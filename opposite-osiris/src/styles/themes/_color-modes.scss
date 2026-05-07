@@ -1,109 +1,255 @@
+// Theme overrides — both system and brand layers.
+// Light theme defaults live in _brand-tokens.scss + _system-tokens.scss + the
+// alias barrel _tokens.scss. This file overrides values for the dark and night
+// themes only. Each P0 contrast row from docs/contrast-audit.md is fixed at
+// the token level here so no consumer needs a per-theme conditional.
+
 :root[data-theme='dark'] {
-	--paper: #121821;
-	--paper-2: #1d2633;
-	--paper-ruled: rgba(255, 255, 255, 0.12);
-	--margin-red: rgba(255, 99, 113, 0.16);
-	--ink: #f7f4ed;
-	--ink-mid: #d8d2c7;
-	--ink-faint: rgba(247, 244, 237, 0.18);
-	--page-bg: #121821;
-	--selection-bg: rgba(245, 216, 74, 0.78);
-	--header-bg: rgba(18, 24, 33, 0.94);
-	--header-frame-bg: rgba(18, 24, 33, 0.96);
-	--surface: rgba(29, 38, 51, 0.9);
-	--surface-strong: rgba(35, 45, 61, 0.94);
-	--surface-muted: rgba(29, 38, 51, 0.88);
-	--surface-line: rgba(247, 244, 237, 0.78);
-	--surface-line-soft: rgba(247, 244, 237, 0.28);
-	--media-bg: rgba(29, 38, 51, 0.92);
-	--control-shadow: rgba(0, 0, 0, 0.46);
-	--control-shadow-soft: rgba(0, 0, 0, 0.28);
-	--button-fill: #f7f4ed;
-	--button-text: #121821;
-	--button-shadow: rgba(247, 244, 237, 0.25);
-	--accent-text: #121821;
-	--sketch-bg-fill: rgba(94, 142, 178, 0.2);
-	--sketch-line: rgba(198, 226, 248, 0.9);
-	--thought-bg: rgba(35, 45, 61, 0.92);
-	--lens-left-bg: #05070d;
-	--lens-right-bg: #151f2d;
-	--lens-rule: rgba(247, 244, 237, 0.15);
-	--mascot-outline: #fffdf8;
-	--mascot-shell: #f2df9f;
-	--mascot-tube: #c78f4e;
-	--mascot-lens: #70e5c4;
-	--mascot-rim: #fff5c9;
-	--mascot-back: #69513d;
-	--mascot-iris: #111821;
-	--mascot-mouth-fill: #fff5df;
-	--character-body-fill: #f0c86e;
-	--character-hair-fill: #fffdf8;
-	--character-eye-fill: #0a101a;
-	--character-book-fill: #9ee7a4;
-	--character-note-fill: rgba(255, 232, 115, 0.46);
-	--character-bubble-fill: rgba(35, 45, 61, 0.98);
-	--portal-panel: rgba(247, 244, 237, 0.96);
-	--portal-panel-dark: rgba(5, 7, 13, 0.96);
-	--portal-shell-line: rgba(255, 253, 248, 0.28);
-	--mood-bye-lens: #c5d0dc;
-	--mood-bye-shell: #bbb4aa;
+	// --- brand layer ---
+	--brand-paper: #121821;
+	--brand-paper-2: #1d2633;
+	--brand-paper-ruled: rgba(255, 255, 255, 0.12);
+	--brand-margin-red: rgba(255, 99, 113, 0.16);
+	--brand-ink: #f7f4ed;
+	--brand-ink-mid: #d8d2c7;
+	--brand-selection-bg: rgba(245, 216, 74, 0.78);
+	--brand-sketch-bg-fill: rgba(94, 142, 178, 0.20);
+	--brand-sketch-line: rgba(198, 226, 248, 0.90);
+	--brand-thought-bg: rgba(35, 45, 61, 0.92);
+	--brand-lens-left-bg: #05070d;
+	--brand-lens-right-bg: #151f2d;
+	--brand-lens-rule: rgba(247, 244, 237, 0.15);
+	--brand-mascot-outline: #fffdf8;
+	--brand-mascot-shell: #f2df9f;
+	--brand-mascot-tube: #c78f4e;
+	--brand-mascot-lens: #70e5c4;
+	--brand-mascot-rim: #fff5c9;
+	--brand-mascot-back: #69513d;
+	--brand-mascot-iris: #111821;
+	--brand-mascot-mouth-fill: #fff5df;
+	--brand-character-body-fill: #f0c86e;
+	--brand-character-hair-fill: #fffdf8;
+	--brand-character-eye-fill: #0a101a;
+	--brand-character-book-fill: #9ee7a4;
+	--brand-character-note-fill: rgba(255, 232, 115, 0.46);
+	--brand-character-bubble-fill: rgba(35, 45, 61, 0.98);
+	--brand-mood-bye-lens: #c5d0dc;
+	--brand-mood-bye-shell: #bbb4aa;
+
+	// --- system layer (audit-fixed) ---
+	--system-bg: #121821;
+	--system-surface: #1d2633;
+	--system-surface-raised: #232d3d;
+	--system-surface-sunken: #161d28;
+	--system-surface-inverse: #f7f4ed;
+	--system-text-strong: #ffffff;            // 16.93:1 on #1d2633
+	--system-text: #e5e7eb;                   // 12.74:1
+	--system-text-muted: #9aa0aa;             //  5.13:1   FIX P0/F1
+	--system-text-on-inverse: #141210;
+	--system-border: #5e6470;                 //  3.10:1   FIX P0/F4
+	--system-border-strong: #c1c7d2;          //  9.47:1
+	--system-divider: #2a3243;                // decorative only
+	--system-focus-ring: #9ec5ff;             //  9.79:1 vs surface
+	--system-focus-ring-offset: #1d2633;
+	--system-link: #9ed0ff;                   // 10.32:1
+	--system-link-hover: #c8e2ff;
+	--system-success-text: #82c98a;           //  9.78:1
+	--system-success-bg: #16321f;
+	--system-success-border: #36a14a;
+	--system-warning-text: #f5d84a;           // 12.41:1
+	--system-warning-bg: #2f2710;
+	--system-warning-border: #c69b1f;
+	--system-danger-text: #ff9b9b;            //  6.14:1
+	--system-danger-bg: #361218;
+	--system-danger-border: #e87a7a;
+	--system-info-text: #9ed0ff;
+	--system-info-bg: #14223a;
+	--system-info-border: #7ab3e8;
+	--system-action-bg: #f7f4ed;
+	--system-action-bg-hover: #e7e2d6;
+	--system-action-bg-active: #d4cfc2;
+	--system-action-fg: #121821;
+	--system-action-bg-disabled: #3a4252;
+	--system-action-fg-disabled: #8d95a3;
+	--system-action-secondary-bg: #1d2633;
+	--system-action-secondary-bg-hover: #28344a;
+	--system-action-secondary-fg: #f7f4ed;
+	--system-action-secondary-border: #5e6470;
+	--system-input-bg: #0f1620;
+	--system-input-fg: #f7f4ed;
+	--system-input-placeholder: #a8aebb;      //  5.86:1
+	--system-input-border: #5e6470;
+	--system-input-border-hover: #7c8392;
+	--system-input-border-focus: #9ec5ff;
+	--system-input-border-invalid: #ff9b9b;
+	--system-input-shadow-focus: 0 0 0 3px rgba(158, 197, 255, 0.24);
+	--system-input-shadow-invalid: 0 0 0 3px rgba(255, 155, 155, 0.20);
+	--system-chip-bg: #232d3d;
+	--system-chip-fg: #d8dde6;
+	--system-chip-border: #3a4252;
+	--system-dialog-bg: #1d2633;
+	--system-dialog-fg: #f7f4ed;
+	--system-dialog-border: #3a4252;
+	--system-dialog-shadow: 0 28px 64px rgba(0, 0, 0, 0.56), 0 6px 20px rgba(0, 0, 0, 0.36);
+	--system-dialog-backdrop: rgba(3, 7, 18, 0.78);
+	--system-dialog-summary-bg: #161d28;
+	--system-dialog-summary-fg: #f7f4ed;
+	--system-dialog-summary-muted: #a8aebb;
+	--system-shadow-1: 0 1px 0 rgba(0, 0, 0, 0.34), 0 1px 2px rgba(0, 0, 0, 0.22);
+	--system-shadow-2: 0 4px 8px rgba(0, 0, 0, 0.40), 0 1px 2px rgba(0, 0, 0, 0.28);
+	--system-shadow-3: 0 12px 24px rgba(0, 0, 0, 0.46), 0 4px 8px rgba(0, 0, 0, 0.30);
 }
 
 :root[data-theme='night'] {
-	--paper: #030712;
-	--paper-2: #0b1220;
-	--paper-ruled: rgba(255, 255, 255, 0.15);
-	--margin-red: rgba(255, 99, 113, 0.12);
-	--ink: #fffdf8;
-	--ink-mid: #e7eef8;
-	--ink-faint: rgba(255, 253, 248, 0.18);
-	--page-bg: #030712;
-	--selection-bg: rgba(122, 179, 232, 0.88);
-	--header-bg: rgba(3, 7, 18, 0.95);
-	--header-frame-bg: rgba(3, 7, 18, 0.97);
-	--surface: rgba(11, 18, 32, 0.92);
-	--surface-strong: rgba(15, 23, 42, 0.96);
-	--surface-muted: rgba(11, 18, 32, 0.9);
-	--surface-line: rgba(255, 253, 248, 0.84);
-	--surface-line-soft: rgba(255, 253, 248, 0.32);
-	--media-bg: rgba(11, 18, 32, 0.94);
-	--control-shadow: rgba(0, 0, 0, 0.56);
-	--control-shadow-soft: rgba(0, 0, 0, 0.34);
-	--button-fill: #fffdf8;
-	--button-text: #030712;
-	--button-shadow: rgba(255, 253, 248, 0.25);
-	--accent-text: #030712;
-	--hl-yellow: #ffe873;
-	--hl-blue: #9ed0ff;
-	--hl-green: #9ee7a4;
-	--hl-red: #ff9b9b;
-	--sketch-bg-fill: rgba(92, 157, 214, 0.2);
-	--sketch-line: rgba(178, 218, 255, 0.95);
-	--thought-bg: rgba(15, 23, 42, 0.94);
-	--lens-left-bg: #01030a;
-	--lens-right-bg: #07111f;
-	--lens-rule: rgba(255, 255, 255, 0.15);
-	--mascot-outline: #fffdf8;
-	--mascot-shell: #dcecff;
-	--mascot-tube: #6db4ff;
-	--mascot-lens: #8af0ff;
-	--mascot-rim: #fff6bf;
-	--mascot-back: #31517a;
-	--mascot-iris: #07111f;
-	--mascot-mouth-fill: #fff8e8;
-	--character-body-fill: #ffd36e;
-	--character-hair-fill: #fffdf8;
-	--character-eye-fill: #030712;
-	--character-book-fill: #a8f4b0;
-	--character-note-fill: rgba(255, 232, 115, 0.5);
-	--character-bubble-fill: rgba(15, 23, 42, 0.98);
-	--portal-panel: rgba(255, 253, 248, 0.98);
-	--portal-panel-dark: rgba(1, 3, 10, 0.97);
-	--portal-shell-line: rgba(255, 253, 248, 0.34);
-	--mood-bye-lens: #b6c6dc;
-	--mood-bye-shell: #aeb9c8;
+	// --- brand layer ---
+	--brand-paper: #030712;
+	--brand-paper-2: #0b1220;
+	--brand-paper-ruled: rgba(255, 255, 255, 0.15);
+	--brand-margin-red: rgba(255, 99, 113, 0.12);
+	--brand-ink: #fffdf8;
+	--brand-ink-mid: #e7eef8;
+	--brand-selection-bg: rgba(122, 179, 232, 0.88);
+	--brand-sketch-bg-fill: rgba(92, 157, 214, 0.20);
+	--brand-sketch-line: rgba(178, 218, 255, 0.95);
+	--brand-thought-bg: rgba(15, 23, 42, 0.94);
+	--brand-lens-left-bg: #01030a;
+	--brand-lens-right-bg: #07111f;
+	--brand-lens-rule: rgba(255, 255, 255, 0.15);
+	--brand-mascot-outline: #fffdf8;
+	--brand-mascot-shell: #dcecff;
+	--brand-mascot-tube: #6db4ff;
+	--brand-mascot-lens: #8af0ff;
+	--brand-mascot-rim: #fff6bf;
+	--brand-mascot-back: #31517a;
+	--brand-mascot-iris: #07111f;
+	--brand-mascot-mouth-fill: #fff8e8;
+	--brand-character-body-fill: #ffd36e;
+	--brand-character-hair-fill: #fffdf8;
+	--brand-character-eye-fill: #030712;
+	--brand-character-book-fill: #a8f4b0;
+	--brand-character-note-fill: rgba(255, 232, 115, 0.50);
+	--brand-character-bubble-fill: rgba(15, 23, 42, 0.98);
+	--brand-hl-yellow: #ffe873;
+	--brand-hl-blue: #9ed0ff;
+	--brand-hl-green: #9ee7a4;
+	--brand-hl-red: #ff9b9b;
+	--brand-mood-bye-lens: #b6c6dc;
+	--brand-mood-bye-shell: #aeb9c8;
+
+	// --- system layer (audit-fixed) ---
+	--system-bg: #030712;
+	--system-surface: #0b1220;
+	--system-surface-raised: #0f172a;
+	--system-surface-sunken: #06090f;
+	--system-surface-inverse: #fffdf8;
+	--system-text-strong: #ffffff;            // 19.79:1
+	--system-text: #e7eef8;                   // 17.24:1
+	--system-text-muted: #9ca3af;             //  8.04:1   FIX P0/F1
+	--system-text-on-inverse: #141210;
+	--system-border: #5b6271;                 //  3.20:1   FIX P0/F4
+	--system-border-strong: #c1c7d2;          // 11.81:1
+	--system-divider: #1c2334;                // decorative only
+	--system-focus-ring: #bcd4ff;             // 13.18:1
+	--system-focus-ring-offset: #0b1220;
+	--system-link: #9ed0ff;                   // 12.36:1
+	--system-link-hover: #d2e6ff;
+	--system-success-text: #9ee7a4;           // 14.55:1
+	--system-success-bg: #0a2317;
+	--system-success-border: #36a14a;
+	--system-warning-text: #ffe873;           // 17.05:1
+	--system-warning-bg: #2a210a;
+	--system-warning-border: #c69b1f;
+	--system-danger-text: #ff9b9b;            //  8.93:1
+	--system-danger-bg: #2a0a10;
+	--system-danger-border: #e87a7a;
+	--system-info-text: #9ed0ff;
+	--system-info-bg: #0a1830;
+	--system-info-border: #7ab3e8;
+	--system-action-bg: #fffdf8;
+	--system-action-bg-hover: #ece7d9;
+	--system-action-bg-active: #d6d1c4;
+	--system-action-fg: #030712;
+	--system-action-bg-disabled: #28324a;
+	--system-action-fg-disabled: #8d95a3;
+	--system-action-secondary-bg: #0b1220;
+	--system-action-secondary-bg-hover: #18213a;
+	--system-action-secondary-fg: #fffdf8;
+	--system-action-secondary-border: #5b6271;
+	--system-input-bg: #06090f;
+	--system-input-fg: #fffdf8;
+	--system-input-placeholder: #b8bec9;      //  9.38:1
+	--system-input-border: #5b6271;
+	--system-input-border-hover: #828998;
+	--system-input-border-focus: #bcd4ff;
+	--system-input-border-invalid: #ff9b9b;
+	--system-input-shadow-focus: 0 0 0 3px rgba(188, 212, 255, 0.26);
+	--system-input-shadow-invalid: 0 0 0 3px rgba(255, 155, 155, 0.22);
+	--system-chip-bg: #0f172a;
+	--system-chip-fg: #d8dde6;
+	--system-chip-border: #1c2334;
+	--system-dialog-bg: #0f172a;
+	--system-dialog-fg: #fffdf8;
+	--system-dialog-border: #1c2334;
+	--system-dialog-shadow: 0 28px 64px rgba(0, 0, 0, 0.66), 0 6px 20px rgba(0, 0, 0, 0.42);
+	--system-dialog-backdrop: rgba(0, 0, 0, 0.82);
+	--system-dialog-summary-bg: #06090f;
+	--system-dialog-summary-fg: #fffdf8;
+	--system-dialog-summary-muted: #b8bec9;
+	--system-shadow-1: 0 1px 0 rgba(0, 0, 0, 0.46), 0 1px 2px rgba(0, 0, 0, 0.30);
+	--system-shadow-2: 0 4px 8px rgba(0, 0, 0, 0.50), 0 1px 2px rgba(0, 0, 0, 0.34);
+	--system-shadow-3: 0 12px 24px rgba(0, 0, 0, 0.58), 0 4px 8px rgba(0, 0, 0, 0.36);
 }
 
+// ---------------------------------------------------------------
+// Per-theme legacy alias overrides — keep existing component CSS
+// working without touching every selector. Same fixes as the
+// :root barrel in _tokens.scss, applied per-theme.
+// ---------------------------------------------------------------
+
+:root[data-theme='dark'],
+:root[data-theme='night'] {
+	--paper: var(--brand-paper);
+	--paper-2: var(--brand-paper-2);
+	--paper-ruled: var(--brand-paper-ruled);
+	--margin-red: var(--brand-margin-red);
+	--ink: var(--brand-ink);
+	--ink-mid: var(--brand-ink-mid);
+	--page-bg: var(--brand-paper);
+	--ink-faint: var(--system-text-muted);            // FIX P0/F1
+	--surface: var(--system-surface);
+	--surface-strong: var(--system-surface-raised);
+	--surface-muted: var(--system-surface-sunken);
+	--surface-line: var(--system-border-strong);
+	--surface-line-soft: var(--system-border);        // FIX P0/F4
+	--media-bg: var(--system-surface);
+	--text-contrast-min: var(--system-text-strong);
+	--text-contrast-mid: var(--system-text);
+	--button-fill: var(--brand-ink);
+	--button-text: var(--brand-paper);
+	--accent-text: var(--brand-ink);
+	--selection-bg: var(--brand-selection-bg);
+	--sketch-bg-fill: var(--brand-sketch-bg-fill);
+	--sketch-line: var(--brand-sketch-line);
+	--thought-bg: var(--brand-thought-bg);
+	--lens-left-bg: var(--brand-lens-left-bg);
+	--lens-right-bg: var(--brand-lens-right-bg);
+	--lens-rule: var(--brand-lens-rule);
+	--hl-yellow: var(--brand-hl-yellow);
+	--hl-blue: var(--brand-hl-blue);
+	--hl-green: var(--brand-hl-green);
+	--hl-red: var(--brand-hl-red);
+	--portal-backdrop: var(--system-dialog-backdrop);
+	--portal-shell: var(--system-dialog-bg);
+	--portal-shell-line: var(--system-dialog-border);
+	--portal-panel: var(--system-dialog-bg);
+	--portal-panel-dark: var(--system-surface-inverse);
+	--portal-contrast-text: var(--system-text-on-inverse);
+	--portal-input-border: var(--system-input-border);
+	--portal-error-text: var(--system-danger-text);
+	--portal-left-text: var(--system-text-on-inverse);
+}
+
+// Decorative non-text adjustments retained from the previous file.
 :root[data-theme='dark'] .asset-icon-grid img,
 :root[data-theme='night'] .asset-icon-grid img {
 	filter: invert(1) hue-rotate(180deg) brightness(1.4);
@@ -132,5 +278,5 @@
 
 :root[data-theme='dark'] .micro-symbols,
 :root[data-theme='night'] .micro-symbols {
-	opacity: 0.2;
+	opacity: 0.20;
 }

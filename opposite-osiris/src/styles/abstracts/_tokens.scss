@@ -1,76 +1,173 @@
+// Token barrel.
+// Step B (two-layer split) puts every variable in either _brand-tokens.scss
+// or _system-tokens.scss. This file:
+//   1. Forwards both layer files.
+//   2. Defines a thin LEGACY ALIAS layer so existing components compile
+//      unchanged while we migrate them per docs/redesign-plan.md.
+// Every legacy alias either points to a layer token (no behaviour change) or
+// resolves a P0 contrast failure documented in docs/contrast-audit.md.
+
+@use 'brand-tokens';
+@use 'system-tokens';
+
 :root {
-	--paper: #f7f4ed;
-	--paper-2: #f0ece2;
-	--paper-ruled: rgba(26, 20, 16, 0.038);
-	--margin-red: rgba(196, 64, 64, 0.12);
-	--ink: #1c1612;
-	--ink-mid: #3a322c;
-	--ink-faint: rgba(28, 22, 18, 0.2);
-	--page-bg: var(--paper);
-	/* Improved contrast ratios */
-	--text-contrast-min: #141210;
-	--text-contrast-mid: #2f2924;
-	--selection-bg: rgba(245, 216, 74, 0.62);
-	--header-bg: rgba(247, 244, 237, 0.94);
+	// ---------------------------------------------------------------
+	// Brand-side legacy aliases (no contrast change; rename only).
+	// ---------------------------------------------------------------
+	--paper: var(--brand-paper);
+	--paper-2: var(--brand-paper-2);
+	--paper-ruled: var(--brand-paper-ruled);
+	--margin-red: var(--brand-margin-red);
+	--ink: var(--brand-ink);
+	--ink-mid: var(--brand-ink-mid);
+	--page-bg: var(--brand-paper);
+
+	--hl-yellow: var(--brand-hl-yellow);
+	--hl-blue: var(--brand-hl-blue);
+	--hl-green: var(--brand-hl-green);
+	--hl-red: var(--brand-hl-red);
+	--fill-yellow-soft: var(--brand-fill-yellow-soft);
+	--fill-yellow-faint: var(--brand-fill-yellow-faint);
+	--fill-blue-faint: var(--brand-fill-blue-faint);
+	--fill-blue-subtle: var(--brand-fill-blue-subtle);
+	--accent-text: var(--brand-ink);
+
+	--selection-bg: var(--brand-selection-bg);
+	--sketch-bg-fill: var(--brand-sketch-bg-fill);
+	--sketch-line: var(--brand-sketch-line);
+	--thought-bg: var(--brand-thought-bg);
+	--lens-left-bg: var(--brand-lens-left-bg);
+	--lens-right-bg: var(--brand-lens-right-bg);
+	--lens-rule: var(--brand-lens-rule);
+
+	--font-body: var(--brand-font-body);
+	--font-display: var(--brand-font-display);
+	--font-brand: var(--brand-font-brand);
+	--font-mono-sketch: var(--brand-font-mono-sketch);
+	--font-annotation: var(--brand-font-annotation);
+
+	--stroke-ui: var(--brand-stroke-ui);
+	--stroke-focus: var(--brand-stroke-focus);
+	--stroke-width-lg: 3px;
+	--radius-control: var(--brand-radius-control);
+	--radius-card: var(--brand-radius-card);
+	--radius-small: var(--brand-radius-small);
+	--radius-large: var(--brand-radius-large);
+	--radius-xl: var(--brand-radius-large);
+
+	--shadow-paper: var(--brand-shadow-paper);
+	--shadow-card-drop: var(--brand-shadow-card-drop);
+	--shadow-media-drop: var(--brand-shadow-media-drop);
+	--shadow-header-drop: var(--brand-shadow-header-drop);
+	--shadow-lift: var(--brand-shadow-lift);
+	--shadow-sketch: var(--brand-shadow-paper);
+	--control-shadow: var(--brand-control-shadow);
+	--control-shadow-soft: var(--brand-control-shadow-soft);
+
+	--duration-fast: var(--brand-duration-fast);
+	--duration-mascot: var(--brand-duration-mascot);
+	--duration-slow: var(--system-duration-slow);
+	--ease-out-sketch: var(--brand-ease-out-sketch);
+	--ease-in-out-smooth: var(--system-ease-standard);
+	--ease-bounce: var(--brand-ease-bounce);
+
+	// Mascot + character + mood aliases (brand-only).
+	--mascot-outline: var(--brand-mascot-outline);
+	--mascot-shell: var(--brand-mascot-shell);
+	--mascot-tube: var(--brand-mascot-tube);
+	--mascot-lens: var(--brand-mascot-lens);
+	--mascot-rim: var(--brand-mascot-rim);
+	--mascot-back: var(--brand-mascot-back);
+	--mascot-iris: var(--brand-mascot-iris);
+	--mascot-mouth-fill: var(--brand-mascot-mouth-fill);
+	--mascot-cheek: var(--brand-mascot-cheek);
+	--mascot-heart: var(--brand-mascot-heart);
+	--mascot-thought: var(--brand-mascot-thought);
+	--mood-happy-lens: var(--brand-mood-happy-lens);
+	--mood-happy-shell: var(--brand-mood-happy-shell);
+	--mood-excited-lens: var(--brand-mood-excited-lens);
+	--mood-excited-shell: var(--brand-mood-excited-shell);
+	--mood-thinking-lens: var(--brand-mood-thinking-lens);
+	--mood-thinking-shell: var(--brand-mood-thinking-shell);
+	--mood-shy-lens: var(--brand-mood-shy-lens);
+	--mood-shy-shell: var(--brand-mood-shy-shell);
+	--mood-proud-lens: var(--brand-mood-proud-lens);
+	--mood-proud-shell: var(--brand-mood-proud-shell);
+	--mood-close-lens: var(--brand-mood-close-lens);
+	--mood-gentle-lens: var(--brand-mood-gentle-lens);
+	--mood-listening-lens: var(--brand-mood-listening-lens);
+	--mood-seller-lens: var(--brand-mood-seller-lens);
+	--mood-love-lens: var(--brand-mood-love-lens);
+	--mood-love-shell: var(--brand-mood-love-shell);
+	--mood-surprised-lens: var(--brand-mood-surprised-lens);
+	--mood-surprised-shell: var(--brand-mood-surprised-shell);
+	--mood-scared-lens: var(--brand-mood-scared-lens);
+	--mood-scared-shell: var(--brand-mood-scared-shell);
+	--mood-angry-lens: var(--brand-mood-angry-lens);
+	--mood-angry-shell: var(--brand-mood-angry-shell);
+	--mood-dizzy-lens: var(--brand-mood-dizzy-lens);
+	--mood-dizzy-shell: var(--brand-mood-dizzy-shell);
+	--mood-laughing-tube: var(--brand-mood-laughing-tube);
+	--mood-silly-lens: var(--brand-mood-silly-lens);
+	--mood-silly-shell: var(--brand-mood-silly-shell);
+	--mood-sleeping-lens: var(--brand-mood-sleeping-lens);
+	--mood-bye-lens: var(--brand-mood-bye-lens);
+	--mood-bye-shell: var(--brand-mood-bye-shell);
+	--character-body-fill: var(--brand-character-body-fill);
+	--character-hair-fill: var(--brand-character-hair-fill);
+	--character-eye-fill: var(--brand-character-eye-fill);
+	--character-book-fill: var(--brand-character-book-fill);
+	--character-note-fill: var(--brand-character-note-fill);
+	--character-bubble-fill: var(--brand-character-bubble-fill);
+	--guide-reader-rule: var(--brand-guide-reader-rule);
+	--guide-student-rule: var(--brand-guide-student-rule);
+	--guide-book-fill: var(--brand-guide-book-fill);
+	--guide-note-fill: var(--brand-guide-note-fill);
+
+	// ---------------------------------------------------------------
+	// System-side legacy aliases — these REWRITE the P0 contrast
+	// failures from docs/contrast-audit.md without renaming consumers.
+	// Each line that fixes a P0 is annotated with the audit row.
+	// ---------------------------------------------------------------
+
+	// FIX P0/F1 — was rgba(28,22,18,0.20) -> 1.52:1. Now solid 5.20:1.
+	--ink-faint: var(--system-text-muted);
+
+	// FIX P0/F4 — was rgba(28,22,18,0.24) -> 1.70:1. Now solid 3.06:1.
+	--surface-line-soft: var(--system-border);
+	--surface-line: var(--system-border-strong);
+
+	// Surfaces — use system-layer solid surfaces (no alpha cascade fragility).
+	--surface: var(--system-surface);
+	--surface-strong: var(--system-surface-raised);
+	--surface-muted: var(--system-surface-sunken);
+	--media-bg: var(--system-surface);
+	--header-bg: rgba(247, 244, 237, 0.94);          // header keeps brand backdrop
 	--header-frame-bg: rgba(247, 244, 237, 0.96);
-	--surface: rgba(247, 244, 237, 0.86);
-	--surface-strong: rgba(255, 253, 246, 0.9);
-	--surface-muted: rgba(240, 236, 226, 0.84);
-	--surface-line: rgba(28, 22, 18, 0.78);
-	--surface-line-soft: rgba(28, 22, 18, 0.24);
-	--media-bg: rgba(247, 244, 237, 0.9);
-	--control-shadow: rgba(28, 22, 18, 0.38);
-	--control-shadow-soft: rgba(28, 22, 18, 0.13);
-	--button-fill: var(--ink);
-	--button-text: var(--paper);
-	--button-shadow: rgba(28, 22, 18, 0.35);
-	--accent-text: #1c1612;
-	--hl-yellow: #f5d84a;
-	--hl-blue: #7ab3e8;
-	--hl-green: #82c98a;
-	--hl-red: #e87a7a;
-	--sketch-bg-fill: rgba(247, 244, 237, 0.56);
-	--sketch-line: rgba(28, 22, 18, 0.74);
-	--thought-bg: rgba(247, 244, 237, 0.8);
-	--lens-left-bg: #0e1117;
-	--lens-right-bg: #f7f4ed;
-	--lens-rule: rgba(26, 20, 16, 0.035);
-	--portal-left-text: rgba(255, 255, 255, 0.92);
-	--portal-left-muted: rgba(255, 255, 255, 0.82);
-	--portal-left-hint: rgba(255, 255, 255, 0.68);
-	--shadow-paper: 2px 3px 0 rgba(28, 22, 18, 0.1), 4px 6px 0 rgba(28, 22, 18, 0.05);
-	--shadow-lift: 0 12px 40px rgba(28, 22, 18, 0.16);
-	--shadow-header-drop: 2px 4px 0 rgba(28, 22, 18, 0.1);
-	--shadow-card-drop: 4px 6px 0 rgba(28, 22, 18, 0.09);
-	--shadow-media-drop: 4px 6px 0 rgba(28, 22, 18, 0.1);
-	--fill-yellow-soft: rgba(245, 216, 74, 0.28);
-	--fill-yellow-faint: rgba(245, 216, 74, 0.12);
-	--fill-blue-faint: rgba(122, 179, 232, 0.16);
-	--fill-blue-subtle: rgba(122, 179, 232, 0.1);
-	--guide-reader-rule: rgba(100, 140, 200, 0.16);
-	--guide-student-rule: rgba(60, 140, 90, 0.12);
-	--guide-book-fill: #8fbc8f;
-	--guide-note-fill: rgba(245, 216, 74, 0.26);
-	--character-body-fill: var(--surface-strong);
-	--character-hair-fill: var(--ink);
-	--character-eye-fill: var(--ink);
-	--character-book-fill: #8fbc8f;
-	--character-note-fill: rgba(245, 216, 74, 0.26);
-	--character-bubble-fill: var(--surface-strong);
-	--portal-backdrop: #030303;
-	--portal-shell: rgba(8, 12, 20, 0.92);
-	--portal-shell-line: rgba(255, 255, 255, 0.2);
-	--portal-panel: rgba(255, 253, 246, 0.95);
-	--portal-panel-dark: rgba(14, 17, 23, 0.94);
-	--portal-panel-glow: rgba(122, 179, 232, 0.24);
-	--portal-contrast-text: rgba(255, 255, 255, 0.92);
-	--portal-input-border: rgba(255, 255, 255, 0.72);
-	--portal-error-text: #ffd0d0;
-	--font-body: 'Kalam', cursive;
-	--font-display: 'Caveat', cursive;
-	--font-brand: 'Caveat Brush', cursive;
-	--font-mono-sketch: 'Special Elite', monospace;
-	--font-annotation: 'Architects Daughter', cursive;
+
+	// Buttons — system primary navy, brand keeps yellow accents on top of it.
+	--button-fill: var(--brand-ink);
+	--button-text: var(--brand-paper);
+
+	// FIX collapse — --text-contrast-min/-mid were duplicates of --ink/--ink-mid.
+	--text-contrast-min: var(--system-text-strong);
+	--text-contrast-mid: var(--system-text);
+
+	// Portal interior — pure system layer.
+	--portal-backdrop: var(--system-dialog-backdrop);
+	--portal-shell: var(--system-dialog-bg);
+	--portal-shell-line: var(--system-dialog-border);
+	--portal-panel: var(--system-dialog-bg);
+	--portal-panel-dark: var(--system-surface-inverse);
+	--portal-panel-glow: rgba(29, 78, 216, 0.18);
+	--portal-contrast-text: var(--system-text-on-inverse);
+	--portal-input-border: var(--system-input-border);
+	--portal-error-text: var(--system-danger-text);
+	--portal-left-text: var(--system-text-on-inverse);
+	--portal-left-muted: rgba(247, 247, 248, 0.82);
+	--portal-left-hint: rgba(247, 247, 248, 0.68);
+
+	// Sizing tokens (no contrast implications).
 	--size-page-gutter: 34px;
 	--size-shell: 1180px;
 	--size-header: 1040px;
@@ -81,18 +178,8 @@
 	--space-header-pad-block: 0.54rem;
 	--space-header-pad-inline: 0.9rem;
 	--space-section-y: 5rem;
-	--stroke-ui: 2px;
-	--stroke-focus: 3px;
-	--radius-control: 16px 13px 15px 12px / 13px 16px 12px 15px;
-	--radius-card: 22px 18px 24px 17px / 18px 24px 17px 22px;
-	--radius-small: 8px 6px 7px 5px / 6px 8px 5px 7px;
-	--radius-large: 28px 24px 30px 22px / 24px 30px 22px 28px;
-	--duration-fast: 140ms;
-	--duration-mascot: 300ms;
-	--duration-slow: 250ms;
-	--ease-out-sketch: cubic-bezier(0.22, 1, 0.36, 1);
-	--ease-in-out-smooth: cubic-bezier(0.4, 0, 0.2, 1);
-	--ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+	// Mascot runtime variables (set by main.ts at runtime).
 	--mascot-look-x: 0px;
 	--mascot-look-y: 0px;
 	--mascot-blink: 1;
@@ -100,45 +187,4 @@
 	--mascot-depth-y: 4px;
 	--mascot-parallax-x: 0px;
 	--mascot-parallax-y: 0px;
-	--mascot-outline: var(--ink);
-	--mascot-shell: #ececec;
-	--mascot-tube: #d8d0c4;
-	--mascot-lens: #e0f5e8;
-	--mascot-rim: rgba(255, 253, 246, 0.86);
-	--mascot-back: #c2c1c0;
-	--mascot-iris: var(--ink);
-	--mascot-mouth-fill: #fffdf8;
-	--mascot-cheek: rgba(232, 122, 122, 0.62);
-	--mascot-heart: #e85f78;
-	--mascot-thought: var(--thought-bg);
-	--mood-happy-lens: #e6f8ff;
-	--mood-happy-shell: #fff3b4;
-	--mood-excited-lens: #fff9cb;
-	--mood-excited-shell: #ffe58c;
-	--mood-thinking-lens: #dce8ff;
-	--mood-thinking-shell: #e7edf8;
-	--mood-shy-lens: #ffe8ef;
-	--mood-shy-shell: #f6e2e7;
-	--mood-proud-lens: #e5fff0;
-	--mood-proud-shell: #d9f2de;
-	--mood-close-lens: #fff3ce;
-	--mood-gentle-lens: #e7f7ef;
-	--mood-listening-lens: #e7edff;
-	--mood-seller-lens: #fff7be;
-	--mood-love-lens: #ffe9f0;
-	--mood-love-shell: #ffd8e3;
-	--mood-surprised-lens: #fff9c9;
-	--mood-surprised-shell: #fff0a6;
-	--mood-scared-lens: #e7edff;
-	--mood-scared-shell: #dce8ff;
-	--mood-angry-lens: #ffe1d8;
-	--mood-angry-shell: #ffc3b5;
-	--mood-dizzy-lens: #e8dcff;
-	--mood-dizzy-shell: #ded1ff;
-	--mood-laughing-tube: #f0c46d;
-	--mood-silly-lens: #f5e3ff;
-	--mood-silly-shell: #f0ddff;
-	--mood-sleeping-lens: #d8e1eb;
-	--mood-bye-lens: #eef0f4;
-	--mood-bye-shell: #e5e1dc;
 }

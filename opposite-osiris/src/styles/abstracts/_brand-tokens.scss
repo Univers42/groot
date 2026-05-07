@@ -1,0 +1,200 @@
+// Brand layer tokens — hand-drawn personality.
+// Used by: hero, mascot, marketing sections, illustrations, decorative SVG,
+// section transitions, sketch backgrounds, "paper" textures.
+// FORBIDDEN inside: forms, dialogs, inputs, buttons in functional contexts,
+// tables, dashboards, legal pages, the portal interior, error states.
+// See docs/contrast-audit.md and docs/redesign-plan.md for the two-layer rule.
+
+:root {
+	// --- paper / ink ---
+	--brand-paper: #f7f4ed;
+	--brand-paper-2: #f0ece2;
+	--brand-paper-ruled: rgba(26, 20, 16, 0.038);
+	--brand-margin-red: rgba(196, 64, 64, 0.12);
+	--brand-ink: #1c1612;
+	--brand-ink-mid: #3a322c;
+
+	// --- highlighter palette (FILL ONLY — never use as foreground text) ---
+	--brand-hl-yellow: #f5d84a;
+	--brand-hl-blue: #7ab3e8;
+	--brand-hl-green: #82c98a;
+	--brand-hl-red: #e87a7a;
+	--brand-fill-yellow-soft: rgba(245, 216, 74, 0.28);
+	--brand-fill-yellow-faint: rgba(245, 216, 74, 0.12);
+	--brand-fill-blue-faint: rgba(122, 179, 232, 0.16);
+	--brand-fill-blue-subtle: rgba(122, 179, 232, 0.10);
+
+	// --- decorative selection / sketch backdrop ---
+	--brand-selection-bg: rgba(245, 216, 74, 0.62);
+	--brand-sketch-bg-fill: rgba(247, 244, 237, 0.56);
+	--brand-sketch-line: rgba(28, 22, 18, 0.74);
+	--brand-thought-bg: rgba(247, 244, 237, 0.80);
+
+	// --- hand-drawn stroke / radius / shadow ---
+	--brand-stroke-ui: 2px;
+	--brand-stroke-focus: 3px;
+	--brand-radius-control: 16px 13px 15px 12px / 13px 16px 12px 15px;
+	--brand-radius-card: 22px 18px 24px 17px / 18px 24px 17px 22px;
+	--brand-radius-small: 8px 6px 7px 5px / 6px 8px 5px 7px;
+	--brand-radius-large: 28px 24px 30px 22px / 24px 30px 22px 28px;
+	--brand-shadow-paper: 2px 3px 0 rgba(28, 22, 18, 0.10), 4px 6px 0 rgba(28, 22, 18, 0.05);
+	--brand-shadow-card-drop: 4px 6px 0 rgba(28, 22, 18, 0.09);
+	--brand-shadow-media-drop: 4px 6px 0 rgba(28, 22, 18, 0.10);
+	--brand-shadow-header-drop: 2px 4px 0 rgba(28, 22, 18, 0.10);
+	--brand-shadow-lift: 0 12px 40px rgba(28, 22, 18, 0.16);
+	--brand-control-shadow: rgba(28, 22, 18, 0.38);
+	--brand-control-shadow-soft: rgba(28, 22, 18, 0.13);
+
+	// --- brand fonts (CDN today; self-host migration tracked in redesign-plan.md) ---
+	--brand-font-body: 'Kalam', cursive;
+	--brand-font-display: 'Caveat', cursive;
+	--brand-font-brand: 'Caveat Brush', cursive;
+	--brand-font-mono-sketch: 'Special Elite', monospace;
+	--brand-font-annotation: 'Architects Daughter', cursive;
+
+	// --- decorative lens chrome (hero portal preview SVG) ---
+	--brand-lens-left-bg: #0e1117;
+	--brand-lens-right-bg: #f7f4ed;
+	--brand-lens-rule: rgba(26, 20, 16, 0.035);
+
+	// --- mascot ---
+	--brand-mascot-outline: #1c1612;
+	--brand-mascot-shell: #ececec;
+	--brand-mascot-tube: #d8d0c4;
+	--brand-mascot-lens: #e0f5e8;
+	--brand-mascot-rim: rgba(255, 253, 246, 0.86);
+	--brand-mascot-back: #c2c1c0;
+	--brand-mascot-iris: #1c1612;
+	--brand-mascot-mouth-fill: #fffdf8;
+	--brand-mascot-cheek: rgba(232, 122, 122, 0.62);
+	--brand-mascot-heart: #e85f78;
+	--brand-mascot-thought: rgba(247, 244, 237, 0.80);
+
+	// --- mascot mood palette ---
+	--brand-mood-happy-lens: #e6f8ff;
+	--brand-mood-happy-shell: #fff3b4;
+	--brand-mood-excited-lens: #fff9cb;
+	--brand-mood-excited-shell: #ffe58c;
+	--brand-mood-thinking-lens: #dce8ff;
+	--brand-mood-thinking-shell: #e7edf8;
+	--brand-mood-shy-lens: #ffe8ef;
+	--brand-mood-shy-shell: #f6e2e7;
+	--brand-mood-proud-lens: #e5fff0;
+	--brand-mood-proud-shell: #d9f2de;
+	--brand-mood-close-lens: #fff3ce;
+	--brand-mood-gentle-lens: #e7f7ef;
+	--brand-mood-listening-lens: #e7edff;
+	--brand-mood-seller-lens: #fff7be;
+	--brand-mood-love-lens: #ffe9f0;
+	--brand-mood-love-shell: #ffd8e3;
+	--brand-mood-surprised-lens: #fff9c9;
+	--brand-mood-surprised-shell: #fff0a6;
+	--brand-mood-scared-lens: #e7edff;
+	--brand-mood-scared-shell: #dce8ff;
+	--brand-mood-angry-lens: #ffe1d8;
+	--brand-mood-angry-shell: #ffc3b5;
+	--brand-mood-dizzy-lens: #e8dcff;
+	--brand-mood-dizzy-shell: #ded1ff;
+	--brand-mood-laughing-tube: #f0c46d;
+	--brand-mood-silly-lens: #f5e3ff;
+	--brand-mood-silly-shell: #f0ddff;
+	--brand-mood-sleeping-lens: #d8e1eb;
+	--brand-mood-bye-lens: #eef0f4;
+	--brand-mood-bye-shell: #e5e1dc;
+
+	// --- character guides (illustration fills) ---
+	--brand-character-body-fill: #fffdf6;
+	--brand-character-hair-fill: #1c1612;
+	--brand-character-eye-fill: #1c1612;
+	--brand-character-book-fill: #8fbc8f;
+	--brand-character-note-fill: rgba(245, 216, 74, 0.26);
+	--brand-character-bubble-fill: #fffdf6;
+	--brand-guide-reader-rule: rgba(100, 140, 200, 0.16);
+	--brand-guide-student-rule: rgba(60, 140, 90, 0.12);
+	--brand-guide-book-fill: #8fbc8f;
+	--brand-guide-note-fill: rgba(245, 216, 74, 0.26);
+
+	// --- motion (brand layer keeps slightly springier easing) ---
+	--brand-duration-fast: 140ms;
+	--brand-duration-mascot: 300ms;
+	--brand-ease-out-sketch: cubic-bezier(0.22, 1, 0.36, 1);
+	--brand-ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+:root[data-theme='dark'] {
+	--brand-paper: #121821;
+	--brand-paper-2: #1d2633;
+	--brand-paper-ruled: rgba(255, 255, 255, 0.12);
+	--brand-margin-red: rgba(255, 99, 113, 0.16);
+	--brand-ink: #f7f4ed;
+	--brand-ink-mid: #d8d2c7;
+	--brand-selection-bg: rgba(245, 216, 74, 0.78);
+	--brand-sketch-bg-fill: rgba(94, 142, 178, 0.20);
+	--brand-sketch-line: rgba(198, 226, 248, 0.90);
+	--brand-thought-bg: rgba(35, 45, 61, 0.92);
+	--brand-lens-left-bg: #05070d;
+	--brand-lens-right-bg: #151f2d;
+	--brand-lens-rule: rgba(247, 244, 237, 0.15);
+	--brand-mascot-outline: #fffdf8;
+	--brand-mascot-shell: #f2df9f;
+	--brand-mascot-tube: #c78f4e;
+	--brand-mascot-lens: #70e5c4;
+	--brand-mascot-rim: #fff5c9;
+	--brand-mascot-back: #69513d;
+	--brand-mascot-iris: #111821;
+	--brand-mascot-mouth-fill: #fff5df;
+	--brand-mascot-thought: rgba(35, 45, 61, 0.92);
+	--brand-character-body-fill: #f0c86e;
+	--brand-character-hair-fill: #fffdf8;
+	--brand-character-eye-fill: #0a101a;
+	--brand-character-book-fill: #9ee7a4;
+	--brand-character-note-fill: rgba(255, 232, 115, 0.46);
+	--brand-character-bubble-fill: rgba(35, 45, 61, 0.98);
+	--brand-guide-reader-rule: rgba(126, 174, 235, 0.28);
+	--brand-guide-student-rule: rgba(126, 205, 149, 0.22);
+	--brand-guide-book-fill: #9ee7a4;
+	--brand-guide-note-fill: rgba(255, 232, 115, 0.46);
+	--brand-mood-bye-lens: #c5d0dc;
+	--brand-mood-bye-shell: #bbb4aa;
+}
+
+:root[data-theme='night'] {
+	--brand-paper: #030712;
+	--brand-paper-2: #0b1220;
+	--brand-paper-ruled: rgba(255, 255, 255, 0.15);
+	--brand-margin-red: rgba(255, 99, 113, 0.12);
+	--brand-ink: #fffdf8;
+	--brand-ink-mid: #e7eef8;
+	--brand-hl-yellow: #ffe873;
+	--brand-hl-blue: #9ed0ff;
+	--brand-hl-green: #9ee7a4;
+	--brand-hl-red: #ff9b9b;
+	--brand-selection-bg: rgba(122, 179, 232, 0.88);
+	--brand-sketch-bg-fill: rgba(92, 157, 214, 0.20);
+	--brand-sketch-line: rgba(178, 218, 255, 0.95);
+	--brand-thought-bg: rgba(15, 23, 42, 0.94);
+	--brand-lens-left-bg: #01030a;
+	--brand-lens-right-bg: #07111f;
+	--brand-lens-rule: rgba(255, 255, 255, 0.15);
+	--brand-mascot-outline: #fffdf8;
+	--brand-mascot-shell: #dcecff;
+	--brand-mascot-tube: #6db4ff;
+	--brand-mascot-lens: #8af0ff;
+	--brand-mascot-rim: #fff6bf;
+	--brand-mascot-back: #31517a;
+	--brand-mascot-iris: #07111f;
+	--brand-mascot-mouth-fill: #fff8e8;
+	--brand-mascot-thought: rgba(15, 23, 42, 0.94);
+	--brand-character-body-fill: #ffd36e;
+	--brand-character-hair-fill: #fffdf8;
+	--brand-character-eye-fill: #030712;
+	--brand-character-book-fill: #a8f4b0;
+	--brand-character-note-fill: rgba(255, 232, 115, 0.50);
+	--brand-character-bubble-fill: rgba(15, 23, 42, 0.98);
+	--brand-guide-reader-rule: rgba(126, 174, 235, 0.34);
+	--brand-guide-student-rule: rgba(126, 205, 149, 0.28);
+	--brand-guide-book-fill: #a8f4b0;
+	--brand-guide-note-fill: rgba(255, 232, 115, 0.50);
+	--brand-mood-bye-lens: #b6c6dc;
+	--brand-mood-bye-shell: #aeb9c8;
+}

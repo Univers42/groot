@@ -449,17 +449,6 @@ async function syncStoredConsents(token: string, email?: string): Promise<void> 
 	}
 }
 
-/** Removes background regions from keyboard navigation while the modal is active. */
-function setBackgroundInert(isInert: boolean): void {
-	queryElements('header, main, footer', isHtmlElement).forEach((region) => {
-		if (isInert) {
-			region.setAttribute('inert', '');
-		} else {
-			region.removeAttribute('inert');
-		}
-	});
-}
-
 /** Returns the full original Binocle mascot SVG structure with tubes, barrels and expression layers. */
 function mascotSvgMarkup(): string {
 	return `
@@ -906,9 +895,9 @@ function createPortalMarkup(mode: PortalMode): string {
 		? 'Create an account with email verification before opening your workspace.'
 		: 'Create a local development account and open your workspace.';
 	return `
-		<div id="portal" class="portal portal--${quick ? 'quick' : 'start'}" role="dialog" aria-modal="true" aria-labelledby="portal-title">
+		<dialog id="portal" class="portal portal--${quick ? 'quick' : 'start'}" aria-labelledby="portal-title">
 			<h2 id="portal-title" class="visually-hidden">Prismatica workspace portal</h2>
-			<button class="portal__close" type="button" aria-label="Close portal">×</button>
+			<button class="portal__close" type="button" aria-label="Close portal" data-close-portal>×</button>
 			<section class="portal__panel portal__panel--login" aria-label="Secure connection panel">
 				<div class="portal-login-area">
 					<div class="portal-brand portal-brand--auth" aria-hidden="true"><span class="portal-brand__mark">P</span><span>Prismatica</span></div>
@@ -990,37 +979,11 @@ function createPortalMarkup(mode: PortalMode): string {
 					</div>
 				</div>
 			</section>
-		</div>`;
+		</dialog>`;
 }
 
-/** Returns keyboard-focusable controls inside a container. */
-function focusableElements(container: HTMLElement): HTMLElement[] {
-	return queryElements('a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])', isHtmlElement).filter((element) => container.contains(element) && element.getAttribute('aria-hidden') !== 'true');
-}
-
-/** Installs and returns a removable keyboard focus trap. */
-function trapFocus(portal: HTMLElement): () => void {
-	const handleKeydown = (event: KeyboardEvent): void => {
-		if (event.key !== 'Tab') {
-			return;
-		}
-		const focusable = focusableElements(portal);
-		const first = focusable[0];
-		const last = focusable.at(-1);
-		if (!first || !last) {
-			return;
-		}
-		if (event.shiftKey && document.activeElement === first) {
-			event.preventDefault();
-			last.focus();
-		} else if (!event.shiftKey && document.activeElement === last) {
-			event.preventDefault();
-			first.focus();
-		}
-	};
-	portal.addEventListener('keydown', handleKeydown);
-	return () => portal.removeEventListener('keydown', handleKeydown);
-}
+// Native <dialog>.showModal() handles focus trap and ESC for us; the manual
+// trapFocus and focusableElements helpers that lived here were removed in Step A.
 
 type PortalFormElements = {
 	error: HTMLOutputElement;
@@ -1735,7 +1698,7 @@ function syncAuthModeInputs(controls: AuthModeControls, authMode: 'login' | 'reg
 	}
 }
 
-/** Closes any active portal. */
+/** Closes any active portal (native <dialog>). */
 function closePortal(): void {
 	const portal = queryElement('.portal', isHtmlElement);
 	if (!portal) {
@@ -1743,15 +1706,17 @@ function closePortal(): void {
 	}
 	mascotState.releaseFocusTrap?.();
 	mascotState.releaseFocusTrap = null;
+	if (portal instanceof HTMLDialogElement && portal.open) {
+		portal.close();
+	}
 	portal.remove();
 	document.body.classList.remove('portal-open');
-	setBackgroundInert(false);
 	announce('Workspace portal closed');
 	mascotState.previousFocus?.focus({ preventScroll: true });
 	mascotState.previousFocus = null;
 }
 
-/** Opens the generated portal. */
+/** Opens the generated portal as a native modal dialog. */
 function openPortal(mode: PortalMode): void {
 	closePortal();
 	mascotState.previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -1761,12 +1726,29 @@ function openPortal(mode: PortalMode): void {
 		return;
 	}
 	document.body.classList.add('portal-open');
-	setBackgroundInert(true);
 	announce('Workspace portal opened');
 	requestAnimationFrame(() => portal.classList.add('is-revealed'));
-	portal.querySelector('.portal__close')?.addEventListener('click', closePortal);
 	portal.querySelector('[data-close-portal]')?.addEventListener('click', closePortal);
-	mascotState.releaseFocusTrap = trapFocus(portal);
+	// Native <dialog> handles ESC, focus management, inert background, and the
+	// top layer for us. We still listen to the close event for symmetric cleanup.
+	if (portal instanceof HTMLDialogElement) {
+		portal.addEventListener('close', () => {
+			document.body.classList.remove('portal-open');
+			mascotState.previousFocus?.focus({ preventScroll: true });
+			mascotState.previousFocus = null;
+		}, { once: true });
+		// Backdrop click closes the dialog.
+		portal.addEventListener('click', (event) => {
+			if (event.target === portal) {
+				portal.close();
+			}
+		});
+		try {
+			portal.showModal();
+		} catch {
+			// Already open or not connected; nothing to do.
+		}
+	}
 	const initialTermsConsent = portal.querySelector('#portal-terms-consent');
 	const initialSubmitButton = portal.querySelector('.portal-cta');
 	const authModeControls: AuthModeControls = {

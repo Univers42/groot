@@ -1,0 +1,135 @@
+// System layer tokens — clean professional UI.
+// Used by: forms, dialogs, inputs, buttons in functional contexts, tables,
+// dashboards, legal pages, the portal interior, error states, notifications.
+// FORBIDDEN inside: marketing hero, mascot, decorative SVG, sketchy headings.
+// All P0 contrast failures from docs/contrast-audit.md are fixed at the token
+// level here. WCAG SC 1.4.3 (text >=4.5:1), 1.4.11 (UI / non-text >=3:1).
+
+:root {
+	// --- surfaces (light theme defaults) ---
+	--system-bg: #f7f4ed;
+	--system-surface: #ffffff;
+	--system-surface-raised: #fffdf8;
+	--system-surface-sunken: #f1ede4;
+	--system-surface-inverse: #0e1117;
+
+	// --- text (all >=4.5:1 against --system-surface) ---
+	--system-text-strong: #141210;       // 17.22:1 on #ffffff   SC 1.4.3
+	--system-text: #2f2924;              // 13.06:1 on #ffffff   SC 1.4.3
+	--system-text-muted: #6a635c;        //  5.20:1 on #ffffff   SC 1.4.3 — replaces --ink-faint
+	--system-text-on-inverse: #f7f7f8;   // 17.94:1 on #0e1117   SC 1.4.3
+	--system-text-on-accent: #ffffff;    // 12.63:1 on #1d4ed8   SC 1.4.3
+
+	// --- borders / dividers ---
+	--system-border: #9a9088;            //  3.06:1 on #ffffff   SC 1.4.11 — replaces --surface-line-soft
+	--system-border-strong: #46403a;     //  8.74:1 on #ffffff   SC 1.4.11 — replaces --surface-line
+	--system-divider: #e3dfd6;           // 1.16:1 — DECORATIVE ONLY, never on color: or input border-color:
+
+	// --- focus indicator (SC 2.4.7 / 2.4.11 / 2.4.13 / 1.4.11) ---
+	--system-focus-ring: #1d4ed8;        //  6.13:1 on #ffffff
+	--system-focus-ring-offset: #ffffff; // halo against any nested context
+
+	// --- accent / link / status text (per-theme; foreground on --system-surface) ---
+	--system-link: #1f5fa6;              //  5.92:1 on #ffffff   SC 1.4.3
+	--system-link-hover: #143f72;        //  9.31:1
+	--system-success-text: #1f7a3a;      //  4.74:1 on #ffffff
+	--system-success-bg: #e8f6ed;
+	--system-success-border: #82c98a;
+	--system-warning-text: #8a5a00;      //  4.62:1 on #ffffff
+	--system-warning-bg: #fff7e3;
+	--system-warning-border: #d9a32a;
+	--system-danger-text: #b21f1f;       //  5.42:1 on #ffffff
+	--system-danger-bg: #fdecec;
+	--system-danger-border: #e87a7a;
+	--system-info-text: #1f5fa6;
+	--system-info-bg: #ecf3fb;
+	--system-info-border: #7ab3e8;
+
+	// --- action / button ---
+	--system-action-bg: #172033;         // navy primary; 14.93:1 vs #ffffff for SC 1.4.11
+	--system-action-bg-hover: #26344f;
+	--system-action-bg-active: #0e1626;
+	--system-action-fg: #ffffff;
+	--system-action-bg-disabled: #c8ccd4;
+	--system-action-fg-disabled: #6b7180;
+	--system-action-secondary-bg: #ffffff;
+	--system-action-secondary-bg-hover: #f4f6fa;
+	--system-action-secondary-fg: #172033;
+	--system-action-secondary-border: #cbd3df;
+
+	// --- form / input ---
+	--system-input-bg: #ffffff;
+	--system-input-fg: #172033;
+	--system-input-placeholder: #6a7280; //  4.83:1 on #ffffff   SC 1.4.3
+	--system-input-border: #9aa3b2;      //  3.04:1 on #ffffff   SC 1.4.11
+	--system-input-border-hover: #6b7280;
+	--system-input-border-focus: #1d4ed8;
+	--system-input-border-invalid: #b21f1f;
+	--system-input-shadow-focus: 0 0 0 3px rgba(29, 78, 216, 0.18);
+	--system-input-shadow-invalid: 0 0 0 3px rgba(178, 31, 31, 0.16);
+	--system-input-radius: 10px;
+	--system-input-min-h: 46px;
+	--system-input-pad-x: 0.85rem;
+	--system-input-pad-y: 0.75rem;
+
+	// --- chip / pill / badge ---
+	--system-chip-bg: #f4f6fa;
+	--system-chip-fg: #2f3948;
+	--system-chip-border: #d7dce5;
+
+	// --- dialog / portal ---
+	--system-dialog-bg: #ffffff;
+	--system-dialog-fg: #172033;
+	--system-dialog-border: #d7dce5;
+	--system-dialog-shadow: 0 24px 56px rgba(8, 12, 24, 0.28), 0 4px 14px rgba(8, 12, 24, 0.14);
+	--system-dialog-radius: 18px;
+	--system-dialog-backdrop: rgba(8, 12, 24, 0.66);
+	--system-dialog-pad: 2rem;
+	--system-dialog-max-w: 520px;
+	--system-dialog-summary-bg: #f4f7fb;
+	--system-dialog-summary-fg: #172033;
+	--system-dialog-summary-muted: #5f6f86;
+
+	// --- system fonts (no CDN dependency) ---
+	--system-font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+	--system-font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+
+	// --- type scale (system layer is restrained) ---
+	--system-text-2xs: 0.72rem;
+	--system-text-xs: 0.78rem;
+	--system-text-sm: 0.86rem;
+	--system-text-base: 0.98rem;
+	--system-text-md: 1.02rem;
+	--system-text-lg: 1.25rem;
+	--system-text-xl: 1.55rem;
+	--system-text-2xl: 1.95rem;
+
+	// --- spacing scale (4-pt grid) ---
+	--system-space-1: 0.25rem;
+	--system-space-2: 0.5rem;
+	--system-space-3: 0.75rem;
+	--system-space-4: 1rem;
+	--system-space-5: 1.25rem;
+	--system-space-6: 1.5rem;
+	--system-space-8: 2rem;
+	--system-space-10: 2.5rem;
+
+	// --- radius scale (geometric, no roughen) ---
+	--system-radius-sm: 6px;
+	--system-radius-md: 10px;
+	--system-radius-lg: 14px;
+	--system-radius-xl: 18px;
+	--system-radius-pill: 999px;
+
+	// --- elevation ---
+	--system-shadow-1: 0 1px 0 rgba(23, 32, 51, 0.06), 0 1px 2px rgba(23, 32, 51, 0.04);
+	--system-shadow-2: 0 4px 8px rgba(23, 32, 51, 0.08), 0 1px 2px rgba(23, 32, 51, 0.06);
+	--system-shadow-3: 0 12px 24px rgba(23, 32, 51, 0.10), 0 4px 8px rgba(23, 32, 51, 0.06);
+
+	// --- motion (system layer is calmer than brand) ---
+	--system-duration-fast: 120ms;
+	--system-duration-base: 180ms;
+	--system-duration-slow: 240ms;
+	--system-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+	--system-ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
+}

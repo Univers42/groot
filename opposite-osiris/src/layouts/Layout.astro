@@ -14,11 +14,16 @@ const {
 } = Astro.props;
 
 const turnstileSiteKey = authConfig.turnstileSiteKey;
+// NOTE: frame-ancestors MUST be delivered via an HTTP response header (Kong,
+// nginx, Cloudflare). Browsers ignore frame-ancestors in <meta http-equiv>
+// per CSP spec, so leaving it here is a false sense of security.
+// Production header is configured in:
+//   infrastructure/baas/mini-baas-infra/kong/kong.yml
+//     Content-Security-Policy: frame-ancestors 'self'
 const productionCsp = [
 	"default-src 'self'",
 	"base-uri 'self'",
 	"object-src 'none'",
-	"frame-ancestors 'self'",
 	"form-action 'self'",
 	"img-src 'self'",
 	"media-src 'self'",
@@ -35,7 +40,6 @@ const developmentCsp = [
 	"default-src 'self'",
 	"base-uri 'self'",
 	"object-src 'none'",
-	"frame-ancestors 'self'",
 	"form-action 'self'",
 	"img-src 'self' data: blob:",
 	"media-src 'self' data: blob:",
