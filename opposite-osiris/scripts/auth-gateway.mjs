@@ -2,7 +2,7 @@
 import { createServer } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { resolve4, resolve6, resolveMx } from 'node:dns/promises';
 import tls from 'node:tls';
 import { createClient, MiniBaasError } from '@mini-baas/js';
@@ -35,6 +35,8 @@ const config = {
 	smtpFromName: process.env.SMTP_FROM_NAME ?? 'Prismatica',
 	smtpFromAddress: process.env.SMTP_FROM_ADDRESS ?? process.env.EMAIL_FROM ?? process.env.SMTP_USERNAME ?? process.env.SMTP_USER ?? '',
 	requireEmailVerification: process.env.AUTH_REQUIRE_EMAIL_VERIFICATION !== 'false' && process.env.PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION !== 'false',
+	osionosBridgeUrl: (process.env.OSIONOS_BRIDGE_URL ?? 'http://localhost:4000/api/auth/bridge/session').replace(/\/$/, ''),
+	osionosBridgeSecret: process.env.OSIONOS_BRIDGE_SHARED_SECRET ?? process.env.JWT_SECRET ?? '',
 };
 
 const buckets = new Map();
@@ -72,6 +74,27 @@ function clientIp(request) {
 function json(response, status, body, headers = {}) {
 	response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...headers });
 	response.end(JSON.stringify(body));
+}
+
+function stableStringify(value) {
+	if (value === null || typeof value !== 'object') return JSON.stringify(value);
+	if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+	const entries = Object.keys(value)
+		.sort((left, right) => left.localeCompare(right))
+		.map((key) => JSON.stringify(key) + ':' + stableStringify(value[key]));
+	return '{' + entries.join(',') + '}';
+}
+
+function bridgeSignature(timestamp, payload) {
+	return createHmac('sha256', config.osionosBridgeSecret)
+		.update(`${timestamp}.${stableStringify(payload)}`)
+		.digest('hex');
+}
+
+function bearerToken(request) {
+	const header = request.headers.authorization ?? '';
+	const value = Array.isArray(header) ? header[0] : header;
+	return value.toLowerCase().startsWith('bearer ') ? value.slice(7).trim() : '';
 }
 
 async function readJson(request) {
@@ -705,6 +728,55 @@ async function handleLogout(request, response) {
 	json(response, 200, { message: 'Signed out.' }, { 'set-cookie': clearRefreshCookie() });
 }
 
+async function handleOsionosSession(request, response) {
+	const accessToken = bearerToken(request);
+	if (!accessToken) {
+		json(response, 401, { message: 'Missing bearer token.' });
+		return;
+	}
+	if (!config.osionosBridgeSecret) {
+		json(response, 503, { message: 'osionos bridge is not configured.' });
+		return;
+	}
+
+	const userClient = createClient({ url: config.baasUrl, anonKey: config.anonKey, accessToken, persistSession: false });
+	let user;
+	try {
+		user = await userClient.auth.getUser();
+	} catch {
+		json(response, 401, { message: 'Invalid or expired Prismatica session.' });
+		return;
+	}
+
+	const email = typeof user.email === 'string' ? user.email.trim().toLowerCase() : '';
+	const subject = typeof user.id === 'string' ? user.id : '';
+	if (!subject || !EMAIL_REGEX.test(email)) {
+		json(response, 422, { message: 'Prismatica user identity is incomplete.' });
+		return;
+	}
+
+	const metadata = typeof user.user_metadata === 'object' && user.user_metadata !== null ? user.user_metadata : {};
+	const payload = {
+		provider: 'prismatica',
+		subject,
+		email,
+		name: typeof metadata.username === 'string' ? metadata.username : email.split('@')[0],
+	};
+	const timestamp = String(Date.now());
+	const result = await fetch(config.osionosBridgeUrl, {
+		method: 'POST',
+		headers: {
+			'content-type': 'application/json',
+			'x-prismatica-bridge-timestamp': timestamp,
+			'x-prismatica-bridge-signature': bridgeSignature(timestamp, payload),
+		},
+		body: JSON.stringify(payload),
+	});
+	const body = await result.json().catch(() => ({}));
+	await audit(result.ok ? 'osionos_bridge_success' : 'osionos_bridge_failed', request, { email, status: result.status });
+	json(response, result.status, body);
+}
+
 function handleMfaHook(response) {
 	json(response, 501, { message: 'MFA hook reserved. Wire this endpoint to TOTP or WebAuthn provider integration before enabling in production.' });
 }
@@ -716,13 +788,14 @@ const routes = new Map([
 	['POST /api/auth/recover', handleRecover],
 	['POST /api/auth/refresh', handleRefresh],
 	['POST /api/auth/logout', handleLogout],
+	['POST /api/auth/osionos-session', handleOsionosSession],
 	['POST /api/newsletter/subscribe', handleNewsletterSubscribe],
 ]);
 
 createServer(async (request, response) => {
 	try {
 		if (request.method === 'OPTIONS') {
-			response.writeHead(204, { 'access-control-allow-origin': config.siteUrl, 'access-control-allow-credentials': 'true', 'access-control-allow-methods': 'GET, POST, OPTIONS', 'access-control-allow-headers': 'content-type' });
+			response.writeHead(204, { 'access-control-allow-origin': config.siteUrl, 'access-control-allow-credentials': 'true', 'access-control-allow-methods': 'GET, POST, OPTIONS', 'access-control-allow-headers': 'content-type, authorization' });
 			response.end();
 			return;
 		}

@@ -100,3 +100,50 @@
 		transition-duration: 0.01ms !important;
 	}
 }
+
+/* Container queries for better responsive design */
+@container (min-width: 400px) {
+	.hero__actions {
+		flex-direction: row;
+		gap: 1rem;
+	}
+}
+
+/* Improved breakpoints for ultra-wide screens */
+@media (min-width: 1400px) {
+	.section-shell {
+		max-width: 1320px;
+	}
+	
+	.floating-header {
+		max-width: 1280px;
+	}
+}
+
+/* Better mobile-first approach for small screens */
+@media (max-width: 480px) {
+	.hero h1 {
+		font-size: clamp(2.5rem, 8vw, 4rem);
+		line-height: 1.1;
+	}
+	
+	.hero__text {
+		font-size: 1.125rem;
+		line-height: 1.6;
+	}
+	
+	.button {
+		font-size: 1.125rem;
+		padding: 0.875rem 1.125rem;
+	}
+	
+	.portal {
+		padding: 0.75rem;
+	}
+	
+	.powers-grid,
+	.character-grid {
+		gap: 1rem;
+		padding: 0 1rem;
+	}
+}

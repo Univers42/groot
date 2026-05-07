@@ -903,20 +903,18 @@ function createPortalMarkup(mode: PortalMode): string {
 	const quick = mode === 'connect';
 	const requiresEmailVerification = authConfig.requireEmailVerification;
 	const registerNote = requiresEmailVerification
-		? 'Username and email stay on one line; password security and verification stay below.'
-		: 'Development mode can create a confirmed local account without sending a verification email.';
+		? 'Create an account with email verification before opening your workspace.'
+		: 'Create a local development account and open your workspace.';
 	return `
 		<div id="portal" class="portal portal--${quick ? 'quick' : 'start'}" role="dialog" aria-modal="true" aria-labelledby="portal-title">
 			<h2 id="portal-title" class="visually-hidden">Prismatica workspace portal</h2>
 			<button class="portal__close" type="button" aria-label="Close portal">×</button>
-			<div class="portal__stage" aria-hidden="true"><span></span><span></span><span></span></div>
 			<section class="portal__panel portal__panel--login" aria-label="Secure connection panel">
 				<div class="portal-login-area">
-					<div class="portal-brand portal-brand--auth" aria-hidden="true"><span class="portal-brand__mark">✦</span><span>Prismatica</span></div>
-					<p class="portal-kicker">${quick ? 'Verified sign in' : 'Secure account'}</p>
+					<div class="portal-brand portal-brand--auth" aria-hidden="true"><span class="portal-brand__mark">P</span><span>Prismatica</span></div>
+					<p class="portal-kicker">${quick ? 'Account connection' : 'Secure account'}</p>
 					<h2 aria-hidden="true" data-auth-title>${quick ? 'Open your workspace' : 'Create your workspace'}</h2>
-					<p class="portal-note" data-auth-note>${quick ? 'Sign in with your verified email and password.' : registerNote}</p>
-					<div class="portal-trust-row" aria-hidden="true"><span>HTTPS</span><span>Rate limited</span><span>Email verified</span></div>
+					<p class="portal-note" data-auth-note>${quick ? 'Sign in to connect Prismatica with the osionos app.' : registerNote}</p>
 					<div class="portal-auth-switch" role="group" aria-label="Authentication mode">
 						<button class="portal-auth-switch__button" type="button" data-auth-switch="register" aria-pressed="${quick ? 'false' : 'true'}">Create account</button>
 						<button class="portal-auth-switch__button" type="button" data-auth-switch="login" aria-pressed="${quick ? 'true' : 'false'}">Sign in</button>
@@ -976,22 +974,19 @@ function createPortalMarkup(mode: PortalMode): string {
 							<button class="portal-secondary" type="button" data-cancel-recovery>Back to login</button>
 						</div>
 						<button class="portal-secondary" type="button" data-close-portal>Return to the tour</button>
-						<a class="portal-link" href="#media-assets">Need a preview first?</a>
 						<output id="portal-error-msg" class="portal-error" role="status" aria-live="polite" aria-atomic="true"></output>
 					</form>
 				</div>
 			</section>
-			<section class="portal__panel portal__panel--preview" aria-label="Workspace security preview">
+			<section class="portal__panel portal__panel--preview" aria-label="Connection summary">
 				<div class="portal-demo-area">
-					<p class="portal-kicker portal-kicker--future">Workspace readiness</p>
-					<div class="portal-dashboard" aria-hidden="true">
-						<div class="portal-dashboard__top"><span></span><span></span><span></span></div>
-						<div class="portal-dashboard__grid"><span></span><span></span><span></span><span></span></div>
-					</div>
+					<p class="portal-kicker portal-kicker--future">Connection summary</p>
+					<h3>One account, two workspaces.</h3>
+					<p class="portal-summary">Your Prismatica identity opens a dedicated osionos workspace through the secure bridge.</p>
 					<div class="portal-cards" aria-label="Security assurances">
-						<article class="portal-card"><span>01</span><h3>Private by design</h3><p>Same-origin API routing keeps browser calls under the HTTPS frontend.</p></article>
-						<article class="portal-card"><span>02</span><h3>Verified identity</h3><p>${requiresEmailVerification ? 'New accounts activate after email confirmation.' : 'Local development can auto-confirm accounts without changing production.'}</p></article>
-						<article class="portal-card"><span>03</span><h3>Ready feedback</h3><p>Inline validation, notices and password checks explain every step.</p></article>
+						<article class="portal-card"><span>01</span><h3>HTTPS gateway</h3><p>Browser requests stay behind the website gateway.</p></article>
+						<article class="portal-card"><span>02</span><h3>Verified identity</h3><p>${requiresEmailVerification ? 'New accounts activate after email confirmation.' : 'Local accounts can auto-confirm in development.'}</p></article>
+						<article class="portal-card"><span>03</span><h3>App access</h3><p>osionos receives a signed session, not database credentials.</p></article>
 					</div>
 				</div>
 			</section>
@@ -1687,13 +1682,13 @@ async function submitPortalLogin(portal: HTMLElement, elements: PortalFormElemen
 function syncAuthModeCopy(controls: AuthModeControls, authMode: 'login' | 'register'): void {
 	const isLogin = authMode === 'login';
 	const registerNote = authConfig.requireEmailVerification
-		? 'Username and email stay inline; password security and email verification stay below.'
-		: 'Development mode can create a confirmed local account without sending a verification email.';
+		? 'Create an account with email verification before opening your workspace.'
+		: 'Create a local development account and open your workspace.';
 	if (controls.authTitle instanceof HTMLElement) {
 		controls.authTitle.textContent = isLogin ? 'Open your workspace' : 'Create your workspace';
 	}
 	if (controls.authNote instanceof HTMLElement) {
-		controls.authNote.textContent = isLogin ? 'Sign in with your verified email and password.' : registerNote;
+		controls.authNote.textContent = isLogin ? 'Sign in to connect Prismatica with the osionos app.' : registerNote;
 	}
 	if (controls.submitButton instanceof HTMLButtonElement) {
 		controls.submitButton.textContent = isLogin ? 'Sign in securely →' : 'Create protected account →';

@@ -5,8 +5,11 @@
 	--margin-red: rgba(196, 64, 64, 0.12);
 	--ink: #1c1612;
 	--ink-mid: #3a322c;
-	--ink-faint: rgba(28, 22, 18, 0.16);
+	--ink-faint: rgba(28, 22, 18, 0.2);
 	--page-bg: var(--paper);
+	/* Improved contrast ratios */
+	--text-contrast-min: #141210;
+	--text-contrast-mid: #2f2924;
 	--selection-bg: rgba(245, 216, 74, 0.62);
 	--header-bg: rgba(247, 244, 237, 0.94);
 	--header-frame-bg: rgba(247, 244, 237, 0.96);
@@ -82,9 +85,14 @@
 	--stroke-focus: 3px;
 	--radius-control: 16px 13px 15px 12px / 13px 16px 12px 15px;
 	--radius-card: 22px 18px 24px 17px / 18px 24px 17px 22px;
+	--radius-small: 8px 6px 7px 5px / 6px 8px 5px 7px;
+	--radius-large: 28px 24px 30px 22px / 24px 30px 22px 28px;
 	--duration-fast: 140ms;
 	--duration-mascot: 300ms;
+	--duration-slow: 250ms;
 	--ease-out-sketch: cubic-bezier(0.22, 1, 0.36, 1);
+	--ease-in-out-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+	--ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
 	--mascot-look-x: 0px;
 	--mascot-look-y: 0px;
 	--mascot-blink: 1;
