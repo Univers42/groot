@@ -1,0 +1,7 @@
+diff --git a/infrastructure/osionos/app b/infrastructure/osionos/app
+index 69c318c..21d355f 160000
+--- a/infrastructure/osionos/app
++++ b/infrastructure/osionos/app
+@@ -1 +1 @@
+-Subproject commit 69c318c314e8e181e982ed7086c0a22ff9d712b4
++Subproject commit 21d355f9ea22c2edd41cefa16570d09a093cd97a
