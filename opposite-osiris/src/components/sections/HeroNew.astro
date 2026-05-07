@@ -1,0 +1,192 @@
+---
+import Button from '../ui/Button.astro';
+import Eyebrow from '../brand/Eyebrow.astro';
+import SketchUnderline from '../brand/SketchUnderline.astro';
+---
+
+<section class="section section--hero hero-new" id="top">
+	<div class="section__container hero-new__grid">
+		<div class="hero-new__copy" data-scroll-rise>
+			<Eyebrow icon="✶">Open-source BaaS for product teams</Eyebrow>
+			<h1 class="section__title hero-new__title">
+				Ship your backend in
+				<span class="accent">
+					<span class="accent__text">an afternoon</span>
+					<SketchUnderline color="yellow" />
+				</span>
+				—not a quarter.
+			</h1>
+			<p class="section__lede hero-new__lede">
+				Prismatica gives your team a self-hostable backend with auth, database, files,
+				and email built in. GDPR-ready, fully typed, and yours forever.
+			</p>
+			<div class="hero-new__cta">
+				<Button variant="primary" size="lg" data-action="open-portal-start">Start free</Button>
+				<Button variant="secondary" size="lg" href="#product">See it in action</Button>
+			</div>
+			<ul class="hero-new__bullets" role="list">
+				<li>No credit card</li>
+				<li>Self-host or cloud</li>
+				<li>EU data residency</li>
+			</ul>
+		</div>
+
+		<div class="hero-new__art" data-scroll-grow aria-hidden="true">
+			<div class="hero-new__frame">
+				<div class="hero-new__chrome">
+					<span></span><span></span><span></span>
+					<code>app.prismatica.dev</code>
+				</div>
+				<div class="hero-new__viewport">
+					<div class="hero-new__panel hero-new__panel--meta">
+						<strong>auth.users</strong>
+						<span class="ui-badge ui-badge--success ui-badge--sm">live</span>
+					</div>
+					<div class="hero-new__panel hero-new__panel--rows">
+						<div><span>amelia@studio.io</span><em>verified</em></div>
+						<div><span>jonas@kollektiv.de</span><em>pending</em></div>
+						<div><span>noor@axiomlab.nl</span><em>verified</em></div>
+					</div>
+					<div class="hero-new__panel hero-new__panel--query">
+						<code>POST /rest/v1/users<br/>Authorization: Bearer •••</code>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+</section>
+
+<style is:global>
+	.hero-new__grid {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+		gap: clamp(2rem, 5vw, 4rem);
+		align-items: center;
+	}
+
+	@media (max-width: 920px) {
+		.hero-new__grid {
+			grid-template-columns: 1fr;
+		}
+	}
+
+	.hero-new__copy {
+		display: grid;
+		gap: 1.1rem;
+	}
+
+	.hero-new__title {
+		text-align: left;
+		font-size: clamp(2rem, 1.4rem + 3vw, 3.4rem);
+	}
+
+	.hero-new__lede {
+		text-align: left;
+		max-width: 56ch;
+	}
+
+	.hero-new__cta {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.65rem;
+		margin-top: 0.4rem;
+	}
+
+	.hero-new__bullets {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 1rem 1.5rem;
+		margin: 0.4rem 0 0;
+		padding: 0;
+		list-style: none;
+		font-size: 0.88rem;
+		color: var(--system-text-muted);
+	}
+	.hero-new__bullets li::before {
+		content: '✓';
+		display: inline-block;
+		margin-right: 0.4rem;
+		color: var(--system-success-text);
+		font-weight: 700;
+	}
+
+	.hero-new__art {
+		position: relative;
+	}
+
+	.hero-new__frame {
+		display: grid;
+		grid-template-rows: auto 1fr;
+		border: 1px solid var(--system-border-strong);
+		border-radius: var(--system-radius-xl);
+		background: var(--system-surface);
+		box-shadow: var(--system-shadow-3);
+		overflow: hidden;
+	}
+
+	.hero-new__chrome {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.55rem 0.9rem;
+		background: var(--system-surface-sunken);
+		border-bottom: 1px solid var(--system-border);
+		font-family: var(--system-font-mono);
+		font-size: 0.78rem;
+		color: var(--system-text-muted);
+	}
+	.hero-new__chrome span {
+		width: 10px;
+		height: 10px;
+		border-radius: 50%;
+		background: var(--system-border-strong);
+	}
+	.hero-new__chrome span:first-child { background: #ff6058; }
+	.hero-new__chrome span:nth-child(2) { background: #ffbd2e; }
+	.hero-new__chrome span:nth-child(3) { background: #28c941; }
+	.hero-new__chrome code {
+		margin-left: 0.5rem;
+	}
+
+	.hero-new__viewport {
+		display: grid;
+		gap: 0.75rem;
+		padding: 1rem;
+		background: var(--system-surface);
+	}
+
+	.hero-new__panel {
+		padding: 0.7rem 0.9rem;
+		border: 1px solid var(--system-border);
+		border-radius: var(--system-radius-md);
+		background: var(--system-surface-raised);
+		font-size: 0.85rem;
+		color: var(--system-text);
+	}
+	.hero-new__panel--meta {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		font-weight: 600;
+		color: var(--system-text-strong);
+	}
+	.hero-new__panel--rows div {
+		display: flex;
+		justify-content: space-between;
+		padding: 0.35rem 0;
+		border-bottom: 1px dashed var(--system-divider);
+	}
+	.hero-new__panel--rows div:last-child {
+		border-bottom: 0;
+	}
+	.hero-new__panel--rows em {
+		font-style: normal;
+		font-size: 0.78rem;
+		color: var(--system-text-muted);
+	}
+	.hero-new__panel--query {
+		font-family: var(--system-font-mono);
+		font-size: 0.78rem;
+		background: var(--system-surface-sunken);
+	}
+</style>

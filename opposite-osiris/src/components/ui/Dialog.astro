@@ -1,0 +1,142 @@
+---
+// Generic native <dialog> wrapper. Owns the chrome (close button, ::backdrop)
+// and exposes a <slot /> for the content. The backdrop click + ESC are handled
+// by the platform; we additionally restore focus to the previously-focused
+// element on close.
+//
+// Inline script is scoped by the unique id so multiple dialogs can coexist
+// safely. The dialog is rendered statically — JS only opens/closes it.
+
+interface Props {
+	id: string;
+	titleId: string;
+	title: string;
+	closeLabel?: string;
+	class?: string;
+}
+
+const { id, titleId, title, closeLabel = 'Close dialog', class: className = '' } = Astro.props;
+---
+
+<dialog id={id} class={`ui-dialog ${className}`} aria-labelledby={titleId}>
+	<div class="ui-dialog__panel">
+		<header class="ui-dialog__header">
+			<h2 id={titleId} class="ui-dialog__title">{title}</h2>
+			<button class="ui-dialog__close" type="button" aria-label={closeLabel} data-ui-dialog-close>
+				<svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true">
+					<path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+				</svg>
+			</button>
+		</header>
+		<div class="ui-dialog__body">
+			<slot />
+		</div>
+	</div>
+</dialog>
+
+<script is:inline define:vars={{ dialogId: id }}>
+	(() => {
+		const dialog = document.getElementById(dialogId);
+		if (!(dialog instanceof HTMLDialogElement)) return;
+		let previous = null;
+		const handleClick = (event) => {
+			if (event.target === dialog) dialog.close('backdrop');
+		};
+		const handleClose = () => {
+			document.body.classList.remove('dialog-open');
+			previous?.focus({ preventScroll: true });
+			previous = null;
+		};
+		dialog.addEventListener('click', handleClick);
+		dialog.addEventListener('close', handleClose);
+		dialog.querySelectorAll('[data-ui-dialog-close]').forEach((button) => {
+			button.addEventListener('click', () => dialog.close('button'));
+		});
+		dialog.addEventListener('ui:open', () => {
+			previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+			document.body.classList.add('dialog-open');
+			if (!dialog.open) dialog.showModal();
+		});
+	})();
+</script>
+
+<style is:global>
+	dialog.ui-dialog {
+		margin: auto;
+		padding: 0;
+		max-width: min(560px, 92vw);
+		max-height: min(86vh, 760px);
+		border: 0;
+		border-radius: var(--system-dialog-radius);
+		background: transparent;
+		color: var(--system-dialog-fg);
+		overflow: hidden;
+	}
+
+	dialog.ui-dialog::backdrop {
+		background: var(--system-dialog-backdrop);
+	}
+
+	dialog.ui-dialog:not([open]) {
+		display: none;
+	}
+
+	.ui-dialog__panel {
+		display: grid;
+		grid-template-rows: auto 1fr;
+		max-height: inherit;
+		background: var(--system-dialog-bg);
+		border: 1px solid var(--system-dialog-border);
+		border-radius: inherit;
+		box-shadow: var(--system-dialog-shadow);
+		font-family: var(--system-font-sans);
+	}
+
+	.ui-dialog__header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		padding: 1.1rem 1.25rem;
+		border-bottom: 1px solid var(--system-dialog-border);
+	}
+
+	.ui-dialog__title {
+		margin: 0;
+		font-size: 1.05rem;
+		font-weight: 700;
+		color: var(--system-text-strong);
+	}
+
+	.ui-dialog__close {
+		display: grid;
+		place-items: center;
+		width: 36px;
+		height: 36px;
+		border: 1px solid transparent;
+		border-radius: var(--system-radius-sm);
+		background: transparent;
+		color: var(--system-text-strong);
+		cursor: pointer;
+		transition: background 160ms var(--system-ease-standard), border-color 160ms var(--system-ease-standard);
+	}
+
+	.ui-dialog__close:hover {
+		background: var(--system-action-secondary-bg-hover);
+		border-color: var(--system-action-secondary-border);
+	}
+
+	.ui-dialog__close:focus-visible {
+		outline: 3px solid var(--system-focus-ring);
+		outline-offset: 2px;
+	}
+
+	.ui-dialog__body {
+		padding: 1.25rem;
+		overflow: auto;
+	}
+
+	body.dialog-open {
+		overflow: hidden;
+	}
+</style>

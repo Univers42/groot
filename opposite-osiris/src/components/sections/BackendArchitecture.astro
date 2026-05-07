@@ -1,0 +1,504 @@
+---
+import Eyebrow from '../brand/Eyebrow.astro';
+
+// Single-canvas interactive architecture explorer.
+//
+// One visual surface. Nodes ARE the toggles — click a node, the service
+// flips on/off, edges fade, the metrics strip at the bottom updates,
+// the tradeoff banner reacts. Presets are chips at the top of the same
+// canvas. There is no second panel — everything lives inside one frame.
+
+type ServiceCategory = 'core' | 'auth' | 'data' | 'engagement' | 'ai' | 'compliance' | 'ops';
+
+interface ServiceDef {
+	id: string;
+	name: string;
+	category: ServiceCategory;
+	required?: boolean;
+	desc: string;
+	cost: number;
+	latencyMs: number;
+	gdprPoints: number;
+	risk: number;
+	complexity: number;
+}
+
+const services: ServiceDef[] = [
+	{ id: 'kong',         name: 'Kong gateway',     category: 'core',       required: true, desc: 'Edge routing, JWT, rate-limit.',           cost: 0,  latencyMs: 4, gdprPoints: 1, risk: 1, complexity: 1 },
+	{ id: 'postgres',     name: 'Postgres',         category: 'core',       required: true, desc: 'Primary relational store, RLS.',          cost: 12, latencyMs: 6, gdprPoints: 2, risk: 2, complexity: 1 },
+	{ id: 'session',      name: 'Sessions',         category: 'auth',                       desc: 'Login, refresh, magic-link, MFA.',         cost: 4,  latencyMs: 8, gdprPoints: 1, risk: 2, complexity: 2 },
+	{ id: 'permission',   name: 'Permissions',      category: 'auth',                       desc: 'RBAC + ABAC policy engine.',              cost: 4,  latencyMs: 5, gdprPoints: 1, risk: 1, complexity: 2 },
+	{ id: 'schema',       name: 'Schema service',   category: 'data',                       desc: 'Migrations, typed schemas.',               cost: 3,  latencyMs: 0, gdprPoints: 0, risk: 1, complexity: 1 },
+	{ id: 'query',        name: 'Query router',     category: 'data',                       desc: 'PostgREST + Mongo planner.',              cost: 5,  latencyMs: 6, gdprPoints: 0, risk: 2, complexity: 2 },
+	{ id: 'mongo',        name: 'MongoDB',          category: 'data',                       desc: 'Document store.',                          cost: 9,  latencyMs: 7, gdprPoints: 1, risk: 2, complexity: 2 },
+	{ id: 'storage',      name: 'Storage',          category: 'data',                       desc: 'S3-compatible objects + presign.',        cost: 6,  latencyMs: 4, gdprPoints: 1, risk: 1, complexity: 1 },
+	{ id: 'email',        name: 'Email',            category: 'engagement',                 desc: 'Transactional mail + DKIM.',              cost: 3,  latencyMs: 0, gdprPoints: 1, risk: 1, complexity: 1 },
+	{ id: 'newsletter',   name: 'Newsletter',       category: 'engagement',                 desc: 'Subscriptions + campaigns.',              cost: 2,  latencyMs: 0, gdprPoints: 1, risk: 1, complexity: 1 },
+	{ id: 'analytics',    name: 'Analytics',        category: 'engagement',                 desc: 'Cookieless events + funnels.',            cost: 4,  latencyMs: 0, gdprPoints: 0, risk: 1, complexity: 1 },
+	{ id: 'ai',           name: 'AI',               category: 'ai',                          desc: 'Chat, completions, prompt vault.',        cost: 18, latencyMs: 0, gdprPoints: 0, risk: 2, complexity: 3 },
+	{ id: 'gdpr',         name: 'GDPR',             category: 'compliance',                  desc: 'Consent, exports, deletion runbook.',     cost: 2,  latencyMs: 0, gdprPoints: 4, risk: 0, complexity: 1 },
+	{ id: 'logs',         name: 'Logs',             category: 'ops',                         desc: 'Buffered structured logs + retention.',   cost: 3,  latencyMs: 0, gdprPoints: 1, risk: 1, complexity: 1 },
+	{ id: 'adapter',      name: 'Adapters',         category: 'ops',                         desc: 'Plug new DBs/secrets without redeploy.',  cost: 1,  latencyMs: 1, gdprPoints: 0, risk: 0, complexity: 1 },
+];
+
+interface Preset { id: string; label: string; enabled: string[]; }
+
+const presets: Preset[] = [
+	{ id: 'minimal',    label: 'Solo / MVP',    enabled: ['kong', 'postgres', 'session', 'schema', 'query', 'email', 'gdpr'] },
+	{ id: 'startup',    label: 'Startup',       enabled: ['kong', 'postgres', 'session', 'permission', 'schema', 'query', 'storage', 'email', 'analytics', 'gdpr', 'logs'] },
+	{ id: 'scaleup',    label: 'Scale-up',      enabled: ['kong', 'postgres', 'mongo', 'session', 'permission', 'schema', 'query', 'storage', 'email', 'newsletter', 'analytics', 'ai', 'gdpr', 'logs', 'adapter'] },
+	{ id: 'compliance', label: 'Regulated EU',  enabled: ['kong', 'postgres', 'session', 'permission', 'schema', 'query', 'storage', 'email', 'gdpr', 'logs'] },
+];
+
+const edges: Array<[string, string]> = [
+	['kong', 'session'], ['kong', 'permission'], ['kong', 'query'],
+	['kong', 'storage'], ['kong', 'email'], ['kong', 'newsletter'],
+	['kong', 'analytics'], ['kong', 'ai'], ['kong', 'gdpr'],
+	['session', 'postgres'], ['permission', 'postgres'],
+	['schema', 'postgres'], ['schema', 'mongo'],
+	['query', 'postgres'], ['query', 'mongo'],
+	['storage', 'adapter'],
+	['email', 'logs'],
+	['newsletter', 'postgres'], ['analytics', 'postgres'],
+	['ai', 'postgres'], ['gdpr', 'postgres'], ['gdpr', 'logs'],
+	['logs', 'postgres'],
+	['adapter', 'postgres'], ['adapter', 'mongo'],
+];
+
+const positions: Record<string, { x: number; y: number; w: number; h: number }> = {
+	kong:       { x:  40, y: 270, w: 170, h: 80 },
+	session:    { x: 270, y:  40, w: 170, h: 70 },
+	permission: { x: 270, y: 130, w: 170, h: 70 },
+	query:      { x: 270, y: 220, w: 170, h: 70 },
+	schema:     { x: 270, y: 310, w: 170, h: 70 },
+	storage:    { x: 270, y: 400, w: 170, h: 70 },
+	email:      { x: 270, y: 490, w: 170, h: 70 },
+	newsletter: { x: 510, y:  40, w: 170, h: 70 },
+	analytics:  { x: 510, y: 130, w: 170, h: 70 },
+	adapter:    { x: 510, y: 220, w: 170, h: 70 },
+	logs:       { x: 510, y: 310, w: 170, h: 70 },
+	gdpr:       { x: 510, y: 400, w: 170, h: 70 },
+	ai:         { x: 510, y: 490, w: 170, h: 70 },
+	postgres:   { x: 760, y: 170, w: 220, h: 100 },
+	mongo:      { x: 760, y: 340, w: 220, h: 100 },
+};
+const center = (id: string) => ({ cx: positions[id].x + positions[id].w / 2, cy: positions[id].y + positions[id].h / 2 });
+
+const categoryColor: Record<ServiceCategory, string> = {
+	core:       'var(--system-action-bg)',
+	auth:       'var(--system-info-text)',
+	data:       'var(--system-success-text)',
+	engagement: 'var(--system-warning-text)',
+	ai:         'var(--brand-hl-blue)',
+	compliance: 'var(--system-danger-text)',
+	ops:        'var(--system-text-muted)',
+};
+---
+
+<section class="section section--surface backend-arch" id="architecture">
+	<div class="section__container">
+		<header class="section__head">
+			<Eyebrow icon="✶">Inside the studio</Eyebrow>
+			<h2 class="section__title">Click a service. Watch the backend reshape.</h2>
+			<p class="section__lede">
+				One canvas. The diagram <em>is</em> the control panel — tap any node to toggle
+				the service. Presets reshape the whole stack in a click. Latency, cost,
+				GDPR coverage and attack surface update as you go.
+			</p>
+		</header>
+
+		<div class="backend-arch__canvas" data-arch-canvas data-scroll-grow>
+			<div class="backend-arch__chrome" aria-hidden="true">
+				<span></span><span></span><span></span>
+				<code data-arch-title>preset · startup</code>
+				<span class="backend-arch__hint">tap a node to toggle</span>
+			</div>
+
+			<div class="backend-arch__presets" role="group" aria-label="Architecture presets">
+				{presets.map((preset, idx) => (
+					<button
+						type="button"
+						class="backend-arch__preset"
+						data-preset={preset.id}
+						data-default={idx === 1 ? 'true' : undefined}
+						aria-pressed={idx === 1 ? 'true' : 'false'}
+					>{preset.label}</button>
+				))}
+			</div>
+
+			<div class="backend-arch__stage">
+				<svg viewBox="0 0 1020 600" role="img" aria-label="Interactive backend architecture diagram" class="backend-arch__svg" data-arch-svg>
+					<defs>
+						<marker id="arch-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+							<path d="M0 0 L10 5 L0 10 z" fill="currentColor" />
+						</marker>
+					</defs>
+
+					<g data-arch-edges>
+						{edges.map(([from, to]) => {
+							const a = center(from);
+							const b = center(to);
+							return (
+								<line
+									class="arch-edge"
+									data-edge={`${from}->${to}`}
+									data-from={from}
+									data-to={to}
+									x1={a.cx} y1={a.cy} x2={b.cx} y2={b.cy}
+									marker-end="url(#arch-arrow)"
+								/>
+							);
+						})}
+					</g>
+
+					<g data-arch-nodes>
+						{services.map((svc) => {
+							const p = positions[svc.id];
+							return (
+								<g
+									class={`arch-node arch-node--${svc.category}`}
+									data-node={svc.id}
+									data-category={svc.category}
+									data-required={svc.required ? 'true' : undefined}
+									transform={`translate(${p.x} ${p.y})`}
+									style={`--node-color: ${categoryColor[svc.category]}`}
+									role="button"
+									tabindex="0"
+									aria-label={`${svc.name}${svc.required ? ' (required)' : ''} — ${svc.desc}`}
+								>
+									<rect class="arch-node__bg" width={p.w} height={p.h} rx="14" />
+									<circle class="arch-node__dot" cx={p.w - 18} cy={18} r="6" />
+									<text class="arch-node__title" x={p.w / 2} y={p.h / 2 - 4} text-anchor="middle">{svc.name}</text>
+									<text class="arch-node__category" x={p.w / 2} y={p.h / 2 + 16} text-anchor="middle">{svc.category}{svc.required ? ' · required' : ''}</text>
+								</g>
+							);
+						})}
+					</g>
+				</svg>
+
+				<div class="backend-arch__tooltip" data-arch-tooltip role="status" aria-live="polite" hidden></div>
+			</div>
+
+			<div class="backend-arch__hud" data-arch-hud>
+				<dl class="backend-arch__metrics" data-arch-metrics>
+					<div><dt>Active</dt> <dd><span data-metric="count">—</span><small>/ {services.length}</small></dd></div>
+					<div><dt>p95 latency</dt> <dd><span data-metric="latency">—</span><small>ms</small></dd></div>
+					<div><dt>Cost</dt> <dd>€<span data-metric="cost">—</span><small>/mo</small></dd></div>
+					<div><dt>GDPR</dt> <dd><span data-metric="gdpr">—</span><small>%</small></dd></div>
+					<div><dt>Surface</dt> <dd><span data-metric="risk">—</span><small>/10</small></dd></div>
+					<div><dt>MAU</dt> <dd><span data-metric="mau">—</span></dd></div>
+				</dl>
+				<p class="backend-arch__tradeoff" data-arch-tradeoff>Balanced stack — production-ready out of the box.</p>
+			</div>
+		</div>
+	</div>
+</section>
+
+<script is:inline define:vars={{
+	servicesData: services.map((s) => ({
+		id: s.id, name: s.name, desc: s.desc, cost: s.cost, latencyMs: s.latencyMs,
+		gdprPoints: s.gdprPoints, risk: s.risk, complexity: s.complexity, required: !!s.required,
+	})),
+	presetsData: presets,
+}}>
+	(() => {
+		const root = document.querySelector('.backend-arch');
+		if (!root) return;
+		const svg = root.querySelector('[data-arch-svg]');
+		const titleEl = root.querySelector('[data-arch-title]');
+		const tradeoffEl = root.querySelector('[data-arch-tradeoff]');
+		const tooltipEl = root.querySelector('[data-arch-tooltip]');
+		const presetButtons = root.querySelectorAll('[data-preset]');
+		const nodes = svg.querySelectorAll('[data-node]');
+		const metric = (key) => root.querySelector(`[data-metric="${key}"]`);
+
+		const enabled = new Set();
+		const TOTAL_GDPR_MAX = servicesData.reduce((s, x) => s + x.gdprPoints, 0);
+
+		function applyState() {
+			servicesData.forEach((svc) => {
+				const node = svg.querySelector(`[data-node="${svc.id}"]`);
+				node?.setAttribute('data-active', enabled.has(svc.id) ? 'true' : 'false');
+				node?.setAttribute('aria-pressed', enabled.has(svc.id) ? 'true' : 'false');
+			});
+			svg.querySelectorAll('[data-edge]').forEach((edge) => {
+				const live = enabled.has(edge.getAttribute('data-from')) && enabled.has(edge.getAttribute('data-to'));
+				edge.setAttribute('data-active', live ? 'true' : 'false');
+			});
+			recomputeMetrics();
+		}
+
+		function recomputeMetrics() {
+			let count = 0, cost = 0, latency = 0, gdpr = 0, risk = 0;
+			servicesData.forEach((svc) => {
+				if (!enabled.has(svc.id)) return;
+				count += 1; cost += svc.cost; latency += svc.latencyMs;
+				gdpr += svc.gdprPoints; risk += svc.risk;
+			});
+			const gdprPct = Math.min(100, Math.round((gdpr / TOTAL_GDPR_MAX) * 100));
+			const riskScore = Math.min(10, Math.round(risk * 0.7));
+			let mau = 0;
+			if (enabled.has('kong') && enabled.has('postgres')) {
+				mau = 50_000;
+				if (enabled.has('mongo')) mau += 50_000;
+				if (enabled.has('storage')) mau += 25_000;
+				if (enabled.has('analytics')) mau += 25_000;
+				if (enabled.has('logs')) mau += 10_000;
+			}
+			metric('count').textContent = String(count);
+			metric('latency').textContent = String(latency);
+			metric('cost').textContent = String(cost);
+			metric('gdpr').textContent = String(gdprPct);
+			metric('risk').textContent = String(riskScore);
+			metric('mau').textContent = mau >= 1000 ? `${(mau / 1000).toFixed(0)}K` : String(mau);
+
+			const messages = [];
+			if (!enabled.has('gdpr')) messages.push('No GDPR module — DSAR exports become a manual job.');
+			if (!enabled.has('logs')) messages.push('Logs disabled — incident response slows down.');
+			if (!enabled.has('permission')) messages.push('No permission engine — RLS in Postgres becomes mandatory.');
+			if (enabled.has('ai') && !enabled.has('gdpr')) messages.push('AI on without GDPR module: prompt-vault retention is on you.');
+			if (enabled.has('mongo') && !enabled.has('schema')) messages.push('Mongo without schema-service — drift will hit you in week 6.');
+			if (enabled.has('newsletter') && !enabled.has('email')) messages.push('Newsletter needs the email service to deliver.');
+			if (count <= 4) messages.push('Lean stack — perfect for prototypes, not for billing customers.');
+			if (count >= 12) messages.push('All-in stack — great for product-market fit, expect ops work.');
+			tradeoffEl.textContent = messages[0] ?? 'Balanced stack — production-ready out of the box.';
+		}
+
+		function applyPreset(id) {
+			const preset = presetsData.find((p) => p.id === id);
+			if (!preset) return;
+			enabled.clear();
+			preset.enabled.forEach((s) => enabled.add(s));
+			servicesData.forEach((svc) => { if (svc.required) enabled.add(svc.id); });
+			presetButtons.forEach((btn) => btn.setAttribute('aria-pressed', btn.dataset.preset === id ? 'true' : 'false'));
+			titleEl.textContent = `preset · ${preset.label.toLowerCase()}`;
+			applyState();
+		}
+
+		function toggleService(id) {
+			const svc = servicesData.find((s) => s.id === id);
+			if (!svc || svc.required) return;
+			if (enabled.has(id)) enabled.delete(id); else enabled.add(id);
+			presetButtons.forEach((btn) => btn.setAttribute('aria-pressed', 'false'));
+			titleEl.textContent = 'preset · custom';
+			applyState();
+		}
+
+		nodes.forEach((node) => {
+			const id = node.getAttribute('data-node');
+			node.addEventListener('click', () => toggleService(id));
+			node.addEventListener('keydown', (event) => {
+				if (event.key === 'Enter' || event.key === ' ') {
+					event.preventDefault();
+					toggleService(id);
+				}
+			});
+			const showTip = () => {
+				const svc = servicesData.find((s) => s.id === id);
+				if (!svc) return;
+				tooltipEl.textContent = `${svc.name} — ${svc.desc}`;
+				tooltipEl.hidden = false;
+			};
+			const hideTip = () => { tooltipEl.hidden = true; };
+			node.addEventListener('pointerenter', showTip);
+			node.addEventListener('pointerleave', hideTip);
+			node.addEventListener('focus', showTip);
+			node.addEventListener('blur', hideTip);
+		});
+
+		presetButtons.forEach((btn) => btn.addEventListener('click', () => applyPreset(btn.dataset.preset)));
+
+		const defaultBtn = root.querySelector('[data-preset][data-default="true"]');
+		applyPreset(defaultBtn?.dataset.preset ?? presetsData[0].id);
+	})();
+</script>
+
+<style is:global>
+	.backend-arch__canvas {
+		position: relative;
+		display: grid;
+		grid-template-rows: auto auto 1fr auto;
+		gap: 0;
+		border: 1px solid var(--system-border-strong);
+		border-radius: var(--system-radius-xl);
+		background: var(--system-surface);
+		box-shadow: var(--system-shadow-3);
+		overflow: hidden;
+	}
+
+	.backend-arch__chrome {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.55rem 0.95rem;
+		background: var(--system-surface-sunken);
+		border-bottom: 1px solid var(--system-border);
+		font-family: var(--system-font-mono);
+		font-size: 0.78rem;
+		color: var(--system-text-muted);
+	}
+	.backend-arch__chrome > span:not(.backend-arch__hint) { width: 10px; height: 10px; border-radius: 50%; background: var(--system-border-strong); }
+	.backend-arch__chrome > span:nth-child(1) { background: #ff6058; }
+	.backend-arch__chrome > span:nth-child(2) { background: #ffbd2e; }
+	.backend-arch__chrome > span:nth-child(3) { background: #28c941; }
+	.backend-arch__chrome code { margin-left: 0.5rem; }
+	.backend-arch__hint { margin-left: auto; font-size: 0.72rem; opacity: 0.7; }
+	@media (max-width: 540px) { .backend-arch__hint { display: none; } }
+
+	.backend-arch__presets {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+		padding: 0.7rem 0.95rem;
+		background: var(--system-surface);
+		border-bottom: 1px solid var(--system-border);
+	}
+	.backend-arch__preset {
+		font-family: var(--system-font-sans);
+		font-size: 0.8rem;
+		font-weight: 600;
+		padding: 0.4rem 0.85rem;
+		border-radius: var(--system-radius-pill);
+		border: 1px solid var(--system-border);
+		background: var(--system-surface-sunken);
+		color: var(--system-text);
+		cursor: pointer;
+		transition: background 160ms var(--system-ease-standard), border-color 160ms var(--system-ease-standard), color 160ms var(--system-ease-standard);
+	}
+	.backend-arch__preset:hover {
+		background: var(--system-action-secondary-bg-hover);
+		border-color: var(--system-border-strong);
+	}
+	.backend-arch__preset[aria-pressed='true'] {
+		background: var(--system-action-bg);
+		color: var(--system-action-fg);
+		border-color: var(--system-action-bg);
+	}
+	.backend-arch__preset:focus-visible {
+		outline: 3px solid var(--system-focus-ring);
+		outline-offset: 2px;
+	}
+
+	.backend-arch__stage {
+		position: relative;
+		padding: 0.5rem;
+		background:
+			radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--system-action-bg) 6%, transparent), transparent 70%),
+			var(--system-surface);
+	}
+	.backend-arch__svg {
+		display: block;
+		width: 100%;
+		height: auto;
+		font-family: var(--system-font-sans);
+		color: var(--system-border-strong);
+	}
+
+	.arch-node { cursor: pointer; outline: none; }
+	.arch-node[data-required] { cursor: default; }
+	.arch-node__bg {
+		fill: color-mix(in srgb, var(--node-color) 14%, var(--system-surface));
+		stroke: var(--node-color);
+		stroke-width: 1.5;
+		transition: opacity 220ms var(--system-ease-standard), filter 220ms var(--system-ease-standard);
+	}
+	.arch-node__dot {
+		fill: var(--node-color);
+		transition: opacity 200ms var(--system-ease-standard);
+	}
+	.arch-node__title { fill: var(--system-text-strong); font-size: 15px; font-weight: 700; pointer-events: none; }
+	.arch-node__category { fill: var(--system-text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; pointer-events: none; }
+
+	.arch-node[data-active='false'] .arch-node__bg {
+		opacity: 0.32;
+		filter: saturate(0.2);
+		stroke-dasharray: 4 4;
+	}
+	.arch-node[data-active='false'] .arch-node__dot { opacity: 0.25; }
+	.arch-node[data-active='false'] .arch-node__title,
+	.arch-node[data-active='false'] .arch-node__category { opacity: 0.45; }
+	.arch-node:hover .arch-node__bg { filter: brightness(1.05) drop-shadow(0 4px 10px color-mix(in srgb, var(--node-color) 30%, transparent)); }
+	.arch-node:focus-visible .arch-node__bg { outline: 3px solid var(--system-focus-ring); }
+
+	.arch-edge {
+		stroke: var(--system-border-strong);
+		stroke-width: 1.5;
+		opacity: 1;
+		transition: opacity 220ms var(--system-ease-standard);
+		color: var(--system-border-strong);
+	}
+	.arch-edge[data-active='false'] { opacity: 0.07; }
+
+	.backend-arch__tooltip {
+		position: absolute;
+		left: 50%;
+		bottom: 0.6rem;
+		transform: translateX(-50%);
+		max-width: min(560px, 90%);
+		padding: 0.45rem 0.85rem;
+		background: var(--system-text-strong);
+		color: var(--system-surface);
+		border-radius: var(--system-radius-pill);
+		font-family: var(--system-font-sans);
+		font-size: 0.78rem;
+		box-shadow: var(--system-shadow-2);
+		pointer-events: none;
+		z-index: 2;
+	}
+
+	.backend-arch__hud {
+		display: grid;
+		gap: 0.5rem;
+		padding: 0.85rem 0.95rem 1rem;
+		background: var(--system-surface-sunken);
+		border-top: 1px solid var(--system-border);
+	}
+	.backend-arch__metrics {
+		display: grid;
+		grid-template-columns: repeat(6, minmax(0, 1fr));
+		gap: 0.4rem 1rem;
+		margin: 0;
+	}
+	@media (max-width: 720px) {
+		.backend-arch__metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+	}
+	.backend-arch__metrics > div { display: grid; gap: 0.05rem; }
+	.backend-arch__metrics dt {
+		margin: 0;
+		font-family: var(--system-font-mono);
+		font-size: 0.66rem;
+		color: var(--system-text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+	}
+	.backend-arch__metrics dd {
+		margin: 0;
+		font-size: 1.1rem;
+		font-weight: 700;
+		color: var(--system-text-strong);
+		font-variant-numeric: tabular-nums;
+		display: flex;
+		align-items: baseline;
+		gap: 0.2rem;
+	}
+	.backend-arch__metrics dd small {
+		font-size: 0.7rem;
+		font-weight: 500;
+		color: var(--system-text-muted);
+	}
+
+	.backend-arch__tradeoff {
+		margin: 0;
+		font-family: var(--system-font-sans);
+		font-size: 0.85rem;
+		color: var(--system-warning-text);
+		padding: 0.5rem 0.7rem;
+		border-left: 3px solid var(--system-warning-border);
+		background: color-mix(in srgb, var(--system-warning-bg) 50%, transparent);
+		border-radius: 0 var(--system-radius-sm) var(--system-radius-sm) 0;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.arch-node__bg, .arch-node__dot, .arch-edge, .backend-arch__preset { transition: none; }
+	}
+</style>

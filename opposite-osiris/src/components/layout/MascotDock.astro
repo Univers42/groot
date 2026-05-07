@@ -1,0 +1,166 @@
+---
+// Floating mascot dock — bottom-left, non-intrusive, never blocks content.
+// The actual mascot SVG is injected by `src/scripts/main.ts` mountMascot()
+// into the `#mascot-anchor` slot below. This component just provides the
+// shell (positioning, glow, label). Hides on small screens so it doesn't
+// fight with the mobile drawer / final CTA.
+//
+// Decisions:
+// - Fixed bottom-left, not bottom-right, so it never overlaps the chat /
+//   support widget pattern users expect on the right.
+// - `aria-live` is OFF on the wrapper — the mascot is decorative chrome.
+// - Includes a small "speech" bubble with a rotating tip; users can dismiss
+//   it (collapses to just the mascot button).
+// - Pointer-events are managed so the giant bubble doesn't block links
+//   underneath when collapsed.
+---
+
+<aside class="mascot-dock" data-component="mascot-dock" aria-label="Prismatica assistant">
+	<div class="mascot-dock__bubble" data-mascot-bubble>
+		<button
+			class="mascot-dock__bubble-close"
+			type="button"
+			aria-label="Hide assistant tip"
+			data-mascot-dismiss
+		>×</button>
+		<p class="mascot-dock__tip" data-mascot-tip>Hey — need a backend in 5 minutes? Click me.</p>
+	</div>
+	<div id="mascot-anchor" class="mascot-dock__anchor"></div>
+</aside>
+
+<script is:inline>
+	(() => {
+		const dock = document.querySelector('[data-component="mascot-dock"]');
+		if (!dock) return;
+		const bubble = dock.querySelector('[data-mascot-bubble]');
+		const tipEl = dock.querySelector('[data-mascot-tip]');
+		const dismiss = dock.querySelector('[data-mascot-dismiss]');
+		const STORAGE_KEY = 'prismatica:mascot-tip-dismissed';
+		const tips = [
+			'Hey — need a backend in 5 minutes? Click me.',
+			'Self-host the whole stack with one command.',
+			'GDPR exports are one endpoint away.',
+			'Toggle services live in the Backend section ↑',
+			'Postgres + PostgREST = your typed API.',
+		];
+		let cursor = 0;
+		const rotate = () => {
+			if (!tipEl) return;
+			cursor = (cursor + 1) % tips.length;
+			tipEl.textContent = tips[cursor];
+		};
+		const dismissed = (() => {
+			try { return globalThis.localStorage?.getItem(STORAGE_KEY) === '1'; }
+			catch { return false; }
+		})();
+		if (dismissed && bubble) bubble.setAttribute('hidden', '');
+		dismiss?.addEventListener('click', () => {
+			bubble?.setAttribute('hidden', '');
+			try { globalThis.localStorage?.setItem(STORAGE_KEY, '1'); } catch {}
+		});
+		setInterval(rotate, 9000);
+	})();
+</script>
+
+<style is:global>
+	.mascot-dock {
+		position: fixed;
+		left: clamp(0.75rem, 2vw, 1.5rem);
+		bottom: clamp(0.75rem, 2vw, 1.5rem);
+		z-index: 30;
+		display: grid;
+		gap: 0.6rem;
+		justify-items: start;
+		pointer-events: none;
+	}
+
+	.mascot-dock__bubble {
+		position: relative;
+		max-width: 240px;
+		padding: 0.7rem 0.9rem 0.7rem 0.9rem;
+		background: var(--system-surface);
+		border: 1px solid var(--system-border);
+		border-radius: var(--system-radius-lg);
+		box-shadow: var(--system-shadow-2);
+		font-family: var(--system-font-sans);
+		font-size: 0.86rem;
+		line-height: 1.4;
+		color: var(--system-text);
+		pointer-events: auto;
+		animation: mascot-pop 320ms var(--system-ease-emphasized) both;
+	}
+
+	.mascot-dock__bubble[hidden] { display: none; }
+
+	.mascot-dock__bubble::after {
+		content: '';
+		position: absolute;
+		left: 22px;
+		bottom: -7px;
+		width: 14px;
+		height: 14px;
+		background: inherit;
+		border-right: 1px solid var(--system-border);
+		border-bottom: 1px solid var(--system-border);
+		transform: rotate(45deg);
+	}
+
+	.mascot-dock__bubble-close {
+		position: absolute;
+		top: 4px;
+		right: 6px;
+		width: 22px;
+		height: 22px;
+		display: grid;
+		place-items: center;
+		background: transparent;
+		border: 0;
+		border-radius: 50%;
+		color: var(--system-text-muted);
+		font-size: 1.05rem;
+		line-height: 1;
+		cursor: pointer;
+	}
+	.mascot-dock__bubble-close:hover { background: var(--system-action-secondary-bg-hover); color: var(--system-text-strong); }
+	.mascot-dock__bubble-close:focus-visible {
+		outline: 3px solid var(--system-focus-ring);
+		outline-offset: 2px;
+	}
+
+	.mascot-dock__tip { margin: 0; padding-right: 1rem; }
+
+	.mascot-dock__anchor {
+		position: relative;
+		width: 92px;
+		height: 70px;
+		pointer-events: auto;
+		filter: drop-shadow(0 6px 14px rgba(15, 23, 42, 0.18));
+		transition: transform 220ms var(--system-ease-emphasized);
+	}
+	.mascot-dock__anchor:hover { transform: translateY(-3px) scale(1.04); }
+
+	.mascot-dock__anchor .binocle {
+		display: block;
+		width: 100%;
+		height: 100%;
+		padding: 0;
+		background: transparent;
+		border: 0;
+		cursor: pointer;
+	}
+
+	@keyframes mascot-pop {
+		from { opacity: 0; transform: translateY(8px) scale(0.92); }
+		to   { opacity: 1; transform: translateY(0)   scale(1); }
+	}
+
+	@media (max-width: 540px) {
+		.mascot-dock__bubble { display: none; }
+		.mascot-dock__anchor { width: 72px; height: 56px; }
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.mascot-dock__bubble,
+		.mascot-dock__anchor { animation: none; transition: none; }
+	}
+</style>

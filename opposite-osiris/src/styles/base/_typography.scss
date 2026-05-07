@@ -1,0 +1,160 @@
+// Self-hosted typography. Brand fonts (Caveat, Kalam, Caveat Brush, Special
+// Elite, Architects Daughter) are personality-only — never used inside forms,
+// dialogs, tables or pricing CTAs. System body type is Inter, used for every
+// functional UI surface and most marketing body copy.
+//
+// `font-display: swap` keeps text legible during font load (WCAG 2.4.7-friendly
+// fallbacks). The local() probe lets users with the font installed skip the
+// network entirely.
+//
+// Until the woff2 binaries are committed (see public/fonts/README.md) the
+// `src: url(...)` entries silently fall back to the local() / system stack.
+
+// --- Inter (system layer) ---------------------------------------------------
+@font-face {
+	font-family: 'Inter';
+	src: local('Inter Regular'), local('Inter-Regular'), url('/fonts/inter-400.woff2') format('woff2');
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Inter';
+	src: local('Inter Medium'), local('Inter-Medium'), url('/fonts/inter-500.woff2') format('woff2');
+	font-weight: 500;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Inter';
+	src: local('Inter SemiBold'), local('Inter-SemiBold'), url('/fonts/inter-600.woff2') format('woff2');
+	font-weight: 600;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Inter';
+	src: local('Inter Bold'), local('Inter-Bold'), url('/fonts/inter-700.woff2') format('woff2');
+	font-weight: 700;
+	font-style: normal;
+	font-display: swap;
+}
+
+// --- Brand families ---------------------------------------------------------
+@font-face {
+	font-family: 'Caveat';
+	src: local('Caveat'), url('/fonts/caveat-400.woff2') format('woff2');
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Caveat';
+	src: local('Caveat SemiBold'), url('/fonts/caveat-600.woff2') format('woff2');
+	font-weight: 600;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Caveat';
+	src: local('Caveat Bold'), url('/fonts/caveat-700.woff2') format('woff2');
+	font-weight: 700;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Caveat Brush';
+	src: local('Caveat Brush'), url('/fonts/caveat-brush-400.woff2') format('woff2');
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Kalam';
+	src: local('Kalam'), url('/fonts/kalam-400.woff2') format('woff2');
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Kalam';
+	src: local('Kalam Bold'), url('/fonts/kalam-700.woff2') format('woff2');
+	font-weight: 700;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Special Elite';
+	src: local('Special Elite'), url('/fonts/special-elite-400.woff2') format('woff2');
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Architects Daughter';
+	src: local('Architects Daughter'), url('/fonts/architects-daughter-400.woff2') format('woff2');
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+
+// Marketing typography defaults — Inter for body, brand for accents only.
+body {
+	font-family: var(--system-font-sans);
+	font-weight: 400;
+	font-size: clamp(15px, 0.9rem + 0.18vw, 17px);
+	line-height: 1.6;
+	letter-spacing: -0.005em;
+	color: var(--system-text);
+	text-rendering: optimizeLegibility;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, h6 {
+	font-family: var(--system-font-sans);
+	font-weight: 700;
+	letter-spacing: -0.02em;
+	line-height: 1.15;
+	color: var(--system-text-strong);
+}
+
+// Brand-decorated headlines opt in.
+.brand-display {
+	font-family: var(--brand-font-display);
+	font-weight: 700;
+	letter-spacing: -0.005em;
+	line-height: 1.05;
+}
+
+.brand-script {
+	font-family: var(--brand-font-brand);
+}
+
+.brand-eyebrow {
+	font-family: var(--brand-font-mono-sketch);
+	font-size: 0.78rem;
+	letter-spacing: 0.18em;
+	text-transform: uppercase;
+	color: var(--system-text-muted);
+}
+
+.brand-handwriting {
+	font-family: var(--brand-font-body);
+	font-weight: 400;
+}
+
+code, kbd, samp, pre {
+	font-family: var(--system-font-mono);
+	font-size: 0.92em;
+}

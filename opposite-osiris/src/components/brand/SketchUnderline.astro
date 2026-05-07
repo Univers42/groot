@@ -1,0 +1,41 @@
+---
+// Brand-layer hand-drawn underline. Sits *under* a span/h1/word; absolutely
+// positioned by the consumer. Pure decoration, aria-hidden.
+
+interface Props {
+	color?: 'yellow' | 'blue' | 'green' | 'red';
+	thickness?: 'thin' | 'thick';
+	class?: string;
+}
+
+const { color = 'yellow', thickness = 'thick', class: className = '' } = Astro.props;
+const colorVar = `var(--brand-hl-${color})`;
+const stroke = thickness === 'thin' ? 4 : 8;
+---
+
+<svg
+	class={`brand-underline brand-underline--${color} ${className}`}
+	viewBox="0 0 220 22"
+	preserveAspectRatio="none"
+	aria-hidden="true"
+	focusable="false"
+>
+	<path
+		d="M4 14 C 60 4, 130 22, 216 8"
+		fill="none"
+		stroke={colorVar}
+		stroke-width={stroke}
+		stroke-linecap="round"
+	/>
+</svg>
+
+<style is:global>
+	.brand-underline {
+		display: block;
+		width: 100%;
+		height: 0.55em;
+		margin-top: -0.32em;
+		opacity: 0.85;
+		pointer-events: none;
+	}
+</style>

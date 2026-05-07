@@ -1,0 +1,65 @@
+---
+import Button from '../ui/Button.astro';
+---
+
+<section class="section section--final final-cta">
+	<div class="section__container final-cta__panel" data-scroll-grow>
+		<h2 class="final-cta__title">Your backend, ready in an afternoon.</h2>
+		<p class="final-cta__lede">Open-source. GDPR-ready. Yours forever.</p>
+		<div class="final-cta__actions">
+			<Button variant="primary" size="lg" data-action="open-portal-start">Start free</Button>
+			<Button variant="secondary" size="lg" href="/docs">Read the docs</Button>
+		</div>
+		<p class="final-cta__meta">No credit card. Self-host whenever you want.</p>
+	</div>
+</section>
+
+<style is:global>
+	.final-cta__panel {
+		position: relative;
+		display: grid;
+		gap: 1rem;
+		justify-items: center;
+		text-align: center;
+		padding: clamp(2.5rem, 5vw, 4rem);
+		border-radius: var(--system-radius-xl);
+		background:
+			radial-gradient(ellipse at top, color-mix(in srgb, var(--system-action-bg) 25%, transparent), transparent 60%),
+			var(--system-surface-raised);
+		border: 1px solid var(--system-border-strong);
+		box-shadow: var(--system-shadow-3);
+		overflow: hidden;
+	}
+	.final-cta__panel::before {
+		content: '';
+		position: absolute;
+		inset: -2px;
+		border: 2px dashed color-mix(in srgb, var(--brand-margin-red) 50%, transparent);
+		border-radius: inherit;
+		pointer-events: none;
+		opacity: 0.35;
+	}
+	.final-cta__title {
+		margin: 0;
+		font-size: clamp(1.85rem, 1.4rem + 2vw, 2.6rem);
+		font-weight: 700;
+		letter-spacing: -0.02em;
+		color: var(--system-text-strong);
+	}
+	.final-cta__lede {
+		margin: 0;
+		font-size: 1.05rem;
+		color: var(--system-text);
+	}
+	.final-cta__actions {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: center;
+		gap: 0.65rem;
+	}
+	.final-cta__meta {
+		margin: 0.5rem 0 0;
+		font-size: 0.85rem;
+		color: var(--system-text-muted);
+	}
+</style>

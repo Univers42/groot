@@ -1,0 +1,89 @@
+---
+import Card from '../ui/Card.astro';
+import Eyebrow from '../brand/Eyebrow.astro';
+
+const quotes = [
+	{
+		quote: '“We replaced four SaaS subscriptions with one Compose file. Onboarding now takes a day, not a sprint.”',
+		name: 'Amelia Hart',
+		role: 'Staff Engineer',
+		company: 'Northwave Studios',
+	},
+	{
+		quote: '“The GDPR plumbing alone saved us six weeks. The mascot is a bonus.”',
+		name: 'Jonas Reuter',
+		role: 'Head of Product',
+		company: 'Kollektiv DE',
+	},
+	{
+		quote: '“Self-hosted, audited, owned. Exactly what our security team asked for.”',
+		name: 'Noor Janssen',
+		role: 'CTO',
+		company: 'Axiom Lab',
+	},
+];
+---
+
+<section class="section section--surface social-proof">
+	<div class="section__container">
+		<header class="section__head">
+			<Eyebrow>What teams say</Eyebrow>
+			<h2 class="section__title">Built by people shipping every week.</h2>
+		</header>
+
+		<div class="social-proof__grid">
+			{quotes.map((q) => (
+				<div data-scroll-rise>
+					<Card variant="testimonial">
+						<blockquote class="social-proof__quote">{q.quote}</blockquote>
+						<footer class="social-proof__author">
+							<span class="social-proof__avatar" aria-hidden="true">{q.name.split(' ').map((n) => n[0]).join('')}</span>
+							<div>
+								<strong>{q.name}</strong>
+								<span>{q.role} · {q.company}</span>
+							</div>
+						</footer>
+					</Card>
+				</div>
+			))}
+		</div>
+	</div>
+</section>
+
+<style is:global>
+	.social-proof__grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+		gap: 1.5rem;
+	}
+	.social-proof__quote {
+		margin: 0;
+		font-size: 1rem;
+		line-height: 1.55;
+		color: var(--system-text);
+	}
+	.social-proof__author {
+		display: flex;
+		align-items: center;
+		gap: 0.7rem;
+		font-size: 0.85rem;
+	}
+	.social-proof__author strong {
+		display: block;
+		color: var(--system-text-strong);
+	}
+	.social-proof__author span {
+		color: var(--system-text-muted);
+	}
+	.social-proof__avatar {
+		display: grid;
+		place-items: center;
+		width: 38px;
+		height: 38px;
+		border-radius: 50%;
+		background: var(--system-action-secondary-bg);
+		color: var(--system-action-bg);
+		font-weight: 700;
+		font-size: 0.82rem;
+	}
+</style>

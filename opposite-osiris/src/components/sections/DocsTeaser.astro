@@ -1,0 +1,95 @@
+---
+import Button from '../ui/Button.astro';
+import Card from '../ui/Card.astro';
+import Eyebrow from '../brand/Eyebrow.astro';
+
+const links = [
+	{ href: '/docs/quickstart', label: 'Quickstart' },
+	{ href: '/docs/auth',       label: 'Auth & sessions' },
+	{ href: '/docs/postgrest',  label: 'PostgREST recipes' },
+	{ href: '/docs/gdpr',       label: 'GDPR runbook' },
+];
+---
+
+<section class="section section--surface docs-teaser" id="docs">
+	<div class="section__container docs-teaser__grid">
+		<div data-scroll-rise>
+			<Eyebrow>Built for engineers</Eyebrow>
+			<h2 class="section__title docs-teaser__title">Read the docs.<br/>Ship in an afternoon.</h2>
+			<p class="section__lede docs-teaser__lede">
+				Every endpoint typed. Every recipe runnable. Every page versioned.
+			</p>
+			<Button variant="primary" size="lg" href="/docs">Open the docs</Button>
+		</div>
+
+		<div class="docs-teaser__panel" data-scroll-grow>
+			<Card variant="doc">
+				<pre class="docs-teaser__code"><code>{`import { createClient } from '@mini-baas/js';
+
+const baas = createClient({ url, anonKey });
+
+const { data, error } = await baas
+	.from('projects')
+	.select('id, name, owner:users(email)')
+	.eq('archived', false);`}</code></pre>
+				<ul class="docs-teaser__links" role="list">
+					{links.map((link) => (
+						<li><a href={link.href}>{link.label} →</a></li>
+					))}
+				</ul>
+			</Card>
+		</div>
+	</div>
+</section>
+
+<style is:global>
+	.docs-teaser__grid {
+		display: grid;
+		grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+		gap: clamp(2rem, 4vw, 3rem);
+		align-items: center;
+	}
+	@media (max-width: 920px) {
+		.docs-teaser__grid { grid-template-columns: 1fr; }
+	}
+	.docs-teaser__title { text-align: left; }
+	.docs-teaser__lede {
+		text-align: left;
+		max-width: 50ch;
+		margin-bottom: 1.25rem;
+	}
+	.docs-teaser__code {
+		margin: 0;
+		padding: 1rem;
+		background: var(--system-surface-sunken);
+		border: 1px solid var(--system-border);
+		border-radius: var(--system-radius-md);
+		font-family: var(--system-font-mono);
+		font-size: 0.84rem;
+		line-height: 1.55;
+		color: var(--system-text);
+		overflow-x: auto;
+	}
+	.docs-teaser__links {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+		gap: 0.4rem 1rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+	.docs-teaser__links a {
+		display: inline-flex;
+		min-height: 36px;
+		align-items: center;
+		color: var(--system-link);
+		text-decoration: none;
+		font-weight: 500;
+	}
+	.docs-teaser__links a:hover { color: var(--system-link-hover); text-decoration: underline; }
+	.docs-teaser__links a:focus-visible {
+		outline: 3px solid var(--system-focus-ring);
+		outline-offset: 2px;
+		border-radius: var(--system-radius-sm);
+	}
+</style>

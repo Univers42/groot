@@ -1,0 +1,154 @@
+---
+// System-layer text field. Uses native validation states; the visible label
+// stays explicit (never placeholder-as-label) per WCAG 3.3.2. The error and
+// hint slots both link to the input through aria-describedby so screen readers
+// announce them on focus.
+
+interface Props {
+	id: string;
+	name: string;
+	label: string;
+	type?: 'text' | 'email' | 'password' | 'tel' | 'url' | 'search' | 'number';
+	value?: string | number;
+	placeholder?: string;
+	autocomplete?: string;
+	inputmode?: 'text' | 'email' | 'numeric' | 'decimal' | 'tel' | 'url' | 'search';
+	required?: boolean;
+	minlength?: number;
+	maxlength?: number;
+	pattern?: string;
+	hint?: string;
+	error?: string;
+	disabled?: boolean;
+	readonly?: boolean;
+	class?: string;
+}
+
+const {
+	id,
+	name,
+	label,
+	type = 'text',
+	value,
+	placeholder,
+	autocomplete,
+	inputmode,
+	required = false,
+	minlength,
+	maxlength,
+	pattern,
+	hint,
+	error,
+	disabled = false,
+	readonly = false,
+	class: className = '',
+} = Astro.props;
+
+const hintId = hint ? `${id}-hint` : undefined;
+const errorId = `${id}-error`;
+const describedBy = [hintId, error ? errorId : undefined].filter(Boolean).join(' ') || undefined;
+---
+
+<div class={`ui-field ${className}`} data-field={name}>
+	<label class="ui-field__label" for={id}>
+		{label}{required && <span class="ui-field__required" aria-hidden="true"> *</span>}
+	</label>
+	<input
+		class="ui-field__input"
+		id={id}
+		name={name}
+		type={type}
+		value={value as string | undefined}
+		placeholder={placeholder}
+		autocomplete={autocomplete}
+		inputmode={inputmode}
+		required={required}
+		minlength={minlength}
+		maxlength={maxlength}
+		pattern={pattern}
+		disabled={disabled}
+		readonly={readonly}
+		aria-describedby={describedBy}
+		aria-invalid={error ? 'true' : undefined}
+	/>
+	{hint && <p class="ui-field__hint" id={hintId}>{hint}</p>}
+	<p
+		class="ui-field__error"
+		id={errorId}
+		role={error ? 'alert' : undefined}
+		aria-live="polite"
+		hidden={!error}
+	>{error}</p>
+</div>
+
+<style is:global>
+	.ui-field {
+		display: grid;
+		gap: 0.35rem;
+		font-family: var(--system-font-sans);
+	}
+
+	.ui-field__label {
+		font-size: 0.86rem;
+		font-weight: 600;
+		color: var(--system-text-strong);
+	}
+
+	.ui-field__required {
+		color: var(--system-danger-text);
+	}
+
+	.ui-field__input {
+		width: 100%;
+		min-height: var(--system-input-min-h);
+		padding: 0.7rem var(--system-input-pad-x);
+		border: 1px solid var(--system-input-border);
+		border-radius: var(--system-input-radius);
+		background: var(--system-input-bg);
+		color: var(--system-input-fg);
+		font: inherit;
+		font-size: 1rem;
+		transition: border-color 160ms var(--system-ease-standard),
+			box-shadow 160ms var(--system-ease-standard);
+	}
+
+	.ui-field__input::placeholder {
+		color: var(--system-input-placeholder);
+	}
+
+	.ui-field__input:hover:not(:focus-visible):not([aria-invalid='true']) {
+		border-color: var(--system-input-border-hover);
+	}
+
+	.ui-field__input:focus-visible {
+		outline: 0;
+		border-color: var(--system-input-border-focus);
+		box-shadow: var(--system-input-shadow-focus);
+	}
+
+	.ui-field__input[aria-invalid='true'] {
+		border-color: var(--system-input-border-invalid);
+		box-shadow: var(--system-input-shadow-invalid);
+	}
+
+	.ui-field__input[disabled] {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
+	.ui-field__hint {
+		margin: 0;
+		font-size: 0.82rem;
+		color: var(--system-text-muted);
+	}
+
+	.ui-field__error {
+		margin: 0;
+		font-size: 0.82rem;
+		color: var(--system-danger-text);
+	}
+
+	.ui-field__error[hidden] {
+		display: none;
+	}
+</style>

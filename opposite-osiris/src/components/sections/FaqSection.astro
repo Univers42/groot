@@ -1,0 +1,101 @@
+---
+import Eyebrow from '../brand/Eyebrow.astro';
+
+const faqs = [
+	{
+		q: 'Can I really self-host the whole stack?',
+		a: 'Yes. The entire mini-baas-infra repo is MIT licensed: Kong, GoTrue, PostgREST, Postgres, MailHog. One `docker compose up` and you are running locally; the same images deploy to any VPS.',
+	},
+	{
+		q: 'Where does my data live?',
+		a: 'Wherever you put it. The hosted tier runs in EU regions (Paris and Frankfurt). Self-hosted means your machines, your jurisdiction, your DPA — we never see the data.',
+	},
+	{
+		q: 'How does pricing work as I grow?',
+		a: 'You pay per active project, not per seat. Move from Free → Team in one click. If you outgrow Team, self-host: same code, no migration.',
+	},
+	{
+		q: 'How do I migrate from another BaaS?',
+		a: 'PostgREST means your schema is the API. Most teams import their existing dump, point Kong at it, and ship in under a day. We have migration recipes for Supabase, Firebase and Hasura.',
+	},
+	{
+		q: 'What about security audits?',
+		a: 'Auth flows ship with Turnstile, rate-limit and CSP defaults. The repo includes a published threat model, breach-response runbook, and OWASP ASVS L2 mapping in /docs/gdpr/.',
+	},
+];
+---
+
+<section class="section section--sunken faq" id="faq">
+	<div class="section__container faq__inner">
+		<header class="section__head">
+			<Eyebrow>FAQ</Eyebrow>
+			<h2 class="section__title">Answers, before you ask.</h2>
+		</header>
+
+		<ul class="faq__list" role="list">
+			{faqs.map((item, index) => (
+				<li class="faq__item" data-scroll-rise>
+					<details class="faq__details" open={index === 0}>
+						<summary class="faq__summary">
+							<span class="faq__question">{item.q}</span>
+							<span class="faq__icon" aria-hidden="true">+</span>
+						</summary>
+						<p class="faq__answer">{item.a}</p>
+					</details>
+				</li>
+			))}
+		</ul>
+	</div>
+</section>
+
+<style is:global>
+	.faq__inner { max-width: 820px; margin: 0 auto; }
+	.faq__list {
+		display: grid;
+		gap: 0.6rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+	.faq__details {
+		border: 1px solid var(--system-border);
+		border-radius: var(--system-radius-md);
+		background: var(--system-surface);
+		overflow: hidden;
+	}
+	.faq__summary {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 1rem;
+		padding: 1rem 1.1rem;
+		cursor: pointer;
+		font-weight: 600;
+		color: var(--system-text-strong);
+		list-style: none;
+	}
+	.faq__summary::-webkit-details-marker { display: none; }
+	.faq__summary:focus-visible {
+		outline: 3px solid var(--system-focus-ring);
+		outline-offset: -3px;
+	}
+	.faq__question { flex: 1; }
+	.faq__icon {
+		display: grid;
+		place-items: center;
+		width: 28px;
+		height: 28px;
+		border: 1px solid var(--system-border);
+		border-radius: 50%;
+		font-weight: 700;
+		color: var(--system-text-muted);
+		transition: transform 200ms var(--system-ease-standard);
+	}
+	.faq__details[open] .faq__icon { transform: rotate(45deg); }
+	.faq__answer {
+		margin: 0;
+		padding: 0 1.1rem 1.1rem;
+		color: var(--system-text);
+		line-height: 1.6;
+	}
+</style>

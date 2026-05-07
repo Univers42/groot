@@ -239,3 +239,82 @@ Manual:
 - Email template redesign (separate audit per
   `src/email-templates/`).
 - Dashboard visual rebuild — depends on Phase 5 finishing first.
+
+---
+
+## ADR addendum — landing-page rebuild (this iteration)
+
+### Decision A — Two-layer tokens are now load-bearing
+Brand tokens (`--brand-*`) are personality-only (paper, ink, highlighters,
+mascot palette). System tokens (`--system-*`) drive every functional surface
+(text, borders, focus, action, dialog, input, card, chip, status). Legacy
+aliases in `_tokens.scss` keep older components compiling while we sweep them.
+
+### Decision B — Native `<dialog>` everywhere
+`Dialog.astro` (system primitive) and `Portal.astro` (auth) both use
+`HTMLDialogElement.showModal()`. The platform handles ESC, focus trap,
+inert background, and top-layer rendering. Custom focus-trap code was deleted.
+
+### Decision C — Self-hosted fonts
+Google Fonts is being removed. `_typography.scss` declares every face with
+`font-display: swap` and `local()` first, `url('/fonts/*.woff2')` second.
+`public/fonts/README.md` lists the binaries to drop in. Until then the
+`local()` probe + system fallback keep the site readable. Once shipped we
+remove the `<link>` tags and the `fonts.googleapis.com` / `fonts.gstatic.com`
+entries from CSP in `Layout.astro`.
+
+### Decision D — Scroll-driven motion with safe fallback
+`utilities/_scroll-effects.scss` provides `[data-scroll-grow]` and
+`[data-scroll-rise]`. They use `animation-timeline: view()` inside
+`@supports`, so unsupported browsers see a static layout (no JS jank). All
+animations are killed under `prefers-reduced-motion: reduce`. Applied to
+hero art, feature cards, product showcase, pricing cards, FAQ items, and
+the final CTA panel.
+
+### Decision E — Landing-page IA replaced
+`src/pages/index.astro` now composes:
+`HeaderNew → HeroNew → LogoStrip → FeatureTrio → ProductShowcase →
+SocialProof → Pricing → DocsTeaser → FaqSection → FinalCta → FooterNew`.
+Old marketing sections (`HeroSection`, `PowersSection`,
+`MediaAssetsSection`, `WorkspaceGridSection`, `BaasStatusSection`,
+`IntelligenceSection`, `CharactersSection`) are kept on disk for reuse on
+sub-pages but no longer reachable from `/`. They will be removed in a
+follow-up cleanup once links/redirects are confirmed.
+
+### Decision F — Feature module skeleton
+`src/features/{mascot,portal,consent,theme,baas-status}/index.ts` exist as
+stubs (theme + portal are functional today). The 2200-line `main.ts` keeps
+running until each subsystem is moved behind its `init*()` export. The
+portal module already lazily injects Turnstile on first
+`[data-action="open-portal-*"]` click — eager `<script>` injection in
+`Layout.astro` can be removed when the rest of main.ts moves.
+
+### Decision G — Stylelint guard for `--system-divider`
+Pending: add a stylelint rule
+`declaration-property-value-disallowed-list: { "/^(color|border-color|outline-color|.*-color)$/": ["/var\\(--system-divider\\)/"] }`
+so the decoration-only divider token can never become text/border color.
+
+### What shipped in this commit
+- `src/styles/base/_typography.scss` (NEW) — self-hosted @font-face stack.
+- `src/styles/utilities/_scroll-effects.scss` (NEW) — `[data-scroll-grow]`
+  + `[data-scroll-rise]` with `animation-timeline: view()`.
+- `src/styles/sections/_section-base.scss` (NEW) — section container,
+  eyebrow, title, lede, accent helpers.
+- `src/styles/main.scss` — imports the three new SCSS modules above.
+- `src/components/ui/{Button,Field,Dialog,Card,Badge}.astro` (NEW) —
+  system primitives.
+- `src/components/brand/{SketchUnderline,PaperBackdrop,Eyebrow}.astro`
+  (NEW) — brand primitives.
+- `src/components/sections/{HeaderNew,HeroNew,LogoStrip,FeatureTrio,
+  ProductShowcase,SocialProof,Pricing,DocsTeaser,FaqSection,FinalCta,
+  FooterNew}.astro` (NEW) — 11 marketing sections.
+- `src/pages/index.astro` — rewritten to compose the new sections.
+- `src/features/{mascot,portal,consent,theme,baas-status}/index.ts` (NEW)
+  — module skeleton, theme + portal functional.
+- `public/fonts/README.md` (NEW) — binary checklist.
+
+### Quality gate (this commit)
+- `npx astro check` → 0 errors / 0 warnings / 0 hints.
+- `npx astro build` → 9 pages built, ~900 ms. Vite warns about missing
+  `/fonts/*.woff2` (expected: binaries ship in a follow-up; CSS falls back
+  via `local()` + system stack).

@@ -1,0 +1,111 @@
+---
+// System-layer card — used for features, pricing tiers, testimonials, docs.
+// Three visual variants share the same skeleton so the page reads consistently.
+
+interface Props {
+	variant?: 'feature' | 'pricing' | 'testimonial' | 'doc';
+	emphasized?: boolean;
+	tag?: 'article' | 'section' | 'div' | 'li';
+	class?: string;
+}
+
+const {
+	variant = 'feature',
+	emphasized = false,
+	tag = 'article',
+	class: className = '',
+} = Astro.props;
+
+const Tag = tag;
+const classes = [
+	'ui-card',
+	`ui-card--${variant}`,
+	emphasized ? 'ui-card--emphasized' : '',
+	className,
+].filter(Boolean).join(' ');
+---
+
+<Tag class={classes}>
+	<slot />
+</Tag>
+
+<style is:global>
+	.ui-card {
+		position: relative;
+		display: grid;
+		gap: 1rem;
+		padding: 1.5rem;
+		border: 1px solid var(--system-border);
+		border-radius: var(--system-radius-lg);
+		background: var(--system-surface);
+		color: var(--system-text);
+		font-family: var(--system-font-sans);
+		box-shadow: var(--system-shadow-1);
+		transition: transform 220ms var(--system-ease-standard),
+			box-shadow 220ms var(--system-ease-standard),
+			border-color 220ms var(--system-ease-standard);
+	}
+
+	.ui-card--feature {
+		gap: 0.75rem;
+	}
+
+	.ui-card--pricing {
+		gap: 1.1rem;
+		padding: 1.75rem;
+	}
+
+	.ui-card--testimonial {
+		gap: 1rem;
+		padding: 1.5rem;
+	}
+
+	.ui-card--doc {
+		gap: 0.6rem;
+		padding: 1.1rem 1.25rem;
+	}
+
+	.ui-card--emphasized {
+		border-color: var(--system-action-bg);
+		box-shadow: var(--system-shadow-3);
+		transform: translateY(-4px);
+	}
+
+	@media (hover: hover) {
+		.ui-card:hover {
+			border-color: var(--system-border-strong);
+			box-shadow: var(--system-shadow-2);
+			transform: translateY(-2px);
+		}
+		.ui-card--emphasized:hover {
+			transform: translateY(-6px);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.ui-card,
+		.ui-card--emphasized {
+			transition: none;
+			transform: none;
+		}
+	}
+
+	.ui-card__title {
+		margin: 0;
+		font-size: 1.12rem;
+		font-weight: 700;
+		color: var(--system-text-strong);
+	}
+
+	.ui-card__lede {
+		margin: 0;
+		font-size: 0.96rem;
+		line-height: 1.55;
+		color: var(--system-text);
+	}
+
+	.ui-card__meta {
+		font-size: 0.82rem;
+		color: var(--system-text-muted);
+	}
+</style>

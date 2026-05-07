@@ -1,0 +1,36 @@
+---
+// Brand-layer eyebrow — short typewriter-style label sitting above section
+// headlines. Uses Special Elite via the `brand-eyebrow` utility class.
+
+interface Props {
+	icon?: string;
+	class?: string;
+}
+
+const { icon, class: className = '' } = Astro.props;
+---
+
+<p class={`brand-eyebrow eyebrow ${className}`}>
+	{icon && <span class="eyebrow__icon" aria-hidden="true">{icon}</span>}
+	<slot />
+</p>
+
+<style is:global>
+	.eyebrow {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin: 0 0 0.75rem;
+		padding: 0.25rem 0.7rem;
+		border: 1px dashed var(--system-border);
+		border-radius: var(--system-radius-pill);
+		background: color-mix(in srgb, var(--system-surface) 60%, transparent);
+		color: var(--system-text-muted);
+	}
+
+	.eyebrow__icon {
+		font-family: var(--brand-font-brand);
+		color: var(--brand-hl-yellow-strong, var(--brand-hl-yellow));
+		font-size: 1rem;
+	}
+</style>

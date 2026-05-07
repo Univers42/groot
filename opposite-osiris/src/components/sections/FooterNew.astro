@@ -1,0 +1,215 @@
+---
+import Button from '../ui/Button.astro';
+
+const groups = [
+	{
+		heading: 'Product',
+		links: [
+			{ href: '#product', label: 'Overview' },
+			{ href: '#pricing', label: 'Pricing' },
+			{ href: '#faq',     label: 'FAQ' },
+		],
+	},
+	{
+		heading: 'Resources',
+		links: [
+			{ href: '/docs',                   label: 'Docs' },
+			{ href: '/docs/quickstart',        label: 'Quickstart' },
+			{ href: '/docs/gdpr',              label: 'GDPR runbook' },
+		],
+	},
+	{
+		heading: 'Company',
+		links: [
+			{ href: 'https://github.com/Univers42/track-binocle', label: 'GitHub' },
+			{ href: '/about',  label: 'About' },
+			{ href: '/blog',   label: 'Blog' },
+		],
+	},
+	{
+		heading: 'Legal',
+		links: [
+			{ href: '/legal/privacy-policy', label: 'Privacy policy' },
+			{ href: '/legal/terms',          label: 'Terms' },
+			{ href: '/legal/cookies',        label: 'Cookies' },
+			{ href: '/legal/data-rights',    label: 'Data rights' },
+		],
+	},
+];
+
+const year = new Date().getFullYear();
+---
+
+<footer class="footer-new" role="contentinfo">
+	<div class="footer-new__inner">
+		<section class="footer-new__intro">
+			<a class="footer-new__brand" href="/">
+				<span class="footer-new__logo" aria-hidden="true">◐</span>
+				<span class="footer-new__wordmark">Prismatica</span>
+			</a>
+			<p class="footer-new__tagline">Open-source backend for product teams.</p>
+
+			<form class="footer-new__newsletter" action="/api/newsletter/subscribe" method="post" novalidate>
+				<label for="footer-newsletter-email">Get release notes</label>
+				<div class="footer-new__newsletter-row">
+					<input id="footer-newsletter-email" type="email" name="email" autocomplete="email" placeholder="you@studio.io" required />
+					<Button variant="primary" size="sm" type="submit">Subscribe</Button>
+				</div>
+				<p class="footer-new__newsletter-meta">One email per release. No tracking pixels.</p>
+			</form>
+		</section>
+
+		<nav class="footer-new__nav" aria-label="Footer">
+			{groups.map((group) => (
+				<div class="footer-new__group">
+					<h3 class="footer-new__heading">{group.heading}</h3>
+					<ul role="list">
+						{group.links.map((link) => (
+							<li><a href={link.href}>{link.label}</a></li>
+						))}
+					</ul>
+				</div>
+			))}
+		</nav>
+	</div>
+
+	<div class="footer-new__base">
+		<p>© {year} Prismatica · Open source under MIT</p>
+		<p class="footer-new__gdpr">GDPR contact: <a href="mailto:dpo@prismatica.dev">dpo@prismatica.dev</a></p>
+		<ul class="footer-new__social" role="list">
+			<li><a href="https://github.com/Univers42/track-binocle" aria-label="GitHub">GitHub</a></li>
+			<li><a href="https://x.com/prismatica" aria-label="X (Twitter)">X</a></li>
+			<li><a href="https://mastodon.social/@prismatica" aria-label="Mastodon" rel="me">Mastodon</a></li>
+		</ul>
+	</div>
+</footer>
+
+<style is:global>
+	.footer-new {
+		background: var(--system-surface-sunken);
+		border-top: 1px solid var(--system-border);
+		color: var(--system-text);
+		font-family: var(--system-font-sans);
+	}
+	.footer-new__inner {
+		display: grid;
+		grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.4fr);
+		gap: clamp(2rem, 4vw, 3.5rem);
+		width: min(1180px, 92vw);
+		margin: 0 auto;
+		padding: clamp(2.5rem, 5vw, 4rem) 0 2rem;
+	}
+	@media (max-width: 820px) {
+		.footer-new__inner { grid-template-columns: 1fr; }
+	}
+	.footer-new__brand {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.55rem;
+		color: var(--system-text-strong);
+		text-decoration: none;
+		font-weight: 700;
+	}
+	.footer-new__logo {
+		display: grid;
+		place-items: center;
+		width: 32px;
+		height: 32px;
+		border-radius: var(--system-radius-md);
+		background: var(--system-action-bg);
+		color: var(--system-action-fg);
+	}
+	.footer-new__tagline {
+		margin: 0.6rem 0 1.2rem;
+		color: var(--system-text-muted);
+		max-width: 38ch;
+	}
+	.footer-new__newsletter label {
+		display: block;
+		font-size: 0.86rem;
+		font-weight: 600;
+		color: var(--system-text-strong);
+		margin-bottom: 0.4rem;
+	}
+	.footer-new__newsletter-row {
+		display: flex;
+		gap: 0.5rem;
+	}
+	.footer-new__newsletter input {
+		flex: 1;
+		min-height: 40px;
+		padding: 0.55rem 0.75rem;
+		border: 1px solid var(--system-input-border);
+		border-radius: var(--system-radius-sm);
+		background: var(--system-input-bg);
+		color: var(--system-input-fg);
+		font: inherit;
+	}
+	.footer-new__newsletter input:focus-visible {
+		outline: 0;
+		border-color: var(--system-input-border-focus);
+		box-shadow: var(--system-input-shadow-focus);
+	}
+	.footer-new__newsletter-meta {
+		margin: 0.4rem 0 0;
+		font-size: 0.78rem;
+		color: var(--system-text-muted);
+	}
+
+	.footer-new__nav {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+		gap: 1.5rem 2rem;
+	}
+	.footer-new__heading {
+		margin: 0 0 0.75rem;
+		font-size: 0.78rem;
+		font-weight: 700;
+		letter-spacing: 0.12em;
+		text-transform: uppercase;
+		color: var(--system-text-strong);
+	}
+	.footer-new__group ul {
+		display: grid;
+		gap: 0.4rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+	.footer-new__group a {
+		color: var(--system-text);
+		text-decoration: none;
+		font-size: 0.92rem;
+	}
+	.footer-new__group a:hover { color: var(--system-link-hover); text-decoration: underline; }
+	.footer-new__group a:focus-visible {
+		outline: 3px solid var(--system-focus-ring);
+		outline-offset: 2px;
+		border-radius: var(--system-radius-sm);
+	}
+
+	.footer-new__base {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: space-between;
+		align-items: center;
+		gap: 0.8rem 1.5rem;
+		width: min(1180px, 92vw);
+		margin: 0 auto;
+		padding: 1.2rem 0 1.6rem;
+		border-top: 1px solid var(--system-border);
+		font-size: 0.82rem;
+		color: var(--system-text-muted);
+	}
+	.footer-new__base p { margin: 0; }
+	.footer-new__gdpr a { color: var(--system-link); }
+	.footer-new__social {
+		display: flex;
+		gap: 0.8rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+	.footer-new__social a { color: var(--system-text-muted); text-decoration: none; }
+	.footer-new__social a:hover { color: var(--system-text-strong); }
+</style>

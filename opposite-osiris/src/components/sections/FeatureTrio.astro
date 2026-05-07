@@ -1,0 +1,66 @@
+---
+import Card from '../ui/Card.astro';
+import Eyebrow from '../brand/Eyebrow.astro';
+
+const features = [
+	{
+		icon: '⚡',
+		title: 'Auth that just works',
+		copy: 'GoTrue under the hood, social providers, magic links, and Turnstile-protected sign-ups out of the box.',
+	},
+	{
+		icon: '◍',
+		title: 'PostgREST + Postgres',
+		copy: 'Your schema is your API. Row-level security, typed queries, instant realtime — no glue code.',
+	},
+	{
+		icon: '✦',
+		title: 'GDPR by default',
+		copy: 'Consent ledger, DSAR exports, breach response runbook, and EU data residency baked in.',
+	},
+];
+---
+
+<section class="section section--surface feature-trio" id="product">
+	<div class="section__container">
+		<header class="section__head">
+			<Eyebrow>What you get</Eyebrow>
+			<h2 class="section__title">A backend stack you would have built — already built.</h2>
+			<p class="section__lede">Three primitives, one Docker Compose file, full keys to the kingdom.</p>
+		</header>
+
+		<div class="feature-trio__grid">
+			{features.map((feature) => (
+				<div data-scroll-grow>
+					<Card variant="feature" class="feature-trio__card">
+						<span class="feature-trio__icon" aria-hidden="true">{feature.icon}</span>
+						<h3 class="ui-card__title">{feature.title}</h3>
+						<p class="ui-card__lede">{feature.copy}</p>
+					</Card>
+				</div>
+			))}
+		</div>
+	</div>
+</section>
+
+<style is:global>
+	.feature-trio__grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+		gap: 1.5rem;
+	}
+	.feature-trio__card {
+		height: 100%;
+	}
+	.feature-trio__icon {
+		display: grid;
+		place-items: center;
+		width: 44px;
+		height: 44px;
+		border-radius: var(--system-radius-md);
+		background: var(--system-action-secondary-bg);
+		color: var(--system-action-bg);
+		font-size: 1.25rem;
+		font-weight: 700;
+	}
+</style>

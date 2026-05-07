@@ -1,0 +1,206 @@
+---
+import Button from '../ui/Button.astro';
+
+const navItems = [
+	{ href: '#product',   label: 'Product' },
+	{ href: '#pricing',   label: 'Pricing' },
+	{ href: '#docs',      label: 'Docs' },
+];
+---
+
+<header class="header-new" data-component="header-new">
+	<div class="header-new__inner">
+		<a class="header-new__brand" href="/" aria-label="Prismatica home">
+			<span class="header-new__logo" aria-hidden="true">◐</span>
+			<span class="header-new__wordmark">Prismatica</span>
+		</a>
+
+		<nav class="header-new__nav" aria-label="Primary">
+			<ul class="header-new__list">
+				{navItems.map((item) => (
+					<li><a class="header-new__link" href={item.href}>{item.label}</a></li>
+				))}
+			</ul>
+		</nav>
+
+		<div class="header-new__actions">
+			<Button variant="ghost" size="sm" href="#login" data-action="open-portal-connect">Sign in</Button>
+			<Button variant="primary" size="sm" data-action="open-portal-start">Start free</Button>
+		</div>
+
+		<button
+			class="header-new__menu"
+			type="button"
+			aria-expanded="false"
+			aria-controls="header-new-menu"
+			aria-label="Toggle navigation"
+			data-header-toggle
+		>
+			<span aria-hidden="true"></span>
+			<span aria-hidden="true"></span>
+			<span aria-hidden="true"></span>
+		</button>
+	</div>
+
+	<div class="header-new__drawer" id="header-new-menu" hidden>
+		<ul class="header-new__list header-new__list--mobile">
+			{navItems.map((item) => (
+				<li><a class="header-new__link" href={item.href}>{item.label}</a></li>
+			))}
+		</ul>
+		<div class="header-new__drawer-actions">
+			<Button variant="ghost" size="md" href="#login" data-action="open-portal-connect" full>Sign in</Button>
+			<Button variant="primary" size="md" data-action="open-portal-start" full>Start free</Button>
+		</div>
+	</div>
+</header>
+
+<script is:inline>
+	(() => {
+		const root = document.querySelector('[data-component="header-new"]');
+		if (!root) return;
+		const toggle = root.querySelector('[data-header-toggle]');
+		const drawer = root.querySelector('#header-new-menu');
+		if (!(toggle instanceof HTMLElement) || !(drawer instanceof HTMLElement)) return;
+		toggle.addEventListener('click', () => {
+			const open = toggle.getAttribute('aria-expanded') === 'true';
+			toggle.setAttribute('aria-expanded', String(!open));
+			drawer.hidden = open;
+			document.body.classList.toggle('drawer-open', !open);
+		});
+	})();
+</script>
+
+<style is:global>
+	.header-new {
+		position: sticky;
+		top: 0;
+		z-index: 40;
+		background: color-mix(in srgb, var(--system-surface) 88%, transparent);
+		backdrop-filter: saturate(140%) blur(8px);
+		-webkit-backdrop-filter: saturate(140%) blur(8px);
+		border-bottom: 1px solid var(--system-border);
+	}
+
+	.header-new__inner {
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+		width: min(1180px, 92vw);
+		margin: 0 auto;
+		padding: 0.85rem 0;
+	}
+
+	.header-new__brand {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.55rem;
+		color: var(--system-text-strong);
+		font-family: var(--system-font-sans);
+		font-weight: 700;
+		font-size: 1.05rem;
+		text-decoration: none;
+	}
+
+	.header-new__logo {
+		display: grid;
+		place-items: center;
+		width: 32px;
+		height: 32px;
+		border-radius: var(--system-radius-md);
+		background: var(--system-action-bg);
+		color: var(--system-action-fg);
+		font-size: 1.2rem;
+	}
+
+	.header-new__nav {
+		flex: 1;
+	}
+
+	.header-new__list {
+		display: flex;
+		gap: 0.4rem;
+		justify-content: center;
+		list-style: none;
+		margin: 0;
+		padding: 0;
+	}
+
+	.header-new__link {
+		display: inline-flex;
+		align-items: center;
+		min-height: 40px;
+		padding: 0.45rem 0.85rem;
+		border-radius: var(--system-radius-sm);
+		color: var(--system-text);
+		font-weight: 500;
+		text-decoration: none;
+	}
+	.header-new__link:hover {
+		background: var(--system-action-secondary-bg-hover);
+		color: var(--system-text-strong);
+	}
+	.header-new__link:focus-visible {
+		outline: 3px solid var(--system-focus-ring);
+		outline-offset: 2px;
+	}
+
+	.header-new__actions {
+		display: flex;
+		gap: 0.5rem;
+	}
+
+	.header-new__menu {
+		display: none;
+		flex-direction: column;
+		gap: 4px;
+		width: 44px;
+		height: 44px;
+		padding: 0;
+		justify-content: center;
+		align-items: center;
+		background: transparent;
+		border: 1px solid var(--system-border);
+		border-radius: var(--system-radius-sm);
+		color: var(--system-text-strong);
+	}
+	.header-new__menu span {
+		display: block;
+		width: 22px;
+		height: 2px;
+		background: currentColor;
+	}
+	.header-new__menu:focus-visible {
+		outline: 3px solid var(--system-focus-ring);
+		outline-offset: 2px;
+	}
+
+	.header-new__drawer {
+		display: none;
+	}
+
+	@media (max-width: 800px) {
+		.header-new__nav,
+		.header-new__actions {
+			display: none;
+		}
+		.header-new__menu {
+			display: inline-flex;
+		}
+		.header-new__drawer:not([hidden]) {
+			display: grid;
+			gap: 1rem;
+			padding: 1rem;
+			border-top: 1px solid var(--system-border);
+			background: var(--system-surface);
+		}
+		.header-new__list--mobile {
+			flex-direction: column;
+			gap: 0.25rem;
+		}
+		.header-new__drawer-actions {
+			display: grid;
+			gap: 0.5rem;
+		}
+	}
+</style>

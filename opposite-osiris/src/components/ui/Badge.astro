@@ -1,0 +1,68 @@
+---
+// System-layer badge — small status / pill / "most popular" marker.
+
+interface Props {
+	tone?: 'neutral' | 'info' | 'success' | 'warning' | 'danger' | 'accent';
+	size?: 'sm' | 'md';
+	class?: string;
+}
+
+const { tone = 'neutral', size = 'md', class: className = '' } = Astro.props;
+const classes = ['ui-badge', `ui-badge--${tone}`, `ui-badge--${size}`, className].filter(Boolean).join(' ');
+---
+
+<span class={classes}><slot /></span>
+
+<style is:global>
+	.ui-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		padding: 0.18rem 0.6rem;
+		border: 1px solid transparent;
+		border-radius: var(--system-radius-pill);
+		font-family: var(--system-font-sans);
+		font-size: 0.74rem;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		line-height: 1.2;
+		white-space: nowrap;
+	}
+
+	.ui-badge--sm {
+		font-size: 0.68rem;
+		padding: 0.12rem 0.5rem;
+	}
+
+	.ui-badge--neutral {
+		background: var(--system-chip-bg);
+		color: var(--system-chip-fg);
+		border-color: var(--system-chip-border);
+	}
+	.ui-badge--info {
+		background: var(--system-info-bg);
+		color: var(--system-info-text);
+		border-color: var(--system-info-border);
+	}
+	.ui-badge--success {
+		background: var(--system-success-bg);
+		color: var(--system-success-text);
+		border-color: var(--system-success-border);
+	}
+	.ui-badge--warning {
+		background: var(--system-warning-bg);
+		color: var(--system-warning-text);
+		border-color: var(--system-warning-border);
+	}
+	.ui-badge--danger {
+		background: var(--system-danger-bg);
+		color: var(--system-danger-text);
+		border-color: var(--system-danger-border);
+	}
+	.ui-badge--accent {
+		background: var(--system-action-bg);
+		color: var(--system-action-fg);
+		border-color: var(--system-action-bg);
+	}
+</style>

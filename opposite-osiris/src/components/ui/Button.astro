@@ -1,0 +1,159 @@
+---
+// System-layer button. The ONE button component used in functional contexts:
+// pricing CTAs, dialog actions, form submits, navigation primary CTA.
+// Decisions:
+// - Three variants (primary/secondary/ghost) cover ~95% of cases.
+// - `as` prop lets the same component render as <a> when an href is provided
+//   (preserves keyboard semantics; no JS needed for navigation buttons).
+// - Native `disabled` attribute is preferred over aria-disabled because we
+//   never need a focusable-but-inert button in this product.
+// - Min target 46×46 (WCAG 2.5.8).
+
+interface Props {
+	variant?: 'primary' | 'secondary' | 'ghost';
+	size?: 'sm' | 'md' | 'lg';
+	href?: string;
+	type?: 'button' | 'submit' | 'reset';
+	disabled?: boolean;
+	full?: boolean;
+	id?: string;
+	class?: string;
+	'aria-label'?: string;
+	'data-action'?: string;
+	rel?: string;
+	target?: string;
+}
+
+const {
+	variant = 'primary',
+	size = 'md',
+	href,
+	type = 'button',
+	disabled = false,
+	full = false,
+	id,
+	class: className = '',
+	rel,
+	target,
+	...rest
+} = Astro.props;
+
+const classes = [
+	'ui-button',
+	`ui-button--${variant}`,
+	`ui-button--${size}`,
+	full ? 'ui-button--full' : '',
+	className,
+].filter(Boolean).join(' ');
+---
+
+{href ? (
+	<a class={classes} href={href} id={id} rel={rel} target={target} {...rest}>
+		<slot />
+	</a>
+) : (
+	<button class={classes} type={type} disabled={disabled} id={id} {...rest}>
+		<slot />
+	</button>
+)}
+
+<style is:global>
+	.ui-button {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.5rem;
+		min-height: 46px;
+		padding: 0.7rem 1.15rem;
+		border: 1px solid transparent;
+		border-radius: var(--system-radius-md);
+		background: transparent;
+		color: inherit;
+		font-family: var(--system-font-sans);
+		font-size: 0.96rem;
+		font-weight: 600;
+		line-height: 1.1;
+		letter-spacing: -0.005em;
+		text-decoration: none;
+		cursor: pointer;
+		transition: background 160ms var(--system-ease-standard),
+			color 160ms var(--system-ease-standard),
+			border-color 160ms var(--system-ease-standard),
+			box-shadow 160ms var(--system-ease-standard),
+			transform 160ms var(--system-ease-standard);
+	}
+
+	.ui-button:focus-visible {
+		outline: 3px solid var(--system-focus-ring);
+		outline-offset: 2px;
+	}
+
+	.ui-button[disabled],
+	.ui-button[aria-disabled='true'] {
+		cursor: not-allowed;
+		background: var(--system-action-bg-disabled);
+		color: var(--system-action-fg-disabled);
+		border-color: transparent;
+		box-shadow: none;
+		transform: none;
+	}
+
+	.ui-button--full {
+		width: 100%;
+	}
+
+	.ui-button--sm {
+		min-height: 36px;
+		padding: 0.45rem 0.85rem;
+		font-size: 0.86rem;
+		border-radius: var(--system-radius-sm);
+	}
+
+	.ui-button--lg {
+		min-height: 54px;
+		padding: 0.95rem 1.6rem;
+		font-size: 1.04rem;
+	}
+
+	.ui-button--primary {
+		background: var(--system-action-bg);
+		color: var(--system-action-fg);
+		box-shadow: var(--system-shadow-1);
+	}
+	.ui-button--primary:hover:not([disabled]) {
+		background: var(--system-action-bg-hover);
+		box-shadow: var(--system-shadow-2);
+		transform: translateY(-1px);
+	}
+	.ui-button--primary:active:not([disabled]) {
+		background: var(--system-action-bg-active);
+		transform: translateY(0);
+	}
+
+	.ui-button--secondary {
+		background: var(--system-action-secondary-bg);
+		color: var(--system-action-secondary-fg);
+		border-color: var(--system-action-secondary-border);
+	}
+	.ui-button--secondary:hover:not([disabled]) {
+		background: var(--system-action-secondary-bg-hover);
+	}
+
+	.ui-button--ghost {
+		background: transparent;
+		color: var(--system-text-strong);
+		border-color: transparent;
+	}
+	.ui-button--ghost:hover:not([disabled]) {
+		background: var(--system-action-secondary-bg-hover);
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.ui-button {
+			transition: none;
+		}
+		.ui-button:hover:not([disabled]) {
+			transform: none;
+		}
+	}
+</style>

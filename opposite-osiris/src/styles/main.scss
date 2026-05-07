@@ -1,10 +1,14 @@
 @use 'abstracts/tokens';
 @use 'themes/color-modes';
 @use 'base/reset';
+@use 'base/typography';
 @use 'utilities/accessibility';
+@use 'utilities/scroll-effects';
+@use 'utilities/swipe-stack';
 @use 'layout/background';
 @use 'layout/header';
 @use 'layout/shell';
+@use 'sections/section-base';
 @use 'sections/hero';
 @use 'components/buttons';
 @use 'components/illustrations';

@@ -1,23 +1,39 @@
 ---
-import AppShell from '../components/layout/AppShell.astro';
-import BaasStatusSection from '../components/sections/BaasStatusSection.astro';
-import CharactersSection from '../components/sections/CharactersSection.astro';
-import HeroSection from '../components/sections/HeroSection.astro';
-import IntelligenceSection from '../components/sections/IntelligenceSection.astro';
-import MediaAssetsSection from '../components/sections/MediaAssetsSection.astro';
-import PowersSection from '../components/sections/PowersSection.astro';
-import WorkspaceGridSection from '../components/sections/WorkspaceGridSection.astro';
+import BackendArchitecture from '../components/sections/BackendArchitecture.astro';
+import DocsTeaser from '../components/sections/DocsTeaser.astro';
+import FaqSection from '../components/sections/FaqSection.astro';
+import FeatureTrio from '../components/sections/FeatureTrio.astro';
+import FinalCta from '../components/sections/FinalCta.astro';
+import FooterNew from '../components/sections/FooterNew.astro';
+import HeaderNew from '../components/sections/HeaderNew.astro';
+import HeroNew from '../components/sections/HeroNew.astro';
+import LogoStrip from '../components/sections/LogoStrip.astro';
+import Pricing from '../components/sections/Pricing.astro';
+import SocialProof from '../components/sections/SocialProof.astro';
+import MascotDock from '../components/layout/MascotDock.astro';
+import Notification from '../components/ui/Notification.astro';
+import ConsentBanner from '../components/gdpr/ConsentBanner.astro';
 import Layout from '../layouts/Layout.astro';
 ---
 
 <Layout>
-	<AppShell>
-		<HeroSection />
-		<PowersSection />
-		<MediaAssetsSection />
-		<WorkspaceGridSection />
-		<BaasStatusSection />
-		<IntelligenceSection />
-		<CharactersSection />
-	</AppShell>
+	<a href="#main-content" class="skip-link">Skip to main content</a>
+	<div aria-live="polite" aria-atomic="true" class="visually-hidden" id="global-announcer"></div>
+	<Notification />
+	<HeaderNew />
+	<main id="main-content" class="swipe-stack">
+		<section class="swipe-stack__scene" style="--i: 0;"><div class="swipe-stack__card"><HeroNew /></div></section>
+		<section class="swipe-stack__scene" style="--i: 1;"><div class="swipe-stack__card"><LogoStrip /></div></section>
+		<section class="swipe-stack__scene" style="--i: 2;"><div class="swipe-stack__card"><FeatureTrio /></div></section>
+		<section class="swipe-stack__scene" style="--i: 3; --tall: 1;"><div class="swipe-stack__card"><BackendArchitecture /></div></section>
+		<section class="swipe-stack__scene" style="--i: 4;"><div class="swipe-stack__card"><SocialProof /></div></section>
+		<section class="swipe-stack__scene" style="--i: 5;"><div class="swipe-stack__card"><Pricing /></div></section>
+		<section class="swipe-stack__scene" style="--i: 6;"><div class="swipe-stack__card"><DocsTeaser /></div></section>
+		<section class="swipe-stack__scene" style="--i: 7;"><div class="swipe-stack__card"><FaqSection /></div></section>
+		<section class="swipe-stack__scene" style="--i: 8;"><div class="swipe-stack__card"><FinalCta /></div></section>
+	</main>
+	<div class="swipe-stack__tail"><FooterNew /></div>
+	<ConsentBanner />
+	<MascotDock />
 </Layout>
+

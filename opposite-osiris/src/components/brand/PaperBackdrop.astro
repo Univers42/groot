@@ -1,0 +1,55 @@
+---
+// Brand-layer paper texture + red margin line — applied as a subtle backdrop
+// to marketing sections only. Renders one positioned ::before/::after via
+// gradient fallback; the SVG noise sits behind for premium feel where the
+// browser supports it.
+
+interface Props {
+	intensity?: 'subtle' | 'normal' | 'strong';
+	margin?: boolean;
+	class?: string;
+}
+
+const { intensity = 'subtle', margin = true, class: className = '' } = Astro.props;
+const classes = [
+	'brand-paper',
+	`brand-paper--${intensity}`,
+	margin ? 'brand-paper--margin' : '',
+	className,
+].filter(Boolean).join(' ');
+---
+
+<div class={classes} aria-hidden="true"></div>
+
+<style is:global>
+	.brand-paper {
+		position: absolute;
+		inset: 0;
+		pointer-events: none;
+		background:
+			repeating-linear-gradient(0deg, transparent 0 31px, var(--brand-paper-ruled) 31px 32px),
+			var(--brand-paper);
+		mix-blend-mode: multiply;
+		z-index: 0;
+	}
+
+	.brand-paper--margin::before {
+		content: '';
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		left: clamp(28px, 7vw, 84px);
+		width: 2px;
+		background: var(--brand-margin-red);
+	}
+
+	.brand-paper--subtle { opacity: 0.55; }
+	.brand-paper--normal { opacity: 0.85; }
+	.brand-paper--strong { opacity: 1; }
+
+	:root[data-theme='dark'] .brand-paper,
+	:root[data-theme='night'] .brand-paper {
+		mix-blend-mode: screen;
+		opacity: 0.35;
+	}
+</style>

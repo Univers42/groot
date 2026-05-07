@@ -1,0 +1,184 @@
+---
+// Sticky "camera" parallax. The viewport stays put while the cards
+// scroll past, stack on top of each other and shrink/fade as the
+// next one rises. This is the "we don't move, the world moves" feel.
+//
+// How it works:
+// - Each card is `position: sticky` pinned near the top of the viewport.
+// - Cards take less than 100vh and have generous margin-bottom so the
+//   next sticky card scrolls *over* the previous one — the previous
+//   card visually shrinks + dims via animation-timeline: view(exit).
+// - No JS. Pure CSS scroll-driven animations with reduced-motion
+//   fallback that just renders a clean stack.
+
+interface CardDef {
+	eyebrow: string;
+	title: string;
+	body: string;
+	accent: 'yellow' | 'blue' | 'green' | 'red';
+}
+
+const cards: CardDef[] = [
+	{ eyebrow: '01 — You own the runtime',     title: 'Your data. Your machines. Your rules.', body: 'No SaaS lock-in. Run the whole stack on a single VPS, a Pi cluster, or your own k8s.',     accent: 'yellow' },
+	{ eyebrow: '02 — Zero-trust by default',   title: 'GDPR by design — not by retrofit.',     body: 'Consent, retention windows and deletion runbooks ship as services, not as a checklist.',  accent: 'green' },
+	{ eyebrow: '03 — Open from day one',       title: 'Read the source. Fork the source.',     body: 'Every service in the diagram below is yours to read, audit, patch and redeploy.',         accent: 'blue' },
+	{ eyebrow: '04 — Made for builders',       title: 'Scale without rewriting.',              body: 'Same Compose file from your laptop to production. No proprietary primitives, no surprise bills.', accent: 'red' },
+];
+---
+
+<section class="parallax-stage" aria-label="Why teams self-host with Prismatica">
+	<div class="parallax-stage__rail">
+		{cards.map((card, idx) => (
+			<article
+				class={`parallax-card parallax-card--${card.accent}`}
+				data-parallax-card
+				style={`--card-index: ${idx}; z-index: ${idx + 1};`}
+			>
+				<div class="parallax-card__inner">
+					<p class="parallax-card__eyebrow">{card.eyebrow}</p>
+					<h3 class="parallax-card__title">{card.title}</h3>
+					<p class="parallax-card__body">{card.body}</p>
+				</div>
+			</article>
+		))}
+	</div>
+	<p class="parallax-stage__hint" aria-hidden="true">scroll</p>
+</section>
+
+<style is:global>
+	.parallax-stage {
+		position: relative;
+		padding-block: clamp(2rem, 6vw, 4rem);
+		background: var(--system-surface-sunken);
+		overflow: clip;
+	}
+
+	.parallax-stage__rail {
+		max-width: 1180px;
+		margin-inline: auto;
+		padding-inline: clamp(1rem, 4vw, 2rem);
+		display: grid;
+		gap: 0;
+	}
+
+	/* Each card is sticky at the top of the viewport. The next card
+	   scrolls *over* it because cards have margin-bottom > 0 and a
+	   higher z-index, creating the "camera stays, world moves" feel. */
+	.parallax-card {
+		position: sticky;
+		top: clamp(4rem, 9vh, 7rem);
+		min-height: clamp(360px, 64vh, 560px);
+		margin-bottom: 22vh;
+		display: grid;
+		align-items: center;
+		padding: clamp(1.5rem, 5vw, 3.5rem);
+		border-radius: var(--system-radius-xl);
+		background: var(--system-surface);
+		border: 1px solid var(--system-border-strong);
+		box-shadow: var(--system-shadow-3);
+		isolation: isolate;
+		overflow: hidden;
+		transform-origin: 50% 0;
+	}
+	.parallax-card:last-child { margin-bottom: 0; }
+
+	.parallax-card::before {
+		content: '';
+		position: absolute;
+		inset: 0;
+		background:
+			radial-gradient(circle at 18% 14%, color-mix(in srgb, var(--card-accent) 35%, transparent), transparent 55%),
+			radial-gradient(circle at 80% 90%, color-mix(in srgb, var(--card-accent) 20%, transparent), transparent 55%);
+		opacity: 0.7;
+		z-index: -1;
+	}
+	.parallax-card::after {
+		content: '';
+		position: absolute;
+		right: -120px;
+		bottom: -120px;
+		width: 360px;
+		height: 360px;
+		border-radius: 50%;
+		background: color-mix(in srgb, var(--card-accent) 22%, transparent);
+		filter: blur(60px);
+		z-index: -1;
+	}
+
+	.parallax-card--yellow { --card-accent: var(--brand-hl-yellow, #ffd400); }
+	.parallax-card--blue   { --card-accent: var(--brand-hl-blue, #2563eb); }
+	.parallax-card--green  { --card-accent: var(--brand-hl-green, #16a34a); }
+	.parallax-card--red    { --card-accent: var(--brand-hl-red, #dc2626); }
+
+	.parallax-card__inner {
+		display: grid;
+		gap: 0.9rem;
+		max-width: 60ch;
+	}
+	.parallax-card__eyebrow {
+		margin: 0;
+		font-family: var(--system-font-mono);
+		font-size: 0.85rem;
+		text-transform: uppercase;
+		letter-spacing: 0.16em;
+		color: color-mix(in srgb, var(--card-accent) 75%, var(--system-text));
+	}
+	.parallax-card__title {
+		margin: 0;
+		font-family: var(--system-font-display, var(--system-font-sans));
+		font-size: clamp(2.2rem, 6vw, 4.6rem);
+		line-height: 1.02;
+		letter-spacing: -0.02em;
+		color: var(--system-text-strong);
+		max-width: 18ch;
+	}
+	.parallax-card__body {
+		margin: 0;
+		max-width: 56ch;
+		font-size: clamp(1rem, 1.6vw, 1.25rem);
+		color: var(--system-text);
+		line-height: 1.55;
+	}
+
+	.parallax-stage__hint {
+		position: absolute;
+		top: 1rem;
+		right: 1.25rem;
+		margin: 0;
+		font-family: var(--system-font-mono);
+		font-size: 0.7rem;
+		letter-spacing: 0.3em;
+		text-transform: uppercase;
+		color: var(--system-text-muted);
+		writing-mode: vertical-rl;
+	}
+
+	/* As a card EXITS the viewport (next one rising over it), shrink + dim it.
+	   This drives the "going down a tunnel" cinematic effect. */
+	@keyframes parallax-exit {
+		from { transform: scale(1)    translateY(0);    opacity: 1; filter: blur(0); }
+		to   { transform: scale(0.85) translateY(-40px); opacity: 0.35; filter: blur(2px); }
+	}
+	@keyframes parallax-enter {
+		from { transform: scale(0.92) translateY(60px); opacity: 0.4; filter: blur(3px); }
+		to   { transform: scale(1)    translateY(0);    opacity: 1;   filter: blur(0); }
+	}
+
+	@supports (animation-timeline: view()) {
+		[data-parallax-card] {
+			animation:
+				parallax-enter linear both,
+				parallax-exit  linear both;
+			animation-timeline: view(), view();
+			animation-range: entry 0% cover 30%, cover 60% exit 100%;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.parallax-card {
+			position: static;
+			margin-bottom: 1.5rem;
+		}
+		[data-parallax-card] { animation: none; }
+	}
+</style>

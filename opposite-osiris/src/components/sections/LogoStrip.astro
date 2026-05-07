@@ -1,0 +1,50 @@
+---
+const logos = [
+	'Northwave', 'Kollektiv', 'Halcyon', 'Foundry', 'Axiom Lab', 'Praxis',
+];
+---
+
+<section class="section section--tight section--sunken logo-strip" aria-label="Trusted by teams at">
+	<div class="section__container">
+		<p class="logo-strip__label">Trusted by product teams everywhere</p>
+		<ul class="logo-strip__list" role="list">
+			{logos.map((name) => (
+				<li class="logo-strip__item" data-scroll-rise>{name}</li>
+			))}
+		</ul>
+	</div>
+</section>
+
+<style is:global>
+	.logo-strip__label {
+		margin: 0 0 1rem;
+		text-align: center;
+		font-size: 0.82rem;
+		font-weight: 600;
+		letter-spacing: 0.14em;
+		text-transform: uppercase;
+		color: var(--system-text-muted);
+	}
+	.logo-strip__list {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: center;
+		gap: 1.5rem 2.4rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+	.logo-strip__item {
+		font-family: var(--system-font-sans);
+		font-weight: 700;
+		font-size: 1.05rem;
+		letter-spacing: -0.01em;
+		color: var(--system-text-muted);
+		opacity: 0.78;
+		transition: opacity 200ms var(--system-ease-standard), color 200ms var(--system-ease-standard);
+	}
+	.logo-strip__item:hover {
+		opacity: 1;
+		color: var(--system-text-strong);
+	}
+</style>

@@ -1,0 +1,139 @@
+---
+import Button from '../ui/Button.astro';
+import Card from '../ui/Card.astro';
+import Badge from '../ui/Badge.astro';
+import Eyebrow from '../brand/Eyebrow.astro';
+
+const tiers = [
+	{
+		id: 'free',
+		name: 'Free',
+		price: '€0',
+		cadence: 'forever',
+		summary: 'For solo builders and side projects.',
+		features: [
+			'1 project · 5K MAU',
+			'Auth, Database, Storage',
+			'Community support',
+			'EU data residency',
+		],
+		cta: { label: 'Start free', variant: 'secondary', action: 'open-portal-start' },
+		emphasized: false,
+	},
+	{
+		id: 'team',
+		name: 'Team',
+		price: '€39',
+		cadence: 'per project · month',
+		summary: 'For teams with users in production.',
+		features: [
+			'10 projects · 50K MAU',
+			'Realtime, Edge Functions',
+			'SSO + audit logs',
+			'Email support, 24h SLA',
+		],
+		cta: { label: 'Start 14-day trial', variant: 'primary', action: 'open-portal-start' },
+		emphasized: true,
+	},
+	{
+		id: 'self',
+		name: 'Self-hosted',
+		price: 'Free',
+		cadence: 'forever · MIT',
+		summary: 'Run the whole stack on your VPS.',
+		features: [
+			'Unlimited everything',
+			'Docker Compose + Helm',
+			'Audited GDPR runbooks',
+			'Optional paid support',
+		],
+		cta: { label: 'See the docs', variant: 'secondary', action: 'open-docs' },
+		emphasized: false,
+	},
+];
+---
+
+<section class="section section--sunken pricing" id="pricing">
+	<div class="section__container">
+		<header class="section__head">
+			<Eyebrow>Pricing</Eyebrow>
+			<h2 class="section__title">Pick a tier. Switch anytime.</h2>
+			<p class="section__lede">No seat counts. No vendor lock-in. Self-host whenever you want.</p>
+		</header>
+
+		<div class="pricing__grid">
+			{tiers.map((tier) => (
+				<div data-scroll-grow class={`pricing__cell ${tier.emphasized ? 'pricing__cell--emphasized' : ''}`}>
+					<Card variant="pricing" emphasized={tier.emphasized}>
+						<div class="pricing__head">
+							<h3 class="ui-card__title">{tier.name}</h3>
+							{tier.emphasized && <Badge tone="accent" size="sm">Most popular</Badge>}
+						</div>
+						<p class="pricing__price">
+							<span class="pricing__amount">{tier.price}</span>
+							<span class="pricing__cadence">{tier.cadence}</span>
+						</p>
+						<p class="ui-card__lede">{tier.summary}</p>
+						<ul class="pricing__features" role="list">
+							{tier.features.map((f) => (<li>{f}</li>))}
+						</ul>
+						<Button
+							variant={tier.cta.variant as 'primary' | 'secondary'}
+							size="md"
+							full
+							data-action={tier.cta.action}
+						>{tier.cta.label}</Button>
+					</Card>
+				</div>
+			))}
+		</div>
+	</div>
+</section>
+
+<style is:global>
+	.pricing__grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+		gap: 1.5rem;
+		align-items: stretch;
+	}
+	.pricing__cell { height: 100%; }
+	.pricing__cell .ui-card { height: 100%; }
+
+	.pricing__head {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	.pricing__price {
+		display: flex;
+		align-items: baseline;
+		gap: 0.4rem;
+		margin: 0;
+	}
+	.pricing__amount {
+		font-size: 2rem;
+		font-weight: 700;
+		color: var(--system-text-strong);
+		letter-spacing: -0.02em;
+	}
+	.pricing__cadence {
+		font-size: 0.82rem;
+		color: var(--system-text-muted);
+	}
+	.pricing__features {
+		display: grid;
+		gap: 0.45rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		font-size: 0.92rem;
+	}
+	.pricing__features li::before {
+		content: '✓';
+		color: var(--system-success-text);
+		font-weight: 700;
+		margin-right: 0.5rem;
+	}
+</style>
