@@ -7,3 +7,6 @@
 [submodule "vendor/scripts"]
 	path = vendor/scripts
 	url = git@github.com:Univers42/scripts.git
+[submodule "infrastructure/osionos/app"]
+	path = infrastructure/osionos/app
+	url = git@github.com:Univers42/osionos.git
