@@ -15,7 +15,7 @@ const anonKey = import.meta.env.PUBLIC_BAAS_ANON_KEY ?? '';
 			<p data-auth-status role="status" aria-live="polite">Checking the verification link.</p>
 			<p class="auth-card__hint">This page will keep the result visible so you can choose the next step.</p>
 			<a class="button button--primary" data-confirm-home href="/" hidden>Go to homepage</a>
-			<button class="button button--ghost" type="button" data-confirm-request data-open-connect hidden>Request new link</button>
+			<button class="button button--ghost" type="button" data-confirm-request data-open-connect hidden aria-label="Request a new email verification link">Request new link</button>
 			<a class="text-link" href="/">Return home</a>
 		</section>
 	</main>

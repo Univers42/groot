@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { assert, authPasswordGrant, config, isJwtLike, passed, runChecks, textBody } from './_shared.mjs';
+import { assert, authPasswordGrant, config, ensureSecurityTestUser, isJwtLike, passed, runChecks, textBody } from './_shared.mjs';
 
 const rejectionStatuses = new Set([400, 401, 422, 429]);
 
@@ -15,6 +15,7 @@ export async function run() {
 			name: 'successful login token shape',
 			description: 'Checks a valid password grant returns a bounded JWT response with access_token and expires_in.',
 			run: async () => {
+				await ensureSecurityTestUser();
 				const response = await authPasswordGrant();
 				const body = await textBody(response);
 				assert.equal(response.status, 200, `valid login returned HTTP ${response.status} with ${body.length} response bytes`);

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { assert, authPasswordGrant, baasHeaders, config, fetchWithTimeout, isJwtLike, jsonBody, passed, restUrl, runChecks, textBody } from './_shared.mjs';
+import { assert, authPasswordGrant, baasHeaders, config, ensureSecurityTestUser, fetchWithTimeout, isJwtLike, jsonBody, passed, restUrl, runChecks, textBody } from './_shared.mjs';
 
 async function expectAnonForbidden(path, label) {
 	const response = await fetchWithTimeout(restUrl(path), { headers: baasHeaders() });
@@ -12,6 +12,7 @@ async function expectAnonForbidden(path, label) {
 }
 
 async function loginToken(email = config.testEmail, password = config.testPassword) {
+	await ensureSecurityTestUser();
 	const response = await authPasswordGrant(email, password);
 	assert.equal(response.status, 200, `login failed with HTTP ${response.status}`);
 	const payload = await jsonBody(response);

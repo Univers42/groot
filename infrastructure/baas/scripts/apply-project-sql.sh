@@ -37,6 +37,9 @@ REVOKE ALL ON public.users FROM anon, authenticated;
 GRANT SELECT (id, username, email, avatar_url, bio, theme, notifications_enabled, is_email_verified, created_at, updated_at) ON public.users TO anon;
 GRANT SELECT (id, username, email, avatar_url, bio, theme, notifications_enabled, is_email_verified, created_at, updated_at, deletion_requested_at, deleted_at) ON public.users TO authenticated;
 GRANT UPDATE (username, avatar_url, bio, theme, notifications_enabled, deletion_requested_at, updated_at) ON public.users TO authenticated;
+REVOKE ALL ON public.user_consents, public.user_activities, public.sessions, public.user_tokens FROM anon, authenticated;
+GRANT SELECT, INSERT, UPDATE ON public.user_consents TO authenticated;
+GRANT SELECT ON public.user_activities, public.sessions, public.user_tokens TO authenticated;
 GRANT ALL ON public.users TO service_role;
 NOTIFY pgrst, 'reload schema';
 SQL

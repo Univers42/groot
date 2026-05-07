@@ -17,6 +17,6 @@ const { id = 'newsletter-signup' } = Astro.props;
 		<input id={`${id}-consent`} name="newsletter_consent" type="checkbox" required />
 		<span>I agree to receive the Prismatica newsletter. I can unsubscribe at any time. See the <a href="/legal/privacy-policy/">Privacy Policy</a>.</span>
 	</label>
-	<button class="button button--primary" type="submit">Subscribe</button>
+	<button class="button button--primary" type="submit" aria-label="Subscribe to the Prismatica newsletter">Subscribe</button>
 	<output class="form-status" role="status" aria-live="polite" data-newsletter-status></output>
 </form>

@@ -6,17 +6,17 @@ const features = [
 	{
 		icon: '⚡',
 		title: 'Auth that just works',
-		copy: 'GoTrue under the hood, social providers, magic links, and Turnstile-protected sign-ups out of the box.',
+		kind: 'auth',
 	},
 	{
 		icon: '◍',
 		title: 'PostgREST + Postgres',
-		copy: 'Your schema is your API. Row-level security, typed queries, instant realtime — no glue code.',
+		kind: 'database',
 	},
 	{
 		icon: '✦',
 		title: 'GDPR by default',
-		copy: 'Consent ledger, DSAR exports, breach response runbook, and EU data residency baked in.',
+		kind: 'privacy',
 	},
 ];
 ---
@@ -35,7 +35,15 @@ const features = [
 					<Card variant="feature" class="feature-trio__card">
 						<span class="feature-trio__icon" aria-hidden="true">{feature.icon}</span>
 						<h3 class="ui-card__title">{feature.title}</h3>
-						<p class="ui-card__lede">{feature.copy}</p>
+						{feature.kind === 'auth' && (
+							<p class="ui-card__lede"><span class="term" title="Authentication: proving who a user is before giving access.">Auth</span> with GoTrue under the hood, social providers, magic links, and Turnstile-protected sign-ups out of the box.</p>
+						)}
+						{feature.kind === 'database' && (
+							<p class="ui-card__lede">Your schema is your <abbr title="Application Programming Interface: the contract software uses to talk to other software.">API</abbr>. <span class="term" title="Row-level security: database rules that limit which rows each user may read or change.">Row-level security</span>, typed queries, instant realtime — no glue code.</p>
+						)}
+						{feature.kind === 'privacy' && (
+							<p class="ui-card__lede"><abbr title="General Data Protection Regulation: European privacy law covering personal data.">GDPR</abbr> by default: consent ledger, <abbr title="Data Subject Access Request: a person asking to access, export, correct, or delete their data.">DSAR</abbr> exports, breach response runbook, and <abbr title="European Union.">EU</abbr> data residency baked in.</p>
+						)}
 					</Card>
 				</div>
 			))}

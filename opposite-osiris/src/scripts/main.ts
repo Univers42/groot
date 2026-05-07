@@ -6,7 +6,7 @@ import { CONSENT_STORAGE_KEY, CSRF_STORAGE_KEY, NEWSLETTER_INTENT_KEY, POLICY_VE
 import { type NotificationKind, type NotificationOptions, dismissAll, notify } from './notifications';
 import { checkPasswordStrength, passwordRuleResults } from './password-strength';
 
-type ThemeName = 'light' | 'dark' | 'night';
+type ThemeName = 'light' | 'dark';
 
 type PortalMode = 'start' | 'connect';
 
@@ -92,7 +92,7 @@ function randomBetween(minimum: number, span: number): number {
 function randomIndex(length: number): number {
 	return Math.floor(secureRandom() * length);
 }
-const THEMES: ThemeName[] = ['light', 'dark', 'night'];
+const THEMES: ThemeName[] = ['light', 'dark'];
 const authClient = useAuth();
 const COMMON_EMAIL_DOMAINS = ['gmail.com', 'outlook.com', 'hotmail.com', 'icloud.com', 'yahoo.com', 'proton.me', 'protonmail.com', 'live.com'];
 const EMAIL_DOMAIN_ALIASES: Record<string, string> = {
@@ -256,7 +256,7 @@ function writeStorage(key: string, value: string): void {
 /** Chooses the initial theme from storage or system preference. */
 function initialTheme(): ThemeName {
 	const stored = readStorage(THEME_KEY);
-	if (stored === 'light' || stored === 'dark' || stored === 'night') {
+	if (stored === 'light' || stored === 'dark') {
 		return stored;
 	}
 	return globalThis.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
@@ -267,29 +267,28 @@ function themeIcon(theme: ThemeName): string {
 	const icons: Record<ThemeName, string> = {
 		light: '☼',
 		dark: '☾',
-		night: '✦',
 	};
 	return icons[theme];
 }
 
 /** Updates visible and assistive theme button labels. */
 function updateThemeButton(theme: ThemeName): void {
-	const button = queryElement('#theme-toggle', isButton);
-	const label = queryElement('[data-theme-label]', isHtmlElement);
+	const buttons = queryElements('#theme-toggle, [data-theme-toggle]', isButton);
+	const labels = queryElements('[data-theme-label]', isHtmlElement);
 	const nextTheme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length] ?? 'light';
 	const themeLabel = theme[0].toUpperCase() + theme.slice(1);
 	const nextLabel = nextTheme[0].toUpperCase() + nextTheme.slice(1);
-	if (button) {
+	buttons.forEach((button) => {
 		button.setAttribute('aria-label', `Theme: ${theme}. Switch to ${nextTheme} mode`);
 		button.title = `Switch to ${nextLabel} theme`;
 		const icon = button.querySelector('.header-icon--theme');
 		if (icon instanceof HTMLElement) {
 			icon.textContent = themeIcon(theme);
 		}
-	}
-	if (label) {
+	});
+	labels.forEach((label) => {
 		label.textContent = `Theme: ${themeLabel}`;
-	}
+	});
 }
 
 /** Applies a theme to the document root. */
@@ -333,6 +332,42 @@ function applyMotionPreference(paused: boolean): void {
 	writeStorage(MOTION_KEY, paused ? 'true' : 'false');
 	updateMotionButton(paused);
 	announce(paused ? 'Animations paused' : 'Animations resumed');
+}
+
+/** Ensures every button has an accessible name, even if a future edit forgets one. */
+function ensureButtonLabels(): void {
+	queryElements('button', (element): element is HTMLButtonElement => element instanceof HTMLButtonElement).forEach((button) => {
+		if (button.getAttribute('aria-label') || button.getAttribute('aria-labelledby')) {
+			return;
+		}
+		const label = (button.textContent ?? '').replaceAll(/\s+/g, ' ').trim() || button.title.trim();
+		if (label) {
+			button.setAttribute('aria-label', label);
+		}
+	});
+}
+
+function bindPasswordToggles(root: ParentNode = document): void {
+	Array.from(root.querySelectorAll('[data-password-toggle]')).forEach((toggle) => {
+		if (!(toggle instanceof HTMLButtonElement) || toggle.dataset.passwordToggleBound === 'true') return;
+		const inputId = toggle.getAttribute('aria-controls');
+		const input = inputId ? root.querySelector(`#${CSS.escape(inputId)}`) : null;
+		if (!(input instanceof HTMLInputElement)) return;
+		toggle.dataset.passwordToggleBound = 'true';
+		toggle.addEventListener('click', () => {
+			const show = input.type === 'password';
+			input.type = show ? 'text' : 'password';
+			toggle.setAttribute('aria-pressed', String(show));
+			const targetName = toggle.dataset.passwordTargetName ?? toggle.getAttribute('aria-label')?.replace(/^(Show|Hide)\s+/i, '') ?? 'password';
+			const nextVerb = show ? 'Hide' : 'Show';
+			toggle.dataset.passwordTargetName = targetName;
+			toggle.setAttribute('aria-label', `${nextVerb} ${targetName}`);
+			toggle.title = `${nextVerb} ${targetName}`;
+			const icon = toggle.querySelector('[aria-hidden="true"]');
+			if (icon instanceof HTMLElement) icon.textContent = show ? '◎' : '◉';
+			input.focus({ preventScroll: true });
+		});
+	});
 }
 
 /** Draws a subtle paper grain on the decorative canvas. */
@@ -923,7 +958,10 @@ function createPortalMarkup(mode: PortalMode): string {
 						</div>
 						<div class="field" data-password-field>
 							<label for="portal-password">Password <span aria-hidden="true">*</span></label>
-							<input id="portal-password" name="password" type="password" autocomplete="current-password" placeholder="8+ chars, A–z, 0–9, symbol" required />
+							<div class="password-control">
+								<input id="portal-password" name="password" type="password" autocomplete="current-password" placeholder="8+ chars, A–z, 0–9, symbol" required />
+								<button class="password-control__toggle" type="button" data-password-toggle aria-label="Show password" aria-controls="portal-password" aria-pressed="false" title="Show password"><span aria-hidden="true">◉</span></button>
+							</div>
 							<p class="portal-password-hint portal-register-only">Minimum 8 characters with uppercase, lowercase, number and symbol.</p>
 							<div class="password-strength portal-register-only" data-password-strength data-strength-level="empty" aria-live="polite">
 								<div class="password-strength__meter" aria-hidden="true">
@@ -939,7 +977,10 @@ function createPortalMarkup(mode: PortalMode): string {
 						</div>
 						<div class="field portal-register-only">
 							<label for="portal-password-confirm">Repeat password <span aria-hidden="true">*</span></label>
-							<input id="portal-password-confirm" name="password_confirm" type="password" autocomplete="new-password" placeholder="Repeat your password" required />
+							<div class="password-control">
+								<input id="portal-password-confirm" name="password_confirm" type="password" autocomplete="new-password" placeholder="Repeat your password" required />
+								<button class="password-control__toggle" type="button" data-password-toggle aria-label="Show repeated password" aria-controls="portal-password-confirm" aria-pressed="false" title="Show repeated password"><span aria-hidden="true">◉</span></button>
+							</div>
 							<p id="portal-password-match" class="password-match" data-password-match aria-live="polite">Repeat the same password.</p>
 						</div>
 						<label class="consent-toggle portal-consent" for="portal-terms-consent">
@@ -1725,6 +1766,8 @@ function openPortal(mode: PortalMode): void {
 	if (!portal) {
 		return;
 	}
+	bindPasswordToggles(portal);
+	ensureButtonLabels();
 	document.body.classList.add('portal-open');
 	announce('Workspace portal opened');
 	requestAnimationFrame(() => portal.classList.add('is-revealed'));
@@ -2140,7 +2183,8 @@ function bindSkipLinkFocus(): void {
 
 /** Installs document-level interaction handlers. */
 function bindInteractions(): void {
-	queryElement('#theme-toggle', isButton)?.addEventListener('click', cycleTheme);
+		queryElement('#theme-toggle', isButton)?.addEventListener('click', cycleTheme);
+		queryElements('[data-theme-toggle]', isButton).forEach((button) => button.addEventListener('click', cycleTheme));
 	queryElement('#pause-animations', isButton)?.addEventListener('click', () => applyMotionPreference(!document.documentElement.classList.contains('motion-paused')));
 	bindSkipLinkFocus();
 	bindEmailFieldValidation(document);
@@ -2195,10 +2239,35 @@ function init(): void {
 	dismissAll();
 	applyTheme(initialTheme());
 	applyMotionPreference(readStorage(MOTION_KEY) === 'true');
+	ensureButtonLabels();
+	bindPasswordToggles();
 	renderPaperGrain();
 	mountMascot();
 	bindInteractions();
+	bindScrollReveal();
 	void mountBaasStatus();
+}
+
+// ---------- Scroll reveal ----------
+
+function bindScrollReveal(): void {
+        if (typeof IntersectionObserver === 'undefined') return;
+        if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+        const candidates = document.querySelectorAll<HTMLElement>('[data-scroll-rise], [data-scroll-grow], [data-reveal]');
+        if (candidates.length === 0) return;
+        const io = new IntersectionObserver((entries) => {
+                for (const entry of entries) {
+                        if (entry.isIntersecting) {
+                                entry.target.classList.add('is-revealed');
+                                io.unobserve(entry.target);
+                        }
+                }
+        }, { threshold: 0.18, rootMargin: '0px 0px -8% 0px' });
+        candidates.forEach((node) => {
+                node.classList.add('reveal-prep');
+                io.observe(node);
+        });
+
 }
 
 init();

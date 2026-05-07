@@ -1,109 +1,40 @@
-// Self-hosted typography. Brand fonts (Caveat, Kalam, Caveat Brush, Special
-// Elite, Architects Daughter) are personality-only — never used inside forms,
-// dialogs, tables or pricing CTAs. System body type is Inter, used for every
-// functional UI surface and most marketing body copy.
+// Typography. System body font is Inter (loaded via Google Fonts <link> in
+// Layout.astro). Brand fonts (Caveat, Kalam, Caveat Brush, Special Elite,
+// Architects Daughter) are also delivered by the same Google Fonts <link>.
 //
-// `font-display: swap` keeps text legible during font load (WCAG 2.4.7-friendly
-// fallbacks). The local() probe lets users with the font installed skip the
-// network entirely.
-//
-// Until the woff2 binaries are committed (see public/fonts/README.md) the
-// `src: url(...)` entries silently fall back to the local() / system stack.
+// We keep light local() probes here so users who already have a given face
+// installed skip the network entirely. We intentionally do NOT include
+// `src: url('/fonts/*.woff2')` — those self-hosted binaries don't ship in
+// this build and would trigger network 404s in Firefox/Chrome.
 
-// --- Inter (system layer) ---------------------------------------------------
 @font-face {
-	font-family: 'Inter';
-	src: local('Inter Regular'), local('Inter-Regular'), url('/fonts/inter-400.woff2') format('woff2');
+	font-family: 'Inter Local';
+	src: local('Inter Regular'), local('Inter-Regular');
 	font-weight: 400;
 	font-style: normal;
 	font-display: swap;
 }
 
 @font-face {
-	font-family: 'Inter';
-	src: local('Inter Medium'), local('Inter-Medium'), url('/fonts/inter-500.woff2') format('woff2');
+	font-family: 'Inter Local';
+	src: local('Inter Medium'), local('Inter-Medium');
 	font-weight: 500;
 	font-style: normal;
 	font-display: swap;
 }
 
 @font-face {
-	font-family: 'Inter';
-	src: local('Inter SemiBold'), local('Inter-SemiBold'), url('/fonts/inter-600.woff2') format('woff2');
+	font-family: 'Inter Local';
+	src: local('Inter SemiBold'), local('Inter-SemiBold');
 	font-weight: 600;
 	font-style: normal;
 	font-display: swap;
 }
 
 @font-face {
-	font-family: 'Inter';
-	src: local('Inter Bold'), local('Inter-Bold'), url('/fonts/inter-700.woff2') format('woff2');
+	font-family: 'Inter Local';
+	src: local('Inter Bold'), local('Inter-Bold');
 	font-weight: 700;
-	font-style: normal;
-	font-display: swap;
-}
-
-// --- Brand families ---------------------------------------------------------
-@font-face {
-	font-family: 'Caveat';
-	src: local('Caveat'), url('/fonts/caveat-400.woff2') format('woff2');
-	font-weight: 400;
-	font-style: normal;
-	font-display: swap;
-}
-
-@font-face {
-	font-family: 'Caveat';
-	src: local('Caveat SemiBold'), url('/fonts/caveat-600.woff2') format('woff2');
-	font-weight: 600;
-	font-style: normal;
-	font-display: swap;
-}
-
-@font-face {
-	font-family: 'Caveat';
-	src: local('Caveat Bold'), url('/fonts/caveat-700.woff2') format('woff2');
-	font-weight: 700;
-	font-style: normal;
-	font-display: swap;
-}
-
-@font-face {
-	font-family: 'Caveat Brush';
-	src: local('Caveat Brush'), url('/fonts/caveat-brush-400.woff2') format('woff2');
-	font-weight: 400;
-	font-style: normal;
-	font-display: swap;
-}
-
-@font-face {
-	font-family: 'Kalam';
-	src: local('Kalam'), url('/fonts/kalam-400.woff2') format('woff2');
-	font-weight: 400;
-	font-style: normal;
-	font-display: swap;
-}
-
-@font-face {
-	font-family: 'Kalam';
-	src: local('Kalam Bold'), url('/fonts/kalam-700.woff2') format('woff2');
-	font-weight: 700;
-	font-style: normal;
-	font-display: swap;
-}
-
-@font-face {
-	font-family: 'Special Elite';
-	src: local('Special Elite'), url('/fonts/special-elite-400.woff2') format('woff2');
-	font-weight: 400;
-	font-style: normal;
-	font-display: swap;
-}
-
-@font-face {
-	font-family: 'Architects Daughter';
-	src: local('Architects Daughter'), url('/fonts/architects-daughter-400.woff2') format('woff2');
-	font-weight: 400;
 	font-style: normal;
 	font-display: swap;
 }

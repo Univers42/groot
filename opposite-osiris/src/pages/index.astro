@@ -21,16 +21,15 @@ import Layout from '../layouts/Layout.astro';
 	<div aria-live="polite" aria-atomic="true" class="visually-hidden" id="global-announcer"></div>
 	<Notification />
 	<HeaderNew />
-	<main id="main-content" class="swipe-stack">
-		<section class="swipe-stack__scene" style="--i: 0;"><div class="swipe-stack__card"><HeroNew /></div></section>
-		<section class="swipe-stack__scene" style="--i: 1;"><div class="swipe-stack__card"><LogoStrip /></div></section>
-		<section class="swipe-stack__scene" style="--i: 2;"><div class="swipe-stack__card"><FeatureTrio /></div></section>
-		<section class="swipe-stack__scene" style="--i: 3; --tall: 1;"><div class="swipe-stack__card"><BackendArchitecture /></div></section>
-		<section class="swipe-stack__scene" style="--i: 4;"><div class="swipe-stack__card"><SocialProof /></div></section>
-		<section class="swipe-stack__scene" style="--i: 5;"><div class="swipe-stack__card"><Pricing /></div></section>
-		<section class="swipe-stack__scene" style="--i: 6;"><div class="swipe-stack__card"><DocsTeaser /></div></section>
-		<section class="swipe-stack__scene" style="--i: 7;"><div class="swipe-stack__card"><FaqSection /></div></section>
-		<section class="swipe-stack__scene" style="--i: 8;"><div class="swipe-stack__card"><FinalCta /></div></section>
+	<main id="main-content" class="swipe-stack" data-swipe-stack>
+		<section class="swipe-stack__scene" style="--i: 0;"><div class="swipe-stack__card swipe-stack__card--hero"><div class="swipe-stack__hero-combo"><HeroNew /><LogoStrip /></div></div></section>
+		<section class="swipe-stack__scene" style="--i: 1;"><div class="swipe-stack__card"><FeatureTrio /></div></section>
+		<section class="swipe-stack__scene" style="--i: 2; --tall: 1;"><div class="swipe-stack__card"><BackendArchitecture /></div></section>
+		<section class="swipe-stack__scene" style="--i: 3;"><div class="swipe-stack__card"><SocialProof /></div></section>
+		<section class="swipe-stack__scene" style="--i: 4;"><div class="swipe-stack__card"><Pricing /></div></section>
+		<section class="swipe-stack__scene" style="--i: 5;"><div class="swipe-stack__card"><DocsTeaser /></div></section>
+		<section class="swipe-stack__scene" style="--i: 6;"><div class="swipe-stack__card"><FaqSection /></div></section>
+		<section class="swipe-stack__scene" style="--i: 7;"><div class="swipe-stack__card"><FinalCta /></div></section>
 	</main>
 	<div class="swipe-stack__tail"><FooterNew /></div>
 	<ConsentBanner />

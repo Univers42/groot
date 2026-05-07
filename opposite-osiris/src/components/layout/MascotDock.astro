@@ -67,12 +67,18 @@
 		position: fixed;
 		left: clamp(0.75rem, 2vw, 1.5rem);
 		bottom: clamp(0.75rem, 2vw, 1.5rem);
-		z-index: 30;
+		/* Above swipe-stack__tail (footer, z-index: 9999) so the mascot never
+		   disappears behind the footer. Stays below the native <dialog> portal,
+		   which lives in the top-layer and is unaffected by z-index. */
+		z-index: 10000;
 		display: grid;
 		gap: 0.6rem;
 		justify-items: start;
 		pointer-events: none;
 	}
+
+	/* When the portal dialog is open, hide the mascot to avoid double-CTA noise. */
+	body.dialog-open .mascot-dock { display: none; }
 
 	.mascot-dock__bubble {
 		position: relative;

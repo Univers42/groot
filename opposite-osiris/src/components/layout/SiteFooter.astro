@@ -34,7 +34,7 @@ const socialLinks = [
 				<label for="footer-newsletter-email">Subscribe for product updates</label>
 				<div class="site-footer__newsletter-row">
 					<input id="footer-newsletter-email" name="email" type="email" autocomplete="email" placeholder="you@example.com" required />
-					<button class="site-footer__subscribe" type="submit">Subscribe</button>
+					<button class="site-footer__subscribe" type="submit" aria-label="Subscribe to product updates">Subscribe</button>
 				</div>
 				<label class="site-footer__newsletter-consent" for="footer-newsletter-consent">
 					<input id="footer-newsletter-consent" name="newsletter_consent" type="checkbox" required />
@@ -48,7 +48,7 @@ const socialLinks = [
 			<h2 id="footer-legal-title">Legal & social</h2>
 			<nav class="site-footer__legal-links" aria-label="Legal navigation">
 				{LEGAL_LINKS.filter((link) => link.label === 'Privacy Policy' || link.label === 'Terms of Service').map((link) => <a href={link.href}>{link.label}</a>)}
-				<button class="link-button" type="button" data-manage-cookies>Cookie preferences</button>
+				<button class="link-button" type="button" data-manage-cookies aria-label="Open cookie preferences">Cookie preferences</button>
 			</nav>
 			<nav class="site-footer__social" aria-label="Social links">
 				{socialLinks.map((link) => <a href={link.href} rel="noopener noreferrer" aria-label={`${link.label} profile`}>{link.label.slice(0, 2)}</a>)}

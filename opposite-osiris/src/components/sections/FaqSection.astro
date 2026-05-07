@@ -4,11 +4,11 @@ import Eyebrow from '../brand/Eyebrow.astro';
 const faqs = [
 	{
 		q: 'Can I really self-host the whole stack?',
-		a: 'Yes. The entire mini-baas-infra repo is MIT licensed: Kong, GoTrue, PostgREST, Postgres, MailHog. One `docker compose up` and you are running locally; the same images deploy to any VPS.',
+		a: 'Yes. The entire backend infrastructure repo is <abbr title="Massachusetts Institute of Technology license: a permissive open-source software license.">MIT</abbr> licensed: Kong, GoTrue, PostgREST, Postgres, MailHog. One <code>docker compose up</code> and you are running locally; the same images deploy to any <abbr title="Virtual Private Server: a rented server you control.">VPS</abbr>.',
 	},
 	{
 		q: 'Where does my data live?',
-		a: 'Wherever you put it. The hosted tier runs in EU regions (Paris and Frankfurt). Self-hosted means your machines, your jurisdiction, your DPA — we never see the data.',
+		a: 'Wherever you put it. The hosted tier runs in <abbr title="European Union.">EU</abbr> regions (Paris and Frankfurt). Self-hosted means your machines, your jurisdiction, your <abbr title="Data Processing Agreement: a legal contract defining how a vendor handles personal data.">DPA</abbr> — we never see the data.',
 	},
 	{
 		q: 'How does pricing work as I grow?',
@@ -16,11 +16,11 @@ const faqs = [
 	},
 	{
 		q: 'How do I migrate from another BaaS?',
-		a: 'PostgREST means your schema is the API. Most teams import their existing dump, point Kong at it, and ship in under a day. We have migration recipes for Supabase, Firebase and Hasura.',
+		a: 'PostgREST means your schema is the <abbr title="Application Programming Interface: the contract software uses to talk to other software.">API</abbr>. Most teams import their existing dump, point Kong at it, and ship in under a day. We have migration recipes for Supabase, Firebase and Hasura.',
 	},
 	{
 		q: 'What about security audits?',
-		a: 'Auth flows ship with Turnstile, rate-limit and CSP defaults. The repo includes a published threat model, breach-response runbook, and OWASP ASVS L2 mapping in /docs/gdpr/.',
+		a: '<span class="term" title="Authentication: proving who a user is before giving access.">Auth</span> flows ship with Turnstile, rate-limit and <abbr title="Content Security Policy: browser rules limiting what a page may load or execute.">CSP</abbr> defaults. The repo includes a published threat model, breach-response runbook, and <abbr title="Open Worldwide Application Security Project: a nonprofit security standards community.">OWASP</abbr> <abbr title="Application Security Verification Standard: OWASP checklist for application security controls.">ASVS</abbr> <abbr title="Level 2: a stronger assurance target for applications handling sensitive data.">L2</abbr> mapping in /docs/gdpr/.',
 	},
 ];
 ---
@@ -28,7 +28,7 @@ const faqs = [
 <section class="section section--sunken faq" id="faq">
 	<div class="section__container faq__inner">
 		<header class="section__head">
-			<Eyebrow>FAQ</Eyebrow>
+			<Eyebrow><abbr title="Frequently Asked Questions">FAQ</abbr></Eyebrow>
 			<h2 class="section__title">Answers, before you ask.</h2>
 		</header>
 
@@ -40,7 +40,21 @@ const faqs = [
 							<span class="faq__question">{item.q}</span>
 							<span class="faq__icon" aria-hidden="true">+</span>
 						</summary>
-						<p class="faq__answer">{item.a}</p>
+						{index === 0 && (
+							<p class="faq__answer">Yes. The entire backend infrastructure repo is <abbr title="Massachusetts Institute of Technology license: a permissive open-source software license.">MIT</abbr> licensed: Kong, GoTrue, PostgREST, Postgres, MailHog. One <code>docker compose up</code> and you are running locally; the same images deploy to any <abbr title="Virtual Private Server: a rented server you control.">VPS</abbr>.</p>
+						)}
+						{index === 1 && (
+							<p class="faq__answer">Wherever you put it. The hosted tier runs in <abbr title="European Union.">EU</abbr> regions (Paris and Frankfurt). Self-hosted means your machines, your jurisdiction, your <abbr title="Data Processing Agreement: a legal contract defining how a vendor handles personal data.">DPA</abbr> — we never see the data.</p>
+						)}
+						{index === 2 && (
+							<p class="faq__answer">You pay per active project, not per seat. Move from Free → Team in one click. If you outgrow Team, self-host: same code, no migration.</p>
+						)}
+						{index === 3 && (
+							<p class="faq__answer">PostgREST means your schema is the <abbr title="Application Programming Interface: the contract software uses to talk to other software.">API</abbr>. Most teams import their existing dump, point Kong at it, and ship in under a day. We have migration recipes for Supabase, Firebase and Hasura.</p>
+						)}
+						{index === 4 && (
+							<p class="faq__answer"><span class="term" title="Authentication: proving who a user is before giving access.">Auth</span> flows ship with Turnstile, rate-limit and <abbr title="Content Security Policy: browser rules limiting what a page may load or execute.">CSP</abbr> defaults. The repo includes a published threat model, breach-response runbook, and <abbr title="Open Worldwide Application Security Project: a nonprofit security standards community.">OWASP</abbr> <abbr title="Application Security Verification Standard: OWASP checklist for application security controls.">ASVS</abbr> <abbr title="Level 2: a stronger assurance target for applications handling sensitive data.">L2</abbr> mapping in /docs/gdpr/.</p>
+						)}
 					</details>
 				</li>
 			))}

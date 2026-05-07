@@ -2,38 +2,56 @@
 // card pinned inside it. The camera stays fixed; the next scene's card rises
 // over the current one, like a vertical deck being swiped.
 //
+// The depth animation is driven by a JS-set custom property `--swipe-progress`
+// (0 = card fully in view, 1 = next card has covered it) so it works in every
+// browser, not just those that support `animation-timeline: view()`. The scene
+// ranges are intentionally compact so transitions feel decisive, while the
+// outgoing card stays opaque and readable for accessibility.
+//
 // Markup contract (index.astro):
-//   <main class="swipe-stack">
-//     <div class="swipe-stack__card" style="--i: 0"> ... </div>
-//     ...
+//   <main class="swipe-stack" data-swipe-stack>
+//     <section class="swipe-stack__scene" style="--i: N">
+//       <div class="swipe-stack__card"> ... </div>
+//     </section>
 //   </main>
 
 .swipe-stack {
 	--swipe-top: clamp(4.25rem, 8vh, 6.25rem);
 	--swipe-side: clamp(0.75rem, 2.4vw, 1.6rem);
 	--swipe-bottom: clamp(0.85rem, 2vh, 1.35rem);
+	--swipe-grid-cell: clamp(40px, 5vw, 64px);
 
 	display: block;
 	padding-block: var(--swipe-bottom);
 	background:
+		// Soft radial vignette for depth without moving the camera plane.
+		radial-gradient(120% 80% at 50% 0%,
+			color-mix(in srgb, var(--system-action-bg, #4f46e5) 6%, transparent) 0%,
+			transparent 55%),
 		linear-gradient(90deg,
-			color-mix(in srgb, var(--system-text-strong, #0f172a) 4%, transparent) 1px,
-			transparent 1px) 0 0 / 48px 48px,
+			color-mix(in srgb, var(--system-text-strong, #0f172a) 5%, transparent) 1px,
+			transparent 1px) 0 0 / var(--swipe-grid-cell) var(--swipe-grid-cell),
 		linear-gradient(180deg,
-			color-mix(in srgb, var(--system-text-strong, #0f172a) 4%, transparent) 1px,
-			transparent 1px) 0 0 / 48px 48px,
+			color-mix(in srgb, var(--system-text-strong, #0f172a) 5%, transparent) 1px,
+			transparent 1px) 0 0 / var(--swipe-grid-cell) var(--swipe-grid-cell),
 		var(--system-surface-sunken, #f8fafc);
+	background-attachment: scroll;
 }
 
 .swipe-stack__scene {
 	position: relative;
-	min-height: 155svh;
+	// Each scene is one viewport for reading + a short tail for the sticky pin to
+	// hold while the next scene scrolls underneath. NO overlap between scenes:
+	// users repeatedly perceived overlapping cards as a layout bug. The "swipe"
+	// effect now comes purely from the sticky pin + a gentle scale on the
+	// outgoing card as the next one arrives from below.
+	min-height: 130svh;
 	z-index: calc(1 + var(--i, 0));
 }
 
-.swipe-stack__scene:first-child { min-height: 140svh; }
-.swipe-stack__scene:last-child { min-height: 115svh; }
-.swipe-stack__scene[style*='--tall'] { min-height: 185svh; }
+.swipe-stack__scene:first-child { min-height: 120svh; }
+.swipe-stack__scene:last-child { min-height: 110svh; }
+.swipe-stack__scene[style*='--tall'] { min-height: 150svh; }
 
 .swipe-stack__card {
 	position: sticky;
@@ -50,21 +68,47 @@
 	display: flex;
 	flex-direction: column;
 	justify-content: center;
-	transform-origin: 50% 0;
+	transform: none;
+	filter: none;
+	opacity: 1;
+	transition: box-shadow 140ms ease, border-color 140ms ease;
 }
 
 .swipe-stack__scene:first-child .swipe-stack__card { box-shadow: none; }
+
+.swipe-stack__card--hero {
+	justify-content: stretch;
+}
+
+.swipe-stack__hero-combo {
+	display: grid;
+	align-content: center;
+	min-height: inherit;
+}
+
+.swipe-stack__hero-combo .section--hero {
+	padding-block: clamp(3.25rem, 5vw, 5rem) clamp(1.5rem, 3vw, 2.25rem);
+}
+
+.swipe-stack__hero-combo .logo-strip {
+	padding-block: clamp(1.25rem, 2.4vw, 2rem);
+}
 
 .swipe-stack__card::before {
 	content: '';
 	position: absolute;
 	inset: 0;
 	pointer-events: none;
-	background: linear-gradient(180deg,
-		color-mix(in srgb, var(--system-text-strong, #0f172a) 5%, transparent) 0%,
-		transparent 9%,
-		transparent 90%,
-		color-mix(in srgb, var(--system-text-strong, #0f172a) 3%, transparent) 100%);
+	background:
+		linear-gradient(180deg,
+			color-mix(in srgb, var(--system-text-strong, #0f172a) 5%, transparent) 0%,
+			transparent 9%,
+			transparent 90%,
+			color-mix(in srgb, var(--system-text-strong, #0f172a) 3%, transparent) 100%),
+		linear-gradient(180deg,
+			color-mix(in srgb, white 16%, transparent) 0%,
+			transparent 76%);
+	opacity: 0.72;
 	z-index: 0;
 }
 
@@ -72,19 +116,7 @@
 	position: relative;
 	z-index: 1;
 	width: 100%;
-}
-
-@keyframes swipe-card-depth {
-	from { transform: scale(1) translateY(0); filter: blur(0); opacity: 1; }
-	to { transform: scale(0.9) translateY(-3rem); filter: blur(2px); opacity: 0.46; }
-}
-
-@supports (animation-timeline: view()) {
-	.swipe-stack__card {
-		animation: swipe-card-depth linear both;
-		animation-timeline: view();
-		animation-range: cover 70% exit 100%;
-	}
+	transform: none;
 }
 
 // Final card (the page footer) is a passive end — no sticky behavior so it
@@ -105,6 +137,7 @@
 
 	.swipe-stack__scene {
 		min-height: auto;
+		margin-top: 0;
 	}
 
 	.swipe-stack__card {
@@ -114,8 +147,12 @@
 		border: 0;
 		border-radius: 0;
 		box-shadow: none;
-		animation: none;
+		transform: none;
+		filter: none;
+		opacity: 1;
+		will-change: auto;
 	}
+	.swipe-stack__card > * { transform: none; }
 	.swipe-stack__card::before { display: none; }
 }
 
@@ -127,6 +164,7 @@
 
 	.swipe-stack__scene {
 		min-height: auto;
+		margin-top: 0;
 	}
 
 	.swipe-stack__card {
@@ -136,7 +174,12 @@
 		border: 0;
 		border-radius: 0;
 		box-shadow: none;
-		animation: none;
+		transform: none;
+		filter: none;
+		opacity: 1;
+		will-change: auto;
+		transition: none;
 	}
+	.swipe-stack__card > * { transform: none; }
 	.swipe-stack__card::before { display: none; }
 }

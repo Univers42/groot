@@ -11,9 +11,9 @@ import { POLICY_VERSION } from '../../data/legal';
 			<p class="consent-banner__version">Policy version {POLICY_VERSION}</p>
 		</div>
 		<div class="consent-banner__actions" aria-label="Quick consent choices">
-			<button class="button button--primary" type="button" data-consent-accept-all>Accept all</button>
-			<button class="button button--ghost" type="button" data-consent-reject-all>Reject all</button>
-			<button class="button button--ghost" type="button" data-consent-manage aria-expanded="false" aria-controls="consent-preferences">Manage preferences</button>
+			<button class="button button--primary" type="button" data-consent-accept-all aria-label="Accept all optional cookies and preferences">Accept all</button>
+			<button class="button button--ghost" type="button" data-consent-reject-all aria-label="Reject all optional cookies and preferences">Reject all</button>
+			<button class="button button--ghost" type="button" data-consent-manage aria-expanded="false" aria-controls="consent-preferences" aria-label="Manage cookie and consent preferences">Manage preferences</button>
 		</div>
 		<form id="consent-preferences" class="consent-banner__preferences" data-consent-form hidden>
 			<label class="consent-toggle">
@@ -29,7 +29,7 @@ import { POLICY_VERSION } from '../../data/legal';
 				<span><strong>Marketing</strong> — promotional messages. Off by default.</span>
 			</label>
 			<div class="consent-banner__actions">
-				<button class="button button--primary" type="submit">Save preferences</button>
+				<button class="button button--primary" type="submit" aria-label="Save consent preferences">Save preferences</button>
 				<a href="/legal/privacy-policy/">Privacy Policy</a>
 			</div>
 		</form>

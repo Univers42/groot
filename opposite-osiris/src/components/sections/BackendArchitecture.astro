@@ -103,7 +103,7 @@ const categoryColor: Record<ServiceCategory, string> = {
 			<p class="section__lede">
 				One canvas. The diagram <em>is</em> the control panel — tap any node to toggle
 				the service. Presets reshape the whole stack in a click. Latency, cost,
-				GDPR coverage and attack surface update as you go.
+				<abbr title="General Data Protection Regulation: European privacy law covering personal data.">GDPR</abbr> coverage and attack surface update as you go.
 			</p>
 		</header>
 
@@ -122,6 +122,8 @@ const categoryColor: Record<ServiceCategory, string> = {
 						data-preset={preset.id}
 						data-default={idx === 1 ? 'true' : undefined}
 						aria-pressed={idx === 1 ? 'true' : 'false'}
+						aria-label={`Apply architecture preset: ${preset.label}`}
+						title={`Apply architecture preset: ${preset.label}`}
 					>{preset.label}</button>
 				))}
 			</div>
@@ -166,6 +168,7 @@ const categoryColor: Record<ServiceCategory, string> = {
 									tabindex="0"
 									aria-label={`${svc.name}${svc.required ? ' (required)' : ''} — ${svc.desc}`}
 								>
+									<title>{`${svc.name}${svc.required ? ' (required)' : ''} — ${svc.desc}`}</title>
 									<rect class="arch-node__bg" width={p.w} height={p.h} rx="14" />
 									<circle class="arch-node__dot" cx={p.w - 18} cy={18} r="6" />
 									<text class="arch-node__title" x={p.w / 2} y={p.h / 2 - 4} text-anchor="middle">{svc.name}</text>
@@ -182,11 +185,11 @@ const categoryColor: Record<ServiceCategory, string> = {
 			<div class="backend-arch__hud" data-arch-hud>
 				<dl class="backend-arch__metrics" data-arch-metrics>
 					<div><dt>Active</dt> <dd><span data-metric="count">—</span><small>/ {services.length}</small></dd></div>
-					<div><dt>p95 latency</dt> <dd><span data-metric="latency">—</span><small>ms</small></dd></div>
+					<div><dt><abbr title="95th percentile: 95% of requests are faster than this value.">p95</abbr> latency</dt> <dd><span data-metric="latency">—</span><small>ms</small></dd></div>
 					<div><dt>Cost</dt> <dd>€<span data-metric="cost">—</span><small>/mo</small></dd></div>
-					<div><dt>GDPR</dt> <dd><span data-metric="gdpr">—</span><small>%</small></dd></div>
+					<div><dt><abbr title="General Data Protection Regulation: European privacy law covering personal data.">GDPR</abbr></dt> <dd><span data-metric="gdpr">—</span><small>%</small></dd></div>
 					<div><dt>Surface</dt> <dd><span data-metric="risk">—</span><small>/10</small></dd></div>
-					<div><dt>MAU</dt> <dd><span data-metric="mau">—</span></dd></div>
+					<div><dt><abbr title="Monthly Active Users: unique users active during a month.">MAU</abbr></dt> <dd><span data-metric="mau">—</span></dd></div>
 				</dl>
 				<p class="backend-arch__tradeoff" data-arch-tradeoff>Balanced stack — production-ready out of the box.</p>
 			</div>

@@ -25,14 +25,56 @@ for (const file of envFiles) {
 	}
 }
 
+function normalizeBaasUrl(configured = 'http://localhost:8000') {
+	return configured.startsWith('/api') ? 'http://localhost:8000' : configured.replace(/\/$/, '');
+}
+
 export const config = {
-	url: (process.env.PUBLIC_BAAS_URL ?? 'http://localhost:8000').replace(/\/$/, ''),
+	url: normalizeBaasUrl(process.env.PUBLIC_BAAS_URL),
 	anonKey: process.env.PUBLIC_BAAS_ANON_KEY ?? '',
 	allowedOrigin: process.env.SECURITY_ALLOWED_ORIGIN ?? 'http://localhost:4322',
 	disallowedOrigin: process.env.SECURITY_DISALLOWED_ORIGIN ?? 'http://evil.example.com',
-	testEmail: process.env.SECURITY_TEST_EMAIL ?? 'john.doe@example.com',
+	testEmail: process.env.SECURITY_TEST_EMAIL ?? `devfast+security-${Date.now()}@archicode.codes`,
 	testPassword: process.env.SECURITY_TEST_PASSWORD ?? 'Test123!',
 };
+
+let securityUserReady;
+
+export async function ensureSecurityTestUser() {
+	if (!securityUserReady) {
+		securityUserReady = (async () => {
+			const { createServiceBaasClient } = await import('../baas-env.mjs');
+			try {
+				await createServiceBaasClient().auth.admin.createUser({
+					email: config.testEmail,
+					password: config.testPassword,
+					email_confirm: true,
+				});
+			} catch (error) {
+				const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+				if (!message.includes('already') && !message.includes('registered') && !message.includes('exists')) {
+					throw error;
+				}
+			}
+			try {
+				await createServiceBaasClient().from('users').insert({
+					username: config.testEmail.split('@')[0].replaceAll(/[^a-z0-9_-]/gi, '-'),
+					email: config.testEmail,
+					password_hash: ['managed', 'by', 'gotrue'].join('-'),
+					theme: 'light',
+					notifications_enabled: true,
+					is_email_verified: true,
+				});
+			} catch (error) {
+				const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+				if (!message.includes('duplicate') && !message.includes('already') && !message.includes('unique')) {
+					throw error;
+				}
+			}
+		})();
+	}
+	return securityUserReady;
+}
 
 export { assert };
 

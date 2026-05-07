@@ -24,8 +24,18 @@ const navItems = [
 		</nav>
 
 		<div class="header-new__actions">
-			<Button variant="ghost" size="sm" href="#login" data-action="open-portal-connect">Sign in</Button>
-			<Button variant="primary" size="sm" data-action="open-portal-start">Start free</Button>
+			<button
+				id="theme-toggle"
+				class="header-new__theme"
+				type="button"
+				aria-label="Theme: light. Switch to dark mode"
+				title="Switch to dark theme"
+			>
+				<span class="header-icon--theme" aria-hidden="true">☼</span>
+				<span class="visually-hidden" data-theme-label>Theme: Light</span>
+			</button>
+			<Button variant="ghost" size="sm" data-open-connect>Sign in</Button>
+			<Button variant="primary" size="sm" data-open-portal>Start free</Button>
 		</div>
 
 		<button
@@ -49,8 +59,18 @@ const navItems = [
 			))}
 		</ul>
 		<div class="header-new__drawer-actions">
-			<Button variant="ghost" size="md" href="#login" data-action="open-portal-connect" full>Sign in</Button>
-			<Button variant="primary" size="md" data-action="open-portal-start" full>Start free</Button>
+			<button
+				class="header-new__theme header-new__theme--drawer"
+				type="button"
+				aria-label="Theme: light. Switch to dark mode"
+				title="Switch to dark theme"
+				data-theme-toggle
+			>
+				<span class="header-icon--theme" aria-hidden="true">☼</span>
+				<span data-theme-label>Theme: Light</span>
+			</button>
+			<Button variant="ghost" size="md" data-open-connect full>Sign in</Button>
+			<Button variant="primary" size="md" data-open-portal full>Start free</Button>
 		</div>
 	</div>
 </header>
@@ -76,9 +96,7 @@ const navItems = [
 		position: sticky;
 		top: 0;
 		z-index: 40;
-		background: color-mix(in srgb, var(--system-surface) 88%, transparent);
-		backdrop-filter: saturate(140%) blur(8px);
-		-webkit-backdrop-filter: saturate(140%) blur(8px);
+		background: var(--system-surface);
 		border-bottom: 1px solid var(--system-border);
 	}
 
@@ -147,7 +165,37 @@ const navItems = [
 
 	.header-new__actions {
 		display: flex;
+		align-items: center;
 		gap: 0.5rem;
+	}
+
+	.header-new__theme {
+		display: inline-grid;
+		place-items: center;
+		width: 40px;
+		height: 40px;
+		padding: 0;
+		border: 1px solid var(--system-border);
+		border-radius: var(--system-radius-sm);
+		background: var(--system-action-secondary-bg);
+		color: var(--system-text-strong);
+		font: inherit;
+		cursor: pointer;
+		transition: background 120ms ease, border-color 120ms ease;
+	}
+	.header-new__theme:hover {
+		background: var(--system-action-secondary-bg-hover);
+		border-color: var(--system-border-strong);
+	}
+	.header-new__theme:focus-visible {
+		outline: 3px solid var(--system-focus-ring);
+		outline-offset: 2px;
+	}
+	.header-new__theme--drawer {
+		display: inline-flex;
+		justify-content: center;
+		gap: 0.5rem;
+		width: 100%;
 	}
 
 	.header-new__menu {

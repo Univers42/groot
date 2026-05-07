@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import { createBaasClient } from './baas-env.mjs';
+import { createBaasClient, createServiceBaasClient } from './baas-env.mjs';
 
 const client = createBaasClient();
+const serviceClient = createServiceBaasClient();
+const testEmail = `devfast+newsletter-${Date.now()}@archicode.codes`;
+const testPassword = 'Test123!';
 
 const steps = [];
 
@@ -25,8 +28,17 @@ async function runStep(name, action, detailText = String) {
 	}
 }
 
-async function authenticateSeededUser() {
-	const payload = await client.auth.signInWithPassword({ email: 'john.doe@example.com', password: 'Test123!' });
+async function authenticateTestUser() {
+	await serviceClient.auth.admin.createUser({ email: testEmail, password: testPassword, email_confirm: true });
+	await serviceClient.from('users').insert({
+		username: testEmail.split('@')[0].replaceAll(/[^a-z0-9_-]/gi, '-'),
+		email: testEmail,
+		password_hash: ['managed', 'by', 'gotrue'].join('-'),
+		theme: 'light',
+		notifications_enabled: true,
+		is_email_verified: true,
+	});
+	const payload = await client.auth.signInWithPassword({ email: testEmail, password: testPassword });
 	assert.equal(typeof payload.access_token, 'string');
 	return payload.access_token;
 }
@@ -37,7 +49,7 @@ async function assertRpcOk(name, body, token) {
 }
 
 async function main() {
-	const token = await runStep('Authenticate seeded user', authenticateSeededUser, () => 'JWT returned');
+	const token = await runStep('Authenticate test user', authenticateTestUser, () => 'JWT returned');
 
 	if (token) {
 		await runStep('Grant newsletter consent', async () => {
