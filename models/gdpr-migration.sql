@@ -668,7 +668,7 @@ BEGIN
   INSERT INTO gdpr_requests (user_id, email, request_type, details)
   VALUES (optin.user_id, optin.email, gdpr_request_type_newsletter(), jsonb_build_object('stage', 'double_opt_in_confirmed', gdpr_json_key_policy_version(), policy_version));
 
-  RETURN jsonb_build_object(gdpr_json_key_status(), gdpr_status_confirmed(), gdpr_json_key_consent_type(), gdpr_consent_type_newsletter(), gdpr_json_key_policy_version(), policy_version);
+  RETURN jsonb_build_object(gdpr_json_key_status(), gdpr_status_confirmed(), 'email', optin.email, gdpr_json_key_consent_type(), gdpr_consent_type_newsletter(), gdpr_json_key_policy_version(), policy_version);
 END;
 $$;
 
@@ -723,7 +723,7 @@ BEGIN
     INSERT INTO gdpr_requests (user_id, email, request_type, details)
     VALUES (optin.user_id, optin.email, gdpr_request_type_consent_withdrawal(), jsonb_build_object(gdpr_json_key_consent_type(), normalized_type, gdpr_json_key_source(), 'newsletter_token', gdpr_json_key_policy_version(), gdpr_policy_version()));
 
-    RETURN jsonb_build_object(gdpr_json_key_status(), gdpr_status_updated(), gdpr_json_key_consent_type(), normalized_type, gdpr_json_key_granted(), false, gdpr_json_key_withdrawn_at(), CURRENT_TIMESTAMP);
+    RETURN jsonb_build_object(gdpr_json_key_status(), gdpr_status_updated(), 'email', optin.email, gdpr_json_key_consent_type(), normalized_type, gdpr_json_key_granted(), false, gdpr_json_key_withdrawn_at(), CURRENT_TIMESTAMP);
   END IF;
 
   current_user_id := gdpr_require_authenticated_user();
