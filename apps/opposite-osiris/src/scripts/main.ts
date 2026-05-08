@@ -1686,6 +1686,31 @@ async function processPortalLogin(elements: PortalFormElements, turnstileToken: 
 	if (elements.newsletterConsent?.checked) {
 		await requestNewsletterSubscription(elements.email.value).catch(() => undefined);
 	}
+	const osionosBridge = authenticated.accessToken
+		? await authClient.osionosSession(authenticated.accessToken).catch(() => null)
+		: null;
+	if (osionosBridge?.ok && osionosBridge.redirectUrl) {
+		notifyWithMascot({
+			kind: 'success',
+			title: 'Opening osionos',
+			message: 'Your private osionos workspace is ready.',
+			duration: 2500,
+		});
+		setMountedMascotMood('happy', 1800);
+		announce('Opening your osionos workspace.');
+		globalThis.setTimeout(() => {
+			globalThis.location.assign(osionosBridge.redirectUrl as string);
+		}, 700);
+		return;
+	}
+	if (osionosBridge && !osionosBridge.ok) {
+		notifyWithMascot({
+			kind: 'warning',
+			title: 'Workspace bridge pending',
+			message: osionosBridge.message,
+			duration: 7000,
+		});
+	}
 	notifyWithMascot({
 		kind: 'success',
 		title: 'Welcome back',

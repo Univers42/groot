@@ -7,7 +7,7 @@ import { resolve4, resolve6, resolveMx } from 'node:dns/promises';
 import tls from 'node:tls';
 import { createClient, MiniBaasError } from '@mini-baas/js';
 
-for (const file of ['.env.local', '.env', '../infrastructure/baas/.env.local']) {
+for (const file of ['.env.local', '.env', '../../.env.local', '../../infrastructure/baas/.env.local']) {
 	const path = resolve(process.cwd(), file);
 	if (!existsSync(path)) continue;
 	for (const rawLine of readFileSync(path, 'utf8').split(/\r?\n/)) {
@@ -24,7 +24,7 @@ const config = {
 	port: Number(process.env.AUTH_GATEWAY_PORT ?? 8787),
 	baasUrl: (process.env.PUBLIC_BAAS_URL?.startsWith('/api') ? 'http://localhost:8000' : (process.env.PUBLIC_BAAS_URL ?? 'http://localhost:8000')).replace(/\/$/, ''),
 	anonKey: process.env.PUBLIC_BAAS_ANON_KEY ?? process.env.KONG_PUBLIC_API_KEY ?? '',
-	serviceKey: process.env.SERVICE_ROLE_KEY ?? process.env.KONG_SERVICE_API_KEY ?? '',
+	serviceKey: process.env.SERVICE_ROLE_KEY ?? process.env.KONG_SERVICE_API_KEY ?? process.env.BAAS_SERVICE_ROLE_KEY ?? '',
 	turnstileSecret: process.env.TURNSTILE_SECRET_KEY ?? '',
 	turnstileBypassLocal: process.env.TURNSTILE_BYPASS_LOCAL === 'true',
 	siteUrl: process.env.PUBLIC_SITE_URL ?? 'http://localhost:4322',
@@ -36,7 +36,7 @@ const config = {
 	smtpFromAddress: process.env.SMTP_FROM_ADDRESS ?? process.env.EMAIL_FROM ?? process.env.SMTP_USERNAME ?? process.env.SMTP_USER ?? '',
 	requireEmailVerification: process.env.AUTH_REQUIRE_EMAIL_VERIFICATION !== 'false' && process.env.PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION !== 'false',
 	osionosBridgeUrl: (process.env.OSIONOS_BRIDGE_URL ?? 'http://localhost:4000/api/auth/bridge/session').replace(/\/$/, ''),
-	osionosBridgeSecret: process.env.OSIONOS_BRIDGE_SHARED_SECRET ?? process.env.JWT_SECRET ?? '',
+	osionosBridgeSecret: process.env.OSIONOS_BRIDGE_SHARED_SECRET ?? '',
 };
 
 const buckets = new Map();
@@ -958,17 +958,25 @@ async function handleOsionosSession(request, response) {
 		subject,
 		email,
 		name: typeof metadata.username === 'string' ? metadata.username : email.split('@')[0],
+		jti: randomUUID(),
 	};
 	const timestamp = String(Date.now());
-	const result = await fetch(config.osionosBridgeUrl, {
-		method: 'POST',
-		headers: {
-			'content-type': 'application/json',
-			'x-prismatica-bridge-timestamp': timestamp,
-			'x-prismatica-bridge-signature': bridgeSignature(timestamp, payload),
-		},
-		body: JSON.stringify(payload),
-	});
+	let result;
+	try {
+		result = await fetch(config.osionosBridgeUrl, {
+			method: 'POST',
+			headers: {
+				'content-type': 'application/json',
+				'x-prismatica-bridge-timestamp': timestamp,
+				'x-prismatica-bridge-signature': bridgeSignature(timestamp, payload),
+			},
+			body: JSON.stringify(payload),
+		});
+	} catch (error) {
+		await audit('osionos_bridge_failed', request, { email, status: 502, error: error instanceof Error ? error.message : 'bridge_unreachable' });
+		json(response, 502, { message: 'osionos bridge is unreachable.' });
+		return;
+	}
 	const body = await result.json().catch(() => ({}));
 	await audit(result.ok ? 'osionos_bridge_success' : 'osionos_bridge_failed', request, { email, status: result.status });
 	json(response, result.status, body);

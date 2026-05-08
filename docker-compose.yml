@@ -52,7 +52,8 @@ services:
       - ./models/user.sql:/project-init/01-user.sql:ro
       - ./models/gdpr-migration.sql:/project-init/02-gdpr.sql:ro
       - ./models/auth-security-migration.sql:/project-init/03-auth-security.sql:ro
-      - ./models/seeds.sql:/project-init/04-seeds.sql:ro
+      - ./models/osionos-bridge-migration.sql:/project-init/04-osionos-bridge.sql:ro
+      - ./models/seeds.sql:/project-init/05-seeds.sql:ro
     depends_on:
       db-bootstrap:
         condition: service_completed_successfully
@@ -69,7 +70,7 @@ services:
     image: ${BAAS_GOTRUE_IMAGE:-supabase/gotrue:v2.188.1}
     env_file:
       - ./infrastructure/baas/.env.local
-      - ./opposite-osiris/.env.local
+      - ./.env.local
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: 9999
@@ -93,7 +94,7 @@ services:
       GOTRUE_JWT_EXP: 3600
       GOTRUE_JWT_ISSUER: ${API_EXTERNAL_URL:-http://localhost:8000/auth/v1}
     volumes:
-      - ./opposite-osiris/src/email-templates:/etc/gotrue/templates:ro
+      - ./apps/opposite-osiris/src/email-templates:/etc/gotrue/templates:ro
     depends_on:
       db-bootstrap:
         condition: service_completed_successfully
@@ -151,7 +152,7 @@ services:
       dockerfile: Dockerfile
     env_file:
       - ./infrastructure/baas/.env.local
-      - ./opposite-osiris/.env.local
+      - ./.env.local
     ports:
       - "127.0.0.1:${KONG_HTTP_PORT:-8000}:8000"
       - "127.0.0.1:${KONG_ADMIN_PORT:-8001}:8001"
@@ -201,25 +202,65 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  local-runtime-secrets:
+    image: node:22-alpine
+    working_dir: /app
+    command: ["node", "infrastructure/baas/scripts/ensure-osionos-runtime-secrets.mjs"]
+    volumes:
+      - ./:/app
+    restart: "no"
+
+  osionos-bridge:
+    image: node:22-alpine
+    working_dir: /app/apps/osionos/app
+    command: ["node", "scripts/bridge-api.mjs"]
+    env_file:
+      - ./infrastructure/baas/.env.local
+      - ./.env.local
+    environment:
+      OSIONOS_BRIDGE_PORT: 4000
+      OSIONOS_APP_URL: ${OSIONOS_APP_URL:-http://localhost:3001}
+      OSIONOS_ALLOWED_ORIGIN: ${OSIONOS_ALLOWED_ORIGIN:-http://localhost:3001}
+      OSIONOS_BAAS_URL: http://kong:8000
+      OSIONOS_BRIDGE_PERSISTENCE: ${OSIONOS_BRIDGE_PERSISTENCE:-auto}
+      OSIONOS_BRIDGE_REQUIRE_BAAS: ${OSIONOS_BRIDGE_REQUIRE_BAAS:-false}
+    volumes:
+      - ./:/app:ro
+    ports:
+      - "127.0.0.1:${OSIONOS_BRIDGE_HOST_PORT:-4000}:4000"
+    depends_on:
+      local-runtime-secrets:
+        condition: service_completed_successfully
+      kong:
+        condition: service_healthy
+      project-db-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
   auth-gateway:
     image: node:22-alpine
-    working_dir: /app/opposite-osiris
+    working_dir: /app/apps/opposite-osiris
     command: ["node", "scripts/auth-gateway.mjs"]
     env_file:
       - ./infrastructure/baas/.env.local
-      - ./opposite-osiris/.env.local
+      - ./.env.local
     environment:
       AUTH_GATEWAY_PORT: 8787
       PUBLIC_BAAS_URL: http://kong:8000
+      OSIONOS_BRIDGE_URL: http://osionos-bridge:4000/api/auth/bridge/session
     volumes:
       - ./:/app:ro
     ports:
       - "${AUTH_GATEWAY_HOST_PORT:-8787}:8787"
     depends_on:
+      local-runtime-secrets:
+        condition: service_completed_successfully
       kong:
         condition: service_healthy
       project-db-init:
         condition: service_completed_successfully
+      osionos-bridge:
+        condition: service_started
     restart: unless-stopped
 
 volumes:

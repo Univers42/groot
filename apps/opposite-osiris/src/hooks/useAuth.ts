@@ -39,6 +39,15 @@ export type AuthResult = {
 	expiresIn?: number;
 };
 
+export type OsionosBridgeResult = {
+	ok: boolean;
+	status: number;
+	message: string;
+	redirectUrl?: string;
+	expiresIn?: number;
+	workspaceId?: string;
+};
+
 export type AvailabilityFieldResult = {
 	checked: boolean;
 	available: boolean | null;
@@ -133,6 +142,21 @@ async function parseAuthResponse(response: Response): Promise<AuthResult> {
 	};
 }
 
+async function parseOsionosBridgeResponse(response: Response): Promise<OsionosBridgeResult> {
+	const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+	const fallback = response.ok ? 'osionos bridge handoff is ready.' : 'Could not open the osionos workspace.';
+	const message = [payload.message, payload.error_description, payload.msg, payload.error]
+		.find((value) => typeof value === 'string' && value.trim().length > 0);
+	return {
+		ok: response.ok,
+		status: response.status,
+		message: typeof message === 'string' ? message : fallback,
+		redirectUrl: typeof payload.redirectUrl === 'string' ? payload.redirectUrl : undefined,
+		expiresIn: typeof payload.expiresIn === 'number' ? payload.expiresIn : undefined,
+		workspaceId: typeof payload.workspaceId === 'string' ? payload.workspaceId : undefined,
+	};
+}
+
 async function parseAvailabilityResponse(response: Response): Promise<AvailabilityResult> {
 	const payload = await response.json().catch(() => ({})) as Partial<AvailabilityResult>;
 	return {
@@ -210,6 +234,16 @@ export function useAuth(options: AuthClientOptions = {}) {
 		},
 		async logout(): Promise<AuthResult> {
 			return parseAuthResponse(await post('/logout', {}));
+		},
+		async osionosSession(accessToken: string): Promise<OsionosBridgeResult> {
+			if (!accessToken) {
+				return { ok: false, status: 401, message: 'Missing Prismatica session token.' };
+			}
+			return parseOsionosBridgeResponse(await fetchWithBackoff(`${gatewayUrl}/osionos-session`, {
+				method: 'POST',
+				headers: { Accept: 'application/json', Authorization: `Bearer ${accessToken}` },
+				credentials: 'include',
+			}, maxRetries));
 		},
 		async beginMfaTotpEnrollment(): Promise<AuthResult> {
 			return parseAuthResponse(await post('/mfa/totp/enroll', {}));

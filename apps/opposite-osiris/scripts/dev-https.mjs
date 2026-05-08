@@ -6,7 +6,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const projectDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const repoRoot = resolve(projectDir, '..');
+const repoRoot = resolve(projectDir, '../..');
 const certDir = resolve(repoRoot, 'infrastructure/baas/certs');
 const certScript = resolve(repoRoot, 'infrastructure/baas/scripts/generate-localhost-cert.sh');
 const trustScript = resolve(repoRoot, 'infrastructure/baas/scripts/trust-localhost-cert.sh');

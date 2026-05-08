@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createClient } from '@mini-baas/js';
 
-const envFiles = ['.env.local', '.env', '../infrastructure/baas/.env.local'];
+const envFiles = ['.env.local', '.env', '../../.env.local', '../../infrastructure/baas/.env.local'];
 
 function stripWrappingQuotes(value) {
 	const first = value.at(0);

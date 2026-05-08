@@ -10,7 +10,7 @@ BAAS_SMTP_VERSION ?= smtp-v1
 BAAS_SERVICES ?= kong gotrue postgrest postgres redis realtime
 BAAS_DOCKERFILE := infrastructure/baas/Dockerfile
 BAAS_CONTEXT := infrastructure/baas
-FRONTEND_DIR := opposite-osiris
+FRONTEND_DIR := apps/opposite-osiris
 
 .PHONY: version baas-build baas-push baas-update baas-smoke baas-release-smtp
 
