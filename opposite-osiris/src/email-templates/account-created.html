@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Your Prismatica account is ready</title>
+</head>
+<body style="margin:0; padding:0; background:#eef2f6; color:#201a17; font-family:Arial, Helvetica, sans-serif;">
+	<main style="background:#eef2f6; margin:0; padding:28px 12px;">
+		<section style="max-width:640px; margin:0 auto; background:#fffdf8; border:1px solid #d7cec2; border-radius:18px; box-shadow:0 18px 42px rgba(32,26,23,.13); overflow:hidden;">
+			<div style="height:8px; background:#2f6f73;"></div>
+			<div style="padding:32px 30px 30px 30px;">
+				<p style="margin:0 0 10px 0; color:#2f6f73; font-size:13px; font-weight:700; letter-spacing:.09em; text-transform:uppercase;">Prismatica account</p>
+				<h1 style="margin:0 0 18px 0; color:#201a17; font-family:Georgia, 'Times New Roman', serif; font-size:34px; line-height:1.08;">Your account is ready</h1>
+				<p style="margin:0 0 16px 0; font-size:17px; line-height:1.58;">Hello {{.Email}},</p>
+				<p style="margin:0 0 24px 0; font-size:17px; line-height:1.58;">Your Prismatica account was created successfully. You can now sign in and start using your workspace.</p>
+				<p style="margin:28px 0;"><a href="{{.SiteURL}}/" style="display:inline-block; padding:15px 24px; color:#201a17; background:#f5d84a; border:2px solid #201a17; border-radius:999px; box-shadow:4px 4px 0 #201a17; font-size:17px; font-weight:700; text-decoration:none;">Open Prismatica →</a></p>
+			</div>
+			<footer style="padding:20px 30px 28px 30px; border-top:1px solid #d7cec2; background:#f4efe7;">
+				<p style="margin:0 0 8px 0; color:#5a514a; font-size:13px; line-height:1.45;">Prismatica account notifications are required for account security.</p>
+				<p style="margin:0; font-size:13px; line-height:1.45;"><a href="{{.SiteURL}}/legal/privacy-policy/" style="color:#2f6f73; font-weight:700;">Privacy Policy</a></p>
+			</footer>
+		</section>
+	</main>
+</body>
+</html>

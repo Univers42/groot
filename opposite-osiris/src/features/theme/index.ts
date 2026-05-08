@@ -2,22 +2,29 @@
 // Reads a stored theme preference, applies it to <html data-theme>, and binds
 // the theme toggle button. Safe to call multiple times — it is idempotent.
 
-export type ThemeName = 'light' | 'dark' | 'night';
+export type ThemeName = 'aurora' | 'solar' | 'ember' | 'forest';
 
 const STORAGE_KEY = 'prismatica:theme';
-const THEMES: ThemeName[] = ['light', 'dark', 'night'];
+const THEMES: ThemeName[] = ['aurora', 'solar', 'ember', 'forest'];
+
+function normalizeTheme(value: string | null | undefined): ThemeName | null {
+	if (value === 'aurora' || value === 'solar' || value === 'ember' || value === 'forest') return value;
+	if (value === 'light') return 'solar';
+	if (value === 'dark' || value === 'night') return 'aurora';
+	return null;
+}
 
 function readStoredTheme(): ThemeName | null {
 	try {
 		const value = globalThis.localStorage?.getItem(STORAGE_KEY);
-		return THEMES.includes(value as ThemeName) ? (value as ThemeName) : null;
+		return normalizeTheme(value);
 	} catch {
 		return null;
 	}
 }
 
 function systemPreference(): ThemeName {
-	return globalThis.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+	return globalThis.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'aurora' : 'solar';
 }
 
 function persist(theme: ThemeName): void {
@@ -34,7 +41,7 @@ export function applyTheme(theme: ThemeName): void {
 }
 
 export function cycleTheme(): ThemeName {
-	const current = (document.documentElement.dataset.theme as ThemeName | undefined) ?? 'light';
+	const current = normalizeTheme(document.documentElement.dataset.theme) ?? 'aurora';
 	const next = THEMES[(THEMES.indexOf(current) + 1) % THEMES.length];
 	applyTheme(next);
 	return next;

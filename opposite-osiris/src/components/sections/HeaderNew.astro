@@ -1,5 +1,6 @@
 ---
 import Button from '../ui/Button.astro';
+import PrismaticaLogo from '../brand/PrismaticaLogo.astro';
 
 const navItems = [
 	{ href: '#product',   label: 'Product' },
@@ -11,7 +12,7 @@ const navItems = [
 <header class="header-new" data-component="header-new">
 	<div class="header-new__inner">
 		<a class="header-new__brand" href="/" aria-label="Prismatica home">
-			<span class="header-new__logo" aria-hidden="true">◐</span>
+			<span class="header-new__logo" aria-hidden="true"><PrismaticaLogo decorative /></span>
 			<span class="header-new__wordmark">Prismatica</span>
 		</a>
 
@@ -28,11 +29,11 @@ const navItems = [
 				id="theme-toggle"
 				class="header-new__theme"
 				type="button"
-				aria-label="Theme: light. Switch to dark mode"
-				title="Switch to dark theme"
+				aria-label="Theme: Aurora. Switch to Solar palette"
+				title="Switch to Solar theme"
 			>
-				<span class="header-icon--theme" aria-hidden="true">☼</span>
-				<span class="visually-hidden" data-theme-label>Theme: Light</span>
+				<span class="header-icon--theme" aria-hidden="true">✦</span>
+				<span class="visually-hidden" data-theme-label>Theme: Aurora</span>
 			</button>
 			<Button variant="ghost" size="sm" data-open-connect>Sign in</Button>
 			<Button variant="primary" size="sm" data-open-portal>Start free</Button>
@@ -62,12 +63,12 @@ const navItems = [
 			<button
 				class="header-new__theme header-new__theme--drawer"
 				type="button"
-				aria-label="Theme: light. Switch to dark mode"
-				title="Switch to dark theme"
+				aria-label="Theme: Aurora. Switch to Solar palette"
+				title="Switch to Solar theme"
 				data-theme-toggle
 			>
-				<span class="header-icon--theme" aria-hidden="true">☼</span>
-				<span data-theme-label>Theme: Light</span>
+				<span class="header-icon--theme" aria-hidden="true">✦</span>
+				<span data-theme-label>Theme: Aurora</span>
 			</button>
 			<Button variant="ghost" size="md" data-open-connect full>Sign in</Button>
 			<Button variant="primary" size="md" data-open-portal full>Start free</Button>
@@ -96,8 +97,9 @@ const navItems = [
 		position: sticky;
 		top: 0;
 		z-index: 40;
-		background: var(--system-surface);
-		border-bottom: 1px solid var(--system-border);
+		background: var(--header-bg);
+		border-bottom: 1px solid var(--brand-canvas-line-strong);
+		box-shadow: var(--brand-shadow-header-drop);
 	}
 
 	.header-new__inner {
@@ -114,9 +116,9 @@ const navItems = [
 		align-items: center;
 		gap: 0.55rem;
 		color: var(--system-text-strong);
-		font-family: var(--system-font-sans);
-		font-weight: 700;
-		font-size: 1.05rem;
+		font-family: var(--brand-font-display);
+		font-weight: 400;
+		font-size: 1.28rem;
 		text-decoration: none;
 	}
 
@@ -125,10 +127,13 @@ const navItems = [
 		place-items: center;
 		width: 32px;
 		height: 32px;
-		border-radius: var(--system-radius-md);
-		background: var(--system-action-bg);
-		color: var(--system-action-fg);
-		font-size: 1.2rem;
+		color: var(--system-text-strong);
+	}
+
+	.header-new__logo .prismatica-logo {
+		width: 32px;
+		height: 32px;
+		display: block;
 	}
 
 	.header-new__nav {
@@ -151,7 +156,7 @@ const navItems = [
 		padding: 0.45rem 0.85rem;
 		border-radius: var(--system-radius-sm);
 		color: var(--system-text);
-		font-weight: 500;
+		font-weight: 600;
 		text-decoration: none;
 	}
 	.header-new__link:hover {
@@ -177,14 +182,14 @@ const navItems = [
 		padding: 0;
 		border: 1px solid var(--system-border);
 		border-radius: var(--system-radius-sm);
-		background: var(--system-action-secondary-bg);
+		background: color-mix(in srgb, var(--brand-canvas-surface-2) 70%, transparent);
 		color: var(--system-text-strong);
 		font: inherit;
 		cursor: pointer;
 		transition: background 120ms ease, border-color 120ms ease;
 	}
 	.header-new__theme:hover {
-		background: var(--system-action-secondary-bg-hover);
+		background: color-mix(in srgb, var(--brand-palette-primary) 16%, var(--brand-canvas-surface));
 		border-color: var(--system-border-strong);
 	}
 	.header-new__theme:focus-visible {
@@ -240,7 +245,7 @@ const navItems = [
 			gap: 1rem;
 			padding: 1rem;
 			border-top: 1px solid var(--system-border);
-			background: var(--system-surface);
+			background: var(--header-frame-bg);
 		}
 		.header-new__list--mobile {
 			flex-direction: column;

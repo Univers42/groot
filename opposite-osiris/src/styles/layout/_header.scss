@@ -12,7 +12,6 @@
 	min-height: 68px;
 	padding: var(--space-header-pad-block) var(--space-header-pad-inline);
 	background: var(--header-bg);
-	backdrop-filter: blur(12px);
 	filter: drop-shadow(var(--shadow-header-drop));
 	overflow: visible;
 }
@@ -43,6 +42,22 @@
 	font-family: var(--font-brand);
 	font-size: clamp(1.35rem, 2.5vw, 1.72rem);
 	white-space: nowrap;
+}
+
+.brand-mark__logo {
+	display: block;
+	width: 2rem;
+	height: 2rem;
+	color: var(--ink);
+	flex: 0 0 auto;
+}
+
+.brand-mark__logo .prismatica-logo__iris--left {
+	fill: var(--prismatica-logo-left);
+}
+
+.brand-mark__logo .prismatica-logo__iris--right {
+	fill: var(--prismatica-logo-right);
 }
 
 .header-mascot-slot {

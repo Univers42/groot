@@ -1,22 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <g transform="scale(0.5) translate(8, 20)">
-    <g fill="#ececec" stroke="#1c1612" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M15 34 C26 20, 51 16, 69 27 C80 34, 87 48, 86 62 C85 78, 73 90, 55 94 C34 98, 14 90, 7 75 C1 61, 4 45, 15 34Z" />
-      <path d="M115 27 C134 16, 158 20, 169 34 C180 49, 183 65, 177 78 C170 92, 150 98, 129 94 C111 90, 99 78, 98 62 C97 48, 104 34, 115 27Z" />
-      <ellipse cx="43" cy="57" rx="39" ry="34" />
-      <ellipse cx="141" cy="57" rx="39" ry="34" />
-    </g>
-    <!-- rims -->
-    <ellipse cx="43" cy="57" rx="28" ry="24" fill="#f5f0e8" stroke="#1c1612" stroke-width="3" />
-    <ellipse cx="141" cy="57" rx="28" ry="24" fill="#f5f0e8" stroke="#1c1612" stroke-width="3" />
-    
-    <!-- pupils -->
-    <circle cx="43" cy="57" r="11" fill="#1c1612" />
-    <circle cx="141" cy="57" r="11" fill="#1c1612" />
-    <circle cx="38" cy="52" r="3" fill="#fff" />
-    <circle cx="136" cy="52" r="3" fill="#fff" />
-
-    <!-- bridge -->
-    <path d="M80 61 C84 51, 91 48, 97 52 C101 55, 104 59, 108 62 C110 63, 112 63, 114 62" fill="none" stroke="#1c1612" stroke-width="6" stroke-linecap="round" />
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <rect width="32" height="32" rx="7" fill="#fffdf8"/>
+  <path d="M14.4 16c.9-.78 2.3-.78 3.2 0" stroke="#201a17" stroke-width="1.8" stroke-linecap="round"/>
+  <circle cx="11" cy="16" r="8" fill="#fffdf8" stroke="#201a17" stroke-width="1.8"/>
+  <circle cx="21" cy="16" r="8" fill="#fffdf8" stroke="#201a17" stroke-width="1.8"/>
+  <circle cx="11" cy="16" r="3.3" fill="#8b5cf6"/>
+  <circle cx="21" cy="16" r="3.3" fill="#06b6d4"/>
+  <circle cx="9.8" cy="14.8" r="0.9" fill="#fffdf8"/>
+  <circle cx="19.8" cy="14.8" r="0.9" fill="#fffdf8"/>
 </svg>

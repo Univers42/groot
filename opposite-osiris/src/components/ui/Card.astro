@@ -35,9 +35,9 @@ const classes = [
 		display: grid;
 		gap: 1rem;
 		padding: 1.5rem;
-		border: 1px solid var(--system-border);
+		border: 1px solid var(--brand-canvas-line-strong);
 		border-radius: var(--system-radius-lg);
-		background: var(--system-surface);
+		background: color-mix(in srgb, var(--brand-canvas-surface) 84%, transparent);
 		color: var(--system-text);
 		font-family: var(--system-font-sans);
 		box-shadow: var(--system-shadow-1);
@@ -92,6 +92,7 @@ const classes = [
 
 	.ui-card__title {
 		margin: 0;
+		font-family: var(--system-font-sans);
 		font-size: 1.12rem;
 		font-weight: 700;
 		color: var(--system-text-strong);

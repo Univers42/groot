@@ -1,0 +1,273 @@
+---
+import Eyebrow from '../brand/Eyebrow.astro';
+---
+
+<section class="section section--surface canvas-windows" id="canvas">
+	<div class="section__container canvas-windows__grid">
+		<header class="canvas-windows__copy" data-scroll-rise>
+			<Eyebrow icon="✶">Workspace anatomy</Eyebrow>
+			<h2 class="section__title canvas-windows__title">One canvas, many windows.</h2>
+			<p class="section__lede canvas-windows__lede">
+				Notes, auth, metrics, Postgres rows, email events, and product workflows all live in one
+				place without losing the backend wiring underneath.
+			</p>
+		</header>
+
+		<figure class="canvas-windows__figure" data-scroll-grow>
+			<svg class="canvas-windows__svg" viewBox="0 0 1100 640" xmlns="http://www.w3.org/2000/svg" fill="none" role="img" aria-labelledby="canvas-windows-title canvas-windows-desc">
+				<title id="canvas-windows-title">One Prismatica canvas with several product windows</title>
+				<desc id="canvas-windows-desc">A hand-drawn dashboard showing notes, charts, assistant context, Postgres rows, privacy panels, sharing controls, and code extensions.</desc>
+				<defs>
+					<filter id="canvas-wobble" x="-5%" y="-5%" width="110%" height="110%">
+						<feTurbulence type="fractalNoise" baseFrequency="0.02" numOctaves="2" seed="3" />
+						<feDisplacementMap in="SourceGraphic" scale="2.4" />
+					</filter>
+					<filter id="canvas-wobble-tight" x="-5%" y="-5%" width="110%" height="110%">
+						<feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" seed="7" />
+						<feDisplacementMap in="SourceGraphic" scale="1.8" />
+					</filter>
+					<pattern id="canvas-dots" width="14" height="14" patternUnits="userSpaceOnUse">
+						<circle cx="2" cy="2" r="1" fill="var(--brand-canvas-text-muted)" opacity="0.42" />
+					</pattern>
+				</defs>
+
+				<rect x="0" y="0" width="1100" height="640" fill="url(#canvas-dots)" opacity="0.46" />
+				<rect class="canvas-windows__halo" x="180" y="84" width="760" height="458" rx="24" />
+
+				<g filter="url(#canvas-wobble)" stroke="var(--brand-canvas-text)" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round">
+					<rect x="120" y="60" width="860" height="520" rx="12" />
+					<line x1="120" y1="100" x2="980" y2="100" />
+					<circle cx="146" cy="80" r="5" fill="var(--brand-window-close)" stroke="none" />
+					<circle cx="166" cy="80" r="5" fill="var(--brand-window-minimize)" stroke="none" />
+					<circle cx="186" cy="80" r="5" fill="var(--brand-window-maximize)" stroke="none" />
+					<rect x="220" y="70" width="180" height="22" rx="4" />
+					<line x1="430" y1="80" x2="500" y2="80" stroke-dasharray="4 4" />
+					<rect x="500" y="70" width="100" height="22" rx="4" />
+					<line x1="220" y1="100" x2="220" y2="580" />
+					<rect x="140" y="120" width="60" height="14" rx="3" />
+					<rect x="140" y="146" width="70" height="10" rx="3" />
+					<rect x="140" y="166" width="50" height="10" rx="3" />
+					<rect x="140" y="186" width="64" height="10" rx="3" />
+					<line x1="135" y1="208" x2="205" y2="208" />
+					<rect x="140" y="220" width="60" height="14" rx="3" />
+					<rect x="140" y="246" width="70" height="10" rx="3" />
+					<rect x="140" y="266" width="46" height="10" rx="3" />
+				</g>
+
+				<g filter="url(#canvas-wobble-tight)" stroke="var(--brand-canvas-text)" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round">
+					<rect x="250" y="130" width="240" height="170" rx="8" />
+					<line x1="250" y1="158" x2="490" y2="158" />
+					<text x="262" y="150" font-family="var(--brand-font-annotation)" font-size="14" fill="var(--brand-canvas-text)" stroke="none">notes.md</text>
+					<line x1="266" y1="178" x2="460" y2="178" />
+					<line x1="266" y1="194" x2="430" y2="194" />
+					<line x1="266" y1="210" x2="450" y2="210" />
+					<line x1="266" y1="226" x2="380" y2="226" />
+					<line x1="266" y1="246" x2="420" y2="246" />
+					<line x1="266" y1="262" x2="400" y2="262" />
+					<line x1="266" y1="278" x2="350" y2="278" />
+				</g>
+
+				<g filter="url(#canvas-wobble-tight)" stroke="var(--brand-palette-primary)" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round">
+					<rect x="510" y="130" width="280" height="170" rx="8" stroke="var(--brand-canvas-text)" />
+					<line x1="510" y1="158" x2="790" y2="158" stroke="var(--brand-canvas-text)" />
+					<text x="522" y="150" font-family="var(--brand-font-annotation)" font-size="14" fill="var(--brand-canvas-text)" stroke="none">live_metrics</text>
+					<line x1="530" y1="280" x2="770" y2="280" stroke="var(--brand-canvas-text)" />
+					<line x1="530" y1="180" x2="530" y2="280" stroke="var(--brand-canvas-text)" />
+					<polyline points="540,260 570,240 600,250 630,210 660,225 690,180 720,200 760,170" />
+					<circle cx="690" cy="180" r="3" fill="var(--brand-palette-primary)" />
+					<circle cx="760" cy="170" r="3" fill="var(--brand-palette-primary)" />
+					<line x1="550" y1="280" x2="550" y2="270" stroke-width="6" stroke="var(--brand-palette-secondary)" />
+					<line x1="580" y1="280" x2="580" y2="262" stroke-width="6" stroke="var(--brand-palette-secondary)" />
+					<line x1="610" y1="280" x2="610" y2="258" stroke-width="6" stroke="var(--brand-palette-secondary)" />
+					<line x1="640" y1="280" x2="640" y2="248" stroke-width="6" stroke="var(--brand-palette-secondary)" />
+					<line x1="670" y1="280" x2="670" y2="240" stroke-width="6" stroke="var(--brand-palette-secondary)" />
+					<line x1="700" y1="280" x2="700" y2="232" stroke-width="6" stroke="var(--brand-palette-secondary)" />
+					<line x1="730" y1="280" x2="730" y2="224" stroke-width="6" stroke="var(--brand-palette-secondary)" />
+				</g>
+
+				<g filter="url(#canvas-wobble-tight)" stroke="var(--brand-canvas-text)" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round">
+					<rect x="800" y="130" width="160" height="240" rx="8" />
+					<line x1="800" y1="158" x2="960" y2="158" />
+					<text x="812" y="150" font-family="var(--brand-font-annotation)" font-size="14" fill="var(--brand-canvas-text)" stroke="none">~/ assistant</text>
+					<rect x="816" y="174" width="100" height="22" rx="11" />
+					<rect x="844" y="206" width="100" height="22" rx="11" stroke="var(--brand-palette-primary)" />
+					<rect x="816" y="238" width="120" height="32" rx="11" />
+					<rect x="844" y="280" width="100" height="22" rx="11" stroke="var(--brand-palette-primary)" />
+					<line x1="816" y1="346" x2="944" y2="346" />
+					<text x="822" y="340" font-family="var(--system-font-mono)" font-size="9" fill="var(--brand-canvas-text-muted)" stroke="none">ask anything</text>
+					<text x="928" y="340" font-family="var(--system-font-mono)" font-size="9" fill="var(--brand-palette-primary)" stroke="none">enter</text>
+				</g>
+
+				<g filter="url(#canvas-wobble-tight)" stroke="var(--brand-canvas-text)" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round">
+					<rect x="250" y="320" width="240" height="240" rx="8" />
+					<line x1="250" y1="348" x2="490" y2="348" />
+					<text x="262" y="340" font-family="var(--brand-font-annotation)" font-size="14" fill="var(--brand-canvas-text)" stroke="none">postgres / tracking</text>
+					<line x1="250" y1="372" x2="490" y2="372" stroke-dasharray="3 3" />
+					<text x="266" y="366" font-family="var(--system-font-mono)" font-size="10" fill="var(--brand-canvas-text-dim)" stroke="none">id</text>
+					<text x="306" y="366" font-family="var(--system-font-mono)" font-size="10" fill="var(--brand-canvas-text-dim)" stroke="none">metric</text>
+					<text x="386" y="366" font-family="var(--system-font-mono)" font-size="10" fill="var(--brand-canvas-text-dim)" stroke="none">value</text>
+					<text x="446" y="366" font-family="var(--system-font-mono)" font-size="10" fill="var(--brand-canvas-text-dim)" stroke="none">ts</text>
+					<line x1="250" y1="394" x2="490" y2="394" stroke-dasharray="2 4" opacity="0.5" /><rect x="266" y="380" width="18" height="8" rx="2" /><rect x="306" y="380" width="60" height="8" rx="2" /><rect x="386" y="380" width="24" height="8" rx="2" stroke="var(--brand-palette-secondary)" /><rect x="446" y="380" width="34" height="8" rx="2" />
+					<line x1="250" y1="416" x2="490" y2="416" stroke-dasharray="2 4" opacity="0.5" /><rect x="266" y="402" width="18" height="8" rx="2" /><rect x="306" y="402" width="60" height="8" rx="2" /><rect x="386" y="402" width="34" height="8" rx="2" stroke="var(--brand-palette-secondary)" /><rect x="446" y="402" width="34" height="8" rx="2" />
+					<line x1="250" y1="438" x2="490" y2="438" stroke-dasharray="2 4" opacity="0.5" /><rect x="266" y="424" width="18" height="8" rx="2" /><rect x="306" y="424" width="60" height="8" rx="2" /><rect x="386" y="424" width="47" height="8" rx="2" stroke="var(--brand-palette-secondary)" /><rect x="446" y="424" width="34" height="8" rx="2" />
+					<line x1="250" y1="460" x2="490" y2="460" stroke-dasharray="2 4" opacity="0.5" /><rect x="266" y="446" width="18" height="8" rx="2" /><rect x="306" y="446" width="60" height="8" rx="2" /><rect x="386" y="446" width="38" height="8" rx="2" stroke="var(--brand-palette-secondary)" /><rect x="446" y="446" width="34" height="8" rx="2" />
+					<line x1="250" y1="482" x2="490" y2="482" stroke-dasharray="2 4" opacity="0.5" /><rect x="266" y="468" width="18" height="8" rx="2" /><rect x="306" y="468" width="60" height="8" rx="2" /><rect x="386" y="468" width="57" height="8" rx="2" stroke="var(--brand-palette-secondary)" /><rect x="446" y="468" width="34" height="8" rx="2" />
+					<line x1="250" y1="504" x2="490" y2="504" stroke-dasharray="2 4" opacity="0.5" /><rect x="266" y="490" width="18" height="8" rx="2" /><rect x="306" y="490" width="60" height="8" rx="2" /><rect x="386" y="490" width="31" height="8" rx="2" stroke="var(--brand-palette-secondary)" /><rect x="446" y="490" width="34" height="8" rx="2" />
+				</g>
+
+				<g filter="url(#canvas-wobble-tight)" stroke="var(--brand-canvas-text)" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round">
+					<rect x="510" y="320" width="135" height="115" rx="8" />
+					<text x="522" y="345" font-family="var(--brand-font-annotation)" font-size="16" fill="var(--brand-palette-primary)" stroke="none">Private</text>
+					<line x1="522" y1="360" x2="610" y2="360" stroke-dasharray="2 3" />
+					<line x1="522" y1="376" x2="600" y2="376" stroke-dasharray="2 3" />
+					<line x1="522" y1="392" x2="580" y2="392" stroke-dasharray="2 3" />
+					<circle cx="618" cy="412" r="10" />
+					<path d="M 614 412 L 618 416 L 624 408" stroke="var(--brand-palette-secondary)" stroke-width="2" />
+
+					<rect x="655" y="320" width="135" height="115" rx="8" />
+					<text x="667" y="345" font-family="var(--brand-font-annotation)" font-size="16" fill="var(--brand-palette-secondary)" stroke="none">Shared</text>
+					<circle cx="672" cy="380" r="10" />
+					<circle cx="690" cy="380" r="10" />
+					<circle cx="708" cy="380" r="10" />
+					<line x1="667" y1="408" x2="780" y2="408" stroke-dasharray="2 3" />
+
+					<rect x="510" y="445" width="280" height="115" rx="8" />
+					<text x="522" y="470" font-family="var(--brand-font-annotation)" font-size="16" fill="var(--brand-palette-rose)" stroke="none">Public / forkable</text>
+					<rect x="522" y="486" width="80" height="14" rx="3" />
+					<rect x="612" y="486" width="80" height="14" rx="3" />
+					<rect x="702" y="486" width="80" height="14" rx="3" />
+					<line x1="522" y1="514" x2="780" y2="514" stroke-dasharray="2 3" />
+					<line x1="522" y1="530" x2="700" y2="530" stroke-dasharray="2 3" />
+					<line x1="522" y1="546" x2="650" y2="546" stroke-dasharray="2 3" />
+				</g>
+
+				<g filter="url(#canvas-wobble-tight)" stroke="var(--brand-canvas-text)" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round">
+					<rect x="800" y="380" width="160" height="180" rx="8" />
+					<line x1="800" y1="408" x2="960" y2="408" />
+					<text x="812" y="400" font-family="var(--brand-font-annotation)" font-size="14" fill="var(--brand-canvas-text)" stroke="none">extend.ts</text>
+					<text x="816" y="428" font-family="var(--system-font-mono)" font-size="10" fill="var(--brand-palette-primary)" stroke="none">export const</text>
+					<text x="816" y="442" font-family="var(--system-font-mono)" font-size="10" fill="var(--brand-canvas-text)" stroke="none">widget = () =&gt;</text>
+					<text x="816" y="456" font-family="var(--system-font-mono)" font-size="10" fill="var(--brand-palette-secondary)" stroke="none">return event</text>
+					<line x1="812" y1="490" x2="948" y2="490" stroke-dasharray="3 3" />
+					<line x1="812" y1="504" x2="900" y2="504" stroke-dasharray="3 3" />
+					<line x1="812" y1="518" x2="930" y2="518" stroke-dasharray="3 3" />
+					<line x1="812" y1="532" x2="880" y2="532" stroke-dasharray="3 3" />
+				</g>
+
+				<g stroke="var(--brand-palette-primary)" fill="none" stroke-width="1.8" stroke-linecap="round">
+					<path d="M 100 130 Q 180 110 240 160" filter="url(#canvas-wobble-tight)" />
+					<path d="M 232 154 L 244 162 L 232 170" />
+				</g>
+				<text x="36" y="116" font-family="var(--brand-font-annotation)" font-size="22" fill="var(--brand-palette-primary)">drag anything in</text>
+
+				<g stroke="var(--brand-palette-secondary)" fill="none" stroke-width="1.8" stroke-linecap="round">
+					<path d="M 590 50 Q 620 80 640 130" filter="url(#canvas-wobble-tight)" />
+					<path d="M 634 122 L 642 134 L 650 124" />
+				</g>
+				<text x="450" y="42" font-family="var(--brand-font-annotation)" font-size="22" fill="var(--brand-palette-secondary)">dashboards</text>
+
+				<g stroke="var(--brand-palette-rose)" fill="none" stroke-width="1.8" stroke-linecap="round">
+					<path d="M 1040 200 Q 1000 200 970 220" filter="url(#canvas-wobble-tight)" />
+					<path d="M 980 212 L 968 220 L 976 232" />
+				</g>
+				<text x="990" y="180" font-family="var(--brand-font-annotation)" font-size="22" fill="var(--brand-palette-rose)">auth context</text>
+
+				<g stroke="var(--brand-palette-primary)" fill="none" stroke-width="1.8" stroke-linecap="round">
+					<path d="M 70 460 Q 130 440 240 420" filter="url(#canvas-wobble-tight)" />
+					<path d="M 232 412 L 244 420 L 234 432" />
+				</g>
+				<text x="22" y="490" font-family="var(--brand-font-annotation)" font-size="22" fill="var(--brand-palette-primary)">local DB</text>
+
+				<g stroke="var(--brand-palette-secondary)" fill="none" stroke-width="1.8" stroke-linecap="round">
+					<path d="M 660 600 Q 660 580 660 440" filter="url(#canvas-wobble-tight)" />
+					<path d="M 654 448 L 660 438 L 668 448" />
+				</g>
+				<text x="540" y="618" font-family="var(--brand-font-annotation)" font-size="22" fill="var(--brand-palette-secondary)">private / shared / public</text>
+
+				<g stroke="var(--brand-palette-warm)" fill="none" stroke-width="1.8" stroke-linecap="round">
+					<path d="M 1050 470 Q 1000 480 970 470" filter="url(#canvas-wobble-tight)" />
+					<path d="M 980 462 L 968 470 L 978 482" />
+				</g>
+				<text x="998" y="510" font-family="var(--brand-font-annotation)" font-size="22" fill="var(--brand-palette-warm)">fork &amp; extend</text>
+				<ellipse cx="660" cy="234" rx="88" ry="42" stroke="var(--brand-palette-primary)" stroke-width="1.6" stroke-dasharray="4 5" fill="none" filter="url(#canvas-wobble-tight)" opacity="0.7" />
+			</svg>
+		</figure>
+	</div>
+</section>
+
+<style is:global>
+	.canvas-windows__grid {
+		display: grid;
+		gap: clamp(1.5rem, 4vw, 3rem);
+		align-items: center;
+	}
+
+	.canvas-windows__copy {
+		display: grid;
+		justify-items: center;
+		gap: 0.9rem;
+		max-width: 760px;
+		margin-inline: auto;
+		text-align: center;
+	}
+
+	.canvas-windows .canvas-windows__title {
+		font-size: clamp(3rem, 7vw, 6.5rem);
+		font-weight: 400;
+		line-height: 0.9;
+		color: var(--brand-canvas-text);
+		text-shadow: 0 0 44px var(--brand-glow-primary);
+	}
+
+	.canvas-windows__lede {
+		max-width: 68ch;
+		text-align: center;
+	}
+
+	.canvas-windows__figure {
+		position: relative;
+		width: min(1080px, 100%);
+		margin: 0 auto;
+		padding: clamp(0.35rem, 1.2vw, 0.85rem);
+		border: 1px solid var(--brand-canvas-line-strong);
+		border-radius: clamp(1rem, 2vw, 1.6rem);
+		background: color-mix(in srgb, var(--brand-canvas-surface) 72%, transparent);
+		box-shadow: var(--system-shadow-3), inset 0 1px 0 color-mix(in srgb, var(--brand-canvas-text) 10%, transparent);
+		overflow: hidden;
+	}
+
+	.canvas-windows__figure::before {
+		content: '';
+		position: absolute;
+		inset: 4% 12%;
+		background: radial-gradient(ellipse, var(--brand-glow-primary), transparent 70%);
+		opacity: 0.42;
+	}
+
+	.canvas-windows__svg {
+		position: relative;
+		display: block;
+		width: 100%;
+		height: auto;
+		color: var(--brand-canvas-text);
+	}
+
+	.canvas-windows__halo {
+		fill: color-mix(in srgb, var(--brand-palette-secondary) 8%, transparent);
+		stroke: color-mix(in srgb, var(--brand-palette-secondary) 24%, transparent);
+		stroke-width: 1;
+	}
+
+	@media (max-width: 760px) {
+		.canvas-windows__figure {
+			width: 100%;
+			overflow: hidden;
+		}
+		.canvas-windows .canvas-windows__title {
+			font-size: clamp(2.7rem, 14vw, 4.6rem);
+		}
+		.canvas-windows__svg {
+			min-width: 0;
+		}
+	}
+</style>

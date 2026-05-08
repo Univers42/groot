@@ -1,65 +1,18 @@
-// Scroll-driven scale + fade for "giant card" hero/feature/pricing/showcase
-// elements. Modern browsers (Chrome 115+, Safari 26+, Firefox behind flag)
-// support `animation-timeline: view()` natively. We progressively enhance:
-//
-// - Default: cards rest at full size (so older browsers see no jank).
-// - With `@supports (animation-timeline: view())`: cards scale 0.86 → 1 and
-//   fade 0.55 → 1 as they enter the viewport.
-// - Under `prefers-reduced-motion: reduce`: all scroll animations are reset.
-//
-// Apply by adding `data-scroll-grow` to any element. The selector is loose so
-// it works on cards, frames, hero panels, anything.
-
-@keyframes scroll-card-grow {
-	from {
-		scale: 0.86;
-		opacity: 0.55;
-		filter: saturate(0.85);
-	}
-	to {
-		scale: 1;
-		opacity: 1;
-		filter: saturate(1);
-	}
-}
-
-@keyframes scroll-rise-in {
-	from {
-		translate: 0 32px;
-		opacity: 0;
-	}
-	to {
-		translate: 0 0;
-		opacity: 1;
-	}
-}
+// Scroll reveals are intentionally one-shot and transform-only. Avoid
+// scroll-linked timelines, filters, sticky pins, or per-frame scaling; those are
+// beautiful in demos and unpleasant on real laptops during long pages.
 
 [data-scroll-grow],
 [data-scroll-rise] {
 	transform-origin: center center;
 }
 
-@supports (animation-timeline: view()) {
-	[data-scroll-grow] {
-		animation: scroll-card-grow linear both;
-		animation-timeline: view();
-		animation-range: entry 0% cover 35%;
-	}
-
-	[data-scroll-rise] {
-		animation: scroll-rise-in linear both;
-		animation-timeline: view();
-		animation-range: entry 0% cover 25%;
-	}
-}
-
 @media (prefers-reduced-motion: reduce) {
 	[data-scroll-grow],
 	[data-scroll-rise] {
 		animation: none !important;
-		scale: 1 !important;
-		translate: 0 0 !important;
 		opacity: 1 !important;
 		filter: none !important;
+		transform: none !important;
 	}
 }

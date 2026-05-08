@@ -1,6 +1,6 @@
-// Typography. System body font is Inter (loaded via Google Fonts <link> in
-// Layout.astro). Brand fonts (Caveat, Kalam, Caveat Brush, Special Elite,
-// Architects Daughter) are also delivered by the same Google Fonts <link>.
+// Typography. The live landing page now follows the prototype stack:
+// Space Grotesk for interface text, Instrument Serif for display, JetBrains Mono
+// for code and tiny labels, and Caveat for hand annotations.
 //
 // We keep light local() probes here so users who already have a given face
 // installed skip the network entirely. We intentionally do NOT include
@@ -39,13 +39,13 @@
 	font-display: swap;
 }
 
-// Marketing typography defaults — Inter for body, brand for accents only.
+// Marketing typography defaults — Space Grotesk for body, display tokens for headings.
 body {
 	font-family: var(--system-font-sans);
 	font-weight: 400;
 	font-size: clamp(15px, 0.9rem + 0.18vw, 17px);
 	line-height: 1.6;
-	letter-spacing: -0.005em;
+	letter-spacing: 0;
 	color: var(--system-text);
 	text-rendering: optimizeLegibility;
 	-webkit-font-smoothing: antialiased;
@@ -53,9 +53,9 @@ body {
 }
 
 h1, h2, h3, h4, h5, h6 {
-	font-family: var(--system-font-sans);
+	font-family: var(--brand-font-display);
 	font-weight: 700;
-	letter-spacing: -0.02em;
+	letter-spacing: 0;
 	line-height: 1.15;
 	color: var(--system-text-strong);
 }
@@ -63,8 +63,8 @@ h1, h2, h3, h4, h5, h6 {
 // Brand-decorated headlines opt in.
 .brand-display {
 	font-family: var(--brand-font-display);
-	font-weight: 700;
-	letter-spacing: -0.005em;
+	font-weight: 400;
+	letter-spacing: 0;
 	line-height: 1.05;
 }
 

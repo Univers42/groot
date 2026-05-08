@@ -1,13 +1,9 @@
 ---
 import Layout from '../../layouts/Layout.astro';
-
-const configuredBaasUrl = import.meta.env.PUBLIC_BAAS_URL ?? '/api';
-const baasUrl = configuredBaasUrl.replace(/\/$/, '');
-const anonKey = import.meta.env.PUBLIC_BAAS_ANON_KEY ?? '';
 ---
 
 <Layout title="Confirm newsletter subscription" description="Confirm your Prismatica newsletter double opt-in.">
-	<main class="auth-page" data-newsletter-confirm data-baas-url={baasUrl} data-anon-key={anonKey}>
+	<main class="auth-page" data-newsletter-confirm>
 		<section class="auth-card" aria-labelledby="newsletter-confirm-title">
 			<p class="eyebrow">Newsletter</p>
 			<h1 id="newsletter-confirm-title">Confirming your subscription…</h1>
@@ -16,13 +12,9 @@ const anonKey = import.meta.env.PUBLIC_BAAS_ANON_KEY ?? '';
 		</section>
 	</main>
 	<script>
-		import { createClient } from '@mini-baas/js';
-
 		const root = document.querySelector('[data-newsletter-confirm]') as HTMLElement | null;
 		const status = root?.querySelector('[data-newsletter-confirm-status]');
 		const token = new URLSearchParams(window.location.search).get('token');
-		const baasUrl = root?.dataset.baasUrl?.replace(/\/$/, '') ?? '';
-		const anonKey = root?.dataset.anonKey ?? '';
 		const setStatus = (message: string, isError = false) => {
 			if (!status) return;
 			status.textContent = message;
@@ -33,12 +25,13 @@ const anonKey = import.meta.env.PUBLIC_BAAS_ANON_KEY ?? '';
 				setStatus('This newsletter link is missing its token.', true);
 				return;
 			}
-			if (!baasUrl || !anonKey) {
-				setStatus('Newsletter confirmation is not configured for this environment.', true);
-				return;
-			}
 			try {
-				await createClient({ url: baasUrl, anonKey, persistSession: false }).rpc('gdpr_confirm_newsletter_optin', { token });
+				const response = await fetch('/api/newsletter/confirm', {
+					method: 'POST',
+					headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+					body: JSON.stringify({ token }),
+				});
+				if (!response.ok) throw new Error('newsletter_confirm_failed');
 			} catch {
 				setStatus('This confirmation link is invalid or expired.', true);
 				return;

@@ -7,7 +7,7 @@
 	border: var(--stroke-width-lg) solid var(--ink);
 	border-radius: var(--radius-xl);
 	background:
-		linear-gradient(135deg, color-mix(in srgb, var(--paper) 94%, white), color-mix(in srgb, var(--accent-blue) 10%, var(--paper))),
+		linear-gradient(135deg, color-mix(in srgb, var(--paper) 94%, var(--brand-canvas-text)), color-mix(in srgb, var(--brand-palette-secondary) 10%, var(--paper))),
 		var(--paper);
 	box-shadow: var(--shadow-sketch);
 	transform: rotate(-0.35deg);
@@ -33,7 +33,7 @@
 	padding: 1rem;
 	border: var(--stroke-width) dashed var(--ink-soft);
 	border-radius: var(--radius-lg);
-	background: color-mix(in srgb, var(--paper) 76%, var(--accent-green));
+	background: color-mix(in srgb, var(--paper) 76%, var(--system-success-border));
 }
 
 .baas-status__state {
@@ -54,7 +54,7 @@
 	padding: 0.85rem;
 	border: var(--stroke-width) solid var(--ink);
 	border-radius: var(--radius-md);
-	background: color-mix(in srgb, var(--paper) 90%, white);
+	background: color-mix(in srgb, var(--paper) 90%, var(--brand-canvas-text));
 	box-shadow: 0.18rem 0.18rem 0 var(--ink-soft);
 }
 

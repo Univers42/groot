@@ -40,6 +40,7 @@ const config = {
 };
 
 const buckets = new Map();
+const signInNoticeBuckets = new Map();
 const mailDomainCache = new Map();
 const EMAIL_ATEXT = "A-Za-z0-9!#$%&'*+/=?^_`{|}~-";
 const EMAIL_LOCAL_PART = String.raw`(?:[${EMAIL_ATEXT}]+(?:\.[${EMAIL_ATEXT}]+)*|"[^"\r\n]+")`;
@@ -304,10 +305,53 @@ function loginLocation(request, ipAddress) {
 
 function renderEmailTemplate(fileName, variables) {
 	const html = readFileSync(resolve(emailTemplateDir, fileName), 'utf8');
-	return html.replaceAll(/{{\s*([\w.-]+)\s*}}/g, (_match, key) => escapeHtml(variables[key] ?? 'unknown'));
+	return html.replaceAll(/{{\s*([\w.-]+)\s*}}/g, (_match, rawKey) => {
+		const key = String(rawKey).replace(/^\./, '');
+		return escapeHtml(variables[key] ?? variables[rawKey] ?? 'unknown');
+	});
 }
 
-function loginAlertContext(request, email) {
+function siteBaseUrl() {
+	return config.siteUrl.replace(/\/$/, '');
+}
+
+function authLinkPayload(payload) {
+	const properties = typeof payload?.properties === 'object' && payload.properties !== null ? payload.properties : {};
+	let actionLink = '';
+	let token = '';
+	if (typeof payload?.action_link === 'string') actionLink = payload.action_link;
+	else if (typeof properties.action_link === 'string') actionLink = properties.action_link;
+	if (typeof payload?.hashed_token === 'string') token = payload.hashed_token;
+	else if (typeof payload?.token_hash === 'string') token = payload.token_hash;
+	else if (typeof properties.hashed_token === 'string') token = properties.hashed_token;
+	else if (typeof properties.token_hash === 'string') token = properties.token_hash;
+	return {
+		actionLink,
+		token,
+	};
+}
+
+async function requestPasswordRecoveryEmail(request, email) {
+	if (!serviceBaas || !hasSmtpConfig()) {
+		await recoverAccount({ email });
+		return;
+	}
+	const result = await generateAdminLink({
+		type: 'recovery',
+		email,
+		password: randomBytes(18).toString('base64url'),
+		redirect_to: `${siteBaseUrl()}/auth/reset-password`,
+	});
+	if (!result.response.ok) {
+		await audit('password_recovery_link_failed', request, { email, status: result.response.status });
+		return;
+	}
+	const { token, actionLink } = authLinkPayload(result.payload);
+	const resetUrl = actionLink || (token ? `${siteBaseUrl()}/auth/reset-password?token=${encodeURIComponent(token)}` : '');
+	if (resetUrl) await sendPasswordReset(request, email, token, resetUrl);
+}
+
+function loginAlertContext(request, email, outcome = 'success') {
 	const ipAddress = clientIp(request) || 'unknown';
 	const occurredAt = new Intl.DateTimeFormat('en-GB', {
 		dateStyle: 'full',
@@ -318,9 +362,10 @@ function loginAlertContext(request, email) {
 		email,
 		ipAddress,
 		location: loginLocation(request, ipAddress),
-		method: 'Password sign-in through the Prismatica auth gateway',
+		method: outcome === 'success' ? 'Successful password sign-in through the Prismatica auth gateway' : 'Failed password sign-in attempt through the Prismatica auth gateway',
+		outcome: outcome === 'success' ? 'Successful sign-in' : 'Failed sign-in attempt',
 		occurredAt: `${occurredAt} (UTC)`,
-		siteUrl: config.siteUrl.replace(/\/$/, ''),
+		siteUrl: siteBaseUrl(),
 		userAgent: headerValue(request, 'user-agent', 'unknown device', 500),
 		origin: headerValue(request, 'origin', 'not sent', 240),
 		referer: headerValue(request, 'referer', 'not sent', 240),
@@ -328,20 +373,89 @@ function loginAlertContext(request, email) {
 	};
 }
 
-async function sendLoginSecurityNotification(request, email) {
+function shouldSendSignInNotice(email, outcome) {
+	if (outcome === 'success') return true;
+	const key = `${email}:${outcome}`;
+	const now = Date.now();
+	const lastSentAt = signInNoticeBuckets.get(key) ?? 0;
+	if (now - lastSentAt < 10 * 60 * 1000) return false;
+	signInNoticeBuckets.set(key, now);
+	return true;
+}
+
+async function sendLoginSecurityNotification(request, email, outcome = 'success') {
 	if (!hasSmtpConfig()) {
 		console.warn(`[auth-gateway] login security alert skipped for ${email}: SMTP is not fully configured.`);
 		await audit('login_alert_skipped', request, { email, reason: 'smtp_not_configured' });
 		return;
 	}
-	const context = loginAlertContext(request, email);
+	if (!shouldSendSignInNotice(email, outcome)) {
+		await audit('login_alert_suppressed', request, { email, outcome, reason: 'recent_notice_sent' });
+		return;
+	}
+	const context = loginAlertContext(request, email, outcome);
 	await sendSmtpMail({
 		to: email,
-		subject: 'Security alert: new Prismatica sign-in',
+		subject: outcome === 'success' ? 'Security alert: new Prismatica sign-in' : 'Security alert: failed Prismatica sign-in attempt',
 		html: renderEmailTemplate('login-alert.html', context),
 	});
 	console.info(`[auth-gateway] login security alert accepted by SMTP for ${email} from ${context.ipAddress}.`);
-	await audit('login_alert_sent', request, { email, ip_address: context.ipAddress, location: context.location });
+	await audit('login_alert_sent', request, { email, outcome, ip_address: context.ipAddress, location: context.location });
+}
+
+async function sendAccountCreatedNotification(request, email) {
+	if (!hasSmtpConfig()) return;
+	await sendSmtpMail({
+		to: email,
+		subject: 'Your Prismatica account is ready',
+		html: renderEmailTemplate('account-created.html', { Email: email, SiteURL: siteBaseUrl() }),
+	});
+	await audit('account_created_email_sent', request, { email });
+}
+
+async function sendEmailVerification(request, email, token, confirmUrl) {
+	await sendSmtpMail({
+		to: email,
+		subject: 'Confirm your Prismatica account',
+		html: renderEmailTemplate('email-verification.html', { Email: email, SiteURL: siteBaseUrl(), Token: token, ConfirmURL: confirmUrl }),
+	});
+	await audit('email_verification_sent', request, { email });
+}
+
+async function sendPasswordReset(request, email, token, resetUrl) {
+	await sendSmtpMail({
+		to: email,
+		subject: 'Reset your Prismatica password',
+		html: renderEmailTemplate('password-reset.html', { Email: email, SiteURL: siteBaseUrl(), Token: token, ResetURL: resetUrl }),
+	});
+	await audit('password_recovery_email_sent', request, { email });
+}
+
+async function sendNewsletterConfirm(request, email, token) {
+	await sendSmtpMail({
+		to: email,
+		subject: 'Confirm your Prismatica newsletter subscription',
+		html: renderEmailTemplate('newsletter-confirm.html', { Email: email, SiteURL: siteBaseUrl(), Token: token }),
+	});
+	await audit('newsletter_confirmation_email_sent', request, { email });
+}
+
+async function sendNewsletterWelcome(request, email, token) {
+	await sendSmtpMail({
+		to: email,
+		subject: 'Welcome to the Prismatica newsletter',
+		html: renderEmailTemplate('newsletter-welcome.html', { Email: email, SiteURL: siteBaseUrl(), Token: token }),
+	});
+	await audit('newsletter_welcome_email_sent', request, { email });
+}
+
+async function sendNewsletterUnsubscribe(request, email) {
+	await sendSmtpMail({
+		to: email,
+		subject: 'You are unsubscribed from the Prismatica newsletter',
+		html: renderEmailTemplate('newsletter-unsubscribe.html', { Email: email, SiteURL: siteBaseUrl() }),
+	});
+	await audit('newsletter_unsubscribe_email_sent', request, { email });
 }
 
 function smtpBody({ to, subject, html }) {
@@ -467,6 +581,7 @@ function registrationProfile(payload) {
 		username: cleanText(rawProfile.username, 32),
 		confirmPassword: String(rawProfile.confirmPassword ?? ''),
 		email_verification_consent: rawProfile.emailVerificationConsent !== false,
+		newsletter_consent: rawProfile.newsletterConsent === true,
 		notifications_enabled: true,
 	};
 }
@@ -559,6 +674,16 @@ async function handleDevConfirmedRegistration(request, response, context) {
 	if (!await ensureLocalUserProfile(request, response, context, true)) {
 		return;
 	}
+	await sendAccountCreatedNotification(request, context.email).catch(async (error) => {
+		console.error(`[auth-gateway] account-created email failed for ${context.email}: ${error instanceof Error ? error.message : 'unknown error'}`);
+		await audit('account_created_email_failed', request, { email: context.email, error: error instanceof Error ? error.message : 'unknown_error' });
+	});
+	if (context.profile.newsletter_consent) {
+		await requestNewsletterOptIn(request, context.email).catch(async (error) => {
+			console.error(`[auth-gateway] registration newsletter opt-in failed for ${context.email}: ${error instanceof Error ? error.message : 'unknown error'}`);
+			await audit('newsletter_confirmation_email_failed', request, { email: context.email, error: error instanceof Error ? error.message : 'unknown_error' });
+		});
+	}
 	await audit('register_dev_confirmed', request, { email: context.email });
 	json(response, 200, { message: 'Development account created and confirmed. You can sign in now.' });
 }
@@ -576,18 +701,19 @@ async function handleEmailVerifiedRegistration(request, response, context) {
 		json(response, result.response.status, { message: humanAuthMessage(result.payload, 'Registration failed.') });
 		return;
 	}
-	const token = typeof result.payload.hashed_token === 'string' ? result.payload.hashed_token : '';
-	const actionLink = typeof result.payload.action_link === 'string' ? result.payload.action_link : '';
-	const confirmUrl = token ? `${config.siteUrl.replace(/\/$/, '')}/auth/confirm/?token=${encodeURIComponent(token)}` : actionLink;
+	const { token, actionLink } = authLinkPayload(result.payload);
+	const confirmUrl = token ? `${siteBaseUrl()}/auth/confirm/?token=${encodeURIComponent(token)}` : actionLink;
 	if (!confirmUrl) {
 		json(response, 502, { message: 'Could not create the email verification link.' });
 		return;
 	}
-	await sendSmtpMail({
-		to: context.email,
-		subject: 'Confirm your Prismatica account',
-		html: `<p>Hello,</p><p>Confirm your Prismatica account before signing in:</p><p><a href="${escapeHtml(confirmUrl)}">Confirm account</a></p><p>If you did not request this account, you can ignore this email.</p><p>Prismatica</p>`,
-	});
+	await sendEmailVerification(request, context.email, token, confirmUrl);
+	if (context.profile.newsletter_consent) {
+		await requestNewsletterOptIn(request, context.email).catch(async (error) => {
+			console.error(`[auth-gateway] registration newsletter opt-in failed for ${context.email}: ${error instanceof Error ? error.message : 'unknown error'}`);
+			await audit('newsletter_confirmation_email_failed', request, { email: context.email, error: error instanceof Error ? error.message : 'unknown_error' });
+		});
+	}
 	if (!await ensureLocalUserProfile(request, response, context, false)) {
 		return;
 	}
@@ -650,6 +776,12 @@ async function handleLogin(request, response) {
 		const result = await signInWithPassword({ email, password });
 		await audit(result.response.ok ? 'login_success' : 'login_failed', request, { email, status: result.response.status });
 		if (!result.response.ok) {
+			if (await localProfileExists('email', email)) {
+				await sendLoginSecurityNotification(request, email, 'failed').catch(async (error) => {
+					console.error(`[auth-gateway] failed-login security alert failed for ${email}: ${error instanceof Error ? error.message : 'unknown error'}`);
+					await audit('login_alert_failed', request, { email, outcome: 'failed', error: error instanceof Error ? error.message : 'unknown_error' });
+				});
+			}
 			json(response, result.response.status, { message: humanAuthMessage(result.payload, 'Invalid credentials.') });
 			return;
 		}
@@ -667,11 +799,40 @@ async function handleRecover(request, response) {
 	await protectedAction(request, response, 'recover', async (payload) => {
 		const email = String(payload.email ?? '').trim().toLowerCase();
 		if (EMAIL_REGEX.test(email) && await hasDeliverableEmailDomain(email)) {
-			await recoverAccount({ email });
+			await requestPasswordRecoveryEmail(request, email);
 			await audit('password_recovery_requested', request, { email });
 		}
 		json(response, 200, { message: 'If an account exists for that email, a reset link has been sent.' });
 	});
+}
+
+async function requestNewsletterOptIn(request, email) {
+	const token = randomBytes(32).toString('hex');
+	const result = await restRpc('gdpr_request_newsletter_optin', { email, token });
+	if (!result.response.ok) {
+		return {
+			ok: false,
+			status: result.response.status,
+			message: humanAuthMessage(result.payload, 'Could not start the newsletter confirmation.'),
+		};
+	}
+	try {
+		await sendNewsletterConfirm(request, email, token);
+	} catch (error) {
+		console.error(`[auth-gateway] newsletter confirmation email failed for ${email}: ${error instanceof Error ? error.message : 'unknown error'}`);
+		await audit('newsletter_confirmation_email_failed', request, { email, error: error instanceof Error ? error.message : 'unknown_error' });
+		return {
+			ok: false,
+			status: 502,
+			message: 'Could not send the newsletter confirmation email. Please try again in a moment.',
+		};
+	}
+	await audit('newsletter_optin_requested', request, { email });
+	return {
+		ok: true,
+		status: 200,
+		message: `Check ${escapeHtml(email)} to confirm your subscription.`,
+	};
 }
 
 async function handleNewsletterSubscribe(request, response) {
@@ -691,20 +852,56 @@ async function handleNewsletterSubscribe(request, response) {
 		json(response, 422, { message: 'Use an email domain that can receive mail.' });
 		return;
 	}
-	const token = randomBytes(32).toString('hex');
-	const result = await restRpc('gdpr_request_newsletter_optin', { email, token });
-	if (!result.response.ok) {
-		json(response, result.response.status, { message: humanAuthMessage(result.payload, 'Could not start the newsletter confirmation.') });
+	const result = await requestNewsletterOptIn(request, email);
+	if (!result.ok) {
+		json(response, result.status, { message: result.message });
 		return;
 	}
-	const confirmUrl = `${config.siteUrl.replace(/\/$/, '')}/newsletter/confirm/?token=${encodeURIComponent(token)}`;
-	await sendSmtpMail({
-		to: email,
-		subject: 'Confirm your Prismatica newsletter subscription',
-		html: `<p>Hello,</p><p>Please confirm your Prismatica newsletter subscription:</p><p><a href="${confirmUrl}">Confirm subscription</a></p><p>If you did not request this, you can ignore this email.</p><p>Prismatica</p>`,
-	});
-	await audit('newsletter_optin_requested', request, { email });
-	json(response, 200, { message: `Check ${escapeHtml(email)} to confirm your subscription.` });
+	json(response, result.status, { message: result.message });
+}
+
+async function handleNewsletterConfirm(request, response) {
+	const payload = await readJson(request);
+	const token = String(payload.token ?? '').trim();
+	if (!token) {
+		json(response, 422, { message: 'Confirmation token is required.' });
+		return;
+	}
+	const result = await restRpc('gdpr_confirm_newsletter_optin', { token });
+	if (!result.response.ok) {
+		json(response, result.response.status, { message: humanAuthMessage(result.payload, 'This confirmation link is invalid or expired.') });
+		return;
+	}
+	const email = typeof result.payload?.email === 'string' ? result.payload.email : '';
+	if (EMAIL_REGEX.test(email) && hasSmtpConfig()) {
+		await sendNewsletterWelcome(request, email, token).catch(async (error) => {
+			console.error(`[auth-gateway] newsletter welcome failed for ${email}: ${error instanceof Error ? error.message : 'unknown error'}`);
+			await audit('newsletter_welcome_email_failed', request, { email, error: error instanceof Error ? error.message : 'unknown_error' });
+		});
+	}
+	json(response, 200, { message: 'Your newsletter subscription is confirmed. Thank you.' });
+}
+
+async function handleNewsletterUnsubscribe(request, response) {
+	const payload = await readJson(request);
+	const token = String(payload.token ?? '').trim();
+	if (!token) {
+		json(response, 422, { message: 'Unsubscribe token is required.' });
+		return;
+	}
+	const result = await restRpc('gdpr_withdraw_consent', { consent_type: 'newsletter', token });
+	if (!result.response.ok) {
+		json(response, result.response.status, { message: humanAuthMessage(result.payload, 'This unsubscribe link is invalid or has already been used.') });
+		return;
+	}
+	const email = typeof result.payload?.email === 'string' ? result.payload.email : '';
+	if (EMAIL_REGEX.test(email) && hasSmtpConfig()) {
+		await sendNewsletterUnsubscribe(request, email).catch(async (error) => {
+			console.error(`[auth-gateway] newsletter unsubscribe email failed for ${email}: ${error instanceof Error ? error.message : 'unknown error'}`);
+			await audit('newsletter_unsubscribe_email_failed', request, { email, error: error instanceof Error ? error.message : 'unknown_error' });
+		});
+	}
+	json(response, 200, { message: 'You have been unsubscribed from the Prismatica newsletter.' });
 }
 
 async function handleRefresh(request, response) {
@@ -790,6 +987,8 @@ const routes = new Map([
 	['POST /api/auth/logout', handleLogout],
 	['POST /api/auth/osionos-session', handleOsionosSession],
 	['POST /api/newsletter/subscribe', handleNewsletterSubscribe],
+	['POST /api/newsletter/confirm', handleNewsletterConfirm],
+	['POST /api/newsletter/unsubscribe', handleNewsletterUnsubscribe],
 ]);
 
 createServer(async (request, response) => {

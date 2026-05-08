@@ -1,15 +1,16 @@
 // New landing-page sections shared base: container, vertical rhythm, headline
-// scale, eyebrow alignment, and the giant scroll-grown card frames.
+// scale, and eyebrow alignment.
 
 .section {
 	position: relative;
-	padding: clamp(3.5rem, 6vw, 6rem) 0;
+	padding: clamp(2.75rem, 4.8vw, 4.75rem) 0;
 	z-index: 1;
+	isolation: isolate;
 }
 
-.section--tight   { padding: clamp(2.5rem, 4vw, 4rem) 0; }
-.section--hero    { padding: clamp(4.5rem, 8vw, 7.5rem) 0 clamp(3rem, 5vw, 5rem); }
-.section--final   { padding: clamp(4rem, 7vw, 6.5rem) 0 clamp(3.5rem, 6vw, 6rem); }
+.section--tight   { padding: clamp(2rem, 3.5vw, 3.25rem) 0; }
+.section--hero    { padding: clamp(5rem, 7vw, 7rem) 0 clamp(2.25rem, 4vw, 4rem); }
+.section--final   { padding: clamp(2rem, 4vw, 3.5rem) 0; }
 
 .section--surface { background: var(--system-surface); }
 .section--sunken  { background: var(--system-surface-sunken); }
@@ -25,16 +26,16 @@
 	display: grid;
 	gap: 0.85rem;
 	max-width: 760px;
-	margin: 0 auto clamp(2rem, 4vw, 3rem);
+	margin: 0 auto clamp(1.5rem, 3vw, 2.4rem);
 	text-align: center;
 }
 
 .section__title {
 	margin: 0;
 	font-size: clamp(1.85rem, 1.2rem + 2.4vw, 2.85rem);
-	font-weight: 700;
-	letter-spacing: -0.02em;
-	line-height: 1.12;
+	font-weight: 400;
+	letter-spacing: 0;
+	line-height: 1;
 	color: var(--system-text-strong);
 }
 

@@ -12,7 +12,7 @@ function extractArrayBlock(source, name) {
 export async function run() {
 	return summarize(await runChecks([
 		{
-			name: 'Production CSP blocks active document gadgets',
+			name: 'Production meta CSP blocks active document gadgets',
 			run: () => {
 				const layout = readProjectFile('src/layouts/Layout.astro');
 				const csp = extractArrayBlock(layout, 'productionCsp');
@@ -20,7 +20,6 @@ export async function run() {
 					"default-src 'self'",
 					"base-uri 'self'",
 					"object-src 'none'",
-					"frame-ancestors 'self'",
 					"form-action 'self'",
 					"img-src 'self'",
 					"media-src 'self'",
@@ -30,19 +29,28 @@ export async function run() {
 				]) {
 					assert.ok(csp.includes(directive), `production CSP missing ${directive}`);
 				}
+				assert.ok(!csp.includes('frame-ancestors'), 'frame-ancestors is ignored in meta CSP and must not be present there');
 				assert.ok(!csp.includes("'unsafe-inline'"), 'production CSP must not allow unsafe-inline');
 				assert.ok(!csp.includes("'unsafe-eval'"), 'production CSP must not allow unsafe-eval');
 				assert.ok(!/img-src[^"\n]*\b(?:blob:|data:)/u.test(csp), 'production img-src must not allow blob: or data:');
 			},
 		},
 		{
-			name: 'Development CSP marks unsafe allowances as dev-only',
+			name: 'Development meta CSP marks unsafe allowances as dev-only',
 			run: () => {
 				const layout = readProjectFile('src/layouts/Layout.astro');
 				const csp = extractArrayBlock(layout, 'developmentCsp');
 				assert.ok(csp.includes("'unsafe-inline'"), 'development CSP may keep Vite inline allowance');
 				assert.ok(csp.includes("'unsafe-eval'"), 'development CSP may keep Vite eval allowance');
-				assert.ok(csp.includes("frame-ancestors 'self'"), 'development CSP still needs frame-ancestors');
+				assert.ok(!csp.includes('frame-ancestors'), 'frame-ancestors is ignored in meta CSP and must not be present there');
+			},
+		},
+		{
+			name: 'Production static headers carry frame-ancestors',
+			run: () => {
+				const headers = readProjectFile('public/_headers');
+				assert.ok(headers.includes('Content-Security-Policy:'), 'production static CSP header missing');
+				assert.ok(headers.includes("frame-ancestors 'self'"), 'production static CSP header missing frame-ancestors');
 			},
 		},
 		{

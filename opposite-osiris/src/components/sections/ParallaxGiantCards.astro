@@ -1,15 +1,7 @@
 ---
-// Sticky "camera" parallax. The viewport stays put while the cards
-// scroll past, stack on top of each other and shrink/fade as the
-// next one rises. This is the "we don't move, the world moves" feel.
-//
-// How it works:
-// - Each card is `position: sticky` pinned near the top of the viewport.
-// - Cards take less than 100vh and have generous margin-bottom so the
-//   next sticky card scrolls *over* the previous one — the previous
-//   card visually shrinks + dims via animation-timeline: view(exit).
-// - No JS. Pure CSS scroll-driven animations with reduced-motion
-//   fallback that just renders a clean stack.
+// Lightweight legacy section kept for alternate page compositions. It avoids
+// sticky/parallax scroll behavior so it follows the same smoothness contract as
+// the current landing page.
 
 interface CardDef {
 	eyebrow: string;
@@ -31,7 +23,6 @@ const cards: CardDef[] = [
 		{cards.map((card, idx) => (
 			<article
 				class={`parallax-card parallax-card--${card.accent}`}
-				data-parallax-card
 				style={`--card-index: ${idx}; z-index: ${idx + 1};`}
 			>
 				<div class="parallax-card__inner">
@@ -42,7 +33,6 @@ const cards: CardDef[] = [
 			</article>
 		))}
 	</div>
-	<p class="parallax-stage__hint" aria-hidden="true">scroll</p>
 </section>
 
 <style is:global>
@@ -58,27 +48,23 @@ const cards: CardDef[] = [
 		margin-inline: auto;
 		padding-inline: clamp(1rem, 4vw, 2rem);
 		display: grid;
-		gap: 0;
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+		gap: clamp(1rem, 2.4vw, 1.5rem);
 	}
 
-	/* Each card is sticky at the top of the viewport. The next card
-	   scrolls *over* it because cards have margin-bottom > 0 and a
-	   higher z-index, creating the "camera stays, world moves" feel. */
 	.parallax-card {
-		position: sticky;
-		top: clamp(4rem, 9vh, 7rem);
-		min-height: clamp(360px, 64vh, 560px);
-		margin-bottom: 22vh;
+		position: relative;
+		min-height: 100%;
+		margin-bottom: 0;
 		display: grid;
 		align-items: center;
-		padding: clamp(1.5rem, 5vw, 3.5rem);
+		padding: clamp(1.25rem, 3vw, 2rem);
 		border-radius: var(--system-radius-xl);
 		background: var(--system-surface);
 		border: 1px solid var(--system-border-strong);
-		box-shadow: var(--system-shadow-3);
+		box-shadow: var(--system-shadow-1);
 		isolation: isolate;
 		overflow: hidden;
-		transform-origin: 50% 0;
 	}
 	.parallax-card:last-child { margin-bottom: 0; }
 
@@ -93,22 +79,13 @@ const cards: CardDef[] = [
 		z-index: -1;
 	}
 	.parallax-card::after {
-		content: '';
-		position: absolute;
-		right: -120px;
-		bottom: -120px;
-		width: 360px;
-		height: 360px;
-		border-radius: 50%;
-		background: color-mix(in srgb, var(--card-accent) 22%, transparent);
-		filter: blur(60px);
-		z-index: -1;
+		display: none;
 	}
 
-	.parallax-card--yellow { --card-accent: var(--brand-hl-yellow, #ffd400); }
-	.parallax-card--blue   { --card-accent: var(--brand-hl-blue, #2563eb); }
-	.parallax-card--green  { --card-accent: var(--brand-hl-green, #16a34a); }
-	.parallax-card--red    { --card-accent: var(--brand-hl-red, #dc2626); }
+	.parallax-card--yellow { --card-accent: var(--brand-hl-yellow); }
+	.parallax-card--blue   { --card-accent: var(--brand-hl-blue); }
+	.parallax-card--green  { --card-accent: var(--brand-hl-green); }
+	.parallax-card--red    { --card-accent: var(--brand-hl-red); }
 
 	.parallax-card__inner {
 		display: grid;
@@ -128,7 +105,7 @@ const cards: CardDef[] = [
 		font-family: var(--system-font-display, var(--system-font-sans));
 		font-size: clamp(2.2rem, 6vw, 4.6rem);
 		line-height: 1.02;
-		letter-spacing: -0.02em;
+		letter-spacing: 0;
 		color: var(--system-text-strong);
 		max-width: 18ch;
 	}
@@ -140,45 +117,7 @@ const cards: CardDef[] = [
 		line-height: 1.55;
 	}
 
-	.parallax-stage__hint {
-		position: absolute;
-		top: 1rem;
-		right: 1.25rem;
-		margin: 0;
-		font-family: var(--system-font-mono);
-		font-size: 0.7rem;
-		letter-spacing: 0.3em;
-		text-transform: uppercase;
-		color: var(--system-text-muted);
-		writing-mode: vertical-rl;
-	}
-
-	/* As a card EXITS the viewport (next one rising over it), shrink + dim it.
-	   This drives the "going down a tunnel" cinematic effect. */
-	@keyframes parallax-exit {
-		from { transform: scale(1)    translateY(0);    opacity: 1; filter: blur(0); }
-		to   { transform: scale(0.85) translateY(-40px); opacity: 0.35; filter: blur(2px); }
-	}
-	@keyframes parallax-enter {
-		from { transform: scale(0.92) translateY(60px); opacity: 0.4; filter: blur(3px); }
-		to   { transform: scale(1)    translateY(0);    opacity: 1;   filter: blur(0); }
-	}
-
-	@supports (animation-timeline: view()) {
-		[data-parallax-card] {
-			animation:
-				parallax-enter linear both,
-				parallax-exit  linear both;
-			animation-timeline: view(), view();
-			animation-range: entry 0% cover 30%, cover 60% exit 100%;
-		}
-	}
-
 	@media (prefers-reduced-motion: reduce) {
-		.parallax-card {
-			position: static;
-			margin-bottom: 1.5rem;
-		}
-		[data-parallax-card] { animation: none; }
+		.parallax-card { transition: none; }
 	}
 </style>

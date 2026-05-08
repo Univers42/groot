@@ -4,16 +4,27 @@
 
 html {
 	scroll-behavior: smooth;
+	scroll-padding-top: 5rem;
 }
 
 body {
 	margin: 0;
 	min-height: 100vh;
-	color: var(--ink);
-	font-family: var(--font-body);
-	font-weight: 300;
-	background: linear-gradient(90deg, transparent 0 76px, var(--margin-red) 77px 79px, transparent 80px), repeating-linear-gradient(0deg, transparent 0 31px, var(--paper-ruled) 31px 32px), var(--page-bg);
+	color: var(--system-text);
+	font-family: var(--system-font-sans);
+	font-weight: 400;
+	background:
+		radial-gradient(ellipse at 18% 0%, var(--brand-glow-primary), transparent 34rem),
+		radial-gradient(ellipse at 88% 12%, var(--brand-glow-secondary), transparent 36rem),
+		radial-gradient(ellipse at 48% 100%, var(--brand-glow-tertiary), transparent 40rem),
+		linear-gradient(90deg, var(--brand-canvas-line) 1px, transparent 1px) 0 0 / var(--brand-canvas-grid-size) var(--brand-canvas-grid-size),
+		linear-gradient(180deg, var(--brand-canvas-line) 1px, transparent 1px) 0 0 / var(--brand-canvas-grid-size) var(--brand-canvas-grid-size),
+		var(--brand-canvas-bg);
 	overflow-x: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	html { scroll-behavior: auto; }
 }
 
 body.portal-open {
@@ -71,7 +82,7 @@ h1 {
 	font-weight: 400;
 	font-size: clamp(5rem, 13vw, 12rem);
 	line-height: 0.73;
-	letter-spacing: -0.045em;
+	letter-spacing: 0;
 }
 
 h2 {

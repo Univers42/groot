@@ -1,5 +1,6 @@
 ---
 import { DATA_CONTROLLER, LEGAL_LINKS } from '../../data/legal';
+import PrismaticaLogo from '../brand/PrismaticaLogo.astro';
 
 const portalUrl = import.meta.env.PUBLIC_PORTAL_URL ?? 'https://portal.example.com/sign-in';
 
@@ -14,7 +15,7 @@ const socialLinks = [
 	<div class="site-footer__classic" aria-label="Prismatica footer">
 		<section class="site-footer__brand" aria-labelledby="footer-brand-title">
 			<a class="site-footer__logo" href="/" aria-label="Prismatica home">
-				<span aria-hidden="true">✦</span>
+				<span aria-hidden="true"><PrismaticaLogo class="site-footer__logo-mark" decorative /></span>
 				<strong id="footer-brand-title">Prismatica</strong>
 			</a>
 			<p>Accessible workspace infrastructure for notes, dashboards, automations and privacy-aware product teams.</p>

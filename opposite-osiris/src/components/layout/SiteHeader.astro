@@ -1,10 +1,11 @@
 ---
 import { navItems } from '../../data/site';
+import PrismaticaLogo from '../brand/PrismaticaLogo.astro';
 import HeaderIcon from '../ui/HeaderIcon.astro';
 ---
 
 <header class="floating-header" role="banner" aria-label="Primary navigation">
-	<a href="#top" class="brand-mark" aria-label="Prismatica home">Prismatica</a>
+	<a href="#top" class="brand-mark" aria-label="Prismatica home"><PrismaticaLogo class="brand-mark__logo" decorative /><span>Prismatica</span></a>
 	<div class="header-mascot-slot" aria-label="Mascot portal launcher">
 		<div id="mascot-anchor"></div>
 		<span class="header-mascot-note">click to laugh</span>
@@ -23,9 +24,9 @@ import HeaderIcon from '../ui/HeaderIcon.astro';
 			<HeaderIcon name="login" />
 			<span class="visually-hidden">Open login</span>
 		</button>
-		<button id="theme-toggle" class="header-cta header-cta--icon header-cta--theme" type="button" aria-label="Theme: light. Switch to dark mode" aria-live="polite" title="Switch theme">
-			<span class="header-icon header-icon--theme" aria-hidden="true">☼</span>
-			<span class="visually-hidden" data-theme-label>Theme: Light</span>
+		<button id="theme-toggle" class="header-cta header-cta--icon header-cta--theme" type="button" aria-label="Theme: Aurora. Switch to Solar palette" aria-live="polite" title="Switch theme">
+			<span class="header-icon header-icon--theme" aria-hidden="true">✦</span>
+			<span class="visually-hidden" data-theme-label>Theme: Aurora</span>
 		</button>
 		<button id="pause-animations" class="header-cta header-cta--icon header-cta--motion" type="button" aria-label="Pause animations" aria-pressed="false" title="Pause animations">
 			<span class="header-icon header-icon--motion" aria-hidden="true">Ⅱ</span>

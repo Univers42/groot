@@ -57,7 +57,7 @@
 	width: 1.2rem;
 	height: 1.2rem;
 	margin-top: 0.2rem;
-	accent-color: var(--accent-blue);
+	accent-color: var(--brand-palette-secondary);
 }
 
 .newsletter-signup {
@@ -176,7 +176,7 @@
 
 .auth-card [role='status'].is-error,
 .auth-form output.is-error {
-	color: var(--danger, #9d1f1f);
+	color: var(--system-danger-text);
 }
 
 .field-error-message {
@@ -184,7 +184,7 @@
 	font-family: var(--font-mono-sketch);
 	font-size: 0.76rem;
 	line-height: 1.35;
-	color: var(--danger, #9d1f1f);
+	color: var(--system-danger-text);
 }
 
 .field-error-message:empty {
@@ -192,7 +192,7 @@
 }
 
 .field input[aria-invalid='true'] {
-	border-color: var(--danger, #9d1f1f);
+	border-color: var(--system-input-border-invalid);
 }
 
 .legal-page section {

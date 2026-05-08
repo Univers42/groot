@@ -1,5 +1,6 @@
 ---
 import Button from '../ui/Button.astro';
+import PrismaticaLogo from '../brand/PrismaticaLogo.astro';
 
 const groups = [
 	{
@@ -44,17 +45,22 @@ const year = new Date().getFullYear();
 	<div class="footer-new__inner">
 		<section class="footer-new__intro">
 			<a class="footer-new__brand" href="/">
-				<span class="footer-new__logo" aria-hidden="true">◐</span>
+				<span class="footer-new__logo" aria-hidden="true"><PrismaticaLogo decorative /></span>
 				<span class="footer-new__wordmark">Prismatica</span>
 			</a>
 			<p class="footer-new__tagline">Open-source backend for product teams.</p>
 
-			<form class="footer-new__newsletter" action="/api/newsletter/subscribe" method="post" novalidate>
+			<form class="footer-new__newsletter" action="/api/newsletter/subscribe" method="post" novalidate data-newsletter-signup>
 				<label for="footer-newsletter-email">Get release notes</label>
 				<div class="footer-new__newsletter-row">
 					<input id="footer-newsletter-email" type="email" name="email" autocomplete="email" placeholder="you@studio.io" required />
 					<Button variant="primary" size="sm" type="submit">Subscribe</Button>
 				</div>
+				<label class="footer-new__consent" for="footer-newsletter-consent">
+					<input id="footer-newsletter-consent" type="checkbox" name="newsletter_consent" required />
+					<span>I agree to receive release emails and can unsubscribe from any footer.</span>
+				</label>
+				<output class="footer-new__newsletter-status" data-newsletter-status aria-live="polite"></output>
 				<p class="footer-new__newsletter-meta">One email per release. No tracking pixels.</p>
 			</form>
 		</section>
@@ -86,8 +92,8 @@ const year = new Date().getFullYear();
 
 <style is:global>
 	.footer-new {
-		background: var(--system-surface-sunken);
-		border-top: 1px solid var(--system-border);
+		background: color-mix(in srgb, var(--brand-canvas-bg) 92%, transparent);
+		border-top: 1px solid var(--brand-canvas-line-strong);
 		color: var(--system-text);
 		font-family: var(--system-font-sans);
 	}
@@ -108,16 +114,21 @@ const year = new Date().getFullYear();
 		gap: 0.55rem;
 		color: var(--system-text-strong);
 		text-decoration: none;
-		font-weight: 700;
+		font-family: var(--brand-font-display);
+		font-weight: 400;
+		font-size: 1.3rem;
 	}
 	.footer-new__logo {
 		display: grid;
 		place-items: center;
 		width: 32px;
 		height: 32px;
-		border-radius: var(--system-radius-md);
-		background: var(--system-action-bg);
-		color: var(--system-action-fg);
+		color: var(--system-text-strong);
+	}
+	.footer-new__logo .prismatica-logo {
+		width: 32px;
+		height: 32px;
+		display: block;
 	}
 	.footer-new__tagline {
 		margin: 0.6rem 0 1.2rem;
@@ -154,6 +165,39 @@ const year = new Date().getFullYear();
 		margin: 0.4rem 0 0;
 		font-size: 0.78rem;
 		color: var(--system-text-muted);
+	}
+	.footer-new__consent {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.5rem;
+		margin-top: 0.6rem;
+		font-size: 0.78rem;
+		line-height: 1.4;
+		color: var(--system-text-muted);
+	}
+	.footer-new__consent input {
+		width: 1rem;
+		height: 1rem;
+		margin: 0.1rem 0 0;
+		accent-color: var(--brand-palette-secondary);
+	}
+	.footer-new__newsletter-status {
+		display: block;
+		min-height: 1.35rem;
+		margin-top: 0.45rem;
+		font-size: 0.78rem;
+		color: var(--system-text-strong);
+	}
+	@media (max-width: 560px) {
+		.footer-new__newsletter-row {
+			display: grid;
+		}
+		.footer-new__newsletter-row .ui-button {
+			width: 100%;
+		}
+		.footer-new__consent {
+			font-size: 0.84rem;
+		}
 	}
 
 	.footer-new__nav {

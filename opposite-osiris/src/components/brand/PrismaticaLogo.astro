@@ -1,0 +1,36 @@
+---
+type Props = {
+	class?: string;
+	title?: string;
+	decorative?: boolean;
+};
+
+const {
+	class: className = 'prismatica-logo',
+	title = 'Prismatica logo',
+	decorative = false,
+} = Astro.props;
+
+const titleId = 'prismatica-logo-title';
+---
+
+<svg
+	class={className}
+	viewBox="0 0 32 32"
+	fill="none"
+	role={decorative ? undefined : 'img'}
+	aria-hidden={decorative ? 'true' : undefined}
+	aria-labelledby={decorative ? undefined : titleId}
+	focusable="false"
+>
+	{!decorative && <title id={titleId}>{title}</title>}
+	<path class="prismatica-logo__bridge" d="M14.4 16c.9-.78 2.3-.78 3.2 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+	<circle class="prismatica-logo__lens prismatica-logo__lens--left" cx="11" cy="16" r="8" stroke="currentColor" stroke-width="1.65" />
+	<circle class="prismatica-logo__lens prismatica-logo__lens--right" cx="21" cy="16" r="8" stroke="currentColor" stroke-width="1.65" />
+	<circle class="prismatica-logo__glow prismatica-logo__glow--left" cx="11" cy="16" r="5.1" fill="currentColor" opacity="0.08" />
+	<circle class="prismatica-logo__glow prismatica-logo__glow--right" cx="21" cy="16" r="5.1" fill="currentColor" opacity="0.08" />
+	<circle class="prismatica-logo__iris prismatica-logo__iris--left" cx="11" cy="16" r="3" fill="var(--prismatica-logo-left)" />
+	<circle class="prismatica-logo__iris prismatica-logo__iris--right" cx="21" cy="16" r="3" fill="var(--prismatica-logo-right)" />
+	<circle class="prismatica-logo__spark" cx="9.8" cy="14.8" r="0.9" fill="var(--prismatica-logo-spark)" />
+	<circle class="prismatica-logo__spark" cx="19.8" cy="14.8" r="0.9" fill="var(--prismatica-logo-spark)" />
+</svg>

@@ -22,7 +22,7 @@
 	border-left-width: 0.45rem;
 	border-left-color: var(--notification-accent);
 	border-radius: 20px 16px 22px 17px / 16px 22px 17px 20px;
-	background: color-mix(in srgb, var(--surface-strong) 94%, white);
+	background: color-mix(in srgb, var(--surface-strong) 94%, var(--brand-canvas-text));
 	color: var(--ink);
 	box-shadow: var(--shadow-lift);
 	pointer-events: auto;
@@ -30,10 +30,10 @@
 	animation: notification-enter 240ms var(--ease-out-sketch) both;
 }
 
-.notification-card--success { --notification-accent: #82c98a; }
-.notification-card--error { --notification-accent: #e87a7a; }
-.notification-card--warning { --notification-accent: #f5d84a; }
-.notification-card--info { --notification-accent: #7ab3e8; }
+.notification-card--success { --notification-accent: var(--system-success-border); }
+.notification-card--error { --notification-accent: var(--system-danger-border); }
+.notification-card--warning { --notification-accent: var(--system-warning-border); }
+.notification-card--info { --notification-accent: var(--system-info-border); }
 
 .notification-card--leaving {
 	animation: notification-leave 180ms ease-in both;

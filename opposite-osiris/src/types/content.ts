@@ -1,4 +1,4 @@
-export type ThemeName = 'light' | 'dark' | 'night';
+export type ThemeName = 'aurora' | 'solar' | 'ember' | 'forest';
 
 export type NavItem = {
 	label: string;

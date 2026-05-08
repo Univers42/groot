@@ -142,8 +142,8 @@
 	--surface-strong: var(--system-surface-raised);
 	--surface-muted: var(--system-surface-sunken);
 	--media-bg: var(--system-surface);
-	--header-bg: rgba(247, 244, 237, 0.94);          // header keeps brand backdrop
-	--header-frame-bg: rgba(247, 244, 237, 0.96);
+	--header-bg: color-mix(in srgb, var(--brand-canvas-surface) 96%, var(--brand-canvas-bg));
+	--header-frame-bg: color-mix(in srgb, var(--brand-canvas-surface-2) 98%, var(--brand-canvas-bg));
 
 	// Buttons — system primary navy, brand keeps yellow accents on top of it.
 	--button-fill: var(--brand-ink);
@@ -159,13 +159,13 @@
 	--portal-shell-line: var(--system-dialog-border);
 	--portal-panel: var(--system-dialog-bg);
 	--portal-panel-dark: var(--system-surface-inverse);
-	--portal-panel-glow: rgba(29, 78, 216, 0.18);
+	--portal-panel-glow: color-mix(in srgb, var(--brand-palette-secondary) 18%, transparent);
 	--portal-contrast-text: var(--system-text-on-inverse);
 	--portal-input-border: var(--system-input-border);
 	--portal-error-text: var(--system-danger-text);
 	--portal-left-text: var(--system-text-on-inverse);
-	--portal-left-muted: rgba(247, 247, 248, 0.82);
-	--portal-left-hint: rgba(247, 247, 248, 0.68);
+	--portal-left-muted: color-mix(in srgb, var(--system-text-on-inverse) 82%, transparent);
+	--portal-left-hint: color-mix(in srgb, var(--system-text-on-inverse) 68%, transparent);
 
 	// Sizing tokens (no contrast implications).
 	--size-page-gutter: 34px;

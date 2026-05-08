@@ -1,7 +1,6 @@
 ---
 import Button from '../ui/Button.astro';
 import Eyebrow from '../brand/Eyebrow.astro';
-import SketchUnderline from '../brand/SketchUnderline.astro';
 ---
 
 <section class="section section--hero hero-new" id="top">
@@ -9,16 +8,12 @@ import SketchUnderline from '../brand/SketchUnderline.astro';
 		<div class="hero-new__copy" data-scroll-rise>
 			<Eyebrow icon="✶">Open-source BaaS for product teams</Eyebrow>
 			<h1 class="section__title hero-new__title">
-				Ship your backend in
-				<span class="accent">
-					<span class="accent__text">an afternoon</span>
-					<SketchUnderline color="yellow" />
-				</span>
-				—not a quarter.
+				Everything.
+				<span class="hero-new__glow-word">One Space.</span>
 			</h1>
 			<p class="section__lede hero-new__lede">
-				Prismatica gives your team a self-hostable backend with auth, database, files,
-				and email built in. GDPR-ready, fully typed, and yours forever.
+				Prismatica keeps auth, database, files, email, dashboards, and product workflows
+				on one self-hostable backend canvas. GDPR-ready, fully typed, and yours forever.
 			</p>
 			<div class="hero-new__cta">
 				<Button variant="primary" size="lg" data-open-portal>Start free</Button>
@@ -59,30 +54,42 @@ import SketchUnderline from '../brand/SketchUnderline.astro';
 <style is:global>
 	.hero-new__grid {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-		gap: clamp(2rem, 5vw, 4rem);
+		gap: clamp(1.5rem, 4vw, 3rem);
 		align-items: center;
-	}
-
-	@media (max-width: 920px) {
-		.hero-new__grid {
-			grid-template-columns: 1fr;
-		}
+		justify-items: center;
 	}
 
 	.hero-new__copy {
 		display: grid;
-		gap: 1.1rem;
+		gap: 1rem;
+		justify-items: center;
+		max-width: 940px;
+		text-align: center;
 	}
 
-	.hero-new__title {
-		text-align: left;
-		font-size: clamp(2rem, 1.4rem + 3vw, 3.4rem);
+	.hero-new .hero-new__title {
+		max-width: min(10.5ch, 94vw);
+		font-family: var(--brand-font-display);
+		font-size: clamp(4.8rem, 10vw, 10.5rem);
+		font-weight: 400;
+		line-height: 0.86;
+		letter-spacing: 0;
+		text-align: center;
+		color: var(--brand-canvas-text);
+	}
+
+	.hero-new__glow-word {
+		display: inline-block;
+		color: transparent;
+		background: linear-gradient(90deg, var(--brand-palette-primary), var(--brand-palette-secondary), var(--brand-palette-warm));
+		background-clip: text;
+		-webkit-background-clip: text;
+		text-shadow: 0 0 42px var(--brand-glow-primary), 0 0 72px var(--brand-glow-secondary);
 	}
 
 	.hero-new__lede {
-		text-align: left;
-		max-width: 56ch;
+		max-width: 66ch;
+		text-align: center;
 	}
 
 	.hero-new__cta {
@@ -106,20 +113,30 @@ import SketchUnderline from '../brand/SketchUnderline.astro';
 		content: '✓';
 		display: inline-block;
 		margin-right: 0.4rem;
-		color: var(--system-success-text);
+		color: var(--brand-checkmark);
 		font-weight: 700;
 	}
 
 	.hero-new__art {
 		position: relative;
+		width: min(940px, 100%);
+	}
+
+	.hero-new__art::before {
+		content: '';
+		position: absolute;
+		inset: 12% 6%;
+		z-index: -1;
+		background: radial-gradient(ellipse, var(--brand-glow-secondary), transparent 72%);
+		opacity: 0.52;
 	}
 
 	.hero-new__frame {
 		display: grid;
 		grid-template-rows: auto 1fr;
-		border: 1px solid var(--system-border-strong);
+		border: 1px solid var(--brand-canvas-line-strong);
 		border-radius: var(--system-radius-xl);
-		background: var(--system-surface);
+		background: var(--brand-canvas-panel-bg-strong);
 		box-shadow: var(--system-shadow-3);
 		overflow: hidden;
 	}
@@ -129,8 +146,8 @@ import SketchUnderline from '../brand/SketchUnderline.astro';
 		align-items: center;
 		gap: 0.4rem;
 		padding: 0.55rem 0.9rem;
-		background: var(--system-surface-sunken);
-		border-bottom: 1px solid var(--system-border);
+		background: color-mix(in srgb, var(--brand-canvas-bg) 76%, transparent);
+		border-bottom: 1px solid var(--brand-canvas-line);
 		font-family: var(--system-font-mono);
 		font-size: 0.78rem;
 		color: var(--system-text-muted);
@@ -141,9 +158,9 @@ import SketchUnderline from '../brand/SketchUnderline.astro';
 		border-radius: 50%;
 		background: var(--system-border-strong);
 	}
-	.hero-new__chrome span:first-child { background: #ff6058; }
-	.hero-new__chrome span:nth-child(2) { background: #ffbd2e; }
-	.hero-new__chrome span:nth-child(3) { background: #28c941; }
+	.hero-new__chrome span:first-child { background: var(--brand-window-close); }
+	.hero-new__chrome span:nth-child(2) { background: var(--brand-window-minimize); }
+	.hero-new__chrome span:nth-child(3) { background: var(--brand-window-maximize); }
 	.hero-new__chrome code {
 		margin-left: 0.5rem;
 	}
@@ -152,14 +169,17 @@ import SketchUnderline from '../brand/SketchUnderline.astro';
 		display: grid;
 		gap: 0.75rem;
 		padding: 1rem;
-		background: var(--system-surface);
+		background:
+			linear-gradient(90deg, var(--brand-canvas-line) 1px, transparent 1px) 0 0 / calc(var(--brand-canvas-grid-size) / 2) calc(var(--brand-canvas-grid-size) / 2),
+			linear-gradient(180deg, var(--brand-canvas-line) 1px, transparent 1px) 0 0 / calc(var(--brand-canvas-grid-size) / 2) calc(var(--brand-canvas-grid-size) / 2),
+			var(--brand-canvas-bg-2);
 	}
 
 	.hero-new__panel {
 		padding: 0.7rem 0.9rem;
-		border: 1px solid var(--system-border);
+		border: 1px solid var(--brand-canvas-line-strong);
 		border-radius: var(--system-radius-md);
-		background: var(--system-surface-raised);
+		background: color-mix(in srgb, var(--brand-canvas-surface) 86%, transparent);
 		font-size: 0.85rem;
 		color: var(--system-text);
 	}
@@ -187,6 +207,18 @@ import SketchUnderline from '../brand/SketchUnderline.astro';
 	.hero-new__panel--query {
 		font-family: var(--system-font-mono);
 		font-size: 0.78rem;
-		background: var(--system-surface-sunken);
+		background: color-mix(in srgb, var(--brand-canvas-bg) 82%, transparent);
+	}
+
+	@media (max-width: 700px) {
+		.hero-new .hero-new__title {
+			max-width: min(9.2ch, 96vw);
+			font-size: clamp(3.35rem, 17vw, 5.6rem);
+			line-height: 0.86;
+		}
+		.hero-new__cta,
+		.hero-new__bullets {
+			justify-content: center;
+		}
 	}
 </style>

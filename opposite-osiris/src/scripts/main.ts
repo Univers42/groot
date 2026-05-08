@@ -6,7 +6,7 @@ import { CONSENT_STORAGE_KEY, CSRF_STORAGE_KEY, NEWSLETTER_INTENT_KEY, POLICY_VE
 import { type NotificationKind, type NotificationOptions, dismissAll, notify } from './notifications';
 import { checkPasswordStrength, passwordRuleResults } from './password-strength';
 
-type ThemeName = 'light' | 'dark';
+type ThemeName = 'aurora' | 'solar' | 'ember' | 'forest';
 
 type PortalMode = 'start' | 'connect';
 
@@ -92,7 +92,7 @@ function randomBetween(minimum: number, span: number): number {
 function randomIndex(length: number): number {
 	return Math.floor(secureRandom() * length);
 }
-const THEMES: ThemeName[] = ['light', 'dark'];
+const THEMES: ThemeName[] = ['aurora', 'solar', 'ember', 'forest'];
 const authClient = useAuth();
 const COMMON_EMAIL_DOMAINS = ['gmail.com', 'outlook.com', 'hotmail.com', 'icloud.com', 'yahoo.com', 'proton.me', 'protonmail.com', 'live.com'];
 const EMAIL_DOMAIN_ALIASES: Record<string, string> = {
@@ -253,33 +253,58 @@ function writeStorage(key: string, value: string): void {
 	}
 }
 
+function isThemeName(value: string | null | undefined): value is ThemeName {
+	return value === 'aurora' || value === 'solar' || value === 'ember' || value === 'forest';
+}
+
+function normalizeTheme(value: string | null): ThemeName | null {
+	if (isThemeName(value)) {
+		return value;
+	}
+	if (value === 'light') {
+		return 'solar';
+	}
+	if (value === 'dark' || value === 'night') {
+		return 'aurora';
+	}
+	return null;
+}
+
 /** Chooses the initial theme from storage or system preference. */
 function initialTheme(): ThemeName {
-	const stored = readStorage(THEME_KEY);
-	if (stored === 'light' || stored === 'dark') {
-		return stored;
-	}
-	return globalThis.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+	return normalizeTheme(readStorage(THEME_KEY)) ?? (globalThis.matchMedia('(prefers-color-scheme: dark)').matches ? 'aurora' : 'solar');
 }
 
 /** Returns the compact icon for the selected theme. */
 function themeIcon(theme: ThemeName): string {
 	const icons: Record<ThemeName, string> = {
-		light: '☼',
-		dark: '☾',
+		aurora: '✦',
+		solar: '☼',
+		ember: '◒',
+		forest: '◆',
 	};
 	return icons[theme];
+}
+
+function themeDisplayName(theme: ThemeName): string {
+	const labels: Record<ThemeName, string> = {
+		aurora: 'Aurora',
+		solar: 'Solar',
+		ember: 'Ember',
+		forest: 'Forest',
+	};
+	return labels[theme];
 }
 
 /** Updates visible and assistive theme button labels. */
 function updateThemeButton(theme: ThemeName): void {
 	const buttons = queryElements('#theme-toggle, [data-theme-toggle]', isButton);
 	const labels = queryElements('[data-theme-label]', isHtmlElement);
-	const nextTheme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length] ?? 'light';
-	const themeLabel = theme[0].toUpperCase() + theme.slice(1);
-	const nextLabel = nextTheme[0].toUpperCase() + nextTheme.slice(1);
+	const nextTheme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length] ?? 'aurora';
+	const themeLabel = themeDisplayName(theme);
+	const nextLabel = themeDisplayName(nextTheme);
 	buttons.forEach((button) => {
-		button.setAttribute('aria-label', `Theme: ${theme}. Switch to ${nextTheme} mode`);
+		button.setAttribute('aria-label', `Theme: ${themeLabel}. Switch to ${nextLabel} palette`);
 		button.title = `Switch to ${nextLabel} theme`;
 		const icon = button.querySelector('.header-icon--theme');
 		if (icon instanceof HTMLElement) {
@@ -294,18 +319,18 @@ function updateThemeButton(theme: ThemeName): void {
 /** Applies a theme to the document root. */
 function applyTheme(theme: ThemeName): void {
 	document.documentElement.dataset.theme = theme;
-	document.documentElement.style.colorScheme = theme === 'light' ? 'light' : 'dark';
+	document.documentElement.style.colorScheme = theme === 'solar' ? 'light' : 'dark';
 	writeStorage(THEME_KEY, theme);
 	updateThemeButton(theme);
 }
 
 /** Advances the current theme. */
 function cycleTheme(): void {
-	const current = document.documentElement.dataset.theme as ThemeName | undefined;
+	const current = normalizeTheme(document.documentElement.dataset.theme ?? null);
 	const index = current ? THEMES.indexOf(current) : -1;
-	const nextTheme = THEMES[(index + 1) % THEMES.length] ?? 'light';
+	const nextTheme = THEMES[(index + 1) % THEMES.length] ?? 'aurora';
 	applyTheme(nextTheme);
-	announce(`${nextTheme[0].toUpperCase() + nextTheme.slice(1)} theme enabled`);
+	announce(`${themeDisplayName(nextTheme)} theme enabled`);
 }
 
 /** Updates visible and assistive motion button labels. */
@@ -446,6 +471,20 @@ async function requestPasswordRecovery(email: string, turnstileToken: string): P
 	}
 }
 
+async function requestNewsletterSubscription(email: string): Promise<AuthResult> {
+	const response = await fetch('/api/newsletter/subscribe', {
+		method: 'POST',
+		headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+		body: JSON.stringify({ email: email.trim() }),
+	});
+	const payload = await response.json().catch(() => ({})) as { message?: string; error?: string };
+	return {
+		ok: response.ok,
+		status: response.status,
+		message: payload.message ?? payload.error ?? (response.ok ? 'Check your inbox to confirm your subscription.' : 'Could not send the newsletter confirmation email.'),
+	};
+}
+
 /** Persists consent preferences locally when no user token exists yet. */
 function storeConsentPreferences(preferences: Omit<ConsentPreferences, 'policyVersion' | 'savedAt'>): ConsentPreferences {
 	const record: ConsentPreferences = {
@@ -471,15 +510,15 @@ function readConsentPreferences(): ConsentPreferences | null {
 }
 
 /** Synchronises locally stored newsletter consent after login when possible. */
-async function syncStoredConsents(token: string, email?: string): Promise<void> {
+async function syncStoredConsents(_token: string, email?: string): Promise<void> {
 	const preferences = readConsentPreferences();
 	if (preferences?.newsletter && email) {
-		await callGdprRpc('gdpr_request_newsletter_optin', { email }, token).catch(() => undefined);
+		await requestNewsletterSubscription(email).catch(() => undefined);
 	}
 
 	const newsletterIntent = readStorage(NEWSLETTER_INTENT_KEY);
 	if (newsletterIntent && email) {
-		await callGdprRpc('gdpr_request_newsletter_optin', { email }, token).catch(() => undefined);
+		await requestNewsletterSubscription(email).catch(() => undefined);
 		localStorage.removeItem(NEWSLETTER_INTENT_KEY);
 	}
 }
@@ -876,6 +915,7 @@ function startMascotBlink(mascot: HTMLButtonElement): void {
 /** Wires pointer, focus and click interactions to the restored mascot. */
 function bindMascotInteractions(mascot: HTMLButtonElement): void {
 	prepareMascotSvg(mascot);
+	let lastScrollMascotUpdate = 0;
 	globalThis.addEventListener('pointermove', (event) => updateMascotTarget(mascot, event.clientX, event.clientY), { passive: true });
 	mascot.addEventListener('pointerenter', () => setMascotMood(mascot, 'happy', 700));
 	mascot.addEventListener('focus', () => setMascotMood(mascot, 'listening', 700));
@@ -885,9 +925,11 @@ function bindMascotInteractions(mascot: HTMLButtonElement): void {
 	});
 	mascot.addEventListener('dblclick', () => setMascotMood(mascot, 'love', 1800, true));
 	globalThis.addEventListener('scroll', () => {
-		if (Date.now() < mascotState.lockedUntil || document.body.classList.contains('portal-open')) {
+		const now = Date.now();
+		if (now - lastScrollMascotUpdate < 900 || now < mascotState.lockedUntil || document.body.classList.contains('portal-open')) {
 			return;
 		}
+		lastScrollMascotUpdate = now;
 		setMascotMood(mascot, 'curious', 700, true);
 		liftMascotBrows(mascot, 520);
 	}, { passive: true });
@@ -1087,6 +1129,7 @@ function portalRegistrationProfile(elements: PortalFormElements): RegisterProfil
 		username: elements.username?.value.trim() ?? '',
 		confirmPassword: elements.confirmPassword?.value ?? '',
 		emailVerificationConsent: authConfig.requireEmailVerification ? (elements.emailVerificationConsent?.checked ?? true) : Boolean(elements.emailVerificationConsent?.checked),
+		newsletterConsent: Boolean(elements.newsletterConsent?.checked),
 		notificationsEnabled: true,
 	};
 }
@@ -1641,7 +1684,7 @@ async function processPortalLogin(elements: PortalFormElements, turnstileToken: 
 	}
 	await syncStoredConsents(authenticated.accessToken ?? '', elements.email.value);
 	if (elements.newsletterConsent?.checked) {
-		await callGdprRpc('gdpr_request_newsletter_optin', { email: elements.email.value }, authenticated.accessToken).catch(() => undefined);
+		await requestNewsletterSubscription(elements.email.value).catch(() => undefined);
 	}
 	notifyWithMascot({
 		kind: 'success',
@@ -2057,41 +2100,26 @@ function bindNewsletterSignup(): void {
 			status.textContent = 'Sending your newsletter request…';
 			setMountedMascotMood('listening', 1600);
 			try {
-				const response = await fetch('/api/newsletter/subscribe', {
-					method: 'POST',
-					headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-					body: JSON.stringify({ email: email.value.trim() }),
-				});
-				const responseText = await response.clone().text().catch(() => '');
-				const alreadySubscribed = response.status === 409 || messageMentions(responseText, 'already subscribed', 'already on the newsletter');
+				const response = await requestNewsletterSubscription(email.value);
 				if (response.ok) {
 					writeStorage(NEWSLETTER_INTENT_KEY, JSON.stringify({ email: email.value.trim(), pendingDoubleOptIn: true, policyVersion: POLICY_VERSION, savedAt: new Date().toISOString() }));
-					status.textContent = 'Check your inbox to confirm your subscription.';
+					status.textContent = response.message;
 					notifyWithMascot({
-						kind: alreadySubscribed ? 'info' : 'success',
-						title: alreadySubscribed ? 'Already subscribed' : 'Almost there!',
-						message: alreadySubscribed ? 'You are already on the newsletter list.' : 'Check your inbox to confirm your subscription.',
-						duration: alreadySubscribed ? 5000 : 0,
+						kind: 'success',
+						title: 'Almost there!',
+						message: response.message,
+						duration: 0,
 					});
 					return;
 				}
-				if (alreadySubscribed) {
-					status.textContent = 'You are already on the newsletter list.';
-					notifyWithMascot({
-						kind: 'info',
-						title: 'Already subscribed',
-						message: 'You are already on the newsletter list.',
-						duration: 5000,
-					});
-					return;
-				}
-				throw new Error('newsletter_failed');
-			} catch {
-				status.textContent = 'Could not send. Please try again or contact us directly.';
+				throw new Error(response.message);
+			} catch (error) {
+				const message = error instanceof Error && error.message !== 'newsletter_failed' ? error.message : 'Could not send. Please try again or contact us directly.';
+				status.textContent = message;
 				notifyWithMascot({
 					kind: 'error',
 					title: 'Could not send',
-					message: 'Please try again or contact us directly.',
+					message,
 					duration: 8000,
 				});
 			} finally {

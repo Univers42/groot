@@ -341,9 +341,9 @@ const categoryColor: Record<ServiceCategory, string> = {
 		color: var(--system-text-muted);
 	}
 	.backend-arch__chrome > span:not(.backend-arch__hint) { width: 10px; height: 10px; border-radius: 50%; background: var(--system-border-strong); }
-	.backend-arch__chrome > span:nth-child(1) { background: #ff6058; }
-	.backend-arch__chrome > span:nth-child(2) { background: #ffbd2e; }
-	.backend-arch__chrome > span:nth-child(3) { background: #28c941; }
+	.backend-arch__chrome > span:nth-child(1) { background: var(--brand-window-close); }
+	.backend-arch__chrome > span:nth-child(2) { background: var(--brand-window-minimize); }
+	.backend-arch__chrome > span:nth-child(3) { background: var(--brand-window-maximize); }
 	.backend-arch__chrome code { margin-left: 0.5rem; }
 	.backend-arch__hint { margin-left: auto; font-size: 0.72rem; opacity: 0.7; }
 	@media (max-width: 540px) { .backend-arch__hint { display: none; } }

@@ -1,13 +1,9 @@
 ---
 import Layout from '../../layouts/Layout.astro';
-
-const configuredBaasUrl = import.meta.env.PUBLIC_BAAS_URL ?? '/api';
-const baasUrl = configuredBaasUrl.replace(/\/$/, '');
-const anonKey = import.meta.env.PUBLIC_BAAS_ANON_KEY ?? '';
 ---
 
 <Layout title="Unsubscribe from Prismatica" description="Unsubscribe from the Prismatica newsletter.">
-	<main class="auth-page" data-newsletter-unsubscribe data-baas-url={baasUrl} data-anon-key={anonKey}>
+	<main class="auth-page" data-newsletter-unsubscribe>
 		<section class="auth-card" aria-labelledby="newsletter-unsubscribe-title">
 			<p class="eyebrow">Newsletter</p>
 			<h1 id="newsletter-unsubscribe-title">Unsubscribing…</h1>
@@ -16,13 +12,9 @@ const anonKey = import.meta.env.PUBLIC_BAAS_ANON_KEY ?? '';
 		</section>
 	</main>
 	<script>
-		import { createClient } from '@mini-baas/js';
-
 		const root = document.querySelector('[data-newsletter-unsubscribe]') as HTMLElement | null;
 		const status = root?.querySelector('[data-newsletter-unsubscribe-status]');
 		const token = new URLSearchParams(window.location.search).get('token');
-		const baasUrl = root?.dataset.baasUrl?.replace(/\/$/, '') ?? '';
-		const anonKey = root?.dataset.anonKey ?? '';
 		const setStatus = (message: string, isError = false) => {
 			if (!status) return;
 			status.textContent = message;
@@ -33,12 +25,13 @@ const anonKey = import.meta.env.PUBLIC_BAAS_ANON_KEY ?? '';
 				setStatus('This unsubscribe link is missing its token.', true);
 				return;
 			}
-			if (!baasUrl || !anonKey) {
-				setStatus('Newsletter unsubscribe is not configured for this environment.', true);
-				return;
-			}
 			try {
-				await createClient({ url: baasUrl, anonKey, persistSession: false }).rpc('gdpr_withdraw_consent', { consent_type: 'newsletter', token });
+				const response = await fetch('/api/newsletter/unsubscribe', {
+					method: 'POST',
+					headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+					body: JSON.stringify({ token }),
+				});
+				if (!response.ok) throw new Error('newsletter_unsubscribe_failed');
 			} catch {
 				setStatus('This unsubscribe link is invalid or has already been used.', true);
 				return;

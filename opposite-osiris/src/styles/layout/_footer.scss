@@ -52,6 +52,21 @@
 	box-shadow: 0.16rem 0.16rem 0 var(--ink);
 }
 
+.site-footer__logo-mark {
+	display: block;
+	width: 1.85rem;
+	height: 1.85rem;
+	color: var(--ink);
+}
+
+.site-footer__logo-mark .prismatica-logo__iris--left {
+	fill: var(--prismatica-logo-left);
+}
+
+.site-footer__logo-mark .prismatica-logo__iris--right {
+	fill: var(--prismatica-logo-right);
+}
+
 .site-footer__logo strong {
 	font-family: var(--font-brand);
 	font-size: clamp(1.7rem, 3vw, 2.35rem);

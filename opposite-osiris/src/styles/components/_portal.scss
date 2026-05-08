@@ -336,7 +336,7 @@ dialog.portal[data-auth-mode='login'] .portal-register-identity .field:not(.port
 	color: var(--system-input-fg);
 	font-family: var(--system-font-sans);
 	font-size: 1rem;
-	box-shadow: 0 1px 0 rgba(0, 0, 0, 0.03);
+	box-shadow: 0 1px 0 color-mix(in srgb, var(--brand-canvas-bg) 12%, transparent);
 	transition: border-color 160ms var(--system-ease-standard), box-shadow 160ms var(--system-ease-standard);
 }
 

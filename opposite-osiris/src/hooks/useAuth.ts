@@ -18,6 +18,7 @@ export type RegisterProfile = {
 	username: string;
 	confirmPassword: string;
 	emailVerificationConsent?: boolean;
+	newsletterConsent?: boolean;
 	notificationsEnabled?: boolean;
 };
 

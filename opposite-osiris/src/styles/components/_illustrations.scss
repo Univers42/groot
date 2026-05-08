@@ -157,6 +157,12 @@
 	fill: var(--character-bubble-fill) !important;
 }
 
+:root[data-theme='aurora'] .character-svg [fill='#000'],
+:root[data-theme='aurora'] .character-svg [fill='#000000'],
+:root[data-theme='ember'] .character-svg [fill='#000'],
+:root[data-theme='ember'] .character-svg [fill='#000000'],
+:root[data-theme='forest'] .character-svg [fill='#000'],
+:root[data-theme='forest'] .character-svg [fill='#000000'],
 :root[data-theme='dark'] .character-svg [fill='#000'],
 :root[data-theme='dark'] .character-svg [fill='#000000'],
 :root[data-theme='night'] .character-svg [fill='#000'],
@@ -164,6 +170,12 @@
 	fill: var(--character-hair-fill) !important;
 }
 
+:root[data-theme='aurora'] .character-svg [stroke='#000'],
+:root[data-theme='aurora'] .character-svg [stroke='#000000'],
+:root[data-theme='ember'] .character-svg [stroke='#000'],
+:root[data-theme='ember'] .character-svg [stroke='#000000'],
+:root[data-theme='forest'] .character-svg [stroke='#000'],
+:root[data-theme='forest'] .character-svg [stroke='#000000'],
 :root[data-theme='dark'] .character-svg [stroke='#000'],
 :root[data-theme='dark'] .character-svg [stroke='#000000'],
 :root[data-theme='night'] .character-svg [stroke='#000'],

@@ -6,7 +6,7 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/04 18:29:46 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/04 18:35:37 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/05/08 01:04:18 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -18,7 +18,11 @@ const templateDir = resolve(process.cwd(), 'src/email-templates');
 const templates = [
 	{
 		file: 'password-reset.html',
-		required: ['{{.Token}}', '{{.SiteURL}}', '{{.Email}}', 'Reset my password →', '1 hour'],
+		required: ['{{.Token}}', '{{.SiteURL}}', '{{.Email}}', '{{ResetURL}}', 'Reset my password →', '1 hour'],
+	},
+	{
+		file: 'account-created.html',
+		required: ['{{.SiteURL}}', '{{.Email}}', 'Your account is ready', 'Open Prismatica →'],
 	},
 	{
 		file: 'email-verification.html',
@@ -33,8 +37,12 @@ const templates = [
 		required: ['{{.Token}}', '{{.SiteURL}}', '{{.Email}}', 'One-click unsubscribe', 'You can unsubscribe at any time'],
 	},
 	{
+		file: 'newsletter-unsubscribe.html',
+		required: ['{{.SiteURL}}', '{{.Email}}', 'You are unsubscribed'],
+	},
+	{
 		file: 'login-alert.html',
-		required: ['{{email}}', '{{ipAddress}}', '{{location}}', '{{occurredAt}}', '{{userAgent}}', 'Security alert', 'New sign-in to Prismatica'],
+		required: ['{{email}}', '{{ipAddress}}', '{{location}}', '{{occurredAt}}', '{{userAgent}}', '{{outcome}}', 'Security alert', 'New sign-in to Prismatica'],
 	},
 ];
 
