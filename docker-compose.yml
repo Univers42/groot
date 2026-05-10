@@ -351,10 +351,39 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  playground-simulation:
+    profiles:
+      - testing
+    build:
+      context: ./apps/osionos/app
+      dockerfile: docker/services/browser-tests/Dockerfile
+    working_dir: /app
+    init: true
+    ipc: host
+    network_mode: host
+    environment:
+      CI: "1"
+      NODE_ENV: test
+      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      PLAYGROUND_WEBSITE_URL: http://127.0.0.1:4322
+      PLAYGROUND_APP_URL: http://127.0.0.1:3001
+      PLAYGROUND_VIEWER_DIR: /app/public/playground-simulation
+      PLAYGROUND_HEADLESS: ${PLAYGROUND_HEADLESS:-1}
+      PLAYGROUND_SLOWMO_MS: ${PLAYGROUND_SLOWMO_MS:-80}
+    volumes:
+      - ./apps/osionos/app:/app
+      - osionos-browser-test-node-modules:/app/node_modules
+      - osionos-browser-test-pnpm-store:/pnpm/store
+    entrypoint: ["/bin/bash", "/app/docker/services/browser-tests/entrypoint.sh"]
+    command: ["node", "scripts/playground-simulation.mjs"]
+
 volumes:
   track-binocle-postgres-data:
   track-binocle-redis-data:
   osionos-app-node-modules:
   osionos-app-pnpm-store:
+  osionos-browser-test-node-modules:
+  osionos-browser-test-pnpm-store:
   mini-baas-sdk-node-modules:
   opposite-osiris-node-modules:

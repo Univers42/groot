@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/10 15:13:09 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/10 16:01:30 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -24,6 +24,53 @@ BAAS_DOCKERFILE := infrastructure/baas/Dockerfile
 BAAS_CONTEXT := infrastructure/baas
 FRONTEND_DIR := apps/opposite-osiris
 BOOL ?= false
+WEBSITE_URL := http://localhost:4322
+OSIONOS_URL := http://localhost:3001
+BRIDGE_URL := http://localhost:4000
+AUTH_URL := http://localhost:8787/api/auth
+BAAS_URL := http://localhost:8000
+PLAYGROUND_VIEWER_URL := $(OSIONOS_URL)/playground-simulation/index.html
+VSCODE_CLI ?= /usr/bin/code
+CURL_HEALTH := curl --retry 30 --retry-delay 2 --retry-all-errors --retry-connrefused -fsS
+
+.DEFAULT_GOAL := all
+
+all: bootstrap up healthcheck showcase
+
+bootstrap:
+	docker run --rm -v "$$PWD":/workspace -w /workspace node:22-alpine node infrastructure/baas/scripts/bootstrap.mjs
+
+up:
+	docker compose up -d --build
+
+healthcheck:
+	docker compose ps
+	$(CURL_HEALTH) $(BRIDGE_URL)/api/auth/bridge/health
+	$(CURL_HEALTH) $(OSIONOS_URL) >/dev/null
+	$(CURL_HEALTH) $(WEBSITE_URL) >/dev/null
+	$(CURL_HEALTH) -o /dev/null -w 'auth-gateway-http-%{http_code}\n' $(AUTH_URL)/availability
+	docker compose exec -T -e BAAS_INTERNAL_URL=http://kong:8000 opposite-osiris node scripts/container-only.mjs node scripts/verify-connection.mjs
+
+showcase:
+	@printf '\nPipeline ready. Open these local services:\n'
+	@printf '  Website:             %s\n' '$(WEBSITE_URL)'
+	@printf '  osionos app:         %s\n' '$(OSIONOS_URL)'
+	@printf '  osionos bridge API:  %s\n' '$(BRIDGE_URL)'
+	@printf '  Auth gateway:        %s\n' '$(AUTH_URL)'
+	@printf '  BaaS gateway:        %s\n\n' '$(BAAS_URL)'
+
+playground: healthcheck playground-preview
+	docker compose run --rm --build playground-simulation
+	$(MAKE) showcase
+
+playground-preview:
+	@printf '\nSimulation preview: Docker Playwright will create a throwaway account and bridge it into osionos.\n'
+	@printf 'Opening the VS Code simulation viewer: %s\n' '$(PLAYGROUND_VIEWER_URL)'
+	@if [ -x '$(VSCODE_CLI)' ]; then \
+		'$(VSCODE_CLI)' --reuse-window '$(PLAYGROUND_VIEWER_URL)' >/dev/null 2>&1 || printf 'Open this URL in VS Code Simple Browser: %s\n' '$(PLAYGROUND_VIEWER_URL)'; \
+	else \
+		printf 'Open this URL in VS Code Simple Browser: %s\n' '$(PLAYGROUND_VIEWER_URL)'; \
+	fi
 
 version: baas-update baas-build baas-push baas-smoke
 ## Publish a versioned BaaS release to DockerHub and GHCR, then smoke-test it.
@@ -100,4 +147,4 @@ docker_reclaim_cache:
 # Remove BuildKit/buildx cache only
 	docker builder prune -a -f
 
-.PHONY: version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker_rm_all docker_verify docker_reclaim_cache
+.PHONY: all bootstrap up healthcheck showcase playground playground-preview version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker_rm_all docker_verify docker_reclaim_cache

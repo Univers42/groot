@@ -19,9 +19,22 @@ The browser flow is:
 5. The browser redirects to `http://localhost:3001/#bridge_token=...`.
 6. osionos consumes the token and opens the user's private workspace.
 
-## Fresh Start
+## Normal Workflow
 
-Run these commands from the repository root:
+Most users only need two commands:
+
+```sh
+make
+make playground
+```
+
+`make` bootstraps the ignored runtime files, builds and starts the Docker stack, runs health checks, then prints the localhost URLs only after the pipeline is ready.
+
+`make playground` opens a VS Code simulation viewer, then runs the classic user scenario with Docker-contained Playwright: open the website, create a development account, sign in, bridge into osionos, and verify the app session. The viewer is explicitly a simulation screen and refreshes with screenshots/status from the automated run.
+
+## Fresh Start Internals
+
+The Makefile runs these commands from the repository root:
 
 ```sh
 docker run --rm -v "$PWD":/workspace -w /workspace node:22-alpine node infrastructure/baas/scripts/bootstrap.mjs
