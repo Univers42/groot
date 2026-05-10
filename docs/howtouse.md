@@ -32,16 +32,41 @@ make playground
 
 `make playground` opens a VS Code simulation viewer, then runs the classic user scenario with Docker-contained Playwright: open the website, create a development account, sign in, bridge into osionos, and verify the app session. The viewer is explicitly a simulation screen and refreshes with screenshots/status from the automated run.
 
+## Environment And Vault
+
+Runtime env files are managed by Docker-only commands. The generated `.env.example` files are grouped by required, recommended, optional, and legacy keys. Optional keys may stay commented or blank when the feature is not enabled, for example SMTP, OAuth, analytics, Sonar, or third-party API integrations.
+
+Useful commands:
+
+```sh
+make env-format
+make vault-seed
+make vault-verify-approles
+make env-fetch
+make env-restore-test
+```
+
+`make env-format` rewrites managed env files and examples with comments and categories. Real env files comment out missing values so later Compose env files do not accidentally override earlier non-empty secrets with blanks.
+
+`make vault-seed` starts local HashiCorp Vault through the Compose `secrets` profile, initializes and unseals it, creates service AppRoles, and stores the managed env data under `secret/data/track-binocle/env/*`. Vault is exposed only on `http://127.0.0.1:8200` by default.
+
+`make vault-verify-approles` logs in with the root service AppRoles and verifies each token can read the managed Vault env secret without printing secret values. This confirms the local AppRole path for `postgres`, `db-bootstrap`, `project-db-init`, `pg-meta`, `supavisor`, `osionos-bridge`, `osionos-app`, `auth-gateway`, and `opposite-osiris`.
+
+`make env-fetch` materializes the current Vault values back into the ignored local env files before the Compose stack starts. `make env-restore-test` creates `.env.bak` files, removes the managed env files, fetches them from Vault, and verifies required keys came back.
+
 ## Fresh Start Internals
 
 The Makefile runs these commands from the repository root:
 
 ```sh
-docker run --rm -v "$PWD":/workspace -w /workspace node:22-alpine node infrastructure/baas/scripts/bootstrap.mjs
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/workspace -w /workspace node:22-alpine node infrastructure/baas/scripts/bootstrap.mjs
+docker compose --profile secrets up -d --build vault
+docker compose --profile secrets run --rm --build vault-init
+docker compose --profile secrets run --rm vault-env node infrastructure/baas/scripts/vault-env.mjs fetch
 docker compose up -d --build
 ```
 
-The bootstrap command generates ignored local runtime files without using host Node. The Compose command builds and starts every service.
+The bootstrap command generates ignored local runtime files without using host Node. The Vault commands keep env files aligned with the local Vault store. The final Compose command builds and starts every service.
 
 If the website dependency volume needs to be initialized separately, run:
 
@@ -117,8 +142,7 @@ Fully reset containers, Postgres data, dependency volumes, and generated runtime
 
 ```sh
 docker compose down -v
-docker run --rm -v "$PWD":/workspace -w /workspace node:22-alpine node infrastructure/baas/scripts/bootstrap.mjs
-docker compose up -d --build
+make
 ```
 
 Use the reset only when you intentionally want to remove local database data and Docker dependency volumes.
