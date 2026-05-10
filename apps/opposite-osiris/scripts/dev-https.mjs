@@ -7,9 +7,9 @@ import { fileURLToPath } from 'node:url';
 
 const projectDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = resolve(projectDir, '../..');
-const certDir = resolve(repoRoot, 'infrastructure/baas/certs');
-const certScript = resolve(repoRoot, 'infrastructure/baas/scripts/generate-localhost-cert.sh');
-const trustScript = resolve(repoRoot, 'infrastructure/baas/scripts/trust-localhost-cert.sh');
+const certDir = resolve(repoRoot, 'apps/baas/certs');
+const certScript = resolve(repoRoot, 'apps/baas/scripts/generate-localhost-cert.sh');
+const trustScript = resolve(repoRoot, 'apps/baas/scripts/trust-localhost-cert.sh');
 const caFile = resolve(certDir, 'track-binocle-local-ca.pem');
 const certFile = resolve(certDir, 'localhost.pem');
 const keyFile = resolve(certDir, 'localhost-key.pem');

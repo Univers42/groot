@@ -7,7 +7,7 @@ import { loadEnv } from 'vite';
 const env = loadEnv(process.env.NODE_ENV ?? 'development', process.cwd(), '');
 const authGatewayTarget = env.AUTH_GATEWAY_TARGET ?? `http://localhost:${env.AUTH_GATEWAY_PORT ?? 8787}`;
 const baasGatewayTarget = env.BAAS_GATEWAY_TARGET ?? 'http://localhost:8000';
-const defaultCertDir = resolve(process.cwd(), '../../infrastructure/baas/certs');
+const defaultCertDir = resolve(process.cwd(), '../../apps/baas/certs');
 const devHttpsEnabled = env.ASTRO_DEV_HTTPS === 'true' || env.PUBLIC_SITE_URL?.startsWith('https://localhost');
 const devHttpsKey = resolve(process.cwd(), env.ASTRO_DEV_HTTPS_KEY ?? `${defaultCertDir}/localhost-key.pem`);
 const devHttpsCert = resolve(process.cwd(), env.ASTRO_DEV_HTTPS_CERT ?? `${defaultCertDir}/localhost.pem`);

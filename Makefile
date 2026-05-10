@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/10 22:28:50 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/11 00:12:46 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -20,8 +20,8 @@ BAAS_GHCR_IMAGE ?= ghcr.io/univers42/mini-baas-infra
 BAAS_SMTP_IMAGE ?= dlesieur/mini-baas-infra
 BAAS_SMTP_VERSION ?= smtp-v1
 BAAS_SERVICES ?= kong gotrue postgrest postgres redis realtime
-BAAS_DOCKERFILE := infrastructure/baas/Dockerfile
-BAAS_CONTEXT := infrastructure/baas
+BAAS_DOCKERFILE := apps/baas/Dockerfile
+BAAS_CONTEXT := apps/baas
 FRONTEND_DIR := apps/opposite-osiris
 BOOL ?= false
 WEBSITE_URL := http://localhost:4322
@@ -33,7 +33,7 @@ PLAYGROUND_VIEWER_URL := $(OSIONOS_URL)/playground-simulation/index.html
 VSCODE_CLI ?= /usr/bin/code
 CURL_HEALTH := curl --retry 30 --retry-delay 2 --retry-all-errors --retry-connrefused -fsS
 VAULT_COMPOSE := docker compose --profile secrets
-VAULT_ENV_CMD := $(VAULT_COMPOSE) run --rm vault-env node infrastructure/baas/scripts/vault-env.mjs
+VAULT_ENV_CMD := $(VAULT_COMPOSE) run --rm vault-env node apps/baas/scripts/vault-env.mjs
 HOST_UID := $(shell id -u)
 HOST_GID := $(shell id -g)
 export HOST_UID HOST_GID
@@ -56,10 +56,10 @@ help:
 all: bootstrap env-format vault-seed vault-verify-approles env-fetch up healthcheck showcase
 
 bootstrap:
-	$(DOCKER_NODE) node infrastructure/baas/scripts/bootstrap.mjs
+	$(DOCKER_NODE) node apps/baas/scripts/bootstrap.mjs
 
 env-format:
-	$(DOCKER_NODE) node infrastructure/baas/scripts/vault-env.mjs format
+	$(DOCKER_NODE) node apps/baas/scripts/vault-env.mjs format
 
 vault-up:
 	$(VAULT_COMPOSE) up -d --build vault
@@ -75,7 +75,7 @@ env-fetch: vault-up
 	$(VAULT_ENV_CMD) fetch
 
 env-backup:
-	$(DOCKER_NODE) node infrastructure/baas/scripts/vault-env.mjs backup
+	$(DOCKER_NODE) node apps/baas/scripts/vault-env.mjs backup
 
 env-restore-test: vault-seed
 	$(VAULT_ENV_CMD) roundtrip
@@ -94,6 +94,18 @@ mail-logs:
 mail-down:
 ## Stop osionos Mail and the Gmail bridge containers.
 	docker compose stop mail mail-bridge
+
+calendar-up:
+## Start osionos Calendar and the Google Calendar bridge with Docker Compose.
+	docker compose up -d --build calendar calendar-bridge
+
+calendar-logs:
+## Follow osionos Calendar and Google Calendar bridge logs.
+	docker compose logs -f calendar calendar-bridge
+
+calendar-down:
+## Stop osionos Calendar and the Google Calendar bridge containers.
+	docker compose stop calendar calendar-bridge
 
 healthcheck:
 	docker compose ps
@@ -199,4 +211,4 @@ docker_reclaim_cache:
 ## Remove BuildKit/buildx cache only.
 	docker builder prune -a -f
 
-.PHONY: help all bootstrap env-format vault-up vault-seed vault-verify-approles env-fetch env-backup env-restore-test up mail-up mail-logs mail-down healthcheck showcase playground playground-preview version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker_rm_all docker_verify docker_reclaim_cache
+.PHONY: help all bootstrap env-format vault-up vault-seed vault-verify-approles env-fetch env-backup env-restore-test up mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker_rm_all docker_verify docker_reclaim_cache

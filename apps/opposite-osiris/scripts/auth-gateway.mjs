@@ -7,7 +7,7 @@ import { resolve4, resolve6, resolveMx } from 'node:dns/promises';
 import tls from 'node:tls';
 import { createClient, MiniBaasError } from '@mini-baas/js';
 
-for (const file of ['.env.local', '.env', '../../.env.local', '../../infrastructure/baas/.env.local']) {
+for (const file of ['.env.local', '.env', '../../.env.local', '../../apps/baas/.env.local']) {
 	const path = resolve(process.cwd(), file);
 	if (!existsSync(path)) continue;
 	for (const rawLine of readFileSync(path, 'utf8').split(/\r?\n/)) {

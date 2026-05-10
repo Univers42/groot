@@ -1,8 +1,8 @@
-[submodule "infrastructure/baas/sdk"]
-	path = infrastructure/baas/sdk
+[submodule "apps/baas/sdk"]
+	path = apps/baas/sdk
 	url = git@github.com:Univers42/mini-baas-sdk.git
-[submodule "infrastructure/baas/mini-baas-infra"]
-	path = infrastructure/baas/mini-baas-infra
+[submodule "apps/baas/mini-baas-infra"]
+	path = apps/baas/mini-baas-infra
 	url = git@github.com:Univers42/mini-baas-infra.git
 [submodule "vendor/scripts"]
 	path = vendor/scripts

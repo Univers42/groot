@@ -1,0 +1,33 @@
+[package]
+name = "realtime-gateway"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+realtime-core = { path = "../realtime-core" }
+realtime-engine = { path = "../realtime-engine" }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true }
+axum-extra = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+dashmap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+bytes = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+smol_str = { workspace = true }
+uuid = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+tokio-tungstenite = { workspace = true }
+
+[lints]
+workspace = true

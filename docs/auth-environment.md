@@ -20,7 +20,7 @@ PUBLIC_SITE_URL=http://localhost:4322
 The public site key is safe for browser code. The Turnstile secret must only be read by the auth gateway or production backend. Generate the ignored file with Dockerized Node from the repository root:
 
 ```sh
-docker run --rm -v "$PWD":/workspace -w /workspace node:22-alpine node infrastructure/baas/scripts/bootstrap-env.mjs
+docker run --rm -v "$PWD":/workspace -w /workspace node:22-alpine node apps/baas/scripts/bootstrap-env.mjs
 ```
 
 ## Local runtime

@@ -10,7 +10,7 @@
 		{
 			"label": "check-baas-publish-state",
 			"type": "shell",
-			"command": "set -e; echo 'local mini-baas 0.0.1 images:'; docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^mini-baas/.+:0\\.0\\.1$' | sort || true; echo 'remote tag:'; git -C infrastructure/baas/mini-baas-infra ls-remote --tags origin 'refs/tags/v0.0.1' || true; echo 'track-binocle containers:'; docker ps --format 'table {{.Names}}\\t{{.Status}}\\t{{.Ports}}' | grep mini-baas-track-binocle || true",
+			"command": "set -e; echo 'local mini-baas 0.0.1 images:'; docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^mini-baas/.+:0\\.0\\.1$' | sort || true; echo 'remote tag:'; git -C apps/baas/mini-baas-infra ls-remote --tags origin 'refs/tags/v0.0.1' || true; echo 'track-binocle containers:'; docker ps --format 'table {{.Names}}\\t{{.Status}}\\t{{.Ports}}' | grep mini-baas-track-binocle || true",
 			"args": [],
 			"isBackground": false,
 			"problemMatcher": [],
@@ -28,7 +28,7 @@
 		{
 			"label": "login-ghcr-dockerhub",
 			"type": "shell",
-			"command": "set -e; if command -v gh >/dev/null 2>&1 && gh auth token >/tmp/gh-token 2>/dev/null; then cat /tmp/gh-token | docker login ghcr.io -u univers42 --password-stdin >/dev/null && echo 'ghcr-login-ok'; rm -f /tmp/gh-token; else echo 'ghcr-login-missing'; fi; set -a; . infrastructure/baas/mini-baas-infra/.env; set +a; if [ -n \"${DOCKER_LOGIN:-}\" ] && [ -n \"${DOCKER_PAT:-}\" ]; then printf '%s' \"$DOCKER_PAT\" | docker login docker.io -u \"$DOCKER_LOGIN\" --password-stdin >/dev/null && echo 'dockerhub-login-ok'; else echo 'dockerhub-login-missing'; fi",
+			"command": "set -e; if command -v gh >/dev/null 2>&1 && gh auth token >/tmp/gh-token 2>/dev/null; then cat /tmp/gh-token | docker login ghcr.io -u univers42 --password-stdin >/dev/null && echo 'ghcr-login-ok'; rm -f /tmp/gh-token; else echo 'ghcr-login-missing'; fi; set -a; . apps/baas/mini-baas-infra/.env; set +a; if [ -n \"${DOCKER_LOGIN:-}\" ] && [ -n \"${DOCKER_PAT:-}\" ]; then printf '%s' \"$DOCKER_PAT\" | docker login docker.io -u \"$DOCKER_LOGIN\" --password-stdin >/dev/null && echo 'dockerhub-login-ok'; else echo 'dockerhub-login-missing'; fi",
 			"args": [],
 			"isBackground": false,
 			"problemMatcher": [],

@@ -54,11 +54,11 @@ The root Compose stack now includes one osionos bridge API service instead of du
 - `auth-gateway` runs the opposite-osiris auth entry point.
 - `osionos-bridge` runs [apps/osionos/app/scripts/bridge-api.mjs](../apps/osionos/app/scripts/bridge-api.mjs).
 
-For local development, the root Compose stack runs `local-runtime-secrets`, which calls [infrastructure/baas/scripts/ensure-osionos-runtime-secrets.mjs](../infrastructure/baas/scripts/ensure-osionos-runtime-secrets.mjs). That script creates missing random local values in `.env.local` and configures osionos to require a bridge session by default. Use `--rotate` with the script when you intentionally want to invalidate local bridge sessions.
+For local development, the root Compose stack runs `local-runtime-secrets`, which calls [apps/baas/scripts/ensure-osionos-runtime-secrets.mjs](../apps/baas/scripts/ensure-osionos-runtime-secrets.mjs). That script creates missing random local values in `.env.local` and configures osionos to require a bridge session by default. Use `--rotate` with the script when you intentionally want to invalidate local bridge sessions.
 
 ```bash
-node infrastructure/baas/scripts/ensure-osionos-runtime-secrets.mjs
-node infrastructure/baas/scripts/ensure-osionos-runtime-secrets.mjs --rotate
+node apps/baas/scripts/ensure-osionos-runtime-secrets.mjs
+node apps/baas/scripts/ensure-osionos-runtime-secrets.mjs --rotate
 ```
 
 The effective runtime values are:

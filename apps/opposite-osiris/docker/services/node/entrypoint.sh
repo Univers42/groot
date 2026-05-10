@@ -5,7 +5,7 @@ export TRACK_BINOCLE_IN_DOCKER=1
 git config --global --add safe.directory /workspace 2>/dev/null || true
 
 APP_DIR=/workspace/apps/opposite-osiris
-SDK_DIR=/workspace/infrastructure/baas/sdk
+SDK_DIR=/workspace/apps/baas/sdk
 STAMP_DIR="$APP_DIR/node_modules/.cache"
 STAMP="$STAMP_DIR/npm-deps.sha256"
 SDK_STAMP_DIR="$SDK_DIR/node_modules/.cache"
@@ -28,7 +28,7 @@ else
   echo "[entrypoint] SDK dependencies up to date."
 fi
 
-current_hash="$(cat package.json package-lock.json ../../infrastructure/baas/sdk/package.json ../../infrastructure/baas/sdk/package-lock.json | sha256sum | awk '{print $1}')"
+current_hash="$(cat package.json package-lock.json ../../apps/baas/sdk/package.json ../../apps/baas/sdk/package-lock.json | sha256sum | awk '{print $1}')"
 cached_hash=""
 
 cd "$APP_DIR"

@@ -15,7 +15,7 @@ const roots = [
 	'opposite-osiris/scripts',
 	'opposite-osiris/astro.config.mjs',
 	'docker-compose.yml',
-	'infrastructure/baas',
+	'apps/baas',
 ];
 
 const allowed = [

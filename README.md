@@ -76,10 +76,10 @@ The UI runs at `http://localhost:3002` and the bridge runs at `http://localhost:
 The Makefile runs these commands from the repository root:
 
 ```sh
-docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/workspace -w /workspace node:22-alpine node infrastructure/baas/scripts/bootstrap.mjs
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/workspace -w /workspace node:22-alpine node apps/baas/scripts/bootstrap.mjs
 docker compose --profile secrets up -d --build vault
 docker compose --profile secrets run --rm --build vault-init
-docker compose --profile secrets run --rm vault-env node infrastructure/baas/scripts/vault-env.mjs fetch
+docker compose --profile secrets run --rm vault-env node apps/baas/scripts/vault-env.mjs fetch
 docker compose up -d --build
 ```
 

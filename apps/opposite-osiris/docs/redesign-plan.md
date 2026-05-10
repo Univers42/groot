@@ -233,7 +233,7 @@ Manual:
 ## Out of scope (tracked, not in this plan)
 
 - Server-side CSP header at Kong (operational; tracked in
-  `infrastructure/baas/mini-baas-infra/`).
+  `apps/baas/mini-baas-infra/`).
 - Email template redesign (separate audit per
   `src/email-templates/`).
 - Dashboard visual rebuild — depends on Phase 5 finishing first.

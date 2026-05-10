@@ -3,7 +3,7 @@ name: track-binocle
 services:
   vault:
     build:
-      context: ./infrastructure/baas/mini-baas-infra/docker/services/vault
+      context: ./apps/baas/mini-baas-infra/docker/services/vault
       dockerfile: Dockerfile
     profiles:
       - secrets
@@ -28,12 +28,12 @@ services:
 
   vault-init:
     build:
-      context: ./infrastructure/baas/mini-baas-infra/docker/services/vault
+      context: ./apps/baas/mini-baas-infra/docker/services/vault
       dockerfile: Dockerfile
     profiles:
       - secrets
     env_file:
-      - ./infrastructure/baas/.env.local
+      - ./apps/baas/.env.local
       - ./.env.local
       - ./apps/opposite-osiris/.env.local
       - ./apps/osionos/app/.env
@@ -62,7 +62,7 @@ services:
     volumes:
       - ./:/workspace
       - track-binocle-vault-data:/vault/data:ro
-    command: ["node", "infrastructure/baas/scripts/vault-env.mjs", "fetch"]
+    command: ["node", "apps/baas/scripts/vault-env.mjs", "fetch"]
     depends_on:
       vault-init:
         condition: service_completed_successfully
@@ -71,7 +71,7 @@ services:
   postgres:
     image: ${BAAS_POSTGRES_IMAGE:-ghcr.io/univers42/mini-baas-infra/postgres:v2026-05-03}
     env_file:
-      - ./infrastructure/baas/.env.local
+      - ./apps/baas/.env.local
     ports:
       - "127.0.0.1:${PG_PORT:-5432}:5432"
     environment:
@@ -90,7 +90,7 @@ services:
   db-bootstrap:
     image: postgres:16-alpine
     env_file:
-      - ./infrastructure/baas/.env.local
+      - ./apps/baas/.env.local
     environment:
       REALTIME_DB_NAME: ${REALTIME_DB_NAME:-realtime}
     command: >
@@ -100,7 +100,7 @@ services:
         psql -h postgres -U "$${POSTGRES_USER:-postgres}" -d "$${POSTGRES_DB:-postgres}" -v ON_ERROR_STOP=1 -v pwd="$${POSTGRES_PASSWORD:-postgres}" -v realtime_db="$${REALTIME_DB_NAME:-realtime}" -f /bootstrap/db-bootstrap.sql;
       '
     volumes:
-      - ./infrastructure/baas/scripts/db-bootstrap.sql:/bootstrap/db-bootstrap.sql:ro
+      - ./apps/baas/scripts/db-bootstrap.sql:/bootstrap/db-bootstrap.sql:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -109,18 +109,19 @@ services:
   project-db-init:
     image: postgres:16-alpine
     env_file:
-      - ./infrastructure/baas/.env.local
+      - ./apps/baas/.env.local
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
     command: ["sh", "/bootstrap/apply-project-sql.sh"]
     volumes:
-      - ./infrastructure/baas/scripts/apply-project-sql.sh:/bootstrap/apply-project-sql.sh:ro
+      - ./apps/baas/scripts/apply-project-sql.sh:/bootstrap/apply-project-sql.sh:ro
       - ./models/user.sql:/project-init/01-user.sql:ro
       - ./models/gdpr-migration.sql:/project-init/02-gdpr.sql:ro
       - ./models/auth-security-migration.sql:/project-init/03-auth-security.sql:ro
       - ./models/osionos-bridge-migration.sql:/project-init/04-osionos-bridge.sql:ro
-      - ./models/seeds.sql:/project-init/05-seeds.sql:ro
+      - ./models/calendar-migration.sql:/project-init/05-calendar.sql:ro
+      - ./models/seeds.sql:/project-init/06-seeds.sql:ro
     depends_on:
       db-bootstrap:
         condition: service_completed_successfully
@@ -136,7 +137,7 @@ services:
   gotrue:
     image: ${BAAS_GOTRUE_IMAGE:-supabase/gotrue:v2.188.1}
     env_file:
-      - ./infrastructure/baas/.env.local
+      - ./apps/baas/.env.local
       - ./.env.local
     environment:
       GOTRUE_API_HOST: 0.0.0.0
@@ -176,7 +177,7 @@ services:
   postgrest:
     image: ${BAAS_POSTGREST_IMAGE:-postgrest/postgrest:v12.2.3}
     env_file:
-      - ./infrastructure/baas/.env.local
+      - ./apps/baas/.env.local
     environment:
       PGRST_DB_SCHEMA: ${PGRST_DB_SCHEMA:-public}
       PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS:-public}
@@ -192,7 +193,7 @@ services:
   pg-meta:
     image: ${BAAS_PG_META_IMAGE:-supabase/postgres-meta:v0.91.0}
     env_file:
-      - ./infrastructure/baas/.env.local
+      - ./apps/baas/.env.local
     environment:
       PG_META_PORT: 8080
     depends_on:
@@ -205,7 +206,7 @@ services:
   supavisor:
     image: ${BAAS_SUPAVISOR_IMAGE:-supabase/supavisor:2.7.4}
     env_file:
-      - ./infrastructure/baas/.env.local
+      - ./apps/baas/.env.local
     depends_on:
       postgres:
         condition: service_healthy
@@ -215,10 +216,10 @@ services:
     image: ${BAAS_KONG_IMAGE:-track-binocle/mini-baas-kong:local}
     pull_policy: ${BAAS_KONG_PULL_POLICY:-missing}
     build:
-      context: ./infrastructure/baas
+      context: ./apps/baas
       dockerfile: Dockerfile
     env_file:
-      - ./infrastructure/baas/.env.local
+      - ./apps/baas/.env.local
       - ./.env.local
     ports:
       - "127.0.0.1:${KONG_HTTP_PORT:-8000}:8000"
@@ -272,7 +273,7 @@ services:
   local-runtime-secrets:
     image: node:22-alpine
     working_dir: /app
-    command: ["node", "infrastructure/baas/scripts/ensure-osionos-runtime-secrets.mjs"]
+    command: ["node", "apps/baas/scripts/ensure-osionos-runtime-secrets.mjs"]
     volumes:
       - ./:/app
     restart: "no"
@@ -282,7 +283,7 @@ services:
     working_dir: /app/apps/osionos/app
     command: ["node", "scripts/bridge-api.mjs"]
     env_file:
-      - ./infrastructure/baas/.env.local
+      - ./apps/baas/.env.local
       - ./.env.local
     environment:
       OSIONOS_BRIDGE_PORT: 4000
@@ -383,6 +384,70 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  calendar-bridge:
+    build:
+      context: ./apps/calendar
+      target: dev
+    working_dir: /app
+    command: ["npm", "run", "bridge"]
+    env_file:
+      - path: ./apps/calendar/.env.local
+        required: false
+      - path: ./apps/calendar/.env
+        required: false
+      - path: ./apps/baas/.env.local
+        required: false
+      - path: ./.env.local
+        required: false
+    environment:
+      NODE_ENV: development
+      CALENDAR_BRIDGE_PORT: ${CALENDAR_BRIDGE_PORT:-4200}
+      CALENDAR_APP_ORIGIN: http://localhost:${CALENDAR_HOST_PORT:-3003}
+      CALENDAR_BRIDGE_PUBLIC_ORIGIN: http://localhost:${CALENDAR_BRIDGE_PORT:-4200}
+      CALENDAR_REDIRECT_URI: http://localhost:${CALENDAR_BRIDGE_PORT:-4200}/auth/google/callback
+      CALENDAR_BAAS_URL: http://kong:8000
+      CALENDAR_BAAS_PUBLIC_URL: http://localhost:${KONG_HTTP_PORT:-8000}
+      VAULT_ADDR: ${CALENDAR_BRIDGE_VAULT_ADDR:-http://vault:8200}
+    volumes:
+      - ./apps/calendar:/app
+      - calendar-node-modules:/app/node_modules
+    ports:
+      - "127.0.0.1:${CALENDAR_BRIDGE_PORT:-4200}:4200"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      kong:
+        condition: service_healthy
+      project-db-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  calendar:
+    build:
+      context: ./apps/calendar
+      target: dev
+    working_dir: /app
+    command: ["npm", "run", "dev"]
+    env_file:
+      - path: ./apps/calendar/.env.local
+        required: false
+      - path: ./apps/calendar/.env
+        required: false
+    environment:
+      NODE_ENV: development
+      CHOKIDAR_USEPOLLING: "true"
+      VITE_CALENDAR_BRIDGE_URL: http://localhost:${CALENDAR_BRIDGE_PORT:-4200}
+      VITE_CALENDAR_BAAS_URL: http://localhost:${KONG_HTTP_PORT:-8000}
+    volumes:
+      - ./apps/calendar:/app
+      - calendar-node-modules:/app/node_modules
+    ports:
+      - "127.0.0.1:${CALENDAR_HOST_PORT:-3003}:3003"
+    depends_on:
+      calendar-bridge:
+        condition: service_started
+    restart: unless-stopped
+
   opposite-osiris-deps:
     build:
       context: .
@@ -392,7 +457,7 @@ services:
     volumes:
       - ./:/workspace
       - opposite-osiris-node-modules:/workspace/apps/opposite-osiris/node_modules
-      - mini-baas-sdk-node-modules:/workspace/infrastructure/baas/sdk/node_modules
+      - mini-baas-sdk-node-modules:/workspace/apps/baas/sdk/node_modules
     restart: "no"
 
   auth-gateway:
@@ -402,7 +467,7 @@ services:
     working_dir: /workspace/apps/opposite-osiris
     command: ["node", "scripts/auth-gateway.mjs"]
     env_file:
-      - ./infrastructure/baas/.env.local
+      - ./apps/baas/.env.local
       - ./.env.local
       - ./apps/opposite-osiris/.env.local
     environment:
@@ -414,7 +479,7 @@ services:
     volumes:
       - ./:/workspace
       - opposite-osiris-node-modules:/workspace/apps/opposite-osiris/node_modules
-      - mini-baas-sdk-node-modules:/workspace/infrastructure/baas/sdk/node_modules
+      - mini-baas-sdk-node-modules:/workspace/apps/baas/sdk/node_modules
     ports:
       - "${AUTH_GATEWAY_HOST_PORT:-8787}:8787"
     depends_on:
@@ -437,7 +502,7 @@ services:
     working_dir: /workspace/apps/opposite-osiris
     command: ["node", "scripts/container-only.mjs", "astro", "dev", "--host", "0.0.0.0", "--port", "4322"]
     env_file:
-      - ./infrastructure/baas/.env.local
+      - ./apps/baas/.env.local
       - ./.env.local
       - ./apps/opposite-osiris/.env.local
     environment:
@@ -456,7 +521,7 @@ services:
     volumes:
       - ./:/workspace
       - opposite-osiris-node-modules:/workspace/apps/opposite-osiris/node_modules
-      - mini-baas-sdk-node-modules:/workspace/infrastructure/baas/sdk/node_modules
+      - mini-baas-sdk-node-modules:/workspace/apps/baas/sdk/node_modules
     ports:
       - "127.0.0.1:${OPPOSITE_OSIRIS_HOST_PORT:-4322}:4322"
     depends_on:
@@ -504,6 +569,7 @@ volumes:
   osionos-app-node-modules:
   osionos-app-pnpm-store:
   mail-node-modules:
+  calendar-node-modules:
   osionos-browser-test-node-modules:
   osionos-browser-test-pnpm-store:
   mini-baas-sdk-node-modules:
