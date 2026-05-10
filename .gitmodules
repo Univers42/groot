@@ -10,3 +10,9 @@
 [submodule "apps/osionos/app"]
 	path = apps/osionos/app
 	url = git@github.com:Univers42/osionos.git
+[submodule "apps/mail"]
+	path = apps/mail
+	url = git@github.com:Univers42/osionos-mail.git
+[submodule "apps/calendar"]
+	path = apps/calendar
+	url = git@github.com:Univers42/osionos-calendar.git
