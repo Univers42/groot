@@ -1,52 +1,49 @@
 # track-binocle BaaS SDK integration
 
-`track-binocle` must talk to the BaaS through the public Kong gateway only. Do not call PostgREST, pg-meta, Redis, Supavisor, or Postgres directly from frontend code.
+`track-binocle` talks to the BaaS through the public Kong gateway and the project SDK boundary. Frontend code should not call Postgres, PostgREST, pg-meta, Redis, or Supavisor directly.
 
-## Start the BaaS profile
+## Start The Stack
 
-From `infrastructure/baas/mini-baas-infra`:
+Use the root Docker Compose stack:
 
-```bash
-cp .env.example .env
-make config-up PROFILE=track-binocle
+```sh
+docker compose up -d --build
 ```
 
-The profile exposes:
+The stack exposes:
 
 - Kong gateway: `http://localhost:8000`
-- Optional local Postgres admin: `localhost:55432`
+- Website proxy: `http://localhost:4322/api`
+- Auth gateway: `http://localhost:8787/api/auth`
 
 All other service traffic stays inside the Docker network.
 
-## Frontend environment
+## Frontend Environment
 
-In `opposite-osiris`, copy `.env.example` to `.env.local` and set the anon key from the BaaS `.env`:
+The Docker bootstrap writes the ignored website environment file at `apps/opposite-osiris/.env.local`.
 
-```bash
-cp .env.example .env.local
-```
-
-Astro browser variables:
+Expected browser-facing defaults:
 
 ```dotenv
-PUBLIC_BAAS_URL=http://localhost:8000
-PUBLIC_BAAS_ANON_KEY=<anon_key_from_mini_baas_env>
+PUBLIC_BAAS_URL=/api
+PUBLIC_AUTH_GATEWAY_URL=/api/auth
+PUBLIC_SITE_URL=http://localhost:4322
 ```
 
-Next.js-compatible names are also documented in `.env.example` for future migrations.
+The website container proxies `/api` to Kong and `/api/auth` to the auth gateway. Browser code uses relative URLs and never needs direct database credentials.
 
-## SDK initialization
+## SDK Initialization
 
-Install or link the official SDK package, then initialize it with the environment-backed config:
+The website uses the local `@mini-baas/js` package through Docker-managed dependency volumes. Keep SDK access behind the project helpers and route requests through the gateway:
 
 ```ts
-import { createClient } from 'mini-baas-sdk';
+import { createClient } from '@mini-baas/js';
 import { baasConfig } from './baas-config';
 
 export const client = createClient({
-	url: baasConfig.url,
-	anonKey: baasConfig.anonKey,
+  url: baasConfig.url,
+  anonKey: baasConfig.anonKey,
 });
 ```
 
-Use the SDK for reads and writes. The gateway routes REST calls to PostgREST at `/rest/v1`, and project seed data is available after `project-db-init` finishes.
+Use [docs/howtouse.md](howtouse.md) for the full Docker-only workflow.

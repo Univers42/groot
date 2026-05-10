@@ -1,56 +1,43 @@
 # Authentication environment and production transition
 
-Last updated: 2026-05-03
+Last updated: 2026-05-10
 
 `opposite-osiris` is currently an Astro/Vite frontend. The auth client is implemented in a React-compatible hook-style module at `opposite-osiris/src/hooks/useAuth.ts`, but it has no React runtime dependency so the existing Astro build stays lightweight.
 
 ## Development variables
 
-Set these in `opposite-osiris/.env.local`:
+The Docker bootstrap writes these local development values to `apps/opposite-osiris/.env.local`:
 
 ```dotenv
 PUBLIC_AUTH_GATEWAY_URL=/api/auth
-PUBLIC_PORTAL_URL=https://portal.example.com/sign-in
+PUBLIC_PORTAL_URL=http://localhost:3001
 PUBLIC_TURNSTILE_SITE_KEY=1x00000000000000000000AA
 TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
 TURNSTILE_BYPASS_LOCAL=true
 PUBLIC_SITE_URL=http://localhost:4322
 ```
 
-The public site key is safe for browser code. The Turnstile secret must only be read by the auth gateway or production backend.
+The public site key is safe for browser code. The Turnstile secret must only be read by the auth gateway or production backend. Generate the ignored file with Dockerized Node from the repository root:
 
-## Optional local HTTPS
-
-The Astro dev server can also run at `https://localhost:4322` using a certificate generated from `mini-baas-infra`:
-
-```bash
-cd opposite-osiris
-npm run cert:localhost
-npm run cert:trust
-npm run dev:https
+```sh
+docker run --rm -v "$PWD":/workspace -w /workspace node:22-alpine node infrastructure/baas/scripts/bootstrap-env.mjs
 ```
 
-`npm run cert:localhost` creates a reusable local CA plus a `localhost` server certificate inside `mini-baas-infra`. `npm run cert:trust` imports that local CA into the user Chromium/NSS certificate store so the browser can show `https://localhost:4322` as trusted after a browser restart. `npm run dev:https` generates the local certificate if it is missing, refuses to start if another server already owns port `4322`, and starts Astro with TLS enabled. If a plain HTTP server is already running on `4322`, stop it first; otherwise browsers will show `ERR_SSL_PROTOCOL_ERROR` because they are trying to speak TLS to an HTTP server.
+## Local runtime
 
-You can also regenerate the certificate manually:
-
-```bash
-npm run cert:localhost
-npm run cert:trust
-```
-
-Equivalent `.env.local` values:
+The local runtime is HTTP on Docker-owned localhost ports:
 
 ```dotenv
-PUBLIC_SITE_URL=https://localhost:4322
-ASTRO_DEV_HOST=localhost
+PUBLIC_SITE_URL=http://localhost:4322
 ASTRO_DEV_PORT=4322
-ASTRO_DEV_HTTPS=true
-ASTRO_DEV_HTTPS_KEY=../infrastructure/baas/mini-baas-infra/certs/localhost-key.pem
-ASTRO_DEV_HTTPS_CERT=../infrastructure/baas/mini-baas-infra/certs/localhost.pem
+PUBLIC_AUTH_GATEWAY_URL=/api/auth
 ```
 
-The generated CA, key, and certificate files live in `infrastructure/baas/mini-baas-infra/certs/` and are ignored by Git. For `curl` or other system-level clients to trust the same local CA, run `sh ../infrastructure/baas/mini-baas-infra/scripts/trust-localhost-cert.sh --system` from `opposite-osiris` and enter the sudo password when prompted. When switching to HTTPS locally, also make sure `PUBLIC_SITE_URL`, `GOTRUE_SITE_URL`, and `GOTRUE_URI_ALLOW_LIST` include `https://localhost:4322/**` before restarting the BaaS auth service.
+Start the services from the repository root:
+
+```sh
+docker compose up -d --build
+```
 
 ## Production variables
 
@@ -78,14 +65,13 @@ For a live domain:
 - exposes reserved MFA hooks for TOTP and WebAuthn
 - writes security audit events through `auth_record_audit_event`
 
-Run locally:
+Run locally through Docker Compose:
 
-```bash
-cd opposite-osiris
-npm run auth:gateway
+```sh
+docker compose up -d --build auth-gateway opposite-osiris
 ```
 
-Astro dev proxies `/api/auth` to `http://localhost:8787`.
+Astro dev inside Docker proxies `/api/auth` to `http://auth-gateway:8787`.
 
 ## Session model
 
@@ -106,7 +92,9 @@ Recommended future wiring:
 
 ## Email verification protection
 
-GoTrue must run with `GOTRUE_MAILER_AUTOCONFIRM=false`. Registration returns a neutral success state instructing the user to check email, and the UI does not grant a full session until the user confirms their address and signs in.
+Production GoTrue must run with `GOTRUE_MAILER_AUTOCONFIRM=false`. Registration returns a neutral success state instructing the user to check email, and the UI does not grant a full session until the user confirms their address and signs in.
+
+The local Docker stack sets autoconfirm on so Playwright and local development can create an account and immediately verify the website to osionos bridge flow.
 
 ## Audit retention
 

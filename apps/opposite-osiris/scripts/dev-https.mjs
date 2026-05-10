@@ -67,7 +67,7 @@ function ensureCertificateTrust() {
 		stdio: 'inherit',
 	});
 	if (result.status !== 0) {
-		fail('Local HTTPS CA trust setup failed. Install libnss3-tools or run npm run cert:trust manually.');
+		fail('Local HTTPS CA trust setup failed. Install libnss3-tools or run the trust-localhost-cert.sh helper from Docker.');
 	}
 }
 
@@ -108,7 +108,7 @@ async function assertPortAvailable() {
 		.join('\n')
 		.trim();
 	const details = listenerLines ? `\n\nCurrent listener:\n${listenerLines}` : '';
-	fail(`Port ${port} is already in use. Stop the existing dev server first, then run npm run dev:https again. If that server is plain HTTP, browsers show ERR_SSL_PROTOCOL_ERROR for https://localhost:${port}.${details}`);
+	fail(`Port ${port} is already in use. Stop the existing dev server first, then restart the Docker stack. If that server is plain HTTP, browsers show ERR_SSL_PROTOCOL_ERROR for https://localhost:${port}.${details}`);
 }
 
 async function ensureAuthGateway() {

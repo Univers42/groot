@@ -1,60 +1,27 @@
-# Astro Starter Kit: Basics
+# opposite-osiris
+
+Astro website for the local track-binocle pipeline. In this workspace it is run by the root Docker Compose stack at `http://localhost:4322`.
+
+Do not install website dependencies on the host. The package scripts are guarded so direct host execution points back to Docker.
+
+## Run
+
+From the repository root:
 
 ```sh
-npm create astro@latest -- --template basics
+docker compose up -d --build opposite-osiris
 ```
 
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
-
-## 🚀 Project Structure
-
-Inside of your Astro project, you'll see the following folders and files:
-
-```text
-/
-├── public/
-│   └── favicon.svg
-├── src
-│   ├── assets
-│   │   └── astro.svg
-│   ├── components
-│   │   └── Welcome.astro
-│   ├── layouts
-│   │   └── Layout.astro
-│   └── pages
-│       └── index.astro
-└── package.json
-```
-
-To learn more about the folder structure of an Astro project, refer to [our guide on project structure](https://docs.astro.build/en/basics/project-structure/).
-
-## 🧞 Commands
-
-All commands are run from the root of the project, from a terminal:
-
-| Command                   | Action                                           |
-| :------------------------ | :----------------------------------------------- |
-| `npm install`             | Installs dependencies                            |
-| `npm run dev`             | Starts local dev server at `localhost:4321`      |
-| `npm run build`           | Build your production site to `./dist/`          |
-| `npm run preview`         | Preview your build locally, before deploying     |
-| `npm run astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `npm run astro -- --help` | Get help using the Astro CLI                     |
-
-## Local HTTPS on localhost
-
-The secure local endpoint is `https://localhost:4322/`. Generate and trust the mini-baas-infra development CA once, then start the HTTPS dev server:
+For the full website to osionos flow, start the complete stack:
 
 ```sh
-npm run cert:localhost
-npm run cert:trust
-npm run dev:https
+docker compose up -d --build
 ```
 
-After `npm run cert:trust`, restart the browser so Chromium/Firefox reload the local CA trust store. If a plain HTTP dev server is already using port `4322`, stop it before running `npm run dev:https`; otherwise browsers can report `ERR_SSL_PROTOCOL_ERROR` because the HTTPS URL is talking to an HTTP listener.
+## Runtime Wiring
 
-For this workspace, `.env.local` can also set `ASTRO_DEV_HTTPS=true` and `PUBLIC_SITE_URL=https://localhost:4322`, which makes `npm run dev` serve HTTPS on the same port.
+- `/api/auth` proxies to the Docker `auth-gateway` service.
+- `/api` proxies to the Docker Kong gateway.
+- Successful login creates an osionos bridge session and redirects to `http://localhost:3001`.
 
-## 👀 Want to learn more?
-
-Feel free to check [our documentation](https://docs.astro.build) or jump into our [Discord server](https://astro.build/chat).
+The complete operating guide is [../../docs/howtouse.md](../../docs/howtouse.md).

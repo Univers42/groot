@@ -1,57 +1,39 @@
 # track-binocle
 
-SDK-first local BaaS runtime for the Prismatica frontend.
+Docker-only local runtime for the website, osionos app, bridge, and mini BaaS backend.
 
-## Local BaaS runtime
+Do not install or run app dependencies on the host. The root `docker-compose.yml` owns the runtime, dependency volumes, database, gateways, website, and app.
 
-The root Compose stack is project-owned and image-based. Normal app, gateway, and verification code use the `@mini-baas/js` SDK boundary; the raw `infrastructure/baas/mini-baas-infra` checkout is not required at runtime.
+## Start
 
-### Bootstrap environment
-
-Generate the ignored runtime env file:
+From the repository root:
 
 ```sh
-node infrastructure/baas/scripts/bootstrap-env.mjs
-```
-
-Then make sure `opposite-osiris/.env.local` exists and points browser code at the dev proxy:
-
-```dotenv
-PUBLIC_BAAS_URL=/api
-PUBLIC_AUTH_GATEWAY_URL=/api/auth
-PUBLIC_BAAS_ANON_KEY=<same value as KONG_PUBLIC_API_KEY from infrastructure/baas/.env.local>
-```
-
-Runtime secrets and generated certificates stay ignored:
-
-- `infrastructure/baas/.env.local`
-- `infrastructure/baas/certs/*`
-- `opposite-osiris/.env.local`
-
-### Start and verify
-
-```sh
+docker run --rm -v "$PWD":/workspace -w /workspace node:22-alpine node infrastructure/baas/scripts/bootstrap-env.mjs
+docker run --rm -v "$PWD":/workspace -w /workspace node:22-alpine node infrastructure/baas/scripts/ensure-osionos-runtime-secrets.mjs
 docker compose up -d --build
-cd opposite-osiris
-npm run dev
-npm run verify:sdk-boundaries
-npm run check
-npm run build
-npm run baas:verify
 ```
 
-`npm run dev` now runs the project HTTPS wrapper. It generates the localhost certificate, imports the local CA into common Linux browser trust stores, and refuses to fall back to a random port when the expected dev port is already occupied by a stale server.
+## URLs
 
-### Optional image overrides
+- Website: `http://localhost:4322`
+- osionos app: `http://localhost:3001`
+- osionos bridge API: `http://localhost:4000`
+- Auth gateway: `http://localhost:8787/api/auth`
+- BaaS gateway: `http://localhost:8000`
 
-The Compose stack supports pinned or remote images via environment variables:
+## Verify
 
-- `BAAS_KONG_IMAGE`
-- `BAAS_POSTGRES_IMAGE`
-- `BAAS_GOTRUE_IMAGE`
-- `BAAS_POSTGREST_IMAGE`
-- `BAAS_PG_META_IMAGE`
-- `BAAS_SUPAVISOR_IMAGE`
-- `BAAS_REDIS_IMAGE`
+```sh
+docker compose ps
+curl -fsS http://localhost:4000/api/auth/bridge/health
+curl -fsS http://localhost:3001 >/dev/null
+curl -fsS http://localhost:4322 >/dev/null
+curl -sS -o /dev/null -w 'auth-gateway-http-%{http_code}\n' http://localhost:8787/api/auth/availability
+```
 
-The default Kong image is built locally from [infrastructure/baas/Dockerfile](infrastructure/baas/Dockerfile).
+Open `http://localhost:4322`, create a development account, sign in, and expect the website to redirect into `http://localhost:3001` with the user's private osionos workspace.
+
+## More
+
+The complete operating guide is [docs/howtouse.md](docs/howtouse.md).

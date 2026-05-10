@@ -2,8 +2,8 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "command": "./node_modules/.bin/astro dev",
-      "name": "Development server",
+      "command": "docker compose up -d --build opposite-osiris",
+      "name": "Docker development server",
       "request": "launch",
       "type": "node-terminal"
     }

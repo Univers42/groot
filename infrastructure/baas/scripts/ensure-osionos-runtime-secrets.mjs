@@ -62,7 +62,7 @@ const updates = {
 };
 
 const osionosLocalUrl = process.env.OSIONOS_LOCAL_URL ?? 'http://localhost:3001';
-const prismaticaLocalUrl = process.env.PRISMATICA_LOCAL_URL ?? process.env.PUBLIC_SITE_URL ?? 'https://localhost:4323';
+const prismaticaLocalUrl = process.env.PRISMATICA_LOCAL_URL ?? process.env.PUBLIC_SITE_URL ?? 'http://localhost:4322';
 
 const rootChanged = upsertEnv(rootEnvPath, {
   ...updates,

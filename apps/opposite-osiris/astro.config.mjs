@@ -5,7 +5,8 @@ import { defineConfig } from 'astro/config';
 import { loadEnv } from 'vite';
 
 const env = loadEnv(process.env.NODE_ENV ?? 'development', process.cwd(), '');
-const authGatewayTarget = `http://localhost:${env.AUTH_GATEWAY_PORT ?? 8787}`;
+const authGatewayTarget = env.AUTH_GATEWAY_TARGET ?? `http://localhost:${env.AUTH_GATEWAY_PORT ?? 8787}`;
+const baasGatewayTarget = env.BAAS_GATEWAY_TARGET ?? 'http://localhost:8000';
 const defaultCertDir = resolve(process.cwd(), '../../infrastructure/baas/certs');
 const devHttpsEnabled = env.ASTRO_DEV_HTTPS === 'true' || env.PUBLIC_SITE_URL?.startsWith('https://localhost');
 const devHttpsKey = resolve(process.cwd(), env.ASTRO_DEV_HTTPS_KEY ?? `${defaultCertDir}/localhost-key.pem`);
@@ -16,7 +17,7 @@ function localHttpsConfig() {
 		return undefined;
 	}
 	if (!existsSync(devHttpsKey) || !existsSync(devHttpsCert)) {
-		throw new Error(`Local HTTPS was requested but the certificate files are missing. Run npm run cert:localhost, then restart Astro with npm run dev:https. Expected key: ${devHttpsKey}. Expected cert: ${devHttpsCert}.`);
+		throw new Error(`Local HTTPS was requested but the certificate files are missing. Start the Docker stack or generate the localhost certificate from the project-owned BaaS scripts. Expected key: ${devHttpsKey}. Expected cert: ${devHttpsCert}.`);
 	}
 	return {
 		key: readFileSync(devHttpsKey),
@@ -70,7 +71,7 @@ export default defineConfig({
 					secure: false,
 				},
 				'/api': {
-					target: 'http://localhost:8000',
+					target: baasGatewayTarget,
 					changeOrigin: true,
 					secure: false,
 					rewrite: (path) => path.replace(/^\/api/, ''),

@@ -32,6 +32,9 @@ if [ "$schema_applied" != "1" ]; then
   $psql_base -c "INSERT INTO track_binocle_runtime_migrations (marker) VALUES ('${marker}_schema') ON CONFLICT DO NOTHING"
 fi
 
+$psql_base -f /project-init/04-osionos-bridge.sql
+$psql_base -c "INSERT INTO track_binocle_runtime_migrations (marker) VALUES ('${marker}_osionos_bridge') ON CONFLICT DO NOTHING"
+
 $psql_base <<'SQL'
 REVOKE ALL ON public.users FROM anon, authenticated;
 GRANT SELECT (id, username, email, avatar_url, bio, theme, notifications_enabled, is_email_verified, created_at, updated_at) ON public.users TO anon;
@@ -48,7 +51,7 @@ seeds_applied=$($psql_base -Atc "SELECT 1 FROM track_binocle_runtime_migrations 
 if [ "$seeds_applied" != "1" ]; then
   seeded_user_count=$($psql_base -Atc "SELECT COUNT(*) FROM users WHERE email IN ('john.doe@example.com', 'jane.doe@example.com')")
   if [ "$seeded_user_count" = "0" ]; then
-    $psql_base -f /project-init/04-seeds.sql
+    $psql_base -f /project-init/05-seeds.sql
   fi
   $psql_base -c "INSERT INTO track_binocle_runtime_migrations (marker) VALUES ('${marker}_seeds') ON CONFLICT DO NOTHING"
 fi

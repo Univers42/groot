@@ -87,37 +87,38 @@ It allows these browser request headers:
 
 Credentials are enabled and preflight responses are cached for `3600` seconds.
 
-After editing the Kong template, restart Kong from `infrastructure/baas/mini-baas-infra`:
+After editing the Kong template, restart Kong from the repository root:
 
 ```bash
-docker compose -f docker-compose.track-binocle.yml up -d --force-recreate kong
+docker compose up -d --force-recreate kong
 ```
 
-Then verify from `opposite-osiris`:
+Then verify the Docker services:
 
 ```bash
-npm run baas:verify:cors
+docker compose ps
+curl -fsS http://localhost:4322 >/dev/null
+curl -sS -o /dev/null -w 'auth-gateway-http-%{http_code}\n' http://localhost:8787/api/auth/availability
 ```
 
 ## Astro local proxy fallback
 
-`opposite-osiris/astro.config.mjs` defines a Vite dev proxy from `/api` to `http://localhost:8000`. This is only a local fallback; production frontend code should still call the public BaaS gateway URL and never connect directly to Postgres or internal services.
+`apps/opposite-osiris/astro.config.mjs` defines a Vite dev proxy from `/api` to the Docker Kong service. Production frontend code should still call the public BaaS gateway URL and never connect directly to Postgres or internal services.
 
 The proxy preserves any incoming `apikey` header.
 
 ## Security suite
 
-The frontend package includes an outside-in security test suite:
+The frontend package includes an outside-in security test suite. Run it through Docker-managed project scripts, not host dependency installs.
 
 ```bash
-cd opposite-osiris
-npm run test:security
+docker compose run --rm opposite-osiris node scripts/container-only.mjs vitest run scripts/security
 ```
 
 Run one category:
 
 ```bash
-npm run test:security -- --category=cors
+docker compose run --rm opposite-osiris node scripts/container-only.mjs vitest run scripts/security -- --category=cors
 ```
 
 The suite is documented in `opposite-osiris/scripts/security/README.md`. It is for testing infrastructure owned by this project only and must not be pointed at systems without explicit authorization.

@@ -146,7 +146,7 @@ BEGIN
 
   INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role, permissions)
   VALUES (v_workspace_id, p_subject, 'owner', v_permissions)
-  ON CONFLICT (workspace_id, user_id) DO UPDATE SET
+  ON CONFLICT ON CONSTRAINT osionos_workspace_members_pkey DO UPDATE SET
     role = 'owner',
     permissions = v_permissions,
     updated_at = now();

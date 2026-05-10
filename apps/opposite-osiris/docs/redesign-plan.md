@@ -211,12 +211,10 @@ After the system layer is solid, revisit the brand layer for delight:
 ## Quality gate (every PR)
 
 ```bash
-cd opposite-osiris
-npm run check
-npm run build
-npm run verify:sdk-boundaries
-npm run test:security
-npm run lint:styles    # added in Phase 4
+docker compose run --rm opposite-osiris node scripts/container-only.mjs astro check
+docker compose run --rm opposite-osiris node scripts/container-only.mjs astro build
+docker compose run --rm opposite-osiris node scripts/container-only.mjs node scripts/verify-sdk-boundaries.mjs
+docker compose run --rm opposite-osiris node scripts/container-only.mjs node scripts/security/run-all.mjs
 ```
 
 Manual:

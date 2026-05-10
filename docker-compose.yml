@@ -79,7 +79,7 @@ services:
       GOTRUE_DB_MIGRATIONS_PATH: ${GOTRUE_DB_MIGRATIONS_PATH:-/usr/local/etc/auth/migrations}
       GOTRUE_DISABLE_SIGNUP: ${GOTRUE_DISABLE_SIGNUP:-false}
       GOTRUE_EXTERNAL_EMAIL_ENABLED: ${GOTRUE_EXTERNAL_EMAIL_ENABLED:-true}
-      GOTRUE_MAILER_AUTOCONFIRM: ${GOTRUE_MAILER_AUTOCONFIRM:-false}
+      GOTRUE_MAILER_AUTOCONFIRM: ${GOTRUE_MAILER_AUTOCONFIRM:-true}
       GOTRUE_SMTP_HOST: ${SMTP_HOST:-mailpit}
       GOTRUE_SMTP_PORT: ${SMTP_PORT:-1025}
       GOTRUE_SMTP_USER: ${SMTP_USERNAME:-}
@@ -237,19 +237,65 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  osionos-app:
+    build:
+      context: ./apps/osionos/app
+      dockerfile: docker/services/node/Dockerfile
+    working_dir: /app
+    command: ["pnpm", "exec", "vite", "--host", "0.0.0.0", "--port", "3001", "--strictPort"]
+    env_file:
+      - ./.env.local
+      - ./apps/osionos/app/.env
+    environment:
+      NODE_ENV: development
+      CHOKIDAR_USEPOLLING: "true"
+      VITE_API_URL: http://localhost:4000
+      VITE_REQUIRE_BRIDGE_SESSION: "true"
+      VITE_ALLOW_OFFLINE_MODE: "false"
+      VITE_PRISMATICA_URL: http://localhost:4322
+    volumes:
+      - ./apps/osionos/app:/app
+      - osionos-app-node-modules:/app/node_modules
+      - osionos-app-pnpm-store:/pnpm/store
+    ports:
+      - "127.0.0.1:${OSIONOS_APP_HOST_PORT:-3001}:3001"
+    depends_on:
+      osionos-bridge:
+        condition: service_started
+    restart: unless-stopped
+
+  opposite-osiris-deps:
+    build:
+      context: .
+      dockerfile: apps/opposite-osiris/docker/services/node/Dockerfile
+    working_dir: /workspace/apps/opposite-osiris
+    command: ["true"]
+    volumes:
+      - ./:/workspace
+      - opposite-osiris-node-modules:/workspace/apps/opposite-osiris/node_modules
+      - mini-baas-sdk-node-modules:/workspace/infrastructure/baas/sdk/node_modules
+    restart: "no"
+
   auth-gateway:
-    image: node:22-alpine
-    working_dir: /app/apps/opposite-osiris
+    build:
+      context: .
+      dockerfile: apps/opposite-osiris/docker/services/node/Dockerfile
+    working_dir: /workspace/apps/opposite-osiris
     command: ["node", "scripts/auth-gateway.mjs"]
     env_file:
       - ./infrastructure/baas/.env.local
       - ./.env.local
+      - ./apps/opposite-osiris/.env.local
     environment:
       AUTH_GATEWAY_PORT: 8787
       PUBLIC_BAAS_URL: http://kong:8000
       OSIONOS_BRIDGE_URL: http://osionos-bridge:4000/api/auth/bridge/session
+      AUTH_REQUIRE_EMAIL_VERIFICATION: ${AUTH_REQUIRE_EMAIL_VERIFICATION:-false}
+      PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION: ${PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION:-false}
     volumes:
-      - ./:/app:ro
+      - ./:/workspace
+      - opposite-osiris-node-modules:/workspace/apps/opposite-osiris/node_modules
+      - mini-baas-sdk-node-modules:/workspace/infrastructure/baas/sdk/node_modules
     ports:
       - "${AUTH_GATEWAY_HOST_PORT:-8787}:8787"
     depends_on:
@@ -259,10 +305,56 @@ services:
         condition: service_healthy
       project-db-init:
         condition: service_completed_successfully
+      opposite-osiris-deps:
+        condition: service_completed_successfully
       osionos-bridge:
+        condition: service_started
+    restart: unless-stopped
+
+  opposite-osiris:
+    build:
+      context: .
+      dockerfile: apps/opposite-osiris/docker/services/node/Dockerfile
+    working_dir: /workspace/apps/opposite-osiris
+    command: ["node", "scripts/container-only.mjs", "astro", "dev", "--host", "0.0.0.0", "--port", "4322"]
+    env_file:
+      - ./infrastructure/baas/.env.local
+      - ./.env.local
+      - ./apps/opposite-osiris/.env.local
+    environment:
+      ASTRO_DEV_HOST: 0.0.0.0
+      ASTRO_DEV_PORT: 4322
+      ASTRO_DEV_HTTPS: "false"
+      PUBLIC_SITE_URL: http://localhost:4322
+      PUBLIC_BAAS_URL: /api
+      PUBLIC_AUTH_GATEWAY_URL: /api/auth
+      PUBLIC_OSIONOS_APP_URL: http://localhost:3001
+      PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION: ${PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION:-false}
+      AUTH_REQUIRE_EMAIL_VERIFICATION: ${AUTH_REQUIRE_EMAIL_VERIFICATION:-false}
+      AUTH_GATEWAY_TARGET: http://auth-gateway:8787
+      BAAS_GATEWAY_TARGET: http://kong:8000
+      TURNSTILE_BYPASS_LOCAL: "true"
+    volumes:
+      - ./:/workspace
+      - opposite-osiris-node-modules:/workspace/apps/opposite-osiris/node_modules
+      - mini-baas-sdk-node-modules:/workspace/infrastructure/baas/sdk/node_modules
+    ports:
+      - "127.0.0.1:${OPPOSITE_OSIRIS_HOST_PORT:-4322}:4322"
+    depends_on:
+      auth-gateway:
+        condition: service_started
+      opposite-osiris-deps:
+        condition: service_completed_successfully
+      kong:
+        condition: service_healthy
+      osionos-app:
         condition: service_started
     restart: unless-stopped
 
 volumes:
   track-binocle-postgres-data:
   track-binocle-redis-data:
+  osionos-app-node-modules:
+  osionos-app-pnpm-store:
+  mini-baas-sdk-node-modules:
+  opposite-osiris-node-modules:

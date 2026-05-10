@@ -8,7 +8,7 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const baasDir = resolve(scriptDir, '..');
 const repoRoot = resolve(baasDir, '../..');
 const target = resolve(baasDir, '.env.local');
-const frontendEnv = resolve(repoRoot, 'opposite-osiris/.env.local');
+const frontendEnv = resolve(repoRoot, 'apps/opposite-osiris/.env.local');
 
 function parseEnv(path) {
 	if (!existsSync(path)) return new Map();
@@ -38,6 +38,22 @@ function signJwt(secret, role) {
 
 function setIfMissing(values, key, value) {
 	if (!values.get(key)) values.set(key, value);
+}
+
+function writeEnv(path, values, order) {
+	mkdirSync(dirname(path), { recursive: true });
+	const lines = order.map((key) => [key, values.get(key) ?? ''].join('='));
+	writeFileSync(path, `${lines.join('\n')}\n`, { mode: 0o600 });
+}
+
+function upsertEnv(path, updates) {
+	const existing = parseEnv(path);
+	const values = new Map(existing);
+	for (const [key, value] of Object.entries(updates)) {
+		setIfMissing(values, key, value);
+	}
+	const preservedKeys = [...values.keys()].filter((key) => !(key in updates)).sort((left, right) => left.localeCompare(right));
+	writeEnv(path, values, [...Object.keys(updates), ...preservedKeys]);
 }
 
 const existing = parseEnv(target);
@@ -127,6 +143,23 @@ const order = [
 	'GOTRUE_URI_ALLOW_LIST',
 ];
 
-mkdirSync(dirname(target), { recursive: true });
-writeFileSync(target, `${order.map((key) => `${key}=${values.get(key)}`).join('\n')}\n`, { mode: 0o600 });
+writeEnv(target, values, order);
 console.log(`Wrote ${target}`);
+
+upsertEnv(frontendEnv, {
+	PUBLIC_BAAS_URL: '/api',
+	PUBLIC_AUTH_GATEWAY_URL: '/api/auth',
+	PUBLIC_BAAS_ANON_KEY: values.get('KONG_PUBLIC_API_KEY'),
+	PUBLIC_SITE_URL: 'http://localhost:4322',
+	ASTRO_DEV_HOST: '0.0.0.0',
+	ASTRO_DEV_PORT: '4322',
+	ASTRO_DEV_HTTPS: 'false',
+	PUBLIC_OSIONOS_APP_URL: 'http://localhost:3001',
+	PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION: 'false',
+	AUTH_REQUIRE_EMAIL_VERIFICATION: 'false',
+	GOTRUE_MAILER_AUTOCONFIRM: 'true',
+	PUBLIC_TURNSTILE_SITE_KEY: '',
+	TURNSTILE_SECRET_KEY: '',
+	TURNSTILE_BYPASS_LOCAL: 'true',
+});
+console.log(`Wrote ${frontendEnv}`);
