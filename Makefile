@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/10 16:01:30 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/10 22:28:50 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -32,16 +32,68 @@ BAAS_URL := http://localhost:8000
 PLAYGROUND_VIEWER_URL := $(OSIONOS_URL)/playground-simulation/index.html
 VSCODE_CLI ?= /usr/bin/code
 CURL_HEALTH := curl --retry 30 --retry-delay 2 --retry-all-errors --retry-connrefused -fsS
+VAULT_COMPOSE := docker compose --profile secrets
+VAULT_ENV_CMD := $(VAULT_COMPOSE) run --rm vault-env node infrastructure/baas/scripts/vault-env.mjs
+HOST_UID := $(shell id -u)
+HOST_GID := $(shell id -g)
+export HOST_UID HOST_GID
+DOCKER_NODE := docker run --rm --user "$(HOST_UID):$(HOST_GID)" -e HOST_UID="$(HOST_UID)" -e HOST_GID="$(HOST_GID)" -v "$$PWD":/workspace -w /workspace node:22-alpine
 
-.DEFAULT_GOAL := all
 
-all: bootstrap up healthcheck showcase
+# Beautiful help as the default target
+.DEFAULT_GOAL := help
+
+
+help:
+	@echo -e "\033[1;38;5;39m───────────────────────────────────────────────────────────────\033[0m"
+	@echo -e "\033[1;38;5;39m        Track Binocle: Makefile Pipeline & Utilities         \033[0m"
+	@echo -e "\033[1;38;5;39m───────────────────────────────────────────────────────────────\033[0m"
+	@printf "\033[1;38;5;45mUsage:\033[0m make [target]\n\n"
+	@awk 'BEGIN { section = "" } /^[a-zA-Z0-9][^: ]*:/ { target=$$1; sub(":.*", "", target); getline; if ($$0 ~ /^## /) { desc = substr($$0, 4); if (desc ~ /^== /) { section = substr(desc, 4); printf("\n\033[1;38;5;220m%s\033[0m\n", section); } else { printf("  \033[1;38;5;81m%-22s\033[0m %s\n", target, desc); } } }' $(MAKEFILE_LIST)
+	@echo -e "\033[1;38;5;39m───────────────────────────────────────────────────────────────\033[0m"
+	@echo -e "\033[1;38;5;245mFor docs: make docs or see README.md\033[0m"
+
+all: bootstrap env-format vault-seed vault-verify-approles env-fetch up healthcheck showcase
 
 bootstrap:
-	docker run --rm -v "$$PWD":/workspace -w /workspace node:22-alpine node infrastructure/baas/scripts/bootstrap.mjs
+	$(DOCKER_NODE) node infrastructure/baas/scripts/bootstrap.mjs
+
+env-format:
+	$(DOCKER_NODE) node infrastructure/baas/scripts/vault-env.mjs format
+
+vault-up:
+	$(VAULT_COMPOSE) up -d --build vault
+	$(VAULT_COMPOSE) run --rm --build vault-init
+
+vault-seed: vault-up
+	$(VAULT_ENV_CMD) seed
+
+vault-verify-approles: vault-seed
+	$(VAULT_ENV_CMD) verify-approles
+
+env-fetch: vault-up
+	$(VAULT_ENV_CMD) fetch
+
+env-backup:
+	$(DOCKER_NODE) node infrastructure/baas/scripts/vault-env.mjs backup
+
+env-restore-test: vault-seed
+	$(VAULT_ENV_CMD) roundtrip
 
 up:
 	docker compose up -d --build
+
+mail-up:
+## Start osionos Mail and the Gmail bridge with Docker Compose.
+	docker compose up -d --build mail mail-bridge
+
+mail-logs:
+## Follow osionos Mail and Gmail bridge logs.
+	docker compose logs -f mail mail-bridge
+
+mail-down:
+## Stop osionos Mail and the Gmail bridge containers.
+	docker compose stop mail mail-bridge
 
 healthcheck:
 	docker compose ps
@@ -115,20 +167,20 @@ baas-release-smtp:
 	@echo "Published SMTP-enabled BaaS image $(BAAS_SMTP_IMAGE):$(BAAS_SMTP_VERSION) and latest."
 
 
-# =============================================================
-# Docker Environment Management
-# =============================================================
 
-# These targets help fully clean and inspect our local Docker environment.
-# SAFE DEFAULTS:
-# - Volumes are preserved unless explicitly removed.
-# - Database data stored in named volumes will survive normal cleanup.
+## == Docker Environment Management ==
+
+## These targets help fully clean and inspect our local Docker environment.
+## SAFE DEFAULTS:
+## - Volumes are preserved unless explicitly removed.
+## - Database data stored in named volumes will survive normal cleanup.
 
 docker-clean:
-# that will remove all unused containers, networks, images (both dangling and unreferenced), and optionally, volumes.
+## Remove all unused containers, networks, images (dangling/unreferenced), and optionally, volumes.
 	docker system prune -a --volumes=$(BOOL) -f
 
 docker-rm-all:
+## Remove all containers and images, prune system and builder cache.
 	docker ps -aq | xargs -r docker rm -f
 	docker images -aq | xargs -r docker rmi -f
 	docker system prune -a --volumes=$(BOOL) -f
@@ -136,7 +188,7 @@ docker-rm-all:
 
 
 docker_verify:
-# show all containers(running and stopped), images, volumes, networks, and disk usage
+## Show all containers (running and stopped), images, volumes, networks, and disk usage.
 	docker ps -a
 	docker images -a
 	docker volume ls
@@ -144,7 +196,7 @@ docker_verify:
 	docker system df -v
 
 docker_reclaim_cache:
-# Remove BuildKit/buildx cache only
+## Remove BuildKit/buildx cache only.
 	docker builder prune -a -f
 
-.PHONY: all bootstrap up healthcheck showcase playground playground-preview version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker_rm_all docker_verify docker_reclaim_cache
+.PHONY: help all bootstrap env-format vault-up vault-seed vault-verify-approles env-fetch env-backup env-restore-test up mail-up mail-logs mail-down healthcheck showcase playground playground-preview version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker_rm_all docker_verify docker_reclaim_cache
