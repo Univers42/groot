@@ -3,6 +3,7 @@ node_modules/
 .env
 .env.*
 !.env.example
+.env*.bak
 audit/
 vendor/sdk/
 *.secret
@@ -11,3 +12,4 @@ infrastructure/baas/mini-baas-infra/certs/*
 !infrastructure/baas/mini-baas-infra/certs/.gitkeep
 infrastructure/baas/certs/*
 !infrastructure/baas/certs/.gitkeep
+prompt
