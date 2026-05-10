@@ -28,9 +28,11 @@ schema_applied=$($psql_base -Atc "SELECT 1 FROM track_binocle_runtime_migrations
 if [ "$schema_applied" != "1" ]; then
   $psql_base -f /project-init/01-user.sql
   $psql_base -f /project-init/02-gdpr.sql
-  $psql_base -f /project-init/03-auth-security.sql
   $psql_base -c "INSERT INTO track_binocle_runtime_migrations (marker) VALUES ('${marker}_schema') ON CONFLICT DO NOTHING"
 fi
+
+$psql_base -f /project-init/03-auth-security.sql
+$psql_base -c "INSERT INTO track_binocle_runtime_migrations (marker) VALUES ('${marker}_auth_security') ON CONFLICT DO NOTHING"
 
 $psql_base -f /project-init/04-osionos-bridge.sql
 $psql_base -c "INSERT INTO track_binocle_runtime_migrations (marker) VALUES ('${marker}_osionos_bridge') ON CONFLICT DO NOTHING"

@@ -1,6 +1,18 @@
+# **************************************************************************** #
+#                                                                              #
+#                                                         :::      ::::::::    #
+#    Makefile                                           :+:      :+:    :+:    #
+#                                                     +:+ +:+         +:+      #
+#    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
+#                                                 +#+#+#+#+#+   +#+            #
+#    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
+#    Updated: 2026/05/10 15:13:09 by dlesieur         ###   ########.fr        #
+#                                                                              #
+# **************************************************************************** #
+
+# Makefile for managing mini-Baas infrastructure images and environment.
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
-
 VERSION ?=
 BAAS_VERSION ?= $(if $(VERSION),$(if $(filter v%,$(VERSION)),$(VERSION),v$(VERSION)),v$(shell date +%F))
 BAAS_DOCKERHUB_IMAGE ?= dlesieur/mini-baas-infra
@@ -11,15 +23,14 @@ BAAS_SERVICES ?= kong gotrue postgrest postgres redis realtime
 BAAS_DOCKERFILE := infrastructure/baas/Dockerfile
 BAAS_CONTEXT := infrastructure/baas
 FRONTEND_DIR := apps/opposite-osiris
+BOOL ?= false
 
-.PHONY: version baas-build baas-push baas-update baas-smoke baas-release-smtp
-
-## Publish a versioned BaaS release to DockerHub and GHCR, then smoke-test it.
 version: baas-update baas-build baas-push baas-smoke
+## Publish a versioned BaaS release to DockerHub and GHCR, then smoke-test it.
 	@echo "Published mini-baas-infra $(BAAS_VERSION) to DockerHub and GHCR."
 
-## Tag the locally built composable mini-baas images with versioned and latest tags.
 baas-build:
+## Tag the locally built composable mini-baas images with versioned and latest tags.
 	@for service in $(BAAS_SERVICES); do \
 		source="$(BAAS_DOCKERHUB_IMAGE)-$$service:latest"; \
 		if [ "$$service" = "realtime" ] && ! docker image inspect "$$source" >/dev/null 2>&1; then source="dlesieur/realtime-agnostic:latest"; fi; \
@@ -31,8 +42,8 @@ baas-build:
 		echo "Tagged $$service as $(BAAS_VERSION) and latest for DockerHub/GHCR"; \
 	done
 
-## Push both DockerHub and GHCR version/latest aliases for every BaaS service image.
 baas-push:
+## Push both DockerHub and GHCR version/latest aliases for every BaaS service image.
 	@for service in $(BAAS_SERVICES); do \
 		docker push "$(BAAS_DOCKERHUB_IMAGE)-$$service:$(BAAS_VERSION)"; \
 		docker push "$(BAAS_DOCKERHUB_IMAGE)-$$service:latest"; \
@@ -40,18 +51,53 @@ baas-push:
 		docker push "$(BAAS_GHCR_IMAGE)/$$service:latest"; \
 	done
 
-## Pin the wrapper Dockerfile to the versioned image tag, never latest.
 baas-update:
+# Pin the wrapper Dockerfile to the versioned image tag, never latest.
 	python3 -c "from pathlib import Path; path=Path('$(BAAS_DOCKERFILE)'); version='$(BAAS_VERSION)'; image='$(BAAS_DOCKERHUB_IMAGE)-kong'; lines=path.read_text().splitlines(); idx=next((i for i,line in enumerate(lines) if line.startswith('FROM ')), None); assert idx is not None, f'No FROM line found in {path}'; lines[idx]=f'FROM {image}:{version}'; path.write_text('\\n'.join(lines) + '\\n'); print(f'Pinned {path} to {image}:{version}')"
 
-## Smoke-test the currently running BaaS gateway through the frontend verifier.
 baas-smoke:
+# Smoke-test the currently running BaaS gateway through the frontend verifier.
 	cd $(FRONTEND_DIR) && node scripts/verify-connection.mjs
 
-## Build and publish the SMTP-enabled BaaS wrapper image, then run SMTP smoke tests.
 baas-release-smtp:
+## Build and publish the SMTP-enabled BaaS wrapper image, then run SMTP smoke tests.
 	docker build -f $(BAAS_DOCKERFILE) -t $(BAAS_SMTP_IMAGE):$(BAAS_SMTP_VERSION) -t $(BAAS_SMTP_IMAGE):latest $(BAAS_CONTEXT)
 	docker push $(BAAS_SMTP_IMAGE):$(BAAS_SMTP_VERSION)
 	docker push $(BAAS_SMTP_IMAGE):latest
 	cd $(FRONTEND_DIR) && npm run test:smtp && npm run test:email
 	@echo "Published SMTP-enabled BaaS image $(BAAS_SMTP_IMAGE):$(BAAS_SMTP_VERSION) and latest."
+
+
+# =============================================================
+# Docker Environment Management
+# =============================================================
+
+# These targets help fully clean and inspect our local Docker environment.
+# SAFE DEFAULTS:
+# - Volumes are preserved unless explicitly removed.
+# - Database data stored in named volumes will survive normal cleanup.
+
+docker-clean:
+# that will remove all unused containers, networks, images (both dangling and unreferenced), and optionally, volumes.
+	docker system prune -a --volumes=$(BOOL) -f
+
+docker-rm-all:
+	docker ps -aq | xargs -r docker rm -f
+	docker images -aq | xargs -r docker rmi -f
+	docker system prune -a --volumes=$(BOOL) -f
+	docker builder prune -a -f
+
+
+docker_verify:
+# show all containers(running and stopped), images, volumes, networks, and disk usage
+	docker ps -a
+	docker images -a
+	docker volume ls
+	docker network ls
+	docker system df -v
+
+docker_reclaim_cache:
+# Remove BuildKit/buildx cache only
+	docker builder prune -a -f
+
+.PHONY: version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker_rm_all docker_verify docker_reclaim_cache

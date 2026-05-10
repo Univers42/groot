@@ -21,15 +21,14 @@ The browser flow is:
 
 ## Fresh Start
 
-Run these commands from the repository root.
+Run these commands from the repository root:
 
 ```sh
-docker run --rm -v "$PWD":/workspace -w /workspace node:22-alpine node infrastructure/baas/scripts/bootstrap-env.mjs
-docker run --rm -v "$PWD":/workspace -w /workspace node:22-alpine node infrastructure/baas/scripts/ensure-osionos-runtime-secrets.mjs
+docker run --rm -v "$PWD":/workspace -w /workspace node:22-alpine node infrastructure/baas/scripts/bootstrap.mjs
 docker compose up -d --build
 ```
 
-The first two commands generate ignored local runtime files without using host Node. The third command builds and starts every service.
+The bootstrap command generates ignored local runtime files without using host Node. The Compose command builds and starts every service.
 
 If the website dependency volume needs to be initialized separately, run:
 
@@ -74,19 +73,6 @@ The verified development flow is:
 6. The final osionos URL should look like `http://localhost:3001/#source=adapter&view=v-prod-table` after the bridge token is consumed.
 7. The sidebar should show the user's private workspace, for example `dockerbridge's osionos`.
 
-The Playwright verification performed for this stack created a local account, signed in through the website, redirected into osionos, consumed the bridge token, and found this app session in browser storage:
-
-```json
-{
-  "hasBridgeSession": true,
-  "bridgePersona": "dockerbridge",
-  "workspace": "dockerbridge's osionos",
-  "accessTokenPrefix": "osionos_v1."
-}
-```
-
-Postgres then reported one persisted bridge workspace named `dockerbridge's osionos`.
-
 ## Logs
 
 ```sh
@@ -118,8 +104,7 @@ Fully reset containers, Postgres data, dependency volumes, and generated runtime
 
 ```sh
 docker compose down -v
-docker run --rm -v "$PWD":/workspace -w /workspace node:22-alpine node infrastructure/baas/scripts/bootstrap-env.mjs
-docker run --rm -v "$PWD":/workspace -w /workspace node:22-alpine node infrastructure/baas/scripts/ensure-osionos-runtime-secrets.mjs
+docker run --rm -v "$PWD":/workspace -w /workspace node:22-alpine node infrastructure/baas/scripts/bootstrap.mjs
 docker compose up -d --build
 ```
 
