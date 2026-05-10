@@ -17,6 +17,7 @@ pnpm-debug.log*
 .env
 .env.local
 .env.production
+.env*.bak
 *.secret
 docker-compose.override.yml
 
