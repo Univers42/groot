@@ -45,6 +45,25 @@ CREATE TABLE IF NOT EXISTS public.osionos_workspace_members (
   PRIMARY KEY (workspace_id, user_id)
 );
 
+CREATE TABLE IF NOT EXISTS public.osionos_pages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES public.osionos_workspaces(id) ON DELETE CASCADE,
+  parent_page_id UUID REFERENCES public.osionos_pages(id) ON DELETE SET NULL,
+  owner_id UUID,
+  title TEXT NOT NULL DEFAULT 'Untitled',
+  icon TEXT,
+  cover TEXT,
+  database_id TEXT,
+  surface TEXT CHECK (surface IS NULL OR surface IN ('page', 'agent', 'home')),
+  visibility TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private', 'shared', 'public')),
+  collaborators JSONB NOT NULL DEFAULT '[]'::jsonb,
+  properties JSONB NOT NULL DEFAULT '[]'::jsonb,
+  content JSONB NOT NULL DEFAULT '[]'::jsonb,
+  archived_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS public.osionos_bridge_audit_events (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   provider TEXT NOT NULL,
@@ -56,11 +75,16 @@ CREATE TABLE IF NOT EXISTS public.osionos_bridge_audit_events (
 
 CREATE INDEX IF NOT EXISTS osionos_workspaces_owner_idx ON public.osionos_workspaces(owner_id);
 CREATE INDEX IF NOT EXISTS osionos_workspace_members_user_idx ON public.osionos_workspace_members(user_id);
+CREATE INDEX IF NOT EXISTS osionos_pages_workspace_archived_idx ON public.osionos_pages(workspace_id, archived_at);
+CREATE INDEX IF NOT EXISTS osionos_pages_workspace_parent_idx ON public.osionos_pages(workspace_id, parent_page_id);
+CREATE INDEX IF NOT EXISTS osionos_pages_workspace_updated_idx ON public.osionos_pages(workspace_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS osionos_pages_workspace_surface_idx ON public.osionos_pages(workspace_id, surface);
 CREATE INDEX IF NOT EXISTS osionos_bridge_audit_subject_idx ON public.osionos_bridge_audit_events(provider, subject, created_at DESC);
 
 ALTER TABLE public.osionos_bridge_identities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.osionos_workspaces ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.osionos_workspace_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.osionos_pages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.osionos_bridge_audit_events ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS osionos_bridge_identities_select_own ON public.osionos_bridge_identities;
@@ -81,12 +105,65 @@ DROP POLICY IF EXISTS osionos_workspace_members_select_own ON public.osionos_wor
 CREATE POLICY osionos_workspace_members_select_own ON public.osionos_workspace_members
   FOR SELECT TO authenticated USING (user_id = auth.uid());
 
+DROP POLICY IF EXISTS osionos_pages_select_member ON public.osionos_pages;
+CREATE POLICY osionos_pages_select_member ON public.osionos_pages
+  FOR SELECT TO authenticated USING (
+    EXISTS (
+      SELECT 1 FROM public.osionos_workspace_members member
+      WHERE member.workspace_id = public.osionos_pages.workspace_id
+        AND member.user_id = auth.uid()
+        AND member.permissions && ARRAY['read', 'admin']::TEXT[]
+    )
+  );
+
+DROP POLICY IF EXISTS osionos_pages_insert_member ON public.osionos_pages;
+CREATE POLICY osionos_pages_insert_member ON public.osionos_pages
+  FOR INSERT TO authenticated WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.osionos_workspace_members member
+      WHERE member.workspace_id = public.osionos_pages.workspace_id
+        AND member.user_id = auth.uid()
+        AND member.permissions && ARRAY['create', 'admin']::TEXT[]
+    )
+  );
+
+DROP POLICY IF EXISTS osionos_pages_update_member ON public.osionos_pages;
+CREATE POLICY osionos_pages_update_member ON public.osionos_pages
+  FOR UPDATE TO authenticated USING (
+    EXISTS (
+      SELECT 1 FROM public.osionos_workspace_members member
+      WHERE member.workspace_id = public.osionos_pages.workspace_id
+        AND member.user_id = auth.uid()
+        AND member.permissions && ARRAY['update', 'admin']::TEXT[]
+    )
+  ) WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.osionos_workspace_members member
+      WHERE member.workspace_id = public.osionos_pages.workspace_id
+        AND member.user_id = auth.uid()
+        AND member.permissions && ARRAY['update', 'admin']::TEXT[]
+    )
+  );
+
+DROP POLICY IF EXISTS osionos_pages_delete_member ON public.osionos_pages;
+CREATE POLICY osionos_pages_delete_member ON public.osionos_pages
+  FOR DELETE TO authenticated USING (
+    EXISTS (
+      SELECT 1 FROM public.osionos_workspace_members member
+      WHERE member.workspace_id = public.osionos_pages.workspace_id
+        AND member.user_id = auth.uid()
+        AND member.permissions && ARRAY['delete', 'admin']::TEXT[]
+    )
+  );
+
 GRANT SELECT ON public.osionos_bridge_identities TO authenticated;
 GRANT SELECT ON public.osionos_workspaces TO authenticated;
 GRANT SELECT ON public.osionos_workspace_members TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.osionos_pages TO authenticated;
 GRANT ALL ON public.osionos_bridge_identities TO service_role;
 GRANT ALL ON public.osionos_workspaces TO service_role;
 GRANT ALL ON public.osionos_workspace_members TO service_role;
+GRANT ALL ON public.osionos_pages TO service_role;
 GRANT ALL ON public.osionos_bridge_audit_events TO service_role;
 
 CREATE OR REPLACE FUNCTION public.osionos_bridge_upsert_workspace(
