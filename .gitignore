@@ -13,3 +13,4 @@ apps/baas/mini-baas-infra/certs/*
 apps/baas/certs/*
 !apps/baas/certs/.gitkeep
 prompt
+apps/track-binocle
