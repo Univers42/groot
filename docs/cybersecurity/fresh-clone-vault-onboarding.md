@@ -83,4 +83,4 @@ Do not store a static Vault token in GitHub secrets. The repository variables sh
 
 ## Troubleshooting Docker Pulls
 
-After `make docker-rm-all`, every image layer must be downloaded again. If Docker Hub retries a layer, the pipeline is waiting on Docker networking, not on Vault. Re-run after checking network access and Docker Hub rate limits. The default pipeline still fails before these pulls when credentials are missing.
+After `make docker-rm-all`, every image layer must be downloaded again. `make all` runs `make docker-prefetch-images` before Compose builds; that target tries public mirrors first, retries each pull, and bounds every pull with `DOCKER_PULL_TIMEOUT` seconds. If all mirror and direct pulls fail, the pipeline exits with a Docker networking or registry error instead of waiting indefinitely. The default pipeline still fails before these pulls when credentials are missing.

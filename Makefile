@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/13 22:59:50 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/13 23:45:14 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -16,6 +16,8 @@ SHELL := /bin/bash
 COMPOSE_PROGRESS ?= plain
 BUILDKIT_PROGRESS ?= plain
 export COMPOSE_PROGRESS BUILDKIT_PROGRESS
+DOCKER_PULL_ATTEMPTS ?= 2
+DOCKER_PULL_TIMEOUT ?= 180
 VERSION ?=
 BAAS_VERSION ?= $(if $(VERSION),$(if $(filter v%,$(VERSION)),$(VERSION),v$(VERSION)),v$(shell date +%F))
 APP_VERSION ?= $(if $(VERSION),$(if $(filter v%,$(VERSION)),$(VERSION),v$(VERSION)),v$(shell date +%F))
@@ -93,10 +95,10 @@ help:
 	@echo -e "\033[1;38;5;39m───────────────────────────────────────────────────────────────\033[0m"
 	@echo -e "\033[1;38;5;245mFor docs: make docs or see README.md\033[0m"
 
-all: env-fetch-shared pulls certs bootstrap env-format vault-seed vault-verify-approles env-fetch up healthcheck showcase
+all: env-fetch-shared pulls certs bootstrap env-format docker-prefetch-images vault-seed vault-verify-approles env-fetch up healthcheck showcase
 ## Build, start, and verify the complete Vault-backed Track Binocle pipeline.
 
-all-local: pulls certs bootstrap env-format vault-seed vault-verify-approles env-fetch up healthcheck showcase
+all-local: pulls certs bootstrap env-format docker-prefetch-images vault-seed vault-verify-approles env-fetch up healthcheck showcase
 ## Build the local generated-secret pipeline without shared Vault credentials.
 
 pulls:
@@ -162,6 +164,40 @@ certs-trust: certs
 
 env-format:
 	$(NODE_RUN) apps/baas/scripts/vault-env.mjs format
+
+docker-prefetch-images:
+## Pull required public images from resilient mirrors before Compose builds.
+	@set -eu; \
+	pull_image() { \
+		target="$$1"; mirror="$$2"; \
+		if docker image inspect "$$target" >/dev/null 2>&1; then echo "[docker] using cached $$target"; return 0; fi; \
+		attempt=1; \
+		while [ "$$attempt" -le '$(DOCKER_PULL_ATTEMPTS)' ]; do \
+			echo "[docker] pulling $$mirror for $$target (attempt $$attempt/$(DOCKER_PULL_ATTEMPTS), timeout $(DOCKER_PULL_TIMEOUT)s)"; \
+			if timeout '$(DOCKER_PULL_TIMEOUT)' docker pull "$$mirror"; then docker tag "$$mirror" "$$target"; return 0; fi; \
+			attempt=$$((attempt + 1)); \
+		done; \
+		attempt=1; \
+		while [ "$$attempt" -le '$(DOCKER_PULL_ATTEMPTS)' ]; do \
+			echo "[docker] pulling $$target directly (attempt $$attempt/$(DOCKER_PULL_ATTEMPTS), timeout $(DOCKER_PULL_TIMEOUT)s)"; \
+			if timeout '$(DOCKER_PULL_TIMEOUT)' docker pull "$$target"; then return 0; fi; \
+			attempt=$$((attempt + 1)); \
+		done; \
+		echo "[docker] failed to pull $$target"; exit 1; \
+	}; \
+	pull_image node:22-alpine public.ecr.aws/docker/library/node:22-alpine; \
+	pull_image node:22-bookworm public.ecr.aws/docker/library/node:22-bookworm; \
+	pull_image node:22-bookworm-slim public.ecr.aws/docker/library/node:22-bookworm-slim; \
+	pull_image nginx:1.27-alpine public.ecr.aws/docker/library/nginx:1.27-alpine; \
+	pull_image postgres:16 public.ecr.aws/docker/library/postgres:16; \
+	pull_image postgres:16-alpine public.ecr.aws/docker/library/postgres:16-alpine; \
+	pull_image redis:7-alpine public.ecr.aws/docker/library/redis:7-alpine; \
+	pull_image kong:3.8 public.ecr.aws/docker/library/kong:3.8; \
+	pull_image hashicorp/vault:1.16 public.ecr.aws/hashicorp/vault:1.16; \
+	pull_image postgrest/postgrest:v12.2.3 mirror.gcr.io/postgrest/postgrest:v12.2.3; \
+	pull_image supabase/gotrue:v2.188.1 public.ecr.aws/supabase/gotrue:v2.188.1; \
+	pull_image supabase/postgres-meta:v0.91.0 public.ecr.aws/supabase/postgres-meta:v0.91.0; \
+	pull_image supabase/supavisor:2.7.4 public.ecr.aws/supabase/supavisor:2.7.4
 
 vault-up: certs
 	$(VAULT_COMPOSE) up -d --build vault local-https-proxy
@@ -529,4 +565,4 @@ docker_reclaim_cache:
 ## Remove BuildKit/buildx cache only.
 	docker builder prune -a -f
 
-.PHONY: help all all-local pulls pushes bootstrap certs certs-trust env-format vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fetch-shared env-fetch-shared vault-publish-shared vault-status-shared vault-repair-shared vault-github-oidc vault-fly-create vault-fly-deploy vault-fly-publish vault-fly-github vault-fly vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache
+.PHONY: help all all-local pulls pushes bootstrap certs certs-trust env-format docker-prefetch-images vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fetch-shared env-fetch-shared vault-publish-shared vault-status-shared vault-repair-shared vault-github-oidc vault-fly-create vault-fly-deploy vault-fly-publish vault-fly-github vault-fly vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache

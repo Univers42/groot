@@ -1,0 +1,24 @@
+prismatica:
+  label: Prismatica
+  permalink: /prismatica
+  description: Prismatica platform updates
+
+release:
+  label: Release
+  permalink: /release
+  description: Release announcements
+
+architecture:
+  label: Architecture
+  permalink: /architecture
+  description: Architecture and design decisions
+
+backend:
+  label: Backend
+  permalink: /backend
+  description: Backend development updates
+
+frontend:
+  label: Frontend
+  permalink: /frontend
+  description: Frontend development updates

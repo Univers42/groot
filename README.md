@@ -92,7 +92,7 @@ make pushes
 
 For teammates, a maintainer can run `make vault-invite-token VAULT_TEAM_ROLE=reader` to write an ignored `.vault/track-binocle-reader.env` token file, or `make vault-invite-token VAULT_TEAM_ROLE=writer VAULT_TOKEN_TTL=8h` for someone allowed to publish updated secrets. Share that file through your normal secure channel, never through Git. Invited users must keep the token file private with mode `600` or `400`; the shared Vault targets refuse group-readable or world-readable token files. Invited users can place the reader file in `.vault/` and run `make all`; the Makefile fetches shared secrets before bootstrap. If no invite token or API key is present, `make all` fails before Docker starts. If you want to hand over a password-like API key instead of a file, give the teammate the reader token value and the Vault URL; they can run `VAULT_API_KEY=... VAULT_ADDR=https://track-binocle-vault.fly.dev make vault-fetch-shared` or `VAULT_API_KEY=... VAULT_ADDR=https://track-binocle-vault.fly.dev make all`. They can also run `make vault-fetch-shared VAULT_TOKEN_FILE=.vault/track-binocle-reader.env` explicitly. Invite tokens default to `https://local-https-proxy:8200` because the fetch command runs inside Docker; open Vault in a browser at `https://localhost:8200`.
 
-For the full fresh-clone checklist, see [docs/fresh-clone-vault-onboarding.md](docs/fresh-clone-vault-onboarding.md).
+For the full fresh-clone checklist, see [docs/cybersecurity/fresh-clone-vault-onboarding.md](docs/cybersecurity/fresh-clone-vault-onboarding.md).
 
 If a colleague receives an old or incomplete Vault payload, the fetch now fails before Compose starts and prints only the missing key names. A maintainer with complete ignored env files should repair the shared Vault with `make vault-repair-shared VAULT_PUBLISH_TOKEN_FILE=.vault/track-binocle-writer.env`, then recreate or resend reader tokens as needed. Writers can still run `make vault-publish-shared VAULT_PUBLISH_TOKEN_FILE=.vault/track-binocle-writer.env` after updating local ignored env files.
 
@@ -137,15 +137,16 @@ This target logs in with `--password-stdin`, tags every app image with the reque
 The Makefile runs these commands from the repository root:
 
 ```sh
-docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/workspace -w /workspace node:22-alpine node apps/baas/scripts/bootstrap.mjs
-docker compose --profile secrets run --rm --no-deps vault-env node apps/baas/scripts/vault-env.mjs fetch # only when .vault/track-binocle-reader.env or VAULT_TOKEN is present
+make env-fetch-shared # requires .vault/track-binocle-reader.env, VAULT_API_KEY, or VAULT_TOKEN
+node apps/baas/scripts/bootstrap.mjs # or the Docker Node fallback when host Node is unavailable
+make docker-prefetch-images # bounded retries through public mirrors before Compose builds
 docker compose --profile secrets up -d --build vault
 docker compose --profile secrets run --rm --build vault-init
 docker compose --profile secrets run --rm vault-env node apps/baas/scripts/vault-env.mjs fetch
 docker compose up -d --build
 ```
 
-The bootstrap command generates ignored local runtime files without using host Node. If a shared Vault token exists, the Makefile fetches team secrets first; if the shared Vault is missing required keys, it stops with the missing key names. The local Vault commands then keep env files aligned with the local Vault store. The final Compose command builds and starts every service.
+The shared Vault fetch is the first step of `make all`; without credentials it stops before Git pulls, bootstrap, image pulls, or Compose. The bootstrap command then generates ignored local runtime files, using host Node when available and the Docker Node fallback otherwise. `make docker-prefetch-images` pulls required public images through bounded mirror retries before Compose builds, so Docker networking failures are visible instead of hanging indefinitely. The local Vault commands then keep env files aligned with the local Vault store. The final Compose command builds and starts every service.
 
 If the website dependency volume needs to be initialized separately, run:
 

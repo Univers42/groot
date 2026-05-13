@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?><?xml-stylesheet type="text/xsl" href="atom.xsl"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+    <id>https://univers42.github.io/blog</id>
+    <title>Prismatica Blog</title>
+    <updated>2025-01-15T00:00:00.000Z</updated>
+    <generator>https://github.com/jpmonette/feed</generator>
+    <link rel="alternate" href="https://univers42.github.io/blog"/>
+    <subtitle>Prismatica Blog</subtitle>
+    <icon>https://univers42.github.io/img/favicon.ico</icon>
+    <entry>
+        <title type="html"><![CDATA[Welcome to Prismatica]]></title>
+        <id>https://univers42.github.io/blog/welcome</id>
+        <link href="https://univers42.github.io/blog/welcome"/>
+        <updated>2025-01-15T00:00:00.000Z</updated>
+        <summary type="html"><![CDATA[Welcome to Prismatica — a polymorphic data platform built as part of the ft_transcendence project at 42.]]></summary>
+        <content type="html"><![CDATA[<p>Welcome to <strong>Prismatica</strong> — a polymorphic data platform built as part of the ft_transcendence project at 42.</p>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="what-is-prismatica">What is Prismatica?<a href="https://univers42.github.io/blog/welcome#what-is-prismatica" class="hash-link" aria-label="Direct link to What is Prismatica?" title="Direct link to What is Prismatica?" translate="no">​</a></h2>
+<p>Prismatica is a modern full-stack platform featuring:</p>
+<ul>
+<li class=""><strong>Dual-Database Architecture</strong> — PostgreSQL 16 for relational data, MongoDB 7 for flexible documents</li>
+<li class=""><strong>REST API</strong> with Express and schema-validated endpoints</li>
+<li class=""><strong>React 19 + Vite 6</strong> frontend with TypeScript</li>
+<li class=""><strong>Docker Compose</strong> orchestration for development and production</li>
+<li class=""><strong>ABAC Security</strong> — Attribute-Based Access Control at every layer</li>
+<li class=""><strong>NestJS Backend</strong> with Prisma ORM</li>
+</ul>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="documentation">Documentation<a href="https://univers42.github.io/blog/welcome#documentation" class="hash-link" aria-label="Direct link to Documentation" title="Direct link to Documentation" translate="no">​</a></h2>
+<p>Explore the full documentation to get started:</p>
+<ul>
+<li class=""><a class="" href="https://univers42.github.io/docs/intro">Introduction</a> — Overview and quick start</li>
+<li class=""><a class="" href="https://univers42.github.io/docs/architecture">Architecture</a> — System design and data flow</li>
+<li class=""><a class="" href="https://univers42.github.io/docs/setup">Setup Guide</a> — Local development setup</li>
+<li class=""><a class="" href="https://univers42.github.io/docs/api">API Reference</a> — Endpoint documentation</li>
+</ul>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="get-involved">Get Involved<a href="https://univers42.github.io/blog/welcome#get-involved" class="hash-link" aria-label="Direct link to Get Involved" title="Direct link to Get Involved" translate="no">​</a></h2>
+<p>Prismatica is open source. Check out the <a class="" href="https://univers42.github.io/docs/contributing">Contributing Guide</a> and the <a href="https://github.com/Univers42/ft_transcendence" target="_blank" rel="noopener noreferrer" class="">GitHub repository</a>.</p>]]></content>
+        <author>
+            <name>Prismatica Team</name>
+            <uri>https://github.com/Univers42</uri>
+        </author>
+        <category label="Prismatica" term="Prismatica"/>
+        <category label="Release" term="Release"/>
+    </entry>
+</feed>
