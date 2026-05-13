@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/14 00:51:33 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/14 01:25:00 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -16,10 +16,14 @@ SHELL := /bin/bash
 COMPOSE_PROGRESS ?= plain
 BUILDKIT_PROGRESS ?= plain
 BUILDX_BUILDER ?= default
-export COMPOSE_PROGRESS BUILDKIT_PROGRESS BUILDX_BUILDER
+DOCKER_BUILDKIT ?= 1
+COMPOSE_DOCKER_CLI_BUILD ?= 1
+COMPOSE_BAKE ?= 1
+export COMPOSE_PROGRESS BUILDKIT_PROGRESS BUILDX_BUILDER DOCKER_BUILDKIT COMPOSE_DOCKER_CLI_BUILD COMPOSE_BAKE
 DOCKER_PULL_ATTEMPTS ?= 2
 DOCKER_PULL_TIMEOUT ?= 180
 DOCKER_PULL_KILL_AFTER ?= 15
+DOCKER_PREFETCH_JOBS ?= 6
 VERSION ?=
 BAAS_VERSION ?= $(if $(VERSION),$(if $(filter v%,$(VERSION)),$(VERSION),v$(VERSION)),v$(shell date +%F))
 APP_VERSION ?= $(if $(VERSION),$(if $(filter v%,$(VERSION)),$(VERSION),v$(VERSION)),v$(shell date +%F))
@@ -180,6 +184,10 @@ env-format:
 docker-prefetch-images:
 ## Pull required public images from resilient mirrors before Compose builds.
 	@set -eu; \
+	jobs='$(DOCKER_PREFETCH_JOBS)'; \
+	case "$$jobs" in ''|*[!0-9]*) echo '[docker] DOCKER_PREFETCH_JOBS must be a positive integer'; exit 1;; esac; \
+	if [ "$$jobs" -lt 1 ]; then jobs=1; fi; \
+	echo "[docker] prefetching images with up to $$jobs concurrent pulls"; \
 	pull_image() { \
 		target="$$1"; mirror="$$2"; \
 		if docker image inspect "$$target" >/dev/null 2>&1; then echo "[docker] using cached $$target"; return 0; fi; \
@@ -198,22 +206,38 @@ docker-prefetch-images:
 			if timeout --kill-after='$(DOCKER_PULL_KILL_AFTER)s' '$(DOCKER_PULL_TIMEOUT)s' docker pull "$$target"; then return 0; fi; \
 			attempt=$$((attempt + 1)); \
 		done; \
-		echo "[docker] failed to pull $$target"; exit 1; \
+		echo "[docker] failed to pull $$target"; return 1; \
 	}; \
-	pull_image node:22-alpine public.ecr.aws/docker/library/node:22-alpine; \
-	pull_image node:22-bookworm public.ecr.aws/docker/library/node:22-bookworm; \
-	pull_image node:22-bookworm-slim public.ecr.aws/docker/library/node:22-bookworm-slim; \
-	pull_image nginx:1.27-alpine public.ecr.aws/docker/library/nginx:1.27-alpine; \
-	pull_image docker/dockerfile:1 docker/dockerfile:1; \
-	pull_image postgres:16 public.ecr.aws/docker/library/postgres:16; \
-	pull_image postgres:16-alpine public.ecr.aws/docker/library/postgres:16-alpine; \
-	pull_image redis:7-alpine public.ecr.aws/docker/library/redis:7-alpine; \
-	pull_image kong:3.8 public.ecr.aws/docker/library/kong:3.8; \
-	pull_image hashicorp/vault:1.16 public.ecr.aws/hashicorp/vault:1.16; \
-	pull_image postgrest/postgrest:v12.2.3 mirror.gcr.io/postgrest/postgrest:v12.2.3; \
-	pull_image supabase/gotrue:v2.188.1 public.ecr.aws/supabase/gotrue:v2.188.1; \
-	pull_image supabase/postgres-meta:v0.91.0 public.ecr.aws/supabase/postgres-meta:v0.91.0; \
-	pull_image supabase/supavisor:2.7.4 public.ecr.aws/supabase/supavisor:2.7.4
+	pids=(); failed=0; \
+	wait_for_pull() { \
+		pid="$${pids[0]}"; \
+		set +e; wait "$$pid"; status="$$?"; set -e; \
+		pids=("$${pids[@]:1}"); \
+		if [ "$$status" -ne 0 ]; then failed=1; fi; \
+	}; \
+	start_pull() { \
+		pull_image "$$1" "$$2" & \
+		pids+=("$$!"); \
+		if [ "$${#pids[@]}" -ge "$$jobs" ]; then wait_for_pull; fi; \
+	}; \
+	start_pull node:22-alpine public.ecr.aws/docker/library/node:22-alpine; \
+	start_pull node:20-alpine public.ecr.aws/docker/library/node:20-alpine; \
+	start_pull node:22-bookworm public.ecr.aws/docker/library/node:22-bookworm; \
+	start_pull node:22-bookworm-slim public.ecr.aws/docker/library/node:22-bookworm-slim; \
+	start_pull nginx:1.27-alpine public.ecr.aws/docker/library/nginx:1.27-alpine; \
+	start_pull docker/dockerfile:1 docker/dockerfile:1; \
+	start_pull docker/dockerfile:1.7 docker/dockerfile:1.7; \
+	start_pull postgres:16 public.ecr.aws/docker/library/postgres:16; \
+	start_pull postgres:16-alpine public.ecr.aws/docker/library/postgres:16-alpine; \
+	start_pull redis:7-alpine public.ecr.aws/docker/library/redis:7-alpine; \
+	start_pull kong:3.8 public.ecr.aws/docker/library/kong:3.8; \
+	start_pull hashicorp/vault:1.16 public.ecr.aws/hashicorp/vault:1.16; \
+	start_pull postgrest/postgrest:v12.2.3 mirror.gcr.io/postgrest/postgrest:v12.2.3; \
+	start_pull supabase/gotrue:v2.188.1 public.ecr.aws/supabase/gotrue:v2.188.1; \
+	start_pull supabase/postgres-meta:v0.91.0 public.ecr.aws/supabase/postgres-meta:v0.91.0; \
+	start_pull supabase/supavisor:2.7.4 public.ecr.aws/supabase/supavisor:2.7.4; \
+	while [ "$${#pids[@]}" -gt 0 ]; do wait_for_pull; done; \
+	if [ "$$failed" -ne 0 ]; then echo '[docker] one or more image pulls failed'; exit 1; fi
 
 vault-up: certs docker-prefetch-images
 	@docker compose rm -sf local-https-proxy >/dev/null 2>&1 || true

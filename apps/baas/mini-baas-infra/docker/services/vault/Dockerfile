@@ -1,8 +1,10 @@
+# syntax=docker/dockerfile:1.7
 # File: docker/services/vault/Dockerfile
 FROM hashicorp/vault:1.16
 
 # Alpine-based image: add bash + jq for init script and prepare Vault data.
-RUN apk add --no-cache bash jq \
+RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
+  apk add --update-cache bash jq \
   && mkdir -p /vault/data \
   && chown -R vault:vault /vault/data
 

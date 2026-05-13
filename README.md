@@ -140,14 +140,14 @@ The Makefile runs these commands from the repository root:
 make env-fetch-shared # requires .vault/track-binocle-reader.env, VAULT_API_KEY, or VAULT_TOKEN
 make certs-trust-local # best-effort user browser trust import; skipped in CI
 node apps/baas/scripts/bootstrap.mjs # or the Docker Node fallback when host Node is unavailable
-make docker-prefetch-images # bounded retries through public mirrors before Compose builds
+make docker-prefetch-images # bounded parallel retries through public mirrors before Compose builds
 docker compose --profile secrets up -d --build --pull never vault local-https-proxy
 docker compose --profile secrets run --rm --build vault-init
 docker compose --profile secrets run --rm vault-env node apps/baas/scripts/vault-env.mjs fetch
 docker compose up -d --build --pull never
 ```
 
-The shared Vault fetch is the first step of `make all`; without credentials it stops before Git pulls, bootstrap, image pulls, certificate trust import, or Compose. The bootstrap command then generates ignored local runtime files, using host Node when available and the Docker Node fallback otherwise. `make docker-prefetch-images` pulls required public images and the `docker/dockerfile:1` BuildKit frontend through bounded retries before Compose builds, using `DOCKER_PULL_TIMEOUT` plus the `DOCKER_PULL_KILL_AFTER` hard-stop window. Later Compose `up` calls use `--pull never`, so Docker networking failures stay inside the bounded prefetch step instead of hanging indefinitely. The Makefile also exports `BUILDX_BUILDER=default` so a teammate's active docker-container Buildx builder cannot pull `moby/buildkit` outside the bounded prefetch step. The local Vault commands then keep env files aligned with the local Vault store. Before the local HTTPS proxy starts, the Makefile recreates it so nginx serves the current localhost certificate. The final Compose command builds and starts every service.
+The shared Vault fetch is the first step of `make all`; without credentials it stops before Git pulls, bootstrap, image pulls, certificate trust import, or Compose. The bootstrap command then generates ignored local runtime files, using host Node when available and the Docker Node fallback otherwise. `make docker-prefetch-images` pulls required public images and the Dockerfile BuildKit frontends through bounded parallel retries before Compose builds, using `DOCKER_PREFETCH_JOBS` concurrent pulls, `DOCKER_PULL_TIMEOUT`, and the `DOCKER_PULL_KILL_AFTER` hard-stop window. Later Compose `up` calls use `--pull never`, so Docker networking failures stay inside the bounded prefetch step instead of hanging indefinitely. The Makefile also exports `DOCKER_BUILDKIT=1`, `COMPOSE_DOCKER_CLI_BUILD=1`, `COMPOSE_BAKE=1`, and `BUILDX_BUILDER=default` so Compose builds use Docker's built-in BuildKit/Bake path and a teammate's active docker-container Buildx builder cannot pull `moby/buildkit` outside the bounded prefetch step. The local Vault commands then keep env files aligned with the local Vault store. Before the local HTTPS proxy starts, the Makefile recreates it so nginx serves the current localhost certificate. The final Compose command builds and starts every service.
 
 If the website dependency volume needs to be initialized separately, run:
 

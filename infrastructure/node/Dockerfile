@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # **************************************************************************** #
 #                                                                              #
 #                                                         :::      ::::::::    #
@@ -12,7 +13,8 @@
 
 FROM node:22-alpine
 
-RUN apk add --no-cache python3 build-base cmake git bash \
+RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
+	apk add --update-cache python3 build-base cmake git bash \
 	&& ln -sf /usr/bin/python3 /usr/bin/python \
 	&& corepack enable \
 	&& corepack prepare pnpm@10.32.1 --activate

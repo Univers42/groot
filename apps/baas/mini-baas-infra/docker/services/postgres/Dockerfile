@@ -1,11 +1,14 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1.7
 # File: docker/services/postgres/Dockerfile
 # PostgreSQL 16 with pg_net extension (required by GoTrue webhooks / Supabase).
 
 FROM postgres:16
 
 # Install build dependencies for pg_net
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+  && apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
     curl \
@@ -26,7 +29,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && apt-get purge -y --auto-remove \
     build-essential \
     git \
-    postgresql-server-dev-16 \
-  && rm -rf /var/lib/apt/lists/*
+    postgresql-server-dev-16
 
 EXPOSE 5432
