@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/11 00:12:46 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/12 15:17:14 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -15,6 +15,7 @@ SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 VERSION ?=
 BAAS_VERSION ?= $(if $(VERSION),$(if $(filter v%,$(VERSION)),$(VERSION),v$(VERSION)),v$(shell date +%F))
+APP_VERSION ?= $(if $(VERSION),$(if $(filter v%,$(VERSION)),$(VERSION),v$(VERSION)),v$(shell date +%F))
 BAAS_DOCKERHUB_IMAGE ?= dlesieur/mini-baas-infra
 BAAS_GHCR_IMAGE ?= ghcr.io/univers42/mini-baas-infra
 BAAS_SMTP_IMAGE ?= dlesieur/mini-baas-infra
@@ -29,6 +30,10 @@ OSIONOS_URL := http://localhost:3001
 BRIDGE_URL := http://localhost:4000
 AUTH_URL := http://localhost:8787/api/auth
 BAAS_URL := http://localhost:8000
+MAIL_URL := http://localhost:3002
+MAIL_BRIDGE_URL := http://localhost:4100
+CALENDAR_URL := http://localhost:3003
+CALENDAR_BRIDGE_URL := http://localhost:4200
 PLAYGROUND_VIEWER_URL := $(OSIONOS_URL)/playground-simulation/index.html
 VSCODE_CLI ?= /usr/bin/code
 CURL_HEALTH := curl --retry 30 --retry-delay 2 --retry-all-errors --retry-connrefused -fsS
@@ -54,6 +59,7 @@ help:
 	@echo -e "\033[1;38;5;245mFor docs: make docs or see README.md\033[0m"
 
 all: bootstrap env-format vault-seed vault-verify-approles env-fetch up healthcheck showcase
+## Build, start, and verify the complete Docker-only Track Binocle pipeline.
 
 bootstrap:
 	$(DOCKER_NODE) node apps/baas/scripts/bootstrap.mjs
@@ -81,7 +87,61 @@ env-restore-test: vault-seed
 	$(VAULT_ENV_CMD) roundtrip
 
 up:
-	docker compose up -d --build
+## Build and start every service in the root Docker Compose graph.
+	docker compose up -d --build --wait
+
+app-images:
+## Build the local Docker images for the website, osionos, Mail, Calendar, bridges, and BaaS gateway.
+	docker compose build kong osionos-app mail mail-bridge calendar calendar-bridge auth-gateway opposite-osiris opposite-osiris-deps playground-simulation
+
+app-login:
+## Log in to DockerHub using DOCKER_USER/DOCKER_PAT from the shell or ignored env files.
+	@set +u; set -a; \
+	for env_file in .env.local .env apps/baas/mini-baas-infra/.env; do \
+		if [[ -f "$$env_file" ]]; then . "$$env_file"; fi; \
+	done; \
+	set +a; set -u; \
+	docker_user="$${DOCKER_USER:-$${DOCKER_LOGIN:-}}"; \
+	docker_pat="$${DOCKER_PAT:-}"; \
+	if [[ -z "$$docker_user" || -z "$$docker_pat" ]]; then \
+		echo 'DOCKER_USER and DOCKER_PAT must be set in the shell or an ignored env file.'; \
+		exit 1; \
+	fi; \
+	printf '%s' "$$docker_pat" | docker login docker.io -u "$$docker_user" --password-stdin >/dev/null; \
+	echo 'dockerhub-login-ok'
+
+app-images-push: app-images app-login
+## Tag and push the application images to DockerHub. Use VERSION=vX.Y.Z to override the tag.
+	@set +u; set -a; \
+	for env_file in .env.local .env apps/baas/mini-baas-infra/.env; do \
+		if [[ -f "$$env_file" ]]; then . "$$env_file"; fi; \
+	done; \
+	set +a; set -u; \
+	docker_user="$${DOCKER_USER:-$${DOCKER_LOGIN:-}}"; \
+	if [[ -z "$$docker_user" ]]; then \
+		echo 'DOCKER_USER must be set in the shell or an ignored env file.'; \
+		exit 1; \
+	fi; \
+	for spec in \
+		'track-binocle/mini-baas-kong:local track-binocle-mini-baas-kong' \
+		'track-binocle/osionos-app:local track-binocle-osionos-app' \
+		'track-binocle/mail-bridge:local track-binocle-mail-bridge' \
+		'track-binocle/mail:local track-binocle-mail' \
+		'track-binocle/calendar-bridge:local track-binocle-calendar-bridge' \
+		'track-binocle/calendar:local track-binocle-calendar' \
+		'track-binocle/auth-gateway:local track-binocle-auth-gateway' \
+		'track-binocle/opposite-osiris:local track-binocle-opposite-osiris' \
+		'track-binocle/opposite-osiris-deps:local track-binocle-opposite-osiris-deps' \
+		'track-binocle/playground-simulation:local track-binocle-playground-simulation'; do \
+		set -- $$spec; \
+		local_image="$$1"; \
+		remote_repo="docker.io/$$docker_user/$$2"; \
+		docker tag "$$local_image" "$$remote_repo:$(APP_VERSION)"; \
+		docker tag "$$local_image" "$$remote_repo:latest"; \
+		docker push "$$remote_repo:$(APP_VERSION)"; \
+		docker push "$$remote_repo:latest"; \
+		echo "pushed $$remote_repo:$(APP_VERSION) and latest"; \
+	done
 
 mail-up:
 ## Start osionos Mail and the Gmail bridge with Docker Compose.
@@ -108,26 +168,41 @@ calendar-down:
 	docker compose stop calendar calendar-bridge
 
 healthcheck:
+## Verify the BaaS, website, osionos app, Mail, Calendar, bridges, and app-to-BaaS connectivity.
 	docker compose ps
 	$(CURL_HEALTH) $(BRIDGE_URL)/api/auth/bridge/health
 	$(CURL_HEALTH) $(OSIONOS_URL) >/dev/null
 	$(CURL_HEALTH) $(WEBSITE_URL) >/dev/null
 	$(CURL_HEALTH) -o /dev/null -w 'auth-gateway-http-%{http_code}\n' $(AUTH_URL)/availability
+	$(CURL_HEALTH) $(MAIL_BRIDGE_URL)/health >/dev/null
+	$(CURL_HEALTH) $(MAIL_URL) >/dev/null
+	$(CURL_HEALTH) $(CALENDAR_BRIDGE_URL)/health >/dev/null
+	$(CURL_HEALTH) $(CALENDAR_URL) >/dev/null
+	docker compose exec -T mail-bridge node -e "fetch('http://127.0.0.1:' + (process.env.MAIL_BRIDGE_PORT || '4100') + '/session').then((r) => r.json()).then((session) => { if (!session.configured) { console.error('mail bridge reachable, but Gmail OAuth credentials are not configured'); process.exit(1); } }).catch((error) => { console.error(error.message); process.exit(1); })"
+	docker compose exec -T calendar-bridge node -e "fetch('http://127.0.0.1:' + (process.env.CALENDAR_BRIDGE_PORT || '4200') + '/session').then((r) => r.json()).then((session) => { if (!session.configured) { console.error('calendar bridge reachable, but Google Calendar OAuth credentials are not configured'); process.exit(1); } }).catch((error) => { console.error(error.message); process.exit(1); })"
+	docker compose exec -T calendar-bridge node -e "fetch('http://127.0.0.1:' + (process.env.CALENDAR_BRIDGE_PORT || '4200') + '/baas/status').then((r) => r.json()).then((status) => { if (!status.connected) { console.error('calendar bridge cannot reach the BaaS gateway'); process.exit(1); } }).catch((error) => { console.error(error.message); process.exit(1); })"
 	docker compose exec -T -e BAAS_INTERNAL_URL=http://kong:8000 opposite-osiris node scripts/container-only.mjs node scripts/verify-connection.mjs
 
 showcase:
+## Print the local service URLs after the pipeline is healthy.
 	@printf '\nPipeline ready. Open these local services:\n'
 	@printf '  Website:             %s\n' '$(WEBSITE_URL)'
 	@printf '  osionos app:         %s\n' '$(OSIONOS_URL)'
 	@printf '  osionos bridge API:  %s\n' '$(BRIDGE_URL)'
 	@printf '  Auth gateway:        %s\n' '$(AUTH_URL)'
 	@printf '  BaaS gateway:        %s\n\n' '$(BAAS_URL)'
+	@printf '  osionos Mail:        %s\n' '$(MAIL_URL)'
+	@printf '  Mail bridge:         %s\n' '$(MAIL_BRIDGE_URL)'
+	@printf '  osionos Calendar:    %s\n' '$(CALENDAR_URL)'
+	@printf '  Calendar bridge:     %s\n\n' '$(CALENDAR_BRIDGE_URL)'
 
 playground: healthcheck playground-preview
+## Run the Docker Playwright user flow and app-service integration simulation.
 	docker compose run --rm --build playground-simulation
 	$(MAKE) showcase
 
 playground-preview:
+## Open the VS Code simulation viewer for Docker Playwright results.
 	@printf '\nSimulation preview: Docker Playwright will create a throwaway account and bridge it into osionos.\n'
 	@printf 'Opening the VS Code simulation viewer: %s\n' '$(PLAYGROUND_VIEWER_URL)'
 	@if [ -x '$(VSCODE_CLI)' ]; then \
@@ -135,6 +210,10 @@ playground-preview:
 	else \
 		printf 'Open this URL in VS Code Simple Browser: %s\n' '$(PLAYGROUND_VIEWER_URL)'; \
 	fi
+
+docs:
+## Show the primary Docker pipeline documentation files.
+	@printf 'Read README.md and docs/howtouse.md for the Docker-only pipeline workflow.\n'
 
 version: baas-update baas-build baas-push baas-smoke
 ## Publish a versioned BaaS release to DockerHub and GHCR, then smoke-test it.
@@ -193,8 +272,14 @@ docker-clean:
 
 docker-rm-all:
 ## Remove all containers and images, prune system and builder cache.
-	docker ps -aq | xargs -r docker rm -f
-	docker images -aq | xargs -r docker rmi -f
+	docker ps -aq | sort -u | xargs -r docker rm -f
+	@docker images -aq | sort -u | while read -r image_id; do \
+		if docker image inspect "$$image_id" >/dev/null 2>&1; then \
+			docker rmi -f "$$image_id" || { \
+				if docker image inspect "$$image_id" >/dev/null 2>&1; then exit 1; fi; \
+			}; \
+		fi; \
+	done
 	docker system prune -a --volumes=$(BOOL) -f
 	docker builder prune -a -f
 
@@ -211,4 +296,4 @@ docker_reclaim_cache:
 ## Remove BuildKit/buildx cache only.
 	docker builder prune -a -f
 
-.PHONY: help all bootstrap env-format vault-up vault-seed vault-verify-approles env-fetch env-backup env-restore-test up mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker_rm_all docker_verify docker_reclaim_cache
+.PHONY: help all bootstrap env-format vault-up vault-seed vault-verify-approles env-fetch env-backup env-restore-test up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache

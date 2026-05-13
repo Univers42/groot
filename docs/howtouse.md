@@ -9,6 +9,10 @@ This workspace runs through Docker Compose only. Do not install app dependencies
 - osionos bridge API: `http://localhost:4000`
 - Auth gateway: `http://localhost:8787/api/auth`
 - BaaS gateway: `http://localhost:8000`
+- osionos Mail: `http://localhost:3002`
+- Mail bridge: `http://localhost:4100`
+- osionos Calendar: `http://localhost:3003`
+- Calendar bridge: `http://localhost:4200`
 
 The browser flow is:
 
@@ -18,19 +22,30 @@ The browser flow is:
 4. The bridge creates a short-lived one-time token and persists the private osionos workspace in Postgres.
 5. The browser redirects to `http://localhost:3001/#bridge_token=...`.
 6. osionos consumes the token and opens the user's private workspace.
+7. The osionos sidebar app buttons open the Docker-served Mail and Calendar apps.
 
 ## Normal Workflow
 
 Most users only need two commands:
 
 ```sh
-make
+make all
 make playground
 ```
 
-`make` bootstraps the ignored runtime files, builds and starts the Docker stack, runs health checks, then prints the localhost URLs only after the pipeline is ready.
+`make all` bootstraps the ignored runtime files, builds and starts the Docker stack, runs health checks, then prints the localhost URLs only after the pipeline is ready.
 
-`make playground` opens a VS Code simulation viewer, then runs the classic user scenario with Docker-contained Playwright: open the website, create a development account, sign in, bridge into osionos, and verify the app session. The viewer is explicitly a simulation screen and refreshes with screenshots/status from the automated run.
+`make playground` opens a VS Code simulation viewer, then runs the Docker-contained Playwright scenario: open the website, create a development account, sign in, bridge into osionos, create a persisted markdown page through the osionos bridge, open Settings, open Mail and Calendar from the sidebar, and probe both service bridges. If Gmail or Google Calendar are already authorized in their ignored token files, the simulation also samples real messages/events without printing account values.
+
+Calendar can reuse the Mail app's `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. Put Calendar-specific overrides in `apps/calendar/.env.local` when you want a separate Google OAuth client.
+
+To publish the app images to DockerHub, set `DOCKER_USER` and `DOCKER_PAT` in the shell or an ignored env file, then run:
+
+```sh
+make app-images-push VERSION=v0.1.0
+```
+
+This target logs in with `--password-stdin`, tags every app image with the requested version and `latest`, and pushes them without printing the token.
 
 ## Environment And Vault
 
@@ -83,6 +98,11 @@ curl -fsS http://localhost:4000/api/auth/bridge/health
 curl -fsS http://localhost:3001 >/dev/null
 curl -fsS http://localhost:4322 >/dev/null
 curl -sS -o /dev/null -w 'auth-gateway-http-%{http_code}\n' http://localhost:8787/api/auth/availability
+curl -fsS http://localhost:4100/health >/dev/null
+curl -fsS http://localhost:3002 >/dev/null
+curl -fsS http://localhost:4200/health >/dev/null
+curl -fsS http://localhost:3003 >/dev/null
+curl -fsS http://localhost:4200/baas/status | grep -q '"connected":true'
 ```
 
 `http://localhost:8787/health` is not a real route for this gateway. Use `/api/auth/availability`.

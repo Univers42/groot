@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev:all": "docker compose up --build mail mail-bridge calendar calendar-bridge",
+    "dev:all": "docker compose up -d --build --wait",
     "mail": "docker compose up --build mail mail-bridge",
     "mail:down": "docker compose stop mail mail-bridge",
     "mail:logs": "docker compose logs -f mail mail-bridge",

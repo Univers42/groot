@@ -71,10 +71,17 @@ ROOT_TOKEN=$(jq -r '.root_token' "${KEYS_FILE}")
 export VAULT_TOKEN="${ROOT_TOKEN}"
 
 # ── 6. Enable KV v2 secrets engine ───────────────────────────────
-if ! vault secrets list -address="${VAULT_ADDR}" 2>/dev/null | grep -q '^secret/'; then
+MOUNTS_JSON=$(vault secrets list -address="${VAULT_ADDR}" -format=json 2>/dev/null || echo '{}')
+if ! echo "${MOUNTS_JSON}" | jq -e 'has("secret/")' >/dev/null; then
   echo "[*] Enabling KV v2 secrets engine…"
-  vault secrets enable -address="${VAULT_ADDR}" -path=secret -version=2 kv
-  echo "[+] KV v2 enabled at secret/"
+  if ENABLE_OUTPUT=$(vault secrets enable -address="${VAULT_ADDR}" -path=secret -version=2 kv 2>&1); then
+    echo "[+] KV v2 enabled at secret/"
+  elif echo "${ENABLE_OUTPUT}" | grep -q 'path is already in use'; then
+    echo "[=] KV v2 already enabled"
+  else
+    echo "${ENABLE_OUTPUT}"
+    exit 1
+  fi
 else
   echo "[=] KV v2 already enabled"
 fi

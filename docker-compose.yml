@@ -303,9 +303,16 @@ services:
         condition: service_healthy
       project-db-init:
         condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4000/api/auth/bridge/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 5s
+      timeout: 3s
+      start_period: 20s
+      retries: 12
     restart: unless-stopped
 
   osionos-app:
+    image: ${OSIONOS_APP_IMAGE:-track-binocle/osionos-app:local}
     build:
       context: ./apps/osionos/app
       dockerfile: docker/services/node/Dockerfile
@@ -321,6 +328,8 @@ services:
       VITE_REQUIRE_BRIDGE_SESSION: "true"
       VITE_ALLOW_OFFLINE_MODE: "false"
       VITE_PRISMATICA_URL: http://localhost:4322
+      VITE_MAIL_APP_URL: http://localhost:${MAIL_HOST_PORT:-3002}
+      VITE_CALENDAR_APP_URL: http://localhost:${CALENDAR_HOST_PORT:-3003}
     volumes:
       - ./apps/osionos/app:/app
       - osionos-app-node-modules:/app/node_modules
@@ -329,10 +338,17 @@ services:
       - "127.0.0.1:${OSIONOS_APP_HOST_PORT:-3001}:3001"
     depends_on:
       osionos-bridge:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3001').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 5s
+      timeout: 3s
+      start_period: 30s
+      retries: 20
     restart: unless-stopped
 
   mail-bridge:
+    image: ${MAIL_BRIDGE_IMAGE:-track-binocle/mail-bridge:local}
     build:
       context: ./apps/mail
       target: dev
@@ -357,9 +373,16 @@ services:
       - "127.0.0.1:${MAIL_BRIDGE_PORT:-4100}:4100"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"const port=process.env.MAIL_BRIDGE_PORT||4100; fetch('http://127.0.0.1:'+port+'/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 5s
+      timeout: 3s
+      start_period: 20s
+      retries: 12
     restart: unless-stopped
 
   mail:
+    image: ${MAIL_IMAGE:-track-binocle/mail:local}
     build:
       context: ./apps/mail
       target: dev
@@ -381,19 +404,28 @@ services:
       - "127.0.0.1:${MAIL_HOST_PORT:-3002}:3002"
     depends_on:
       mail-bridge:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3002').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 5s
+      timeout: 3s
+      start_period: 30s
+      retries: 20
     restart: unless-stopped
 
   calendar-bridge:
+    image: ${CALENDAR_BRIDGE_IMAGE:-track-binocle/calendar-bridge:local}
     build:
       context: ./apps/calendar
       target: dev
     working_dir: /app
     command: ["npm", "run", "bridge"]
     env_file:
-      - path: ./apps/calendar/.env.local
-        required: false
       - path: ./apps/calendar/.env
+        required: false
+      - path: ./apps/mail/.env
+        required: false
+      - path: ./apps/calendar/.env.local
         required: false
       - path: ./apps/baas/.env.local
         required: false
@@ -420,9 +452,16 @@ services:
         condition: service_healthy
       project-db-init:
         condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"const port=process.env.CALENDAR_BRIDGE_PORT||4200; fetch('http://127.0.0.1:'+port+'/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 5s
+      timeout: 3s
+      start_period: 20s
+      retries: 12
     restart: unless-stopped
 
   calendar:
+    image: ${CALENDAR_IMAGE:-track-binocle/calendar:local}
     build:
       context: ./apps/calendar
       target: dev
@@ -445,10 +484,17 @@ services:
       - "127.0.0.1:${CALENDAR_HOST_PORT:-3003}:3003"
     depends_on:
       calendar-bridge:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3003').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 5s
+      timeout: 3s
+      start_period: 30s
+      retries: 20
     restart: unless-stopped
 
   opposite-osiris-deps:
+    image: ${OPPOSITE_OSIRIS_DEPS_IMAGE:-track-binocle/opposite-osiris-deps:local}
     build:
       context: .
       dockerfile: apps/opposite-osiris/docker/services/node/Dockerfile
@@ -461,6 +507,7 @@ services:
     restart: "no"
 
   auth-gateway:
+    image: ${AUTH_GATEWAY_IMAGE:-track-binocle/auth-gateway:local}
     build:
       context: .
       dockerfile: apps/opposite-osiris/docker/services/node/Dockerfile
@@ -492,10 +539,17 @@ services:
       opposite-osiris-deps:
         condition: service_completed_successfully
       osionos-bridge:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8787/api/auth/availability').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 5s
+      timeout: 3s
+      start_period: 20s
+      retries: 12
     restart: unless-stopped
 
   opposite-osiris:
+    image: ${OPPOSITE_OSIRIS_IMAGE:-track-binocle/opposite-osiris:local}
     build:
       context: .
       dockerfile: apps/opposite-osiris/docker/services/node/Dockerfile
@@ -526,18 +580,25 @@ services:
       - "127.0.0.1:${OPPOSITE_OSIRIS_HOST_PORT:-4322}:4322"
     depends_on:
       auth-gateway:
-        condition: service_started
+        condition: service_healthy
       opposite-osiris-deps:
         condition: service_completed_successfully
       kong:
         condition: service_healthy
       osionos-app:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4322').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 5s
+      timeout: 3s
+      start_period: 30s
+      retries: 20
     restart: unless-stopped
 
   playground-simulation:
     profiles:
       - testing
+    image: ${PLAYGROUND_SIMULATION_IMAGE:-track-binocle/playground-simulation:local}
     build:
       context: ./apps/osionos/app
       dockerfile: docker/services/browser-tests/Dockerfile
@@ -552,6 +613,11 @@ services:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
       PLAYGROUND_WEBSITE_URL: http://127.0.0.1:4322
       PLAYGROUND_APP_URL: http://127.0.0.1:3001
+      PLAYGROUND_BRIDGE_URL: http://127.0.0.1:4000
+      PLAYGROUND_MAIL_URL: http://127.0.0.1:3002
+      PLAYGROUND_MAIL_BRIDGE_URL: http://127.0.0.1:4100
+      PLAYGROUND_CALENDAR_URL: http://127.0.0.1:3003
+      PLAYGROUND_CALENDAR_BRIDGE_URL: http://127.0.0.1:4200
       PLAYGROUND_VIEWER_DIR: /app/public/playground-simulation
       PLAYGROUND_HEADLESS: ${PLAYGROUND_HEADLESS:-1}
       PLAYGROUND_SLOWMO_MS: ${PLAYGROUND_SLOWMO_MS:-80}
