@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/13 16:12:18 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/13 16:38:30 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -50,14 +50,24 @@ VAULT_WRITER_TOKEN_FILE ?= .vault/track-binocle-writer.env
 VAULT_TOKEN_FILE ?= $(VAULT_READER_TOKEN_FILE)
 VAULT_PUBLISH_TOKEN_FILE ?= $(VAULT_WRITER_TOKEN_FILE)
 VAULT_PUBLIC_ADDR ?= http://vault:8200
+VAULT_ENV_PREFIX ?= secret/data/track-binocle/env
 VAULT_GITHUB_OIDC_AUTH_PATH ?= jwt
 VAULT_GITHUB_OIDC_ROLE ?= track-binocle-github-actions
 VAULT_GITHUB_OIDC_REPOSITORY ?= Univers42/track-binocle
 VAULT_GITHUB_OIDC_AUDIENCE ?= vault://track-binocle
+VAULT_GITHUB_AUTH_PATH ?= github
+VAULT_GITHUB_ORG ?= Univers42
+VAULT_GITHUB_TEAM ?= transcendance
+FLY_VAULT_APP ?= track-binocle-vault
+FLY_VAULT_REGION ?= cdg
+FLY_VAULT_VOLUME ?= vault_data
+FLY_VAULT_URL ?= https://$(FLY_VAULT_APP).fly.dev
+FLY ?= flyctl
 HOST_UID := $(shell id -u)
 HOST_GID := $(shell id -g)
 export HOST_UID HOST_GID
 DOCKER_NODE := docker run --rm --user "$(HOST_UID):$(HOST_GID)" -e HOST_UID="$(HOST_UID)" -e HOST_GID="$(HOST_GID)" -v "$$PWD":/workspace -w /workspace node:22-alpine
+DOCKER_NODE_VAULT := docker run --rm --user "$(HOST_UID):$(HOST_GID)" -e HOST_UID="$(HOST_UID)" -e HOST_GID="$(HOST_GID)" -e VAULT_ADDR -e VAULT_TOKEN -e VAULT_ENV_PREFIX -e VAULT_GITHUB_OIDC_AUTH_PATH -e VAULT_GITHUB_OIDC_ROLE -e VAULT_GITHUB_OIDC_REPOSITORY -e VAULT_GITHUB_OIDC_AUDIENCE -e VAULT_GITHUB_AUTH_PATH -e VAULT_GITHUB_ORG -e VAULT_GITHUB_TEAM -v "$$PWD":/workspace -w /workspace node:22-alpine
 
 
 # Beautiful help as the default target
@@ -99,7 +109,7 @@ pulls:
 			echo "[pulls] $${displaypath} has no upstream branch; fetched only"; \
 		fi \
 	'; \
-	git submodule update --init --recursive --remote --merge
+	git submodule update --init --recursive --remote --checkout
 
 pushes:
 ## Add, commit, and push the root repo plus every recursive submodule. Use GIT_COMMIT_MESSAGE="...".
@@ -196,7 +206,36 @@ vault-repair-shared: env-format
 
 vault-github-oidc: vault-policy-sync
 ## Configure Vault JWT auth so GitHub Actions can fetch managed env secrets through OIDC.
-	$(VAULT_COMPOSE) run --rm -e VAULT_GITHUB_OIDC_AUTH_PATH='$(VAULT_GITHUB_OIDC_AUTH_PATH)' -e VAULT_GITHUB_OIDC_ROLE='$(VAULT_GITHUB_OIDC_ROLE)' -e VAULT_GITHUB_OIDC_REPOSITORY='$(VAULT_GITHUB_OIDC_REPOSITORY)' -e VAULT_GITHUB_OIDC_AUDIENCE='$(VAULT_GITHUB_OIDC_AUDIENCE)' vault-env node apps/baas/scripts/vault-env.mjs sync-github-oidc
+	$(VAULT_COMPOSE) run --rm -e VAULT_GITHUB_OIDC_AUTH_PATH='$(VAULT_GITHUB_OIDC_AUTH_PATH)' -e VAULT_GITHUB_OIDC_ROLE='$(VAULT_GITHUB_OIDC_ROLE)' -e VAULT_GITHUB_OIDC_REPOSITORY='$(VAULT_GITHUB_OIDC_REPOSITORY)' -e VAULT_GITHUB_OIDC_AUDIENCE='$(VAULT_GITHUB_OIDC_AUDIENCE)' -e VAULT_GITHUB_AUTH_PATH='$(VAULT_GITHUB_AUTH_PATH)' -e VAULT_GITHUB_ORG='$(VAULT_GITHUB_ORG)' -e VAULT_GITHUB_TEAM='$(VAULT_GITHUB_TEAM)' vault-env node apps/baas/scripts/vault-env.mjs sync-github-oidc
+
+vault-fly-create:
+## Create the Fly app and persistent Vault volume when missing.
+	@$(FLY) apps create $(FLY_VAULT_APP) --org personal || true
+	@$(FLY) volumes list --app $(FLY_VAULT_APP) | grep -q '$(FLY_VAULT_VOLUME)' || $(FLY) volumes create $(FLY_VAULT_VOLUME) --app $(FLY_VAULT_APP) --region $(FLY_VAULT_REGION) --size 1 --yes
+
+vault-fly-deploy:
+## Deploy the public Vault service to Fly.io.
+	@cd apps/baas/mini-baas-infra/docker/services/vault && $(FLY) deploy --app $(FLY_VAULT_APP) --config fly.toml --remote-only
+
+vault-fly-publish:
+## Publish managed env data and GitHub auth configuration to the Fly Vault.
+	@mkdir -p .vault
+	@set -eu; token_file='.vault/fly-vault-root-token'; trap 'rm -f "$$token_file"' EXIT; \
+		$(FLY) ssh console --app $(FLY_VAULT_APP) --command 'jq -r .root_token /vault/data/.vault-keys.json' > "$$token_file"; \
+		chmod 600 "$$token_file"; \
+		token="$$(tr -d '\r\n' < "$$token_file")"; \
+		VAULT_ADDR='$(FLY_VAULT_URL)' VAULT_TOKEN="$$token" VAULT_ENV_PREFIX='$(VAULT_ENV_PREFIX)' VAULT_GITHUB_OIDC_AUTH_PATH='$(VAULT_GITHUB_OIDC_AUTH_PATH)' VAULT_GITHUB_OIDC_ROLE='$(VAULT_GITHUB_OIDC_ROLE)' VAULT_GITHUB_OIDC_REPOSITORY='$(VAULT_GITHUB_OIDC_REPOSITORY)' VAULT_GITHUB_OIDC_AUDIENCE='$(VAULT_GITHUB_OIDC_AUDIENCE)' VAULT_GITHUB_AUTH_PATH='$(VAULT_GITHUB_AUTH_PATH)' VAULT_GITHUB_ORG='$(VAULT_GITHUB_ORG)' VAULT_GITHUB_TEAM='$(VAULT_GITHUB_TEAM)' $(DOCKER_NODE_VAULT) node apps/baas/scripts/vault-env.mjs publish; \
+		VAULT_ADDR='$(FLY_VAULT_URL)' VAULT_TOKEN="$$token" VAULT_ENV_PREFIX='$(VAULT_ENV_PREFIX)' VAULT_GITHUB_OIDC_AUTH_PATH='$(VAULT_GITHUB_OIDC_AUTH_PATH)' VAULT_GITHUB_OIDC_ROLE='$(VAULT_GITHUB_OIDC_ROLE)' VAULT_GITHUB_OIDC_REPOSITORY='$(VAULT_GITHUB_OIDC_REPOSITORY)' VAULT_GITHUB_OIDC_AUDIENCE='$(VAULT_GITHUB_OIDC_AUDIENCE)' VAULT_GITHUB_AUTH_PATH='$(VAULT_GITHUB_AUTH_PATH)' VAULT_GITHUB_ORG='$(VAULT_GITHUB_ORG)' VAULT_GITHUB_TEAM='$(VAULT_GITHUB_TEAM)' $(DOCKER_NODE_VAULT) node apps/baas/scripts/vault-env.mjs sync-github-oidc
+
+vault-fly-github:
+## Point GitHub Actions at the public Fly Vault URL.
+	@gh variable set TRACK_BINOCLE_VAULT_ADDR --repo $(VAULT_GITHUB_OIDC_REPOSITORY) --body '$(FLY_VAULT_URL)'
+	@gh variable set TRACK_BINOCLE_VAULT_AUTH_PATH --repo $(VAULT_GITHUB_OIDC_REPOSITORY) --body '$(VAULT_GITHUB_OIDC_AUTH_PATH)'
+	@gh variable set TRACK_BINOCLE_VAULT_ROLE --repo $(VAULT_GITHUB_OIDC_REPOSITORY) --body '$(VAULT_GITHUB_OIDC_ROLE)'
+	@gh variable set TRACK_BINOCLE_VAULT_ENV_PREFIX --repo $(VAULT_GITHUB_OIDC_REPOSITORY) --body '$(VAULT_ENV_PREFIX)'
+
+vault-fly: vault-fly-create vault-fly-deploy vault-fly-publish vault-fly-github
+## Create, deploy, publish, and wire GitHub Actions to the Fly-hosted Vault.
 
 vault-rotate-approles: vault-up
 ## Rotate service AppRole secret IDs and store the new IDs in Vault.
@@ -436,4 +475,4 @@ docker_reclaim_cache:
 ## Remove BuildKit/buildx cache only.
 	docker builder prune -a -f
 
-.PHONY: help all pulls pushes bootstrap env-format vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fetch-shared env-fetch-shared vault-publish-shared vault-status-shared vault-repair-shared vault-github-oidc vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache
+.PHONY: help all pulls pushes bootstrap env-format vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fetch-shared env-fetch-shared vault-publish-shared vault-status-shared vault-repair-shared vault-github-oidc vault-fly-create vault-fly-deploy vault-fly-publish vault-fly-github vault-fly vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache

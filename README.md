@@ -62,6 +62,7 @@ make env-fetch-shared
 make vault-publish-shared VAULT_PUBLISH_TOKEN_FILE=.vault/track-binocle-writer.env
 make vault-repair-shared VAULT_PUBLISH_TOKEN_FILE=.vault/track-binocle-writer.env
 make vault-github-oidc
+make vault-fly
 make vault-rotate-approles
 make vault-verify-approles
 make env-fetch
@@ -85,7 +86,9 @@ For teammates, a maintainer can run `make vault-invite-token VAULT_TEAM_ROLE=rea
 
 If a colleague receives an old or incomplete Vault payload, the fetch now fails before Compose starts and prints only the missing key names. A maintainer with complete ignored env files should repair the shared Vault with `make vault-repair-shared VAULT_PUBLISH_TOKEN_FILE=.vault/track-binocle-writer.env`, then recreate or resend reader tokens as needed. Writers can still run `make vault-publish-shared VAULT_PUBLISH_TOKEN_FILE=.vault/track-binocle-writer.env` after updating local ignored env files.
 
-The GitHub workflow `.github/workflows/colleague-docker-pipeline.yml` simulates the colleague path on `push`, `pull_request`, and manual runs. It authenticates to Vault with GitHub OIDC, so do not store a static Vault token in GitHub secrets. Configure Vault with `make vault-github-oidc`, then set repository secret or variable `TRACK_BINOCLE_VAULT_ADDR` to a public HTTPS Vault URL reachable by GitHub-hosted runners. The repo variables `TRACK_BINOCLE_VAULT_AUTH_PATH=jwt`, `TRACK_BINOCLE_VAULT_ROLE=track-binocle-github-actions`, and `TRACK_BINOCLE_VAULT_ENV_PREFIX=secret/data/track-binocle/env` describe the Vault OIDC login path. If private submodule checkout needs broader access than `GITHUB_TOKEN`, set `SUBMODULES_TOKEN` to a PAT that can read the submodule repositories.
+The GitHub workflow `.github/workflows/colleague-docker-pipeline.yml` simulates the colleague path on `push`, `pull_request`, and manual runs. It authenticates to Vault with GitHub OIDC, so do not store a static Vault token in GitHub secrets. `make vault-fly` creates the Fly app `track-binocle-vault`, deploys Vault at `https://track-binocle-vault.fly.dev`, publishes the managed env records, configures GitHub Actions OIDC, maps the GitHub team `Univers42/transcendance` to the Vault reader policy, and sets the repository variables. The variables `TRACK_BINOCLE_VAULT_ADDR`, `TRACK_BINOCLE_VAULT_AUTH_PATH=jwt`, `TRACK_BINOCLE_VAULT_ROLE=track-binocle-github-actions`, and `TRACK_BINOCLE_VAULT_ENV_PREFIX=secret/data/track-binocle/env` describe the Vault OIDC login path. If private submodule checkout needs broader access than `GITHUB_TOKEN`, set `SUBMODULES_TOKEN` to a PAT that can read the submodule repositories.
+
+Developers in the GitHub team can use Vault's GitHub auth against the public Fly Vault without a shared Vault password. After authenticating with `gh`, run `gh auth refresh -s read:org` if the CLI token cannot read organization teams, then `export VAULT_ADDR=https://track-binocle-vault.fly.dev` and `export VAULT_TOKEN="$(vault login -method=github -format=json token="$(gh auth token)" | jq -r '.auth.client_token')"`. `make vault-fetch-shared` can then fetch the managed env files. The Vault policy grants read access only to the managed env path, not broad `secret/*` access.
 
 `make vault-rotate-approles` rotates service AppRole secret IDs and stores the new IDs in Vault. `make vault-verify-approles` logs in with the root service AppRoles and verifies each token can read the managed Vault env secret without printing secret values. This confirms the local AppRole path for the BaaS, osionos, website, Mail, and Calendar services.
 

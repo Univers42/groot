@@ -602,6 +602,9 @@ async function syncGithubOidc() {
   const roleName = process.env.VAULT_GITHUB_OIDC_ROLE ?? 'track-binocle-github-actions';
   const repository = process.env.VAULT_GITHUB_OIDC_REPOSITORY ?? 'Univers42/track-binocle';
   const audience = process.env.VAULT_GITHUB_OIDC_AUDIENCE ?? 'vault://track-binocle';
+  const developerAuthPath = process.env.VAULT_GITHUB_AUTH_PATH ?? 'github';
+  const developerOrg = process.env.VAULT_GITHUB_ORG ?? 'Univers42';
+  const developerTeam = process.env.VAULT_GITHUB_TEAM ?? 'transcendance';
 
   const mounts = await vaultRequest('GET', 'sys/auth');
   if (!mounts?.[`${authPath}/`]) {
@@ -627,6 +630,22 @@ async function syncGithubOidc() {
   });
 
   console.log(`[vault] GitHub OIDC role ${roleName} synced for ${repository}`);
+
+  const authMounts = await vaultRequest('GET', 'sys/auth');
+  if (!authMounts?.[`${developerAuthPath}/`]) {
+    await vaultRequest('POST', `sys/auth/${developerAuthPath}`, { type: 'github' });
+    console.log(`[vault] enabled ${developerAuthPath} auth`);
+  }
+
+  await vaultRequest('POST', `auth/${developerAuthPath}/config`, {
+    organization: developerOrg,
+  });
+
+  await vaultRequest('POST', `auth/${developerAuthPath}/map/teams/${developerTeam}`, {
+    value: 'track-binocle-env-reader',
+  });
+
+  console.log(`[vault] GitHub team ${developerOrg}/${developerTeam} mapped to track-binocle-env-reader`);
 }
 
 async function rotateAppRoles() {
