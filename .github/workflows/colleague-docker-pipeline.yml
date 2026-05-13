@@ -94,6 +94,8 @@ jobs:
         if: failure()
         run: |
           docker compose ps -a || true
+          docker compose logs --tail=240 osionos-bridge || true
+          docker compose exec -T osionos-bridge node -e "fetch('http://127.0.0.1:4000/api/auth/bridge/health').then(async (r) => { console.log(r.status, await r.text()); process.exit(r.ok ? 0 : 1); }).catch((error) => { console.error(error); process.exit(1); })" || true
           docker compose logs --tail=160 || true
 
       - name: Clean Docker state

@@ -323,14 +323,11 @@ services:
       OSIONOS_BAAS_URL: http://kong:8000
       OSIONOS_BRIDGE_PERSISTENCE: ${OSIONOS_BRIDGE_PERSISTENCE:-auto}
       OSIONOS_BRIDGE_REQUIRE_BAAS: ${OSIONOS_BRIDGE_REQUIRE_BAAS:-false}
-      CLAUDE_BIN: ${CLAUDE_BIN:-/opt/claude-node/bin/claude}
+      CLAUDE_BIN: ${CLAUDE_BIN:-claude}
       HOME: /home/node
-      PATH: /opt/claude-node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     volumes:
       - ./:/app:ro
-      - ${CLAUDE_NODE_HOME:-${HOME}/.nvm/versions/node/v22.22.2}:/opt/claude-node:ro
-      - ${CLAUDE_HOME:-${HOME}/.claude}:/home/node/.claude
-      - ${CLAUDE_CONFIG_FILE:-${HOME}/.claude.json}:/home/node/.claude.json
     expose:
       - "4000"
     depends_on:
@@ -344,8 +341,8 @@ services:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4000/api/auth/bridge/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
       interval: 5s
       timeout: 3s
-      start_period: 20s
-      retries: 12
+      start_period: 45s
+      retries: 24
     restart: unless-stopped
 
   osionos-app:

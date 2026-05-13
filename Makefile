@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/13 20:05:46 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/13 20:17:34 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -360,6 +360,7 @@ calendar-down:
 healthcheck: certs
 ## Verify the BaaS, website, osionos app, Mail, Calendar, bridges, and app-to-BaaS connectivity.
 	docker compose ps
+	$(CURL_HEALTH) $(BAAS_URL) >/dev/null
 	$(CURL_HEALTH) $(BRIDGE_URL)/api/auth/bridge/health
 	$(CURL_HEALTH) $(OSIONOS_URL) >/dev/null
 	$(CURL_HEALTH) $(WEBSITE_URL) >/dev/null

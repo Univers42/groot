@@ -15,6 +15,14 @@ const generatedKeys = new Set([
   'OSIONOS_BRIDGE_EMAIL_HASH_SALT',
 ]);
 
+const legacyUrlDefaults = new Map([
+  ['OSIONOS_APP_URL', 'http://localhost:3001'],
+  ['OSIONOS_ALLOWED_ORIGIN', 'http://localhost:3001'],
+  ['PUBLIC_OSIONOS_APP_URL', 'http://localhost:3001'],
+  ['VITE_API_URL', 'http://localhost:4000'],
+  ['VITE_PRISMATICA_URL', 'http://localhost:4322'],
+]);
+
 function secret() {
   return randomBytes(48).toString('base64url');
 }
@@ -37,7 +45,7 @@ function upsertEnv(path, updates) {
 
   for (const [key, value] of Object.entries(updates)) {
     const existing = values.get(key);
-    const shouldSet = rotate || existing === undefined || existing === '' || /^replace-with-/i.test(existing);
+    const shouldSet = rotate || existing === undefined || existing === '' || /^replace-with-/i.test(existing) || existing === legacyUrlDefaults.get(key);
     if (!shouldSet) continue;
 
     const nextLine = `${key}=${value}`;
@@ -61,8 +69,8 @@ const updates = {
   OSIONOS_BRIDGE_EMAIL_HASH_SALT: secret(),
 };
 
-const osionosLocalUrl = process.env.OSIONOS_LOCAL_URL ?? 'http://localhost:3001';
-const prismaticaLocalUrl = process.env.PRISMATICA_LOCAL_URL ?? process.env.PUBLIC_SITE_URL ?? 'http://localhost:4322';
+const osionosLocalUrl = process.env.OSIONOS_LOCAL_URL ?? 'https://localhost:3001';
+const prismaticaLocalUrl = process.env.PRISMATICA_LOCAL_URL ?? process.env.PUBLIC_SITE_URL ?? 'https://localhost:4322';
 
 const rootChanged = upsertEnv(rootEnvPath, {
   ...updates,
@@ -71,7 +79,7 @@ const rootChanged = upsertEnv(rootEnvPath, {
   PUBLIC_OSIONOS_APP_URL: osionosLocalUrl,
 });
 const appChanged = upsertEnv(osionosEnvPath, {
-  VITE_API_URL: 'http://localhost:4000',
+  VITE_API_URL: process.env.OSIONOS_BRIDGE_PUBLIC_URL ?? 'https://localhost:4000',
   VITE_REQUIRE_BRIDGE_SESSION: 'true',
   VITE_PRISMATICA_URL: prismaticaLocalUrl,
 });
