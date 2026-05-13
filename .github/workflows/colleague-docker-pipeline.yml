@@ -78,4 +78,4 @@ jobs:
 
       - name: Clean Docker state
         if: always()
-        run: docker compose --profile secrets --profile testing down -v --remove-orphans
+        run: docker compose --profile secrets --profile testing down -v --remove-orphans || true
