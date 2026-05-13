@@ -302,6 +302,7 @@ services:
 
   local-runtime-secrets:
     image: node:22-alpine
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     working_dir: /app
     command: ["node", "apps/baas/scripts/ensure-osionos-runtime-secrets.mjs"]
     volumes:
@@ -310,7 +311,7 @@ services:
 
   osionos-bridge:
     image: node:22-bookworm-slim
-    user: node
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     working_dir: /app/apps/osionos/app
     command: ["node", "scripts/bridge-api.mjs"]
     env_file:
@@ -324,7 +325,7 @@ services:
       OSIONOS_BRIDGE_PERSISTENCE: ${OSIONOS_BRIDGE_PERSISTENCE:-auto}
       OSIONOS_BRIDGE_REQUIRE_BAAS: ${OSIONOS_BRIDGE_REQUIRE_BAAS:-false}
       CLAUDE_BIN: ${CLAUDE_BIN:-claude}
-      HOME: /home/node
+      HOME: ${OSIONOS_BRIDGE_HOME:-/tmp}
       PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     volumes:
       - ./:/app:ro

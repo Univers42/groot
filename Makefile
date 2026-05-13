@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/13 20:17:34 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/13 22:30:13 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -177,36 +177,65 @@ vault-invite-token: vault-policy-sync
 	$(VAULT_COMPOSE) run --rm -e VAULT_TEAM_ROLE='$(VAULT_TEAM_ROLE)' -e VAULT_TOKEN_TTL='$(VAULT_TOKEN_TTL)' -e VAULT_TEAM_TOKEN_FILE='$(VAULT_TEAM_TOKEN_FILE)' -e VAULT_PUBLIC_ADDR='$(VAULT_PUBLIC_ADDR)' vault-env node apps/baas/scripts/vault-env.mjs team-token
 
 vault-fetch-shared:
-## Fetch managed env files with VAULT_TOKEN or VAULT_TOKEN_FILE from an invited user.
+## Fetch managed env files with VAULT_API_KEY, VAULT_TOKEN, or VAULT_TOKEN_FILE from an invited user.
 	@set -eu; \
-	if [[ -f '$(VAULT_TOKEN_FILE)' ]]; then set -a; . '$(VAULT_TOKEN_FILE)'; set +a; fi; \
-	: "$${VAULT_TOKEN:?Set VAULT_TOKEN or provide VAULT_TOKEN_FILE=$(VAULT_TOKEN_FILE)}"; \
+	token_file='$(VAULT_TOKEN_FILE)'; \
+	if [[ -f "$$token_file" ]]; then \
+		mode="$$(stat -c '%a' "$$token_file")"; \
+		case "$$mode" in 400|600) ;; *) echo "[vault] refusing $$token_file because it must be private; run: chmod 600 $$token_file"; exit 1;; esac; \
+		set -a; . "$$token_file"; set +a; \
+	elif [[ -n "$${VAULT_API_KEY:-}" && -n "$${VAULT_ADDR:-}" ]]; then \
+		export VAULT_TOKEN="$$VAULT_API_KEY"; \
+		echo '[vault] using VAULT_API_KEY from the current shell environment'; \
+	elif [[ -n "$${VAULT_TOKEN:-}" && -n "$${VAULT_ADDR:-}" ]]; then \
+		echo '[vault] using VAULT_TOKEN from the current shell environment'; \
+	fi; \
+	: "$${VAULT_TOKEN:?Set VAULT_API_KEY, VAULT_TOKEN, or provide VAULT_TOKEN_FILE=$(VAULT_TOKEN_FILE)}"; \
 	: "$${VAULT_ADDR:?Set VAULT_ADDR or provide VAULT_TOKEN_FILE=$(VAULT_TOKEN_FILE)}"; \
 	$(VAULT_SHARED_CMD) -e VAULT_TOKEN -e VAULT_ADDR -e VAULT_ENV_PREFIX vault-env node apps/baas/scripts/vault-env.mjs fetch
 
 env-fetch-shared:
 ## Fetch shared team secrets first when a reader/writer token is available.
 	@set -eu; \
-	if [[ -f '$(VAULT_TOKEN_FILE)' || ( -n "$${VAULT_TOKEN:-}" && -n "$${VAULT_ADDR:-}" ) ]]; then \
+	if [[ -f '$(VAULT_TOKEN_FILE)' || ( -n "$${VAULT_API_KEY:-}" && -n "$${VAULT_ADDR:-}" ) || ( -n "$${VAULT_TOKEN:-}" && -n "$${VAULT_ADDR:-}" ) ]]; then \
 		$(MAKE) vault-fetch-shared VAULT_TOKEN_FILE='$(VAULT_TOKEN_FILE)'; \
+	elif [[ "$${GITHUB_ACTIONS:-}" == 'true' ]]; then \
+		echo '[vault] GitHub Actions must use its OIDC-generated Vault token file before make all.'; \
+		exit 1; \
 	else \
-		echo '[vault] no shared Vault token found; continuing with local generated env'; \
+		echo '[vault] no shared Vault token found; continuing with local generated dev secrets only'; \
 	fi
 
 vault-publish-shared:
-## Publish managed env files with a writer VAULT_TOKEN or writer VAULT_TOKEN_FILE.
+## Publish managed env files with a writer VAULT_API_KEY, VAULT_TOKEN, or token file.
 	@set -eu; \
 	token_file='$(VAULT_PUBLISH_TOKEN_FILE)'; \
-	if [[ -f "$$token_file" ]]; then set -a; . "$$token_file"; set +a; elif [[ -f '$(VAULT_TOKEN_FILE)' ]]; then set -a; . '$(VAULT_TOKEN_FILE)'; set +a; fi; \
-	: "$${VAULT_TOKEN:?Set a writer VAULT_TOKEN or provide VAULT_PUBLISH_TOKEN_FILE=$(VAULT_PUBLISH_TOKEN_FILE)}"; \
+	if [[ -f "$$token_file" ]]; then \
+		mode="$$(stat -c '%a' "$$token_file")"; \
+		case "$$mode" in 400|600) ;; *) echo "[vault] refusing $$token_file because it must be private; run: chmod 600 $$token_file"; exit 1;; esac; \
+		set -a; . "$$token_file"; set +a; \
+	elif [[ -f '$(VAULT_TOKEN_FILE)' ]]; then \
+		mode="$$(stat -c '%a' '$(VAULT_TOKEN_FILE)')"; \
+		case "$$mode" in 400|600) ;; *) echo "[vault] refusing $(VAULT_TOKEN_FILE) because it must be private; run: chmod 600 $(VAULT_TOKEN_FILE)"; exit 1;; esac; \
+		set -a; . '$(VAULT_TOKEN_FILE)'; set +a; \
+	elif [[ -n "$${VAULT_API_KEY:-}" ]]; then \
+		export VAULT_TOKEN="$$VAULT_API_KEY"; \
+	fi; \
+	: "$${VAULT_TOKEN:?Set a writer VAULT_API_KEY, VAULT_TOKEN, or provide VAULT_PUBLISH_TOKEN_FILE=$(VAULT_PUBLISH_TOKEN_FILE)}"; \
 	: "$${VAULT_ADDR:?Set VAULT_ADDR or provide VAULT_TOKEN_FILE}"; \
 	$(VAULT_SHARED_CMD) -e VAULT_TOKEN -e VAULT_ADDR -e VAULT_ENV_PREFIX vault-env node apps/baas/scripts/vault-env.mjs publish
 
 vault-status-shared:
-## Check managed Vault env coverage with an invited reader or writer token.
+## Check managed Vault env coverage with an invited reader/writer API key or token.
 	@set -eu; \
-	if [[ -f '$(VAULT_TOKEN_FILE)' ]]; then set -a; . '$(VAULT_TOKEN_FILE)'; set +a; fi; \
-	: "$${VAULT_TOKEN:?Set VAULT_TOKEN or provide VAULT_TOKEN_FILE=$(VAULT_TOKEN_FILE)}"; \
+	if [[ -f '$(VAULT_TOKEN_FILE)' ]]; then \
+		mode="$$(stat -c '%a' '$(VAULT_TOKEN_FILE)')"; \
+		case "$$mode" in 400|600) ;; *) echo "[vault] refusing $(VAULT_TOKEN_FILE) because it must be private; run: chmod 600 $(VAULT_TOKEN_FILE)"; exit 1;; esac; \
+		set -a; . '$(VAULT_TOKEN_FILE)'; set +a; \
+	elif [[ -n "$${VAULT_API_KEY:-}" ]]; then \
+		export VAULT_TOKEN="$$VAULT_API_KEY"; \
+	fi; \
+	: "$${VAULT_TOKEN:?Set VAULT_API_KEY, VAULT_TOKEN, or provide VAULT_TOKEN_FILE=$(VAULT_TOKEN_FILE)}"; \
 	: "$${VAULT_ADDR:?Set VAULT_ADDR or provide VAULT_TOKEN_FILE=$(VAULT_TOKEN_FILE)}"; \
 	$(VAULT_SHARED_CMD) -e VAULT_TOKEN -e VAULT_ADDR -e VAULT_ENV_PREFIX vault-env node apps/baas/scripts/vault-env.mjs status
 

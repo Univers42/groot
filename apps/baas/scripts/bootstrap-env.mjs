@@ -106,8 +106,8 @@ setIfMissing(values, 'GOTRUE_SMTP_USER', frontend.get('SMTP_USERNAME') ?? '');
 setIfMissing(values, 'GOTRUE_SMTP_PASS', frontend.get('SMTP_PASSWORD') ?? '');
 setIfMissing(values, 'GOTRUE_SMTP_ADMIN_EMAIL', frontend.get('SMTP_FROM_ADDRESS') ?? 'noreply@mini-baas.local');
 setIfMissing(values, 'GOTRUE_SMTP_SENDER_NAME', frontend.get('SMTP_FROM_NAME') ?? 'Prismatica');
-setIfMissing(values, 'GOTRUE_SITE_URL', frontend.get('PUBLIC_SITE_URL') ?? 'http://localhost:4322');
-setIfMissing(values, 'GOTRUE_URI_ALLOW_LIST', 'http://localhost:4322/**,https://localhost:4322/**,http://localhost:4321/**,https://localhost:4321/**,http://localhost:5173/**,https://localhost:5173/**');
+setIfMissing(values, 'GOTRUE_SITE_URL', frontend.get('PUBLIC_SITE_URL') ?? 'https://localhost:4322');
+setIfMissing(values, 'GOTRUE_URI_ALLOW_LIST', 'https://localhost:4322/**,https://localhost:3001/**,http://localhost:4322/**,http://localhost:3001/**,http://localhost:4321/**,https://localhost:4321/**,http://localhost:5173/**,https://localhost:5173/**');
 
 const order = [
 	'POSTGRES_USER',
@@ -150,11 +150,11 @@ upsertEnv(frontendEnv, {
 	PUBLIC_BAAS_URL: '/api',
 	PUBLIC_AUTH_GATEWAY_URL: '/api/auth',
 	PUBLIC_BAAS_ANON_KEY: values.get('KONG_PUBLIC_API_KEY'),
-	PUBLIC_SITE_URL: 'http://localhost:4322',
+	PUBLIC_SITE_URL: 'https://localhost:4322',
 	ASTRO_DEV_HOST: '0.0.0.0',
 	ASTRO_DEV_PORT: '4322',
 	ASTRO_DEV_HTTPS: 'false',
-	PUBLIC_OSIONOS_APP_URL: 'http://localhost:3001',
+	PUBLIC_OSIONOS_APP_URL: 'https://localhost:3001',
 	PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION: 'false',
 	AUTH_REQUIRE_EMAIL_VERIFICATION: 'false',
 	GOTRUE_MAILER_AUTOCONFIRM: 'true',

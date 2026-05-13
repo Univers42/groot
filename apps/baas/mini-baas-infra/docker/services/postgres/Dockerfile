@@ -14,7 +14,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-server-dev-16 \
   && git clone --depth 1 --branch v0.14.0 https://github.com/supabase/pg_net.git /tmp/pg_net \
   && cd /tmp/pg_net \
-  && make COPT="-Wno-error=attribute-warning" \
+  && sed -i \
+    -e 's/CURLOPT_POST, 1)/CURLOPT_POST, 1L)/' \
+    -e 's/CURLOPT_POSTFIELDSIZE, 0)/CURLOPT_POSTFIELDSIZE, 0L)/' \
+    -e 's/CURLOPT_TIMEOUT_MS, cdata->timeout_milliseconds)/CURLOPT_TIMEOUT_MS, (long)cdata->timeout_milliseconds)/' \
+    -e 's/CURLOPT_FOLLOWLOCATION, true)/CURLOPT_FOLLOWLOCATION, 1L)/' \
+    src/core.c \
+  && make \
   && make install \
   && rm -rf /tmp/pg_net \
   && apt-get purge -y --auto-remove \
