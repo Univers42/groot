@@ -6,13 +6,16 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/13 22:40:11 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/13 22:59:50 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
 # Makefile for managing mini-Baas infrastructure images and environment.
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
+COMPOSE_PROGRESS ?= plain
+BUILDKIT_PROGRESS ?= plain
+export COMPOSE_PROGRESS BUILDKIT_PROGRESS
 VERSION ?=
 BAAS_VERSION ?= $(if $(VERSION),$(if $(filter v%,$(VERSION)),$(VERSION),v$(VERSION)),v$(shell date +%F))
 APP_VERSION ?= $(if $(VERSION),$(if $(filter v%,$(VERSION)),$(VERSION),v$(VERSION)),v$(shell date +%F))
