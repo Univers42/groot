@@ -54,6 +54,8 @@ Useful commands:
 
 ```sh
 make pulls
+make all
+make all-local
 make env-format
 make vault-seed
 make vault-publish
@@ -76,7 +78,9 @@ make db-password-apply
 make pushes
 ```
 
-`make pulls` fetches and pulls the root repository plus every recursive submodule before the Docker pipeline runs. It uses configured upstream branches when they exist and otherwise fetches without changing branches. `make all` runs this first so a fresh clone is brought as close as possible to the latest upstream state before dependencies and containers are built.
+`make all` is the Vault-backed teammate pipeline. It fetches shared env values before bootstrap and fails immediately when no Vault credential is provided. `make all-local` is the explicit offline/generated-secret development path.
+
+`make pulls` fetches and pulls the root repository plus every recursive submodule. It uses configured upstream branches when they exist and otherwise fetches without changing branches.
 
 `make pushes` stages, commits, and pushes every recursive submodule and then the root repository. It commits deeper nested submodules first so parent repositories record the new submodule SHAs. The default commit message is `update`; override it with `make pushes GIT_COMMIT_MESSAGE="your message"`.
 
@@ -86,7 +90,9 @@ make pushes
 
 `make vault-publish` updates the managed Vault env records from the ignored local env files after a maintainer changes a credential. `make vault-status` compares local and Vault key coverage without printing values.
 
-For teammates, a maintainer can run `make vault-invite-token VAULT_TEAM_ROLE=reader` to write an ignored `.vault/track-binocle-reader.env` token file, or `make vault-invite-token VAULT_TEAM_ROLE=writer VAULT_TOKEN_TTL=8h` for someone allowed to publish updated secrets. Share that file through your normal secure channel, never through Git. Invited users must keep the token file private with mode `600` or `400`; the shared Vault targets refuse group-readable or world-readable token files. Invited users can place the reader file in `.vault/` and run `make all`; the Makefile fetches shared secrets before seeding the local Vault when the token file is present. Without an invite token, local `make all` uses generated development secrets only. If you want to hand over a password-like API key instead of a file, give the teammate the reader token value and the Vault URL; they can run `VAULT_API_KEY=... VAULT_ADDR=https://track-binocle-vault.fly.dev make vault-fetch-shared` or `VAULT_API_KEY=... VAULT_ADDR=https://track-binocle-vault.fly.dev make all`. They can also run `make vault-fetch-shared VAULT_TOKEN_FILE=.vault/track-binocle-reader.env` explicitly. Invite tokens default to `https://local-https-proxy:8200` because the fetch command runs inside Docker; open Vault in a browser at `https://localhost:8200`.
+For teammates, a maintainer can run `make vault-invite-token VAULT_TEAM_ROLE=reader` to write an ignored `.vault/track-binocle-reader.env` token file, or `make vault-invite-token VAULT_TEAM_ROLE=writer VAULT_TOKEN_TTL=8h` for someone allowed to publish updated secrets. Share that file through your normal secure channel, never through Git. Invited users must keep the token file private with mode `600` or `400`; the shared Vault targets refuse group-readable or world-readable token files. Invited users can place the reader file in `.vault/` and run `make all`; the Makefile fetches shared secrets before bootstrap. If no invite token or API key is present, `make all` fails before Docker starts. If you want to hand over a password-like API key instead of a file, give the teammate the reader token value and the Vault URL; they can run `VAULT_API_KEY=... VAULT_ADDR=https://track-binocle-vault.fly.dev make vault-fetch-shared` or `VAULT_API_KEY=... VAULT_ADDR=https://track-binocle-vault.fly.dev make all`. They can also run `make vault-fetch-shared VAULT_TOKEN_FILE=.vault/track-binocle-reader.env` explicitly. Invite tokens default to `https://local-https-proxy:8200` because the fetch command runs inside Docker; open Vault in a browser at `https://localhost:8200`.
+
+For the full fresh-clone checklist, see [docs/fresh-clone-vault-onboarding.md](docs/fresh-clone-vault-onboarding.md).
 
 If a colleague receives an old or incomplete Vault payload, the fetch now fails before Compose starts and prints only the missing key names. A maintainer with complete ignored env files should repair the shared Vault with `make vault-repair-shared VAULT_PUBLISH_TOKEN_FILE=.vault/track-binocle-writer.env`, then recreate or resend reader tokens as needed. Writers can still run `make vault-publish-shared VAULT_PUBLISH_TOKEN_FILE=.vault/track-binocle-writer.env` after updating local ignored env files.
 

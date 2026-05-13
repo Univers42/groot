@@ -69,8 +69,12 @@ FLY ?= flyctl
 HOST_UID := $(shell id -u)
 HOST_GID := $(shell id -g)
 export HOST_UID HOST_GID
+NODE_BIN ?= $(shell command -v node 2>/dev/null || true)
 DOCKER_NODE := docker run --rm --user "$(HOST_UID):$(HOST_GID)" -e HOST_UID="$(HOST_UID)" -e HOST_GID="$(HOST_GID)" -v "$$PWD":/workspace -w /workspace node:22-alpine
+DOCKER_NODE_SHARED := docker run --rm --user "$(HOST_UID):$(HOST_GID)" -e HOST_UID="$(HOST_UID)" -e HOST_GID="$(HOST_GID)" -e VAULT_ADDR -e VAULT_TOKEN -e VAULT_ENV_PREFIX -e NODE_EXTRA_CA_CERTS=/workspace/apps/baas/certs/track-binocle-local-ca.pem -v "$$PWD":/workspace -w /workspace node:22-alpine
 DOCKER_NODE_VAULT := docker run --rm --user "$(HOST_UID):$(HOST_GID)" -e HOST_UID="$(HOST_UID)" -e HOST_GID="$(HOST_GID)" -e VAULT_ADDR -e VAULT_TOKEN -e VAULT_ENV_PREFIX -e VAULT_GITHUB_OIDC_AUTH_PATH -e VAULT_GITHUB_OIDC_ROLE -e VAULT_GITHUB_OIDC_REPOSITORY -e VAULT_GITHUB_OIDC_AUDIENCE -e VAULT_GITHUB_AUTH_PATH -e VAULT_GITHUB_ORG -e VAULT_GITHUB_TEAM -v "$$PWD":/workspace -w /workspace node:22-alpine
+NODE_RUN := $(if $(NODE_BIN),$(NODE_BIN),$(DOCKER_NODE) node)
+NODE_RUN_SHARED := $(if $(NODE_BIN),$(NODE_BIN),$(DOCKER_NODE_SHARED) node)
 
 
 # Beautiful help as the default target
@@ -86,8 +90,11 @@ help:
 	@echo -e "\033[1;38;5;39m───────────────────────────────────────────────────────────────\033[0m"
 	@echo -e "\033[1;38;5;245mFor docs: make docs or see README.md\033[0m"
 
-all: pulls certs bootstrap env-format env-fetch-shared vault-seed vault-verify-approles env-fetch up healthcheck showcase
-## Build, start, and verify the complete Docker-only Track Binocle pipeline.
+all: env-fetch-shared pulls certs bootstrap env-format vault-seed vault-verify-approles env-fetch up healthcheck showcase
+## Build, start, and verify the complete Vault-backed Track Binocle pipeline.
+
+all-local: pulls certs bootstrap env-format vault-seed vault-verify-approles env-fetch up healthcheck showcase
+## Build the local generated-secret pipeline without shared Vault credentials.
 
 pulls:
 ## Fetch and pull the root repo plus every recursive submodule using configured upstreams.
@@ -140,7 +147,7 @@ pushes:
 	done
 
 bootstrap:
-	$(DOCKER_NODE) node apps/baas/scripts/bootstrap.mjs
+	$(NODE_RUN) apps/baas/scripts/bootstrap.mjs
 
 certs:
 ## Generate the local HTTPS CA and localhost certificate used by the Docker TLS proxy.
@@ -151,7 +158,7 @@ certs-trust: certs
 	bash apps/baas/scripts/trust-localhost-cert.sh $(EXTRA_ARGS)
 
 env-format:
-	$(DOCKER_NODE) node apps/baas/scripts/vault-env.mjs format
+	$(NODE_RUN) apps/baas/scripts/vault-env.mjs format
 
 vault-up: certs
 	$(VAULT_COMPOSE) up -d --build vault local-https-proxy
@@ -192,7 +199,7 @@ vault-fetch-shared:
 	fi; \
 	: "$${VAULT_TOKEN:?Set VAULT_API_KEY, VAULT_TOKEN, or provide VAULT_TOKEN_FILE=$(VAULT_TOKEN_FILE)}"; \
 	: "$${VAULT_ADDR:?Set VAULT_ADDR or provide VAULT_TOKEN_FILE=$(VAULT_TOKEN_FILE)}"; \
-	$(VAULT_SHARED_CMD) -e VAULT_TOKEN -e VAULT_ADDR -e VAULT_ENV_PREFIX vault-env node apps/baas/scripts/vault-env.mjs fetch
+	$(NODE_RUN_SHARED) apps/baas/scripts/vault-env.mjs fetch
 
 env-fetch-shared:
 ## Fetch shared team secrets first when a reader/writer token is available.
@@ -203,7 +210,9 @@ env-fetch-shared:
 		echo '[vault] GitHub Actions must use its OIDC-generated Vault token file before make all.'; \
 		exit 1; \
 	else \
-		echo '[vault] no shared Vault token found; continuing with local generated dev secrets only'; \
+		echo '[vault] missing shared Vault credentials. Set VAULT_API_KEY+VAULT_ADDR, VAULT_TOKEN+VAULT_ADDR, or provide VAULT_TOKEN_FILE=$(VAULT_TOKEN_FILE).'; \
+		echo '[vault] for offline generated development secrets, run make all-local instead of make all.'; \
+		exit 1; \
 	fi
 
 vault-publish-shared:
@@ -288,7 +297,7 @@ env-fetch: vault-up
 	$(VAULT_ENV_CMD) fetch
 
 env-backup:
-	$(DOCKER_NODE) node apps/baas/scripts/vault-env.mjs backup
+	$(NODE_RUN) apps/baas/scripts/vault-env.mjs backup
 
 env-restore-test: vault-seed
 	$(VAULT_ENV_CMD) roundtrip
@@ -517,4 +526,4 @@ docker_reclaim_cache:
 ## Remove BuildKit/buildx cache only.
 	docker builder prune -a -f
 
-.PHONY: help all pulls pushes bootstrap certs certs-trust env-format vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fetch-shared env-fetch-shared vault-publish-shared vault-status-shared vault-repair-shared vault-github-oidc vault-fly-create vault-fly-deploy vault-fly-publish vault-fly-github vault-fly vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache
+.PHONY: help all all-local pulls pushes bootstrap certs certs-trust env-format vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fetch-shared env-fetch-shared vault-publish-shared vault-status-shared vault-repair-shared vault-github-oidc vault-fly-create vault-fly-deploy vault-fly-publish vault-fly-github vault-fly vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache
