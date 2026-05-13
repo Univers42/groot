@@ -34,6 +34,14 @@ const teamPolicies = [
   { role: 'writer', name: 'track-binocle-env-writer', file: 'track-binocle-env-writer.hcl' },
 ];
 
+function vaultDisplayHost() {
+  try {
+    return new URL(vaultAddr).host;
+  } catch {
+    return vaultAddr;
+  }
+}
+
 const managedFiles = [
   {
     id: 'root',
@@ -441,11 +449,19 @@ function tokenFromKeysFile() {
 async function vaultRequestAs(method, path, body, token) {
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers['X-Vault-Token'] = token;
-  const response = await fetch(`${vaultAddr}/v1/${path}`, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  let response;
+  try {
+    response = await fetch(`${vaultAddr}/v1/${path}`, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch (error) {
+    const cause = error?.cause ?? error;
+    const code = cause?.code ? ` (${cause.code})` : '';
+    const message = cause?.message ?? error?.message ?? String(error);
+    throw new Error(`Vault ${method} ${path} could not reach ${vaultDisplayHost()}${code}: ${message}`);
+  }
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`Vault ${method} ${path} failed with HTTP ${response.status}`);
   if (response.status === 204) return {};
@@ -735,32 +751,41 @@ async function roundtrip() {
   verifyRequiredKeys();
 }
 
-if (command === 'format') {
-  formatLocal();
-} else if (command === 'seed') {
-  await seedVault();
-} else if (command === 'publish') {
-  await seedVault();
-} else if (command === 'fetch') {
-  await fetchVault();
-} else if (command === 'status') {
-  await statusVault();
-} else if (command === 'validate') {
-  verifyRequiredKeys();
-} else if (command === 'sync-policies') {
-  await syncTeamPolicies();
-} else if (command === 'team-token') {
-  await createTeamToken();
-} else if (command === 'sync-github-oidc') {
-  await syncGithubOidc();
-} else if (command === 'rotate-approles') {
-  await rotateAppRoles();
-} else if (command === 'backup') {
-  backupEnvFiles();
-} else if (command === 'roundtrip') {
-  await roundtrip();
-} else if (command === 'verify-approles') {
-  await verifyAppRoles();
-} else {
-  console.log('Usage: node apps/baas/scripts/vault-env.mjs <format|seed|publish|fetch|status|validate|backup|roundtrip|sync-policies|team-token|sync-github-oidc|rotate-approles|verify-approles>');
+async function main() {
+  if (command === 'format') {
+    formatLocal();
+  } else if (command === 'seed') {
+    await seedVault();
+  } else if (command === 'publish') {
+    await seedVault();
+  } else if (command === 'fetch') {
+    await fetchVault();
+  } else if (command === 'status') {
+    await statusVault();
+  } else if (command === 'validate') {
+    verifyRequiredKeys();
+  } else if (command === 'sync-policies') {
+    await syncTeamPolicies();
+  } else if (command === 'team-token') {
+    await createTeamToken();
+  } else if (command === 'sync-github-oidc') {
+    await syncGithubOidc();
+  } else if (command === 'rotate-approles') {
+    await rotateAppRoles();
+  } else if (command === 'backup') {
+    backupEnvFiles();
+  } else if (command === 'roundtrip') {
+    await roundtrip();
+  } else if (command === 'verify-approles') {
+    await verifyAppRoles();
+  } else {
+    console.log('Usage: node apps/baas/scripts/vault-env.mjs <format|seed|publish|fetch|status|validate|backup|roundtrip|sync-policies|team-token|sync-github-oidc|rotate-approles|verify-approles>');
+  }
+}
+
+try {
+  await main();
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
 }

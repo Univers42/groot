@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/14 00:20:19 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/14 00:51:33 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -59,7 +59,7 @@ VAULT_READER_TOKEN_FILE ?= .vault/track-binocle-reader.env
 VAULT_WRITER_TOKEN_FILE ?= .vault/track-binocle-writer.env
 VAULT_TOKEN_FILE ?= $(VAULT_READER_TOKEN_FILE)
 VAULT_PUBLISH_TOKEN_FILE ?= $(VAULT_WRITER_TOKEN_FILE)
-VAULT_PUBLIC_ADDR ?= https://local-https-proxy:8200
+VAULT_PUBLIC_ADDR ?= https://localhost:8200
 VAULT_ENV_PREFIX ?= secret/data/track-binocle/env
 VAULT_GITHUB_OIDC_AUTH_PATH ?= jwt
 VAULT_GITHUB_OIDC_ROLE ?= track-binocle-github-actions
@@ -78,7 +78,7 @@ HOST_GID := $(shell id -g)
 export HOST_UID HOST_GID
 NODE_BIN ?= $(shell command -v node 2>/dev/null || true)
 DOCKER_NODE := docker run --rm --user "$(HOST_UID):$(HOST_GID)" -e HOST_UID="$(HOST_UID)" -e HOST_GID="$(HOST_GID)" -v "$$PWD":/workspace -w /workspace node:22-alpine
-DOCKER_NODE_SHARED := docker run --rm --user "$(HOST_UID):$(HOST_GID)" -e HOST_UID="$(HOST_UID)" -e HOST_GID="$(HOST_GID)" -e VAULT_ADDR -e VAULT_TOKEN -e VAULT_ENV_PREFIX -e NODE_EXTRA_CA_CERTS=/workspace/apps/baas/certs/track-binocle-local-ca.pem -v "$$PWD":/workspace -w /workspace node:22-alpine
+DOCKER_NODE_SHARED := docker run --rm --network host --user "$(HOST_UID):$(HOST_GID)" -e HOST_UID="$(HOST_UID)" -e HOST_GID="$(HOST_GID)" -e VAULT_ADDR -e VAULT_TOKEN -e VAULT_ENV_PREFIX -e NODE_EXTRA_CA_CERTS=/workspace/apps/baas/certs/track-binocle-local-ca.pem -v "$$PWD":/workspace -w /workspace node:22-alpine
 DOCKER_NODE_VAULT := docker run --rm --user "$(HOST_UID):$(HOST_GID)" -e HOST_UID="$(HOST_UID)" -e HOST_GID="$(HOST_GID)" -e VAULT_ADDR -e VAULT_TOKEN -e VAULT_ENV_PREFIX -e VAULT_GITHUB_OIDC_AUTH_PATH -e VAULT_GITHUB_OIDC_ROLE -e VAULT_GITHUB_OIDC_REPOSITORY -e VAULT_GITHUB_OIDC_AUDIENCE -e VAULT_GITHUB_AUTH_PATH -e VAULT_GITHUB_ORG -e VAULT_GITHUB_TEAM -v "$$PWD":/workspace -w /workspace node:22-alpine
 NODE_RUN := $(if $(NODE_BIN),$(NODE_BIN),$(DOCKER_NODE) node)
 NODE_RUN_SHARED := $(if $(NODE_BIN),$(NODE_BIN),$(DOCKER_NODE_SHARED) node)
@@ -97,10 +97,10 @@ help:
 	@echo -e "\033[1;38;5;39m───────────────────────────────────────────────────────────────\033[0m"
 	@echo -e "\033[1;38;5;245mFor docs: make docs or see README.md\033[0m"
 
-all: env-fetch-shared pulls certs bootstrap env-format docker-prefetch-images vault-seed vault-verify-approles env-fetch up healthcheck showcase
+all: env-fetch-shared pulls certs certs-trust-local bootstrap env-format docker-prefetch-images vault-seed vault-verify-approles env-fetch up healthcheck showcase
 ## Build, start, and verify the complete Vault-backed Track Binocle pipeline.
 
-all-local: pulls certs bootstrap env-format docker-prefetch-images vault-seed vault-verify-approles env-fetch up healthcheck showcase
+all-local: pulls certs certs-trust-local bootstrap env-format docker-prefetch-images vault-seed vault-verify-approles env-fetch up healthcheck showcase
 ## Build the local generated-secret pipeline without shared Vault credentials.
 
 pulls:
@@ -164,6 +164,16 @@ certs-trust: certs
 ## Trust the local HTTPS CA in user browser stores; use EXTRA_ARGS=--system for the Linux system store.
 	bash apps/baas/scripts/trust-localhost-cert.sh $(EXTRA_ARGS)
 
+certs-trust-local: certs
+## Best-effort import of the local HTTPS CA into user browser stores without breaking CI.
+	@if [[ "$${CI:-}" == 'true' || "$${GITHUB_ACTIONS:-}" == 'true' || "$${TRACK_BINOCLE_SKIP_CERT_TRUST:-}" == '1' ]]; then \
+		echo '[certs] skipping browser trust import in CI/noninteractive mode'; \
+	elif command -v certutil >/dev/null 2>&1; then \
+		bash apps/baas/scripts/trust-localhost-cert.sh || echo '[certs] browser trust import failed; run make certs-trust after installing libnss3-tools'; \
+	else \
+		echo '[certs] certutil not found; install libnss3-tools or run make certs-trust EXTRA_ARGS=--system'; \
+	fi
+
 env-format:
 	$(NODE_RUN) apps/baas/scripts/vault-env.mjs format
 
@@ -206,6 +216,7 @@ docker-prefetch-images:
 	pull_image supabase/supavisor:2.7.4 public.ecr.aws/supabase/supavisor:2.7.4
 
 vault-up: certs docker-prefetch-images
+	@docker compose rm -sf local-https-proxy >/dev/null 2>&1 || true
 	$(VAULT_COMPOSE) up -d --build --pull never vault local-https-proxy
 	$(VAULT_COMPOSE) run --rm --build vault-init
 
@@ -244,6 +255,23 @@ vault-fetch-shared:
 	fi; \
 	: "$${VAULT_TOKEN:?Set VAULT_API_KEY, VAULT_TOKEN, or provide VAULT_TOKEN_FILE=$(VAULT_TOKEN_FILE)}"; \
 	: "$${VAULT_ADDR:?Set VAULT_ADDR or provide VAULT_TOKEN_FILE=$(VAULT_TOKEN_FILE)}"; \
+	vault_addr_is_local=0; \
+	case "$$VAULT_ADDR" in \
+		https://local-https-proxy:*|http://local-https-proxy:*) \
+			VAULT_ADDR="$${VAULT_ADDR/local-https-proxy/localhost}"; \
+			export VAULT_ADDR; \
+			vault_addr_is_local=1; \
+			echo '[vault] translated Docker-only Vault host local-https-proxy to localhost for host fetch'; \
+			;; \
+		https://localhost:8200*|http://localhost:8200*|https://127.0.0.1:8200*|http://127.0.0.1:8200*) \
+			vault_addr_is_local=1; \
+			;; \
+	esac; \
+	if [[ "$$vault_addr_is_local" == '1' ]]; then \
+		echo '[vault] ensuring local Vault proxy is running for localhost token'; \
+		$(MAKE) vault-up; \
+	fi; \
+	if [[ -z "$${NODE_EXTRA_CA_CERTS:-}" && -f '$(LOCAL_CA_CERT)' ]]; then export NODE_EXTRA_CA_CERTS='$(LOCAL_CA_CERT)'; fi; \
 	$(NODE_RUN_SHARED) apps/baas/scripts/vault-env.mjs fetch
 
 env-fetch-shared:
@@ -361,6 +389,7 @@ db-password-apply:
 
 up: certs docker-prefetch-images
 ## Build and start every service in the root Docker Compose graph.
+	@docker compose rm -sf local-https-proxy >/dev/null 2>&1 || true
 	docker compose up -d --build --pull never --wait
 
 app-images:
@@ -571,4 +600,4 @@ docker_reclaim_cache:
 ## Remove BuildKit/buildx cache only.
 	docker builder prune -a -f
 
-.PHONY: help all all-local pulls pushes bootstrap certs certs-trust env-format docker-prefetch-images vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fetch-shared env-fetch-shared vault-publish-shared vault-status-shared vault-repair-shared vault-github-oidc vault-fly-create vault-fly-deploy vault-fly-publish vault-fly-github vault-fly vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache
+.PHONY: help all all-local pulls pushes bootstrap certs certs-trust certs-trust-local env-format docker-prefetch-images vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fetch-shared env-fetch-shared vault-publish-shared vault-status-shared vault-repair-shared vault-github-oidc vault-fly-create vault-fly-deploy vault-fly-publish vault-fly-github vault-fly vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache

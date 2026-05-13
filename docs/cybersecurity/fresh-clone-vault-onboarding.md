@@ -58,7 +58,8 @@ Expected behavior:
 - The shared Vault env files are fetched first.
 - If Vault auth fails, the command stops before Docker Compose starts.
 - If Vault data is incomplete, the command prints missing key names only and stops.
-- If Vault auth succeeds, the local Vault is seeded from the fetched env, app services start through HTTPS, and the healthcheck verifies the full app pipeline.
+- If Vault auth succeeds, the local Vault is seeded from the fetched env, the local CA is imported into user browser stores when possible, app services start through HTTPS, and the healthcheck verifies the full app pipeline.
+- Older token files that contain `VAULT_ADDR=https://local-https-proxy:8200` are translated to `https://localhost:8200` before host-side Vault fetches. If a token file points at the localhost Vault proxy, `make all` starts the local Vault/proxy before fetching. Fresh shared-team tokens should point at the public shared Vault, usually `https://track-binocle-vault.fly.dev`.
 
 ## Negative Test
 

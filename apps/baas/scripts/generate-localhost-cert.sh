@@ -51,6 +51,7 @@ IP.1 = 127.0.0.1
 IP.2 = ::1
 EOF
 
+ca_regenerated=0
 if [ ! -s "$CA_KEY" ] || [ ! -s "$CA_CERT" ]; then
   rm -f "$CA_KEY" "$CA_CERT"
   openssl genrsa -out "$CA_KEY" 4096 >/dev/null 2>&1
@@ -62,20 +63,38 @@ if [ ! -s "$CA_KEY" ] || [ ! -s "$CA_CERT" ]; then
     -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
     -addext "keyUsage=critical,keyCertSign,cRLSign" \
     -out "$CA_CERT" >/dev/null 2>&1
+  ca_regenerated=1
 fi
 
-rm -f "$SERVER_KEY" "$SERVER_CSR" "$SERVER_CERT"
-openssl genrsa -out "$SERVER_KEY" 2048 >/dev/null 2>&1
-openssl req -new -key "$SERVER_KEY" -out "$SERVER_CSR" -config "$OPENSSL_CONFIG" >/dev/null 2>&1
-openssl x509 -req \
-  -in "$SERVER_CSR" \
-  -CA "$CA_CERT" \
-  -CAkey "$CA_KEY" \
-  -CAcreateserial \
-  -out "$SERVER_CERT" \
-  -days 397 \
-  -sha256 \
-  -extfile "$SERVER_EXT" >/dev/null 2>&1
+server_needs_regen=1
+if [ "$ca_regenerated" -eq 0 ] && [ -s "$SERVER_KEY" ] && [ -s "$SERVER_CERT" ]; then
+  san=$(openssl x509 -in "$SERVER_CERT" -noout -ext subjectAltName 2>/dev/null || true)
+  if openssl verify -CAfile "$CA_CERT" "$SERVER_CERT" >/dev/null 2>&1 \
+    && openssl x509 -checkend 2592000 -noout -in "$SERVER_CERT" >/dev/null 2>&1; then
+    case "$san" in
+      *DNS:localhost*DNS:host.docker.internal*DNS:local-https-proxy*IP\ Address:127.0.0.1*)
+        server_needs_regen=0
+        ;;
+    esac
+  fi
+fi
+
+if [ "$server_needs_regen" -eq 1 ]; then
+  rm -f "$SERVER_KEY" "$SERVER_CSR" "$SERVER_CERT"
+  openssl genrsa -out "$SERVER_KEY" 2048 >/dev/null 2>&1
+  openssl req -new -key "$SERVER_KEY" -out "$SERVER_CSR" -config "$OPENSSL_CONFIG" >/dev/null 2>&1
+  openssl x509 -req \
+    -in "$SERVER_CSR" \
+    -CA "$CA_CERT" \
+    -CAkey "$CA_KEY" \
+    -CAcreateserial \
+    -out "$SERVER_CERT" \
+    -days 397 \
+    -sha256 \
+    -extfile "$SERVER_EXT" >/dev/null 2>&1
+else
+  printf 'Using existing local HTTPS server certificate with required localhost SANs.\n'
+fi
 
 chmod 600 "$CA_KEY" "$SERVER_KEY"
 chmod 644 "$CA_CERT" "$SERVER_CERT"
