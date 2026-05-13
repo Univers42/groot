@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/14 00:10:17 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/14 00:20:19 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -176,7 +176,10 @@ docker-prefetch-images:
 		attempt=1; \
 		while [ "$$attempt" -le '$(DOCKER_PULL_ATTEMPTS)' ]; do \
 			echo "[docker] pulling $$mirror for $$target (attempt $$attempt/$(DOCKER_PULL_ATTEMPTS), timeout $(DOCKER_PULL_TIMEOUT)s)"; \
-			if timeout --kill-after='$(DOCKER_PULL_KILL_AFTER)s' '$(DOCKER_PULL_TIMEOUT)s' docker pull "$$mirror"; then docker tag "$$mirror" "$$target"; return 0; fi; \
+			if timeout --kill-after='$(DOCKER_PULL_KILL_AFTER)s' '$(DOCKER_PULL_TIMEOUT)s' docker pull "$$mirror"; then \
+				if [ "$$mirror" != "$$target" ]; then docker tag "$$mirror" "$$target"; fi; \
+				return 0; \
+			fi; \
 			attempt=$$((attempt + 1)); \
 		done; \
 		attempt=1; \
@@ -191,6 +194,7 @@ docker-prefetch-images:
 	pull_image node:22-bookworm public.ecr.aws/docker/library/node:22-bookworm; \
 	pull_image node:22-bookworm-slim public.ecr.aws/docker/library/node:22-bookworm-slim; \
 	pull_image nginx:1.27-alpine public.ecr.aws/docker/library/nginx:1.27-alpine; \
+	pull_image docker/dockerfile:1 docker/dockerfile:1; \
 	pull_image postgres:16 public.ecr.aws/docker/library/postgres:16; \
 	pull_image postgres:16-alpine public.ecr.aws/docker/library/postgres:16-alpine; \
 	pull_image redis:7-alpine public.ecr.aws/docker/library/redis:7-alpine; \
