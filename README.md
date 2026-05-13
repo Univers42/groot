@@ -45,11 +45,12 @@ Dependabot and Renovate are configured at the root so JS, Docker, and GitHub Act
 
 ## Environment And Vault
 
-Runtime env files are managed by Docker-only commands. The generated `.env.example` files are grouped by required, recommended, optional, and legacy keys. Optional keys may stay commented or blank when the feature is not enabled, for example SMTP, OAuth, analytics, Sonar, or third-party API integrations.
+Runtime env files are managed by Docker-only commands. The generated `.env.example` files are grouped by required, recommended, optional, and legacy keys. Optional keys may stay commented or blank when the feature is not enabled, for example SMTP, analytics, Sonar, or third-party API integrations. Gmail and Google Calendar OAuth credentials are required for the root `make all` pipeline because the healthcheck verifies that both bridges are configured.
 
 Useful commands:
 
 ```sh
+make pulls
 make env-format
 make vault-seed
 make vault-publish
@@ -57,14 +58,21 @@ make vault-status
 make vault-invite-token VAULT_TEAM_ROLE=reader
 make vault-invite-token VAULT_TEAM_ROLE=writer VAULT_TOKEN_TTL=8h
 make vault-fetch-shared VAULT_TOKEN_FILE=.vault/track-binocle-reader.env
-make vault-publish-shared VAULT_TOKEN_FILE=.vault/track-binocle-writer.env
+make env-fetch-shared
+make vault-publish-shared VAULT_PUBLISH_TOKEN_FILE=.vault/track-binocle-writer.env
+make vault-repair-shared VAULT_PUBLISH_TOKEN_FILE=.vault/track-binocle-writer.env
 make vault-rotate-approles
 make vault-verify-approles
 make env-fetch
 make env-restore-test
 make db-password-check
 make db-password-apply
+make pushes
 ```
+
+`make pulls` fetches and pulls the root repository plus every recursive submodule before the Docker pipeline runs. It uses configured upstream branches when they exist and otherwise fetches without changing branches. `make all` runs this first so a fresh clone is brought as close as possible to the latest upstream state before dependencies and containers are built.
+
+`make pushes` stages, commits, and pushes every recursive submodule and then the root repository. It commits deeper nested submodules first so parent repositories record the new submodule SHAs. The default commit message is `update`; override it with `make pushes GIT_COMMIT_MESSAGE="your message"`.
 
 `make env-format` rewrites managed env files and examples with comments and categories. Real env files comment out missing values so later Compose env files do not accidentally override earlier non-empty secrets with blanks.
 
@@ -72,11 +80,15 @@ make db-password-apply
 
 `make vault-publish` updates the managed Vault env records from the ignored local env files after a maintainer changes a credential. `make vault-status` compares local and Vault key coverage without printing values.
 
-For teammates, a maintainer can run `make vault-invite-token VAULT_TEAM_ROLE=reader` to write an ignored `.vault/track-binocle-reader.env` token file, or `make vault-invite-token VAULT_TEAM_ROLE=writer VAULT_TOKEN_TTL=8h` for someone allowed to publish updated secrets. Share that file through your normal secure channel, never through Git. Invited users then run `make vault-fetch-shared VAULT_TOKEN_FILE=.vault/track-binocle-reader.env`; writers can run `make vault-publish-shared VAULT_TOKEN_FILE=.vault/track-binocle-writer.env` after updating local ignored env files.
+For teammates, a maintainer can run `make vault-invite-token VAULT_TEAM_ROLE=reader` to write an ignored `.vault/track-binocle-reader.env` token file, or `make vault-invite-token VAULT_TEAM_ROLE=writer VAULT_TOKEN_TTL=8h` for someone allowed to publish updated secrets. Share that file through your normal secure channel, never through Git. Invited users can place the reader file in `.vault/` and run `make all`; the Makefile fetches shared secrets before seeding the local Vault when the token file is present. They can also run `make vault-fetch-shared VAULT_TOKEN_FILE=.vault/track-binocle-reader.env` explicitly.
+
+If a colleague receives an old or incomplete Vault payload, the fetch now fails before Compose starts and prints only the missing key names. A maintainer with complete ignored env files should repair the shared Vault with `make vault-repair-shared VAULT_PUBLISH_TOKEN_FILE=.vault/track-binocle-writer.env`, then recreate or resend reader tokens as needed. Writers can still run `make vault-publish-shared VAULT_PUBLISH_TOKEN_FILE=.vault/track-binocle-writer.env` after updating local ignored env files.
+
+The GitHub workflow `.github/workflows/colleague-docker-pipeline.yml` simulates the colleague path on `push`, `pull_request`, and manual runs. Configure repository secrets `TRACK_BINOCLE_VAULT_ADDR` and `TRACK_BINOCLE_VAULT_TOKEN` with a reachable Vault address and a reader token for `secret/data/track-binocle/env/*`. Set `TRACK_BINOCLE_VAULT_ENV_PREFIX` only if the KV path changes. If private submodule checkout needs broader access than `GITHUB_TOKEN`, set `SUBMODULES_TOKEN` to a PAT that can read the submodule repositories.
 
 `make vault-rotate-approles` rotates service AppRole secret IDs and stores the new IDs in Vault. `make vault-verify-approles` logs in with the root service AppRoles and verifies each token can read the managed Vault env secret without printing secret values. This confirms the local AppRole path for the BaaS, osionos, website, Mail, and Calendar services.
 
-`make env-fetch` materializes the current Vault values back into the ignored local env files before the Compose stack starts. `make env-restore-test` creates `.env.bak` files, removes the managed env files, fetches them from Vault, and verifies required keys came back.
+`make env-fetch` materializes the current Vault values back into the ignored local env files before the Compose stack starts. Fetch merges non-empty Vault values with existing local/generated values, so an older Vault record cannot erase a newly generated required value. `make env-restore-test` creates `.env.bak` files, removes the managed env files, fetches them from Vault, and verifies required keys came back.
 
 If the live Postgres volume was initialized with an older password than `apps/baas/.env.local`, `make db-password-check` detects the drift and `make db-password-apply` applies the current ignored env password to the live Postgres role without printing it. After changing database credentials, run `make db-password-apply`, `make vault-publish`, and then `make env-fetch` on other machines.
 
@@ -112,13 +124,14 @@ The Makefile runs these commands from the repository root:
 
 ```sh
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/workspace -w /workspace node:22-alpine node apps/baas/scripts/bootstrap.mjs
+docker compose --profile secrets run --rm --no-deps vault-env node apps/baas/scripts/vault-env.mjs fetch # only when .vault/track-binocle-reader.env or VAULT_TOKEN is present
 docker compose --profile secrets up -d --build vault
 docker compose --profile secrets run --rm --build vault-init
 docker compose --profile secrets run --rm vault-env node apps/baas/scripts/vault-env.mjs fetch
 docker compose up -d --build
 ```
 
-The bootstrap command generates ignored local runtime files without using host Node. The Vault commands keep env files aligned with the local Vault store. The final Compose command builds and starts every service.
+The bootstrap command generates ignored local runtime files without using host Node. If a shared Vault token exists, the Makefile fetches team secrets first; if the shared Vault is missing required keys, it stops with the missing key names. The local Vault commands then keep env files aligned with the local Vault store. The final Compose command builds and starts every service.
 
 If the website dependency volume needs to be initialized separately, run:
 

@@ -69,8 +69,9 @@ const managedFiles = [
     envPath: 'apps/mail/.env.local',
     examplePath: 'apps/mail/.env.example',
     fallbackEnvPaths: ['apps/mail/.env'],
+    required: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'],
     recommended: ['MAIL_BRIDGE_PORT', 'MAIL_APP_ORIGIN', 'MAIL_BRIDGE_PUBLIC_ORIGIN', 'GMAIL_REDIRECT_URI', 'GMAIL_SYNC_LIMIT', 'GMAIL_MAX_SYNC_LIMIT', 'GMAIL_LIST_PAGE_SIZE', 'GMAIL_DETAIL_BATCH_SIZE', 'VITE_GMAIL_SYNC_LIMIT', 'VITE_GMAIL_SYNC_PAGE_SIZE'],
-    optional: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GMAIL_CALLBACK_PATHS', 'MAIL_BRIDGE_VAULT_ENABLED', 'VAULT_ADDR', 'MAIL_BRIDGE_VAULT_OAUTH_PATH', 'VAULT_TOKEN', 'VAULT_ROLE_ID', 'VAULT_SECRET_ID'],
+    optional: ['GMAIL_CALLBACK_PATHS', 'MAIL_BRIDGE_VAULT_ENABLED', 'VAULT_ADDR', 'MAIL_BRIDGE_VAULT_OAUTH_PATH', 'VAULT_TOKEN', 'VAULT_ROLE_ID', 'VAULT_SECRET_ID'],
   },
   {
     id: 'calendar',
@@ -78,8 +79,9 @@ const managedFiles = [
     envPath: 'apps/calendar/.env.local',
     examplePath: 'apps/calendar/.env.example',
     fallbackEnvPaths: ['apps/calendar/.env', 'apps/mail/.env', 'apps/baas/.env.local'],
+    required: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'],
     recommended: ['CALENDAR_BRIDGE_PORT', 'CALENDAR_APP_ORIGIN', 'CALENDAR_BRIDGE_PUBLIC_ORIGIN', 'CALENDAR_REDIRECT_URI', 'CALENDAR_BAAS_URL', 'CALENDAR_BAAS_PUBLIC_URL', 'CALENDAR_BRIDGE_REQUIRE_BAAS', 'CALENDAR_EVENTS_PAGE_SIZE', 'VITE_CALENDAR_BRIDGE_URL', 'VITE_CALENDAR_BAAS_URL'],
-    optional: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'CALENDAR_CALLBACK_PATHS', 'CALENDAR_BAAS_SERVICE_KEY', 'CALENDAR_BRIDGE_VAULT_ENABLED', 'CALENDAR_BRIDGE_VAULT_OAUTH_PATH', 'VAULT_ADDR', 'VAULT_TOKEN', 'VAULT_ROLE_ID', 'VAULT_SECRET_ID'],
+    optional: ['CALENDAR_CALLBACK_PATHS', 'CALENDAR_BAAS_SERVICE_KEY', 'CALENDAR_BRIDGE_VAULT_ENABLED', 'CALENDAR_BRIDGE_VAULT_OAUTH_PATH', 'VAULT_ADDR', 'VAULT_TOKEN', 'VAULT_ROLE_ID', 'VAULT_SECRET_ID'],
   },
   {
     id: 'baas',
@@ -466,18 +468,59 @@ async function ensureKvWhenAllowed() {
   }
 }
 
-function envData(config) {
+function envRecord(config) {
   const values = valuesForConfig(config);
   const data = {};
   for (const key of listKeys(config)) data[key] = values.get(key) ?? '';
-  return data;
+  return { config, values, data };
+}
+
+function missingRequired(config, values) {
+  return (config.required ?? []).filter((key) => !values.get(key));
+}
+
+function requiredFixHint() {
+  return 'Fetch current team secrets with make vault-fetch-shared, or set the listed keys in ignored env files and publish them with make vault-publish or make vault-repair-shared.';
+}
+
+function assertRequiredRecords(records, source) {
+  const failures = [];
+  for (const { config, values } of records) {
+    const missing = missingRequired(config, values);
+    if (missing.length > 0) failures.push(`${config.envPath}: ${missing.join(', ')}`);
+  }
+  if (failures.length > 0) {
+    throw new Error([
+      `${source} is missing required managed env values:`,
+      ...failures.map((line) => `- ${line}`),
+      requiredFixHint(),
+    ].join('\n'));
+  }
+}
+
+function mergedFetchedValues(config, vaultValues) {
+  const localValues = valuesForConfig(config);
+  const merged = new Map();
+  for (const key of listKeys(config)) {
+    const vaultValue = vaultValues[key];
+    if (vaultValue !== undefined && vaultValue !== null && String(vaultValue) !== '') {
+      merged.set(key, String(vaultValue));
+      continue;
+    }
+    const localValue = localValues.get(key);
+    if (localValue) merged.set(key, localValue);
+    else if (vaultValue !== undefined && vaultValue !== null) merged.set(key, String(vaultValue));
+  }
+  return merged;
 }
 
 async function seedVault() {
   await ensureKvWhenAllowed();
-  for (const config of managedFiles.filter((item) => item.envPath)) {
-    await vaultRequest('POST', `${kvPrefix}/${config.id}`, { data: envData(config) });
-    console.log(`[vault] seeded ${config.id}`);
+  const records = managedFiles.filter((item) => item.envPath).map(envRecord);
+  assertRequiredRecords(records, 'Local env before Vault publish');
+  for (const { config, data } of records) {
+    await vaultRequest('POST', `${kvPrefix}/${config.id}`, { data });
+    console.log(`[vault] published ${config.id}`);
   }
 }
 
@@ -486,6 +529,7 @@ function countValues(values) {
 }
 
 async function statusVault() {
+  const failures = [];
   for (const config of managedFiles.filter((item) => item.envPath)) {
     const keys = listKeys(config);
     const localValues = valuesForConfig(config);
@@ -495,6 +539,15 @@ async function statusVault() {
     const missingVaultRequired = (config.required ?? []).filter((key) => !vaultValues[key]);
     const localCount = keys.filter((key) => localValues.get(key)).length;
     console.log(`[vault] ${config.id}: local ${localCount}/${keys.length}, vault ${countValues(vaultValues)}/${keys.length}, missing required local=${missingLocalRequired.length}, vault=${missingVaultRequired.length}`);
+    if (missingLocalRequired.length > 0) failures.push(`${config.envPath}: missing local ${missingLocalRequired.join(', ')}`);
+    if (missingVaultRequired.length > 0) failures.push(`${config.id}: missing Vault ${missingVaultRequired.join(', ')}`);
+  }
+  if (failures.length > 0) {
+    throw new Error([
+      'Vault status found missing required managed env values:',
+      ...failures.map((line) => `- ${line}`),
+      requiredFixHint(),
+    ].join('\n'));
   }
 }
 
@@ -565,10 +618,16 @@ async function rotateAppRoles() {
 }
 
 async function fetchVault() {
+  const records = [];
   for (const config of managedFiles.filter((item) => item.envPath)) {
     const payload = await vaultRequest('GET', `${kvPrefix}/${config.id}`);
     if (!payload?.data?.data) throw new Error(`No Vault env data found for ${config.id}. Run make vault-seed first.`);
-    writeManaged(config, { envValues: new Map(Object.entries(payload.data.data)), writeExample: false });
+    const values = mergedFetchedValues(config, payload.data.data);
+    records.push({ config, values });
+  }
+  assertRequiredRecords(records, 'Vault fetch result');
+  for (const { config, values } of records) {
+    writeManaged(config, { envValues: values, writeExample: false });
     console.log(`[vault] fetched ${config.id}`);
   }
 }
@@ -607,12 +666,8 @@ function removeEnvFiles() {
 }
 
 function verifyRequiredKeys() {
-  for (const config of managedFiles.filter((item) => item.envPath)) {
-    const values = parseEnv(absolute(config.envPath));
-    for (const key of config.required ?? []) {
-      if (!values.get(key)) throw new Error(`${config.envPath} is missing required key ${key}`);
-    }
-  }
+  const records = managedFiles.filter((item) => item.envPath).map((config) => ({ config, values: valuesForConfig(config) }));
+  assertRequiredRecords(records, 'Local env validation');
   console.log('[env] required keys restored from Vault');
 }
 

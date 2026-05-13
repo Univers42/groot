@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/13 14:47:53 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/13 15:53:53 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -36,13 +36,19 @@ CALENDAR_URL := http://localhost:3003
 CALENDAR_BRIDGE_URL := http://localhost:4200
 PLAYGROUND_VIEWER_URL := $(OSIONOS_URL)/playground-simulation/index.html
 VSCODE_CLI ?= /usr/bin/code
+GIT_COMMIT_MESSAGE ?= update
+GIT_PUSH_REMOTE ?= origin
 CURL_HEALTH := curl --retry 30 --retry-delay 2 --retry-all-errors --retry-connrefused -fsS
 VAULT_COMPOSE := docker compose --profile secrets
 VAULT_ENV_CMD := $(VAULT_COMPOSE) run --rm vault-env node apps/baas/scripts/vault-env.mjs
+VAULT_SHARED_CMD := $(VAULT_COMPOSE) run --rm --no-deps
 VAULT_TEAM_ROLE ?= reader
 VAULT_TOKEN_TTL ?= 24h
 VAULT_TEAM_TOKEN_FILE ?= .vault/track-binocle-$(VAULT_TEAM_ROLE).env
-VAULT_TOKEN_FILE ?= .vault/track-binocle-reader.env
+VAULT_READER_TOKEN_FILE ?= .vault/track-binocle-reader.env
+VAULT_WRITER_TOKEN_FILE ?= .vault/track-binocle-writer.env
+VAULT_TOKEN_FILE ?= $(VAULT_READER_TOKEN_FILE)
+VAULT_PUBLISH_TOKEN_FILE ?= $(VAULT_WRITER_TOKEN_FILE)
 VAULT_PUBLIC_ADDR ?= http://vault:8200
 HOST_UID := $(shell id -u)
 HOST_GID := $(shell id -g)
@@ -63,8 +69,58 @@ help:
 	@echo -e "\033[1;38;5;39m───────────────────────────────────────────────────────────────\033[0m"
 	@echo -e "\033[1;38;5;245mFor docs: make docs or see README.md\033[0m"
 
-all: bootstrap env-format vault-seed vault-verify-approles env-fetch up healthcheck showcase
+all: pulls bootstrap env-format env-fetch-shared vault-seed vault-verify-approles env-fetch up healthcheck showcase
 ## Build, start, and verify the complete Docker-only Track Binocle pipeline.
+
+pulls:
+## Fetch and pull the root repo plus every recursive submodule using configured upstreams.
+	@set -eu; \
+	echo '[pulls] root'; \
+	git fetch --all --prune; \
+	if git symbolic-ref --short -q HEAD >/dev/null && git rev-parse --verify --quiet '@{u}' >/dev/null; then \
+		git pull --rebase --autostash; \
+	else \
+		echo '[pulls] root has no upstream branch; fetched only'; \
+	fi; \
+	git submodule sync --recursive; \
+	git submodule update --init --recursive; \
+	git submodule foreach --recursive ' \
+		set -eu; \
+		branch=$$(git symbolic-ref --short -q HEAD || true); \
+		echo "[pulls] $${displaypath} ($${branch:-detached})"; \
+		git fetch --all --prune; \
+		if [ -n "$$branch" ] && git rev-parse --verify --quiet "@{u}" >/dev/null; then \
+			git pull --rebase --autostash; \
+		else \
+			echo "[pulls] $${displaypath} has no upstream branch; fetched only"; \
+		fi \
+	'; \
+	git submodule update --init --recursive --remote --merge
+
+pushes:
+## Add, commit, and push the root repo plus every recursive submodule. Use GIT_COMMIT_MESSAGE="...".
+	@set -eu; \
+	git submodule sync --recursive; \
+	git submodule update --init --recursive; \
+	repos="$$(git submodule foreach --quiet --recursive 'printf "%s\n" "$$displaypath"' | awk '{ print length, $$0 }' | sort -rn | cut -d' ' -f2-)"; \
+	printf '%s\n.\n' "$$repos" | while IFS= read -r repo; do \
+		[ -n "$$repo" ] || continue; \
+		if ! git -C "$$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1; then continue; fi; \
+		branch="$$(git -C "$$repo" symbolic-ref --short -q HEAD || true)"; \
+		if [ -z "$$branch" ]; then echo "[pushes] $$repo is detached; skipping push"; continue; fi; \
+		echo "[pushes] $$repo ($$branch)"; \
+		git -C "$$repo" add -A; \
+		if ! git -C "$$repo" diff --cached --quiet; then \
+			git -C "$$repo" commit -m '$(GIT_COMMIT_MESSAGE)'; \
+		else \
+			echo "[pushes] $$repo has no staged changes"; \
+		fi; \
+		if git -C "$$repo" rev-parse --verify --quiet '@{u}' >/dev/null; then \
+			git -C "$$repo" push; \
+		else \
+			git -C "$$repo" push -u '$(GIT_PUSH_REMOTE)' "$$branch"; \
+		fi; \
+	done
 
 bootstrap:
 	$(DOCKER_NODE) node apps/baas/scripts/bootstrap.mjs
@@ -101,15 +157,25 @@ vault-fetch-shared:
 	if [[ -f '$(VAULT_TOKEN_FILE)' ]]; then set -a; . '$(VAULT_TOKEN_FILE)'; set +a; fi; \
 	: "$${VAULT_TOKEN:?Set VAULT_TOKEN or provide VAULT_TOKEN_FILE=$(VAULT_TOKEN_FILE)}"; \
 	: "$${VAULT_ADDR:?Set VAULT_ADDR or provide VAULT_TOKEN_FILE=$(VAULT_TOKEN_FILE)}"; \
-	$(VAULT_COMPOSE) run --rm -e VAULT_TOKEN -e VAULT_ADDR -e VAULT_ENV_PREFIX vault-env node apps/baas/scripts/vault-env.mjs fetch
+	$(VAULT_SHARED_CMD) -e VAULT_TOKEN -e VAULT_ADDR -e VAULT_ENV_PREFIX vault-env node apps/baas/scripts/vault-env.mjs fetch
+
+env-fetch-shared:
+## Fetch shared team secrets first when a reader/writer token is available.
+	@set -eu; \
+	if [[ -f '$(VAULT_TOKEN_FILE)' || ( -n "$${VAULT_TOKEN:-}" && -n "$${VAULT_ADDR:-}" ) ]]; then \
+		$(MAKE) vault-fetch-shared VAULT_TOKEN_FILE='$(VAULT_TOKEN_FILE)'; \
+	else \
+		echo '[vault] no shared Vault token found; continuing with local generated env'; \
+	fi
 
 vault-publish-shared:
 ## Publish managed env files with a writer VAULT_TOKEN or writer VAULT_TOKEN_FILE.
 	@set -eu; \
-	if [[ -f '$(VAULT_TOKEN_FILE)' ]]; then set -a; . '$(VAULT_TOKEN_FILE)'; set +a; fi; \
-	: "$${VAULT_TOKEN:?Set a writer VAULT_TOKEN or provide VAULT_TOKEN_FILE=.vault/track-binocle-writer.env}"; \
+	token_file='$(VAULT_PUBLISH_TOKEN_FILE)'; \
+	if [[ -f "$$token_file" ]]; then set -a; . "$$token_file"; set +a; elif [[ -f '$(VAULT_TOKEN_FILE)' ]]; then set -a; . '$(VAULT_TOKEN_FILE)'; set +a; fi; \
+	: "$${VAULT_TOKEN:?Set a writer VAULT_TOKEN or provide VAULT_PUBLISH_TOKEN_FILE=$(VAULT_PUBLISH_TOKEN_FILE)}"; \
 	: "$${VAULT_ADDR:?Set VAULT_ADDR or provide VAULT_TOKEN_FILE}"; \
-	$(VAULT_COMPOSE) run --rm -e VAULT_TOKEN -e VAULT_ADDR -e VAULT_ENV_PREFIX vault-env node apps/baas/scripts/vault-env.mjs publish
+	$(VAULT_SHARED_CMD) -e VAULT_TOKEN -e VAULT_ADDR -e VAULT_ENV_PREFIX vault-env node apps/baas/scripts/vault-env.mjs publish
 
 vault-status-shared:
 ## Check managed Vault env coverage with an invited reader or writer token.
@@ -117,7 +183,12 @@ vault-status-shared:
 	if [[ -f '$(VAULT_TOKEN_FILE)' ]]; then set -a; . '$(VAULT_TOKEN_FILE)'; set +a; fi; \
 	: "$${VAULT_TOKEN:?Set VAULT_TOKEN or provide VAULT_TOKEN_FILE=$(VAULT_TOKEN_FILE)}"; \
 	: "$${VAULT_ADDR:?Set VAULT_ADDR or provide VAULT_TOKEN_FILE=$(VAULT_TOKEN_FILE)}"; \
-	$(VAULT_COMPOSE) run --rm -e VAULT_TOKEN -e VAULT_ADDR -e VAULT_ENV_PREFIX vault-env node apps/baas/scripts/vault-env.mjs status
+	$(VAULT_SHARED_CMD) -e VAULT_TOKEN -e VAULT_ADDR -e VAULT_ENV_PREFIX vault-env node apps/baas/scripts/vault-env.mjs status
+
+vault-repair-shared: env-format
+## Publish complete local env files to shared Vault with a writer token, then verify coverage.
+	$(MAKE) vault-publish-shared VAULT_PUBLISH_TOKEN_FILE='$(VAULT_PUBLISH_TOKEN_FILE)' VAULT_TOKEN_FILE='$(VAULT_TOKEN_FILE)'
+	$(MAKE) vault-status-shared VAULT_TOKEN_FILE='$(VAULT_PUBLISH_TOKEN_FILE)'
 
 vault-rotate-approles: vault-up
 ## Rotate service AppRole secret IDs and store the new IDs in Vault.
@@ -357,4 +428,4 @@ docker_reclaim_cache:
 ## Remove BuildKit/buildx cache only.
 	docker builder prune -a -f
 
-.PHONY: help all bootstrap env-format vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fetch-shared vault-publish-shared vault-status-shared vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache
+.PHONY: help all pulls pushes bootstrap env-format vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fetch-shared env-fetch-shared vault-publish-shared vault-status-shared vault-repair-shared vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache

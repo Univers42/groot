@@ -62,6 +62,8 @@ services:
     volumes:
       - ./:/workspace
       - track-binocle-vault-data:/vault/data:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: ["node", "apps/baas/scripts/vault-env.mjs", "fetch"]
     depends_on:
       vault-init:
