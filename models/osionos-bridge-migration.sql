@@ -64,6 +64,55 @@ CREATE TABLE IF NOT EXISTS public.osionos_pages (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS public.osionos_page_configurations (
+  page_id TEXT NOT NULL,
+  workspace_id UUID NOT NULL REFERENCES public.osionos_workspaces(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL,
+  config JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, page_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.osionos_page_action_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  page_id TEXT NOT NULL,
+  workspace_id UUID NOT NULL REFERENCES public.osionos_workspaces(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL,
+  action TEXT NOT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+DO $$
+DECLARE
+  v_constraint_name TEXT;
+BEGIN
+  SELECT conname INTO v_constraint_name
+  FROM pg_constraint
+  WHERE conrelid = 'public.osionos_page_configurations'::regclass
+    AND contype = 'f'
+    AND conkey = ARRAY[(SELECT attnum FROM pg_attribute WHERE attrelid = 'public.osionos_page_configurations'::regclass AND attname = 'page_id')];
+  IF v_constraint_name IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE public.osionos_page_configurations DROP CONSTRAINT %I', v_constraint_name);
+  END IF;
+
+  SELECT conname INTO v_constraint_name
+  FROM pg_constraint
+  WHERE conrelid = 'public.osionos_page_action_events'::regclass
+    AND contype = 'f'
+    AND conkey = ARRAY[(SELECT attnum FROM pg_attribute WHERE attrelid = 'public.osionos_page_action_events'::regclass AND attname = 'page_id')];
+  IF v_constraint_name IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE public.osionos_page_action_events DROP CONSTRAINT %I', v_constraint_name);
+  END IF;
+END $$;
+
+ALTER TABLE public.osionos_page_configurations
+  ALTER COLUMN page_id TYPE TEXT USING page_id::text;
+
+ALTER TABLE public.osionos_page_action_events
+  ALTER COLUMN page_id TYPE TEXT USING page_id::text;
+
 CREATE TABLE IF NOT EXISTS public.osionos_bridge_audit_events (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   provider TEXT NOT NULL,
@@ -79,12 +128,18 @@ CREATE INDEX IF NOT EXISTS osionos_pages_workspace_archived_idx ON public.osiono
 CREATE INDEX IF NOT EXISTS osionos_pages_workspace_parent_idx ON public.osionos_pages(workspace_id, parent_page_id);
 CREATE INDEX IF NOT EXISTS osionos_pages_workspace_updated_idx ON public.osionos_pages(workspace_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS osionos_pages_workspace_surface_idx ON public.osionos_pages(workspace_id, surface);
+CREATE INDEX IF NOT EXISTS osionos_page_configurations_page_idx ON public.osionos_page_configurations(page_id);
+CREATE INDEX IF NOT EXISTS osionos_page_configurations_workspace_idx ON public.osionos_page_configurations(workspace_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS osionos_page_action_events_page_idx ON public.osionos_page_action_events(page_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS osionos_page_action_events_workspace_idx ON public.osionos_page_action_events(workspace_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS osionos_bridge_audit_subject_idx ON public.osionos_bridge_audit_events(provider, subject, created_at DESC);
 
 ALTER TABLE public.osionos_bridge_identities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.osionos_workspaces ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.osionos_workspace_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.osionos_pages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.osionos_page_configurations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.osionos_page_action_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.osionos_bridge_audit_events ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS osionos_bridge_identities_select_own ON public.osionos_bridge_identities;
@@ -156,14 +211,62 @@ CREATE POLICY osionos_pages_delete_member ON public.osionos_pages
     )
   );
 
+DROP POLICY IF EXISTS osionos_page_configurations_select_own ON public.osionos_page_configurations;
+CREATE POLICY osionos_page_configurations_select_own ON public.osionos_page_configurations
+  FOR SELECT TO authenticated USING (user_id = auth.uid());
+
+DROP POLICY IF EXISTS osionos_page_configurations_insert_own ON public.osionos_page_configurations;
+CREATE POLICY osionos_page_configurations_insert_own ON public.osionos_page_configurations
+  FOR INSERT TO authenticated WITH CHECK (
+    user_id = auth.uid()
+    AND EXISTS (
+      SELECT 1 FROM public.osionos_workspace_members member
+      WHERE member.workspace_id = public.osionos_page_configurations.workspace_id
+        AND member.user_id = auth.uid()
+        AND member.permissions && ARRAY['update', 'admin']::TEXT[]
+    )
+  );
+
+DROP POLICY IF EXISTS osionos_page_configurations_update_own ON public.osionos_page_configurations;
+CREATE POLICY osionos_page_configurations_update_own ON public.osionos_page_configurations
+  FOR UPDATE TO authenticated USING (user_id = auth.uid()) WITH CHECK (
+    user_id = auth.uid()
+    AND EXISTS (
+      SELECT 1 FROM public.osionos_workspace_members member
+      WHERE member.workspace_id = public.osionos_page_configurations.workspace_id
+        AND member.user_id = auth.uid()
+        AND member.permissions && ARRAY['update', 'admin']::TEXT[]
+    )
+  );
+
+DROP POLICY IF EXISTS osionos_page_action_events_select_own ON public.osionos_page_action_events;
+CREATE POLICY osionos_page_action_events_select_own ON public.osionos_page_action_events
+  FOR SELECT TO authenticated USING (user_id = auth.uid());
+
+DROP POLICY IF EXISTS osionos_page_action_events_insert_own ON public.osionos_page_action_events;
+CREATE POLICY osionos_page_action_events_insert_own ON public.osionos_page_action_events
+  FOR INSERT TO authenticated WITH CHECK (
+    user_id = auth.uid()
+    AND EXISTS (
+      SELECT 1 FROM public.osionos_workspace_members member
+      WHERE member.workspace_id = public.osionos_page_action_events.workspace_id
+        AND member.user_id = auth.uid()
+        AND member.permissions && ARRAY['update', 'admin']::TEXT[]
+    )
+  );
+
 GRANT SELECT ON public.osionos_bridge_identities TO authenticated;
 GRANT SELECT ON public.osionos_workspaces TO authenticated;
 GRANT SELECT ON public.osionos_workspace_members TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.osionos_pages TO authenticated;
+GRANT SELECT, INSERT, UPDATE ON public.osionos_page_configurations TO authenticated;
+GRANT SELECT, INSERT ON public.osionos_page_action_events TO authenticated;
 GRANT ALL ON public.osionos_bridge_identities TO service_role;
 GRANT ALL ON public.osionos_workspaces TO service_role;
 GRANT ALL ON public.osionos_workspace_members TO service_role;
 GRANT ALL ON public.osionos_pages TO service_role;
+GRANT ALL ON public.osionos_page_configurations TO service_role;
+GRANT ALL ON public.osionos_page_action_events TO service_role;
 GRANT ALL ON public.osionos_bridge_audit_events TO service_role;
 
 CREATE OR REPLACE FUNCTION public.osionos_bridge_upsert_workspace(

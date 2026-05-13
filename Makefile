@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/13 16:38:30 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/13 20:05:46 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -25,20 +25,23 @@ BAAS_DOCKERFILE := apps/baas/Dockerfile
 BAAS_CONTEXT := apps/baas
 FRONTEND_DIR := apps/opposite-osiris
 BOOL ?= false
-WEBSITE_URL := http://localhost:4322
-OSIONOS_URL := http://localhost:3001
-BRIDGE_URL := http://localhost:4000
-AUTH_URL := http://localhost:8787/api/auth
-BAAS_URL := http://localhost:8000
-MAIL_URL := http://localhost:3002
-MAIL_BRIDGE_URL := http://localhost:4100
-CALENDAR_URL := http://localhost:3003
-CALENDAR_BRIDGE_URL := http://localhost:4200
+WEBSITE_URL := https://localhost:4322
+OSIONOS_URL := https://localhost:3001
+BRIDGE_URL := https://localhost:4000
+AUTH_URL := https://localhost:8787/api/auth
+BAAS_URL := https://localhost:8000
+MAIL_URL := https://localhost:3002
+MAIL_BRIDGE_URL := https://localhost:4100
+CALENDAR_URL := https://localhost:3003
+CALENDAR_BRIDGE_URL := https://localhost:4200
+VAULT_URL := https://localhost:8200
 PLAYGROUND_VIEWER_URL := $(OSIONOS_URL)/playground-simulation/index.html
 VSCODE_CLI ?= /usr/bin/code
 GIT_COMMIT_MESSAGE ?= update
 GIT_PUSH_REMOTE ?= origin
-CURL_HEALTH := curl --retry 30 --retry-delay 2 --retry-all-errors --retry-connrefused -fsS
+LOCAL_CERT_DIR ?= apps/baas/certs
+LOCAL_CA_CERT := $(LOCAL_CERT_DIR)/track-binocle-local-ca.pem
+CURL_HEALTH := curl --cacert $(LOCAL_CA_CERT) --retry 30 --retry-delay 2 --retry-all-errors --retry-connrefused -fsS
 VAULT_COMPOSE := docker compose --profile secrets
 VAULT_ENV_CMD := $(VAULT_COMPOSE) run --rm vault-env node apps/baas/scripts/vault-env.mjs
 VAULT_SHARED_CMD := $(VAULT_COMPOSE) run --rm --no-deps
@@ -49,7 +52,7 @@ VAULT_READER_TOKEN_FILE ?= .vault/track-binocle-reader.env
 VAULT_WRITER_TOKEN_FILE ?= .vault/track-binocle-writer.env
 VAULT_TOKEN_FILE ?= $(VAULT_READER_TOKEN_FILE)
 VAULT_PUBLISH_TOKEN_FILE ?= $(VAULT_WRITER_TOKEN_FILE)
-VAULT_PUBLIC_ADDR ?= http://vault:8200
+VAULT_PUBLIC_ADDR ?= https://local-https-proxy:8200
 VAULT_ENV_PREFIX ?= secret/data/track-binocle/env
 VAULT_GITHUB_OIDC_AUTH_PATH ?= jwt
 VAULT_GITHUB_OIDC_ROLE ?= track-binocle-github-actions
@@ -83,7 +86,7 @@ help:
 	@echo -e "\033[1;38;5;39m───────────────────────────────────────────────────────────────\033[0m"
 	@echo -e "\033[1;38;5;245mFor docs: make docs or see README.md\033[0m"
 
-all: pulls bootstrap env-format env-fetch-shared vault-seed vault-verify-approles env-fetch up healthcheck showcase
+all: pulls certs bootstrap env-format env-fetch-shared vault-seed vault-verify-approles env-fetch up healthcheck showcase
 ## Build, start, and verify the complete Docker-only Track Binocle pipeline.
 
 pulls:
@@ -139,11 +142,19 @@ pushes:
 bootstrap:
 	$(DOCKER_NODE) node apps/baas/scripts/bootstrap.mjs
 
+certs:
+## Generate the local HTTPS CA and localhost certificate used by the Docker TLS proxy.
+	bash apps/baas/scripts/generate-localhost-cert.sh
+
+certs-trust: certs
+## Trust the local HTTPS CA in user browser stores; use EXTRA_ARGS=--system for the Linux system store.
+	bash apps/baas/scripts/trust-localhost-cert.sh $(EXTRA_ARGS)
+
 env-format:
 	$(DOCKER_NODE) node apps/baas/scripts/vault-env.mjs format
 
-vault-up:
-	$(VAULT_COMPOSE) up -d --build vault
+vault-up: certs
+	$(VAULT_COMPOSE) up -d --build vault local-https-proxy
 	$(VAULT_COMPOSE) run --rm --build vault-init
 
 vault-seed: vault-up
@@ -265,7 +276,7 @@ db-password-apply:
 	docker compose exec -T -u postgres -e POSTGRES_TARGET_USER="$${POSTGRES_USER:-postgres}" -e POSTGRES_TARGET_PASSWORD="$$POSTGRES_PASSWORD" -e POSTGRES_TARGET_DB="$${POSTGRES_DB:-postgres}" postgres sh -s < apps/baas/scripts/sync-postgres-password.sh; \
 	echo 'postgres-password-updated'
 
-up:
+up: certs
 ## Build and start every service in the root Docker Compose graph.
 	docker compose up -d --build --wait
 
@@ -346,13 +357,13 @@ calendar-down:
 ## Stop osionos Calendar and the Google Calendar bridge containers.
 	docker compose stop calendar calendar-bridge
 
-healthcheck:
+healthcheck: certs
 ## Verify the BaaS, website, osionos app, Mail, Calendar, bridges, and app-to-BaaS connectivity.
 	docker compose ps
 	$(CURL_HEALTH) $(BRIDGE_URL)/api/auth/bridge/health
 	$(CURL_HEALTH) $(OSIONOS_URL) >/dev/null
 	$(CURL_HEALTH) $(WEBSITE_URL) >/dev/null
-	$(CURL_HEALTH) -o /dev/null -w 'auth-gateway-http-%{http_code}\n' $(AUTH_URL)/availability
+	$(CURL_HEALTH) -o /dev/null -w 'auth-gateway-https-%{http_code}\n' $(AUTH_URL)/availability
 	$(CURL_HEALTH) $(MAIL_BRIDGE_URL)/health >/dev/null
 	$(CURL_HEALTH) $(MAIL_URL) >/dev/null
 	$(CURL_HEALTH) $(CALENDAR_BRIDGE_URL)/health >/dev/null
@@ -370,6 +381,7 @@ showcase:
 	@printf '  osionos bridge API:  %s\n' '$(BRIDGE_URL)'
 	@printf '  Auth gateway:        %s\n' '$(AUTH_URL)'
 	@printf '  BaaS gateway:        %s\n\n' '$(BAAS_URL)'
+	@printf '  Vault:               %s\n\n' '$(VAULT_URL)'
 	@printf '  osionos Mail:        %s\n' '$(MAIL_URL)'
 	@printf '  Mail bridge:         %s\n' '$(MAIL_BRIDGE_URL)'
 	@printf '  osionos Calendar:    %s\n' '$(CALENDAR_URL)'
@@ -475,4 +487,4 @@ docker_reclaim_cache:
 ## Remove BuildKit/buildx cache only.
 	docker builder prune -a -f
 
-.PHONY: help all pulls pushes bootstrap env-format vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fetch-shared env-fetch-shared vault-publish-shared vault-status-shared vault-repair-shared vault-github-oidc vault-fly-create vault-fly-deploy vault-fly-publish vault-fly-github vault-fly vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache
+.PHONY: help all pulls pushes bootstrap certs certs-trust env-format vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fetch-shared env-fetch-shared vault-publish-shared vault-status-shared vault-repair-shared vault-github-oidc vault-fly-create vault-fly-deploy vault-fly-publish vault-fly-github vault-fly vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache

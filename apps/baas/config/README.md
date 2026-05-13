@@ -60,14 +60,14 @@ The local track-binocle compose profile also mounts `opposite-osiris/src/email-t
 
 ## Local CORS
 
-The local `track-binocle` profile exposes the public API through Kong at `http://localhost:8000`. Astro dev servers may run on multiple ports, so the Kong CORS plugin allows these local origins:
+The local `track-binocle` profile exposes the public API through Kong at `https://localhost:8000`. Astro dev servers may run on multiple ports, so the Kong CORS plugin allows these local HTTPS origins:
 
-- `http://localhost:4322`
-- `http://localhost:4321`
-- `http://localhost:5173`
-- `http://localhost:3000`
-- `http://localhost:3001`
-- `http://localhost:3100`
+- `https://localhost:4322`
+- `https://localhost:4321`
+- `https://localhost:5173`
+- `https://localhost:3000`
+- `https://localhost:3001`
+- `https://localhost:3100`
 
 The active Kong template is:
 
@@ -97,8 +97,9 @@ Then verify the Docker services:
 
 ```bash
 docker compose ps
-curl -fsS http://localhost:4322 >/dev/null
-curl -sS -o /dev/null -w 'auth-gateway-http-%{http_code}\n' http://localhost:8787/api/auth/availability
+CA=apps/baas/certs/track-binocle-local-ca.pem
+curl --cacert "$CA" -fsS https://localhost:4322 >/dev/null
+curl --cacert "$CA" -sS -o /dev/null -w 'auth-gateway-https-%{http_code}\n' https://localhost:8787/api/auth/availability
 ```
 
 ## Astro local proxy fallback

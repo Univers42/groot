@@ -4,23 +4,24 @@ This workspace runs through Docker Compose only. Do not install app dependencies
 
 ## What Runs
 
-- Website: `http://localhost:4322`
-- osionos app: `http://localhost:3001`
-- osionos bridge API: `http://localhost:4000`
-- Auth gateway: `http://localhost:8787/api/auth`
-- BaaS gateway: `http://localhost:8000`
-- osionos Mail: `http://localhost:3002`
-- Mail bridge: `http://localhost:4100`
-- osionos Calendar: `http://localhost:3003`
-- Calendar bridge: `http://localhost:4200`
+- Website: `https://localhost:4322`
+- osionos app: `https://localhost:3001`
+- osionos bridge API: `https://localhost:4000`
+- Auth gateway: `https://localhost:8787/api/auth`
+- BaaS gateway: `https://localhost:8000`
+- Vault: `https://localhost:8200`
+- osionos Mail: `https://localhost:3002`
+- Mail bridge: `https://localhost:4100`
+- osionos Calendar: `https://localhost:3003`
+- Calendar bridge: `https://localhost:4200`
 
 The browser flow is:
 
-1. Open the website at `http://localhost:4322`.
+1. Open the website at `https://localhost:4322`.
 2. Create or sign in to a local development account.
 3. The website asks the auth gateway for an osionos bridge session.
 4. The bridge creates a short-lived one-time token and persists the private osionos workspace in Postgres.
-5. The browser redirects to `http://localhost:3001/#bridge_token=...`.
+5. The browser redirects to `https://localhost:3001/#bridge_token=...`.
 6. osionos consumes the token and opens the user's private workspace.
 7. The osionos sidebar app buttons open the Docker-served Mail and Calendar apps.
 
@@ -34,6 +35,8 @@ make playground
 ```
 
 `make all` bootstraps the ignored runtime files, builds and starts the Docker stack, runs health checks, then prints the localhost URLs only after the pipeline is ready.
+
+The root stack terminates local TLS in a Docker Nginx proxy. `make all`, `make up`, and `make healthcheck` generate the local certificate automatically. Run `make certs-trust` once on a development machine to trust the project CA in browser trust stores.
 
 `make playground` opens a VS Code simulation viewer, then runs the Docker-contained Playwright scenario: open the website, create a development account, sign in, bridge into osionos, create a persisted markdown page through the osionos bridge, open Settings, open Mail and Calendar from the sidebar, and probe both service bridges. If Gmail or Google Calendar are already authorized in their ignored token files, the simulation also samples real messages/events without printing account values.
 
@@ -82,7 +85,7 @@ make pushes
 
 `make vault-publish` updates the managed Vault env records from the ignored local env files after a maintainer changes a credential. `make vault-status` compares local and Vault key coverage without printing values.
 
-For teammates, a maintainer can run `make vault-invite-token VAULT_TEAM_ROLE=reader` to write an ignored `.vault/track-binocle-reader.env` token file, or `make vault-invite-token VAULT_TEAM_ROLE=writer VAULT_TOKEN_TTL=8h` for someone allowed to publish updated secrets. Share that file through your normal secure channel, never through Git. Invited users can place the reader file in `.vault/` and run `make all`; the Makefile fetches shared secrets before seeding the local Vault when the token file is present. They can also run `make vault-fetch-shared VAULT_TOKEN_FILE=.vault/track-binocle-reader.env` explicitly.
+For teammates, a maintainer can run `make vault-invite-token VAULT_TEAM_ROLE=reader` to write an ignored `.vault/track-binocle-reader.env` token file, or `make vault-invite-token VAULT_TEAM_ROLE=writer VAULT_TOKEN_TTL=8h` for someone allowed to publish updated secrets. Share that file through your normal secure channel, never through Git. Invited users can place the reader file in `.vault/` and run `make all`; the Makefile fetches shared secrets before seeding the local Vault when the token file is present. They can also run `make vault-fetch-shared VAULT_TOKEN_FILE=.vault/track-binocle-reader.env` explicitly. Invite tokens default to `https://local-https-proxy:8200` because the fetch command runs inside Docker; open Vault in a browser at `https://localhost:8200`.
 
 If a colleague receives an old or incomplete Vault payload, the fetch now fails before Compose starts and prints only the missing key names. A maintainer with complete ignored env files should repair the shared Vault with `make vault-repair-shared VAULT_PUBLISH_TOKEN_FILE=.vault/track-binocle-writer.env`, then recreate or resend reader tokens as needed. Writers can still run `make vault-publish-shared VAULT_PUBLISH_TOKEN_FILE=.vault/track-binocle-writer.env` after updating local ignored env files.
 
@@ -148,15 +151,16 @@ docker compose up -d --build
 
 ```sh
 docker compose ps
-curl -fsS http://localhost:4000/api/auth/bridge/health
-curl -fsS http://localhost:3001 >/dev/null
-curl -fsS http://localhost:4322 >/dev/null
-curl -sS -o /dev/null -w 'auth-gateway-http-%{http_code}\n' http://localhost:8787/api/auth/availability
-curl -fsS http://localhost:4100/health >/dev/null
-curl -fsS http://localhost:3002 >/dev/null
-curl -fsS http://localhost:4200/health >/dev/null
-curl -fsS http://localhost:3003 >/dev/null
-curl -fsS http://localhost:4200/baas/status | grep -q '"connected":true'
+CA=apps/baas/certs/track-binocle-local-ca.pem
+curl --cacert "$CA" -fsS https://localhost:4000/api/auth/bridge/health
+curl --cacert "$CA" -fsS https://localhost:3001 >/dev/null
+curl --cacert "$CA" -fsS https://localhost:4322 >/dev/null
+curl --cacert "$CA" -sS -o /dev/null -w 'auth-gateway-https-%{http_code}\n' https://localhost:8787/api/auth/availability
+curl --cacert "$CA" -fsS https://localhost:4100/health >/dev/null
+curl --cacert "$CA" -fsS https://localhost:3002 >/dev/null
+curl --cacert "$CA" -fsS https://localhost:4200/health >/dev/null
+curl --cacert "$CA" -fsS https://localhost:3003 >/dev/null
+curl --cacert "$CA" -fsS https://localhost:4200/baas/status | grep -q '"connected":true'
 ```
 
 `http://localhost:8787/health` is not a real route for this gateway. Use `/api/auth/availability`.
@@ -177,12 +181,12 @@ docker compose exec -T postgres sh -lc 'export PGPASSWORD="$POSTGRES_PASSWORD"; 
 
 The verified development flow is:
 
-1. Open `http://localhost:4322`.
+1. Open `https://localhost:4322`.
 2. Click `Start free`.
 3. Create a local account. Development email verification is disabled in the Docker stack, so the account can sign in immediately.
 4. Switch to `Sign in` and sign in with the new account.
-5. Expect a redirect to `http://localhost:3001`.
-6. The final osionos URL should look like `http://localhost:3001/#source=adapter&view=v-prod-table` after the bridge token is consumed.
+5. Expect a redirect to `https://localhost:3001`.
+6. The final osionos URL should look like `https://localhost:3001/#source=adapter&view=v-prod-table` after the bridge token is consumed.
 7. The sidebar should show the user's private workspace, for example `dockerbridge's osionos`.
 
 The Playwright verification performed for this stack created a local account, signed in through the website, redirected into osionos, consumed the bridge token, and found this app session in browser storage:

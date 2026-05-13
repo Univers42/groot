@@ -13,9 +13,9 @@ services:
     environment:
       SKIP_SETCAP: "1"
       VAULT_ADDR: http://127.0.0.1:8200
-      VAULT_API_ADDR: http://0.0.0.0:8200
-    ports:
-      - "127.0.0.1:${VAULT_PORT:-8200}:8200"
+      VAULT_API_ADDR: ${VAULT_API_ADDR:-https://localhost:8200}
+    expose:
+      - "8200"
     volumes:
       - track-binocle-vault-data:/vault/data
     restart: unless-stopped
@@ -59,6 +59,7 @@ services:
       VAULT_ADDR: http://vault:8200
       VAULT_KEYS_FILE: /vault/data/.vault-keys.json
       VAULT_ENV_PREFIX: secret/data/track-binocle/env
+      NODE_EXTRA_CA_CERTS: /workspace/apps/baas/certs/track-binocle-local-ca.pem
     volumes:
       - ./:/workspace
       - track-binocle-vault-data:/vault/data:ro
@@ -69,6 +70,31 @@ services:
       vault-init:
         condition: service_completed_successfully
     restart: "no"
+
+  local-https-proxy:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./infrastructure/tls/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./apps/baas/certs:/etc/track-binocle/certs:ro
+    ports:
+      - "127.0.0.1:${OPPOSITE_OSIRIS_HOST_PORT:-4322}:4322"
+      - "127.0.0.1:${OSIONOS_APP_HOST_PORT:-3001}:3001"
+      - "127.0.0.1:${OSIONOS_BRIDGE_HOST_PORT:-4000}:4000"
+      - "127.0.0.1:${AUTH_GATEWAY_HOST_PORT:-8787}:8787"
+      - "127.0.0.1:${KONG_HTTP_PORT:-8000}:8000"
+      - "127.0.0.1:${KONG_ADMIN_PORT:-8001}:8001"
+      - "127.0.0.1:${MAIL_HOST_PORT:-3002}:3002"
+      - "127.0.0.1:${MAIL_BRIDGE_PORT:-4100}:4100"
+      - "127.0.0.1:${CALENDAR_HOST_PORT:-3003}:3003"
+      - "127.0.0.1:${CALENDAR_BRIDGE_PORT:-4200}:4200"
+      - "127.0.0.1:${VAULT_PORT:-8200}:8200"
+    healthcheck:
+      test: ["CMD-SHELL", "nginx -t >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 3s
+      start_period: 5s
+      retries: 6
+    restart: unless-stopped
 
   postgres:
     image: ${BAAS_POSTGRES_IMAGE:-track-binocle-postgres:local}
@@ -146,7 +172,7 @@ services:
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: 9999
-      API_EXTERNAL_URL: ${API_EXTERNAL_URL:-http://localhost:8000/auth/v1}
+      API_EXTERNAL_URL: ${API_EXTERNAL_URL:-https://localhost:8000/auth/v1}
       GOTRUE_DB_DRIVER: postgres
       GOTRUE_DB_MIGRATIONS_PATH: ${GOTRUE_DB_MIGRATIONS_PATH:-/usr/local/etc/auth/migrations}
       GOTRUE_DISABLE_SIGNUP: ${GOTRUE_DISABLE_SIGNUP:-false}
@@ -164,7 +190,7 @@ services:
       GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/v1/verify
       GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
       GOTRUE_JWT_EXP: 3600
-      GOTRUE_JWT_ISSUER: ${API_EXTERNAL_URL:-http://localhost:8000/auth/v1}
+      GOTRUE_JWT_ISSUER: ${API_EXTERNAL_URL:-https://localhost:8000/auth/v1}
     volumes:
       - ./apps/opposite-osiris/src/email-templates:/etc/gotrue/templates:ro
     depends_on:
@@ -225,9 +251,9 @@ services:
     env_file:
       - ./apps/baas/.env.local
       - ./.env.local
-    ports:
-      - "127.0.0.1:${KONG_HTTP_PORT:-8000}:8000"
-      - "127.0.0.1:${KONG_ADMIN_PORT:-8001}:8001"
+    expose:
+      - "8000"
+      - "8001"
     environment:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /tmp/kong.yml
@@ -242,7 +268,7 @@ services:
       KONG_NGINX_WORKER_PROCESSES: "1"
       KONG_MEM_CACHE_SIZE: "64m"
       KONG_UNTRUSTED_LUA_SANDBOX_REQUIRES: "cjson.safe"
-      GOTRUE_JWT_ISS: ${API_EXTERNAL_URL:-http://localhost:8000/auth/v1}
+      GOTRUE_JWT_ISS: ${API_EXTERNAL_URL:-https://localhost:8000/auth/v1}
     command:
       - sh
       - -ec
@@ -250,10 +276,10 @@ services:
         sed \
           -e "s|__KONG_PUBLIC_API_KEY__|$${KONG_PUBLIC_API_KEY}|g" \
           -e "s|__KONG_SERVICE_API_KEY__|$${KONG_SERVICE_API_KEY}|g" \
-          -e "s|__KONG_CORS_ORIGIN_APP__|$${KONG_CORS_ORIGIN_APP:-http://localhost:3000}|g" \
-          -e "s|__KONG_CORS_ORIGIN_PLAYGROUND__|$${KONG_CORS_ORIGIN_PLAYGROUND:-http://localhost:3100}|g" \
-          -e "s|__KONG_CORS_ORIGIN_STUDIO__|$${KONG_CORS_ORIGIN_STUDIO:-http://localhost:3001}|g" \
-          -e "s|__KONG_CORS_ORIGIN_FRONTEND__|$${KONG_CORS_ORIGIN_FRONTEND:-http://localhost:4322}|g" \
+          -e "s|__KONG_CORS_ORIGIN_APP__|$${KONG_CORS_ORIGIN_APP:-https://localhost:3000}|g" \
+          -e "s|__KONG_CORS_ORIGIN_PLAYGROUND__|$${KONG_CORS_ORIGIN_PLAYGROUND:-https://localhost:3100}|g" \
+          -e "s|__KONG_CORS_ORIGIN_STUDIO__|$${KONG_CORS_ORIGIN_STUDIO:-https://localhost:3001}|g" \
+          -e "s|__KONG_CORS_ORIGIN_FRONTEND__|$${KONG_CORS_ORIGIN_FRONTEND:-https://localhost:4322}|g" \
           -e "s|__JWT_SECRET__|$${JWT_SECRET}|g" \
           -e "s|__GOTRUE_JWT_ISS__|$${GOTRUE_JWT_ISS}|g" \
           -e "s|__KONG_ANON_UUID__|$${KONG_ANON_UUID:-cd4f782c-ac87-5081-b322-b54834d15651}|g" \
@@ -283,7 +309,8 @@ services:
     restart: "no"
 
   osionos-bridge:
-    image: node:22-alpine
+    image: node:22-bookworm-slim
+    user: node
     working_dir: /app/apps/osionos/app
     command: ["node", "scripts/bridge-api.mjs"]
     env_file:
@@ -291,15 +318,21 @@ services:
       - ./.env.local
     environment:
       OSIONOS_BRIDGE_PORT: 4000
-      OSIONOS_APP_URL: ${OSIONOS_APP_URL:-http://localhost:3001}
-      OSIONOS_ALLOWED_ORIGIN: ${OSIONOS_ALLOWED_ORIGIN:-http://localhost:3001}
+      OSIONOS_APP_URL: ${OSIONOS_APP_URL:-https://localhost:3001}
+      OSIONOS_ALLOWED_ORIGIN: ${OSIONOS_ALLOWED_ORIGIN:-https://localhost:3001}
       OSIONOS_BAAS_URL: http://kong:8000
       OSIONOS_BRIDGE_PERSISTENCE: ${OSIONOS_BRIDGE_PERSISTENCE:-auto}
       OSIONOS_BRIDGE_REQUIRE_BAAS: ${OSIONOS_BRIDGE_REQUIRE_BAAS:-false}
+      CLAUDE_BIN: ${CLAUDE_BIN:-/opt/claude-node/bin/claude}
+      HOME: /home/node
+      PATH: /opt/claude-node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     volumes:
       - ./:/app:ro
-    ports:
-      - "127.0.0.1:${OSIONOS_BRIDGE_HOST_PORT:-4000}:4000"
+      - ${CLAUDE_NODE_HOME:-${HOME}/.nvm/versions/node/v22.22.2}:/opt/claude-node:ro
+      - ${CLAUDE_HOME:-${HOME}/.claude}:/home/node/.claude
+      - ${CLAUDE_CONFIG_FILE:-${HOME}/.claude.json}:/home/node/.claude.json
+    expose:
+      - "4000"
     depends_on:
       local-runtime-secrets:
         condition: service_completed_successfully
@@ -328,18 +361,19 @@ services:
     environment:
       NODE_ENV: development
       CHOKIDAR_USEPOLLING: "true"
-      VITE_API_URL: http://localhost:4000
+      VITE_API_URL: https://localhost:4000
       VITE_REQUIRE_BRIDGE_SESSION: "true"
       VITE_ALLOW_OFFLINE_MODE: "false"
-      VITE_PRISMATICA_URL: http://localhost:4322
-      VITE_MAIL_APP_URL: http://localhost:${MAIL_HOST_PORT:-3002}
-      VITE_CALENDAR_APP_URL: http://localhost:${CALENDAR_HOST_PORT:-3003}
+      VITE_PAGE_ACTION_SYNC_ENABLED: "true"
+      VITE_PRISMATICA_URL: https://localhost:4322
+      VITE_MAIL_APP_URL: https://localhost:${MAIL_HOST_PORT:-3002}
+      VITE_CALENDAR_APP_URL: https://localhost:${CALENDAR_HOST_PORT:-3003}
     volumes:
       - ./apps/osionos/app:/app
       - osionos-app-node-modules:/app/node_modules
       - osionos-app-pnpm-store:/pnpm/store
-    ports:
-      - "127.0.0.1:${OSIONOS_APP_HOST_PORT:-3001}:3001"
+    expose:
+      - "3001"
     depends_on:
       osionos-bridge:
         condition: service_healthy
@@ -366,15 +400,15 @@ services:
     environment:
       NODE_ENV: development
       MAIL_BRIDGE_PORT: ${MAIL_BRIDGE_PORT:-4100}
-      MAIL_APP_ORIGIN: http://localhost:${MAIL_HOST_PORT:-3002}
-      MAIL_BRIDGE_PUBLIC_ORIGIN: http://localhost:${MAIL_BRIDGE_PORT:-4100}
-      GMAIL_REDIRECT_URI: http://localhost:${MAIL_BRIDGE_PORT:-4100}/auth/gmail/callback
+      MAIL_APP_ORIGIN: https://localhost:${MAIL_HOST_PORT:-3002}
+      MAIL_BRIDGE_PUBLIC_ORIGIN: https://localhost:${MAIL_BRIDGE_PORT:-4100}
+      GMAIL_REDIRECT_URI: https://localhost:${MAIL_BRIDGE_PORT:-4100}/auth/gmail/callback
       VAULT_ADDR: ${MAIL_BRIDGE_VAULT_ADDR:-http://vault:8200}
     volumes:
       - ./apps/mail:/app
       - mail-node-modules:/app/node_modules
-    ports:
-      - "127.0.0.1:${MAIL_BRIDGE_PORT:-4100}:4100"
+    expose:
+      - "4100"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -400,12 +434,12 @@ services:
     environment:
       NODE_ENV: development
       CHOKIDAR_USEPOLLING: "true"
-      VITE_MAIL_BRIDGE_URL: http://localhost:${MAIL_BRIDGE_PORT:-4100}
+      VITE_MAIL_BRIDGE_URL: https://localhost:${MAIL_BRIDGE_PORT:-4100}
     volumes:
       - ./apps/mail:/app
       - mail-node-modules:/app/node_modules
-    ports:
-      - "127.0.0.1:${MAIL_HOST_PORT:-3002}:3002"
+    expose:
+      - "3002"
     depends_on:
       mail-bridge:
         condition: service_healthy
@@ -438,17 +472,17 @@ services:
     environment:
       NODE_ENV: development
       CALENDAR_BRIDGE_PORT: ${CALENDAR_BRIDGE_PORT:-4200}
-      CALENDAR_APP_ORIGIN: http://localhost:${CALENDAR_HOST_PORT:-3003}
-      CALENDAR_BRIDGE_PUBLIC_ORIGIN: http://localhost:${CALENDAR_BRIDGE_PORT:-4200}
-      CALENDAR_REDIRECT_URI: http://localhost:${CALENDAR_BRIDGE_PORT:-4200}/auth/google/callback
+      CALENDAR_APP_ORIGIN: https://localhost:${CALENDAR_HOST_PORT:-3003}
+      CALENDAR_BRIDGE_PUBLIC_ORIGIN: https://localhost:${CALENDAR_BRIDGE_PORT:-4200}
+      CALENDAR_REDIRECT_URI: https://localhost:${CALENDAR_BRIDGE_PORT:-4200}/auth/google/callback
       CALENDAR_BAAS_URL: http://kong:8000
-      CALENDAR_BAAS_PUBLIC_URL: http://localhost:${KONG_HTTP_PORT:-8000}
+      CALENDAR_BAAS_PUBLIC_URL: https://localhost:${KONG_HTTP_PORT:-8000}
       VAULT_ADDR: ${CALENDAR_BRIDGE_VAULT_ADDR:-http://vault:8200}
     volumes:
       - ./apps/calendar:/app
       - calendar-node-modules:/app/node_modules
-    ports:
-      - "127.0.0.1:${CALENDAR_BRIDGE_PORT:-4200}:4200"
+    expose:
+      - "4200"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -479,13 +513,13 @@ services:
     environment:
       NODE_ENV: development
       CHOKIDAR_USEPOLLING: "true"
-      VITE_CALENDAR_BRIDGE_URL: http://localhost:${CALENDAR_BRIDGE_PORT:-4200}
-      VITE_CALENDAR_BAAS_URL: http://localhost:${KONG_HTTP_PORT:-8000}
+      VITE_CALENDAR_BRIDGE_URL: https://localhost:${CALENDAR_BRIDGE_PORT:-4200}
+      VITE_CALENDAR_BAAS_URL: https://localhost:${KONG_HTTP_PORT:-8000}
     volumes:
       - ./apps/calendar:/app
       - calendar-node-modules:/app/node_modules
-    ports:
-      - "127.0.0.1:${CALENDAR_HOST_PORT:-3003}:3003"
+    expose:
+      - "3003"
     depends_on:
       calendar-bridge:
         condition: service_healthy
@@ -525,14 +559,15 @@ services:
       AUTH_GATEWAY_PORT: 8787
       PUBLIC_BAAS_URL: http://kong:8000
       OSIONOS_BRIDGE_URL: http://osionos-bridge:4000/api/auth/bridge/session
+      PUBLIC_SITE_URL: https://localhost:${OPPOSITE_OSIRIS_HOST_PORT:-4322}
       AUTH_REQUIRE_EMAIL_VERIFICATION: ${AUTH_REQUIRE_EMAIL_VERIFICATION:-false}
       PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION: ${PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION:-false}
     volumes:
       - ./:/workspace
       - opposite-osiris-node-modules:/workspace/apps/opposite-osiris/node_modules
       - mini-baas-sdk-node-modules:/workspace/apps/baas/sdk/node_modules
-    ports:
-      - "${AUTH_GATEWAY_HOST_PORT:-8787}:8787"
+    expose:
+      - "8787"
     depends_on:
       local-runtime-secrets:
         condition: service_completed_successfully
@@ -567,10 +602,10 @@ services:
       ASTRO_DEV_HOST: 0.0.0.0
       ASTRO_DEV_PORT: 4322
       ASTRO_DEV_HTTPS: "false"
-      PUBLIC_SITE_URL: http://localhost:4322
+      PUBLIC_SITE_URL: https://localhost:${OPPOSITE_OSIRIS_HOST_PORT:-4322}
       PUBLIC_BAAS_URL: /api
       PUBLIC_AUTH_GATEWAY_URL: /api/auth
-      PUBLIC_OSIONOS_APP_URL: http://localhost:3001
+      PUBLIC_OSIONOS_APP_URL: https://localhost:${OSIONOS_APP_HOST_PORT:-3001}
       PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION: ${PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION:-false}
       AUTH_REQUIRE_EMAIL_VERIFICATION: ${AUTH_REQUIRE_EMAIL_VERIFICATION:-false}
       AUTH_GATEWAY_TARGET: http://auth-gateway:8787
@@ -580,8 +615,8 @@ services:
       - ./:/workspace
       - opposite-osiris-node-modules:/workspace/apps/opposite-osiris/node_modules
       - mini-baas-sdk-node-modules:/workspace/apps/baas/sdk/node_modules
-    ports:
-      - "127.0.0.1:${OPPOSITE_OSIRIS_HOST_PORT:-4322}:4322"
+    expose:
+      - "4322"
     depends_on:
       auth-gateway:
         condition: service_healthy
@@ -615,18 +650,20 @@ services:
       NODE_ENV: test
       PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
-      PLAYGROUND_WEBSITE_URL: http://127.0.0.1:4322
-      PLAYGROUND_APP_URL: http://127.0.0.1:3001
-      PLAYGROUND_BRIDGE_URL: http://127.0.0.1:4000
-      PLAYGROUND_MAIL_URL: http://127.0.0.1:3002
-      PLAYGROUND_MAIL_BRIDGE_URL: http://127.0.0.1:4100
-      PLAYGROUND_CALENDAR_URL: http://127.0.0.1:3003
-      PLAYGROUND_CALENDAR_BRIDGE_URL: http://127.0.0.1:4200
+      PLAYGROUND_WEBSITE_URL: https://127.0.0.1:4322
+      PLAYGROUND_APP_URL: https://127.0.0.1:3001
+      PLAYGROUND_BRIDGE_URL: https://127.0.0.1:4000
+      PLAYGROUND_MAIL_URL: https://127.0.0.1:3002
+      PLAYGROUND_MAIL_BRIDGE_URL: https://127.0.0.1:4100
+      PLAYGROUND_CALENDAR_URL: https://127.0.0.1:3003
+      PLAYGROUND_CALENDAR_BRIDGE_URL: https://127.0.0.1:4200
+      NODE_EXTRA_CA_CERTS: /certs/track-binocle-local-ca.pem
       PLAYGROUND_VIEWER_DIR: /app/public/playground-simulation
       PLAYGROUND_HEADLESS: ${PLAYGROUND_HEADLESS:-1}
       PLAYGROUND_SLOWMO_MS: ${PLAYGROUND_SLOWMO_MS:-80}
     volumes:
       - ./apps/osionos/app:/app
+      - ./apps/baas/certs:/certs:ro
       - osionos-browser-test-node-modules:/app/node_modules
       - osionos-browser-test-pnpm-store:/pnpm/store
     entrypoint: ["/bin/bash", "/app/docker/services/browser-tests/entrypoint.sh"]

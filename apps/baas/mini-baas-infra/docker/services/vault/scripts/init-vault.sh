@@ -95,10 +95,17 @@ vault policy write -address="${VAULT_ADDR}" track-binocle-env-writer /vault/poli
 echo "[+] Policies written"
 
 # ── 8. Enable AppRole auth ───────────────────────────────────────
-if ! vault auth list -address="${VAULT_ADDR}" 2>/dev/null | grep -q '^approle/'; then
+AUTH_JSON=$(vault auth list -address="${VAULT_ADDR}" -format=json 2>/dev/null || echo '{}')
+if ! echo "${AUTH_JSON}" | jq -e 'has("approle/")' >/dev/null; then
   echo "[*] Enabling AppRole auth…"
-  vault auth enable -address="${VAULT_ADDR}" approle
-  echo "[+] AppRole enabled"
+  if ENABLE_AUTH_OUTPUT=$(vault auth enable -address="${VAULT_ADDR}" approle 2>&1); then
+    echo "[+] AppRole enabled"
+  elif echo "${ENABLE_AUTH_OUTPUT}" | grep -q 'path is already in use'; then
+    echo "[=] AppRole already enabled"
+  else
+    echo "${ENABLE_AUTH_OUTPUT}"
+    exit 1
+  fi
 else
   echo "[=] AppRole already enabled"
 fi

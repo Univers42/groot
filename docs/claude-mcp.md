@@ -30,15 +30,45 @@ Available tools:
 
 ## Local Services
 
-The bridge remains on `http://localhost:4000` by default. The MCP server expects the Fastify API on `http://localhost:4200` by default so it does not collide with the bridge.
+The root Docker stack exposes the browser-facing bridge/API through the local TLS proxy at `https://localhost:4000`. Inside Docker and MCP stdio processes, the bridge still speaks plain HTTP at `http://localhost:4000`; keep that internal URL for Claude MCP registrations. In the root Docker stack, `http://localhost:4200` belongs to the Calendar bridge, so osionos MCP should not use that port unless you intentionally start a separate osionos API there.
 
 Override URLs when needed:
 
 ```bash
 OSIONOS_MCP_BRIDGE_URL=http://localhost:4000 \
-OSIONOS_MCP_API_URL=http://localhost:4200 \
-pnpm --dir apps/osionos/app mcp:claude
+OSIONOS_MCP_API_URL=http://localhost:4000 \
+PATH="$HOME/.nvm/versions/node/v22.22.2/bin:$PATH" \
+node apps/osionos/app/scripts/osionos-mcp-server.mjs
 ```
+
+Register the server with Claude Code from the repository root:
+
+```bash
+PATH="$HOME/.nvm/versions/node/v22.22.2/bin:$PATH" \
+pnpm --dir apps/osionos/app install --frozen-lockfile
+
+PATH="$HOME/.nvm/versions/node/v22.22.2/bin:$PATH" \
+claude mcp add osionos \
+	-e OSIONOS_MCP_BRIDGE_URL=http://localhost:4000 \
+	-e OSIONOS_MCP_API_URL=http://localhost:4000 \
+	-- bash -lc 'PATH="$HOME/.nvm/versions/node/v22.22.2/bin:$PATH"; cd "apps/osionos/app"; exec node scripts/osionos-mcp-server.mjs'
+```
+
+On hosts where the global `claude` command is launched by an unsupported Node runtime, put the project Node 22 runtime first before invoking Claude:
+
+```bash
+PATH="$HOME/.nvm/versions/node/v22.22.2/bin:$PATH" claude --version
+```
+
+The browser Agent page calls the root Docker `osionos-bridge` service, which runs Claude Code inside the container. By default the compose stack mounts the host Node 22 Claude install and Claude config from:
+
+```bash
+CLAUDE_NODE_HOME="$HOME/.nvm/versions/node/v22.22.2"
+CLAUDE_HOME="$HOME/.claude"
+CLAUDE_CONFIG_FILE="$HOME/.claude.json"
+```
+
+Override those variables if Claude Code is installed or authenticated somewhere else on a teammate machine.
 
 For local development, start the existing embedded API on the MCP port with the existing Notion Mongo container:
 
@@ -47,7 +77,7 @@ cd apps/osionos/app/src/shared/notion-database-sys
 SHELL=/bin/sh \
 PATH="$HOME/.nvm/versions/node/v22.22.2/bin:$PATH" \
 API_HOST=127.0.0.1 \
-API_PORT=4200 \
+API_PORT=4210 \
 JWT_SECRET=dev-secret-change-in-production \
 OSIONOS_BRIDGE_SHARED_SECRET=dev-secret-change-in-production \
 MONGO_URI='mongodb://notion_user:notion_pass@localhost:37017/notion_playground_db?authSource=admin' \

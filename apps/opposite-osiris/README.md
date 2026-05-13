@@ -1,6 +1,6 @@
 # opposite-osiris
 
-Astro website for the local track-binocle pipeline. In this workspace it is run by the root Docker Compose stack at `http://localhost:4322`.
+Astro website for the local track-binocle pipeline. In this workspace it is run by the root Docker Compose stack at `https://localhost:4322` through the local TLS proxy.
 
 Do not install website dependencies on the host. The package scripts are guarded so direct host execution points back to Docker.
 
@@ -22,6 +22,6 @@ docker compose up -d --build
 
 - `/api/auth` proxies to the Docker `auth-gateway` service.
 - `/api` proxies to the Docker Kong gateway.
-- Successful login creates an osionos bridge session and redirects to `http://localhost:3001`.
+- Successful login creates an osionos bridge session and redirects to `https://localhost:3001`.
 
 The complete operating guide is [../../docs/howtouse.md](../../docs/howtouse.md).
