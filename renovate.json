@@ -1,0 +1,24 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits"
+  ],
+  "minimumReleaseAge": "3 days",
+  "rangeStrategy": "bump",
+  "dependencyDashboardApproval": true,
+  "packageRules": [
+    {
+      "description": "Delay npm and pnpm updates after registry publication",
+      "matchManagers": ["npm", "pnpm"],
+      "minimumReleaseAge": "3 days",
+      "groupName": "js dependencies"
+    },
+    {
+      "description": "Keep Docker image updates reviewable",
+      "matchManagers": ["dockerfile", "docker-compose"],
+      "groupName": "docker images"
+    }
+  ]
+}

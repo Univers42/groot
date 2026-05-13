@@ -12,6 +12,9 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
   DOCKER_BUILDKIT: 1
   COMPOSE_DOCKER_CLI_BUILD: 1
@@ -70,6 +73,8 @@ jobs:
           push: false
           no-cache: true
           tags: mini-baas/${{ matrix.service }}:ci-${{ github.sha }}
+          provenance: true
+          sbom: true
           cache-from: type=local,src=/tmp/.buildx-cache/${{ matrix.service }}
           cache-to: type=local,dest=/tmp/.buildx-cache-new/${{ matrix.service }},mode=max
 

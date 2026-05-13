@@ -90,6 +90,8 @@ fi
 echo "[*] Writing policies…"
 vault policy write -address="${VAULT_ADDR}" mini-baas /vault/policies/mini-baas.hcl
 vault policy write -address="${VAULT_ADDR}" admin /vault/policies/admin.hcl
+vault policy write -address="${VAULT_ADDR}" track-binocle-env-reader /vault/policies/track-binocle-env-reader.hcl
+vault policy write -address="${VAULT_ADDR}" track-binocle-env-writer /vault/policies/track-binocle-env-writer.hcl
 echo "[+] Policies written"
 
 # ── 8. Enable AppRole auth ───────────────────────────────────────
@@ -146,7 +148,7 @@ echo "[+] All secrets seeded"
 # ── 10. Create per-service AppRoles ────────────────────────────────
 echo "[*] Creating service AppRoles…"
 
-SERVICES="kong gotrue postgrest mongo-api adapter-registry query-router email-service storage-router permission-engine schema-service postgres db-bootstrap project-db-init pg-meta supavisor osionos-bridge osionos-app auth-gateway opposite-osiris"
+SERVICES="kong gotrue postgrest mongo-api adapter-registry query-router email-service storage-router permission-engine schema-service postgres db-bootstrap project-db-init pg-meta supavisor osionos-bridge osionos-app auth-gateway opposite-osiris mail mail-bridge calendar calendar-bridge"
 
 for svc in ${SERVICES}; do
   vault write -address="${VAULT_ADDR}" "auth/approle/role/${svc}" \

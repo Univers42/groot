@@ -37,6 +37,12 @@ make playground
 
 `make playground` opens a VS Code simulation viewer, then runs the Docker-contained Playwright scenario: open the website, create a development account, sign in, bridge into osionos, create a persisted markdown page through the osionos bridge, open Settings, open Mail and Calendar from the sidebar, and probe both service bridges. If Gmail or Google Calendar are already authorized in their ignored token files, the simulation also samples real messages/events without printing account values.
 
+## Dependency Supply Chain Controls
+
+Docker builds and CI use frozen lockfiles. npm-based apps use `npm ci --ignore-scripts`, and the local mini-BaaS SDK is built through an explicit trusted `npm run build` step instead of install-time lifecycle hooks. pnpm-based apps use `minimum-release-age=1440`, frozen lockfiles, store integrity checks, and explicit `onlyBuiltDependencies` allowlists for packages that genuinely need build scripts.
+
+Dependabot and Renovate are configured at the root so JS, Docker, and GitHub Actions updates are reviewable and delayed after publication. Docker image CI enables SBOM/provenance attestations where the existing image pipelines build through Buildx.
+
 ## Environment And Vault
 
 Runtime env files are managed by Docker-only commands. The generated `.env.example` files are grouped by required, recommended, optional, and legacy keys. Optional keys may stay commented or blank when the feature is not enabled, for example SMTP, OAuth, analytics, Sonar, or third-party API integrations.
@@ -46,18 +52,33 @@ Useful commands:
 ```sh
 make env-format
 make vault-seed
+make vault-publish
+make vault-status
+make vault-invite-token VAULT_TEAM_ROLE=reader
+make vault-invite-token VAULT_TEAM_ROLE=writer VAULT_TOKEN_TTL=8h
+make vault-fetch-shared VAULT_TOKEN_FILE=.vault/track-binocle-reader.env
+make vault-publish-shared VAULT_TOKEN_FILE=.vault/track-binocle-writer.env
+make vault-rotate-approles
 make vault-verify-approles
 make env-fetch
 make env-restore-test
+make db-password-check
+make db-password-apply
 ```
 
 `make env-format` rewrites managed env files and examples with comments and categories. Real env files comment out missing values so later Compose env files do not accidentally override earlier non-empty secrets with blanks.
 
 `make vault-seed` starts local HashiCorp Vault through the Compose `secrets` profile, initializes and unseals it, creates service AppRoles, and stores the managed env data under `secret/data/track-binocle/env/*`. Vault is exposed only on `http://127.0.0.1:8200` by default.
 
-`make vault-verify-approles` logs in with the root service AppRoles and verifies each token can read the managed Vault env secret without printing secret values. This confirms the local AppRole path for `postgres`, `db-bootstrap`, `project-db-init`, `pg-meta`, `supavisor`, `osionos-bridge`, `osionos-app`, `auth-gateway`, and `opposite-osiris`.
+`make vault-publish` updates the managed Vault env records from the ignored local env files after a maintainer changes a credential. `make vault-status` compares local and Vault key coverage without printing values.
+
+For teammates, a maintainer can run `make vault-invite-token VAULT_TEAM_ROLE=reader` to write an ignored `.vault/track-binocle-reader.env` token file, or `make vault-invite-token VAULT_TEAM_ROLE=writer VAULT_TOKEN_TTL=8h` for someone allowed to publish updated secrets. Share that file through your normal secure channel, never through Git. Invited users then run `make vault-fetch-shared VAULT_TOKEN_FILE=.vault/track-binocle-reader.env`; writers can run `make vault-publish-shared VAULT_TOKEN_FILE=.vault/track-binocle-writer.env` after updating local ignored env files.
+
+`make vault-rotate-approles` rotates service AppRole secret IDs and stores the new IDs in Vault. `make vault-verify-approles` logs in with the root service AppRoles and verifies each token can read the managed Vault env secret without printing secret values. This confirms the local AppRole path for the BaaS, osionos, website, Mail, and Calendar services.
 
 `make env-fetch` materializes the current Vault values back into the ignored local env files before the Compose stack starts. `make env-restore-test` creates `.env.bak` files, removes the managed env files, fetches them from Vault, and verifies required keys came back.
+
+If the live Postgres volume was initialized with an older password than `apps/baas/.env.local`, `make db-password-check` detects the drift and `make db-password-apply` applies the current ignored env password to the live Postgres role without printing it. After changing database credentials, run `make db-password-apply`, `make vault-publish`, and then `make env-fetch` on other machines.
 
 ## osionos Mail And Calendar
 

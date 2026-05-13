@@ -9,8 +9,12 @@ const command = process.argv[2] ?? 'help';
 const vaultAddr = process.env.VAULT_ADDR ?? 'http://127.0.0.1:8200';
 const vaultKeysFile = process.env.VAULT_KEYS_FILE ?? '/vault/data/.vault-keys.json';
 const kvPrefix = process.env.VAULT_ENV_PREFIX ?? 'secret/data/track-binocle/env';
+const vaultPolicyDir = resolve(repoRoot, 'apps/baas/mini-baas-infra/docker/services/vault/policies');
 const categories = ['required', 'recommended', 'optional', 'legacy'];
 const serviceAppRoles = [
+  'kong',
+  'gotrue',
+  'postgrest',
   'postgres',
   'db-bootstrap',
   'project-db-init',
@@ -20,6 +24,14 @@ const serviceAppRoles = [
   'osionos-app',
   'auth-gateway',
   'opposite-osiris',
+  'mail',
+  'mail-bridge',
+  'calendar',
+  'calendar-bridge',
+];
+const teamPolicies = [
+  { role: 'reader', name: 'track-binocle-env-reader', file: 'track-binocle-env-reader.hcl' },
+  { role: 'writer', name: 'track-binocle-env-writer', file: 'track-binocle-env-writer.hcl' },
 ];
 
 const managedFiles = [
@@ -52,6 +64,24 @@ const managedFiles = [
     optional: ['UNSPLASH_ACCESS_KEY', 'SONAR_PORT', 'DOCKER_USER', 'DOCKER_PAT', 'GITHUB_USER', 'GITHUB_PAT'],
   },
   {
+    id: 'mail',
+    title: 'osionos Mail and Gmail bridge runtime',
+    envPath: 'apps/mail/.env.local',
+    examplePath: 'apps/mail/.env.example',
+    fallbackEnvPaths: ['apps/mail/.env'],
+    recommended: ['MAIL_BRIDGE_PORT', 'MAIL_APP_ORIGIN', 'MAIL_BRIDGE_PUBLIC_ORIGIN', 'GMAIL_REDIRECT_URI', 'GMAIL_SYNC_LIMIT', 'GMAIL_MAX_SYNC_LIMIT', 'GMAIL_LIST_PAGE_SIZE', 'GMAIL_DETAIL_BATCH_SIZE', 'VITE_GMAIL_SYNC_LIMIT', 'VITE_GMAIL_SYNC_PAGE_SIZE'],
+    optional: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GMAIL_CALLBACK_PATHS', 'MAIL_BRIDGE_VAULT_ENABLED', 'VAULT_ADDR', 'MAIL_BRIDGE_VAULT_OAUTH_PATH', 'VAULT_TOKEN', 'VAULT_ROLE_ID', 'VAULT_SECRET_ID'],
+  },
+  {
+    id: 'calendar',
+    title: 'osionos Calendar and Google Calendar bridge runtime',
+    envPath: 'apps/calendar/.env.local',
+    examplePath: 'apps/calendar/.env.example',
+    fallbackEnvPaths: ['apps/calendar/.env', 'apps/mail/.env', 'apps/baas/.env.local'],
+    recommended: ['CALENDAR_BRIDGE_PORT', 'CALENDAR_APP_ORIGIN', 'CALENDAR_BRIDGE_PUBLIC_ORIGIN', 'CALENDAR_REDIRECT_URI', 'CALENDAR_BAAS_URL', 'CALENDAR_BAAS_PUBLIC_URL', 'CALENDAR_BRIDGE_REQUIRE_BAAS', 'CALENDAR_EVENTS_PAGE_SIZE', 'VITE_CALENDAR_BRIDGE_URL', 'VITE_CALENDAR_BAAS_URL'],
+    optional: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'CALENDAR_CALLBACK_PATHS', 'CALENDAR_BAAS_SERVICE_KEY', 'CALENDAR_BRIDGE_VAULT_ENABLED', 'CALENDAR_BRIDGE_VAULT_OAUTH_PATH', 'VAULT_ADDR', 'VAULT_TOKEN', 'VAULT_ROLE_ID', 'VAULT_SECRET_ID'],
+  },
+  {
     id: 'baas',
     title: 'Root mini-BaaS runtime',
     envPath: 'apps/baas/.env.local',
@@ -64,6 +94,7 @@ const managedFiles = [
     title: 'Standalone mini-baas-infra runtime',
     envPath: 'apps/baas/mini-baas-infra/.env',
     examplePath: 'apps/baas/mini-baas-infra/.env.example',
+    fallbackEnvPaths: ['apps/baas/.env.local'],
     required: ['POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB', 'DATABASE_URL', 'PGRST_DB_URI', 'PGRST_DB_ANON_ROLE', 'PGRST_DB_SCHEMA', 'JWT_SECRET', 'ANON_KEY', 'SERVICE_ROLE_KEY', 'KONG_PUBLIC_API_KEY', 'KONG_SERVICE_API_KEY'],
     recommended: ['API_EXTERNAL_URL', 'PUBLIC_SITE_URL', 'GOTRUE_SITE_URL', 'GOTRUE_URI_ALLOW_LIST', 'KONG_CORS_ORIGIN_APP', 'KONG_CORS_ORIGIN_FRONTEND', 'KONG_CORS_ORIGIN_PLAYGROUND', 'KONG_CORS_ORIGIN_STUDIO'],
   },
@@ -77,7 +108,7 @@ const managedFiles = [
 ];
 
 const optionalPatterns = [
-  /^SMTP_/, /^GOTRUE_SMTP_/, /^TURNSTILE_/, /^PUBLIC_TURNSTILE_/, /^GOOGLE_/, /^GITHUB_/, /^FORTYTWO_/, /^LLM_/, /^SONAR/, /^UNSPLASH_/, /^DOCKER_/, /^MINIO_/, /^MONGO_/, /^AI_/, /^ANALYTICS_/, /^GDPR_/, /^NEWSLETTER_/, /^LOG_/, /^RUST_LOG$/, /^WAF_/, /^STUDIO_/, /^SUPABASE_/, /^SESSION_/, /^CSV_/, /^JSON_/, /^REDIS_/, /^PLAYGROUND_/, /^SRC_/, /^SYNC_/, /^CONTRACT_/, /^ADAPTER_REGISTRY_/, /^QUERY_/, /^STORAGE_/, /^PERMISSION_/, /^SCHEMA_/, /^VITE_BAAS_/, /^VITE_ALLOW_OFFLINE_MODE$/,
+  /^SMTP_/, /^GOTRUE_SMTP_/, /^TURNSTILE_/, /^PUBLIC_TURNSTILE_/, /^GOOGLE_/, /^GITHUB_/, /^FORTYTWO_/, /^GMAIL_/, /^MAIL_/, /^CALENDAR_/, /^LLM_/, /^SONAR/, /^UNSPLASH_/, /^DOCKER_/, /^MINIO_/, /^MONGO_/, /^AI_/, /^ANALYTICS_/, /^GDPR_/, /^NEWSLETTER_/, /^LOG_/, /^RUST_LOG$/, /^WAF_/, /^STUDIO_/, /^SUPABASE_/, /^SESSION_/, /^CSV_/, /^JSON_/, /^REDIS_/, /^PLAYGROUND_/, /^SRC_/, /^SYNC_/, /^CONTRACT_/, /^ADAPTER_REGISTRY_/, /^QUERY_/, /^STORAGE_/, /^PERMISSION_/, /^SCHEMA_/, /^VITE_BAAS_/, /^VITE_ALLOW_OFFLINE_MODE$/,
 ];
 
 const secretPatterns = [/SECRET/, /TOKEN/, /PASSWORD/, /PASS$/, /_KEY$/, /PAT$/, /JWT/];
@@ -94,7 +125,27 @@ const examples = {
   ASTRO_DEV_HTTPS_KEY: '',
   ASTRO_DEV_PORT: '4322',
   AUTH_REQUIRE_EMAIL_VERIFICATION: 'false',
+  CALENDAR_APP_ORIGIN: 'http://localhost:3003',
+  CALENDAR_BAAS_PUBLIC_URL: 'http://localhost:8000',
+  CALENDAR_BAAS_SERVICE_KEY: '',
+  CALENDAR_BAAS_URL: 'http://localhost:8000',
+  CALENDAR_BRIDGE_PORT: '4200',
+  CALENDAR_BRIDGE_PUBLIC_ORIGIN: 'http://localhost:4200',
+  CALENDAR_BRIDGE_REQUIRE_BAAS: 'false',
+  CALENDAR_BRIDGE_VAULT_ENABLED: 'false',
+  CALENDAR_BRIDGE_VAULT_OAUTH_PATH: 'secret/data/mini-baas/oauth',
+  CALENDAR_CALLBACK_PATHS: '',
+  CALENDAR_EVENTS_PAGE_SIZE: '2500',
+  CALENDAR_REDIRECT_URI: 'http://localhost:4200/auth/google/callback',
   DATABASE_URL: 'postgres://postgres:replace-with-postgres-secret@postgres:5432/postgres',
+  GMAIL_CALLBACK_PATHS: '',
+  GMAIL_DETAIL_BATCH_SIZE: '20',
+  GMAIL_LIST_PAGE_SIZE: '500',
+  GMAIL_MAX_SYNC_LIMIT: '5000',
+  GMAIL_REDIRECT_URI: 'http://localhost:4100/auth/gmail/callback',
+  GMAIL_SYNC_LIMIT: '2000',
+  GOOGLE_CLIENT_ID: '',
+  GOOGLE_CLIENT_SECRET: '',
   GOTRUE_DB_DATABASE_URL: 'postgres://postgres:replace-with-postgres-secret@postgres:5432/postgres',
   GOTRUE_JWT_SECRET: 'replace-with-jwt-secret',
   GOTRUE_MAILER_AUTOCONFIRM: 'true',
@@ -111,6 +162,11 @@ const examples = {
   KONG_CORS_ORIGIN_FRONTEND: 'http://localhost:4322',
   KONG_CORS_ORIGIN_PLAYGROUND: 'http://localhost:3100',
   KONG_CORS_ORIGIN_STUDIO: 'http://localhost:3001',
+  MAIL_APP_ORIGIN: 'http://localhost:3002',
+  MAIL_BRIDGE_PORT: '4100',
+  MAIL_BRIDGE_PUBLIC_ORIGIN: 'http://localhost:4100',
+  MAIL_BRIDGE_VAULT_ENABLED: 'false',
+  MAIL_BRIDGE_VAULT_OAUTH_PATH: 'secret/data/mini-baas/oauth',
   NEXT_PUBLIC_BAAS_URL: '/api',
   OSIONOS_ALLOWED_ORIGIN: 'http://localhost:3001',
   OSIONOS_APP_URL: 'http://localhost:3001',
@@ -148,8 +204,15 @@ const examples = {
   TURNSTILE_BYPASS_LOCAL: 'true',
   VAULT_ADDR: 'http://vault:8200',
   VAULT_ENV_PREFIX: 'secret/data/track-binocle/env',
+  VAULT_ROLE_ID: '',
+  VAULT_SECRET_ID: '',
+  VAULT_TOKEN: '',
   VITE_API_URL: 'http://localhost:4000',
   VITE_BAAS_ENABLED: 'false',
+  VITE_CALENDAR_BAAS_URL: 'http://localhost:8000',
+  VITE_CALENDAR_BRIDGE_URL: 'http://localhost:4200',
+  VITE_GMAIL_SYNC_LIMIT: '2000',
+  VITE_GMAIL_SYNC_PAGE_SIZE: '100',
   VITE_PORT: '3001',
   VITE_PRISMATICA_URL: 'http://localhost:4322',
   VITE_REQUIRE_BRIDGE_SESSION: 'true',
@@ -159,8 +222,12 @@ const descriptions = {
   ANON_KEY: 'Public anon JWT used by browser and gateway calls.',
   DATABASE_URL: 'Internal Postgres URL used by BaaS services.',
   JWT_SECRET: 'Signing secret shared by GoTrue, PostgREST, Kong, and generated JWTs.',
+  GOOGLE_CLIENT_ID: 'Google OAuth client ID used by Mail and Calendar bridges.',
+  GOOGLE_CLIENT_SECRET: 'Google OAuth client secret used by Mail and Calendar bridges.',
   KONG_PUBLIC_API_KEY: 'Public API key injected into Kong routing configuration.',
   KONG_SERVICE_API_KEY: 'Privileged service key injected into Kong routing configuration.',
+  MAIL_BRIDGE_VAULT_ENABLED: 'Enable Mail bridge OAuth credential loading from Vault.',
+  CALENDAR_BRIDGE_VAULT_ENABLED: 'Enable Calendar bridge OAuth credential loading from Vault.',
   OSIONOS_BRIDGE_SHARED_SECRET: 'Shared secret used by the website auth gateway to request osionos bridge tokens.',
   OSIONOS_APP_SESSION_SECRET: 'Secret used by osionos to sign local app sessions.',
   OSIONOS_BRIDGE_EMAIL_HASH_SALT: 'Salt used to hash bridged email identities before persistence.',
@@ -168,6 +235,9 @@ const descriptions = {
   OSIONOS_ALLOWED_ORIGIN: 'Origin accepted by the osionos bridge API.',
   PGRST_DB_URI: 'PostgREST database connection string.',
   SERVICE_ROLE_KEY: 'Privileged JWT used by trusted server-side components only.',
+  VAULT_ROLE_ID: 'Vault AppRole role ID for services or invited collaborators.',
+  VAULT_SECRET_ID: 'Vault AppRole secret ID for services or invited collaborators.',
+  VAULT_TOKEN: 'Short-lived Vault token for fetching or publishing managed environment data.',
   VAULT_ENC_KEY: 'Local encryption material used by Vault-backed BaaS helpers.',
 };
 
@@ -342,6 +412,17 @@ function formatLocal() {
   }
 }
 
+function valuesForConfig(config) {
+  const values = parseEnv(config.envPath ? absolute(config.envPath) : '');
+  for (const fallbackPath of config.fallbackEnvPaths ?? []) {
+    for (const [key, value] of parseEnv(absolute(fallbackPath)).entries()) {
+      if (!values.get(key)) values.set(key, value);
+    }
+  }
+  if (config.id === 'mini-baas-infra' && !values.get('PGRST_DB_SCHEMA')) values.set('PGRST_DB_SCHEMA', 'public');
+  return values;
+}
+
 function tokenFromKeysFile() {
   if (process.env.VAULT_TOKEN) return process.env.VAULT_TOKEN;
   if (existsSync(vaultKeysFile)) {
@@ -376,18 +457,110 @@ async function ensureKv() {
   }
 }
 
+async function ensureKvWhenAllowed() {
+  try {
+    await ensureKv();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[vault] skipped KV mount check; continuing with the existing secret/ mount (${message})`);
+  }
+}
+
 function envData(config) {
-  const values = parseEnv(absolute(config.envPath));
+  const values = valuesForConfig(config);
   const data = {};
   for (const key of listKeys(config)) data[key] = values.get(key) ?? '';
   return data;
 }
 
 async function seedVault() {
-  await ensureKv();
+  await ensureKvWhenAllowed();
   for (const config of managedFiles.filter((item) => item.envPath)) {
     await vaultRequest('POST', `${kvPrefix}/${config.id}`, { data: envData(config) });
     console.log(`[vault] seeded ${config.id}`);
+  }
+}
+
+function countValues(values) {
+  return Object.values(values).filter((value) => value !== undefined && value !== null && String(value) !== '').length;
+}
+
+async function statusVault() {
+  for (const config of managedFiles.filter((item) => item.envPath)) {
+    const keys = listKeys(config);
+    const localValues = valuesForConfig(config);
+    const payload = await vaultRequest('GET', `${kvPrefix}/${config.id}`);
+    const vaultValues = payload?.data?.data ?? {};
+    const missingLocalRequired = (config.required ?? []).filter((key) => !localValues.get(key));
+    const missingVaultRequired = (config.required ?? []).filter((key) => !vaultValues[key]);
+    const localCount = keys.filter((key) => localValues.get(key)).length;
+    console.log(`[vault] ${config.id}: local ${localCount}/${keys.length}, vault ${countValues(vaultValues)}/${keys.length}, missing required local=${missingLocalRequired.length}, vault=${missingVaultRequired.length}`);
+  }
+}
+
+async function syncTeamPolicies() {
+  for (const policy of teamPolicies) {
+    const policyPath = resolve(vaultPolicyDir, policy.file);
+    const policyText = readFileSync(policyPath, 'utf8');
+    await vaultRequest('PUT', `sys/policies/acl/${policy.name}`, { policy: policyText });
+    console.log(`[vault] policy ${policy.name} synced`);
+  }
+}
+
+async function createTeamToken() {
+  const role = process.env.VAULT_TEAM_ROLE ?? 'reader';
+  const policy = teamPolicies.find((item) => item.role === role);
+  if (!policy) throw new Error('VAULT_TEAM_ROLE must be reader or writer');
+
+  await syncTeamPolicies();
+
+  const ttl = process.env.VAULT_TOKEN_TTL ?? (role === 'writer' ? '8h' : '24h');
+  const response = await vaultRequest('POST', 'auth/token/create', {
+    policies: [policy.name],
+    ttl,
+    renewable: false,
+    metadata: {
+      project: 'track-binocle',
+      role,
+    },
+  });
+  const clientToken = response?.auth?.client_token;
+  if (!clientToken) throw new Error('Vault token creation did not return a client token');
+
+  const tokenFile = absolute(process.env.VAULT_TEAM_TOKEN_FILE ?? `.vault/track-binocle-${role}.env`);
+  const publicVaultAddr = process.env.VAULT_PUBLIC_ADDR ?? vaultAddr;
+  mkdirSync(dirname(tokenFile), { recursive: true, mode: 0o700 });
+  writeFileSync(tokenFile, [
+    '# Track Binocle Vault invite token. Keep this file private.',
+    serialize('VAULT_ADDR', publicVaultAddr),
+    serialize('VAULT_TOKEN', clientToken),
+    serialize('VAULT_ENV_PREFIX', kvPrefix),
+    '',
+  ].join('\n'), { mode: 0o600 });
+  const repoPrefix = `${repoRoot}/`;
+  const tokenDisplayPath = tokenFile.startsWith(repoPrefix) ? tokenFile.slice(repoPrefix.length) : tokenFile;
+  console.log(`[vault] wrote ${tokenDisplayPath} with ${role} policy and ttl ${ttl}`);
+}
+
+async function rotateAppRoles() {
+  for (const service of serviceAppRoles) {
+    await vaultRequest('POST', `auth/approle/role/${service}`, {
+      token_policies: 'mini-baas',
+      token_ttl: '1h',
+      token_max_ttl: '4h',
+      secret_id_ttl: '0',
+    });
+
+    const rolePayload = await vaultRequest('GET', `auth/approle/role/${service}/role-id`);
+    const roleId = rolePayload?.data?.role_id;
+    const secretPayload = await vaultRequest('POST', `auth/approle/role/${service}/secret-id`);
+    const secretId = secretPayload?.data?.secret_id;
+    if (!roleId || !secretId) throw new Error(`Failed to rotate AppRole credentials for ${service}`);
+
+    await vaultRequest('POST', `secret/data/mini-baas/approle/${service}`, {
+      data: { role_id: roleId, secret_id: secretId },
+    });
+    console.log(`[vault] AppRole ${service} rotated`);
   }
 }
 
@@ -454,8 +627,20 @@ if (command === 'format') {
   formatLocal();
 } else if (command === 'seed') {
   await seedVault();
+} else if (command === 'publish') {
+  await seedVault();
 } else if (command === 'fetch') {
   await fetchVault();
+} else if (command === 'status') {
+  await statusVault();
+} else if (command === 'validate') {
+  verifyRequiredKeys();
+} else if (command === 'sync-policies') {
+  await syncTeamPolicies();
+} else if (command === 'team-token') {
+  await createTeamToken();
+} else if (command === 'rotate-approles') {
+  await rotateAppRoles();
 } else if (command === 'backup') {
   backupEnvFiles();
 } else if (command === 'roundtrip') {
@@ -463,5 +648,5 @@ if (command === 'format') {
 } else if (command === 'verify-approles') {
   await verifyAppRoles();
 } else {
-  console.log('Usage: node apps/baas/scripts/vault-env.mjs <format|seed|fetch|backup|roundtrip|verify-approles>');
+  console.log('Usage: node apps/baas/scripts/vault-env.mjs <format|seed|publish|fetch|status|validate|backup|roundtrip|sync-policies|team-token|rotate-approles|verify-approles>');
 }

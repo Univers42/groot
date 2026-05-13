@@ -1,0 +1,62 @@
+name: Supply Chain
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supply-chain-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  npm-frozen-installs:
+    name: npm frozen installs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify npm lockfiles without lifecycle scripts
+        run: |
+          set -euo pipefail
+          for dir in apps/mail apps/calendar apps/osionos/app/src/shared/lib/markengine; do
+            echo "checking ${dir}"
+            (cd "${dir}" && npm ci --ignore-scripts)
+          done
+          (cd apps/baas/sdk && npm ci --ignore-scripts && npm run build)
+          (cd apps/opposite-osiris && npm ci --ignore-scripts)
+
+  pnpm-frozen-installs:
+    name: pnpm frozen installs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Enable pinned pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.32.1 --activate
+
+      - name: Verify pnpm lockfiles with approved build scripts only
+        run: |
+          set -euo pipefail
+          for dir in apps/osionos/app apps/osionos/app/src/shared/notion-database-sys; do
+            echo "checking ${dir}"
+            (cd "${dir}" && pnpm install --frozen-lockfile --prefer-offline)
+          done

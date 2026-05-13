@@ -1,0 +1,83 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /apps/mail
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      mail-js:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: /apps/calendar
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      calendar-js:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: /apps/opposite-osiris
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      website-js:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: /apps/baas/sdk
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      sdk-js:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: /apps/osionos/app
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      osionos-pnpm:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: /apps/osionos/app/src/shared/notion-database-sys
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      notion-db-pnpm:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: /apps/osionos/app/src/shared/lib/markengine
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      markengine-js:
+        patterns:
+          - "*"
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

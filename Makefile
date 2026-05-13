@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/12 15:17:14 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/13 14:47:53 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -39,6 +39,11 @@ VSCODE_CLI ?= /usr/bin/code
 CURL_HEALTH := curl --retry 30 --retry-delay 2 --retry-all-errors --retry-connrefused -fsS
 VAULT_COMPOSE := docker compose --profile secrets
 VAULT_ENV_CMD := $(VAULT_COMPOSE) run --rm vault-env node apps/baas/scripts/vault-env.mjs
+VAULT_TEAM_ROLE ?= reader
+VAULT_TOKEN_TTL ?= 24h
+VAULT_TEAM_TOKEN_FILE ?= .vault/track-binocle-$(VAULT_TEAM_ROLE).env
+VAULT_TOKEN_FILE ?= .vault/track-binocle-reader.env
+VAULT_PUBLIC_ADDR ?= http://vault:8200
 HOST_UID := $(shell id -u)
 HOST_GID := $(shell id -g)
 export HOST_UID HOST_GID
@@ -74,6 +79,50 @@ vault-up:
 vault-seed: vault-up
 	$(VAULT_ENV_CMD) seed
 
+vault-publish: vault-up
+## Publish the current managed local env files into Vault without printing values.
+	$(VAULT_ENV_CMD) publish
+
+vault-status: vault-up
+## Compare local and Vault managed env key coverage without printing secret values.
+	$(VAULT_ENV_CMD) status
+
+vault-policy-sync: vault-up
+## Sync limited reader/writer policies for invited team secret access.
+	$(VAULT_ENV_CMD) sync-policies
+
+vault-invite-token: vault-policy-sync
+## Create an ignored .vault invite token file. Use VAULT_TEAM_ROLE=reader|writer.
+	$(VAULT_COMPOSE) run --rm -e VAULT_TEAM_ROLE='$(VAULT_TEAM_ROLE)' -e VAULT_TOKEN_TTL='$(VAULT_TOKEN_TTL)' -e VAULT_TEAM_TOKEN_FILE='$(VAULT_TEAM_TOKEN_FILE)' -e VAULT_PUBLIC_ADDR='$(VAULT_PUBLIC_ADDR)' vault-env node apps/baas/scripts/vault-env.mjs team-token
+
+vault-fetch-shared:
+## Fetch managed env files with VAULT_TOKEN or VAULT_TOKEN_FILE from an invited user.
+	@set -eu; \
+	if [[ -f '$(VAULT_TOKEN_FILE)' ]]; then set -a; . '$(VAULT_TOKEN_FILE)'; set +a; fi; \
+	: "$${VAULT_TOKEN:?Set VAULT_TOKEN or provide VAULT_TOKEN_FILE=$(VAULT_TOKEN_FILE)}"; \
+	: "$${VAULT_ADDR:?Set VAULT_ADDR or provide VAULT_TOKEN_FILE=$(VAULT_TOKEN_FILE)}"; \
+	$(VAULT_COMPOSE) run --rm -e VAULT_TOKEN -e VAULT_ADDR -e VAULT_ENV_PREFIX vault-env node apps/baas/scripts/vault-env.mjs fetch
+
+vault-publish-shared:
+## Publish managed env files with a writer VAULT_TOKEN or writer VAULT_TOKEN_FILE.
+	@set -eu; \
+	if [[ -f '$(VAULT_TOKEN_FILE)' ]]; then set -a; . '$(VAULT_TOKEN_FILE)'; set +a; fi; \
+	: "$${VAULT_TOKEN:?Set a writer VAULT_TOKEN or provide VAULT_TOKEN_FILE=.vault/track-binocle-writer.env}"; \
+	: "$${VAULT_ADDR:?Set VAULT_ADDR or provide VAULT_TOKEN_FILE}"; \
+	$(VAULT_COMPOSE) run --rm -e VAULT_TOKEN -e VAULT_ADDR -e VAULT_ENV_PREFIX vault-env node apps/baas/scripts/vault-env.mjs publish
+
+vault-status-shared:
+## Check managed Vault env coverage with an invited reader or writer token.
+	@set -eu; \
+	if [[ -f '$(VAULT_TOKEN_FILE)' ]]; then set -a; . '$(VAULT_TOKEN_FILE)'; set +a; fi; \
+	: "$${VAULT_TOKEN:?Set VAULT_TOKEN or provide VAULT_TOKEN_FILE=$(VAULT_TOKEN_FILE)}"; \
+	: "$${VAULT_ADDR:?Set VAULT_ADDR or provide VAULT_TOKEN_FILE=$(VAULT_TOKEN_FILE)}"; \
+	$(VAULT_COMPOSE) run --rm -e VAULT_TOKEN -e VAULT_ADDR -e VAULT_ENV_PREFIX vault-env node apps/baas/scripts/vault-env.mjs status
+
+vault-rotate-approles: vault-up
+## Rotate service AppRole secret IDs and store the new IDs in Vault.
+	$(VAULT_ENV_CMD) rotate-approles
+
 vault-verify-approles: vault-seed
 	$(VAULT_ENV_CMD) verify-approles
 
@@ -86,13 +135,25 @@ env-backup:
 env-restore-test: vault-seed
 	$(VAULT_ENV_CMD) roundtrip
 
+db-password-check:
+## Verify apps/baas/.env.local matches the live Postgres password without printing it.
+	@set -eu; set -a; . apps/baas/.env.local; set +a; \
+	docker compose exec -T -e PGPASSWORD="$$POSTGRES_PASSWORD" postgres psql -U "$${POSTGRES_USER:-postgres}" -d "$${POSTGRES_DB:-postgres}" -tAc 'select 1' >/dev/null; \
+	echo 'postgres-password-ok'
+
+db-password-apply:
+## Apply POSTGRES_PASSWORD from apps/baas/.env.local to the live Postgres role.
+	@set -eu; set -a; . apps/baas/.env.local; set +a; \
+	docker compose exec -T -u postgres -e POSTGRES_TARGET_USER="$${POSTGRES_USER:-postgres}" -e POSTGRES_TARGET_PASSWORD="$$POSTGRES_PASSWORD" -e POSTGRES_TARGET_DB="$${POSTGRES_DB:-postgres}" postgres sh -s < apps/baas/scripts/sync-postgres-password.sh; \
+	echo 'postgres-password-updated'
+
 up:
 ## Build and start every service in the root Docker Compose graph.
 	docker compose up -d --build --wait
 
 app-images:
 ## Build the local Docker images for the website, osionos, Mail, Calendar, bridges, and BaaS gateway.
-	docker compose build kong osionos-app mail mail-bridge calendar calendar-bridge auth-gateway opposite-osiris opposite-osiris-deps playground-simulation
+	docker compose --profile testing build kong osionos-app mail mail-bridge calendar calendar-bridge auth-gateway opposite-osiris opposite-osiris-deps playground-simulation
 
 app-login:
 ## Log in to DockerHub using DOCKER_USER/DOCKER_PAT from the shell or ignored env files.
@@ -198,7 +259,7 @@ showcase:
 
 playground: healthcheck playground-preview
 ## Run the Docker Playwright user flow and app-service integration simulation.
-	docker compose run --rm --build playground-simulation
+	docker compose --profile testing run --rm --build playground-simulation
 	$(MAKE) showcase
 
 playground-preview:
@@ -296,4 +357,4 @@ docker_reclaim_cache:
 ## Remove BuildKit/buildx cache only.
 	docker builder prune -a -f
 
-.PHONY: help all bootstrap env-format vault-up vault-seed vault-verify-approles env-fetch env-backup env-restore-test up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache
+.PHONY: help all bootstrap env-format vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fetch-shared vault-publish-shared vault-status-shared vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache

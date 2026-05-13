@@ -10,7 +10,7 @@ ARG APP=adapter-registry
 FROM node:${NODE_VERSION}-alpine AS deps
 WORKDIR /app
 COPY --link package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --ignore-scripts
 
 # ─── Stage 2: Build the specific app ─────────────────────────────
 FROM deps AS build
@@ -31,7 +31,7 @@ WORKDIR /app
 
 # Install production-only deps
 COPY --link package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
 # Copy compiled output
 COPY --from=build --chown=appuser:appgroup --chmod=0555 /app/dist/ ./dist/
