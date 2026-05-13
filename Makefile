@@ -18,6 +18,7 @@ BUILDKIT_PROGRESS ?= plain
 export COMPOSE_PROGRESS BUILDKIT_PROGRESS
 DOCKER_PULL_ATTEMPTS ?= 2
 DOCKER_PULL_TIMEOUT ?= 180
+DOCKER_PULL_KILL_AFTER ?= 15
 VERSION ?=
 BAAS_VERSION ?= $(if $(VERSION),$(if $(filter v%,$(VERSION)),$(VERSION),v$(VERSION)),v$(shell date +%F))
 APP_VERSION ?= $(if $(VERSION),$(if $(filter v%,$(VERSION)),$(VERSION),v$(VERSION)),v$(shell date +%F))
@@ -174,13 +175,13 @@ docker-prefetch-images:
 		attempt=1; \
 		while [ "$$attempt" -le '$(DOCKER_PULL_ATTEMPTS)' ]; do \
 			echo "[docker] pulling $$mirror for $$target (attempt $$attempt/$(DOCKER_PULL_ATTEMPTS), timeout $(DOCKER_PULL_TIMEOUT)s)"; \
-			if timeout '$(DOCKER_PULL_TIMEOUT)' docker pull "$$mirror"; then docker tag "$$mirror" "$$target"; return 0; fi; \
+			if timeout --kill-after='$(DOCKER_PULL_KILL_AFTER)s' '$(DOCKER_PULL_TIMEOUT)s' docker pull "$$mirror"; then docker tag "$$mirror" "$$target"; return 0; fi; \
 			attempt=$$((attempt + 1)); \
 		done; \
 		attempt=1; \
 		while [ "$$attempt" -le '$(DOCKER_PULL_ATTEMPTS)' ]; do \
 			echo "[docker] pulling $$target directly (attempt $$attempt/$(DOCKER_PULL_ATTEMPTS), timeout $(DOCKER_PULL_TIMEOUT)s)"; \
-			if timeout '$(DOCKER_PULL_TIMEOUT)' docker pull "$$target"; then return 0; fi; \
+			if timeout --kill-after='$(DOCKER_PULL_KILL_AFTER)s' '$(DOCKER_PULL_TIMEOUT)s' docker pull "$$target"; then return 0; fi; \
 			attempt=$$((attempt + 1)); \
 		done; \
 		echo "[docker] failed to pull $$target"; exit 1; \
@@ -199,8 +200,8 @@ docker-prefetch-images:
 	pull_image supabase/postgres-meta:v0.91.0 public.ecr.aws/supabase/postgres-meta:v0.91.0; \
 	pull_image supabase/supavisor:2.7.4 public.ecr.aws/supabase/supavisor:2.7.4
 
-vault-up: certs
-	$(VAULT_COMPOSE) up -d --build vault local-https-proxy
+vault-up: certs docker-prefetch-images
+	$(VAULT_COMPOSE) up -d --build --pull never vault local-https-proxy
 	$(VAULT_COMPOSE) run --rm --build vault-init
 
 vault-seed: vault-up
@@ -353,9 +354,9 @@ db-password-apply:
 	docker compose exec -T -u postgres -e POSTGRES_TARGET_USER="$${POSTGRES_USER:-postgres}" -e POSTGRES_TARGET_PASSWORD="$$POSTGRES_PASSWORD" -e POSTGRES_TARGET_DB="$${POSTGRES_DB:-postgres}" postgres sh -s < apps/baas/scripts/sync-postgres-password.sh; \
 	echo 'postgres-password-updated'
 
-up: certs
+up: certs docker-prefetch-images
 ## Build and start every service in the root Docker Compose graph.
-	docker compose up -d --build --wait
+	docker compose up -d --build --pull never --wait
 
 app-images:
 ## Build the local Docker images for the website, osionos, Mail, Calendar, bridges, and BaaS gateway.
@@ -410,9 +411,9 @@ app-images-push: app-images app-login
 		echo "pushed $$remote_repo:$(APP_VERSION) and latest"; \
 	done
 
-mail-up:
+mail-up: docker-prefetch-images
 ## Start osionos Mail and the Gmail bridge with Docker Compose.
-	docker compose up -d --build mail mail-bridge
+	docker compose up -d --build --pull never mail mail-bridge
 
 mail-logs:
 ## Follow osionos Mail and Gmail bridge logs.
@@ -422,9 +423,9 @@ mail-down:
 ## Stop osionos Mail and the Gmail bridge containers.
 	docker compose stop mail mail-bridge
 
-calendar-up:
+calendar-up: docker-prefetch-images
 ## Start osionos Calendar and the Google Calendar bridge with Docker Compose.
-	docker compose up -d --build calendar calendar-bridge
+	docker compose up -d --build --pull never calendar calendar-bridge
 
 calendar-logs:
 ## Follow osionos Calendar and Google Calendar bridge logs.
