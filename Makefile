@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/13 23:45:14 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/14 00:10:17 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -15,7 +15,8 @@ SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 COMPOSE_PROGRESS ?= plain
 BUILDKIT_PROGRESS ?= plain
-export COMPOSE_PROGRESS BUILDKIT_PROGRESS
+BUILDX_BUILDER ?= default
+export COMPOSE_PROGRESS BUILDKIT_PROGRESS BUILDX_BUILDER
 DOCKER_PULL_ATTEMPTS ?= 2
 DOCKER_PULL_TIMEOUT ?= 180
 DOCKER_PULL_KILL_AFTER ?= 15

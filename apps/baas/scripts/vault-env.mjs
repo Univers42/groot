@@ -59,6 +59,7 @@ const managedFiles = [
     title: 'osionos app and bridge API',
     envPath: 'apps/osionos/app/.env',
     examplePath: 'apps/osionos/app/.env.example',
+    writeExample: false,
     required: ['VITE_API_URL', 'VITE_REQUIRE_BRIDGE_SESSION', 'VITE_PRISMATICA_URL'],
     recommended: ['VITE_PORT', 'OSIONOS_BRIDGE_PORT', 'OSIONOS_APP_URL', 'OSIONOS_ALLOWED_ORIGIN', 'OSIONOS_BRIDGE_PERSISTENCE', 'OSIONOS_BRIDGE_REQUIRE_BAAS', 'OSIONOS_BAAS_URL'],
     optional: ['UNSPLASH_ACCESS_KEY', 'SONAR_PORT', 'DOCKER_USER', 'DOCKER_PAT', 'GITHUB_USER', 'GITHUB_PAT'],
@@ -68,6 +69,7 @@ const managedFiles = [
     title: 'osionos Mail and Gmail bridge runtime',
     envPath: 'apps/mail/.env.local',
     examplePath: 'apps/mail/.env.example',
+    writeExample: false,
     fallbackEnvPaths: ['apps/mail/.env'],
     required: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'],
     recommended: ['MAIL_BRIDGE_PORT', 'MAIL_APP_ORIGIN', 'MAIL_BRIDGE_PUBLIC_ORIGIN', 'GMAIL_REDIRECT_URI', 'GMAIL_SYNC_LIMIT', 'GMAIL_MAX_SYNC_LIMIT', 'GMAIL_LIST_PAGE_SIZE', 'GMAIL_DETAIL_BATCH_SIZE', 'VITE_GMAIL_SYNC_LIMIT', 'VITE_GMAIL_SYNC_PAGE_SIZE'],
@@ -78,6 +80,7 @@ const managedFiles = [
     title: 'osionos Calendar and Google Calendar bridge runtime',
     envPath: 'apps/calendar/.env.local',
     examplePath: 'apps/calendar/.env.example',
+    writeExample: false,
     fallbackEnvPaths: ['apps/calendar/.env', 'apps/mail/.env', 'apps/baas/.env.local'],
     required: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'],
     recommended: ['CALENDAR_BRIDGE_PORT', 'CALENDAR_APP_ORIGIN', 'CALENDAR_BRIDGE_PUBLIC_ORIGIN', 'CALENDAR_REDIRECT_URI', 'CALENDAR_BAAS_URL', 'CALENDAR_BAAS_PUBLIC_URL', 'CALENDAR_BRIDGE_REQUIRE_BAAS', 'CALENDAR_EVENTS_PAGE_SIZE', 'VITE_CALENDAR_BRIDGE_URL', 'VITE_CALENDAR_BAAS_URL'],
@@ -104,6 +107,7 @@ const managedFiles = [
     id: 'notion-database-sys',
     title: 'Notion database system example runtime',
     examplePath: 'apps/osionos/app/src/shared/notion-database-sys/.env.example',
+    writeExample: false,
     required: ['ACTIVE_DB_SOURCE', 'API_HOST', 'API_PORT'],
     recommended: ['DATABASE_URL', 'POSTGRES_HOST', 'POSTGRES_PORT', 'POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB', 'MONGO_URI', 'MONGO_HOST', 'MONGO_PORT', 'MONGO_USER', 'MONGO_PASSWORD', 'MONGO_DB'],
   },
@@ -410,7 +414,7 @@ function writeManaged(config, { envValues, writeExample = true }) {
 function formatLocal() {
   for (const config of managedFiles) {
     const envValues = parseEnv(config.envPath ? absolute(config.envPath) : '');
-    writeManaged(config, { envValues, writeExample: true });
+    writeManaged(config, { envValues, writeExample: config.writeExample !== false });
   }
 }
 
