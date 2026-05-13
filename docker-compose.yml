@@ -71,7 +71,9 @@ services:
     restart: "no"
 
   postgres:
-    image: ${BAAS_POSTGRES_IMAGE:-ghcr.io/univers42/mini-baas-infra/postgres:v2026-05-03}
+    image: ${BAAS_POSTGRES_IMAGE:-track-binocle-postgres:local}
+    build:
+      context: ./apps/baas/mini-baas-infra/docker/services/postgres
     env_file:
       - ./apps/baas/.env.local
     ports:
