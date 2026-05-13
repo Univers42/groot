@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/13 15:53:53 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/13 16:12:18 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -50,6 +50,10 @@ VAULT_WRITER_TOKEN_FILE ?= .vault/track-binocle-writer.env
 VAULT_TOKEN_FILE ?= $(VAULT_READER_TOKEN_FILE)
 VAULT_PUBLISH_TOKEN_FILE ?= $(VAULT_WRITER_TOKEN_FILE)
 VAULT_PUBLIC_ADDR ?= http://vault:8200
+VAULT_GITHUB_OIDC_AUTH_PATH ?= jwt
+VAULT_GITHUB_OIDC_ROLE ?= track-binocle-github-actions
+VAULT_GITHUB_OIDC_REPOSITORY ?= Univers42/track-binocle
+VAULT_GITHUB_OIDC_AUDIENCE ?= vault://track-binocle
 HOST_UID := $(shell id -u)
 HOST_GID := $(shell id -g)
 export HOST_UID HOST_GID
@@ -189,6 +193,10 @@ vault-repair-shared: env-format
 ## Publish complete local env files to shared Vault with a writer token, then verify coverage.
 	$(MAKE) vault-publish-shared VAULT_PUBLISH_TOKEN_FILE='$(VAULT_PUBLISH_TOKEN_FILE)' VAULT_TOKEN_FILE='$(VAULT_TOKEN_FILE)'
 	$(MAKE) vault-status-shared VAULT_TOKEN_FILE='$(VAULT_PUBLISH_TOKEN_FILE)'
+
+vault-github-oidc: vault-policy-sync
+## Configure Vault JWT auth so GitHub Actions can fetch managed env secrets through OIDC.
+	$(VAULT_COMPOSE) run --rm -e VAULT_GITHUB_OIDC_AUTH_PATH='$(VAULT_GITHUB_OIDC_AUTH_PATH)' -e VAULT_GITHUB_OIDC_ROLE='$(VAULT_GITHUB_OIDC_ROLE)' -e VAULT_GITHUB_OIDC_REPOSITORY='$(VAULT_GITHUB_OIDC_REPOSITORY)' -e VAULT_GITHUB_OIDC_AUDIENCE='$(VAULT_GITHUB_OIDC_AUDIENCE)' vault-env node apps/baas/scripts/vault-env.mjs sync-github-oidc
 
 vault-rotate-approles: vault-up
 ## Rotate service AppRole secret IDs and store the new IDs in Vault.
@@ -428,4 +436,4 @@ docker_reclaim_cache:
 ## Remove BuildKit/buildx cache only.
 	docker builder prune -a -f
 
-.PHONY: help all pulls pushes bootstrap env-format vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fetch-shared env-fetch-shared vault-publish-shared vault-status-shared vault-repair-shared vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache
+.PHONY: help all pulls pushes bootstrap env-format vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fetch-shared env-fetch-shared vault-publish-shared vault-status-shared vault-repair-shared vault-github-oidc vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache

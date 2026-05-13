@@ -595,6 +595,40 @@ async function createTeamToken() {
   console.log(`[vault] wrote ${tokenDisplayPath} with ${role} policy and ttl ${ttl}`);
 }
 
+async function syncGithubOidc() {
+  await syncTeamPolicies();
+
+  const authPath = process.env.VAULT_GITHUB_OIDC_AUTH_PATH ?? 'jwt';
+  const roleName = process.env.VAULT_GITHUB_OIDC_ROLE ?? 'track-binocle-github-actions';
+  const repository = process.env.VAULT_GITHUB_OIDC_REPOSITORY ?? 'Univers42/track-binocle';
+  const audience = process.env.VAULT_GITHUB_OIDC_AUDIENCE ?? 'vault://track-binocle';
+
+  const mounts = await vaultRequest('GET', 'sys/auth');
+  if (!mounts?.[`${authPath}/`]) {
+    await vaultRequest('POST', `sys/auth/${authPath}`, { type: 'jwt' });
+    console.log(`[vault] enabled ${authPath} auth`);
+  }
+
+  await vaultRequest('POST', `auth/${authPath}/config`, {
+    oidc_discovery_url: 'https://token.actions.githubusercontent.com',
+    bound_issuer: 'https://token.actions.githubusercontent.com',
+  });
+
+  await vaultRequest('POST', `auth/${authPath}/role/${roleName}`, {
+    role_type: 'jwt',
+    user_claim: 'actor',
+    bound_audiences: [audience],
+    bound_claims: {
+      repository,
+    },
+    token_policies: ['track-binocle-env-reader'],
+    token_ttl: '1h',
+    token_max_ttl: '1h',
+  });
+
+  console.log(`[vault] GitHub OIDC role ${roleName} synced for ${repository}`);
+}
+
 async function rotateAppRoles() {
   for (const service of serviceAppRoles) {
     await vaultRequest('POST', `auth/approle/role/${service}`, {
@@ -694,6 +728,8 @@ if (command === 'format') {
   await syncTeamPolicies();
 } else if (command === 'team-token') {
   await createTeamToken();
+} else if (command === 'sync-github-oidc') {
+  await syncGithubOidc();
 } else if (command === 'rotate-approles') {
   await rotateAppRoles();
 } else if (command === 'backup') {
@@ -703,5 +739,5 @@ if (command === 'format') {
 } else if (command === 'verify-approles') {
   await verifyAppRoles();
 } else {
-  console.log('Usage: node apps/baas/scripts/vault-env.mjs <format|seed|publish|fetch|status|validate|backup|roundtrip|sync-policies|team-token|rotate-approles|verify-approles>');
+  console.log('Usage: node apps/baas/scripts/vault-env.mjs <format|seed|publish|fetch|status|validate|backup|roundtrip|sync-policies|team-token|sync-github-oidc|rotate-approles|verify-approles>');
 }
