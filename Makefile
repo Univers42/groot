@@ -122,7 +122,7 @@ pulls:
 			echo "[pulls] $${displaypath} has no upstream branch; fetched only"; \
 		fi \
 	'; \
-	git submodule update --init --recursive --remote --checkout
+	git submodule update --init --recursive --checkout
 
 pushes:
 ## Add, commit, and push the root repo plus every recursive submodule. Use GIT_COMMIT_MESSAGE="...".
