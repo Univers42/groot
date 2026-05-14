@@ -257,7 +257,9 @@ If the browser still warns after `make all`, first verify the VM-side trust stor
 make certs-doctor
 ```
 
-On Debian/Ubuntu, `make certs-trust-system` installs missing `ca-certificates` and `libnss3-tools` with sudo, imports the CA into Chromium/Firefox NSS stores, and updates the Linux system CA store used by VS Code/Electron and some browsers. Set `TRACK_BINOCLE_CERTS_INSTALL_DEPS=0` to disable package installation and manage those packages manually. On other Linux distributions, install the equivalent `certutil` and system CA update tooling before running the trust target.
+On Debian/Ubuntu, `make certs-trust-system` installs missing `ca-certificates` and `libnss3-tools` with sudo, imports the CA into Chromium/Firefox NSS stores, enables Firefox enterprise roots in regular, Snap, and Flatpak Firefox profiles, and updates the Linux system CA store used by VS Code/Electron and some browsers. Set `TRACK_BINOCLE_CERTS_INSTALL_DEPS=0` to disable package installation and manage those packages manually. Set `TRACK_BINOCLE_FIREFOX_ENTERPRISE_ROOTS=0` only when Firefox profile preferences are managed elsewhere. On other Linux distributions, install the equivalent `certutil` and system CA update tooling before running the trust target.
+
+Firefox keeps trust state in the running browser process. If Firefox was already open while `make all` imported the CA, fully quit every Firefox window/process and reopen the localhost URL before treating `ERR_CERT_AUTHORITY_INVALID` as a real failure.
 
 When the app is opened through VS Code Remote SSH, an SSH tunnel, or another port forwarder, the browser may show a random URL such as `https://localhost:40775`. In that case the browser trust store belongs to the forwarding host, not the VM where `make all` ran. `make all` runs `make certs-trust-browser-host`, which auto-detects the SSH client/default gateway and uses SSH/SCP to trust the CA on that browser host when the route is reachable. If the browser host blocks SSH or uses a non-default user or port, follow [troubleshoot/browser-host-ca-trust.md](troubleshoot/browser-host-ca-trust.md).
 

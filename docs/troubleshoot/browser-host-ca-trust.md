@@ -117,3 +117,11 @@ curl -fsS https://localhost:4322 >/dev/null
 ```
 
 If VM-side trust works but the forwarded browser still warns, the browser host trust store is the missing piece. Configure the SSH route above or import `apps/baas/certs/track-binocle-local-ca.pem` manually into the OS/browser trust store on the browser host.
+
+## Firefox Still Warns
+
+Firefox uses its own profile trust database and keeps trust state in the running browser process. The trust helper imports the CA into regular, Snap, and Flatpak Firefox profiles and writes `security.enterprise_roots.enabled=true` to each Firefox `user.js` profile so Firefox also reads the Linux system CA store.
+
+If Firefox was open during the trust import, fully quit every Firefox process, then reopen the forwarded localhost URL. When you need to manage that preference manually, open `about:config`, set `security.enterprise_roots.enabled` to `true`, and restart Firefox.
+
+If Firefox warns on a different port than the service list, for example `https://localhost:4323` while `make showcase` prints `https://localhost:4322`, that port is a VS Code/local forwarding listener rather than the Compose HTTPS proxy. Use the canonical URL when it is reachable. If the forwarded port is required, close and reopen the forwarded port after `make all` so it stops serving a stale editor-side certificate, then rerun `make certs-trust-browser-host` when the browser is on another host.

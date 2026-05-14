@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/14 20:31:33 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/14 23:33:00 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -202,8 +202,21 @@ certs-trust-browser-host: certs
 	fi
 
 certs-doctor: certs
-## Check whether the Linux system CA store trusts the current local HTTPS CA.
+## Check whether the local trust stores and running HTTPS proxy use the current local HTTPS CA.
 	@bash apps/baas/scripts/trust-localhost-cert.sh --verify || true
+	@if docker compose ps --status running --quiet local-https-proxy 2>/dev/null | grep -q .; then \
+		port="$${OPPOSITE_OSIRIS_HOST_PORT:-4322}"; \
+		tmp_cert="$$(mktemp)"; \
+		if timeout 5 openssl s_client -connect "localhost:$$port" -servername localhost </dev/null 2>/dev/null | openssl x509 -out "$$tmp_cert" 2>/dev/null \
+			&& openssl verify -CAfile '$(LOCAL_CA_CERT)' "$$tmp_cert" >/dev/null 2>&1; then \
+			echo "[certs] local HTTPS proxy serves the current Track Binocle CA on https://localhost:$$port"; \
+		else \
+			echo "[certs] local HTTPS proxy certificate on https://localhost:$$port does not verify against $(LOCAL_CA_CERT); recreate local-https-proxy with make up." >&2; \
+		fi; \
+		rm -f "$$tmp_cert"; \
+	else \
+		echo '[certs] local-https-proxy is not running; skipping live proxy certificate check'; \
+	fi
 
 certs-trust-local: certs
 ## Trust the local HTTPS CA for developer browsers and system-trust clients; skipped in CI.
@@ -735,6 +748,7 @@ showcase:
 	@printf '  Calendar bridge:     %s\n\n' '$(CALENDAR_BRIDGE_URL)'
 	@if [[ -n "$${SSH_CONNECTION:-}" || -n "$${VSCODE_IPC_HOOK_CLI:-}" || -n "$${VSCODE_GIT_IPC_HANDLE:-}" ]]; then \
 		printf '[certs] Remote/forwarded browser note: if your browser opens a random forwarded URL such as https://localhost:<port>, it is running outside this VM.\n'; \
+		printf '[certs] Firefox note: prefer the canonical URLs printed above when reachable; if VS Code remaps to another port, close and reopen that forwarded port after certificate regeneration.\n'; \
 		printf '[certs] make certs-trust-browser-host tries SSH/SCP CA trust for that browser host; see docs/troubleshoot/browser-host-ca-trust.md if SSH is blocked.\n\n'; \
 	fi
 

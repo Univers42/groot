@@ -36,7 +36,7 @@ make playground
 
 `make all` bootstraps the ignored runtime files, builds and starts the Docker stack, runs health checks, then prints the localhost URLs only after the pipeline is ready.
 
-The root stack terminates local TLS in a Docker Nginx proxy. `make all`, `make up`, and `make healthcheck` generate the local certificate automatically. On interactive developer machines, `make all` also trusts the project CA in the system and browser trust stores, prompting for sudo when the Linux system CA store must be updated. On Debian/Ubuntu VMs, the trust helper installs missing certificate tooling with sudo before updating the system and browser trust stores.
+The root stack terminates local TLS in a Docker Nginx proxy. `make all`, `make up`, and `make healthcheck` generate the local certificate automatically. On interactive developer machines, `make all` also trusts the project CA in the system and browser trust stores, prompting for sudo when the Linux system CA store must be updated. On Debian/Ubuntu VMs, the trust helper installs missing certificate tooling with sudo before updating the system and browser trust stores. Firefox profiles, including Snap and Flatpak profiles, are configured to read enterprise/system roots and must be fully restarted after the CA is imported.
 
 If VS Code or SSH opens a random forwarded URL such as `https://localhost:40775`, the browser is running on the forwarding host, not inside the VM. `make all` tries to copy and trust `apps/baas/certs/track-binocle-local-ca.pem` on that browser host over SSH/SCP when a back-to-host route is reachable. See [docs/troubleshoot/browser-host-ca-trust.md](docs/troubleshoot/browser-host-ca-trust.md) when the host firewall, user, or SSH port needs to be configured.
 

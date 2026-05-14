@@ -10,6 +10,7 @@ SYSTEM_CA_CERT="/usr/local/share/ca-certificates/track-binocle-local-ca.crt"
 INSTALL_SYSTEM=0
 VERIFY_ONLY=0
 AUTO_INSTALL_DEPS=${TRACK_BINOCLE_CERTS_INSTALL_DEPS:-auto}
+FIREFOX_ENTERPRISE_ROOTS=${TRACK_BINOCLE_FIREFOX_ENTERPRISE_ROOTS:-1}
 
 for arg in "$@"; do
   case "$arg" in
@@ -27,6 +28,7 @@ Imports the Track Binocle local development CA into user browser trust stores.
 Use --system to also install it into the Linux system CA store with sudo.
 Use --verify to check whether the system CA store has the current CA.
 On Debian/Ubuntu, --system installs missing ca-certificates and libnss3-tools unless TRACK_BINOCLE_CERTS_INSTALL_DEPS=0.
+Firefox profiles are also configured to read enterprise/system roots unless TRACK_BINOCLE_FIREFOX_ENTERPRISE_ROOTS=0.
 EOF
       exit 0
       ;;
@@ -183,14 +185,98 @@ trust_existing_nss_db() {
   printf 'Trusted local CA in existing NSS database: %s\n' "$db_dir"
 }
 
+firefox_enterprise_roots_enabled() {
+  case "$FIREFOX_ENTERPRISE_ROOTS" in
+    0|false|FALSE|no|NO)
+      return 1
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
+set_firefox_enterprise_roots_pref() {
+  profile_dir=$1
+  firefox_enterprise_roots_enabled || return 0
+  mkdir -p "$profile_dir"
+  prefs_file="$profile_dir/user.js"
+  tmp_file="$prefs_file.tmp.$$"
+
+  if [ -f "$prefs_file" ]; then
+    grep -v '^[[:space:]]*user_pref("security\.enterprise_roots\.enabled"' "$prefs_file" >"$tmp_file" || true
+  else
+    : >"$tmp_file"
+  fi
+  printf 'user_pref("security.enterprise_roots.enabled", true);\n' >>"$tmp_file"
+  mv "$tmp_file" "$prefs_file"
+  printf 'Enabled Firefox enterprise roots in profile: %s\n' "$profile_dir"
+}
+
+trust_firefox_profile() {
+  profile_dir=$1
+  trust_nss_db "$profile_dir"
+  set_firefox_enterprise_roots_pref "$profile_dir"
+}
+
+trust_firefox_profiles_ini() {
+  profiles_ini=$1
+  base_dir=$(CDPATH= cd -- "$(dirname -- "$profiles_ini")" && pwd)
+  awk '
+    function emit() { if (path != "") print rel "|" path }
+    /^\[/ { emit(); path=""; rel="1"; next }
+    /^Path=/ { path=substr($0, 6); next }
+    /^IsRelative=/ { rel=substr($0, 12); next }
+    END { emit() }
+  ' "$profiles_ini" | while IFS='|' read -r is_relative profile_path; do
+    [ -n "$profile_path" ] || continue
+    case "$profile_path" in
+      /*)
+        profile_dir=$profile_path
+        ;;
+      *)
+        if [ "$is_relative" = "1" ]; then
+          profile_dir="$base_dir/$profile_path"
+        else
+          profile_dir=$profile_path
+        fi
+        ;;
+    esac
+    trust_firefox_profile "$profile_dir"
+  done
+}
+
+trust_firefox_profiles() {
+  for profiles_ini in \
+    "$HOME/.mozilla/firefox/profiles.ini" \
+    "$HOME/snap/firefox/common/.mozilla/firefox/profiles.ini" \
+    "$HOME/.var/app/org.mozilla.firefox/.mozilla/firefox/profiles.ini"; do
+    [ -f "$profiles_ini" ] || continue
+    trust_firefox_profiles_ini "$profiles_ini"
+  done
+
+  for firefox_root in \
+    "$HOME/.mozilla/firefox" \
+    "$HOME/snap/firefox/common/.mozilla/firefox" \
+    "$HOME/.var/app/org.mozilla.firefox/.mozilla/firefox"; do
+    [ -d "$firefox_root" ] || continue
+    [ ! -f "$firefox_root/profiles.ini" ] || continue
+    find "$firefox_root" -type f -name cert9.db -print 2>/dev/null | while IFS= read -r cert_db; do
+      trust_firefox_profile "$(dirname "$cert_db")"
+    done
+  done
+}
+
+warn_if_firefox_running() {
+  if resolve_command pgrep >/dev/null 2>&1 \
+    && { pgrep -x firefox >/dev/null 2>&1 || pgrep -f '/firefox/firefox' >/dev/null 2>&1; }; then
+    printf '[certs] Firefox is running; fully quit every Firefox process before retesting localhost HTTPS.\n' >&2
+  fi
+}
+
 if CERTUTIL=$(resolve_command certutil); then
   trust_nss_db "$HOME/.pki/nssdb"
-
-  if [ -d "$HOME/.mozilla/firefox" ]; then
-    find "$HOME/.mozilla/firefox" -maxdepth 1 -type d \( -name '*.default' -o -name '*.default-release' -o -name '*.default-esr' -o -name '*.dev-edition-default' \) | while IFS= read -r profile_dir; do
-      trust_nss_db "$profile_dir"
-    done
-  fi
+  trust_firefox_profiles
 
   for search_root in \
     "$HOME/snap" \
@@ -202,9 +288,16 @@ if CERTUTIL=$(resolve_command certutil); then
     "$HOME/.mozilla"; do
     [ -d "$search_root" ] || continue
     find "$search_root" -type f -name cert9.db -print 2>/dev/null | while IFS= read -r cert_db; do
-      trust_existing_nss_db "$(dirname "$cert_db")"
+      db_dir=$(dirname "$cert_db")
+      case "$db_dir" in
+        "$HOME/.mozilla/firefox"/*|"$HOME/snap/firefox/common/.mozilla/firefox"/*|"$HOME/.var/app/org.mozilla.firefox/.mozilla/firefox"/*)
+          continue
+          ;;
+      esac
+      trust_existing_nss_db "$db_dir"
     done
   done
+  warn_if_firefox_running
 else
   printf '[certs] certutil is required to trust the CA in Chromium/Firefox NSS stores.\n' >&2
   printf '[certs] Install libnss3-tools for browser profile import.\n' >&2
