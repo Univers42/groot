@@ -122,10 +122,10 @@ help:
 	@echo -e "\033[1;38;5;39m───────────────────────────────────────────────────────────────\033[0m"
 	@echo -e "\033[1;38;5;245mFor docs: make docs or see README.md\033[0m"
 
-all: env-fetch-shared pulls certs certs-trust-local bootstrap env-format docker-prefetch-images vault-seed vault-verify-approles env-fetch up healthcheck showcase
+all: env-fetch-shared pulls certs certs-trust-local certs-trust-browser-host bootstrap env-format docker-prefetch-images vault-seed vault-verify-approles env-fetch up healthcheck showcase
 ## Build, start, and verify the complete Vault-backed Track Binocle pipeline.
 
-all-local: pulls certs certs-trust-local bootstrap env-format docker-prefetch-images vault-seed vault-verify-approles env-fetch up healthcheck showcase
+all-local: pulls certs certs-trust-local certs-trust-browser-host bootstrap env-format docker-prefetch-images vault-seed vault-verify-approles env-fetch up healthcheck showcase
 ## Build the local generated-secret pipeline without shared Vault credentials.
 
 pulls:
@@ -192,6 +192,14 @@ certs-trust: certs
 certs-trust-system: certs
 ## Trust the local HTTPS CA in the Linux system store for VS Code/Electron and system-trust browsers.
 	bash apps/baas/scripts/trust-localhost-cert.sh --system
+
+certs-trust-browser-host: certs
+## Copy and trust the local HTTPS CA on the forwarded browser host over SSH/SCP when reachable.
+	@if [[ "$${CI:-}" == 'true' || "$${GITHUB_ACTIONS:-}" == 'true' || "$${TRACK_BINOCLE_SKIP_CERT_TRUST:-}" == '1' ]]; then \
+		echo '[certs] skipping browser-host trust import in CI/noninteractive mode'; \
+	else \
+		bash apps/baas/scripts/trust-browser-host-ca.sh; \
+	fi
 
 certs-doctor: certs
 ## Check whether the Linux system CA store trusts the current local HTTPS CA.
@@ -727,7 +735,7 @@ showcase:
 	@printf '  Calendar bridge:     %s\n\n' '$(CALENDAR_BRIDGE_URL)'
 	@if [[ -n "$${SSH_CONNECTION:-}" || -n "$${VSCODE_IPC_HOOK_CLI:-}" || -n "$${VSCODE_GIT_IPC_HANDLE:-}" ]]; then \
 		printf '[certs] Remote/forwarded browser note: if your browser opens a random forwarded URL such as https://localhost:<port>, it is running outside this VM.\n'; \
-		printf '[certs] Import %s into the OS/browser trust store on the machine running that browser, or open the URLs from a browser inside this VM.\n\n' '$(LOCAL_CA_CERT)'; \
+		printf '[certs] make certs-trust-browser-host tries SSH/SCP CA trust for that browser host; see docs/troubleshoot/browser-host-ca-trust.md if SSH is blocked.\n\n'; \
 	fi
 
 playground: healthcheck playground-preview
@@ -833,4 +841,4 @@ docker_reclaim_cache:
 	@env -u BUILDX_BUILDER docker buildx use default >/dev/null 2>&1 || true
 	@env -u BUILDX_BUILDER docker builder prune -a -f || true
 
-.PHONY: help all all-local pulls pushes bootstrap certs certs-trust certs-trust-system certs-doctor certs-trust-local env-format buildx-setup compose-build docker-prefetch-images vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fly-invite-token vault-fetch-shared vault-shared-doctor env-fetch-shared vault-publish-shared vault-status-shared vault-repair-shared vault-github-oidc vault-fly-create vault-fly-deploy vault-fly-publish vault-fly-github vault-fly vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache
+.PHONY: help all all-local pulls pushes bootstrap certs certs-trust certs-trust-system certs-trust-browser-host certs-doctor certs-trust-local env-format buildx-setup compose-build docker-prefetch-images vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fly-invite-token vault-fetch-shared vault-shared-doctor env-fetch-shared vault-publish-shared vault-status-shared vault-repair-shared vault-github-oidc vault-fly-create vault-fly-deploy vault-fly-publish vault-fly-github vault-fly vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache

@@ -38,7 +38,7 @@ make playground
 
 The root stack terminates local TLS in a Docker Nginx proxy. `make all`, `make up`, and `make healthcheck` generate the local certificate automatically. On interactive developer machines, `make all` also trusts the project CA in the system and browser trust stores, prompting for sudo when the Linux system CA store must be updated. On Debian/Ubuntu VMs, the trust helper installs missing certificate tooling with sudo before updating the system and browser trust stores.
 
-If VS Code or SSH opens a random forwarded URL such as `https://localhost:40775`, the browser is running on the forwarding host, not inside the VM. Import `apps/baas/certs/track-binocle-local-ca.pem` into the OS/browser trust store on the machine running that browser, or open the URLs from a browser inside the VM.
+If VS Code or SSH opens a random forwarded URL such as `https://localhost:40775`, the browser is running on the forwarding host, not inside the VM. `make all` tries to copy and trust `apps/baas/certs/track-binocle-local-ca.pem` on that browser host over SSH/SCP when a back-to-host route is reachable. See [docs/troubleshoot/browser-host-ca-trust.md](docs/troubleshoot/browser-host-ca-trust.md) when the host firewall, user, or SSH port needs to be configured.
 
 `make playground` opens a VS Code simulation viewer, then runs the Docker-contained Playwright scenario: open the website, create a development account, sign in, bridge into osionos, create a persisted markdown page through the osionos bridge, open Settings, open Mail and Calendar from the sidebar, and probe both service bridges. If Gmail or Google Calendar are already authorized in their ignored token files, the simulation also samples real messages/events without printing account values.
 
@@ -144,7 +144,8 @@ The Makefile runs these commands from the repository root:
 
 ```sh
 make env-fetch-shared # requires .vault/track-binocle-reader.env, VAULT_API_KEY, or VAULT_TOKEN
-make certs-trust-local # best-effort user browser trust import; skipped in CI
+make certs-trust-local # local system and browser trust import; skipped in CI
+make certs-trust-browser-host # SSH/SCP trust import for forwarded browser hosts when reachable
 node apps/baas/scripts/bootstrap.mjs # or the Docker Node fallback when host Node is unavailable
 make docker-prefetch-images # bounded parallel retries through public mirrors before Compose builds
 docker compose --profile secrets up -d --build --pull never vault local-https-proxy

@@ -149,17 +149,18 @@ Do not pre-run Compose manually for normal onboarding. `make all` is responsible
 2. Pull and update root and recursive submodules.
 3. Generate the local HTTPS CA and localhost certificate.
 4. Trust the local CA in browser and Linux system stores on interactive developer machines, prompting for sudo when needed.
-5. Bootstrap generated project files.
-6. Format managed env files.
-7. Prefetch public Docker images in parallel.
-8. Start and seed local Vault services as needed.
-9. Verify service AppRoles.
-10. Fetch final env files.
-11. Build local application images with `docker buildx bake --load`.
-12. Start Docker Compose with prebuilt images using `--no-build`.
-13. Wait for services and init jobs.
-14. Run HTTPS and bridge health checks.
-15. Print the local URLs.
+5. Try SSH/SCP browser-host CA trust for forwarded browsers when a back-to-host route is reachable.
+6. Bootstrap generated project files.
+7. Format managed env files.
+8. Prefetch public Docker images in parallel.
+9. Start and seed local Vault services as needed.
+10. Verify service AppRoles.
+11. Fetch final env files.
+12. Build local application images with `docker buildx bake --load`.
+13. Start Docker Compose with prebuilt images using `--no-build`.
+14. Wait for services and init jobs.
+15. Run HTTPS and bridge health checks.
+16. Print the local URLs.
 
 A successful run ends by printing the service list below.
 
@@ -258,7 +259,7 @@ make certs-doctor
 
 On Debian/Ubuntu, `make certs-trust-system` installs missing `ca-certificates` and `libnss3-tools` with sudo, imports the CA into Chromium/Firefox NSS stores, and updates the Linux system CA store used by VS Code/Electron and some browsers. Set `TRACK_BINOCLE_CERTS_INSTALL_DEPS=0` to disable package installation and manage those packages manually. On other Linux distributions, install the equivalent `certutil` and system CA update tooling before running the trust target.
 
-When the app is opened through VS Code Remote SSH, an SSH tunnel, or another port forwarder, the browser may show a random URL such as `https://localhost:40775`. In that case the browser trust store belongs to the forwarding host, not the VM where `make all` ran. Import `apps/baas/certs/track-binocle-local-ca.pem` into the OS/browser trust store on the machine running the browser, or use a browser inside the VM.
+When the app is opened through VS Code Remote SSH, an SSH tunnel, or another port forwarder, the browser may show a random URL such as `https://localhost:40775`. In that case the browser trust store belongs to the forwarding host, not the VM where `make all` ran. `make all` runs `make certs-trust-browser-host`, which auto-detects the SSH client/default gateway and uses SSH/SCP to trust the CA on that browser host when the route is reachable. If the browser host blocks SSH or uses a non-default user or port, follow [troubleshoot/browser-host-ca-trust.md](troubleshoot/browser-host-ca-trust.md).
 
 ## CI Parity
 
