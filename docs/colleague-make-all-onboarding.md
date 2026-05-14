@@ -174,7 +174,7 @@ All public developer endpoints are exposed through the local HTTPS proxy on `127
 | osionos bridge API | `https://localhost:4000` |
 | Auth gateway | `https://localhost:8787/api/auth` |
 | BaaS gateway | `https://localhost:8000` |
-| Vault | `https://localhost:8200` |
+| Vault | `https://localhost:18200` |
 | osionos Mail | `https://localhost:3002` |
 | Mail bridge | `https://localhost:4100` |
 | osionos Calendar | `https://localhost:3003` |

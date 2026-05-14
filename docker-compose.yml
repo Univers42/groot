@@ -14,7 +14,7 @@ services:
     environment:
       SKIP_SETCAP: "1"
       VAULT_ADDR: http://127.0.0.1:8200
-      VAULT_API_ADDR: ${VAULT_API_ADDR:-https://localhost:8200}
+      VAULT_API_ADDR: ${VAULT_API_ADDR:-https://localhost:18200}
     expose:
       - "8200"
     volumes:
@@ -93,7 +93,7 @@ services:
       - "127.0.0.1:${MAIL_BRIDGE_PORT:-4100}:4100"
       - "127.0.0.1:${CALENDAR_HOST_PORT:-3003}:3003"
       - "127.0.0.1:${CALENDAR_BRIDGE_PORT:-4200}:4200"
-      - "127.0.0.1:${VAULT_PORT:-8200}:8200"
+      - "127.0.0.1:${VAULT_PORT:-18200}:8200"
     healthcheck:
       test: ["CMD-SHELL", "nginx -t >/dev/null 2>&1"]
       interval: 5s
@@ -173,6 +173,15 @@ services:
       - track-binocle-redis-data:/data
     restart: unless-stopped
 
+  mailpit:
+    image: ${MAILPIT_IMAGE:-axllent/mailpit:v1.22.3}
+    expose:
+      - "1025"
+      - "8025"
+    ports:
+      - "127.0.0.1:${MAILPIT_HOST_PORT:-8025}:8025"
+    restart: unless-stopped
+
   gotrue:
     image: ${BAAS_GOTRUE_IMAGE:-supabase/gotrue:v2.188.1}
     env_file:
@@ -207,6 +216,8 @@ services:
     depends_on:
       db-bootstrap:
         condition: service_completed_successfully
+      mailpit:
+        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:9999/health || exit 1"]
@@ -585,6 +596,15 @@ services:
       PUBLIC_SITE_URL: https://localhost:${OPPOSITE_OSIRIS_HOST_PORT:-4322}
       AUTH_REQUIRE_EMAIL_VERIFICATION: ${AUTH_REQUIRE_EMAIL_VERIFICATION:-false}
       PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION: ${PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION:-false}
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_ENCRYPTION: ${SMTP_ENCRYPTION:-none}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-noreply@mini-baas.local}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Prismatica}
+      MAILPIT_API_URL: http://mailpit:8025
+      MAILPIT_VERIFY_DELIVERY: ${MAILPIT_VERIFY_DELIVERY:-true}
     volumes:
       - ./:/workspace
       - opposite-osiris-node-modules:/workspace/apps/opposite-osiris/node_modules
@@ -600,6 +620,8 @@ services:
         condition: service_completed_successfully
       opposite-osiris-deps:
         condition: service_completed_successfully
+      mailpit:
+        condition: service_started
       osionos-bridge:
         condition: service_healthy
     healthcheck:

@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { resolve4, resolve6, resolveMx } from 'node:dns/promises';
+import net from 'node:net';
 import tls from 'node:tls';
 import { createClient, MiniBaasError } from '@mini-baas/js';
 
@@ -20,6 +21,16 @@ for (const file of ['.env.local', '.env', '../../.env.local', '../../apps/baas/.
 	}
 }
 
+const smtpPort = Number(process.env.SMTP_PORT ?? 465);
+
+function normalizeSmtpEncryption(value, port) {
+	const normalized = String(value ?? '').trim().toLowerCase();
+	if (['ssl', 'tls', 'smtps', 'true', '1'].includes(normalized)) return 'ssl';
+	if (['starttls', 'start_tls'].includes(normalized)) return 'starttls';
+	if (['none', 'plain', 'false', '0'].includes(normalized)) return 'none';
+	return Number(port) === 465 ? 'ssl' : 'none';
+}
+
 const config = {
 	port: Number(process.env.AUTH_GATEWAY_PORT ?? 8787),
 	baasUrl: (process.env.PUBLIC_BAAS_URL?.startsWith('/api') ? 'http://localhost:8000' : (process.env.PUBLIC_BAAS_URL ?? 'http://localhost:8000')).replace(/\/$/, ''),
@@ -29,9 +40,11 @@ const config = {
 	turnstileBypassLocal: process.env.TURNSTILE_BYPASS_LOCAL === 'true',
 	siteUrl: process.env.PUBLIC_SITE_URL ?? 'http://localhost:4322',
 	smtpHost: process.env.SMTP_HOST ?? '',
-	smtpPort: Number(process.env.SMTP_PORT ?? 465),
+	smtpPort,
+	smtpEncryption: normalizeSmtpEncryption(process.env.SMTP_ENCRYPTION ?? process.env.SMTP_SECURE, smtpPort),
 	smtpUsername: process.env.SMTP_USERNAME ?? process.env.SMTP_USER ?? '',
 	smtpPassword: process.env.SMTP_PASSWORD ?? process.env.SMTP_PASS ?? '',
+	smtpAuthRequired: process.env.SMTP_AUTH_REQUIRED === 'true',
 	smtpFromName: process.env.SMTP_FROM_NAME ?? 'Prismatica',
 	smtpFromAddress: process.env.SMTP_FROM_ADDRESS ?? process.env.EMAIL_FROM ?? process.env.SMTP_USERNAME ?? process.env.SMTP_USER ?? '',
 	requireEmailVerification: process.env.AUTH_REQUIRE_EMAIL_VERIFICATION !== 'false' && process.env.PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION !== 'false',
@@ -477,11 +490,12 @@ function smtpBody({ to, subject, html }) {
 }
 
 function hasSmtpConfig() {
-	return Boolean(config.smtpHost && config.smtpUsername && config.smtpPassword && config.smtpFromAddress);
+	const wantsAuth = config.smtpAuthRequired || Boolean(config.smtpUsername || config.smtpPassword);
+	const hasAuthPair = Boolean(config.smtpUsername && config.smtpPassword);
+	return Boolean(config.smtpHost && config.smtpFromAddress && (!wantsAuth || hasAuthPair));
 }
 
-function createSmtpClient() {
-	const socket = tls.connect({ host: config.smtpHost, port: config.smtpPort, servername: config.smtpHost, rejectUnauthorized: true });
+function createSmtpClient(socket) {
 	socket.setEncoding('utf8');
 	let buffer = '';
 	const lines = [];
@@ -543,22 +557,52 @@ function createSmtpClient() {
 	return { socket, readResponse, send };
 }
 
+function connectPlainSmtpSocket() {
+	return new Promise((resolveSocket, rejectSocket) => {
+		const socket = net.connect({ host: config.smtpHost, port: config.smtpPort }, () => resolveSocket(socket));
+		socket.once('error', rejectSocket);
+	});
+}
+
+function connectTlsSmtpSocket(existingSocket = null) {
+	return new Promise((resolveSocket, rejectSocket) => {
+		const options = existingSocket
+			? { socket: existingSocket, host: config.smtpHost, servername: config.smtpHost, rejectUnauthorized: true }
+			: { host: config.smtpHost, port: config.smtpPort, servername: config.smtpHost, rejectUnauthorized: true };
+		const socket = tls.connect(options, () => resolveSocket(socket));
+		socket.once('error', rejectSocket);
+	});
+}
+
+async function authenticateSmtp(client) {
+	if (!config.smtpUsername && !config.smtpPassword) return;
+	if (!config.smtpUsername || !config.smtpPassword) {
+		throw Object.assign(new Error('SMTP auth requires both username and password.'), { status: 503 });
+	}
+	await client.send('AUTH LOGIN', [334]);
+	await client.send(Buffer.from(config.smtpUsername, 'utf8').toString('base64'), [334]);
+	await client.send(Buffer.from(config.smtpPassword, 'utf8').toString('base64'), [235]);
+}
+
 async function sendSmtpMail(message) {
-	if (!config.smtpHost || !config.smtpUsername || !config.smtpPassword || !config.smtpFromAddress) {
+	if (!hasSmtpConfig()) {
 		throw Object.assign(new Error('SMTP is not configured.'), { status: 503 });
 	}
-	const client = createSmtpClient();
+	let client;
+	let socket;
 	try {
-		await new Promise((resolveConnect, rejectConnect) => {
-			client.socket.once('secureConnect', resolveConnect);
-			client.socket.once('error', rejectConnect);
-		});
+		socket = config.smtpEncryption === 'ssl' ? await connectTlsSmtpSocket() : await connectPlainSmtpSocket();
+		client = createSmtpClient(socket);
 		const greeting = await client.readResponse();
 		if (greeting.code !== 220) throw new Error('SMTP greeting failed.');
 		await client.send('EHLO prismatica.local', [250]);
-		await client.send('AUTH LOGIN', [334]);
-		await client.send(Buffer.from(config.smtpUsername, 'utf8').toString('base64'), [334]);
-		await client.send(Buffer.from(config.smtpPassword, 'utf8').toString('base64'), [235]);
+		if (config.smtpEncryption === 'starttls') {
+			await client.send('STARTTLS', [220]);
+			socket = await connectTlsSmtpSocket(client.socket);
+			client = createSmtpClient(socket);
+			await client.send('EHLO prismatica.local', [250]);
+		}
+		await authenticateSmtp(client);
 		await client.send(`MAIL FROM:<${config.smtpFromAddress}>`, [250]);
 		await client.send(`RCPT TO:<${message.to}>`, [250, 251]);
 		await client.send('DATA', [354]);
@@ -566,7 +610,8 @@ async function sendSmtpMail(message) {
 		await client.send('QUIT', [221]).catch(() => undefined);
 		client.socket.end();
 	} catch (error) {
-		client.socket.destroy();
+		client?.socket.destroy();
+		socket?.destroy?.();
 		throw error;
 	}
 }

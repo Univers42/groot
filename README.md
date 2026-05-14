@@ -9,7 +9,7 @@ This workspace runs through Docker Compose only. Do not install app dependencies
 - osionos bridge API: `https://localhost:4000`
 - Auth gateway: `https://localhost:8787/api/auth`
 - BaaS gateway: `https://localhost:8000`
-- Vault: `https://localhost:8200`
+- Vault: `https://localhost:18200`
 - osionos Mail: `https://localhost:3002`
 - Mail bridge: `https://localhost:4100`
 - osionos Calendar: `https://localhost:3003`
@@ -50,7 +50,7 @@ Dependabot and Renovate are configured at the root so JS, Docker, and GitHub Act
 
 ## Environment And Vault
 
-Runtime env files are managed by Docker-only commands. The generated `.env.example` files are grouped by required, recommended, optional, and legacy keys. Optional keys may stay commented or blank when the feature is not enabled, for example SMTP, analytics, Sonar, or third-party API integrations. Gmail and Google Calendar OAuth credentials are required for the root `make all` pipeline because the healthcheck verifies that both bridges are configured.
+Runtime env files are managed by Docker-only commands. The generated `.env.example` files are grouped by required, recommended, optional, and legacy keys. Optional keys may stay commented or blank when the feature is not enabled, for example external SMTP, analytics, Sonar, or third-party API integrations. The root `make all` pipeline owns a local Mailpit SMTP inbox so auth and newsletter email flows are deterministic on fresh machines. Gmail and Google Calendar OAuth credentials are required for the root `make all` pipeline because the healthcheck verifies that both bridges are configured.
 
 Useful commands:
 
@@ -90,7 +90,7 @@ make pushes
 
 `make env-format` rewrites managed env files and examples with comments and categories. Real env files comment out missing values so later Compose env files do not accidentally override earlier non-empty secrets with blanks.
 
-`make vault-seed` starts local HashiCorp Vault through the Compose `secrets` profile, initializes and unseals it, creates service AppRoles, and stores the managed env data under `secret/data/track-binocle/env/*`. Browser and host-side Vault access go through the local HTTPS proxy at `https://localhost:8200`; Docker-side service-to-service Vault traffic uses `http://vault:8200`.
+`make vault-seed` starts local HashiCorp Vault through the Compose `secrets` profile, initializes and unseals it, creates service AppRoles, and stores the managed env data under `secret/data/track-binocle/env/*`. Browser and host-side Vault access go through the local HTTPS proxy at `https://localhost:18200`; Docker-side service-to-service Vault traffic uses `http://vault:8200`.
 
 `make vault-publish` updates the managed Vault env records from the ignored local env files after a maintainer changes a credential. `make vault-status` compares local and Vault key coverage without printing values.
 
@@ -107,6 +107,8 @@ Developers in the GitHub team can use Vault's GitHub auth against the public Fly
 `make vault-rotate-approles` rotates service AppRole secret IDs and stores the new IDs in Vault. `make vault-verify-approles` logs in with the root service AppRoles and verifies each token can read the managed Vault env secret without printing secret values. This confirms the local AppRole path for the BaaS, osionos, website, Mail, and Calendar services.
 
 `make env-fetch` materializes the current Vault values back into the ignored local env files before the Compose stack starts. Fetch merges non-empty Vault values with existing local/generated values, so an older Vault record cannot erase a newly generated required value. `make env-restore-test` creates `.env.bak` files, removes the managed env files, fetches them from Vault, and verifies required keys came back.
+
+The root Compose stack sends local auth and newsletter mail through Mailpit at `http://localhost:8025` by default. This keeps `make all` usable without depending on outbound SMTP from the developer machine or CI runner. To test a real SMTP provider instead, export `SMTP_HOST`, `SMTP_PORT`, `SMTP_ENCRYPTION`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_ADDRESS`, and set `MAILPIT_VERIFY_DELIVERY=false` for that run.
 
 If the live Postgres volume was initialized with an older password than `apps/baas/.env.local`, `make db-password-check` detects the drift and `make db-password-apply` applies the current ignored env password to the live Postgres role without printing it. After changing database credentials, run `make db-password-apply`, `make vault-publish`, and then `make env-fetch` on other machines.
 
@@ -126,7 +128,7 @@ make calendar-up
 npm run dev:all
 ```
 
-Mail runs at `http://localhost:3002` with its bridge at `http://localhost:4100`. Calendar runs at `http://localhost:3003` with its bridge at `http://localhost:4200`. Google OAuth credentials belong in the ignored app env files or the BaaS Vault secret configured by each bridge. Calendar can reuse the Mail app's `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`; put Calendar-specific overrides in `apps/calendar/.env.local`. The root stack builds stable local images named `track-binocle/mail:local`, `track-binocle/mail-bridge:local`, `track-binocle/calendar:local`, and `track-binocle/calendar-bridge:local` unless overridden with compose image variables.
+Mail runs at `https://localhost:3002` with its bridge at `https://localhost:4100`. Calendar runs at `https://localhost:3003` with its bridge at `https://localhost:4200`. Google OAuth credentials belong in the ignored app env files or the BaaS Vault secret configured by each bridge. Calendar can reuse the Mail app's `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`; put Calendar-specific overrides in `apps/calendar/.env.local`. The root stack builds stable local images named `track-binocle/mail:local`, `track-binocle/mail-bridge:local`, `track-binocle/calendar:local`, and `track-binocle/calendar-bridge:local` unless overridden with compose image variables.
 
 To publish the app images to DockerHub, set `DOCKER_USER` and `DOCKER_PAT` in the shell or an ignored env file, then run:
 

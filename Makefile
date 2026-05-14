@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/14 17:26:59 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/14 20:31:33 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -36,7 +36,7 @@ COMPOSE_WAIT_TIMEOUT ?= 300
 COMPOSE_WAIT_INTERVAL ?= 2
 COMPOSE_HEALTHY_SERVICES ?= postgres local-https-proxy mail-bridge mail pg-meta gotrue kong osionos-bridge osionos-app auth-gateway opposite-osiris calendar-bridge calendar
 # supavisor restarts intermittently in CI, but the stack does not depend on it for readiness.
-COMPOSE_RUNNING_SERVICES ?= redis postgrest
+COMPOSE_RUNNING_SERVICES ?= redis postgrest mailpit
 COMPOSE_COMPLETED_SERVICES ?= db-bootstrap project-db-init local-runtime-secrets opposite-osiris-deps
 VERSION ?=
 BAAS_VERSION ?= $(if $(VERSION),$(if $(filter v%,$(VERSION)),$(VERSION),v$(VERSION)),v$(shell date +%F))
@@ -45,6 +45,7 @@ BAAS_DOCKERHUB_IMAGE ?= dlesieur/mini-baas-infra
 BAAS_GHCR_IMAGE ?= ghcr.io/univers42/mini-baas-infra
 BAAS_SMTP_IMAGE ?= dlesieur/mini-baas-infra
 BAAS_SMTP_VERSION ?= smtp-v1
+MAILPIT_IMAGE ?= axllent/mailpit:v1.22.3
 BAAS_SERVICES ?= kong gotrue postgrest postgres redis realtime
 BAAS_DOCKERFILE := apps/baas/Dockerfile
 BAAS_CONTEXT := apps/baas
@@ -59,7 +60,8 @@ MAIL_URL := https://localhost:3002
 MAIL_BRIDGE_URL := https://localhost:4100
 CALENDAR_URL := https://localhost:3003
 CALENDAR_BRIDGE_URL := https://localhost:4200
-VAULT_URL := https://localhost:8200
+VAULT_URL := https://localhost:18200
+MAILPIT_URL := http://localhost:8025
 PLAYGROUND_VIEWER_URL := $(OSIONOS_URL)/playground-simulation/index.html
 VSCODE_CLI ?= /usr/bin/code
 GIT_COMMIT_MESSAGE ?= update
@@ -78,7 +80,7 @@ VAULT_READER_TOKEN_FILE ?= .vault/track-binocle-reader.env
 VAULT_WRITER_TOKEN_FILE ?= .vault/track-binocle-writer.env
 VAULT_TOKEN_FILE ?= $(VAULT_READER_TOKEN_FILE)
 VAULT_PUBLISH_TOKEN_FILE ?= $(VAULT_WRITER_TOKEN_FILE)
-VAULT_PUBLIC_ADDR ?= https://localhost:8200
+VAULT_PUBLIC_ADDR ?= $(VAULT_URL)
 VAULT_ENV_PREFIX ?= secret/data/track-binocle/env
 VAULT_SHARED_REQUIRED ?= false
 VAULT_SHARED_ADDR ?= $(FLY_VAULT_URL)
@@ -288,6 +290,7 @@ docker-prefetch-images:
 		start_pull node:22-bookworm-slim public.ecr.aws/docker/library/node:22-bookworm-slim; \
 		start_pull postgres:16-alpine public.ecr.aws/docker/library/postgres:16-alpine; \
 		start_pull redis:7-alpine public.ecr.aws/docker/library/redis:7-alpine; \
+		start_pull '$(MAILPIT_IMAGE)'; \
 		start_pull kong:3.8 public.ecr.aws/docker/library/kong:3.8; \
 		start_pull postgrest/postgrest:v12.2.3 mirror.gcr.io/postgrest/postgrest:v12.2.3; \
 		start_pull supabase/gotrue:v2.188.1 public.ecr.aws/supabase/gotrue:v2.188.1; \
@@ -376,7 +379,7 @@ vault-fetch-shared:
 			vault_addr_is_local=1; \
 			echo '[vault] translated Docker-only Vault host local-https-proxy to localhost for host fetch'; \
 			;; \
-		https://localhost:8200*|http://localhost:8200*|https://127.0.0.1:8200*|http://127.0.0.1:8200*) \
+		https://localhost:*|http://localhost:*|https://127.0.0.1:*|http://127.0.0.1:*) \
 			vault_addr_is_local=1; \
 			;; \
 	esac; \
@@ -429,7 +432,7 @@ vault-shared-doctor:
 	echo "[vault] vault address: $$VAULT_ADDR"; \
 	echo "[vault] env prefix: $${VAULT_ENV_PREFIX:-$(VAULT_ENV_PREFIX)}"; \
 	case "$$VAULT_ADDR" in \
-		https://local-https-proxy:*|http://local-https-proxy:*|https://localhost:8200*|http://localhost:8200*|https://127.0.0.1:8200*|http://127.0.0.1:8200*) \
+		https://local-https-proxy:*|http://local-https-proxy:*|https://localhost:*|http://localhost:*|https://127.0.0.1:*|http://127.0.0.1:*) \
 			if [[ '$(VAULT_ALLOW_LOCAL_SHARED)' == 'true' || '$(VAULT_ALLOW_LOCAL_SHARED)' == '1' ]]; then \
 				echo '[vault] localhost Vault allowed for same-machine testing'; \
 			else \
@@ -603,8 +606,8 @@ compose-wait:
 
 up: certs docker-prefetch-images compose-build
 ## Build and start every service in the root Docker Compose graph.
-	@docker compose kill local-https-proxy db-bootstrap project-db-init gotrue kong postgrest pg-meta supavisor osionos-bridge osionos-app auth-gateway opposite-osiris mail-bridge mail calendar-bridge calendar >/dev/null 2>&1 || true
-	@docker compose rm -f local-https-proxy db-bootstrap project-db-init gotrue kong postgrest pg-meta supavisor osionos-bridge osionos-app auth-gateway opposite-osiris mail-bridge mail calendar-bridge calendar >/dev/null 2>&1 || true
+	@docker compose kill local-https-proxy mailpit db-bootstrap project-db-init gotrue kong postgrest pg-meta supavisor osionos-bridge osionos-app auth-gateway opposite-osiris mail-bridge mail calendar-bridge calendar >/dev/null 2>&1 || true
+	@docker compose rm -f local-https-proxy mailpit db-bootstrap project-db-init gotrue kong postgrest pg-meta supavisor osionos-bridge osionos-app auth-gateway opposite-osiris mail-bridge mail calendar-bridge calendar >/dev/null 2>&1 || true
 	docker compose up -d --no-build --pull never --wait postgres
 	$(MAKE) db-password-apply
 	docker compose up -d --no-build --pull never
@@ -697,6 +700,8 @@ healthcheck: certs
 	$(CURL_HEALTH) $(OSIONOS_URL) >/dev/null
 	$(CURL_HEALTH) $(WEBSITE_URL) >/dev/null
 	$(CURL_HEALTH) -o /dev/null -w 'auth-gateway-https-%{http_code}\n' $(AUTH_URL)/availability
+	$(CURL_HEALTH) $(MAILPIT_URL) >/dev/null
+	docker compose exec -T auth-gateway node scripts/verify-newsletter-delivery.mjs
 	$(CURL_HEALTH) $(MAIL_BRIDGE_URL)/health >/dev/null
 	$(CURL_HEALTH) $(MAIL_URL) >/dev/null
 	$(CURL_HEALTH) $(CALENDAR_BRIDGE_URL)/health >/dev/null
@@ -715,6 +720,7 @@ showcase:
 	@printf '  Auth gateway:        %s\n' '$(AUTH_URL)'
 	@printf '  BaaS gateway:        %s\n\n' '$(BAAS_URL)'
 	@printf '  Vault:               %s\n\n' '$(VAULT_URL)'
+	@printf '  Local mail inbox:    %s\n\n' '$(MAILPIT_URL)'
 	@printf '  osionos Mail:        %s\n' '$(MAIL_URL)'
 	@printf '  Mail bridge:         %s\n' '$(MAIL_BRIDGE_URL)'
 	@printf '  osionos Calendar:    %s\n' '$(CALENDAR_URL)'
