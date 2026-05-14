@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/14 04:52:25 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/14 05:20:33 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -16,6 +16,9 @@ SHELL := /bin/bash
 COMPOSE_PROGRESS ?= plain
 BUILDKIT_PROGRESS ?= plain
 BUILDX_BUILDER ?= track-binocle-builder
+BUILDX_IMAGE ?= moby/buildkit:buildx-stable-1
+BUILDX_BOOTSTRAP_TIMEOUT ?= 120
+BUILDX_BOOTSTRAP_KILL_AFTER ?= 15
 DOCKER_BUILDKIT ?= 1
 COMPOSE_DOCKER_CLI_BUILD ?= 1
 COMPOSE_BAKE ?= 1
@@ -198,7 +201,13 @@ buildx-setup:
 	if docker buildx inspect '$(BUILDX_BUILDER)' >/dev/null 2>&1; then \
 		docker buildx use '$(BUILDX_BUILDER)' >/dev/null; \
 	else \
-		docker buildx create --name '$(BUILDX_BUILDER)' --driver docker-container --use >/dev/null; \
+		docker buildx create --name '$(BUILDX_BUILDER)' --driver docker-container --driver-opt image='$(BUILDX_IMAGE)' --use >/dev/null; \
+	fi; \
+	if ! timeout --kill-after='$(BUILDX_BOOTSTRAP_KILL_AFTER)s' '$(BUILDX_BOOTSTRAP_TIMEOUT)s' docker buildx inspect --bootstrap '$(BUILDX_BUILDER)' >/dev/null; then \
+		echo '[docker] recreating unresponsive buildx builder $(BUILDX_BUILDER)'; \
+		docker buildx rm -f '$(BUILDX_BUILDER)' >/dev/null 2>&1 || true; \
+		docker buildx create --name '$(BUILDX_BUILDER)' --driver docker-container --driver-opt image='$(BUILDX_IMAGE)' --use >/dev/null; \
+		timeout --kill-after='$(BUILDX_BOOTSTRAP_KILL_AFTER)s' '$(BUILDX_BOOTSTRAP_TIMEOUT)s' docker buildx inspect --bootstrap '$(BUILDX_BUILDER)' >/dev/null; \
 	fi
 
 compose-build: buildx-setup
