@@ -1,7 +1,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 1 – Dependency layer (cached unless Cargo.toml / Cargo.lock change)
 # ─────────────────────────────────────────────────────────────────────────────
-FROM rust:1.89-slim-bookworm AS deps
+FROM public.ecr.aws/docker/library/rust:1.89-slim-bookworm AS deps
 WORKDIR /build
 
 RUN apt-get update && \
@@ -57,7 +57,7 @@ RUN touch crates/realtime-server/src/main.rs && \
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 3 – Minimal runtime image  (~15 MB stripped binary + libc)
 # ─────────────────────────────────────────────────────────────────────────────
-FROM debian:bookworm-slim AS runtime
+FROM public.ecr.aws/docker/library/debian:bookworm-slim AS runtime
 
 RUN apt-get update && \
     apt-get install -y ca-certificates curl && \

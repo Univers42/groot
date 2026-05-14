@@ -7,7 +7,7 @@ ARG NODE_VERSION=20
 ARG APP=adapter-registry
 
 # ─── Stage 1: Install ALL dependencies (dev + prod) ──────────────
-FROM node:${NODE_VERSION}-alpine AS deps
+FROM public.ecr.aws/docker/library/node:${NODE_VERSION}-alpine AS deps
 WORKDIR /app
 COPY --link package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
@@ -27,7 +27,7 @@ RUN --mount=type=cache,target=/root/.npm,sharing=locked \
   npm prune --omit=dev --ignore-scripts --no-audit --no-fund
 
 # ─── Stage 4: Production image ───────────────────────────────────
-FROM node:${NODE_VERSION}-alpine AS runtime
+FROM public.ecr.aws/docker/library/node:${NODE_VERSION}-alpine AS runtime
 ARG APP
 ENV NODE_ENV=production \
   APP_NAME=${APP}

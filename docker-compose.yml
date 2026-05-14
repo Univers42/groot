@@ -54,7 +54,7 @@ services:
     restart: "no"
 
   vault-env:
-    image: node:22-alpine
+    image: public.ecr.aws/docker/library/node:22-alpine
     profiles:
       - secrets
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
@@ -78,7 +78,7 @@ services:
     restart: "no"
 
   local-https-proxy:
-    image: nginx:1.27-alpine
+    image: public.ecr.aws/docker/library/nginx:1.27-alpine
     volumes:
       - ./infrastructure/tls/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./apps/baas/certs:/etc/track-binocle/certs:ro
@@ -125,7 +125,7 @@ services:
       start_period: 10s
 
   db-bootstrap:
-    image: postgres:16-alpine
+    image: public.ecr.aws/docker/library/postgres:16-alpine
     env_file:
       - path: ./apps/baas/.env.local
         required: false
@@ -145,7 +145,7 @@ services:
     restart: "no"
 
   project-db-init:
-    image: postgres:16-alpine
+    image: public.ecr.aws/docker/library/postgres:16-alpine
     env_file:
       - path: ./apps/baas/.env.local
         required: false
@@ -167,7 +167,7 @@ services:
     restart: "no"
 
   redis:
-    image: ${BAAS_REDIS_IMAGE:-redis:7-alpine}
+    image: ${BAAS_REDIS_IMAGE:-public.ecr.aws/docker/library/redis:7-alpine}
     command: redis-server --appendonly yes
     volumes:
       - track-binocle-redis-data:/data
@@ -183,7 +183,7 @@ services:
     restart: unless-stopped
 
   gotrue:
-    image: ${BAAS_GOTRUE_IMAGE:-supabase/gotrue:v2.188.1}
+    image: ${BAAS_GOTRUE_IMAGE:-public.ecr.aws/supabase/gotrue:v2.188.1}
     env_file:
       - path: ./.env.local
         required: false
@@ -227,7 +227,7 @@ services:
       retries: 8
 
   postgrest:
-    image: ${BAAS_POSTGREST_IMAGE:-postgrest/postgrest:v12.2.3}
+    image: ${BAAS_POSTGREST_IMAGE:-mirror.gcr.io/postgrest/postgrest:v12.2.3}
     env_file:
       - path: ./apps/baas/.env.local
         required: false
@@ -244,7 +244,7 @@ services:
     restart: unless-stopped
 
   pg-meta:
-    image: ${BAAS_PG_META_IMAGE:-supabase/postgres-meta:v0.91.0}
+    image: ${BAAS_PG_META_IMAGE:-public.ecr.aws/supabase/postgres-meta:v0.91.0}
     env_file:
       - path: ./apps/baas/.env.local
         required: false
@@ -260,7 +260,7 @@ services:
   supavisor:
     profiles:
       - supavisor
-    image: ${BAAS_SUPAVISOR_IMAGE:-supabase/supavisor:2.7.4}
+    image: ${BAAS_SUPAVISOR_IMAGE:-public.ecr.aws/supabase/supavisor:2.7.4}
     env_file:
       - path: ./apps/baas/.env.local
         required: false
@@ -330,7 +330,7 @@ services:
     restart: unless-stopped
 
   local-runtime-secrets:
-    image: node:22-alpine
+    image: public.ecr.aws/docker/library/node:22-alpine
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     working_dir: /app
     command: ["node", "apps/baas/scripts/ensure-osionos-runtime-secrets.mjs"]
@@ -339,7 +339,7 @@ services:
     restart: "no"
 
   osionos-bridge:
-    image: node:22-bookworm-slim
+    image: public.ecr.aws/docker/library/node:22-bookworm-slim
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     working_dir: /app/apps/osionos/app
     command: ["node", "scripts/bridge-api.mjs"]

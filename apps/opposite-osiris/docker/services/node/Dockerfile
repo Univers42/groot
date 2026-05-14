@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM node:22-alpine
+FROM public.ecr.aws/docker/library/node:22-alpine
 
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
 	apk add --update-cache python3 make g++

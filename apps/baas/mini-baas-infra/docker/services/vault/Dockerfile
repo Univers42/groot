@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # File: docker/services/vault/Dockerfile
-FROM hashicorp/vault:1.16
+FROM public.ecr.aws/hashicorp/vault:1.16
 
 # Alpine-based image: add bash + jq for init script and prepare Vault data.
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \

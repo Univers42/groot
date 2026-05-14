@@ -289,20 +289,20 @@ docker-prefetch-images:
 		pull_image "$$@" & \
 		while [ "$$(jobs -pr | wc -l)" -ge "$$jobs" ]; do wait_for_pull; done; \
 	}; \
-	start_pull node:22-alpine public.ecr.aws/docker/library/node:22-alpine; \
-	start_pull nginx:1.27-alpine public.ecr.aws/docker/library/nginx:1.27-alpine; \
+	start_pull public.ecr.aws/docker/library/node:22-alpine; \
+	start_pull public.ecr.aws/docker/library/nginx:1.27-alpine; \
 	start_pull docker/dockerfile:1; \
 	start_pull docker/dockerfile:1.7; \
-	start_pull hashicorp/vault:1.16 public.ecr.aws/hashicorp/vault:1.16; \
+	start_pull public.ecr.aws/hashicorp/vault:1.16; \
 	if [[ "$$scope" == 'all' ]]; then \
-		start_pull node:22-bookworm-slim public.ecr.aws/docker/library/node:22-bookworm-slim; \
-		start_pull postgres:16-alpine public.ecr.aws/docker/library/postgres:16-alpine; \
-		start_pull redis:7-alpine public.ecr.aws/docker/library/redis:7-alpine; \
+		start_pull public.ecr.aws/docker/library/node:22-bookworm-slim; \
+		start_pull public.ecr.aws/docker/library/postgres:16-alpine; \
+		start_pull public.ecr.aws/docker/library/redis:7-alpine; \
 		start_pull '$(MAILPIT_IMAGE)'; \
-		start_pull kong:3.8 public.ecr.aws/docker/library/kong:3.8; \
-		start_pull postgrest/postgrest:v12.2.3 mirror.gcr.io/postgrest/postgrest:v12.2.3; \
-		start_pull supabase/gotrue:v2.188.1 public.ecr.aws/supabase/gotrue:v2.188.1; \
-		start_pull supabase/postgres-meta:v0.91.0 public.ecr.aws/supabase/postgres-meta:v0.91.0; \
+		start_pull public.ecr.aws/docker/library/kong:3.8; \
+		start_pull mirror.gcr.io/postgrest/postgrest:v12.2.3; \
+		start_pull public.ecr.aws/supabase/gotrue:v2.188.1; \
+		start_pull public.ecr.aws/supabase/postgres-meta:v0.91.0; \
 	fi; \
 	while [ "$$(jobs -p | wc -l)" -gt 0 ]; do wait_for_pull; done; \
 	if [ "$$failed" -ne 0 ]; then echo '[docker] one or more image pulls failed'; exit 1; fi
