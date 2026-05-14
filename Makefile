@@ -6,7 +6,11 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
+<<<<<<< Updated upstream
 #    Updated: 2026/05/15 00:10:01 by dlesieur         ###   ########.fr        #
+=======
+#    Updated: 2026/05/14 23:48:33 by dlesieur         ###   ########.fr        #
+>>>>>>> Stashed changes
 #                                                                              #
 # **************************************************************************** #
 

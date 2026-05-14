@@ -141,4 +141,8 @@ for port in 4322 4323; do
 done
 ```
 
+<<<<<<< Updated upstream
 `4322` must be signed by the current `apps/baas/certs/track-binocle-local-ca.pem`. A mismatched forwarded port is outside the Docker proxy and should not be used as the source of truth.
+=======
+`4322` must be signed by the current `apps/baas/certs/track-binocle-local-ca.pem`. A mismatched forwarded port is outside the Docker proxy and should not be used as the source of truth.
+>>>>>>> Stashed changes
