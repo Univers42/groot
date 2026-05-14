@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/14 03:42:32 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/14 04:52:25 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -15,19 +15,25 @@ SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 COMPOSE_PROGRESS ?= plain
 BUILDKIT_PROGRESS ?= plain
-BUILDX_BUILDER ?= default
+BUILDX_BUILDER ?= track-binocle-builder
 DOCKER_BUILDKIT ?= 1
 COMPOSE_DOCKER_CLI_BUILD ?= 1
 COMPOSE_BAKE ?= 1
-export COMPOSE_PROGRESS BUILDKIT_PROGRESS BUILDX_BUILDER DOCKER_BUILDKIT COMPOSE_DOCKER_CLI_BUILD COMPOSE_BAKE
-DOCKER_PULL_ATTEMPTS ?= 2
-DOCKER_PULL_TIMEOUT ?= 180
+REGISTRY_CACHE_PREFIX ?=
+BAKE_FILE ?= docker-bake.hcl
+BAKE_GROUP ?= default
+BAKE_TARGETS ?= postgres kong osionos-app mail calendar opposite-osiris-node
+export COMPOSE_PROGRESS BUILDKIT_PROGRESS BUILDX_BUILDER DOCKER_BUILDKIT COMPOSE_DOCKER_CLI_BUILD COMPOSE_BAKE REGISTRY_CACHE_PREFIX
+DOCKER_PULL_ATTEMPTS ?= 1
+DOCKER_PULL_TIMEOUT ?= 120
 DOCKER_PULL_KILL_AFTER ?= 15
 DOCKER_PREFETCH_JOBS ?= 8
+DOCKER_PREFETCH_SCOPE ?= all
 COMPOSE_WAIT_TIMEOUT ?= 300
 COMPOSE_WAIT_INTERVAL ?= 2
 COMPOSE_HEALTHY_SERVICES ?= postgres local-https-proxy mail-bridge mail pg-meta gotrue kong osionos-bridge osionos-app auth-gateway opposite-osiris calendar-bridge calendar
-COMPOSE_RUNNING_SERVICES ?= redis postgrest supavisor
+# supavisor restarts intermittently in CI, but the stack does not depend on it for readiness.
+COMPOSE_RUNNING_SERVICES ?= redis postgrest
 COMPOSE_COMPLETED_SERVICES ?= db-bootstrap project-db-init local-runtime-secrets opposite-osiris-deps
 VERSION ?=
 BAAS_VERSION ?= $(if $(VERSION),$(if $(filter v%,$(VERSION)),$(VERSION),v$(VERSION)),v$(shell date +%F))
@@ -186,17 +192,42 @@ certs-trust-local: certs
 env-format:
 	$(NODE_RUN) apps/baas/scripts/vault-env.mjs format
 
+buildx-setup:
+## Ensure a BuildKit docker-container builder is available for parallel bake builds.
+	@set -eu; \
+	if docker buildx inspect '$(BUILDX_BUILDER)' >/dev/null 2>&1; then \
+		docker buildx use '$(BUILDX_BUILDER)' >/dev/null; \
+	else \
+		docker buildx create --name '$(BUILDX_BUILDER)' --driver docker-container --use >/dev/null; \
+	fi
+
+compose-build: buildx-setup
+## Build local Compose images in parallel with BuildKit bake and optional registry cache.
+	@set -eu; \
+	cache_flags=''; \
+	if [[ -n '$(REGISTRY_CACHE_PREFIX)' ]]; then \
+		echo '[docker] using registry build cache $(REGISTRY_CACHE_PREFIX)'; \
+		for target in $(BAKE_TARGETS); do \
+			cache_ref='$(REGISTRY_CACHE_PREFIX)'"/$$target"; \
+			cache_flags="$$cache_flags --set $$target.cache-from=type=registry,ref=$$cache_ref"; \
+			cache_flags="$$cache_flags --set $$target.cache-to=type=registry,ref=$$cache_ref,mode=max"; \
+		done; \
+	fi; \
+	docker buildx bake --builder '$(BUILDX_BUILDER)' --file '$(BAKE_FILE)' --load $$cache_flags '$(BAKE_GROUP)'
+
 docker-prefetch-images:
 ## Pull required public images from resilient mirrors before Compose builds.
 	@set -eu; \
 	jobs='$(DOCKER_PREFETCH_JOBS)'; \
+	scope='$(DOCKER_PREFETCH_SCOPE)'; \
 	case "$$jobs" in ''|*[!0-9]*) echo '[docker] DOCKER_PREFETCH_JOBS must be a positive integer'; exit 1;; esac; \
+	case "$$scope" in all|vault) ;; *) echo '[docker] DOCKER_PREFETCH_SCOPE must be all or vault'; exit 1;; esac; \
 	if [ "$$jobs" -lt 1 ]; then jobs=1; fi; \
-	echo "[docker] prefetching images with up to $$jobs concurrent pulls"; \
+	echo "[docker] prefetching $$scope images with up to $$jobs concurrent pulls"; \
 	pull_image() { \
 		target="$$1"; shift; \
 		if docker image inspect "$$target" >/dev/null 2>&1; then echo "[docker] using cached $$target"; return 0; fi; \
-		refs="$$target $$*"; \
+		refs="$$* $$target"; \
 		for ref in $$refs; do \
 			attempt=1; \
 			while [ "$$attempt" -le '$(DOCKER_PULL_ATTEMPTS)' ]; do \
@@ -221,25 +252,28 @@ docker-prefetch-images:
 		while [ "$$(jobs -pr | wc -l)" -ge "$$jobs" ]; do wait_for_pull; done; \
 	}; \
 	start_pull node:22-alpine public.ecr.aws/docker/library/node:22-alpine; \
-	start_pull node:22-bookworm-slim public.ecr.aws/docker/library/node:22-bookworm-slim; \
 	start_pull nginx:1.27-alpine public.ecr.aws/docker/library/nginx:1.27-alpine; \
 	start_pull docker/dockerfile:1; \
 	start_pull docker/dockerfile:1.7; \
-	start_pull postgres:16-alpine public.ecr.aws/docker/library/postgres:16-alpine; \
-	start_pull redis:7-alpine public.ecr.aws/docker/library/redis:7-alpine; \
-	start_pull kong:3.8 public.ecr.aws/docker/library/kong:3.8; \
 	start_pull hashicorp/vault:1.16 public.ecr.aws/hashicorp/vault:1.16; \
-	start_pull postgrest/postgrest:v12.2.3 mirror.gcr.io/postgrest/postgrest:v12.2.3; \
-	start_pull supabase/gotrue:v2.188.1 public.ecr.aws/supabase/gotrue:v2.188.1; \
-	start_pull supabase/postgres-meta:v0.91.0 public.ecr.aws/supabase/postgres-meta:v0.91.0; \
-	start_pull supabase/supavisor:2.7.4 public.ecr.aws/supabase/supavisor:2.7.4; \
+	if [[ "$$scope" == 'all' ]]; then \
+		start_pull node:22-bookworm-slim public.ecr.aws/docker/library/node:22-bookworm-slim; \
+		start_pull postgres:16-alpine public.ecr.aws/docker/library/postgres:16-alpine; \
+		start_pull redis:7-alpine public.ecr.aws/docker/library/redis:7-alpine; \
+		start_pull kong:3.8 public.ecr.aws/docker/library/kong:3.8; \
+		start_pull postgrest/postgrest:v12.2.3 mirror.gcr.io/postgrest/postgrest:v12.2.3; \
+		start_pull supabase/gotrue:v2.188.1 public.ecr.aws/supabase/gotrue:v2.188.1; \
+		start_pull supabase/postgres-meta:v0.91.0 public.ecr.aws/supabase/postgres-meta:v0.91.0; \
+	fi; \
 	while [ "$$(jobs -p | wc -l)" -gt 0 ]; do wait_for_pull; done; \
 	if [ "$$failed" -ne 0 ]; then echo '[docker] one or more image pulls failed'; exit 1; fi
 
-vault-up: certs docker-prefetch-images
+vault-up: certs
+	$(MAKE) docker-prefetch-images DOCKER_PREFETCH_SCOPE=vault
+	$(MAKE) compose-build BAKE_GROUP=secrets BAKE_TARGETS='vault'
 	@docker compose rm -sf local-https-proxy >/dev/null 2>&1 || true
-	$(VAULT_COMPOSE) up -d --build --pull never vault local-https-proxy
-	$(VAULT_COMPOSE) run --rm --build vault-init
+	$(VAULT_COMPOSE) up -d --no-build --pull never vault local-https-proxy
+	$(VAULT_COMPOSE) run --rm vault-init
 
 vault-seed: vault-up
 	$(VAULT_ENV_CMD) seed
@@ -443,17 +477,18 @@ compose-wait:
 		sleep '$(COMPOSE_WAIT_INTERVAL)'; \
 	done
 
-up: certs docker-prefetch-images
+up: certs docker-prefetch-images compose-build
 ## Build and start every service in the root Docker Compose graph.
-	@docker compose rm -sf local-https-proxy db-bootstrap project-db-init gotrue kong postgrest pg-meta supavisor osionos-bridge osionos-app auth-gateway opposite-osiris mail-bridge mail calendar-bridge calendar >/dev/null 2>&1 || true
-	docker compose up -d --build --pull never --wait postgres
+	@docker compose kill local-https-proxy db-bootstrap project-db-init gotrue kong postgrest pg-meta supavisor osionos-bridge osionos-app auth-gateway opposite-osiris mail-bridge mail calendar-bridge calendar >/dev/null 2>&1 || true
+	@docker compose rm -f local-https-proxy db-bootstrap project-db-init gotrue kong postgrest pg-meta supavisor osionos-bridge osionos-app auth-gateway opposite-osiris mail-bridge mail calendar-bridge calendar >/dev/null 2>&1 || true
+	docker compose up -d --no-build --pull never --wait postgres
 	$(MAKE) db-password-apply
-	docker compose up -d --build --pull never
+	docker compose up -d --no-build --pull never
 	$(MAKE) compose-wait
 
 app-images:
 ## Build the local Docker images for the website, osionos, Mail, Calendar, bridges, and BaaS gateway.
-	docker compose --profile testing build kong osionos-app mail mail-bridge calendar calendar-bridge auth-gateway opposite-osiris opposite-osiris-deps playground-simulation
+	$(MAKE) compose-build BAKE_GROUP=testing BAKE_TARGETS='$(BAKE_TARGETS) playground-simulation'
 
 app-login:
 ## Log in to DockerHub using DOCKER_USER/DOCKER_PAT from the shell or ignored env files.
@@ -506,7 +541,8 @@ app-images-push: app-images app-login
 
 mail-up: docker-prefetch-images
 ## Start osionos Mail and the Gmail bridge with Docker Compose.
-	docker compose up -d --build --pull never mail mail-bridge
+	$(MAKE) compose-build BAKE_GROUP=mail BAKE_TARGETS='mail'
+	docker compose up -d --no-build --pull never mail mail-bridge
 
 mail-logs:
 ## Follow osionos Mail and Gmail bridge logs.
@@ -518,7 +554,8 @@ mail-down:
 
 calendar-up: docker-prefetch-images
 ## Start osionos Calendar and the Google Calendar bridge with Docker Compose.
-	docker compose up -d --build --pull never calendar calendar-bridge
+	$(MAKE) compose-build BAKE_GROUP=calendar BAKE_TARGETS='calendar'
+	docker compose up -d --no-build --pull never calendar calendar-bridge
 
 calendar-logs:
 ## Follow osionos Calendar and Google Calendar bridge logs.
@@ -561,7 +598,8 @@ showcase:
 
 playground: healthcheck playground-preview
 ## Run the Docker Playwright user flow and app-service integration simulation.
-	docker compose --profile testing run --rm --build playground-simulation
+	$(MAKE) compose-build BAKE_GROUP=playground BAKE_TARGETS='playground-simulation'
+	docker compose --profile testing run --rm playground-simulation
 	$(MAKE) showcase
 
 playground-preview:
@@ -644,7 +682,8 @@ docker-rm-all:
 		fi; \
 	done
 	docker system prune -a --volumes=$(BOOL) -f
-	docker builder prune -a -f
+	@env -u BUILDX_BUILDER docker buildx use default >/dev/null 2>&1 || true
+	@env -u BUILDX_BUILDER docker builder prune -a -f || true
 
 
 docker_verify:
@@ -657,6 +696,7 @@ docker_verify:
 
 docker_reclaim_cache:
 ## Remove BuildKit/buildx cache only.
-	docker builder prune -a -f
+	@env -u BUILDX_BUILDER docker buildx use default >/dev/null 2>&1 || true
+	@env -u BUILDX_BUILDER docker builder prune -a -f || true
 
-.PHONY: help all all-local pulls pushes bootstrap certs certs-trust certs-trust-local env-format docker-prefetch-images vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fetch-shared env-fetch-shared vault-publish-shared vault-status-shared vault-repair-shared vault-github-oidc vault-fly-create vault-fly-deploy vault-fly-publish vault-fly-github vault-fly vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache
+.PHONY: help all all-local pulls pushes bootstrap certs certs-trust certs-trust-local env-format buildx-setup compose-build docker-prefetch-images vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fetch-shared env-fetch-shared vault-publish-shared vault-status-shared vault-repair-shared vault-github-oidc vault-fly-create vault-fly-deploy vault-fly-publish vault-fly-github vault-fly vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache

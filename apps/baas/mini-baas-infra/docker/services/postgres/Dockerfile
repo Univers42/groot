@@ -2,7 +2,7 @@
 # File: docker/services/postgres/Dockerfile
 # PostgreSQL 16 Alpine with pg_net extension (required by GoTrue webhooks / Supabase).
 
-FROM postgres:16-alpine
+FROM postgres:16-alpine AS pg_net_builder
 
 # Install build dependencies for pg_net
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
@@ -21,7 +21,11 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
     src/core.c \
   && sed -i '1i#define CURL_DISABLE_TYPECHECK 1' src/core.c src/event.h src/errors.c src/util.c src/worker.c \
   && make with_llvm=no \
-  && make install with_llvm=no \
-  && rm -rf /tmp/pg_net /var/cache/apk/*
+  && make install with_llvm=no
+
+FROM postgres:16-alpine
+
+COPY --from=pg_net_builder /usr/local/lib/postgresql/pg_net.so /usr/local/lib/postgresql/
+COPY --from=pg_net_builder /usr/local/share/postgresql/extension/pg_net* /usr/local/share/postgresql/extension/
 
 EXPOSE 5432
