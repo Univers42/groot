@@ -33,10 +33,14 @@ services:
     profiles:
       - secrets
     env_file:
-      - ./apps/baas/.env.local
-      - ./.env.local
-      - ./apps/opposite-osiris/.env.local
-      - ./apps/osionos/app/.env
+      - path: ./apps/baas/.env.local
+        required: false
+      - path: ./.env.local
+        required: false
+      - path: ./apps/opposite-osiris/.env.local
+        required: false
+      - path: ./apps/osionos/app/.env
+        required: false
     environment:
       VAULT_ADDR: http://vault:8200
     entrypoint: /vault/scripts/init-vault.sh
@@ -101,7 +105,8 @@ services:
     build:
       context: ./apps/baas/mini-baas-infra/docker/services/postgres
     env_file:
-      - ./apps/baas/.env.local
+      - path: ./apps/baas/.env.local
+        required: false
     ports:
       - "127.0.0.1:${PG_PORT:-5432}:5432"
     environment:
@@ -120,7 +125,8 @@ services:
   db-bootstrap:
     image: postgres:16-alpine
     env_file:
-      - ./apps/baas/.env.local
+      - path: ./apps/baas/.env.local
+        required: false
     environment:
       REALTIME_DB_NAME: ${REALTIME_DB_NAME:-realtime}
     command: >
@@ -139,7 +145,8 @@ services:
   project-db-init:
     image: postgres:16-alpine
     env_file:
-      - ./apps/baas/.env.local
+      - path: ./apps/baas/.env.local
+        required: false
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
@@ -167,8 +174,10 @@ services:
   gotrue:
     image: ${BAAS_GOTRUE_IMAGE:-supabase/gotrue:v2.188.1}
     env_file:
-      - ./.env.local
-      - ./apps/baas/.env.local
+      - path: ./.env.local
+        required: false
+      - path: ./apps/baas/.env.local
+        required: false
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: 9999
@@ -207,7 +216,8 @@ services:
   postgrest:
     image: ${BAAS_POSTGREST_IMAGE:-postgrest/postgrest:v12.2.3}
     env_file:
-      - ./apps/baas/.env.local
+      - path: ./apps/baas/.env.local
+        required: false
     environment:
       PGRST_DB_SCHEMA: ${PGRST_DB_SCHEMA:-public}
       PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS:-public}
@@ -223,7 +233,8 @@ services:
   pg-meta:
     image: ${BAAS_PG_META_IMAGE:-supabase/postgres-meta:v0.91.0}
     env_file:
-      - ./apps/baas/.env.local
+      - path: ./apps/baas/.env.local
+        required: false
     environment:
       PG_META_PORT: 8080
     depends_on:
@@ -236,7 +247,8 @@ services:
   supavisor:
     image: ${BAAS_SUPAVISOR_IMAGE:-supabase/supavisor:2.7.4}
     env_file:
-      - ./apps/baas/.env.local
+      - path: ./apps/baas/.env.local
+        required: false
     depends_on:
       postgres:
         condition: service_healthy
@@ -249,8 +261,10 @@ services:
       context: ./apps/baas
       dockerfile: Dockerfile
     env_file:
-      - ./.env.local
-      - ./apps/baas/.env.local
+      - path: ./.env.local
+        required: false
+      - path: ./apps/baas/.env.local
+        required: false
     expose:
       - "8000"
       - "8001"
@@ -315,8 +329,10 @@ services:
     working_dir: /app/apps/osionos/app
     command: ["node", "scripts/bridge-api.mjs"]
     env_file:
-      - ./.env.local
-      - ./apps/baas/.env.local
+      - path: ./.env.local
+        required: false
+      - path: ./apps/baas/.env.local
+        required: false
     environment:
       OSIONOS_BRIDGE_PORT: 4000
       OSIONOS_APP_URL: ${OSIONOS_APP_URL:-https://localhost:3001}
@@ -354,8 +370,10 @@ services:
     working_dir: /app
     command: ["pnpm", "exec", "vite", "--host", "0.0.0.0", "--port", "3001", "--strictPort"]
     env_file:
-      - ./.env.local
-      - ./apps/osionos/app/.env
+      - path: ./.env.local
+        required: false
+      - path: ./apps/osionos/app/.env
+        required: false
     environment:
       NODE_ENV: development
       CHOKIDAR_USEPOLLING: "true"
@@ -550,9 +568,12 @@ services:
     working_dir: /workspace/apps/opposite-osiris
     command: ["node", "scripts/auth-gateway.mjs"]
     env_file:
-      - ./.env.local
-      - ./apps/baas/.env.local
-      - ./apps/opposite-osiris/.env.local
+      - path: ./.env.local
+        required: false
+      - path: ./apps/baas/.env.local
+        required: false
+      - path: ./apps/opposite-osiris/.env.local
+        required: false
     environment:
       AUTH_GATEWAY_PORT: 8787
       PUBLIC_BAAS_URL: http://kong:8000
@@ -593,9 +614,12 @@ services:
     working_dir: /workspace/apps/opposite-osiris
     command: ["node", "scripts/container-only.mjs", "astro", "dev", "--host", "0.0.0.0", "--port", "4322"]
     env_file:
-      - ./.env.local
-      - ./apps/baas/.env.local
-      - ./apps/opposite-osiris/.env.local
+      - path: ./.env.local
+        required: false
+      - path: ./apps/baas/.env.local
+        required: false
+      - path: ./apps/opposite-osiris/.env.local
+        required: false
     environment:
       ASTRO_DEV_HOST: 0.0.0.0
       ASTRO_DEV_PORT: 4322
