@@ -254,7 +254,7 @@ The HTTPS health checks use that CA directly with `curl --cacert`. Browser trust
 make certs-trust
 ```
 
-On Linux, `certutil` from `libnss3-tools` is needed for browser profile import. VS Code/Electron and some browsers also use the Linux system CA store; if they still show `ERR_CERT_AUTHORITY_INVALID`, run `make certs-doctor` and then `make certs-trust-system` to update the system store with sudo.
+On Debian/Ubuntu, `make certs-trust-system` installs missing `ca-certificates` and `libnss3-tools` with sudo, imports the CA into Chromium/Firefox NSS stores, and updates the Linux system CA store used by VS Code/Electron and some browsers. Set `TRACK_BINOCLE_CERTS_INSTALL_DEPS=0` to disable package installation and manage those packages manually. On other Linux distributions, install the equivalent `certutil` and system CA update tooling before running the trust target.
 
 ## CI Parity
 
