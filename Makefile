@@ -80,6 +80,7 @@ VAULT_PUBLISH_TOKEN_FILE ?= $(VAULT_WRITER_TOKEN_FILE)
 VAULT_PUBLIC_ADDR ?= https://localhost:8200
 VAULT_ENV_PREFIX ?= secret/data/track-binocle/env
 VAULT_SHARED_REQUIRED ?= false
+VAULT_UP_STAMP := .vault/.up-stamp
 VAULT_GITHUB_OIDC_AUTH_PATH ?= jwt
 VAULT_GITHUB_OIDC_ROLE ?= track-binocle-github-actions
 VAULT_GITHUB_OIDC_REPOSITORY ?= Univers42/track-binocle
@@ -279,11 +280,17 @@ docker-prefetch-images:
 	if [ "$$failed" -ne 0 ]; then echo '[docker] one or more image pulls failed'; exit 1; fi
 
 vault-up: certs
-	$(MAKE) docker-prefetch-images DOCKER_PREFETCH_SCOPE=vault
-	$(MAKE) compose-build BAKE_GROUP=secrets BAKE_TARGETS='vault'
-	@docker compose rm -sf local-https-proxy >/dev/null 2>&1 || true
-	$(VAULT_COMPOSE) up -d --no-build --pull never vault local-https-proxy
-	$(VAULT_COMPOSE) run --rm vault-init
+	@mkdir -p .vault
+	@if [ -f $(VAULT_UP_STAMP) ] && $(VAULT_COMPOSE) ps --status running --quiet vault 2>/dev/null | grep -q .; then \
+		echo '[vault] already up, skipping init'; \
+	else \
+		$(MAKE) docker-prefetch-images DOCKER_PREFETCH_SCOPE=vault; \
+		$(MAKE) compose-build BAKE_GROUP=secrets BAKE_TARGETS='vault'; \
+		docker compose rm -sf local-https-proxy >/dev/null 2>&1 || true; \
+		$(VAULT_COMPOSE) up -d --no-build --pull never vault local-https-proxy; \
+		$(VAULT_COMPOSE) run --rm vault-init; \
+		touch $(VAULT_UP_STAMP); \
+	fi
 
 vault-seed: vault-up
 	$(VAULT_ENV_CMD) seed
@@ -448,7 +455,7 @@ vault-rotate-approles: vault-up
 ## Rotate service AppRole secret IDs and store the new IDs in Vault.
 	$(VAULT_ENV_CMD) rotate-approles
 
-vault-verify-approles: vault-seed
+vault-verify-approles: vault-up
 	$(VAULT_ENV_CMD) verify-approles
 
 env-fetch: vault-up
@@ -607,8 +614,8 @@ healthcheck: certs
 	$(CURL_HEALTH) $(MAIL_URL) >/dev/null
 	$(CURL_HEALTH) $(CALENDAR_BRIDGE_URL)/health >/dev/null
 	$(CURL_HEALTH) $(CALENDAR_URL) >/dev/null
-	docker compose exec -T mail-bridge node -e "fetch('http://127.0.0.1:' + (process.env.MAIL_BRIDGE_PORT || '4100') + '/session').then((r) => r.json()).then((session) => { if (!session.configured) { console.error('mail bridge reachable, but Gmail OAuth credentials are not configured'); process.exit(1); } }).catch((error) => { console.error(error.message); process.exit(1); })"
-	docker compose exec -T calendar-bridge node -e "fetch('http://127.0.0.1:' + (process.env.CALENDAR_BRIDGE_PORT || '4200') + '/session').then((r) => r.json()).then((session) => { if (!session.configured) { console.error('calendar bridge reachable, but Google Calendar OAuth credentials are not configured'); process.exit(1); } }).catch((error) => { console.error(error.message); process.exit(1); })"
+	docker compose exec -T mail-bridge node -e "fetch('http://127.0.0.1:' + (process.env.MAIL_BRIDGE_PORT || '4100') + '/session').then((r) => r.json()).then((session) => { if (!session.configured) console.warn('[healthcheck] Gmail OAuth credentials are not configured; Mail stays available with mock/local data, but Gmail connect and sync are disabled until this developer adds their own Google OAuth client credentials.'); }).catch((error) => { console.error(error.message); process.exit(1); })"
+	docker compose exec -T calendar-bridge node -e "fetch('http://127.0.0.1:' + (process.env.CALENDAR_BRIDGE_PORT || '4200') + '/session').then((r) => r.json()).then((session) => { if (!session.configured) console.warn('[healthcheck] Google Calendar OAuth credentials are not configured; Calendar stays available, but Google Calendar connect and sync are disabled until this developer adds their own Google OAuth client credentials.'); }).catch((error) => { console.error(error.message); process.exit(1); })"
 	docker compose exec -T calendar-bridge node -e "fetch('http://127.0.0.1:' + (process.env.CALENDAR_BRIDGE_PORT || '4200') + '/baas/status').then((r) => r.json()).then((status) => { if (!status.connected) { console.error('calendar bridge cannot reach the BaaS gateway'); process.exit(1); } }).catch((error) => { console.error(error.message); process.exit(1); })"
 	docker compose exec -T -e BAAS_INTERNAL_URL=http://kong:8000 opposite-osiris node scripts/container-only.mjs node scripts/verify-connection.mjs
 
