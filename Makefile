@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/14 23:33:00 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/14 23:48:33 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -15,7 +15,7 @@ SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 COMPOSE_PROGRESS ?= plain
 BUILDKIT_PROGRESS ?= plain
-BUILDX_BUILDER ?= track-binocle-builder
+BUILDX_BUILDER ?= default
 BUILDX_IMAGE ?= moby/buildkit:buildx-stable-1
 BUILDX_BOOTSTRAP_TIMEOUT ?= 120
 BUILDX_BOOTSTRAP_KILL_AFTER ?= 15
@@ -212,6 +212,14 @@ certs-doctor: certs
 			echo "[certs] local HTTPS proxy serves the current Track Binocle CA on https://localhost:$$port"; \
 		else \
 			echo "[certs] local HTTPS proxy certificate on https://localhost:$$port does not verify against $(LOCAL_CA_CERT); recreate local-https-proxy with make up." >&2; \
+			exit 1; \
+		fi; \
+		redirect_status="$$(curl -sS -o /dev/null -w '%{http_code}' "http://localhost:$$port/" || true)"; \
+		if [[ "$$redirect_status" =~ ^30(1|7|8)$$ ]]; then \
+			echo "[certs] plain HTTP on localhost:$$port redirects to HTTPS"; \
+		else \
+			echo "[certs] expected plain HTTP on localhost:$$port to redirect to HTTPS, got HTTP $$redirect_status" >&2; \
+			exit 1; \
 		fi; \
 		rm -f "$$tmp_cert"; \
 	else \
@@ -720,6 +728,13 @@ healthcheck: certs
 	$(CURL_HEALTH) $(BRIDGE_URL)/api/auth/bridge/health
 	$(CURL_HEALTH) $(OSIONOS_URL) >/dev/null
 	$(CURL_HEALTH) $(WEBSITE_URL) >/dev/null
+	@redirect_status="$$(curl -sS -o /dev/null -w '%{http_code}' "http://localhost:$${OPPOSITE_OSIRIS_HOST_PORT:-4322}/" || true)"; \
+	if [[ "$$redirect_status" =~ ^30(1|7|8)$$ ]]; then \
+		echo '[healthcheck] website plain HTTP redirects to HTTPS'; \
+	else \
+		echo "[healthcheck] expected website plain HTTP to redirect to HTTPS, got HTTP $$redirect_status" >&2; \
+		exit 1; \
+	fi
 	$(CURL_HEALTH) -o /dev/null -w 'auth-gateway-https-%{http_code}\n' $(AUTH_URL)/availability
 	$(CURL_HEALTH) $(MAILPIT_URL) >/dev/null
 	docker compose exec -T auth-gateway node scripts/verify-newsletter-delivery.mjs
