@@ -411,7 +411,7 @@ S3-compatible object storage. All client requests to `/storage/v1` route through
 | Health check | `pg_isready` |
 | Bootstrap | `db-bootstrap` runs once on first start |
 
-The `db-bootstrap` container runs `scripts/db-bootstrap.sql` on first startup. It creates required roles (`anon`, `authenticated`, `supabase_admin`), the `auth` schema, the `auth.uid()` helper function, the `realtime` database, and the seed tables (`users`, `posts`, `projects`, etc.).
+The `db-bootstrap` container runs `scripts/db-bootstrap.psql` on first startup. It creates required roles (`anon`, `authenticated`, `supabase_admin`), the `auth` schema, the `auth.uid()` helper function, the `realtime` database, and the seed tables (`users`, `posts`, `projects`, etc.).
 
 ### Redis — Cache
 
@@ -512,7 +512,7 @@ Every HTTP client must present an `apikey` header to pass through Kong. This alo
 
 ### Row-level security (PostgreSQL)
 
-The `db-bootstrap.sql` creates `auth.uid()`:
+The `db-bootstrap.psql` creates `auth.uid()`:
 
 ```sql
 CREATE OR REPLACE FUNCTION auth.uid() RETURNS UUID AS $$
@@ -880,7 +880,7 @@ mini-baas-infra/
 ├── Makefile                    ← all lifecycle commands
 ├── .env.example                ← template for environment secrets
 ├── scripts/
-│   ├── db-bootstrap.sql        ← one-shot PostgreSQL schema + roles setup
+│   ├── db-bootstrap.psql       ← one-shot PostgreSQL schema + roles setup
 │   ├── generate-env.sh         ← generate a .env with random secrets
 │   ├── resolve-ports.sh        ← detect port conflicts, remap if needed
 │   ├── phase1-smoke-test.sh    ← basic API reachability test

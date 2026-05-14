@@ -213,7 +213,7 @@ All three JWT-consuming services **must** share the same `JWT_SECRET`. A mismatc
 
 ### Database Bootstrap
 
-The `scripts/db-bootstrap.sql` script creates:
+The `scripts/db-bootstrap.psql` script creates:
 
 | Object | Purpose |
 |--------|---------|

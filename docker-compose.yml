@@ -135,10 +135,10 @@ services:
       sh -ec '
         export PGPASSWORD="$${POSTGRES_PASSWORD:-postgres}";
         until pg_isready -h postgres -U "$${POSTGRES_USER:-postgres}" -d "$${POSTGRES_DB:-postgres}"; do sleep 1; done;
-        psql -h postgres -U "$${POSTGRES_USER:-postgres}" -d "$${POSTGRES_DB:-postgres}" -v ON_ERROR_STOP=1 -v pwd="$${POSTGRES_PASSWORD:-postgres}" -v realtime_db="$${REALTIME_DB_NAME:-realtime}" -f /bootstrap/db-bootstrap.sql;
+        psql -h postgres -U "$${POSTGRES_USER:-postgres}" -d "$${POSTGRES_DB:-postgres}" -v ON_ERROR_STOP=1 -v pwd="$${POSTGRES_PASSWORD:-postgres}" -v realtime_db="$${REALTIME_DB_NAME:-realtime}" -f /bootstrap/db-bootstrap.psql;
       '
     volumes:
-      - ./apps/baas/scripts/db-bootstrap.sql:/bootstrap/db-bootstrap.sql:ro
+      - ./apps/baas/scripts/db-bootstrap.psql:/bootstrap/db-bootstrap.psql:ro
     depends_on:
       postgres:
         condition: service_healthy

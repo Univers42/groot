@@ -209,6 +209,6 @@ Example document structure:
 
 ### Schema Migration
 
-1. **PostgreSQL:** Modify `scripts/db-bootstrap.sql` and recreate volumes for a fresh deploy (`make compose-down-volumes && make baas`).
+1. **PostgreSQL:** Modify `scripts/db-bootstrap.psql` and recreate volumes for a fresh deploy (`make compose-down-volumes && make baas`).
 2. **MongoDB:** New collections accept any schema. Existing collections read documents as-is.
 3. **Breaking changes:** Document in the service contract READMEs under `docker/contracts/`.

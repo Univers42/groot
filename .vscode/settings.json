@@ -1,0 +1,7 @@
+{
+  "mssql.intelliSense.enableIntelliSense": false,
+  "mssql.intelliSense.enableErrorChecking": false,
+  "files.associations": {
+    "*.psql": "postgres"
+  }
+}

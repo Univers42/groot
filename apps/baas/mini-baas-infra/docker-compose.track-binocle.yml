@@ -48,10 +48,10 @@ services:
     command: >
       sh -ec '
         until pg_isready -h postgres -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"; do sleep 1; done;
-        psql -h postgres -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -v ON_ERROR_STOP=1 -v pwd="$${POSTGRES_PASSWORD}" -v realtime_db="$${REALTIME_DB_NAME}" -f /bootstrap/db-bootstrap.sql;
+        psql -h postgres -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -v ON_ERROR_STOP=1 -v pwd="$${POSTGRES_PASSWORD}" -v realtime_db="$${REALTIME_DB_NAME}" -f /bootstrap/db-bootstrap.psql;
       '
     volumes:
-      - ./scripts/db-bootstrap.sql:/bootstrap/db-bootstrap.sql:ro
+      - ./scripts/db-bootstrap.psql:/bootstrap/db-bootstrap.psql:ro
     depends_on:
       postgres:
         condition: service_healthy

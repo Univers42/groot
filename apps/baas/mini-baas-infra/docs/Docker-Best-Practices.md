@@ -139,7 +139,7 @@ make compose-down-volumes
 make baas
 ```
 
-This forces the database bootstrap container to re-execute with the current `db-bootstrap.sql`.
+This forces the database bootstrap container to re-execute with the current `db-bootstrap.psql`.
 
 ### Route mismatch errors
 

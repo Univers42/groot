@@ -31,11 +31,11 @@ VAULT_TEAM_ROLE=reader make vault-invite-token
 This creates a new file at `.vault/track-binocle-reader.env` (or `-writer.env`).
 It will look something like this:
 ```env
-VAULT_ADDR=https://localhost:8200
+VAULT_ADDR=https://track-binocle-vault.fly.dev
 VAULT_TOKEN=hvs.CAE... (long secret token)
 VAULT_ENV_PREFIX=secret/data/track-binocle/env
 ```
-For remote teammates, the Fly-issued file should use `VAULT_ADDR=https://track-binocle-vault.fly.dev`. A `localhost` token only works against the Vault instance on the maintainer's own machine.
+For remote teammates, the Fly-issued file must use `VAULT_ADDR=https://track-binocle-vault.fly.dev`. A `localhost` token only works against the Vault instance on the maintainer's own machine and is rejected by shared fetches unless `VAULT_ALLOW_LOCAL_SHARED=true` is set for same-machine testing.
 
 ---
 
@@ -72,6 +72,12 @@ The Teammate creates the `.vault/track-binocle-reader.env` file and restricts it
 ```bash
 touch .vault/track-binocle-reader.env
 chmod 600 .vault/track-binocle-reader.env
+```
+
+Before the long pipeline, verify the token wiring without printing secret values:
+
+```bash
+make vault-shared-doctor
 ```
 
 ### Step 4c: Paste the Contents

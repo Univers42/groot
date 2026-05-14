@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/14 16:50:16 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/14 17:24:08 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -80,6 +80,8 @@ VAULT_PUBLISH_TOKEN_FILE ?= $(VAULT_WRITER_TOKEN_FILE)
 VAULT_PUBLIC_ADDR ?= https://localhost:8200
 VAULT_ENV_PREFIX ?= secret/data/track-binocle/env
 VAULT_SHARED_REQUIRED ?= false
+VAULT_SHARED_ADDR ?= $(FLY_VAULT_URL)
+VAULT_ALLOW_LOCAL_SHARED ?= false
 VAULT_UP_STAMP := .vault/.up-stamp
 VAULT_GITHUB_OIDC_AUTH_PATH ?= jwt
 VAULT_GITHUB_OIDC_ROLE ?= track-binocle-github-actions
@@ -184,14 +186,22 @@ certs-trust: certs
 ## Trust the local HTTPS CA in user browser stores; use EXTRA_ARGS=--system for the Linux system store.
 	bash apps/baas/scripts/trust-localhost-cert.sh $(EXTRA_ARGS)
 
+certs-trust-system: certs
+## Trust the local HTTPS CA in the Linux system store for VS Code/Electron and system-trust browsers.
+	bash apps/baas/scripts/trust-localhost-cert.sh --system
+
+certs-doctor: certs
+## Check whether the Linux system CA store trusts the current local HTTPS CA.
+	@bash apps/baas/scripts/trust-localhost-cert.sh --verify || true
+
 certs-trust-local: certs
 ## Best-effort import of the local HTTPS CA into user browser stores without breaking CI.
 	@if [[ "$${CI:-}" == 'true' || "$${GITHUB_ACTIONS:-}" == 'true' || "$${TRACK_BINOCLE_SKIP_CERT_TRUST:-}" == '1' ]]; then \
 		echo '[certs] skipping browser trust import in CI/noninteractive mode'; \
-	elif command -v certutil >/dev/null 2>&1; then \
-		bash apps/baas/scripts/trust-localhost-cert.sh || echo '[certs] browser trust import failed; run make certs-trust after installing libnss3-tools'; \
+	elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then \
+		bash apps/baas/scripts/trust-localhost-cert.sh --system || echo '[certs] trust import failed; run make certs-trust-system'; \
 	else \
-		echo '[certs] certutil not found; install libnss3-tools or run make certs-trust EXTRA_ARGS=--system'; \
+		bash apps/baas/scripts/trust-localhost-cert.sh || echo '[certs] browser trust import failed; install libnss3-tools or run make certs-trust-system'; \
 	fi
 
 env-format:
@@ -324,17 +334,32 @@ vault-fetch-shared:
 ## Fetch managed env files with VAULT_API_KEY, VAULT_TOKEN, or VAULT_TOKEN_FILE from an invited user.
 	@set -eu; \
 	token_file='$(VAULT_TOKEN_FILE)'; \
+	token_source='none'; \
 	if [[ -f "$$token_file" ]]; then \
 		mode="$$(stat -c '%a' "$$token_file")"; \
 		case "$$mode" in 400|600) ;; *) echo "[vault] refusing $$token_file because it must be private; run: chmod 600 $$token_file"; exit 1;; esac; \
 		set -a; . "$$token_file"; set +a; \
-	elif [[ -n "$${VAULT_API_KEY:-}" && -n "$${VAULT_ADDR:-}" ]]; then \
+		token_source="file:$$token_file"; \
+	elif [[ -n "$${VAULT_API_KEY:-}" ]]; then \
 		export VAULT_TOKEN="$$VAULT_API_KEY"; \
+		token_source='VAULT_API_KEY'; \
 		echo '[vault] using VAULT_API_KEY from the current shell environment'; \
-	elif [[ -n "$${VAULT_TOKEN:-}" && -n "$${VAULT_ADDR:-}" ]]; then \
+	elif [[ -n "$${VAULT_TOKEN:-}" ]]; then \
+		token_source='VAULT_TOKEN'; \
 		echo '[vault] using VAULT_TOKEN from the current shell environment'; \
 	fi; \
+	if [[ "$$token_source" == 'none' && -z "$${VAULT_TOKEN:-}" ]]; then \
+		echo '[vault] missing shared Vault token'; \
+		echo '[vault] current repository root: $(CURDIR)'; \
+		echo '[vault] install $(VAULT_TOKEN_FILE) under this root or export VAULT_API_KEY/VAULT_TOKEN'; \
+		exit 1; \
+	fi; \
 	: "$${VAULT_TOKEN:?Set VAULT_API_KEY, VAULT_TOKEN, or provide VAULT_TOKEN_FILE=$(VAULT_TOKEN_FILE)}"; \
+	if [[ -z "$${VAULT_ADDR:-}" ]]; then \
+		VAULT_ADDR='$(VAULT_SHARED_ADDR)'; \
+		export VAULT_ADDR; \
+		echo '[vault] no VAULT_ADDR supplied; defaulting shared Vault fetch to $(VAULT_SHARED_ADDR)'; \
+	fi; \
 	: "$${VAULT_ADDR:?Set VAULT_ADDR or provide VAULT_TOKEN_FILE=$(VAULT_TOKEN_FILE)}"; \
 	vault_addr_is_local=0; \
 	case "$$VAULT_ADDR" in \
@@ -349,18 +374,72 @@ vault-fetch-shared:
 			;; \
 	esac; \
 	if [[ "$$vault_addr_is_local" == '1' ]]; then \
-		echo '[vault] token file points at localhost; that only works with the Vault instance on this machine'; \
-		echo '[vault] remote teammates should use a token from make vault-fly-invite-token or VAULT_ADDR=$(FLY_VAULT_URL)'; \
-		echo '[vault] ensuring local Vault proxy is running for localhost token'; \
-		$(MAKE) vault-up; \
+		if [[ '$(VAULT_ALLOW_LOCAL_SHARED)' == 'true' || '$(VAULT_ALLOW_LOCAL_SHARED)' == '1' ]]; then \
+			echo '[vault] local shared fetch explicitly allowed; ensuring local Vault proxy is running'; \
+			$(MAKE) vault-up; \
+		else \
+			echo '[vault] refusing localhost Vault address for shared env fetch.'; \
+			echo '[vault] This token only works with the Vault instance on the machine that issued it.'; \
+			echo '[vault] For a fresh VM or teammate machine, use a Fly-backed invite token:'; \
+			echo '[vault]   maintainer: make vault-fly-invite-token VAULT_TEAM_ROLE=reader'; \
+			echo '[vault]   teammate:   install .vault/track-binocle-reader.env, chmod 600 it, then make vault-shared-doctor'; \
+			echo '[vault] If you have a bare Fly token, run: VAULT_API_KEY=... VAULT_ADDR=$(VAULT_SHARED_ADDR) make vault-fetch-shared'; \
+			echo '[vault] For same-machine local token testing only, rerun with VAULT_ALLOW_LOCAL_SHARED=true.'; \
+			exit 1; \
+		fi; \
 	fi; \
 	if [[ -z "$${NODE_EXTRA_CA_CERTS:-}" && -f '$(LOCAL_CA_CERT)' ]]; then export NODE_EXTRA_CA_CERTS='$(LOCAL_CA_CERT)'; fi; \
 	$(NODE_RUN_SHARED) apps/baas/scripts/vault-env.mjs fetch
 
+vault-shared-doctor:
+## Check shared Vault token wiring without printing secret values.
+	@set -eu; \
+	token_file='$(VAULT_TOKEN_FILE)'; \
+	token_source='none'; \
+	if [[ -f "$$token_file" ]]; then \
+		mode="$$(stat -c '%a' "$$token_file")"; \
+		case "$$mode" in 400|600) ;; *) echo "[vault] refusing $$token_file because it must be private; run: chmod 600 $$token_file"; exit 1;; esac; \
+		set -a; . "$$token_file"; set +a; \
+		token_source="file:$$token_file"; \
+	elif [[ -n "$${VAULT_API_KEY:-}" ]]; then \
+		export VAULT_TOKEN="$$VAULT_API_KEY"; \
+		token_source='VAULT_API_KEY'; \
+	elif [[ -n "$${VAULT_TOKEN:-}" ]]; then \
+		token_source='VAULT_TOKEN'; \
+	fi; \
+	if [[ "$$token_source" == 'none' ]]; then \
+		echo '[vault] no shared Vault token found'; \
+		echo '[vault] current repository root: $(CURDIR)'; \
+		echo '[vault] install $(VAULT_TOKEN_FILE) under this root or export VAULT_API_KEY/VAULT_TOKEN'; \
+		exit 1; \
+	fi; \
+	if [[ -z "$${VAULT_ADDR:-}" ]]; then \
+		VAULT_ADDR='$(VAULT_SHARED_ADDR)'; \
+		export VAULT_ADDR; \
+		echo '[vault] no VAULT_ADDR supplied; defaulting to $(VAULT_SHARED_ADDR)'; \
+	fi; \
+	echo "[vault] token source: $$token_source"; \
+	echo "[vault] vault address: $$VAULT_ADDR"; \
+	echo "[vault] env prefix: $${VAULT_ENV_PREFIX:-$(VAULT_ENV_PREFIX)}"; \
+	case "$$VAULT_ADDR" in \
+		https://local-https-proxy:*|http://local-https-proxy:*|https://localhost:8200*|http://localhost:8200*|https://127.0.0.1:8200*|http://127.0.0.1:8200*) \
+			if [[ '$(VAULT_ALLOW_LOCAL_SHARED)' == 'true' || '$(VAULT_ALLOW_LOCAL_SHARED)' == '1' ]]; then \
+				echo '[vault] localhost Vault allowed for same-machine testing'; \
+			else \
+				echo '[vault] problem: localhost Vault tokens are not portable to a fresh VM or teammate machine'; \
+				echo '[vault] fix: replace this token with one generated by make vault-fly-invite-token'; \
+				exit 1; \
+			fi; \
+			;; \
+		*) \
+			echo '[vault] shared Vault token wiring looks usable'; \
+			;; \
+	esac
+
 env-fetch-shared:
 ## Fetch shared team secrets first when a reader/writer token is available.
 	@set -eu; \
-	if [[ -f '$(VAULT_TOKEN_FILE)' || ( -n "$${VAULT_API_KEY:-}" && -n "$${VAULT_ADDR:-}" ) || ( -n "$${VAULT_TOKEN:-}" && -n "$${VAULT_ADDR:-}" ) ]]; then \
+	if [[ -f '$(VAULT_TOKEN_FILE)' || -n "$${VAULT_API_KEY:-}" || -n "$${VAULT_TOKEN:-}" ]]; then \
 		if $(MAKE) vault-fetch-shared VAULT_TOKEN_FILE='$(VAULT_TOKEN_FILE)'; then \
 			echo '[vault] shared env fetch complete'; \
 		elif [[ '$(VAULT_SHARED_REQUIRED)' == 'true' || '$(VAULT_SHARED_REQUIRED)' == '1' || "$${GITHUB_ACTIONS:-}" == 'true' ]]; then \
@@ -377,6 +456,7 @@ env-fetch-shared:
 		exit 1; \
 	else \
 		echo '[vault] missing shared Vault credentials; continuing with local generated development secrets'; \
+		echo '[vault] current repository root: $(CURDIR)'; \
 		echo '[vault] set VAULT_SHARED_REQUIRED=true to make this fatal'; \
 	fi
 
@@ -736,4 +816,4 @@ docker_reclaim_cache:
 	@env -u BUILDX_BUILDER docker buildx use default >/dev/null 2>&1 || true
 	@env -u BUILDX_BUILDER docker builder prune -a -f || true
 
-.PHONY: help all all-local pulls pushes bootstrap certs certs-trust certs-trust-local env-format buildx-setup compose-build docker-prefetch-images vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fly-invite-token vault-fetch-shared env-fetch-shared vault-publish-shared vault-status-shared vault-repair-shared vault-github-oidc vault-fly-create vault-fly-deploy vault-fly-publish vault-fly-github vault-fly vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache
+.PHONY: help all all-local pulls pushes bootstrap certs certs-trust certs-trust-local env-format buildx-setup compose-build docker-prefetch-images vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fly-invite-token vault-fetch-shared vault-shared-doctor env-fetch-shared vault-publish-shared vault-status-shared vault-repair-shared vault-github-oidc vault-fly-create vault-fly-deploy vault-fly-publish vault-fly-github vault-fly vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache

@@ -68,7 +68,7 @@ All tables enforce `owner_id` matching — at the database layer (PostgreSQL RLS
 
 ## PostgreSQL Schema Changes
 
-**File:** `scripts/db-bootstrap.sql`
+**File:** `scripts/db-bootstrap.psql`
 
 Changes made during this session:
 
@@ -175,7 +175,7 @@ Run command: `bash scripts/phase15-mongo-mvp-test.sh`
 
 | File | Change |
 |------|--------|
-| `scripts/db-bootstrap.sql` | Added projects table, fixed RLS policies |
+| `scripts/db-bootstrap.psql` | Added projects table, fixed RLS policies |
 | `docs/MVP-Schema-Specification.md` | New specification document |
 | `docs/Mongo-Service-Validation.md` | New audit report |
 | `docs/TOMORROW-EXECUTION-PLAN.md` | New execution plan |

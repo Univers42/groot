@@ -113,5 +113,5 @@ flowchart TB
 
 | Container | Role |
 |-----------|------|
-| **db-bootstrap** | One-shot init container. Waits for PostgreSQL to become healthy, then executes `scripts/db-bootstrap.sql` to create roles (`anon`, `authenticated`, `supabase_admin`), schemas, tables, RLS policies, and seed data. Exits after completion. |
+| **db-bootstrap** | One-shot init container. Waits for PostgreSQL to become healthy, then executes `scripts/db-bootstrap.psql` to create roles (`anon`, `authenticated`, `supabase_admin`), schemas, tables, RLS policies, and seed data. Exits after completion. |
 | **playground** | Nginx container serving the local frontend sandbox at port 3100. Provides a visual test surface for exercising the dual data-plane CRUD flows. |

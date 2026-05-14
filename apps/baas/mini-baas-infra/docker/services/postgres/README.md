@@ -46,7 +46,7 @@ docker compose exec postgres psql -U postgres -c '\l'
 docker compose exec postgres psql -U postgres -c '\dt public.*'
 
 # Run a SQL file
-docker compose exec -T postgres psql -U postgres < scripts/db-bootstrap.sql
+docker compose exec -T postgres psql -U postgres < scripts/db-bootstrap.psql
 
 # Run a migration
 cat scripts/migrations/postgresql/001_init.sql | \

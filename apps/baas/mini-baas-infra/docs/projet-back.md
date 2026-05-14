@@ -2246,7 +2246,7 @@ Cette cartographie relie les principaux fichiers du dépôt à leur rôle archit
 | `docker-compose.yml`                 | orchestration globale de la plateforme             |
 | `docker-bake.hcl`                    | stratégie de build parallèle multi-images          |
 | `Makefile`                           | façade d'exploitation développeur / ops            |
-| `scripts/db-bootstrap.sql`           | initialisation structurante de PostgreSQL          |
+| `scripts/db-bootstrap.psql`          | initialisation structurante de PostgreSQL          |
 | `scripts/generate-env.sh`            | génération sécurisée du `.env`                     |
 | `scripts/validate-all.sh`            | validation locale rapide avant exécution ou commit |
 | `docker/services/kong/conf/kong.yml` | définition déclarative de la gateway               |
