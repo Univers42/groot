@@ -167,8 +167,8 @@ services:
   gotrue:
     image: ${BAAS_GOTRUE_IMAGE:-supabase/gotrue:v2.188.1}
     env_file:
-      - ./apps/baas/.env.local
       - ./.env.local
+      - ./apps/baas/.env.local
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: 9999
@@ -249,8 +249,8 @@ services:
       context: ./apps/baas
       dockerfile: Dockerfile
     env_file:
-      - ./apps/baas/.env.local
       - ./.env.local
+      - ./apps/baas/.env.local
     expose:
       - "8000"
       - "8001"
@@ -315,8 +315,8 @@ services:
     working_dir: /app/apps/osionos/app
     command: ["node", "scripts/bridge-api.mjs"]
     env_file:
-      - ./apps/baas/.env.local
       - ./.env.local
+      - ./apps/baas/.env.local
     environment:
       OSIONOS_BRIDGE_PORT: 4000
       OSIONOS_APP_URL: ${OSIONOS_APP_URL:-https://localhost:3001}
@@ -391,9 +391,9 @@ services:
     working_dir: /app
     command: ["npm", "run", "bridge"]
     env_file:
-      - path: ./apps/mail/.env.local
-        required: false
       - path: ./apps/mail/.env
+        required: false
+      - path: ./apps/mail/.env.local
         required: false
     environment:
       NODE_ENV: development
@@ -425,9 +425,9 @@ services:
     working_dir: /app
     command: ["npm", "run", "dev"]
     env_file:
-      - path: ./apps/mail/.env.local
-        required: false
       - path: ./apps/mail/.env
+        required: false
+      - path: ./apps/mail/.env.local
         required: false
     environment:
       NODE_ENV: development
@@ -461,11 +461,11 @@ services:
         required: false
       - path: ./apps/mail/.env
         required: false
+      - path: ./.env.local
+        required: false
       - path: ./apps/calendar/.env.local
         required: false
       - path: ./apps/baas/.env.local
-        required: false
-      - path: ./.env.local
         required: false
     environment:
       NODE_ENV: development
@@ -504,9 +504,9 @@ services:
     working_dir: /app
     command: ["npm", "run", "dev"]
     env_file:
-      - path: ./apps/calendar/.env.local
-        required: false
       - path: ./apps/calendar/.env
+        required: false
+      - path: ./apps/calendar/.env.local
         required: false
     environment:
       NODE_ENV: development
@@ -550,8 +550,8 @@ services:
     working_dir: /workspace/apps/opposite-osiris
     command: ["node", "scripts/auth-gateway.mjs"]
     env_file:
-      - ./apps/baas/.env.local
       - ./.env.local
+      - ./apps/baas/.env.local
       - ./apps/opposite-osiris/.env.local
     environment:
       AUTH_GATEWAY_PORT: 8787
@@ -593,8 +593,8 @@ services:
     working_dir: /workspace/apps/opposite-osiris
     command: ["node", "scripts/container-only.mjs", "astro", "dev", "--host", "0.0.0.0", "--port", "4322"]
     env_file:
-      - ./apps/baas/.env.local
       - ./.env.local
+      - ./apps/baas/.env.local
       - ./apps/opposite-osiris/.env.local
     environment:
       ASTRO_DEV_HOST: 0.0.0.0

@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/14 01:46:54 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/14 03:42:32 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -23,7 +23,12 @@ export COMPOSE_PROGRESS BUILDKIT_PROGRESS BUILDX_BUILDER DOCKER_BUILDKIT COMPOSE
 DOCKER_PULL_ATTEMPTS ?= 2
 DOCKER_PULL_TIMEOUT ?= 180
 DOCKER_PULL_KILL_AFTER ?= 15
-DOCKER_PREFETCH_JOBS ?= 6
+DOCKER_PREFETCH_JOBS ?= 8
+COMPOSE_WAIT_TIMEOUT ?= 300
+COMPOSE_WAIT_INTERVAL ?= 2
+COMPOSE_HEALTHY_SERVICES ?= postgres local-https-proxy mail-bridge mail pg-meta gotrue kong osionos-bridge osionos-app auth-gateway opposite-osiris calendar-bridge calendar
+COMPOSE_RUNNING_SERVICES ?= redis postgrest supavisor
+COMPOSE_COMPLETED_SERVICES ?= db-bootstrap project-db-init local-runtime-secrets opposite-osiris-deps
 VERSION ?=
 BAAS_VERSION ?= $(if $(VERSION),$(if $(filter v%,$(VERSION)),$(VERSION),v$(VERSION)),v$(shell date +%F))
 APP_VERSION ?= $(if $(VERSION),$(if $(filter v%,$(VERSION)),$(VERSION),v$(VERSION)),v$(shell date +%F))
@@ -189,45 +194,37 @@ docker-prefetch-images:
 	if [ "$$jobs" -lt 1 ]; then jobs=1; fi; \
 	echo "[docker] prefetching images with up to $$jobs concurrent pulls"; \
 	pull_image() { \
-		target="$$1"; mirror="$$2"; \
+		target="$$1"; shift; \
 		if docker image inspect "$$target" >/dev/null 2>&1; then echo "[docker] using cached $$target"; return 0; fi; \
-		attempt=1; \
-		while [ "$$attempt" -le '$(DOCKER_PULL_ATTEMPTS)' ]; do \
-			echo "[docker] pulling $$mirror for $$target (attempt $$attempt/$(DOCKER_PULL_ATTEMPTS), timeout $(DOCKER_PULL_TIMEOUT)s)"; \
-			if timeout --kill-after='$(DOCKER_PULL_KILL_AFTER)s' '$(DOCKER_PULL_TIMEOUT)s' docker pull "$$mirror"; then \
-				if [ "$$mirror" != "$$target" ]; then docker tag "$$mirror" "$$target"; fi; \
-				return 0; \
-			fi; \
-			attempt=$$((attempt + 1)); \
-		done; \
-		attempt=1; \
-		while [ "$$attempt" -le '$(DOCKER_PULL_ATTEMPTS)' ]; do \
-			echo "[docker] pulling $$target directly (attempt $$attempt/$(DOCKER_PULL_ATTEMPTS), timeout $(DOCKER_PULL_TIMEOUT)s)"; \
-			if timeout --kill-after='$(DOCKER_PULL_KILL_AFTER)s' '$(DOCKER_PULL_TIMEOUT)s' docker pull "$$target"; then return 0; fi; \
-			attempt=$$((attempt + 1)); \
+		refs="$$target $$*"; \
+		for ref in $$refs; do \
+			attempt=1; \
+			while [ "$$attempt" -le '$(DOCKER_PULL_ATTEMPTS)' ]; do \
+				echo "[docker] pulling $$ref for $$target (attempt $$attempt/$(DOCKER_PULL_ATTEMPTS), timeout $(DOCKER_PULL_TIMEOUT)s)"; \
+				if timeout --kill-after='$(DOCKER_PULL_KILL_AFTER)s' '$(DOCKER_PULL_TIMEOUT)s' docker pull -q "$$ref" >/dev/null; then \
+					if [ "$$ref" != "$$target" ]; then docker tag "$$ref" "$$target" >/dev/null; fi; \
+					echo "[docker] ready $$target"; \
+					return 0; \
+				fi; \
+				attempt=$$((attempt + 1)); \
+			done; \
 		done; \
 		echo "[docker] failed to pull $$target"; return 1; \
 	}; \
-	pids=(); failed=0; \
+	failed=0; \
 	wait_for_pull() { \
-		pid="$${pids[0]}"; \
-		set +e; wait "$$pid"; status="$$?"; set -e; \
-		pids=("$${pids[@]:1}"); \
-		if [ "$$status" -ne 0 ]; then failed=1; fi; \
+		set +e; wait -n; status="$$?"; set -e; \
+		if [ "$$status" -ne 0 ] && [ "$$status" -ne 127 ]; then failed=1; fi; \
 	}; \
 	start_pull() { \
-		pull_image "$$1" "$$2" & \
-		pids+=("$$!"); \
-		if [ "$${#pids[@]}" -ge "$$jobs" ]; then wait_for_pull; fi; \
+		pull_image "$$@" & \
+		while [ "$$(jobs -pr | wc -l)" -ge "$$jobs" ]; do wait_for_pull; done; \
 	}; \
 	start_pull node:22-alpine public.ecr.aws/docker/library/node:22-alpine; \
-	start_pull node:20-alpine public.ecr.aws/docker/library/node:20-alpine; \
-	start_pull node:22-bookworm public.ecr.aws/docker/library/node:22-bookworm; \
 	start_pull node:22-bookworm-slim public.ecr.aws/docker/library/node:22-bookworm-slim; \
 	start_pull nginx:1.27-alpine public.ecr.aws/docker/library/nginx:1.27-alpine; \
-	start_pull docker/dockerfile:1 docker/dockerfile:1; \
-	start_pull docker/dockerfile:1.7 docker/dockerfile:1.7; \
-	start_pull postgres:16 public.ecr.aws/docker/library/postgres:16; \
+	start_pull docker/dockerfile:1; \
+	start_pull docker/dockerfile:1.7; \
 	start_pull postgres:16-alpine public.ecr.aws/docker/library/postgres:16-alpine; \
 	start_pull redis:7-alpine public.ecr.aws/docker/library/redis:7-alpine; \
 	start_pull kong:3.8 public.ecr.aws/docker/library/kong:3.8; \
@@ -236,7 +233,7 @@ docker-prefetch-images:
 	start_pull supabase/gotrue:v2.188.1 public.ecr.aws/supabase/gotrue:v2.188.1; \
 	start_pull supabase/postgres-meta:v0.91.0 public.ecr.aws/supabase/postgres-meta:v0.91.0; \
 	start_pull supabase/supavisor:2.7.4 public.ecr.aws/supabase/supavisor:2.7.4; \
-	while [ "$${#pids[@]}" -gt 0 ]; do wait_for_pull; done; \
+	while [ "$$(jobs -p | wc -l)" -gt 0 ]; do wait_for_pull; done; \
 	if [ "$$failed" -ne 0 ]; then echo '[docker] one or more image pulls failed'; exit 1; fi
 
 vault-up: certs docker-prefetch-images
@@ -402,7 +399,7 @@ env-restore-test: vault-seed
 db-password-check:
 ## Verify apps/baas/.env.local matches the live Postgres password without printing it.
 	@set -eu; set -a; . apps/baas/.env.local; set +a; \
-	docker compose exec -T -e PGPASSWORD="$$POSTGRES_PASSWORD" postgres psql -U "$${POSTGRES_USER:-postgres}" -d "$${POSTGRES_DB:-postgres}" -tAc 'select 1' >/dev/null; \
+	docker compose exec -T -e PGPASSWORD="$$POSTGRES_PASSWORD" postgres psql -h 127.0.0.1 -U "$${POSTGRES_USER:-postgres}" -d "$${POSTGRES_DB:-postgres}" -tAc 'select 1' >/dev/null; \
 	echo 'postgres-password-ok'
 
 db-password-apply:
@@ -411,10 +408,48 @@ db-password-apply:
 	docker compose exec -T -u postgres -e POSTGRES_TARGET_USER="$${POSTGRES_USER:-postgres}" -e POSTGRES_TARGET_PASSWORD="$$POSTGRES_PASSWORD" -e POSTGRES_TARGET_DB="$${POSTGRES_DB:-postgres}" postgres sh -s < apps/baas/scripts/sync-postgres-password.sh; \
 	echo 'postgres-password-updated'
 
+compose-wait:
+## Wait for long-running services to become healthy/running and init jobs to exit cleanly.
+	@set -eu; \
+	deadline=$$((SECONDS + $(COMPOSE_WAIT_TIMEOUT))); \
+	while true; do \
+		pending=''; failed=''; \
+		for service in $(COMPOSE_HEALTHY_SERVICES); do \
+			cid="$$(docker compose ps -q "$$service" 2>/dev/null || true)"; \
+			if [[ -z "$$cid" ]]; then pending="$$pending $$service(no-container)"; continue; fi; \
+			state="$$(docker inspect -f '{{.State.Status}}' "$$cid")"; \
+			health="$$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$$cid")"; \
+			if [[ "$$state" == 'exited' || "$$state" == 'dead' ]]; then failed="$$failed $$service($$state)"; continue; fi; \
+			if [[ "$$health" != 'healthy' ]]; then pending="$$pending $$service($$health)"; fi; \
+		done; \
+		for service in $(COMPOSE_RUNNING_SERVICES); do \
+			cid="$$(docker compose ps -q "$$service" 2>/dev/null || true)"; \
+			if [[ -z "$$cid" ]]; then pending="$$pending $$service(no-container)"; continue; fi; \
+			state="$$(docker inspect -f '{{.State.Status}}' "$$cid")"; \
+			if [[ "$$state" != 'running' ]]; then pending="$$pending $$service($$state)"; fi; \
+		done; \
+		for service in $(COMPOSE_COMPLETED_SERVICES); do \
+			cid="$$(docker compose ps -a -q "$$service" 2>/dev/null || true)"; \
+			if [[ -z "$$cid" ]]; then pending="$$pending $$service(no-container)"; continue; fi; \
+			state="$$(docker inspect -f '{{.State.Status}}' "$$cid")"; \
+			exit_code="$$(docker inspect -f '{{.State.ExitCode}}' "$$cid")"; \
+			if [[ "$$state" == 'exited' && "$$exit_code" == '0' ]]; then continue; fi; \
+			if [[ "$$state" == 'exited' ]]; then failed="$$failed $$service(exit=$$exit_code)"; else pending="$$pending $$service($$state)"; fi; \
+		done; \
+		if [[ -n "$$failed" ]]; then echo "[compose] failed:$$failed"; docker compose ps; exit 1; fi; \
+		if [[ -z "$$pending" ]]; then echo '[compose] services ready'; exit 0; fi; \
+		if [[ "$$SECONDS" -ge "$$deadline" ]]; then echo "[compose] timed out waiting for:$$pending"; docker compose ps; exit 1; fi; \
+		echo "[compose] waiting for:$$pending"; \
+		sleep '$(COMPOSE_WAIT_INTERVAL)'; \
+	done
+
 up: certs docker-prefetch-images
 ## Build and start every service in the root Docker Compose graph.
-	@docker compose rm -sf local-https-proxy >/dev/null 2>&1 || true
-	docker compose up -d --build --pull never --wait
+	@docker compose rm -sf local-https-proxy db-bootstrap project-db-init gotrue kong postgrest pg-meta supavisor osionos-bridge osionos-app auth-gateway opposite-osiris mail-bridge mail calendar-bridge calendar >/dev/null 2>&1 || true
+	docker compose up -d --build --pull never --wait postgres
+	$(MAKE) db-password-apply
+	docker compose up -d --build --pull never
+	$(MAKE) compose-wait
 
 app-images:
 ## Build the local Docker images for the website, osionos, Mail, Calendar, bridges, and BaaS gateway.

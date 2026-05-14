@@ -34,6 +34,40 @@ const teamPolicies = [
   { role: 'writer', name: 'track-binocle-env-writer', file: 'track-binocle-env-writer.hcl' },
 ];
 
+const baasOnlyKeys = [
+  'ANON_KEY',
+  'DATABASE_URL',
+  'GOTRUE_DB_DATABASE_URL',
+  'GOTRUE_JWT_SECRET',
+  'GOTRUE_SITE_URL',
+  'GOTRUE_SMTP_ADMIN_EMAIL',
+  'GOTRUE_SMTP_HOST',
+  'GOTRUE_SMTP_PASS',
+  'GOTRUE_SMTP_PORT',
+  'GOTRUE_SMTP_SENDER_NAME',
+  'GOTRUE_SMTP_USER',
+  'GOTRUE_URI_ALLOW_LIST',
+  'JWT_SECRET',
+  'KONG_ANON_UUID',
+  'KONG_PUBLIC_API_KEY',
+  'KONG_SERVICE_API_KEY',
+  'PGRST_DB_ANON_ROLE',
+  'PGRST_DB_URI',
+  'PGRST_JWT_SECRET',
+  'PG_META_DB_HOST',
+  'PG_META_DB_NAME',
+  'PG_META_DB_PASSWORD',
+  'PG_META_DB_PORT',
+  'PG_META_DB_USER',
+  'POSTGRES_DB',
+  'POSTGRES_PASSWORD',
+  'POSTGRES_USER',
+  'PROJECT_INIT_MARKER',
+  'SECRET_KEY_BASE',
+  'SERVICE_ROLE_KEY',
+  'VAULT_ENC_KEY',
+];
+
 function vaultDisplayHost() {
   try {
     return new URL(vaultAddr).host;
@@ -48,6 +82,7 @@ const managedFiles = [
     title: 'Root osionos bridge runtime',
     envPath: '.env.local',
     examplePath: '.env.example',
+    dropKeys: baasOnlyKeys,
     required: ['OSIONOS_BRIDGE_SHARED_SECRET', 'OSIONOS_APP_SESSION_SECRET', 'OSIONOS_BRIDGE_EMAIL_HASH_SALT', 'OSIONOS_APP_URL', 'OSIONOS_ALLOWED_ORIGIN'],
     recommended: ['PUBLIC_OSIONOS_APP_URL'],
     optional: ['SONAR_TOK'],
@@ -280,13 +315,16 @@ function isSecretKey(key) {
 
 function listKeys(config) {
   const keys = new Set();
+  const dropKeys = new Set(config.dropKeys ?? []);
   for (const key of config.required ?? []) keys.add(key);
   for (const key of config.recommended ?? []) keys.add(key);
   for (const key of config.optional ?? []) keys.add(key);
   for (const key of config.legacy ?? []) keys.add(key);
   for (const pathValue of [config.envPath, config.examplePath]) {
     if (!pathValue) continue;
-    for (const key of parseEnv(absolute(pathValue)).keys()) keys.add(key);
+    for (const key of parseEnv(absolute(pathValue)).keys()) {
+      if (!dropKeys.has(key)) keys.add(key);
+    }
   }
   return [...keys].sort((left, right) => left.localeCompare(right));
 }
@@ -364,6 +402,37 @@ function serialize(key, value) {
   return `${key}=${text}`;
 }
 
+function setManagedValue(values, keys, key, value) {
+  if (value && keys.has(key)) values.set(key, value);
+}
+
+function setManagedDefault(values, keys, key, value) {
+  if (keys.has(key) && !values.get(key)) values.set(key, value);
+}
+
+function normalizeManagedValues(config, values) {
+  const normalized = new Map(values);
+  const keys = new Set(listKeys(config));
+  const user = normalized.get('POSTGRES_USER');
+  const password = normalized.get('POSTGRES_PASSWORD');
+  const db = normalized.get('POSTGRES_DB');
+
+  if (user && password && db) {
+    const databaseUrl = `postgres://${encodeURIComponent(user)}:${encodeURIComponent(password)}@postgres:5432/${encodeURIComponent(db)}`;
+    for (const key of ['DATABASE_URL', 'PGRST_DB_URI', 'GOTRUE_DB_DATABASE_URL']) {
+      if (keys.has(key)) normalized.set(key, databaseUrl);
+    }
+  }
+
+  setManagedValue(normalized, keys, 'PG_META_DB_PASSWORD', password);
+  setManagedValue(normalized, keys, 'PG_META_DB_USER', user);
+  setManagedValue(normalized, keys, 'PG_META_DB_NAME', db);
+  setManagedDefault(normalized, keys, 'PG_META_DB_HOST', 'postgres');
+  setManagedDefault(normalized, keys, 'PG_META_DB_PORT', '5432');
+
+  return normalized;
+}
+
 function renderEnv(config, values, { example = false } = {}) {
   const keys = listKeys(config);
   const grouped = new Map(categories.map((category) => [category, []]));
@@ -405,10 +474,11 @@ function renderEnv(config, values, { example = false } = {}) {
 }
 
 function writeManaged(config, { envValues, writeExample = true }) {
+  const normalizedValues = normalizeManagedValues(config, envValues);
   if (config.envPath) {
     const envFile = absolute(config.envPath);
     mkdirSync(dirname(envFile), { recursive: true });
-    writeFileSync(envFile, renderEnv(config, envValues, { example: false }), { mode: 0o600 });
+    writeFileSync(envFile, renderEnv(config, normalizedValues, { example: false }), { mode: 0o600 });
     console.log(`[env] wrote ${config.envPath}`);
   }
   if (writeExample && config.examplePath) {
@@ -434,7 +504,7 @@ function valuesForConfig(config) {
     }
   }
   if (config.id === 'mini-baas-infra' && !values.get('PGRST_DB_SCHEMA')) values.set('PGRST_DB_SCHEMA', 'public');
-  return values;
+  return normalizeManagedValues(config, values);
 }
 
 function tokenFromKeysFile() {
@@ -531,7 +601,7 @@ function mergedFetchedValues(config, vaultValues) {
     if (localValue) merged.set(key, localValue);
     else if (vaultValue !== undefined && vaultValue !== null) merged.set(key, String(vaultValue));
   }
-  return merged;
+  return normalizeManagedValues(config, merged);
 }
 
 async function seedVault() {
