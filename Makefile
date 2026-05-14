@@ -1,3 +1,15 @@
+# **************************************************************************** #
+#                                                                              #
+#                                                         :::      ::::::::    #
+#    Makefile                                           :+:      :+:    :+:    #
+#                                                     +:+ +:+         +:+      #
+#    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
+#                                                 +#+#+#+#+#+   +#+            #
+#    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
+#    Updated: 2026/05/15 01:41:40 by dlesieur         ###   ########.fr        #
+#                                                                              #
+# **************************************************************************** #
+
 # Makefile for managing mini-Baas infrastructure images and environment.
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
