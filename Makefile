@@ -91,7 +91,7 @@ FLY_VAULT_APP ?= track-binocle-vault
 FLY_VAULT_REGION ?= cdg
 FLY_VAULT_VOLUME ?= vault_data
 FLY_VAULT_URL ?= https://$(FLY_VAULT_APP).fly.dev
-FLY ?= flyctl
+FLY ?= $(shell if command -v flyctl >/dev/null 2>&1; then command -v flyctl; elif command -v fly >/dev/null 2>&1; then command -v fly; else printf flyctl; fi)
 HOST_UID := $(shell id -u)
 HOST_GID := $(shell id -g)
 export HOST_UID HOST_GID
