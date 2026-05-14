@@ -45,6 +45,8 @@ The pipeline must:
 
 `make healthcheck` also verifies that accidental plain HTTP on the website port redirects to HTTPS.
 
+When `make` runs inside a VirtualBox NAT VM whose default gateway is `10.0.2.2`, it exports `TRACK_BINOCLE_BIND_ADDR=0.0.0.0` so the VM Docker proxy can be reached through VirtualBox port forwards. Normal host runs keep `TRACK_BINOCLE_BIND_ADDR=127.0.0.1`.
+
 ## VM-Side Checks
 
 Check the proxy and published ports:
@@ -53,6 +55,18 @@ Check the proxy and published ports:
 docker compose ps local-https-proxy
 ss -ltnp '( sport = :4322 or sport = :3001 or sport = :3002 or sport = :3003 )'
 ```
+
+Inside a VirtualBox NAT VM, the proxy ports must show `0.0.0.0:<port>` or `:::<port>` in `docker compose ps`; `127.0.0.1:<port>` is only reachable from inside the VM and will reset host-browser connections through NAT.
+
+Forward the host browser ports to the VM once per VM:
+
+```bash
+for port in 3001 3002 3003 4000 4100 4200 4322 8000 8787 18200; do
+  VBoxManage controlvm debian natpf1 "track-binocle-$port,tcp,,$port,,$port"
+done
+```
+
+Add `8025` the same way when the host browser also needs the Mailpit inbox.
 
 Check the CA and live proxy certificate:
 

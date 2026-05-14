@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/14 23:48:33 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/15 00:10:01 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -26,7 +26,8 @@ REGISTRY_CACHE_PREFIX ?=
 BAKE_FILE ?= docker-bake.hcl
 BAKE_GROUP ?= default
 BAKE_TARGETS ?= postgres kong osionos-app mail calendar opposite-osiris-node
-export COMPOSE_PROGRESS BUILDKIT_PROGRESS BUILDX_BUILDER DOCKER_BUILDKIT COMPOSE_DOCKER_CLI_BUILD COMPOSE_BAKE REGISTRY_CACHE_PREFIX
+TRACK_BINOCLE_BIND_ADDR ?= $(shell if [ -r /sys/class/dmi/id/product_name ] && grep -qi 'VirtualBox' /sys/class/dmi/id/product_name 2>/dev/null && ip route 2>/dev/null | grep -q 'default via 10\.0\.2\.2'; then printf '0.0.0.0'; else printf '127.0.0.1'; fi)
+export COMPOSE_PROGRESS BUILDKIT_PROGRESS BUILDX_BUILDER DOCKER_BUILDKIT COMPOSE_DOCKER_CLI_BUILD COMPOSE_BAKE REGISTRY_CACHE_PREFIX TRACK_BINOCLE_BIND_ADDR
 DOCKER_PULL_ATTEMPTS ?= 1
 DOCKER_PULL_TIMEOUT ?= 120
 DOCKER_PULL_KILL_AFTER ?= 15
