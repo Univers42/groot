@@ -66,6 +66,7 @@ GIT_COMMIT_MESSAGE ?= update
 GIT_PUSH_REMOTE ?= origin
 LOCAL_CERT_DIR ?= apps/baas/certs
 LOCAL_CA_CERT := $(LOCAL_CERT_DIR)/track-binocle-local-ca.pem
+CERT_TRUST_MODE ?= system
 CURL_HEALTH := curl --cacert $(LOCAL_CA_CERT) --retry 30 --retry-delay 2 --retry-all-errors --retry-connrefused -fsS
 VAULT_COMPOSE := docker compose --profile secrets
 VAULT_ENV_CMD := $(VAULT_COMPOSE) run --rm vault-env node apps/baas/scripts/vault-env.mjs
@@ -195,13 +196,19 @@ certs-doctor: certs
 	@bash apps/baas/scripts/trust-localhost-cert.sh --verify || true
 
 certs-trust-local: certs
-## Best-effort import of the local HTTPS CA into user browser stores without breaking CI.
+## Trust the local HTTPS CA for developer browsers and system-trust clients; skipped in CI.
 	@if [[ "$${CI:-}" == 'true' || "$${GITHUB_ACTIONS:-}" == 'true' || "$${TRACK_BINOCLE_SKIP_CERT_TRUST:-}" == '1' ]]; then \
 		echo '[certs] skipping browser trust import in CI/noninteractive mode'; \
-	elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then \
-		bash apps/baas/scripts/trust-localhost-cert.sh --system || echo '[certs] trust import failed; run make certs-trust-system'; \
+	elif [[ "$${TRACK_BINOCLE_CERT_TRUST:-$(CERT_TRUST_MODE)}" == 'skip' ]]; then \
+		echo '[certs] skipping local CA trust import because TRACK_BINOCLE_CERT_TRUST=skip'; \
+	elif [[ "$${TRACK_BINOCLE_CERT_TRUST:-$(CERT_TRUST_MODE)}" == 'browser' ]]; then \
+		bash apps/baas/scripts/trust-localhost-cert.sh; \
+	elif [[ -t 0 || -t 1 ]] || { command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; }; then \
+		bash apps/baas/scripts/trust-localhost-cert.sh --system; \
 	else \
-		bash apps/baas/scripts/trust-localhost-cert.sh || echo '[certs] browser trust import failed; install libnss3-tools or run make certs-trust-system'; \
+		echo '[certs] cannot update the system CA store without an interactive terminal or cached sudo.' >&2; \
+		echo '[certs] Rerun make all from a terminal, run make certs-trust-system, or set TRACK_BINOCLE_CERT_TRUST=browser/skip intentionally.' >&2; \
+		exit 1; \
 	fi
 
 env-format:
@@ -712,6 +719,10 @@ showcase:
 	@printf '  Mail bridge:         %s\n' '$(MAIL_BRIDGE_URL)'
 	@printf '  osionos Calendar:    %s\n' '$(CALENDAR_URL)'
 	@printf '  Calendar bridge:     %s\n\n' '$(CALENDAR_BRIDGE_URL)'
+	@if [[ -n "$${SSH_CONNECTION:-}" || -n "$${VSCODE_IPC_HOOK_CLI:-}" || -n "$${VSCODE_GIT_IPC_HANDLE:-}" ]]; then \
+		printf '[certs] Remote/forwarded browser note: if your browser opens a random forwarded URL such as https://localhost:<port>, it is running outside this VM.\n'; \
+		printf '[certs] Import %s into the OS/browser trust store on the machine running that browser, or open the URLs from a browser inside this VM.\n\n' '$(LOCAL_CA_CERT)'; \
+	fi
 
 playground: healthcheck playground-preview
 ## Run the Docker Playwright user flow and app-service integration simulation.

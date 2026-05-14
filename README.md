@@ -36,7 +36,9 @@ make playground
 
 `make all` bootstraps the ignored runtime files, builds and starts the Docker stack, runs health checks, then prints the localhost URLs only after the pipeline is ready.
 
-The root stack terminates local TLS in a Docker Nginx proxy. `make all`, `make up`, and `make healthcheck` generate the local certificate automatically. Run `make certs-trust` once on a development machine to trust the project CA in browser trust stores. On Debian/Ubuntu VMs, `make certs-trust-system` installs missing certificate tooling with sudo before updating the system and browser trust stores.
+The root stack terminates local TLS in a Docker Nginx proxy. `make all`, `make up`, and `make healthcheck` generate the local certificate automatically. On interactive developer machines, `make all` also trusts the project CA in the system and browser trust stores, prompting for sudo when the Linux system CA store must be updated. On Debian/Ubuntu VMs, the trust helper installs missing certificate tooling with sudo before updating the system and browser trust stores.
+
+If VS Code or SSH opens a random forwarded URL such as `https://localhost:40775`, the browser is running on the forwarding host, not inside the VM. Import `apps/baas/certs/track-binocle-local-ca.pem` into the OS/browser trust store on the machine running that browser, or open the URLs from a browser inside the VM.
 
 `make playground` opens a VS Code simulation viewer, then runs the Docker-contained Playwright scenario: open the website, create a development account, sign in, bridge into osionos, create a persisted markdown page through the osionos bridge, open Settings, open Mail and Calendar from the sidebar, and probe both service bridges. If Gmail or Google Calendar are already authorized in their ignored token files, the simulation also samples real messages/events without printing account values.
 

@@ -148,7 +148,7 @@ Do not pre-run Compose manually for normal onboarding. `make all` is responsible
 1. Fetch shared env files from Vault using `.vault/track-binocle-reader.env`.
 2. Pull and update root and recursive submodules.
 3. Generate the local HTTPS CA and localhost certificate.
-4. Best-effort trust the local CA in browser stores when the host supports it.
+4. Trust the local CA in browser and Linux system stores on interactive developer machines, prompting for sudo when needed.
 5. Bootstrap generated project files.
 6. Format managed env files.
 7. Prefetch public Docker images in parallel.
@@ -248,13 +248,17 @@ The pipeline generates a local CA at:
 apps/baas/certs/track-binocle-local-ca.pem
 ```
 
-The HTTPS health checks use that CA directly with `curl --cacert`. Browser trust import is best-effort and skipped in CI/noninteractive environments. If the browser still warns after `make all`, run:
+The HTTPS health checks use that CA directly with `curl --cacert`. On interactive developer machines, `make all` runs the same trust path as `make certs-trust-system` and should not continue silently when the system CA store cannot be updated. CI skips browser/system trust import.
+
+If the browser still warns after `make all`, first verify the VM-side trust store:
 
 ```bash
-make certs-trust
+make certs-doctor
 ```
 
 On Debian/Ubuntu, `make certs-trust-system` installs missing `ca-certificates` and `libnss3-tools` with sudo, imports the CA into Chromium/Firefox NSS stores, and updates the Linux system CA store used by VS Code/Electron and some browsers. Set `TRACK_BINOCLE_CERTS_INSTALL_DEPS=0` to disable package installation and manage those packages manually. On other Linux distributions, install the equivalent `certutil` and system CA update tooling before running the trust target.
+
+When the app is opened through VS Code Remote SSH, an SSH tunnel, or another port forwarder, the browser may show a random URL such as `https://localhost:40775`. In that case the browser trust store belongs to the forwarding host, not the VM where `make all` ran. Import `apps/baas/certs/track-binocle-local-ca.pem` into the OS/browser trust store on the machine running the browser, or use a browser inside the VM.
 
 ## CI Parity
 

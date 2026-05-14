@@ -36,6 +36,14 @@ if [ ! -s "$CA_CERT" ]; then
   sh "$SCRIPT_DIR/generate-localhost-cert.sh"
 fi
 
+fingerprint() {
+  openssl x509 -in "$1" -noout -fingerprint -sha256 2>/dev/null | sed 's/^sha256 Fingerprint=//;s/://g'
+}
+
+same_certificate() {
+  [ -s "$1" ] && [ -s "$2" ] && [ "$(fingerprint "$1")" = "$(fingerprint "$2")" ]
+}
+
 resolve_command() {
   command_name=$1
   if command -v "$command_name" >/dev/null 2>&1; then
@@ -157,13 +165,17 @@ else
 fi
 
 if [ "$INSTALL_SYSTEM" -eq 1 ]; then
-  if ! UPDATE_CA_CERTIFICATES=$(resolve_command update-ca-certificates); then
-    printf '[certs] update-ca-certificates is required for --system on this machine. Install ca-certificates.\n' >&2
-    exit 1
+  if [ -s "$SYSTEM_CA_CERT" ] && same_certificate "$CA_CERT" "$SYSTEM_CA_CERT"; then
+    printf '[certs] Linux system CA store already has the current Track Binocle CA.\n'
+  else
+    if ! UPDATE_CA_CERTIFICATES=$(resolve_command update-ca-certificates); then
+      printf '[certs] update-ca-certificates is required for --system on this machine. Install ca-certificates.\n' >&2
+      exit 1
+    fi
+    run_as_root cp "$CA_CERT" "$SYSTEM_CA_CERT"
+    run_as_root "$UPDATE_CA_CERTIFICATES"
+    printf 'Trusted local CA in the Linux system CA store.\n'
   fi
-  run_as_root cp "$CA_CERT" "$SYSTEM_CA_CERT"
-  run_as_root "$UPDATE_CA_CERTIFICATES"
-  printf 'Trusted local CA in the Linux system CA store.\n'
 fi
 
 printf '\nDone. Fully quit and restart Chrome/Chromium/Firefox, then open https://localhost:4322/.\n'

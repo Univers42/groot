@@ -211,13 +211,17 @@ else
 fi
 
 if [ "$INSTALL_SYSTEM" -eq 1 ]; then
-  if ! UPDATE_CA_CERTIFICATES=$(resolve_command update-ca-certificates); then
-    printf '[certs] update-ca-certificates is required for --system on this machine. Install ca-certificates.\n' >&2
-    exit 1
+  if [ -s "$SYSTEM_CA_CERT" ] && same_certificate "$CA_CERT" "$SYSTEM_CA_CERT"; then
+    printf '[certs] Linux system CA store already has the current Track Binocle CA.\n'
+  else
+    if ! UPDATE_CA_CERTIFICATES=$(resolve_command update-ca-certificates); then
+      printf '[certs] update-ca-certificates is required for --system on this machine. Install ca-certificates.\n' >&2
+      exit 1
+    fi
+    run_as_root cp "$CA_CERT" "$SYSTEM_CA_CERT"
+    run_as_root "$UPDATE_CA_CERTIFICATES"
+    printf 'Trusted local CA in the Linux system CA store.\n'
   fi
-  run_as_root cp "$CA_CERT" "$SYSTEM_CA_CERT"
-  run_as_root "$UPDATE_CA_CERTIFICATES"
-  printf 'Trusted local CA in the Linux system CA store.\n'
 elif resolve_command update-ca-certificates >/dev/null 2>&1; then
   verify_system_store || true
 fi
