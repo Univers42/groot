@@ -254,7 +254,7 @@ The HTTPS health checks use that CA directly with `curl --cacert`. Browser trust
 make certs-trust
 ```
 
-On Linux, `certutil` from `libnss3-tools` is needed for browser store import.
+On Linux, `certutil` from `libnss3-tools` is needed for browser profile import. VS Code/Electron and some browsers also use the Linux system CA store; if they still show `ERR_CERT_AUTHORITY_INVALID`, run `make certs-doctor` and then `make certs-trust-system` to update the system store with sudo.
 
 ## CI Parity
 

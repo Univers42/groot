@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/14 17:24:08 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/14 17:26:59 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -816,4 +816,4 @@ docker_reclaim_cache:
 	@env -u BUILDX_BUILDER docker buildx use default >/dev/null 2>&1 || true
 	@env -u BUILDX_BUILDER docker builder prune -a -f || true
 
-.PHONY: help all all-local pulls pushes bootstrap certs certs-trust certs-trust-local env-format buildx-setup compose-build docker-prefetch-images vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fly-invite-token vault-fetch-shared vault-shared-doctor env-fetch-shared vault-publish-shared vault-status-shared vault-repair-shared vault-github-oidc vault-fly-create vault-fly-deploy vault-fly-publish vault-fly-github vault-fly vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache
+.PHONY: help all all-local pulls pushes bootstrap certs certs-trust certs-trust-system certs-doctor certs-trust-local env-format buildx-setup compose-build docker-prefetch-images vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fly-invite-token vault-fetch-shared vault-shared-doctor env-fetch-shared vault-publish-shared vault-status-shared vault-repair-shared vault-github-oidc vault-fly-create vault-fly-deploy vault-fly-publish vault-fly-github vault-fly vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache
