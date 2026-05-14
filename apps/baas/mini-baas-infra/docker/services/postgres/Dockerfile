@@ -2,7 +2,7 @@
 # File: docker/services/postgres/Dockerfile
 # PostgreSQL 16 Alpine with pg_net extension (required by GoTrue webhooks / Supabase).
 
-FROM postgres:16-alpine AS pg_net_builder
+FROM public.ecr.aws/docker/library/postgres:16-alpine AS pg_net_builder
 
 ARG PG_NET_VERSION=0.14.0
 ADD https://github.com/supabase/pg_net/archive/refs/tags/v${PG_NET_VERSION}.tar.gz /tmp/pg_net.tar.gz
@@ -28,7 +28,7 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
   && apk del .pg-net-build-deps \
   && rm -rf /tmp/pg_net /tmp/pg_net.tar.gz /var/cache/apk/*
 
-FROM postgres:16-alpine
+FROM public.ecr.aws/docker/library/postgres:16-alpine
 
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
   apk add --no-cache ca-certificates libcurl

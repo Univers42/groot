@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # File: docker/services/kong/Dockerfile
 
-FROM kong:3.8
+FROM public.ecr.aws/docker/library/kong:3.8
 COPY --link conf/kong.yml /etc/kong/kong.yml
 ENV KONG_DATABASE=off \
     KONG_DECLARATIVE_CONFIG=/etc/kong/kong.yml \

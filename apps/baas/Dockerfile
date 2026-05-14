@@ -11,7 +11,7 @@
 # **************************************************************************** #
 
 # syntax=docker/dockerfile:1
-FROM kong:3.8
+FROM public.ecr.aws/docker/library/kong:3.8
 
 ENV MINI_BAAS_CONFIG_FILE=/etc/mini-baas/mini-baas-infra.conf
 USER root
