@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/14 05:20:33 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/14 15:02:57 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -79,6 +79,7 @@ VAULT_TOKEN_FILE ?= $(VAULT_READER_TOKEN_FILE)
 VAULT_PUBLISH_TOKEN_FILE ?= $(VAULT_WRITER_TOKEN_FILE)
 VAULT_PUBLIC_ADDR ?= https://localhost:8200
 VAULT_ENV_PREFIX ?= secret/data/track-binocle/env
+VAULT_SHARED_REQUIRED ?= false
 VAULT_GITHUB_OIDC_AUTH_PATH ?= jwt
 VAULT_GITHUB_OIDC_ROLE ?= track-binocle-github-actions
 VAULT_GITHUB_OIDC_REPOSITORY ?= Univers42/track-binocle
@@ -97,7 +98,7 @@ export HOST_UID HOST_GID
 NODE_BIN ?= $(shell command -v node 2>/dev/null || true)
 DOCKER_NODE := docker run --rm --user "$(HOST_UID):$(HOST_GID)" -e HOST_UID="$(HOST_UID)" -e HOST_GID="$(HOST_GID)" -v "$$PWD":/workspace -w /workspace node:22-alpine
 DOCKER_NODE_SHARED := docker run --rm --network host --user "$(HOST_UID):$(HOST_GID)" -e HOST_UID="$(HOST_UID)" -e HOST_GID="$(HOST_GID)" -e VAULT_ADDR -e VAULT_TOKEN -e VAULT_ENV_PREFIX -e NODE_EXTRA_CA_CERTS=/workspace/apps/baas/certs/track-binocle-local-ca.pem -v "$$PWD":/workspace -w /workspace node:22-alpine
-DOCKER_NODE_VAULT := docker run --rm --user "$(HOST_UID):$(HOST_GID)" -e HOST_UID="$(HOST_UID)" -e HOST_GID="$(HOST_GID)" -e VAULT_ADDR -e VAULT_TOKEN -e VAULT_ENV_PREFIX -e VAULT_GITHUB_OIDC_AUTH_PATH -e VAULT_GITHUB_OIDC_ROLE -e VAULT_GITHUB_OIDC_REPOSITORY -e VAULT_GITHUB_OIDC_AUDIENCE -e VAULT_GITHUB_AUTH_PATH -e VAULT_GITHUB_ORG -e VAULT_GITHUB_TEAM -v "$$PWD":/workspace -w /workspace node:22-alpine
+DOCKER_NODE_VAULT := docker run --rm --user "$(HOST_UID):$(HOST_GID)" -e HOST_UID="$(HOST_UID)" -e HOST_GID="$(HOST_GID)" -e VAULT_ADDR -e VAULT_TOKEN -e VAULT_ENV_PREFIX -e VAULT_TEAM_ROLE -e VAULT_TOKEN_TTL -e VAULT_TEAM_TOKEN_FILE -e VAULT_PUBLIC_ADDR -e VAULT_GITHUB_OIDC_AUTH_PATH -e VAULT_GITHUB_OIDC_ROLE -e VAULT_GITHUB_OIDC_REPOSITORY -e VAULT_GITHUB_OIDC_AUDIENCE -e VAULT_GITHUB_AUTH_PATH -e VAULT_GITHUB_ORG -e VAULT_GITHUB_TEAM -v "$$PWD":/workspace -w /workspace node:22-alpine
 NODE_RUN := $(if $(NODE_BIN),$(NODE_BIN),$(DOCKER_NODE) node)
 NODE_RUN_SHARED := $(if $(NODE_BIN),$(NODE_BIN),$(DOCKER_NODE_SHARED) node)
 
@@ -303,6 +304,15 @@ vault-invite-token: vault-policy-sync
 ## Create an ignored .vault invite token file. Use VAULT_TEAM_ROLE=reader|writer.
 	$(VAULT_COMPOSE) run --rm -e VAULT_TEAM_ROLE='$(VAULT_TEAM_ROLE)' -e VAULT_TOKEN_TTL='$(VAULT_TOKEN_TTL)' -e VAULT_TEAM_TOKEN_FILE='$(VAULT_TEAM_TOKEN_FILE)' -e VAULT_PUBLIC_ADDR='$(VAULT_PUBLIC_ADDR)' vault-env node apps/baas/scripts/vault-env.mjs team-token
 
+vault-fly-invite-token:
+## Create an ignored .vault invite token file from the Fly-hosted Vault.
+	@mkdir -p .vault
+	@set -eu; token_file='.vault/fly-vault-root-token'; trap 'rm -f "$$token_file"' EXIT; \
+		$(FLY) ssh console --app $(FLY_VAULT_APP) --command 'jq -r .root_token /vault/data/.vault-keys.json' > "$$token_file"; \
+		chmod 600 "$$token_file"; \
+		token="$$(tr -d '\r\n' < "$$token_file")"; \
+		VAULT_ADDR='$(FLY_VAULT_URL)' VAULT_TOKEN="$$token" VAULT_ENV_PREFIX='$(VAULT_ENV_PREFIX)' VAULT_TEAM_ROLE='$(VAULT_TEAM_ROLE)' VAULT_TOKEN_TTL='$(VAULT_TOKEN_TTL)' VAULT_TEAM_TOKEN_FILE='$(VAULT_TEAM_TOKEN_FILE)' VAULT_PUBLIC_ADDR='$(FLY_VAULT_URL)' $(DOCKER_NODE_VAULT) node apps/baas/scripts/vault-env.mjs team-token
+
 vault-fetch-shared:
 ## Fetch managed env files with VAULT_API_KEY, VAULT_TOKEN, or VAULT_TOKEN_FILE from an invited user.
 	@set -eu; \
@@ -332,6 +342,8 @@ vault-fetch-shared:
 			;; \
 	esac; \
 	if [[ "$$vault_addr_is_local" == '1' ]]; then \
+		echo '[vault] token file points at localhost; that only works with the Vault instance on this machine'; \
+		echo '[vault] remote teammates should use a token from make vault-fly-invite-token or VAULT_ADDR=$(FLY_VAULT_URL)'; \
 		echo '[vault] ensuring local Vault proxy is running for localhost token'; \
 		$(MAKE) vault-up; \
 	fi; \
@@ -342,14 +354,23 @@ env-fetch-shared:
 ## Fetch shared team secrets first when a reader/writer token is available.
 	@set -eu; \
 	if [[ -f '$(VAULT_TOKEN_FILE)' || ( -n "$${VAULT_API_KEY:-}" && -n "$${VAULT_ADDR:-}" ) || ( -n "$${VAULT_TOKEN:-}" && -n "$${VAULT_ADDR:-}" ) ]]; then \
-		$(MAKE) vault-fetch-shared VAULT_TOKEN_FILE='$(VAULT_TOKEN_FILE)'; \
+		if $(MAKE) vault-fetch-shared VAULT_TOKEN_FILE='$(VAULT_TOKEN_FILE)'; then \
+			echo '[vault] shared env fetch complete'; \
+		elif [[ '$(VAULT_SHARED_REQUIRED)' == 'true' || '$(VAULT_SHARED_REQUIRED)' == '1' || "$${GITHUB_ACTIONS:-}" == 'true' ]]; then \
+			exit 1; \
+		else \
+			echo '[vault] shared env fetch failed; continuing with local generated development secrets'; \
+			echo '[vault] set VAULT_SHARED_REQUIRED=true to make shared Vault failures fatal'; \
+		fi; \
 	elif [[ "$${GITHUB_ACTIONS:-}" == 'true' ]]; then \
 		echo '[vault] GitHub Actions must use its OIDC-generated Vault token file before make all.'; \
 		exit 1; \
-	else \
+	elif [[ '$(VAULT_SHARED_REQUIRED)' == 'true' || '$(VAULT_SHARED_REQUIRED)' == '1' ]]; then \
 		echo '[vault] missing shared Vault credentials. Set VAULT_API_KEY+VAULT_ADDR, VAULT_TOKEN+VAULT_ADDR, or provide VAULT_TOKEN_FILE=$(VAULT_TOKEN_FILE).'; \
-		echo '[vault] for offline generated development secrets, run make all-local instead of make all.'; \
 		exit 1; \
+	else \
+		echo '[vault] missing shared Vault credentials; continuing with local generated development secrets'; \
+		echo '[vault] set VAULT_SHARED_REQUIRED=true to make this fatal'; \
 	fi
 
 vault-publish-shared:
@@ -708,4 +729,4 @@ docker_reclaim_cache:
 	@env -u BUILDX_BUILDER docker buildx use default >/dev/null 2>&1 || true
 	@env -u BUILDX_BUILDER docker builder prune -a -f || true
 
-.PHONY: help all all-local pulls pushes bootstrap certs certs-trust certs-trust-local env-format buildx-setup compose-build docker-prefetch-images vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fetch-shared env-fetch-shared vault-publish-shared vault-status-shared vault-repair-shared vault-github-oidc vault-fly-create vault-fly-deploy vault-fly-publish vault-fly-github vault-fly vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache
+.PHONY: help all all-local pulls pushes bootstrap certs certs-trust certs-trust-local env-format buildx-setup compose-build docker-prefetch-images vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fly-invite-token vault-fetch-shared env-fetch-shared vault-publish-shared vault-status-shared vault-repair-shared vault-github-oidc vault-fly-create vault-fly-deploy vault-fly-publish vault-fly-github vault-fly vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply up app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache

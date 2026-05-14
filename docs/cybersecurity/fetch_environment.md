@@ -17,11 +17,14 @@ You can generate tokens with different permissions for `reader` (can only fetch 
 Run the following command from the repository root to create a tracking token for your teammate:
 
 ```bash
-# Generate a Reader Token (Standard for most teammates)
-VAULT_TEAM_ROLE=reader make vault-invite-token
+# Generate a Reader Token from the Fly-hosted shared Vault (standard for remote teammates)
+VAULT_TEAM_ROLE=reader make vault-fly-invite-token
 
-# Or generate a Writer Token
-VAULT_TEAM_ROLE=writer make vault-invite-token
+# Or generate a Writer Token from the Fly-hosted shared Vault
+VAULT_TEAM_ROLE=writer make vault-fly-invite-token
+
+# Only use the local Compose Vault for same-machine testing
+VAULT_TEAM_ROLE=reader make vault-invite-token
 ```
 
 **Where did it go?**
@@ -32,7 +35,7 @@ VAULT_ADDR=https://localhost:8200
 VAULT_TOKEN=hvs.CAE... (long secret token)
 VAULT_ENV_PREFIX=secret/data/track-binocle/env
 ```
-*(Note: If you run a central team server on Fly.io, you should pass `VAULT_PUBLIC_ADDR=https://track-binocle-vault.fly.dev` when running the make command).*
+For remote teammates, the Fly-issued file should use `VAULT_ADDR=https://track-binocle-vault.fly.dev`. A `localhost` token only works against the Vault instance on the maintainer's own machine.
 
 ---
 
@@ -96,7 +99,7 @@ make all
 4. It creates all the `.env.local` or `.env` files automatically in the correct `apps/*` subfolders.
 5. It proceeds to build the Docker images and start the pipeline.
 
-*(If you ever see a missing secret error, or it asks you to write `.env` manually, it means `make all` didn't find the `.vault/track-binocle-reader.env` file, the token has expired, or the file lacks `chmod 600` permissions).*
+If the shared Vault is unreachable, the token has expired, or the file points at the wrong host, `make all` now continues with generated local development secrets. Use `VAULT_SHARED_REQUIRED=true make all` when a shared Vault failure should stop the run.
 
 ---
 

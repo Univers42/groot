@@ -61,6 +61,7 @@ make vault-seed
 make vault-publish
 make vault-status
 make vault-invite-token VAULT_TEAM_ROLE=reader
+make vault-fly-invite-token VAULT_TEAM_ROLE=reader
 make vault-invite-token VAULT_TEAM_ROLE=writer VAULT_TOKEN_TTL=8h
 make vault-fetch-shared VAULT_TOKEN_FILE=.vault/track-binocle-reader.env
 VAULT_API_KEY=... VAULT_ADDR=https://track-binocle-vault.fly.dev make vault-fetch-shared
@@ -78,7 +79,7 @@ make db-password-apply
 make pushes
 ```
 
-`make all` is the Vault-backed teammate pipeline. It fetches shared env values before bootstrap and fails immediately when no Vault credential is provided. `make all-local` is the explicit offline/generated-secret development path.
+`make all` is the teammate pipeline. It tries to fetch shared env values before bootstrap, then continues with locally generated development secrets when no shared Vault credential is present or when the shared fetch fails. Set `VAULT_SHARED_REQUIRED=true` when you want missing, expired, unreachable, or wrong-host Vault credentials to stop the run. GitHub Actions always keeps shared Vault fetch failures fatal. `make all-local` is the explicit offline/generated-secret development path.
 
 `make pulls` fetches and pulls the root repository plus every recursive submodule. It uses configured upstream branches when they exist and otherwise fetches without changing branches.
 
@@ -90,7 +91,7 @@ make pushes
 
 `make vault-publish` updates the managed Vault env records from the ignored local env files after a maintainer changes a credential. `make vault-status` compares local and Vault key coverage without printing values.
 
-For teammates, a maintainer can run `make vault-invite-token VAULT_TEAM_ROLE=reader` to write an ignored `.vault/track-binocle-reader.env` token file, or `make vault-invite-token VAULT_TEAM_ROLE=writer VAULT_TOKEN_TTL=8h` for someone allowed to publish updated secrets. Share that file through your normal secure channel, never through Git. Invited users must keep the token file private with mode `600` or `400`; the shared Vault targets refuse group-readable or world-readable token files. Invited users can place the reader file in `.vault/` and run `make all`; the Makefile fetches shared secrets before bootstrap. If no invite token or API key is present, `make all` fails before Docker starts. If you want to hand over a password-like API key instead of a file, give the teammate the reader token value and the Vault URL; they can run `VAULT_API_KEY=... VAULT_ADDR=https://track-binocle-vault.fly.dev make vault-fetch-shared` or `VAULT_API_KEY=... VAULT_ADDR=https://track-binocle-vault.fly.dev make all`. They can also run `make vault-fetch-shared VAULT_TOKEN_FILE=.vault/track-binocle-reader.env` explicitly. New local invite files default to `https://localhost:8200`, and `vault-fetch-shared` translates older `https://local-https-proxy:8200` files to `https://localhost:8200` for host-side Node fetches. When a token file points at the localhost Vault proxy, `make all` starts the local Vault/proxy before fetching; public Vault tokens still fetch before Docker work begins.
+For teammates, a maintainer can run `make vault-fly-invite-token VAULT_TEAM_ROLE=reader` to mint an ignored `.vault/track-binocle-reader.env` token from the Fly-hosted shared Vault, or `make vault-fly-invite-token VAULT_TEAM_ROLE=writer VAULT_TOKEN_TTL=8h` for someone allowed to publish updated secrets. Use `make vault-invite-token` only for tokens issued by the local Compose Vault on the same machine. Share invite files through your normal secure channel, never through Git. Invited users must keep the token file private with mode `600` or `400`; the shared Vault targets refuse group-readable or world-readable token files. Invited users can place the reader file in `.vault/` and run `make all`; the Makefile fetches shared secrets before bootstrap when it can, and otherwise continues with local generated secrets unless `VAULT_SHARED_REQUIRED=true` is set. If you want to hand over a password-like API key instead of a file, give the teammate the reader token value and the Vault URL; they can run `VAULT_API_KEY=... VAULT_ADDR=https://track-binocle-vault.fly.dev make vault-fetch-shared` or `VAULT_API_KEY=... VAULT_ADDR=https://track-binocle-vault.fly.dev make all`. They can also run `make vault-fetch-shared VAULT_TOKEN_FILE=.vault/track-binocle-reader.env` explicitly. Local invite files default to `https://localhost:8200`, and `vault-fetch-shared` translates older `https://local-https-proxy:8200` files to `https://localhost:8200` for host-side Node fetches. When a token file points at the localhost Vault proxy, `make all` starts the local Vault/proxy before fetching; this only works with a token issued by that local Vault.
 
 For the full fresh-clone checklist, see [docs/cybersecurity/fresh-clone-vault-onboarding.md](docs/cybersecurity/fresh-clone-vault-onboarding.md).
 

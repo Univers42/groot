@@ -347,7 +347,17 @@ Symptom:
 [vault] missing shared Vault credentials
 ```
 
-Fix: create `.vault/track-binocle-reader.env` from the one-time secret link, or export `VAULT_TOKEN`, `VAULT_ADDR`, and `VAULT_ENV_PREFIX` in the shell.
+Fix: create `.vault/track-binocle-reader.env` from the one-time secret link, or export `VAULT_TOKEN`, `VAULT_ADDR`, and `VAULT_ENV_PREFIX` in the shell. Local developer runs continue with generated secrets unless `VAULT_SHARED_REQUIRED=true` is set.
+
+### Vault token rejected with HTTP 403
+
+Symptom:
+
+```text
+Vault GET secret/data/track-binocle/env/root failed with HTTP 403
+```
+
+Fix: check whether `.vault/track-binocle-reader.env` says `VAULT_ADDR=https://localhost:8200`. A localhost invite only works with the Vault instance on the machine that created it. Ask a maintainer to generate a Fly-backed invite with `make vault-fly-invite-token VAULT_TEAM_ROLE=reader`, then replace the reader file and run `chmod 600 .vault/track-binocle-reader.env`.
 
 ### Git submodule clone fails on SSH
 

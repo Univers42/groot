@@ -162,6 +162,28 @@ const optionalPatterns = [
 
 const secretPatterns = [/SECRET/, /TOKEN/, /PASSWORD/, /PASS$/, /_KEY$/, /PAT$/, /JWT/];
 
+class VaultHttpError extends Error {
+  constructor(method, path, status, detail) {
+    const suffix = detail ? `: ${detail}` : '';
+    super(`Vault ${method} ${path} failed with HTTP ${status}${suffix}`);
+    this.name = 'VaultHttpError';
+    this.method = method;
+    this.path = path;
+    this.status = status;
+  }
+}
+
+function formatVaultErrorDetail(text) {
+  if (!text) return '';
+  try {
+    const payload = JSON.parse(text);
+    if (Array.isArray(payload.errors) && payload.errors.length > 0) return payload.errors.join('; ');
+  } catch {
+    // Keep the raw body below when Vault does not return JSON.
+  }
+  return text.replace(/\s+/g, ' ').trim().slice(0, 240);
+}
+
 const examples = {
   ACTIVE_DB_SOURCE: 'json',
   API_EXTERNAL_URL: 'https://localhost:8000/auth/v1',
@@ -533,9 +555,30 @@ async function vaultRequestAs(method, path, body, token) {
     throw new Error(`Vault ${method} ${path} could not reach ${vaultDisplayHost()}${code}: ${message}`);
   }
   if (response.status === 404) return null;
-  if (!response.ok) throw new Error(`Vault ${method} ${path} failed with HTTP ${response.status}`);
+  if (!response.ok) {
+    const detail = formatVaultErrorDetail(await response.text());
+    throw new VaultHttpError(method, path, response.status, detail);
+  }
   if (response.status === 204) return {};
   return response.json();
+}
+
+function vaultFailureHint(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof VaultHttpError && error.status === 403 && error.path.startsWith(`${kvPrefix}/`)) {
+    return [
+      '[vault] Vault rejected this token for the Track Binocle env path.',
+      '[vault] Check that the token file was issued by the same Vault named in VAULT_ADDR and has not expired.',
+      '[vault] If VAULT_ADDR is localhost on a teammate machine, ask a maintainer to run: make vault-fly-invite-token VAULT_TEAM_ROLE=reader',
+    ].join('\n');
+  }
+  if (message.includes('could not reach')) {
+    return [
+      `[vault] Could not reach Vault at ${vaultDisplayHost()}; check VAULT_ADDR and the Fly app status if this is the shared team Vault.`,
+      '[vault] Local development can continue through make all because shared Vault fetch falls back to generated secrets unless VAULT_SHARED_REQUIRED=true.',
+    ].join('\n');
+  }
+  return '';
 }
 
 async function vaultRequest(method, path, body) {
@@ -857,5 +900,7 @@ try {
   await main();
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
+  const hint = vaultFailureHint(error);
+  if (hint) console.error(hint);
   process.exit(1);
 }
