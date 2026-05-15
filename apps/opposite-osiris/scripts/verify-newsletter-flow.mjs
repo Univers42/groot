@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
 import { createBaasClient, createServiceBaasClient } from './baas-env.mjs';
+import { uniqueTestEmail } from './test-email.mjs';
 
 const client = createBaasClient();
 const serviceClient = createServiceBaasClient();
-const testEmail = `devfast+newsletter-${Date.now()}@archicode.codes`;
+const testEmail = uniqueTestEmail('newsletter', 'NEWSLETTER_VERIFY_EMAIL');
 const testPassword = 'Test123!';
 
 const steps = [];

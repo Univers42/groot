@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
 import { resolve } from 'node:path';
+import { uniqueTestEmail } from './test-email.mjs';
 
 for (const file of ['.env.local', '.env', '../../.env.local', '../../apps/baas/.env.local']) {
 	const path = resolve(process.cwd(), file);
@@ -20,7 +21,7 @@ const gatewayBaseUrl = (process.env.AUTH_GATEWAY_TEST_URL ?? `http://localhost:$
 const timestamp = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
 const testPassword = process.env.BAAS_VERIFY_PASSWORD ?? ['Verify', timestamp, '!'].join('');
 const testIdentity = {
-	email: `devfast+verify-${timestamp}@archicode.codes`,
+	email: uniqueTestEmail('verify', 'BAAS_VERIFY_EMAIL'),
 	username: `verify_${Number(timestamp).toString(36)}`.slice(0, 32),
 };
 

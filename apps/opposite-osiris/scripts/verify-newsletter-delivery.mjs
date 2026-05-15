@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import http from 'node:http';
 import https from 'node:https';
+import { uniqueTestEmail } from './test-email.mjs';
 
 const gatewayBaseUrl = (process.env.AUTH_GATEWAY_TEST_URL ?? `http://127.0.0.1:${process.env.AUTH_GATEWAY_PORT ?? 8787}`).replace(/\/$/, '');
 const mailpitApiUrl = (process.env.MAILPIT_API_URL ?? 'http://mailpit:8025').replace(/\/$/, '');
 const verifyMailpit = process.env.MAILPIT_VERIFY_DELIVERY !== 'false';
-const email = `devfast+newsletter-healthcheck-${Date.now()}@archicode.codes`;
+const email = uniqueTestEmail('newsletter-healthcheck', 'NEWSLETTER_HEALTHCHECK_EMAIL');
 
 function safeMessage(message) {
 	return String(message).replaceAll(/[\r\n\t]/g, ' ').slice(0, 240);

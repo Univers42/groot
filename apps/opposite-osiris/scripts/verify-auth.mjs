@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createBaasClient, createServiceBaasClient, fail, pass } from './baas-env.mjs';
+import { uniqueTestEmail } from './test-email.mjs';
 
 function verificationSecret(timestamp) {
 	return process.env.BAAS_VERIFY_PASSWORD ?? ['Verify', timestamp, '!'].join('');
@@ -7,7 +8,7 @@ function verificationSecret(timestamp) {
 
 try {
 	const timestamp = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
-	const email = `devfast+auth-${timestamp}@archicode.codes`;
+	const email = uniqueTestEmail('auth', 'BAAS_VERIFY_EMAIL');
 	const password = verificationSecret(timestamp);
 	await createServiceBaasClient().auth.admin.createUser({ email, password, email_confirm: true });
 	const payload = await createBaasClient().auth.signInWithPassword({ email, password });

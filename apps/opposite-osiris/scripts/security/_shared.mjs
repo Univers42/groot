@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { uniqueTestEmail } from '../test-email.mjs';
 
 const envFiles = ['.env.local', '.env'];
 for (const file of envFiles) {
@@ -34,7 +35,7 @@ export const config = {
 	anonKey: process.env.PUBLIC_BAAS_ANON_KEY ?? '',
 	allowedOrigin: process.env.SECURITY_ALLOWED_ORIGIN ?? 'http://localhost:4322',
 	disallowedOrigin: process.env.SECURITY_DISALLOWED_ORIGIN ?? 'http://evil.example.com',
-	testEmail: process.env.SECURITY_TEST_EMAIL ?? `devfast+security-${Date.now()}@archicode.codes`,
+	testEmail: uniqueTestEmail('security', 'SECURITY_TEST_EMAIL'),
 	testPassword: process.env.SECURITY_TEST_PASSWORD ?? 'Test123!',
 };
 

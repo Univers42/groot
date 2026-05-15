@@ -143,7 +143,7 @@ if [ -z "$CANDIDATE_HOSTS" ]; then
   exit 0
 fi
 
-BASE_SSH_ARGS="-o BatchMode=yes -o ConnectTimeout=$CONNECT_TIMEOUT -o StrictHostKeyChecking=accept-new"
+BASE_SSH_ARGS="-T -o RequestTTY=no -o BatchMode=yes -o ConnectTimeout=$CONNECT_TIMEOUT -o StrictHostKeyChecking=accept-new"
 BASE_SCP_ARGS="-o BatchMode=yes -o ConnectTimeout=$CONNECT_TIMEOUT -o StrictHostKeyChecking=accept-new"
 if [ -n "${TRACK_BINOCLE_BROWSER_HOST_SSH_OPTS:-}" ]; then
   BASE_SSH_ARGS="$BASE_SSH_ARGS $TRACK_BINOCLE_BROWSER_HOST_SSH_OPTS"
@@ -199,8 +199,14 @@ if [ -z "$SELECTED_TARGET" ]; then
   exit 0
 fi
 
-ssh $SELECTED_SSH_ARGS "$SELECTED_TARGET" "mkdir -p '$REMOTE_CERT_DIR'"
-scp $SELECTED_SCP_ARGS "$CA_CERT" "$LOCAL_TRUST_SCRIPT" "$SELECTED_TARGET:$REMOTE_CERT_DIR/"
-ssh $SELECTED_SSH_ARGS "$SELECTED_TARGET" "TRACK_BINOCLE_CERT_DIR='$REMOTE_CERT_DIR' sh '$REMOTE_CERT_DIR/$(basename "$LOCAL_TRUST_SCRIPT")' --system"
+if ssh $SELECTED_SSH_ARGS "$SELECTED_TARGET" "mkdir -p '$REMOTE_CERT_DIR'" \
+  && scp $SELECTED_SCP_ARGS "$CA_CERT" "$LOCAL_TRUST_SCRIPT" "$SELECTED_TARGET:$REMOTE_CERT_DIR/" \
+  && ssh $SELECTED_SSH_ARGS "$SELECTED_TARGET" "TRACK_BINOCLE_CERT_DIR='$REMOTE_CERT_DIR' sh '$REMOTE_CERT_DIR/$(basename "$LOCAL_TRUST_SCRIPT")' --system"; then
+  printf '[certs] browser host trust import completed through %s.\n' "$SELECTED_TARGET"
+  exit 0
+fi
 
-printf '[certs] browser host trust import completed through %s.\n' "$SELECTED_TARGET"
+printf '[certs] browser host trust import failed through %s.\n' "$SELECTED_TARGET" >&2
+printf '[certs] VM-side trust is still configured; rerun with TRACK_BINOCLE_BROWSER_HOST_REQUIRED=1 if this must be fatal.\n' >&2
+[ "$REQUIRED" = 1 ] && exit 1
+exit 0

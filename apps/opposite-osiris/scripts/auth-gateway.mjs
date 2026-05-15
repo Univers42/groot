@@ -47,6 +47,7 @@ const config = {
 	smtpAuthRequired: process.env.SMTP_AUTH_REQUIRED === 'true',
 	smtpFromName: process.env.SMTP_FROM_NAME ?? 'Prismatica',
 	smtpFromAddress: process.env.SMTP_FROM_ADDRESS ?? process.env.EMAIL_FROM ?? process.env.SMTP_USERNAME ?? process.env.SMTP_USER ?? '',
+	emailDomainAllowlist: process.env.AUTH_EMAIL_DOMAIN_ALLOWLIST ?? process.env.EMAIL_DOMAIN_ALLOWLIST ?? '',
 	requireEmailVerification: process.env.AUTH_REQUIRE_EMAIL_VERIFICATION !== 'false' && process.env.PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION !== 'false',
 	osionosBridgeUrl: (process.env.OSIONOS_BRIDGE_URL ?? 'http://localhost:4000/api/auth/bridge/session').replace(/\/$/, ''),
 	osionosBridgeSecret: process.env.OSIONOS_BRIDGE_SHARED_SECRET ?? '',
@@ -155,7 +156,40 @@ function emailDomain(email) {
 	return String(email).split('@').pop()?.toLowerCase() ?? '';
 }
 
+function csvValues(value) {
+	return String(value ?? '').split(',').map((entry) => entry.trim().toLowerCase()).filter(Boolean);
+}
+
+function emailAddress(value) {
+	const raw = String(value ?? '').trim();
+	const bracketed = /<([^>]+)>/.exec(raw)?.[1] ?? raw;
+	return bracketed.trim().toLowerCase();
+}
+
+function isLocalSmtpHost() {
+	const host = config.smtpHost.trim().toLowerCase().replace(/^\[|\]$/g, '');
+	return host === 'mailpit' || host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === 'host.docker.internal' || host.endsWith('.local');
+}
+
+function allowedEmailDomains() {
+	const domains = new Set(csvValues(config.emailDomainAllowlist));
+	const senderDomain = emailDomain(emailAddress(config.smtpFromAddress));
+	if (senderDomain) domains.add(senderDomain);
+	if (isLocalSmtpHost()) {
+		domains.add('mini-baas.local');
+		domains.add('example.test');
+		domains.add('localhost');
+	}
+	return domains;
+}
+
+function isAllowedEmailDomain(email) {
+	const domain = emailDomain(email);
+	return domain ? allowedEmailDomains().has(domain) : false;
+}
+
 async function hasDeliverableEmailDomain(email) {
+	if (isAllowedEmailDomain(email)) return true;
 	const domain = emailDomain(email);
 	const cached = mailDomainCache.get(domain);
 	if (cached && cached.expiresAt > Date.now()) return cached.valid;
