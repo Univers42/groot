@@ -1,3 +1,15 @@
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   001_mock_catalog.js                                :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2026/05/18 21:19:15 by dlesieur          #+#    #+#             */
+/*   Updated: 2026/05/18 21:19:15 by dlesieur         ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
 // File: scripts/migrations/mongodb/001_mock_catalog.js
 // Migration: Create mock_catalog collection with a generic JSON Schema validator.
 // The schema is intentionally domain-agnostic — consuming apps should create

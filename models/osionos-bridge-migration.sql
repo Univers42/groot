@@ -1,3 +1,15 @@
+# **************************************************************************** #
+#                                                                              #
+#                                                         :::      ::::::::    #
+#    osionos-bridge-migration.sql                       :+:      :+:    :+:    #
+#                                                     +:+ +:+         +:+      #
+#    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
+#                                                 +#+#+#+#+#+   +#+            #
+#    Created: 2026/05/18 21:19:26 by dlesieur          #+#    #+#              #
+#    Updated: 2026/05/18 21:19:26 by dlesieur         ###   ########.fr        #
+#                                                                              #
+# **************************************************************************** #
+
 -- Shared BaaS schema for the Prismatica -> osionos bridge.
 -- The browser receives only app-scoped session metadata; this schema keeps the
 -- durable identity/workspace mapping inside Postgres behind PostgREST/service-role access.

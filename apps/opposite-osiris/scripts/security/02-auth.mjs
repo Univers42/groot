@@ -1,3 +1,15 @@
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   02-auth.mjs                                        :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
+/*   Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
 #!/usr/bin/env node
 import { assert, authPasswordGrant, config, ensureSecurityTestUser, isJwtLike, passed, runChecks, textBody } from './_shared.mjs';
 

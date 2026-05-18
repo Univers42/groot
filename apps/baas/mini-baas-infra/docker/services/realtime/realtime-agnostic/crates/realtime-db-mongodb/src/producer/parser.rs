@@ -1,3 +1,15 @@
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   parser.rs                                          :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2026/05/18 21:19:15 by dlesieur          #+#    #+#             */
+/*   Updated: 2026/05/18 21:19:15 by dlesieur         ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
 //! Parsing of `MongoDB` change stream BSON documents into [`EventEnvelope`]s.
 
 use std::collections::HashMap;

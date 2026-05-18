@@ -1,3 +1,15 @@
+# **************************************************************************** #
+#                                                                              #
+#                                                         :::      ::::::::    #
+#    auth-security-migration.sql                        :+:      :+:    :+:    #
+#                                                     +:+ +:+         +:+      #
+#    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
+#                                                 +#+#+#+#+#+   +#+            #
+#    Created: 2026/05/18 21:19:26 by dlesieur          #+#    #+#              #
+#    Updated: 2026/05/18 21:19:26 by dlesieur         ###   ########.fr        #
+#                                                                              #
+# **************************************************************************** #
+
 -- Authentication security migration for track-binocle / Prismatica
 -- Adds audit logging for sensitive authentication events.
 -- Last updated: 2026-05-03

@@ -1,3 +1,15 @@
+# **************************************************************************** #
+#                                                                              #
+#                                                         :::      ::::::::    #
+#    calendar-migration.sql                             :+:      :+:    :+:    #
+#                                                     +:+ +:+         +:+      #
+#    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
+#                                                 +#+#+#+#+#+   +#+            #
+#    Created: 2026/05/18 21:19:26 by dlesieur          #+#    #+#              #
+#    Updated: 2026/05/18 21:19:26 by dlesieur         ###   ########.fr        #
+#                                                                              #
+# **************************************************************************** #
+
 -- BaaS mirror tables for osionos Calendar provider data.
 -- The bridge writes with the service role; frontend clients should not receive raw provider payloads directly.
 

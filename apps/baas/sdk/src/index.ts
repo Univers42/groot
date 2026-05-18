@@ -1,3 +1,15 @@
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   index.ts                                           :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
+/*   Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
 import { AnalyticsClient } from './domains/analytics.js';
 import { AuthClient } from './domains/auth.js';
 import { QueryClient, ResourceQueryBuilder } from './domains/query.js';

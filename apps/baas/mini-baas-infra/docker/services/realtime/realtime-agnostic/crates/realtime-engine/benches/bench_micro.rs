@@ -1,3 +1,15 @@
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   bench_micro.rs                                     :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2026/05/18 21:19:15 by dlesieur          #+#    #+#             */
+/*   Updated: 2026/05/18 21:19:15 by dlesieur         ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
 //! Micro-benchmarks: `SequenceGenerator` + `TopicPattern` matching.
 //!
 //! Run with: `cargo bench -p realtime-engine --bench bench_micro`

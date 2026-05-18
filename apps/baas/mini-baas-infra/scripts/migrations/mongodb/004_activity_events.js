@@ -1,3 +1,15 @@
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   004_activity_events.js                             :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2026/05/18 21:19:15 by dlesieur          #+#    #+#             */
+/*   Updated: 2026/05/18 21:19:15 by dlesieur         ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
 // File: scripts/migrations/mongodb/004_activity_events.js
 // Migration 004: Activity events — time-series user analytics
 // Stores login, page-view, API-call, feature-usage events with a 90-day TTL.

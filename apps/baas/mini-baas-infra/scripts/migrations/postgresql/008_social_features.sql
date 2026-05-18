@@ -1,3 +1,15 @@
+# **************************************************************************** #
+#                                                                              #
+#                                                         :::      ::::::::    #
+#    008_social_features.sql                            :+:      :+:    :+:    #
+#                                                     +:+ +:+         +:+      #
+#    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
+#                                                 +#+#+#+#+#+   +#+            #
+#    Created: 2026/05/18 21:19:15 by dlesieur          #+#    #+#              #
+#    Updated: 2026/05/18 21:19:15 by dlesieur         ###   ########.fr        #
+#                                                                              #
+# **************************************************************************** #
+
 -- File: scripts/migrations/postgresql/008_social_features.sql
 -- Migration 008: Social features — friendships, presence, profile extensions
 -- Enables friend requests, online/offline status, accessibility & i18n prefs.

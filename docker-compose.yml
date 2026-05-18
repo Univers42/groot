@@ -86,7 +86,7 @@ services:
     volumes:
       - ./:/workspace
     working_dir: /workspace
-    entrypoint: ["flyctl"]
+    entrypoint: ["/flyctl"]
     restart: "no"
 
   local-https-proxy:

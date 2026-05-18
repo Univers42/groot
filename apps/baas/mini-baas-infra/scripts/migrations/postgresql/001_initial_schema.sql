@@ -1,3 +1,15 @@
+# **************************************************************************** #
+#                                                                              #
+#                                                         :::      ::::::::    #
+#    001_initial_schema.sql                             :+:      :+:    :+:    #
+#                                                     +:+ +:+         +:+      #
+#    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
+#                                                 +#+#+#+#+#+   +#+            #
+#    Created: 2026/05/18 21:19:15 by dlesieur          #+#    #+#              #
+#    Updated: 2026/05/18 21:19:15 by dlesieur         ###   ########.fr        #
+#                                                                              #
+# **************************************************************************** #
+
 -- File: scripts/migrations/postgresql/001_initial_schema.sql
 -- Migration: Initial schema — roles, auth helpers, base tables, RLS
 -- UP

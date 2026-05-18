@@ -1,3 +1,15 @@
+# **************************************************************************** #
+#                                                                              #
+#                                                         :::      ::::::::    #
+#    011_realtime_triggers.sql                          :+:      :+:    :+:    #
+#                                                     +:+ +:+         +:+      #
+#    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
+#                                                 +#+#+#+#+#+   +#+            #
+#    Created: 2026/05/18 21:19:15 by dlesieur          #+#    #+#              #
+#    Updated: 2026/05/18 21:19:15 by dlesieur         ###   ########.fr        #
+#                                                                              #
+# **************************************************************************** #
+
 -- File: scripts/migrations/postgresql/011_realtime_triggers.sql
 -- Migration 011: Realtime CDC triggers for realtime-agnostic engine
 --

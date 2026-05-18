@@ -1,3 +1,15 @@
+# **************************************************************************** #
+#                                                                              #
+#                                                         :::      ::::::::    #
+#    test_ws_cdc.py                                     :+:      :+:    :+:    #
+#                                                     +:+ +:+         +:+      #
+#    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
+#                                                 +#+#+#+#+#+   +#+            #
+#    Created: 2026/05/18 21:19:15 by dlesieur          #+#    #+#              #
+#    Updated: 2026/05/18 21:19:15 by dlesieur         ###   ########.fr        #
+#                                                                              #
+# **************************************************************************** #
+
 #!/usr/bin/env python3
 """End-to-end test: WebSocket client subscribes, then PG/Mongo CDC events are triggered."""
 import asyncio

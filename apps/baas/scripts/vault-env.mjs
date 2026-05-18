@@ -1,3 +1,15 @@
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   vault-env.mjs                                      :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
+/*   Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
 #!/usr/bin/env node
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -7,6 +19,7 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, '../../..');
 const command = process.argv[2] ?? 'help';
 const vaultAddr = process.env.VAULT_ADDR ?? 'http://127.0.0.1:8200';
+const vaultNamespace = process.env.VAULT_NAMESPACE ?? '';
 const vaultKeysFile = process.env.VAULT_KEYS_FILE ?? '/vault/data/.vault-keys.json';
 const kvPrefix = process.env.VAULT_ENV_PREFIX ?? 'secret/data/track-binocle/env';
 const vaultPolicyDir = resolve(repoRoot, 'apps/baas/mini-baas-infra/docker/services/vault/policies');
@@ -85,7 +98,7 @@ const managedFiles = [
     dropKeys: baasOnlyKeys,
     required: ['OSIONOS_BRIDGE_SHARED_SECRET', 'OSIONOS_APP_SESSION_SECRET', 'OSIONOS_BRIDGE_EMAIL_HASH_SALT', 'OSIONOS_APP_URL', 'OSIONOS_ALLOWED_ORIGIN'],
     recommended: ['PUBLIC_OSIONOS_APP_URL'],
-    optional: ['SONAR_TOK'],
+    optional: ['DOCKER_PAT', 'DOCKER_USER', 'EMAIL_RECUP_ADMIN_VAULT', 'FLY_API_TOKEN', 'SONAR_TOK'],
   },
   {
     id: 'opposite-osiris',
@@ -155,7 +168,7 @@ const managedFiles = [
 ];
 
 const optionalPatterns = [
-  /^SMTP_/, /^GOTRUE_SMTP_/, /^TURNSTILE_/, /^PUBLIC_TURNSTILE_/, /^GOOGLE_/, /^GITHUB_/, /^FORTYTWO_/, /^GMAIL_/, /^MAIL_/, /^CALENDAR_/, /^LLM_/, /^SONAR/, /^UNSPLASH_/, /^DOCKER_/, /^MINIO_/, /^MONGO_/, /^AI_/, /^ANALYTICS_/, /^GDPR_/, /^NEWSLETTER_/, /^LOG_/, /^RUST_LOG$/, /^WAF_/, /^STUDIO_/, /^SUPABASE_/, /^SESSION_/, /^CSV_/, /^JSON_/, /^REDIS_/, /^PLAYGROUND_/, /^SRC_/, /^SYNC_/, /^CONTRACT_/, /^ADAPTER_REGISTRY_/, /^QUERY_/, /^STORAGE_/, /^PERMISSION_/, /^SCHEMA_/, /^VITE_BAAS_/, /^VITE_ALLOW_OFFLINE_MODE$/,
+  /^SMTP_/, /^GOTRUE_SMTP_/, /^TURNSTILE_/, /^PUBLIC_TURNSTILE_/, /^GOOGLE_/, /^GITHUB_/, /^FORTYTWO_/, /^GMAIL_/, /^MAIL_/, /^CALENDAR_/, /^LLM_/, /^SONAR/, /^UNSPLASH_/, /^DOCKER_/, /^FLY_/, /^MINIO_/, /^MONGO_/, /^AI_/, /^ANALYTICS_/, /^GDPR_/, /^NEWSLETTER_/, /^LOG_/, /^RUST_LOG$/, /^WAF_/, /^STUDIO_/, /^SUPABASE_/, /^SESSION_/, /^CSV_/, /^JSON_/, /^REDIS_/, /^PLAYGROUND_/, /^SRC_/, /^SYNC_/, /^CONTRACT_/, /^ADAPTER_REGISTRY_/, /^QUERY_/, /^STORAGE_/, /^PERMISSION_/, /^SCHEMA_/, /^VITE_BAAS_/, /^VITE_ALLOW_OFFLINE_MODE$/,
 ];
 
 const secretPatterns = [/SECRET/, /TOKEN/, /PASSWORD/, /PASS$/, /_KEY$/, /PAT$/, /JWT/];
@@ -209,6 +222,8 @@ const examples = {
   CALENDAR_EVENTS_PAGE_SIZE: '2500',
   CALENDAR_REDIRECT_URI: 'https://localhost:4200/auth/google/callback',
   DATABASE_URL: 'postgres://postgres:replace-with-postgres-secret@postgres:5432/postgres',
+  EMAIL_RECUP_ADMIN_VAULT: '',
+  FLY_API_TOKEN: '',
   GMAIL_CALLBACK_PATHS: '',
   GMAIL_DETAIL_BATCH_SIZE: '20',
   GMAIL_LIST_PAGE_SIZE: '500',
@@ -293,6 +308,8 @@ const examples = {
 const descriptions = {
   ANON_KEY: 'Public anon JWT used by browser and gateway calls.',
   DATABASE_URL: 'Internal Postgres URL used by BaaS services.',
+  EMAIL_RECUP_ADMIN_VAULT: 'Recovery mailbox used as an explicit owner-confirmation check for lost Vault admin credential rotation.',
+  FLY_API_TOKEN: 'Fly.io operator token used only for owner-managed Vault deployment or recovery commands.',
   JWT_SECRET: 'Signing secret shared by GoTrue, PostgREST, Kong, and generated JWTs.',
   GOOGLE_CLIENT_ID: 'Google OAuth client ID used by Mail and Calendar bridges.',
   GOOGLE_CLIENT_SECRET: 'Google OAuth client secret used by Mail and Calendar bridges.',
@@ -544,6 +561,7 @@ function tokenFromKeysFile() {
 async function vaultRequestAs(method, path, body, token) {
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers['X-Vault-Token'] = token;
+  if (vaultNamespace) headers['X-Vault-Namespace'] = vaultNamespace;
   let response;
   try {
     response = await fetch(`${vaultAddr}/v1/${path}`, {
@@ -704,7 +722,9 @@ async function createTeamToken() {
   await syncTeamPolicies();
 
   const ttl = process.env.VAULT_TOKEN_TTL ?? (role === 'writer' ? '8h' : '24h');
-  const response = await vaultRequest('POST', 'auth/token/create', {
+  const orphanToken = process.env.VAULT_TOKEN_ORPHAN !== 'false';
+  const tokenEndpoint = orphanToken ? 'auth/token/create-orphan' : 'auth/token/create';
+  const response = await vaultRequest('POST', tokenEndpoint, {
     policies: [policy.name],
     ttl,
     renewable: false,

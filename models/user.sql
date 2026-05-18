@@ -1,3 +1,15 @@
+# **************************************************************************** #
+#                                                                              #
+#                                                         :::      ::::::::    #
+#    user.sql                                           :+:      :+:    :+:    #
+#                                                     +:+ +:+         +:+      #
+#    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
+#                                                 +#+#+#+#+#+   +#+            #
+#    Created: 2026/05/18 21:19:26 by dlesieur          #+#    #+#              #
+#    Updated: 2026/05/18 21:19:26 by dlesieur         ###   ########.fr        #
+#                                                                              #
+# **************************************************************************** #
+
 -- 1. Create the base users table FIRST
 CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,

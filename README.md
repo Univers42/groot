@@ -66,6 +66,14 @@ make vault-invite-token VAULT_TEAM_ROLE=reader
 make vault-fly-invite-token VAULT_TEAM_ROLE=reader
 make vault-invite-token VAULT_TEAM_ROLE=writer VAULT_TOKEN_TTL=8h
 make vault-shared-doctor
+make vault-session-check
+make vault-login-user
+make vault-login-fly-admin
+make vault-session-status
+make vault-get-secrets
+make vault-session-reader-token
+make vault-session-writer-token
+make vault-logout
 make vault-fetch-shared VAULT_TOKEN_FILE=.vault/track-binocle-reader.env
 VAULT_API_KEY=... VAULT_ADDR=https://track-binocle-vault.fly.dev make vault-fetch-shared
 make env-fetch-shared
@@ -73,6 +81,7 @@ make vault-publish-shared VAULT_PUBLISH_TOKEN_FILE=.vault/track-binocle-writer.e
 make vault-repair-shared VAULT_PUBLISH_TOKEN_FILE=.vault/track-binocle-writer.env
 make vault-github-oidc
 make vault-fly
+make admin-cred-lost
 make vault-rotate-approles
 make vault-verify-approles
 make env-fetch
@@ -98,11 +107,15 @@ For teammates, a maintainer can run `make vault-fly-invite-token VAULT_TEAM_ROLE
 
 For the full fresh-clone checklist, see [docs/cybersecurity/fresh-clone-vault-onboarding.md](docs/cybersecurity/fresh-clone-vault-onboarding.md).
 
+For first-class Vault session management, use `make vault-session-check`, `make vault-login-user`, `make vault-login-approle`, `make vault-login-jwt`, `make vault-login-fly-admin`, `make vault-session-status`, `make vault-get-secrets`, and `make vault-logout`. These targets write private token files, support `VAULT_NAMESPACE`, and avoid printing token values. See [wiki/security/vault-session-management.md](wiki/security/vault-session-management.md) for the full workflow, including AppRole, JWT/OIDC, Fly admin sessions, invite-token minting, and cleanup.
+
 If a colleague receives an old or incomplete Vault payload, the fetch now fails before Compose starts and prints only the missing key names. A maintainer with complete ignored env files should repair the shared Vault with `make vault-repair-shared VAULT_PUBLISH_TOKEN_FILE=.vault/track-binocle-writer.env`, then recreate or resend reader tokens as needed. Writers can still run `make vault-publish-shared VAULT_PUBLISH_TOKEN_FILE=.vault/track-binocle-writer.env` after updating local ignored env files.
 
 The GitHub workflow `.github/workflows/colleague-docker-pipeline.yml` simulates the colleague path on `push`, `pull_request`, and manual runs. It authenticates to Vault with GitHub OIDC, so do not store a static Vault token in GitHub secrets. In GitHub Actions, `make all` now requires the OIDC-generated `.vault/track-binocle-reader.env` file and fails fast if that authorization step did not happen. `make vault-fly` creates the Fly app `track-binocle-vault`, deploys Vault at `https://track-binocle-vault.fly.dev`, publishes the managed env records, configures GitHub Actions OIDC, maps the GitHub team `Univers42/transcendance` to the Vault reader policy, and sets the repository variables. The variables `TRACK_BINOCLE_VAULT_ADDR`, `TRACK_BINOCLE_VAULT_AUTH_PATH=jwt`, `TRACK_BINOCLE_VAULT_ROLE=track-binocle-github-actions`, and `TRACK_BINOCLE_VAULT_ENV_PREFIX=secret/data/track-binocle/env` describe the Vault OIDC login path. If private submodule checkout needs broader access than `GITHUB_TOKEN`, set `SUBMODULES_TOKEN` to a PAT that can read the submodule repositories.
 
 Developers in the GitHub team can use Vault's GitHub auth against the public Fly Vault without a shared Vault password. After authenticating with `gh`, run `gh auth refresh -s read:org` if the CLI token cannot read organization teams, then `export VAULT_ADDR=https://track-binocle-vault.fly.dev` and `export VAULT_API_KEY="$(vault login -method=github -format=json token="$(gh auth token)" | jq -r '.auth.client_token')"`. `make vault-fetch-shared` can then fetch the managed env files. The Vault policy grants read access only to the managed env path, not broad `secret/*` access.
+
+If the Fly Vault admin API key is lost but the Vault unseal/recovery key still exists in the Fly Vault volume, run `make admin-cred-lost` from the owner machine. The target asks for `EMAIL_RECUP_ADMIN_VAULT`, a typed confirmation phrase, a local passphrase, and valid Fly operator access, then uses Vault's root-generation flow to write a fresh admin token to `.vault/track-binocle-admin.env`, update the Fly key file, retire the previous stored root token when possible, publish the current managed env data, and mint fresh `.vault/track-binocle-reader.env` and `.vault/track-binocle-writer.env` files. It does not email or print credentials. If the unseal/recovery key is lost too, Vault cannot recover the old secrets; use the destructive `make vault-fly-reset VAULT_FLY_RESET_CONFIRM=destroy-track-binocle-vault` path only when you are ready to reseed from local ignored env files.
 
 `make vault-rotate-approles` rotates service AppRole secret IDs and stores the new IDs in Vault. `make vault-verify-approles` logs in with the root service AppRoles and verifies each token can read the managed Vault env secret without printing secret values. This confirms the local AppRole path for the BaaS, osionos, website, Mail, and Calendar services.
 
