@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /* ************************************************************************** */
 /*                                                                            */
 /*                                                        :::      ::::::::   */
@@ -10,7 +11,6 @@
 /*                                                                            */
 /* ************************************************************************** */
 
-#!/usr/bin/env node
 
 const target = process.argv.find((arg) => arg.startsWith('http')) ?? process.env.CSP_VERIFY_URL ?? 'https://localhost:4322/';
 const allowLocalTls = target.startsWith('https://localhost') || target.startsWith('https://127.0.0.1');

@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /* ************************************************************************** */
 /*                                                                            */
 /*                                                        :::      ::::::::   */
@@ -10,7 +11,6 @@
 /*                                                                            */
 /* ************************************************************************** */
 
-#!/usr/bin/env node
 import { readFileSync } from 'node:fs';
 import { assert, projectRoot, publicRoot, runChecks, srcRoot, summarize, walkFiles } from './_shared.mjs';
 import { sanitizeSvgMarkup } from '../../../src/lib/svg-security.mjs';

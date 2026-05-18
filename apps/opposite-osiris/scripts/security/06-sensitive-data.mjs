@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /* ************************************************************************** */
 /*                                                                            */
 /*                                                        :::      ::::::::   */
@@ -10,7 +11,6 @@
 /*                                                                            */
 /* ************************************************************************** */
 
-#!/usr/bin/env node
 import { assert, authPasswordGrant, baasHeaders, fetchWithTimeout, noInternalLeak, passed, restUrl, runChecks, textBody } from './_shared.mjs';
 
 async function assertPrivateTable(path, label) {

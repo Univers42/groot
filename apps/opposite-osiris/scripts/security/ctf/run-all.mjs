@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /* ************************************************************************** */
 /*                                                                            */
 /*                                                        :::      ::::::::   */
@@ -10,7 +11,6 @@
 /*                                                                            */
 /* ************************************************************************** */
 
-#!/usr/bin/env node
 import * as xssSinks from './01-xss-sinks.mjs';
 import * as svgUpload from './02-svg-upload-xss.mjs';
 import * as mediaUrl from './03-media-url.mjs';

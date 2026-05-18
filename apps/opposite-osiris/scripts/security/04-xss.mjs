@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /* ************************************************************************** */
 /*                                                                            */
 /*                                                        :::      ::::::::   */
@@ -10,7 +11,6 @@
 /*                                                                            */
 /* ************************************************************************** */
 
-#!/usr/bin/env node
 import { randomUUID } from 'node:crypto';
 import { assert, baasHeaders, fetchWithTimeout, isJsonResponse, jsonBody, passed, restUrl, runChecks } from './_shared.mjs';
 
