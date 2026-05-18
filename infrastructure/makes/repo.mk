@@ -76,7 +76,7 @@ pushes:
 		fi; \
 		if git -C "$$repo" ls-remote --exit-code --heads origin "$$branch" >/dev/null 2>&1; then \
 			git -C "$$repo" fetch origin "$$branch"; \
-			git -C "$$repo" rebase "origin/$$branch" || true; \
+			git -C "$$repo" merge --ff-only "origin/$$branch" 2>/dev/null || true; \
 		fi; \
 		if git -C "$$repo" rev-parse --verify --quiet '@{u}' >/dev/null; then \
 			git -C "$$repo" push; \
