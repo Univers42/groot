@@ -19,6 +19,9 @@
 [submodule "vendor/born2root"]
 	path = vendor/born2root
 	url = git@github.com:Univers42/born2root.git
-[submodule "vendor/--recursive"]
-	path = vendor/--recursive
+[submodule "vendor/QA"]
+	path = vendor/QA
 	url = git@github.com:Univers42/QA.git
+[submodule "vendor/monkey-bot"]
+	path = vendor/monkey-bot
+	url = git@github.com:Univers42/monkey-bot.git
