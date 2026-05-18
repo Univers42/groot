@@ -24,23 +24,59 @@ pulls:
 	'; \
 	git submodule update --init --recursive --checkout
 
+repair-detached:
+## Re-attach every detached submodule HEAD: commit dirty state, merge onto main, push main + develop.
+	@set -eu; \
+	git submodule foreach --recursive 'set -eu; \
+		branch=$$(git symbolic-ref --short -q HEAD 2>/dev/null || true); \
+		if [ -n "$$branch" ]; then \
+			echo "[repair] $$displaypath already on $$branch — skipping"; \
+			exit 0; \
+		fi; \
+		echo "[repair] $$displaypath is detached — fixing"; \
+		git add -A; \
+		if ! git diff --cached --quiet; then \
+			git commit -m "$(GIT_COMMIT_MESSAGE)"; \
+		fi; \
+		tmp="tmp/detached-$$(git rev-parse --short HEAD)"; \
+		git checkout -b "$$tmp"; \
+		if git rev-parse --verify main >/dev/null 2>&1; then \
+			git checkout main; \
+			git merge --no-ff "$$tmp" -m "merge: bring detached work onto main" || true; \
+		else \
+			git checkout -b main; \
+		fi; \
+		git push -u origin main; \
+		if git ls-remote --exit-code --heads origin develop >/dev/null 2>&1; then \
+			git checkout develop 2>/dev/null || git checkout -b develop origin/develop; \
+			git merge --no-ff main -m "merge: sync develop from main" || true; \
+		else \
+			git checkout -b develop; \
+		fi; \
+		git push -u origin develop; \
+		git checkout main; \
+		git branch -d "$$tmp" 2>/dev/null || true \
+	'
+
 pushes:
 ## Add, commit, and push the root repo plus every recursive submodule. Use GIT_COMMIT_MESSAGE="...".
 	@set -eu; \
-	git submodule sync --recursive; \
-	git submodule update --init --recursive; \
 	repos="$$(git submodule foreach --quiet --recursive 'printf "%s\n" "$$displaypath"' | awk '{ print length, $$0 }' | sort -rn | cut -d' ' -f2-)"; \
 	printf '%s\n.\n' "$$repos" | while IFS= read -r repo; do \
 		[ -n "$$repo" ] || continue; \
 		if ! git -C "$$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1; then continue; fi; \
 		branch="$$(git -C "$$repo" symbolic-ref --short -q HEAD || true)"; \
-		if [ -z "$$branch" ]; then echo "[pushes] $$repo is detached; skipping push"; continue; fi; \
+		if [ -z "$$branch" ]; then echo "[pushes] $$repo is detached — run 'make repair-detached' first"; continue; fi; \
 		echo "[pushes] $$repo ($$branch)"; \
 		git -C "$$repo" add -A; \
 		if ! git -C "$$repo" diff --cached --quiet; then \
 			git -C "$$repo" commit -m '$(GIT_COMMIT_MESSAGE)'; \
 		else \
 			echo "[pushes] $$repo has no staged changes"; \
+		fi; \
+		if git -C "$$repo" ls-remote --exit-code --heads origin "$$branch" >/dev/null 2>&1; then \
+			git -C "$$repo" fetch origin "$$branch"; \
+			git -C "$$repo" rebase "origin/$$branch" || true; \
 		fi; \
 		if git -C "$$repo" rev-parse --verify --quiet '@{u}' >/dev/null; then \
 			git -C "$$repo" push; \
