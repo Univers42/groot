@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/10 15:04:54 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/15 02:02:23 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/18 12:32:39 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -99,6 +99,8 @@ FLY_VAULT_REGION ?= cdg
 FLY_VAULT_VOLUME ?= vault_data
 FLY_VAULT_URL ?= https://$(FLY_VAULT_APP).fly.dev
 FLY ?= $(shell if command -v flyctl >/dev/null 2>&1; then command -v flyctl; elif command -v fly >/dev/null 2>&1; then command -v fly; else printf flyctl; fi)
+VAULT_FLY_RESET_PHRASE := destroy-$(FLY_VAULT_APP)
+VAULT_FLY_RESET_CONFIRM ?=
 HOST_UID := $(shell id -u)
 HOST_GID := $(shell id -g)
 export HOST_UID HOST_GID
@@ -370,6 +372,14 @@ vault-fly-invite-token:
 		token="$$(tr -d '\r\n' < "$$token_file")"; \
 		VAULT_ADDR='$(FLY_VAULT_URL)' VAULT_TOKEN="$$token" VAULT_ENV_PREFIX='$(VAULT_ENV_PREFIX)' VAULT_TEAM_ROLE='$(VAULT_TEAM_ROLE)' VAULT_TOKEN_TTL='$(VAULT_TOKEN_TTL)' VAULT_TEAM_TOKEN_FILE='$(VAULT_TEAM_TOKEN_FILE)' VAULT_PUBLIC_ADDR='$(FLY_VAULT_URL)' $(DOCKER_NODE_VAULT) node apps/baas/scripts/vault-env.mjs team-token
 
+vault-reader-token:
+## Create an ignored reader invite token from the Fly-hosted shared Vault.
+	$(MAKE) vault-fly-invite-token VAULT_TEAM_ROLE=reader VAULT_TEAM_TOKEN_FILE='$(VAULT_READER_TOKEN_FILE)'
+
+vault-writer-token:
+## Create an ignored writer invite token from the Fly-hosted shared Vault.
+	$(MAKE) vault-fly-invite-token VAULT_TEAM_ROLE=writer VAULT_TEAM_TOKEN_FILE='$(VAULT_WRITER_TOKEN_FILE)'
+
 vault-fetch-shared:
 ## Fetch managed env files with VAULT_API_KEY, VAULT_TOKEN, or VAULT_TOKEN_FILE from an invited user.
 	@set -eu; \
@@ -570,6 +580,25 @@ vault-fly-github:
 
 vault-fly: vault-fly-create vault-fly-deploy vault-fly-publish vault-fly-github
 ## Create, deploy, publish, and wire GitHub Actions to the Fly-hosted Vault.
+
+vault-fly-reset:
+## Destructively recreate the Fly-hosted Vault and republish managed env data. Requires VAULT_FLY_RESET_CONFIRM=destroy-track-binocle-vault.
+	@if [[ '$(VAULT_FLY_RESET_CONFIRM)' != '$(VAULT_FLY_RESET_PHRASE)' ]]; then \
+		echo '[vault] destructive Fly Vault reset refused.'; \
+		echo '[vault] This deletes the shared Vault service boundary and replaces its admin credentials.'; \
+		echo '[vault] Rerun only as the owner with: make vault-fly-reset VAULT_FLY_RESET_CONFIRM=$(VAULT_FLY_RESET_PHRASE)'; \
+		exit 1; \
+	fi
+	@command -v '$(FLY)' >/dev/null 2>&1 || { echo '[vault] $(FLY) is required for Fly Vault reset.'; exit 1; }
+	@set -eu; \
+		echo '[vault] destroying Fly app $(FLY_VAULT_APP); old Vault root/unseal material and env records become unrecoverable unless separately backed up'; \
+		if $(FLY) status --app '$(FLY_VAULT_APP)' >/dev/null 2>&1; then \
+			$(FLY) apps destroy '$(FLY_VAULT_APP)' --yes; \
+		else \
+			echo '[vault] Fly app $(FLY_VAULT_APP) is not reachable; continuing with fresh create'; \
+		fi; \
+		rm -f .vault/fly-vault-root-token .vault/track-binocle-reader.env .vault/track-binocle-writer.env
+	$(MAKE) vault-fly
 
 vault-rotate-approles: vault-up
 ## Rotate service AppRole secret IDs and store the new IDs in Vault.
