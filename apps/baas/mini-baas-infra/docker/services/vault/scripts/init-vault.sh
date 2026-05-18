@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # **************************************************************************** #
 #                                                                              #
 #                                                         :::      ::::::::    #
@@ -9,8 +10,6 @@
 #    Updated: 2026/05/18 21:19:15 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
-
-#!/usr/bin/env bash
 # File: docker/services/vault/scripts/init-vault.sh
 # One-shot bootstrap: initialize Vault, unseal, seed secrets, create AppRoles.
 # Run by the vault-init container.

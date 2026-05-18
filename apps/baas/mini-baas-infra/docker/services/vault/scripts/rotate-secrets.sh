@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # **************************************************************************** #
 #                                                                              #
 #                                                         :::      ::::::::    #
@@ -9,8 +10,6 @@
 #    Updated: 2026/05/18 21:19:15 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
-
-#!/usr/bin/env bash
 # File: docker/services/vault/scripts/rotate-secrets.sh
 # Automated Vault secret rotation with zero-downtime service restarts.
 #

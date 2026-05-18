@@ -1,3 +1,15 @@
+# **************************************************************************** #
+#                                                                              #
+#                                                         :::      ::::::::    #
+#    repo.mk                                            :+:      :+:    :+:    #
+#                                                     +:+ +:+         +:+      #
+#    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
+#                                                 +#+#+#+#+#+   +#+            #
+#    Created: 2026/05/18 22:05:59 by dlesieur          #+#    #+#              #
+#    Updated: 2026/05/18 22:06:00 by dlesieur         ###   ########.fr        #
+#                                                                              #
+# **************************************************************************** #
+
 # Repository synchronization targets.
 pulls:
 ## Fetch and pull the root repo plus every recursive submodule using configured upstreams.
