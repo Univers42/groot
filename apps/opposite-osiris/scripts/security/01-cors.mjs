@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /* ************************************************************************** */
 /*                                                                            */
 /*                                                        :::      ::::::::   */
@@ -10,7 +11,6 @@
 /*                                                                            */
 /* ************************************************************************** */
 
-#!/usr/bin/env node
 import { assert, config, fetchWithTimeout, headerList, passed, requireBaasConfig, restUrl, runChecks } from './_shared.mjs';
 
 async function preflight(origin) {

@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /* ************************************************************************** */
 /*                                                                            */
 /*                                                        :::      ::::::::   */
@@ -10,7 +11,6 @@
 /*                                                                            */
 /* ************************************************************************** */
 
-#!/usr/bin/env node
 import { assert, authPasswordGrant, config, ensureSecurityTestUser, isJwtLike, passed, runChecks, textBody } from './_shared.mjs';
 
 const rejectionStatuses = new Set([400, 401, 422, 429]);

@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /* ************************************************************************** */
 /*                                                                            */
 /*                                                        :::      ::::::::   */
@@ -10,7 +11,6 @@
 /*                                                                            */
 /* ************************************************************************** */
 
-#!/usr/bin/env node
 import assert from 'node:assert/strict';
 import { createBaasClient, createServiceBaasClient } from './baas-env.mjs';
 import { uniqueTestEmail } from './test-email.mjs';

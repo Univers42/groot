@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /* ************************************************************************** */
 /*                                                                            */
 /*                                                        :::      ::::::::   */
@@ -10,7 +11,6 @@
 /*                                                                            */
 /* ************************************************************************** */
 
-#!/usr/bin/env node
 import http from 'node:http';
 import https from 'node:https';
 import { assert, baasHeaders, config, fetchWithTimeout, passed, restUrl, runChecks } from './_shared.mjs';

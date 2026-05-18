@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /* ************************************************************************** */
 /*                                                                            */
 /*                                                        :::      ::::::::   */
@@ -10,7 +11,6 @@
 /*                                                                            */
 /* ************************************************************************** */
 
-#!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process';
 import { constants, accessSync, existsSync } from 'node:fs';
 import { connect } from 'node:net';

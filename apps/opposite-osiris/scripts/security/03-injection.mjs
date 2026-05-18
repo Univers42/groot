@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /* ************************************************************************** */
 /*                                                                            */
 /*                                                        :::      ::::::::   */
@@ -10,7 +11,6 @@
 /*                                                                            */
 /* ************************************************************************** */
 
-#!/usr/bin/env node
 import { assert, baasHeaders, fetchWithTimeout, jsonBody, noInternalLeak, passed, restUrl, runChecks, safePublicColumns, textBody } from './_shared.mjs';
 
 async function assertSafeQuery(path, label) {

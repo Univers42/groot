@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /* ************************************************************************** */
 /*                                                                            */
 /*                                                        :::      ::::::::   */
@@ -10,7 +11,6 @@
 /*                                                                            */
 /* ************************************************************************** */
 
-#!/usr/bin/env node
 import { assert, config, fetchWithTimeout, passed, runChecks, skipped } from './_shared.mjs';
 
 const productionMode = process.env.NODE_ENV === 'production' || process.env.SECURITY_ENV === 'production' || process.env.SECURITY_ENV === 'prod';

@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /* ************************************************************************** */
 /*                                                                            */
 /*                                                        :::      ::::::::   */
@@ -10,7 +11,6 @@
 /*                                                                            */
 /* ************************************************************************** */
 
-#!/usr/bin/env node
 import { assert, baasHeaders, fetchWithTimeout, passed, runChecks, skipped, storageUrl, textBody } from './_shared.mjs';
 
 const traversalPaths = ['/object/../../etc/passwd', '/object/%2e%2e%2fetc%2fpasswd'];

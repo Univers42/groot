@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /* ************************************************************************** */
 /*                                                                            */
 /*                                                        :::      ::::::::   */
@@ -10,7 +11,6 @@
 /*                                                                            */
 /* ************************************************************************** */
 
-#!/usr/bin/env node
 import { assert, readProjectFile, runChecks, summarize } from './_shared.mjs';
 import { safePublicAssetPath } from '../../../src/lib/media-security.mjs';
 
