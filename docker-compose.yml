@@ -77,6 +77,18 @@ services:
         condition: service_completed_successfully
     restart: "no"
 
+  vault-fly:
+    image: ${VAULT_FLY_IMAGE:-flyio/flyctl:latest}
+    profiles:
+      - secrets
+    environment:
+      FLY_API_TOKEN: ${FLY_API_TOKEN:-}
+    volumes:
+      - ./:/workspace
+    working_dir: /workspace
+    entrypoint: ["flyctl"]
+    restart: "no"
+
   local-https-proxy:
     image: public.ecr.aws/docker/library/nginx:1.27-alpine
     volumes:
@@ -175,6 +187,8 @@ services:
 
   mailpit:
     image: ${MAILPIT_IMAGE:-axllent/mailpit:v1.22.3}
+    profiles:
+      - dev
     expose:
       - "1025"
       - "8025"
@@ -216,8 +230,6 @@ services:
     depends_on:
       db-bootstrap:
         condition: service_completed_successfully
-      mailpit:
-        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:9999/health || exit 1"]
@@ -379,6 +391,8 @@ services:
 
   osionos-app:
     image: ${OSIONOS_APP_IMAGE:-track-binocle/osionos-app:local}
+    profiles:
+      - dev
     build:
       context: ./apps/osionos/app
       dockerfile: docker/services/node/Dockerfile
@@ -418,6 +432,8 @@ services:
 
   mail-bridge:
     image: ${MAIL_BRIDGE_IMAGE:-track-binocle/mail-bridge:local}
+    profiles:
+      - dev
     build:
       context: ./apps/mail
       target: dev
@@ -452,6 +468,8 @@ services:
 
   mail:
     image: ${MAIL_IMAGE:-track-binocle/mail:local}
+    profiles:
+      - dev
     build:
       context: ./apps/mail
       target: dev
@@ -484,6 +502,8 @@ services:
 
   calendar-bridge:
     image: ${CALENDAR_BRIDGE_IMAGE:-track-binocle/calendar-bridge:local}
+    profiles:
+      - dev
     build:
       context: ./apps/calendar
       target: dev
@@ -531,6 +551,8 @@ services:
 
   calendar:
     image: ${CALENDAR_IMAGE:-track-binocle/calendar:local}
+    profiles:
+      - dev
     build:
       context: ./apps/calendar
       target: dev
@@ -564,6 +586,8 @@ services:
 
   opposite-osiris-deps:
     image: ${OPPOSITE_OSIRIS_DEPS_IMAGE:-track-binocle/opposite-osiris-deps:local}
+    profiles:
+      - dev
     build:
       context: .
       dockerfile: apps/opposite-osiris/docker/services/node/Dockerfile
@@ -577,6 +601,8 @@ services:
 
   auth-gateway:
     image: ${AUTH_GATEWAY_IMAGE:-track-binocle/auth-gateway:local}
+    profiles:
+      - dev
     build:
       context: .
       dockerfile: apps/opposite-osiris/docker/services/node/Dockerfile
@@ -634,6 +660,8 @@ services:
 
   opposite-osiris:
     image: ${OPPOSITE_OSIRIS_IMAGE:-track-binocle/opposite-osiris:local}
+    profiles:
+      - dev
     build:
       context: .
       dockerfile: apps/opposite-osiris/docker/services/node/Dockerfile

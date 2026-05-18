@@ -27,7 +27,8 @@ BAKE_FILE ?= docker-bake.hcl
 BAKE_GROUP ?= default
 BAKE_TARGETS ?= postgres kong osionos-app mail calendar opposite-osiris-node
 TRACK_BINOCLE_BIND_ADDR ?= $(shell if [ -r /sys/class/dmi/id/product_name ] && grep -qi 'VirtualBox' /sys/class/dmi/id/product_name 2>/dev/null && ip route 2>/dev/null | grep -q 'default via 10\.0\.2\.2'; then printf '0.0.0.0'; else printf '127.0.0.1'; fi)
-export COMPOSE_PROGRESS BUILDKIT_PROGRESS BUILDX_BUILDER DOCKER_BUILDKIT COMPOSE_DOCKER_CLI_BUILD COMPOSE_BAKE REGISTRY_CACHE_PREFIX TRACK_BINOCLE_BIND_ADDR
+COMPOSE_PROFILES ?= dev
+export COMPOSE_PROFILES COMPOSE_PROGRESS BUILDKIT_PROGRESS BUILDX_BUILDER DOCKER_BUILDKIT COMPOSE_DOCKER_CLI_BUILD COMPOSE_BAKE REGISTRY_CACHE_PREFIX TRACK_BINOCLE_BIND_ADDR
 DOCKER_PULL_ATTEMPTS ?= 1
 DOCKER_PULL_TIMEOUT ?= 120
 DOCKER_PULL_KILL_AFTER ?= 15
@@ -35,10 +36,13 @@ DOCKER_PREFETCH_JOBS ?= 8
 DOCKER_PREFETCH_SCOPE ?= all
 COMPOSE_WAIT_TIMEOUT ?= 300
 COMPOSE_WAIT_INTERVAL ?= 2
-COMPOSE_HEALTHY_SERVICES ?= postgres local-https-proxy mail-bridge mail pg-meta gotrue kong osionos-bridge osionos-app auth-gateway opposite-osiris calendar-bridge calendar
+COMPOSE_HEALTHY_SERVICES_INFRA ?= postgres local-https-proxy pg-meta gotrue kong osionos-bridge
+COMPOSE_HEALTHY_SERVICES ?= $(COMPOSE_HEALTHY_SERVICES_INFRA) auth-gateway mail-bridge mail osionos-app opposite-osiris calendar-bridge calendar
 # supavisor restarts intermittently in CI, but the stack does not depend on it for readiness.
-COMPOSE_RUNNING_SERVICES ?= redis postgrest mailpit
-COMPOSE_COMPLETED_SERVICES ?= db-bootstrap project-db-init local-runtime-secrets opposite-osiris-deps
+COMPOSE_RUNNING_SERVICES_INFRA ?= redis postgrest
+COMPOSE_RUNNING_SERVICES ?= $(COMPOSE_RUNNING_SERVICES_INFRA) mailpit
+COMPOSE_COMPLETED_SERVICES_INFRA ?= db-bootstrap project-db-init local-runtime-secrets
+COMPOSE_COMPLETED_SERVICES ?= $(COMPOSE_COMPLETED_SERVICES_INFRA) opposite-osiris-deps
 VERSION ?=
 BAAS_VERSION ?= $(if $(VERSION),$(if $(filter v%,$(VERSION)),$(VERSION),v$(VERSION)),v$(shell date +%F))
 APP_VERSION ?= $(if $(VERSION),$(if $(filter v%,$(VERSION)),$(VERSION),v$(VERSION)),v$(shell date +%F))
@@ -98,7 +102,10 @@ FLY_VAULT_APP ?= track-binocle-vault
 FLY_VAULT_REGION ?= cdg
 FLY_VAULT_VOLUME ?= vault_data
 FLY_VAULT_URL ?= https://$(FLY_VAULT_APP).fly.dev
-FLY ?= $(shell if command -v flyctl >/dev/null 2>&1; then command -v flyctl; elif command -v fly >/dev/null 2>&1; then command -v fly; else printf flyctl; fi)
+FLY_BIN := $(shell command -v flyctl 2>/dev/null || command -v fly 2>/dev/null)
+VAULT_FLY_IMAGE ?= flyio/flyctl:latest
+FLY_DOCKER := docker compose --profile secrets run --rm --no-deps -e FLY_API_TOKEN vault-fly
+FLY ?= $(if $(FLY_BIN),$(FLY_BIN),$(FLY_DOCKER))
 VAULT_FLY_RESET_PHRASE := destroy-$(FLY_VAULT_APP)
 VAULT_FLY_RESET_CONFIRM ?=
 HOST_UID := $(shell id -u)
@@ -365,6 +372,12 @@ vault-invite-token: vault-policy-sync
 
 vault-fly-invite-token:
 ## Create an ignored .vault invite token file from the Fly-hosted Vault.
+	@if [[ -z '$(FLY_BIN)' && -z "$${FLY_API_TOKEN:-}" ]]; then \
+		echo '[vault] flyctl not found locally and FLY_API_TOKEN is not set.'; \
+		echo '[vault] Either install flyctl (curl -L https://fly.io/install.sh | sh) or export FLY_API_TOKEN=<token>.'; \
+		echo '[vault] With FLY_API_TOKEN set the containerised flyctl in vault-fly will be used automatically.'; \
+		exit 1; \
+	fi
 	@mkdir -p .vault
 	@set -eu; token_file='.vault/fly-vault-root-token'; trap 'rm -f "$$token_file"' EXIT; \
 		$(FLY) ssh console --app $(FLY_VAULT_APP) --command 'jq -r .root_token /vault/data/.vault-keys.json' > "$$token_file"; \
@@ -671,6 +684,15 @@ up: certs docker-prefetch-images compose-build
 	$(MAKE) db-password-apply
 	docker compose up -d --no-build --pull never
 	$(MAKE) compose-wait
+
+up-infra: certs docker-prefetch-images compose-build
+## Build and start backend infrastructure only; skips hot-reload frontends (no dev profile).
+	@COMPOSE_PROFILES= docker compose kill local-https-proxy db-bootstrap project-db-init gotrue kong postgrest pg-meta supavisor osionos-bridge >/dev/null 2>&1 || true
+	@COMPOSE_PROFILES= docker compose rm -f local-https-proxy db-bootstrap project-db-init gotrue kong postgrest pg-meta supavisor osionos-bridge >/dev/null 2>&1 || true
+	COMPOSE_PROFILES= docker compose up -d --no-build --pull never --wait postgres
+	$(MAKE) db-password-apply
+	COMPOSE_PROFILES= docker compose up -d --no-build --pull never
+	$(MAKE) compose-wait COMPOSE_HEALTHY_SERVICES='$(COMPOSE_HEALTHY_SERVICES_INFRA)' COMPOSE_RUNNING_SERVICES='$(COMPOSE_RUNNING_SERVICES_INFRA)' COMPOSE_COMPLETED_SERVICES='$(COMPOSE_COMPLETED_SERVICES_INFRA)'
 
 app-images:
 ## Build the local Docker images for the website, osionos, Mail, Calendar, bridges, and BaaS gateway.

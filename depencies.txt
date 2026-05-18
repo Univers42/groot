@@ -1,0 +1,8 @@
+make
+docker-doc
+docker.io
+docker-buildx
+docker-clean
+docker-compose-v2
+docker-registry
+docker.io
