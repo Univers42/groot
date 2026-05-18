@@ -16,3 +16,9 @@
 [submodule "apps/calendar"]
 	path = apps/calendar
 	url = git@github.com:Univers42/osionos-calendar.git
+[submodule "vendor/born2root"]
+	path = vendor/born2root
+	url = git@github.com:Univers42/born2root.git
+[submodule "vendor/--recursive"]
+	path = vendor/--recursive
+	url = git@github.com:Univers42/QA.git
