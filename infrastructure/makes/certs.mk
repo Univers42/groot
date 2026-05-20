@@ -41,6 +41,9 @@ certs-trust-local: certs
 		bash apps/baas/scripts/trust-localhost-cert.sh; \
 	elif [[ -t 0 || -t 1 ]] || { command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; }; then \
 		bash apps/baas/scripts/trust-localhost-cert.sh --system; \
+	elif bash apps/baas/scripts/trust-localhost-cert.sh --verify >/dev/null 2>&1; then \
+		echo '[certs] system CA already has the current Track Binocle CA; running browser-store update only'; \
+		bash apps/baas/scripts/trust-localhost-cert.sh; \
 	else \
 		echo '[certs] cannot update the system CA store without an interactive terminal or cached sudo.' >&2; \
 		echo '[certs] Rerun make all from a terminal, run make certs-trust-system, or set TRACK_BINOCLE_CERT_TRUST=browser/skip intentionally.' >&2; \

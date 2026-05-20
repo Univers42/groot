@@ -337,6 +337,34 @@ Volumes are preserved by default. Set `BOOL=true` only when you intentionally wa
 
 ## Common Failure Modes
 
+### Localhost Vault token rejected
+
+Symptom:
+
+```text
+[vault] refusing localhost Vault address for shared env fetch.
+[vault] This token only works with the Vault instance on the machine that issued it.
+```
+
+Cause: `.vault/track-binocle-reader.env` has `VAULT_ADDR=https://localhost:18200`. This token was generated from the local Docker Vault and is not portable to the shared Fly.io instance.
+
+Fix (maintainer with `FLY_API_TOKEN`):
+
+```bash
+make vault-login-fly-admin          # open admin session via Fly SSH
+make vault-session-reader-token     # mint reader token pointing to Fly.io URL
+make vault-shared-doctor            # verify VAULT_ADDR is https://track-binocle-vault.fly.dev
+make all
+```
+
+For a one-liner without a persistent session:
+
+```bash
+FLY_API_TOKEN=<your-fly-token> make vault-reader-token
+```
+
+See [security/vault-fly-admin-setup.md](security/vault-fly-admin-setup.md) for the full setup guide.
+
 ### Token file rejected
 
 Symptom:
