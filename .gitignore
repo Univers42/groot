@@ -17,3 +17,5 @@ apps/baas/certs/*
 !apps/baas/certs/.gitkeep
 prompt
 apps/track-binocle
+CLAUDE.md
+adversarial-reviewer-SKILL.md
