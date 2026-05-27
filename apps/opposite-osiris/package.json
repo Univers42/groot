@@ -40,9 +40,9 @@
   "dependencies": {
     "@astrojs/check": "^0.9.4",
     "@mini-baas/js": "file:../../apps/baas/sdk",
-    "astro": "^6.2.1",
-    "sanitize-html": "^2.17.3",
-    "sass": "^1.94.2"
+    "astro": "^6.3.8",
+    "sanitize-html": "^2.17.4",
+    "sass": "^1.100.0"
   },
   "devDependencies": {
     "@types/sanitize-html": "^2.16.1",
