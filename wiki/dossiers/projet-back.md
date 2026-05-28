@@ -2,6 +2,50 @@
 
 > Plateforme BaaS auto-hébergée, orientée Docker Compose, conçue comme une **usine à backends génériques** capable de fournir authentification, données relationnelles, données documentaires, requêtage multi-tenant, temps réel, stockage objet, email transactionnel et politiques de sécurité unifiées sans développement d'API métier spécifique pour chaque nouveau projet.
 
+---
+
+## 📋 Table des Matières
+
+1. [Team information](#team-information)
+1. [Liste des Compétences Couvertes](#1-liste-des-compétences-couvertes)
+1. [Expression des Besoins](#2-expression-des-besoins)
+   - 2.1 [Objectifs du Projet](#21-objectifs-du-projet)
+   - 2.2 [Limites du Projet](#22-limites-du-projet)
+   - 2.3 [Livrables Attendus](#23-livrables-attendus)
+1. [Environnement Technique](#3-environnement-technique)
+   - 3.1 [Technologies Front-End](#31-technologies-front-end)
+   - 3.2 [Technologies Back-End](#32-technologies-back-end)
+   - 3.3 [Outils & Environnement de Développement](#33-outils--environnement-de-développement)
+1. [Réalisations Front-End](#4-réalisations-front-end)
+   - 4.1 [Maquettes des Interfaces Utilisateur](#41-maquettes-des-interfaces-utilisateur)
+   - 4.2 [Enchaînement des Maquettes](#42-enchaînement-des-maquettes)
+   - 4.3 [Interfaces Statiques](#43-interfaces-statiques)
+   - 4.4 [Partie Dynamique des Interfaces](#44-partie-dynamique-des-interfaces)
+   - 4.5 [Adaptation Web & Web Mobile (Responsive)](#45-adaptation-web--web-mobile-responsive)
+1. [Réalisations Back-End](#5-réalisations-back-end)
+   - 5.1 [Architecture & Structure](#51-architecture--structure)
+   - 5.2 [Base de Données](#52-base-de-données)
+   - 5.3 [API / Routes](#53-api--routes)
+1. [Sécurité](#6-sécurité)
+   - 6.1 [Mesures de Sécurité Côté Front-End](#61-mesures-de-sécurité-côté-front-end)
+   - 6.2 [Veille sur les Vulnérabilités](#62-veille-sur-les-vulnérabilités)
+1. [Jeu d'Essai](#7-jeu-dessai)
+1. [Installation & Utilisation](#8-installation--utilisation)
+   - 8.1 [Prérequis](#81-prérequis)
+   - 8.2 [Installation](#82-installation)
+   - 8.3 [Lancement du Projet](#83-lancement-du-projet)
+
+- 8.4 [Séquence de démarrage service par service](#84-séquence-de-démarrage-service-par-service)
+- 8.5 [Cycle complet des requêtes principales](#85-cycle-complet-des-requêtes-principales)
+
+1. [Risques, Limites & Améliorations Futures](#9-risques-limites--améliorations-futures)
+1. [Glossaire](#10-glossaire)
+1. [Structure du Projet](#11-structure-du-projet)
+1. [Cartographie des Fichiers Sources](#12-cartographie-des-fichiers-sources)
+1. [Annexes](#13-annexes)
+
+---
+
 # Team information
 
 ## Composition observée du projet
