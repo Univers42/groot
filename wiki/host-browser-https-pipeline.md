@@ -372,7 +372,6 @@ mkdir -p "$tmpdir"
 # Paste the VM CA base64 between the markers.
 base64 -d > "$tmpdir/track-binocle-local-ca.pem" <<'B64'
 PASTE_VM_CA_BASE64_HERE
-B64
 
 TRACK_BINOCLE_CERT_DIR="$tmpdir" \
   apps/baas/scripts/trust-localhost-cert.sh --system

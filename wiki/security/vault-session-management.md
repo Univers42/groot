@@ -129,6 +129,8 @@ make vault-session-status
 
 This target reads the Fly Vault root token from the Fly volume, immediately exchanges it for a short-lived child token with the `admin` policy, and stores that child token locally. It does not print the root token or use it as the active session token.
 
+For the complete credential setup guide — what `FLY_API_TOKEN` is, where to get it, and how to wire it — see [vault-admin-seed-retrieval.md](vault-admin-seed-retrieval.md).
+
 After creating an admin session, mint fresh invite tokens without using the Fly root token again:
 
 ```sh
