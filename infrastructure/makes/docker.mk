@@ -12,13 +12,14 @@ docker-clean:
 docker-rm-all:
 ## Remove all containers and images, prune system and builder cache.
 	docker ps -aq | sort -u | xargs -r docker rm -f
-	@docker images -aq | sort -u | while read -r image_id; do \
-		if docker image inspect "$$image_id" >/dev/null 2>&1; then \
-			docker rmi -f "$$image_id" || { \
-				if docker image inspect "$$image_id" >/dev/null 2>&1; then exit 1; fi; \
-			}; \
-		fi; \
-	done
+	@removed=1; while [ "$$removed" = "1" ]; do \
+		removed=0; \
+		for image_id in $$(docker images -aq 2>/dev/null); do \
+			if docker rmi -f "$$image_id" >/dev/null 2>&1; then \
+				removed=1; \
+			fi; \
+		done; \
+	done; true
 	docker system prune -a --volumes=$(BOOL) -f
 	@env -u BUILDX_BUILDER docker buildx use default >/dev/null 2>&1 || true
 	@env -u BUILDX_BUILDER docker builder prune -a -f || true

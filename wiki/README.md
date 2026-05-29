@@ -788,23 +788,17 @@ La cible principale n'est donc pas "tout Internet". La cible réelle, c'est une 
 
 #### c. Fonctionnalités attendues
 
-Les fonctionnalités attendues ont été formulées sous forme de cas d'usage, parce que cela oblige à rester concret : *qui veut faire quoi, et pourquoi ?*
+Les fonctionnalités attendues ont été formulées sous forme de cas d'usage, parce que cela oblige à rester concret : *qui veut faire quoi, et pourquoi ?* Plutôt qu'une liste exhaustive, voici comment elles se regroupent par profil d'utilisateur.
 
-- **L'utilisateur final** voudrait créer une page avec du texte, des blocs, des images et des tableaux, **parce qu'il veut centraliser son travail dans un seul espace au lieu d'éparpiller l'information entre plusieurs outils**.
-- **L'utilisateur final** voudrait ouvrir une longue page sans ralentissement, **parce qu'un outil de productivité perd tout son intérêt s'il devient lent dès que le contenu devient sérieux**.
-- **L'utilisateur final** voudrait naviguer au clavier, rechercher vite et retrouver une information ancienne, **parce que le vrai gain de productivité vient souvent de la réduction des petites frictions répétées toute la journée**.
-- **Le builder** voudrait créer une base de données visuelle depuis l'interface, **parce qu'il veut structurer ses informations sans devoir écrire directement du SQL ou monter une application complète**.
-- **Le builder** voudrait transformer une même source de données en tableau, dashboard, graphe ou vue filtrée, **parce qu'une donnée n'a pas toujours la même valeur selon la manière dont on la regarde**.
-- **L'analyste data** voudrait connecter une base PostgreSQL ou MongoDB existante, **parce qu'il veut travailler avec les vraies données de son projet, pas avec des exports copiés à la main**.
-- **L'équipe projet** voudrait partager un dashboard d'accueil dans un workspace, **parce qu'elle a besoin d'un point de ralliement commun pour suivre l'avancement, les priorités et les documents importants**.
-- **L'administrateur de workspace** voudrait séparer espaces publics, privés et partagés, **parce que toutes les informations n'ont pas le même niveau de visibilité ni le même niveau de risque**.
-- **L'administrateur de workspace** voudrait gérer les rôles et les droits d'accès, **parce qu'une plateforme collaborative devient dangereuse si tout le monde peut tout lire ou tout modifier**.
-- **L'équipe technique** voudrait que toutes les requêtes passent par une gateway unique, **parce qu'il faut un point de contrôle clair pour l'authentification, les logs, le CORS et le rate-limit**.
-- **L'équipe technique** voudrait consulter des logs, des métriques et des traces d'erreur, **parce qu'une stack composée de nombreux services devient impossible à maintenir si elle reste opaque**.
-- **L'utilisateur connecté** voudrait retrouver sa session de manière sécurisée, **parce qu'il doit pouvoir travailler sans se reconnecter en permanence, mais sans exposer ses données à un autre utilisateur**.
-- **Le responsable conformité** voudrait exporter, anonymiser ou supprimer les données d'un utilisateur, **parce que le respect du RGPD doit être prévu dans le produit et pas traité comme une tâche manuelle après coup**.
+**L'utilisateur final** veut d'abord centraliser son travail au lieu de l'éparpiller entre cinq outils. Il veut créer une page avec du texte, des blocs, des images et des tableaux, et il veut surtout qu'elle reste fluide quand elle devient longue — un outil de productivité perd tout son intérêt s'il ralentit dès que le contenu devient sérieux. Il veut aussi pouvoir naviguer au clavier, retrouver vite une information ancienne, et retrouver sa session sans se reconnecter en permanence ni risquer d'exposer ses données à un autre utilisateur. Le vrai gain de productivité vient souvent de la réduction des petites frictions répétées toute la journée.
 
-Ces fonctionnalités peuvent paraître larges, mais elles suivent toutes la même logique : **réduire la distance entre une donnée brute et une décision utile**. Osionos ne cherche pas seulement à stocker des informations ; il cherche à les rendre consultables, reliables, sécurisées et actionnables.
+**Le builder et l'analyste data** ont une autre attente : transformer leurs données sans devoir écrire de SQL ni monter une application complète. Le builder veut créer une base de données visuelle depuis l'interface, puis exposer la même source sous forme de tableau, de dashboard, de graphe ou de vue filtrée — parce qu'une donnée n'a pas toujours la même valeur selon la manière dont on la regarde. L'analyste, lui, veut brancher une base PostgreSQL ou MongoDB existante et travailler avec les *vraies* données du projet, pas avec des exports copiés à la main.
+
+**L'équipe projet et son administrateur** ont besoin d'un point de ralliement commun. Ils veulent partager un dashboard d'accueil dans un workspace pour suivre l'avancement, les priorités et les documents importants. Ils veulent aussi pouvoir séparer espaces publics, privés et partagés, et gérer des rôles et droits d'accès — parce que toutes les informations n'ont pas le même niveau de visibilité, et qu'une plateforme collaborative devient dangereuse si tout le monde peut tout lire ou tout modifier.
+
+**L'équipe technique et le responsable conformité**, enfin, attendent que la plateforme soit défendable. Toutes les requêtes doivent passer par une gateway unique, qui sert de point de contrôle clair pour l'authentification, les logs, le CORS et le rate-limit. Les logs, les métriques et les traces d'erreur doivent être consultables, parce qu'une stack composée de nombreux services devient impossible à maintenir si elle reste opaque. Et le responsable conformité doit pouvoir exporter, anonymiser ou supprimer les données d'un utilisateur — parce que le respect du RGPD doit être prévu dans le produit, pas traité comme une tâche manuelle après coup.
+
+Ces attentes peuvent paraître larges, mais elles suivent toutes la même logique : **réduire la distance entre une donnée brute et une décision utile**. Osionos ne cherche pas seulement à stocker des informations ; il cherche à les rendre consultables, reliables, sécurisées et actionnables.
 
 
 #### d. Minimum Viable Product (MVP)
@@ -880,30 +874,15 @@ Cette contrainte nous a forcés à automatiser beaucoup de choses : génération
 
 #### b. Contraintes de sécurité : données sensibles, secrets, RGPD
 
-Elle manipule des données sensibles : comptes utilisateurs, sessions, workspaces privés, rôles, bases de données externes branchées par l'utilisateur, chaînes de connexion, fichiers, logs et traces d'activité. La contrainte n'était donc pas seulement de protéger un formulaire de login, mais de protéger un **écosystème de données**.
+Même si Osionos n'est pas une application de planning terrain comme l'exemple GeoTask, elle manipule quand même des données sensibles : comptes utilisateurs, sessions, workspaces privés, rôles, bases de données externes branchées par l'utilisateur, chaînes de connexion, fichiers, logs et traces d'activité. La contrainte n'était donc pas seulement de protéger un formulaire de login, mais de protéger un **écosystème de données**.
 
-Les principales obligations de sécurité étaient les suivantes :
+Concrètement, plusieurs obligations se sont imposées. L'**authentification** devait être solide : GoTrue prend en charge l'inscription, la connexion, le hachage des mots de passe et l'émission de JWT, avec une séparation claire entre les rôles `anon`, `authenticated` et `service_role`. L'**isolation des données** ne pouvait pas reposer sur la bonne volonté du code applicatif : c'est PostgreSQL qui décide, via la RLS (`auth.uid() = owner_id`), et c'est MongoDB qui reçoit systématiquement un `owner_id` injecté par `mongo-api` depuis le JWT. Les **secrets** n'ont jamais leur place dans Git : ils vivent dans HashiCorp Vault et sont injectés au runtime ; les credentials de bases externes que les utilisateurs branchent sont chiffrés au repos en AES-256-GCM avec dérivation scrypt. Enfin, la **protection en entrée** combine WAF nginx, ModSecurity et OWASP CRS en amont de Kong, avec CORS strict, rate-limit et contrôle des en-têtes, pendant que le **front** valide et passe à `sanitize-html` toute entrée utilisateur avant rendu. Le **RGPD** n'est pas traité comme une tâche administrative post-projet : le `gdpr-service` expose réellement les endpoints d'export, d'anonymisation et de suppression, avec une logique de minimisation et de traçabilité.
 
-- **Authentification robuste** : GoTrue gère l'inscription, la connexion, le hachage des mots de passe et l'émission de JWT.
-- **Sessions et tokens** : les accès sont portés par JWT, avec séparation entre `anon`, `authenticated` et `service_role`.
-- **Isolation des données** : PostgreSQL applique la RLS (`auth.uid() = owner_id`) et MongoDB passe par `mongo-api`, qui injecte `owner_id` depuis le JWT.
-- **Aucun secret dans Git** : les secrets sont stockés dans HashiCorp Vault, puis injectés au runtime via les scripts d'environnement.
-- **Chiffrement des credentials externes** : les connexions aux bases de données externes sont chiffrées au repos en AES-256-GCM avec dérivation scrypt.
-- **Protection en entrée** : WAF nginx + ModSecurity + OWASP CRS avant Kong, CORS strict, rate-limit, contrôle des headers.
-- **Protection front** : validation des entrées, `sanitize-html`, scripts de sécurité CSP/SVG/média, et tests CTF front pour vérifier les cas XSS.
-- **RGPD** : cartographie des données, export, anonymisation et suppression via `gdpr-service`, avec une logique de minimisation et de traçabilité.
+Une contrainte spécifique concernait la **récupération partagée des secrets**. Au début, chaque machine génère ses propres `.env` locaux, et c'est suffisant pour travailler seul. Mais dès qu'on a voulu démarrer la stack sur la machine d'un coéquipier ou dans une VM fraîche, on a réalisé le problème : on n'avait pas le droit d'envoyer les vraies clés JWT, les credentials OAuth ou les secrets SMTP par message, et on ne pouvait pas non plus les versionner. Il fallait un moyen de partager les mêmes valeurs sensibles sans jamais les exposer en clair.
 
-Une contrainte spécifique concernait la **récupération sécurisée des secrets**. Au départ, chaque machine pouvait générer ses propres `.env` locaux, mais ce modèle ne suffisait pas pour travailler à plusieurs : deux développeurs pouvaient lancer la stack sans partager les mêmes clés JWT, credentials OAuth, secrets SMTP ou accès de services. On avait donc besoin d'un système qui permette de récupérer les mêmes variables sensibles, sans les mettre dans Git et sans les envoyer en clair dans un message.
+La solution repose sur deux usages de **HashiCorp Vault**. En local, Vault tourne dans Docker Compose via le profil `secrets` et reste accessible derrière le proxy HTTPS local `https://localhost:18200` ; les containers lui parlent directement sur le réseau Docker interne. Pour le partage équipe, on a déployé une instance partagée sur **Fly.io**, exposée à l'adresse HTTPS `https://track-binocle-vault.fly.dev` via `make vault-fly`. Cette instance ne sert pas à héberger l'application — elle sert uniquement de **point d'accès aux secrets partagés**.
 
-La solution retenue repose sur **HashiCorp Vault**, avec deux modes complémentaires :
-
-| Contexte | Mécanisme | Rôle sécurité |
-|---|---|---|
-| **Développement local** | Vault tourne dans Docker Compose avec le profil `secrets`, puis l'accès hôte passe par le proxy HTTPS local `https://localhost:18200` | Les secrets restent dans un service dédié, pas dans le repo ; les containers parlent à Vault sur le réseau Docker interne |
-| **Partage équipe** | Un Vault partagé est déployé sur Fly.io à l'adresse `https://track-binocle-vault.fly.dev` via `make vault-fly` | Les secrets communs sont récupérables depuis une nouvelle VM ou une machine collègue, sans copier les `.env` dans Git |
-| **Invitation développeur** | Un mainteneur génère un token `reader` ou `writer` avec `make vault-fly-invite-token` | Le token est limité par une policy Vault et peut avoir une durée de vie courte (`TTL`) |
-| **Récupération** | Le développeur place le fichier ignoré `.vault/track-binocle-reader.env`, lance `make vault-shared-doctor`, puis `make all` ou `make vault-fetch-shared` | Le Makefile vérifie les permissions du fichier (`chmod 600` ou `400`), contacte Vault en HTTPS, puis génère les `.env` locaux sans afficher les valeurs |
-| **CI GitHub** | GitHub Actions utilise OIDC pour demander un token temporaire à Vault | Aucun token statique n'est stocké dans les secrets GitHub ; l'identité du workflow est vérifiée dynamiquement |
+Le parcours type ressemble à ceci : un mainteneur génère un token avec `make vault-fly-invite-token VAULT_TEAM_ROLE=reader`, choisit éventuellement une durée de vie courte, et transmet ce token via un canal sécurisé à usage unique (typiquement OneTimeSecret). Le développeur place le fichier ignoré `.vault/track-binocle-reader.env` dans son clone, le passe en `chmod 600`, lance `make vault-shared-doctor` pour vérifier le câblage sans afficher de valeurs, puis simplement `make all` : le Makefile contacte Vault en HTTPS, récupère les variables autorisées par la policy associée au token, et génère les `.env` locaux dans les bons sous-dossiers. Si quelqu'un essaie de partager un token `localhost`, le Makefile refuse (sauf dérogation explicite pour du test sur la même machine), parce qu'un tel token ne prouve rien sur une autre VM. Côté CI, GitHub Actions ne stocke jamais de token Vault statique : la pipeline s'authentifie par OIDC et reçoit un token temporaire ne valant que le temps d'un run.
 
 ```mermaid
 flowchart LR
@@ -926,9 +905,7 @@ flowchart LR
     CI --> OIDC --> FLY
 ```
 
-Ce point est important : **Fly.io ne remplace pas Docker Compose comme environnement principal du projet**. Il sert uniquement de point d'accès HTTPS fiable pour le Vault partagé. La stack applicative reste lancée localement en Docker, mais les secrets nécessaires peuvent être récupérés de manière contrôlée. Les tokens `localhost` générés sur une machine ne sont pas acceptés pour un partage distant, sauf dérogation explicite de test (`VAULT_ALLOW_LOCAL_SHARED=true`), parce qu'ils ne prouvent rien sur une autre VM. La règle finale est donc simple : un secret peut être récupéré, mais seulement avec un token valide, privé, limité par une policy, éventuellement expirant, et jamais versionné.
-
-La contrainte principale était donc de ne jamais faire reposer la sécurité sur une seule couche. Si le front se trompe, le gateway doit encore filtrer. Si un service applicatif se trompe, PostgreSQL doit encore refuser. Si un secret fuit localement, il ne doit pas être présent dans Git.
+La philosophie d'ensemble reste la même : un secret peut être récupéré, mais seulement avec un token valide, privé, limité par une policy, éventuellement expirant, et jamais versionné. C'est dans cette logique que s'inscrit la règle plus large : ne jamais faire reposer la sécurité sur une seule couche. Si le front se trompe, le gateway doit encore filtrer. Si un service applicatif se trompe, PostgreSQL doit encore refuser. Si un fichier local fuit, il ne doit pas contenir de secret en clair.
 
 ```mermaid
 flowchart LR
@@ -995,30 +972,90 @@ Cette contrainte explique la séparation entre :
 
 Le vrai risque n'était pas seulement technique : c'était de vouloir faire Notion, Supabase, Retool, Obsidian et Grafana en même temps. La contrainte de qualité nous a donc obligés à réduire le périmètre, documenter les arbitrages et assumer ce qui restait hors MVP.
 
-### les livrables attendues
+#### g. Contrainte de centralisation : un monorepo devenu studio multi-apps
+
+Une contrainte qu'on n'avait pas anticipée au démarrage est apparue très vite : à effectif réduit, on n'avait tout simplement pas les moyens de maintenir cinq dépôts Git indépendants, cinq pipelines CI distincts, cinq systèmes de versions, cinq backlogs séparés. À chaque fois qu'on essayait de découper proprement (un dépôt pour le BaaS, un pour `osionos`, un pour `opposite-osiris`, un pour le SDK, un pour les outils internes), on perdait plus de temps à synchroniser les versions et à rejouer les contrats inter-services qu'à avancer sur le produit.
+
+On a donc pris une décision pragmatique : **transformer ce dépôt en studio de travail unique**. Tout vit ici — le BaaS, les deux frontends, le SDK, la documentation, les outils, les scripts d'infrastructure — et chaque application sort progressivement du monorepo quand elle devient assez stable pour vivre seule. Concrètement, le studio nous donne un `make` unique qui sait builder, tester et publier chaque app, un seul `pnpm-workspace.yaml` qui partage les dépendances, et un seul historique Git où l'on peut suivre une refonte de bout en bout. Le coût, c'est un dépôt qui paraît énorme au premier coup d'œil ; le bénéfice, c'est qu'à deux personnes on tient encore une plateforme à plusieurs services sans s'épuiser sur la plomberie.
+
+L'idée n'est pas que tout reste à jamais dans ce monorepo. C'est plutôt un **incubateur** : une app grandit ici jusqu'au moment où la sortir devient moins risqué que la garder. `mini-baas-infra` est déjà en bonne voie d'extraction propre (images publiées, tags Git alignés sur les releases), et le SDK `@mini-baas/js` est conçu pour pouvoir être publié séparément le jour où le contrat sera stable. En attendant, le studio fait office d'**atelier partagé**.
+
 ### Environnement humain et technique
 #### a. Environnement humain et méthodologie
-Le projet a été réalisé dans le cadre de l'école 42, à partir du sujet `ft_transcendence`, puis progressivement transformé en Osionos. L'équipe a été constituée autour de rôles complémentaires : pilotage produit, architecture logicielle, développement front, développement back, infrastructure, QA et documentation.
 
-Dans les faits, j'ai porté une partie importante du rôle de **product owner / manager de projet** : cadrage de la vision, priorisation du MVP, arbitrage entre les fonctionnalités, documentation du dossier et coordination avec les contraintes techniques posées par les profils architecture de l'équipe. Vadim et Roxanne ont joué un rôle important sur les exigences d'architecture et de qualité, notamment sur la séparation des services, la sécurité, la reproductibilité et la stratégie de tests.
+Le projet a été réalisé dans le cadre de l'école 42, à partir du sujet `ft_transcendence`, puis progressivement transformé en Osionos. L'équipe s'est constituée début 2026 autour de cinq étudiants de 42, avec des profils volontairement complémentaires : pilotage produit, architecture, développement front, développement back, infrastructure, et QA. Chacun avait un rôle principal et un rôle secondaire, pour qu'aucune fonction critique du projet ne dépende d'une seule personne en cas d'absence.
 
-La méthode de travail s'est rapprochée d'un **Scrumban** : backlog et priorisation comme en Scrum, mais exécution plus souple comme en Kanban. Ce choix était adapté à la réalité du projet : beaucoup d'inconnues techniques, une équipe qui apprend en avançant, et un périmètre qui devait rester maîtrisable malgré l'ambition du produit.
+| Login 42 | Nom | Rôle principal | Rôle secondaire | GitHub | Spécialisation |
+|---|---|---|---|---|---|
+| `dlesieur` | Dylan Lesieur | ALL | ALL | [@LESdylan](https://github.com/LESdylan) | Auth, OAuth 2.0, pilotage produit, dossier |
+| `danfern3` | Daniel Fernández | PO | PM | [@danielfdez17](https://github.com/danielfdez17) | Game engine, WebSockets |
+| `serjimen` | Sergio Jiménez | PM | TL | [@DJSurgeon](https://github.com/DJSurgeon) | Architecture back-end, CI |
+| `rstancu` | Roxana Stancu | TL | PM | [@esettes](https://github.com/esettes) | Front-end, design system SCSS |
+| `vjan-nie` | Vadim Jan Nieto | TL | ALL | [@vjan-nie](https://github.com/vjan-nie) | Base de données, Prisma, Docker |
+
+Dans les faits, j'ai porté une partie importante du rôle de **product owner / manager de projet** — cadrage de la vision, priorisation du MVP, arbitrage entre les fonctionnalités, écriture du dossier et coordination avec les contraintes techniques posées par les profils architecture. **Vadim** et **Roxana** ont beaucoup pesé sur les exigences d'architecture et de qualité, notamment sur la séparation des services, la sécurité, la reproductibilité et la stratégie de tests. **Sergio** a porté l'architecture back-end et la CI, et **Daniel** a travaillé sur les fondations temps réel (WebSockets, moteur de jeu) qui ont nourri par la suite la brique `realtime` du BaaS.
+
+La méthode de travail s'est rapprochée d'un **Scrumban** : backlog et priorisation comme en Scrum, exécution plus souple comme en Kanban. On tenait des plannings courts au début de chaque cycle, on suivait l'avancement sur un board Kanban, et on s'autorisait à réordonner sans cérémonie quand la réalité technique nous le demandait. Ce choix était adapté au contexte : beaucoup d'inconnues techniques, une équipe qui apprend en avançant, et un périmètre qui devait rester maîtrisable malgré l'ambition du produit.
+
+Côté outils, on a délibérément séparé la communication temps réel et le suivi de projet. Pour la **communication**, on utilisait **Discord** comme socle principal (voix + salons écrits par sujet), **WhatsApp** pour les échanges rapides et hors-sujet, et **Slack** pour certains canaux plus formels. Pour le **suivi du projet**, on est passé directement par **GitHub Projects** sur l'organisation [Univers42](https://github.com/orgs/Univers42/projects/6) : board Kanban, issues liées aux PR, milestones, le tout au même endroit que le code.
+
+![Board GitHub Projects de l'organisation Univers42](./assets/gh-project.png)
+
+On avait aussi essayé **Notion** au démarrage pour la documentation, et on l'a finalement abandonné : ça créait deux sources de vérité (Notion d'un côté, le repo de l'autre), et au moindre changement d'architecture la doc Notion devenait fausse en silence. On a donc tout rapatrié dans ce wiki, à côté du code, pour que les PR puissent corriger la doc dans le même geste que le code qu'elles modifient.
+
+Côté contrôle de version, on a travaillé en **Git + GitHub avec un modèle proche de Git Flow** : une branche `main` protégée qui représente l'état stable, une branche d'intégration `develop`, des branches `feature/*` pour les nouveautés, `fix/*` pour les correctifs et `release/*` pour les préparations de version. Sur GitHub, on avait activé des **règles de protection de branche** sur `main` (et plus tard sur `develop`) : pas de push direct, une **pull request obligatoire** avec au moins une revue de code approuvée, et la CI verte comme condition de merge. Pour garder un historique lisible, on s'était également imposés des **commits au format Conventional Commits**, contrôlés par des **hooks Git locaux** (`commit-msg`, `pre-commit`) qui refusaient les messages non conformes et lançaient un `lint` rapide avant le commit. Ce dispositif a tourné pendant plusieurs mois et il fonctionnait correctement — il a fini par être **allégé** quand l'équipe s'est resserrée à deux personnes, non pas parce qu'il était inefficace, mais parce qu'à deux on perdait plus de temps à attendre la revue formelle qu'à corriger un commit mal formaté. On a gardé les hooks, on a gardé la PR sur `main`, et on a accepté d'être plus pragmatiques sur les autres branches.
 
 #### b. Environnement technique
-L'environnement technique peut se résumer ainsi : **une VM stricte, Docker comme unique runtime, et Make comme interface de pilotage**.
 
-| Couche | Environnement utilisé | Contrainte associée |
+L'environnement technique peut se résumer en une phrase : **un poste Linux, Docker comme unique runtime, VS Code comme éditeur, et Make comme interface de pilotage**. Le détail compte, parce que c'est cette homogénéité qui permet à chaque membre de l'équipe d'avoir exactement la même plateforme, indépendamment de sa machine personnelle.
+
+Côté **poste de travail**, on s'est appuyés sur l'écosystème Linux dans toute sa diversité. La VM de référence est une VM `b2b` sous VirtualBox (dans l'esprit Born2beroot), mais en pratique les membres de l'équipe ont fait tourner la stack sur **Ubuntu, Debian, Kali Linux et Arch Linux** sans rencontrer de problème bloquant. C'est précisément ce qu'on cherchait : tant que Docker, Docker Compose et Make sont disponibles, le reste de la stack ne fait pas la différence. L'éditeur principal était **VS Code**, avec quelques extensions partagées (ESLint, Prettier, Docker, GitLens, Mermaid Preview) pour que la revue de code se fasse dans le même cadre que l'écriture.
+
+Côté **piles applicatives**, on a quatre piles distinctes mais cohérentes, qu'il vaut mieux détailler séparément.
+
+*Front application (`osionos`)* — React 19, Vite 6, TypeScript strict, Zustand 5 pour l'état, `@tanstack/react-virtual` pour la virtualisation, Playwright pour les tests end-to-end, ESLint + Prettier, le tout buildé et testé via [apps/osionos/app/scripts/docker-run.sh](../apps/osionos/app/scripts/docker-run.sh) dans un container.
+
+*Front marketing (`opposite-osiris`)* — Astro 6, TypeScript, SCSS, `@simplewebauthn/browser` pour les passkeys, `sanitize-html` côté contenu, et un garde-fou `container-only.mjs` qui refuse purement et simplement l'exécution si on tente de lancer le projet hors Docker.
+
+*BaaS et services applicatifs* — Kong 3.8 (DB-less, YAML versionné) comme passerelle, GoTrue 2.188 pour l'auth, PostgREST 12 sur PostgreSQL, NestJS pour les services internes (`mongo-api`, `query-router`, `storage-router`, `permission-engine`, `session-service`, `schema-service`, `gdpr-service`, `log-service`, `email-service`, `newsletter-service`, `ai-service`, `analytics-service`), `realtime-agnostic` en Rust pour le WebSocket, MinIO derrière `storage-router`, et Trino 467 pour la fédération analytique.
+
+*Bases de données et stockage* — PostgreSQL 16 comme source de vérité (avec RLS, migrations idempotentes et seeds de démonstration), MongoDB 7 pour les blocs semi-structurés avec injection d'`owner_id` par `mongo-api`, Redis 7 pour le cache et les sessions, MinIO pour les fichiers, HashiCorp Vault pour les secrets, et un proxy HTTPS local pour que le navigateur hôte puisse parler aux containers en TLS sans erreur de certificat.
+
+Le tableau ci-dessous sert de résumé visuel, pas de catalogue.
+
+| Couche | Pile retenue | Contrainte associée |
 |---|---|---|
-| **Machine de travail** | VM `b2b` / VirtualBox, dans l'esprit Born2beroot | Sécurité système stricte, ports contrôlés, dépendance forte au réseau VM -> hôte |
-| **Runtime applicatif** | Docker Compose racine | Aucune dépendance applicative installée directement sur l'hôte |
-| **Orchestration** | `make all`, `make playground`, `make healthcheck`, profils Compose | Une commande doit reconstruire et vérifier la stack |
-| **Front app** | React 19, Vite 6, TypeScript, Zustand, Playwright | Tous les scripts passent par `docker-run.sh` |
-| **Front marketing** | Astro 6, TypeScript, SCSS, scripts `container-only.mjs` | Exécution refusée hors container |
-| **BaaS** | Kong, GoTrue, PostgREST, PostgreSQL, MongoDB, Redis, MinIO, Vault, services NestJS | Architecture multi-services, aucun accès direct navigateur -> base |
+| **Poste de travail** | Ubuntu, Debian, Kali, Arch ; VM `b2b` VirtualBox de référence | Linux uniquement, l'OS exact ne doit jamais bloquer un développeur |
+| **Éditeur** | VS Code + extensions partagées (ESLint, Prettier, Docker, GitLens) | Revue de code et écriture dans le même cadre |
+| **Runtime applicatif** | Docker + Docker Compose racine | Zéro dépendance applicative installée directement sur l'hôte |
+| **Orchestration** | Makefile (`make all`, `make playground`, `make healthcheck`), profils Compose | Une commande doit reconstruire et vérifier la stack |
+| **Front app** | React 19, Vite 6, TypeScript, Zustand 5, Playwright | Tous les scripts passent par `docker-run.sh` |
+| **Front marketing** | Astro 6, TypeScript, SCSS, `container-only.mjs` | Exécution refusée hors container |
+| **BaaS** | Kong, GoTrue, PostgREST, NestJS, `realtime-agnostic` (Rust), Trino | Architecture multi-services, aucun accès direct navigateur → base |
+| **Bases & stockage** | PostgreSQL 16, MongoDB 7, Redis 7, MinIO, Vault | Source de vérité côté PG, `owner_id` côté Mongo, secrets hors Git |
 | **Sécurité locale** | HTTPS local, CA projet, WAF, Vault, `.env` générés | Reproduire un environnement proche production sans exposer les secrets |
+| **Versionnement** | Git + GitHub, modèle Git Flow, PR + revue, hooks `commit-msg` / `pre-commit` | Historique lisible, branches stables protégées |
 | **Qualité** | ESLint, TypeScript, Playwright, tests canvas/bridge, smoke tests BaaS, ShellCheck, SonarCloud, QA registry | Pas de merge fiable sans pipeline vérifiable |
 
 Le point le plus important est que l'environnement n'est pas pensé pour le confort individuel du développeur, mais pour la **reproductibilité collective**. Si une commande fonctionne uniquement sur ma machine, elle ne compte pas comme une vraie solution.
+
+#### c. Environnements de déploiement
+
+Contrairement à un projet client classique — par exemple un projet livré à un grand compte avec trois environnements canoniques (développement local, recette interne, production client) — Osionos n'a pas de client final qui héberge l'application sur ses propres serveurs. Le projet est avant tout un **dossier RNCP/CDA + une plateforme auto-hébergée** ; la « production » au sens strict n'existe pas encore. Cela ne nous a pas dispensés d'organiser nos environnements proprement, mais en les adaptant à notre réalité.
+
+Concrètement, on travaille sur trois environnements imbriqués. Le premier, le plus utilisé, est l'environnement **local de développement** : la stack complète tourne en Docker Compose sur la machine ou la VM de chaque développeur, avec des `.env` générés soit à partir du Vault local, soit à partir du Vault partagé sur Fly.io pour les secrets communs. C'est dans cet environnement qu'on écrit du code, qu'on lance les tests Playwright et la suite seize phases, et qu'on rejoue les scénarios CTF. Aucune variable sensible n'est jamais commitée.
+
+Le deuxième environnement est un environnement de **recette / intégration**, qui correspond aux exécutions de la **CI GitHub Actions** et à ce que produit `make ci-run-local` (qui rejoue exactement ce que fait la CI, mais sur une machine de développeur). Il sert à valider qu'une PR est réellement intégrable : reset complet de l'état Compose, génération de `.env` déterministes, `db-bootstrap`, santé de la gateway, puis suite de tests système. Aucune donnée réelle d'utilisateur n'y vit ; les seeds sont des données de démonstration anonymisées. C'est ici qu'on attrape les casses d'intégration avant qu'elles ne touchent `main`.
+
+Le troisième environnement est ce qu'on appelle pour l'instant le **bac de démonstration interne** — une stack identique à la stack locale, mais démarrée sur la VM commune de l'équipe à partir des **images Docker pinnées** publiées sur GHCR et Docker Hub. Il sert aux démonstrations, aux tests d'acceptation manuels, et aux vérifications de bout en bout d'un scénario utilisateur complet (inscription, création de workspace, connexion d'une base externe, partage). À ce stade, les sauvegardes restent simples : snapshot du volume PostgreSQL et export `mongodump` à la demande, parce qu'il n'y a pas encore d'utilisateurs réels à protéger. Le jour où une vraie production sera mise en place pour des utilisateurs externes, ce bac de démonstration sera promu en environnement de pré-production, et la production proprement dite recevra ses propres rituels (snapshots planifiés, retention, restore drills, alerting Prometheus complet).
+
+| Environnement | Ce qu'il contient | Ce qu'on y vérifie | Données |
+|---|---|---|---|
+| **Local / dev** | Stack complète en Docker Compose sur poste ou VM `b2b` | Écriture de code, tests E2E Playwright, tests CTF front, debug | Données de développement, seeds locaux |
+| **CI / recette** | Même stack rejouée par GitHub Actions ou `make ci-run-local` | `db-bootstrap`, santé gateway, suite 16 phases, ShellCheck, Sonar | Données générées par les seeds, aucune donnée réelle |
+| **Démo interne** | Images Docker pinnées (GHCR + Docker Hub), VM commune de l'équipe | Tests d'acceptation manuels, scénario utilisateur complet | Données d'exemple anonymisées |
+
+La différence par rapport au modèle « local + recette + prod client » classique est donc surtout une question de périmètre : on n'a pas (encore) de prod client, mais on a un environnement qui *jouerait* le rôle de pré-production si on devait en avoir une demain. Les mécanismes de sécurité (secrets dans Vault, RLS PostgreSQL, isolation `owner_id` Mongo, images pinnées par digest) sont déjà câblés pour ce scénario, ce qui évite d'avoir à tout refaire le jour où cette étape arrivera.
 
 ### Objectifs de qualité
 
