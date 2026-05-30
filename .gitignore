@@ -23,3 +23,7 @@ adversarial-reviewer-SKILL.md
 
 # Local task workflow artifacts
 .claude/workflow/
+
+# Python venvs (translation / md-to-pdf bootstraps)
+wiki/.venv-translate/
+wiki/.venv/
