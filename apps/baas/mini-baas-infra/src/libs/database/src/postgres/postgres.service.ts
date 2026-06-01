@@ -6,7 +6,7 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/05/31 16:38:08 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -99,7 +99,10 @@ export class PostgresService implements OnModuleInit, OnModuleDestroy {
     const client: PoolClient = await this.tenantPool.connect();
     try {
       await client.query('BEGIN');
-      await client.query(`SET LOCAL app.current_user_id = $1`, [userId]);
+      await client.query(
+        `SELECT set_config('app.current_user_id', $1, true), set_config('request.jwt.claims', $2, true)`,
+        [userId, JSON.stringify({ sub: userId })],
+      );
       const result = await client.query<T>(text, params);
       await client.query('COMMIT');
       return result.rows;

@@ -50,12 +50,26 @@ plugins:
 
   - name: response-transformer
     config:
+      # Add hardening headers — covers OWASP ZAP findings:
+      #  • Permissions-Policy (Low: header not set)
+      #  • Cross-Origin-* round out the modern set
+      #  • HSTS bumped to 2y + preload
       add:
         headers:
-          - Strict-Transport-Security:max-age=31536000; includeSubDomains
           - X-Content-Type-Options:nosniff
           - X-Frame-Options:DENY
           - Referrer-Policy:strict-origin-when-cross-origin
+          - Permissions-Policy:accelerometer=(), autoplay=(), camera=(), display-capture=(), encrypted-media=(), fullscreen=(self), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-get=(), screen-wake-lock=(), sync-xhr=(self), usb=(), web-share=(), xr-spatial-tracking=()
+          - Cross-Origin-Opener-Policy:same-origin
+          - Cross-Origin-Resource-Policy:same-site
+          - Strict-Transport-Security:max-age=63072000; includeSubDomains; preload
+      # Strip headers that leak server identity (ZAP: Server Leaks Version
+      # Information, In Page Banner Info Leak).
+      remove:
+        headers:
+          - Server
+          - X-Powered-By
+          - Via
 
   # ── Prometheus metrics (replaces per-service prom-client) ───────
   - name: prometheus

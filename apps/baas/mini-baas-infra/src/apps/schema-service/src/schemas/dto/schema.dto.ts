@@ -6,7 +6,7 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/06/01 01:40:54 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -58,9 +58,9 @@ export class CreateSchemaDto {
   @IsNotEmpty()
   name!: string;
 
-  @ApiProperty({ enum: ['postgresql', 'mongodb'] })
-  @IsEnum(['postgresql', 'mongodb'])
-  engine!: 'postgresql' | 'mongodb';
+  @ApiProperty({ enum: ['postgresql', 'mongodb', 'mysql'] })
+  @IsEnum(['postgresql', 'mongodb', 'mysql'])
+  engine!: 'postgresql' | 'mongodb' | 'mysql';
 
   @ApiProperty({ description: 'Database ID from adapter-registry' })
   @IsUUID()

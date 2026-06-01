@@ -6,7 +6,7 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/06/01 01:40:54 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -32,6 +32,12 @@ export class SchemasController {
   @ApiOperation({ summary: 'List all schemas created by the current user' })
   async list(@CurrentUser() user: UserContext) {
     return this.service.list(user.id);
+  }
+
+  @Get('migrations')
+  @ApiOperation({ summary: 'List cross-engine schema migrations for the current user' })
+  async migrations(@CurrentUser() user: UserContext) {
+    return this.service.listMigrations(user.id);
   }
 
   @Delete(':id')

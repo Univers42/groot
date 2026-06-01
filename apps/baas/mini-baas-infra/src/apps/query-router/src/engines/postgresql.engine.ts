@@ -6,78 +6,86 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/06/01 01:41:50 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotImplementedException,
+} from '@nestjs/common';
 import { Client } from 'pg';
+import type {
+  AdapterOp,
+  EngineCaps,
+  IDatabaseAdapter,
+  QueryOpts,
+  QueryResult,
+} from '@mini-baas/database';
 
 const TABLE_REGEX = /^[a-zA-Z_]\w{0,63}$/;
 const COLUMN_REGEX = /^[a-zA-Z_]\w*$/;
 
-export interface QueryResult {
-  rows: Record<string, unknown>[];
-  rowCount: number;
-}
-
 @Injectable()
-export class PostgresqlEngine {
+export class PostgresqlEngine implements IDatabaseAdapter {
+  readonly engine = 'postgresql';
 
-  private validateTable(name: string): void {
-    if (!TABLE_REGEX.test(name)) {
-      throw new BadRequestException(`Invalid table name: ${name}`);
-    }
-  }
-
-  private validateColumn(name: string): void {
-    if (!COLUMN_REGEX.test(name)) {
-      throw new BadRequestException(`Invalid column name: ${name}`);
-    }
+  capabilities(): EngineCaps {
+    return {
+      read: true,
+      write: true,
+      upsert: false,
+      txIntra: true,
+      stream: false,
+      semantic: { joins: 'native', patternSearch: 'native', ddl: true, migrationVersioning: true, latencyClass: 'native' },
+    };
   }
 
   async execute(
     connectionString: string,
-    table: string,
-    action: string,
-    opts: {
-      data?: Record<string, unknown>;
-      filter?: Record<string, unknown>;
-      sort?: Record<string, string>;
-      limit?: number;
-      offset?: number;
-      userId?: string;
-    },
+    resource: string,
+    op: AdapterOp,
+    opts: QueryOpts,
   ): Promise<QueryResult> {
-    this.validateTable(table);
+    this.validateTable(resource);
 
     const client = new Client({ connectionString });
     await client.connect();
 
     try {
-      // Set user context so RLS policies (owner_id = current_setting('app.current_user_id'))
-      // can enforce row-level isolation on user-registered databases.
+      // Set user context so unified RLS policies can enforce row-level isolation.
       if (opts.userId) {
         await client.query('BEGIN');
-        await client.query(`SET LOCAL app.current_user_id = $1`, [opts.userId]);
+        await client.query(
+          `SELECT set_config('app.current_user_id', $1, true), set_config('request.jwt.claims', $2, true)`,
+          [opts.userId, JSON.stringify({ sub: opts.userId })],
+        );
       }
 
       let result: QueryResult;
-      switch (action) {
-        case 'select':
-          result = await this.select(client, table, opts);
+      switch (op) {
+        case 'list':
+          result = await this.select(client, resource, opts);
+          break;
+        case 'get':
+          result = await this.select(client, resource, { ...opts, limit: 1 });
           break;
         case 'insert':
-          result = await this.insert(client, table, opts.data ?? {}, opts.userId);
+          result = await this.insert(client, resource, opts.data ?? {}, opts.userId);
           break;
         case 'update':
-          result = await this.update(client, table, opts.data ?? {}, opts.filter ?? {});
+          result = await this.update(client, resource, opts.data ?? {}, opts.filter ?? {});
           break;
         case 'delete':
-          result = await this.deleteRows(client, table, opts.filter ?? {});
+          result = await this.deleteRows(client, resource, opts.filter ?? {});
           break;
+        case 'upsert':
+          throw new NotImplementedException(
+            'PostgreSQL upsert is reserved for M2 — use insert + ON CONFLICT directly via schema-service migrations for now.',
+          );
         default:
-          throw new BadRequestException(`Unknown SQL action: ${action}`);
+          throw new BadRequestException(`Unknown operation: ${op}`);
       }
 
       if (opts.userId) {
@@ -94,7 +102,7 @@ export class PostgresqlEngine {
     }
   }
 
-  async listTables(connectionString: string): Promise<string[]> {
+  async listResources(connectionString: string): Promise<string[]> {
     const client = new Client({ connectionString });
     await client.connect();
     try {
@@ -107,30 +115,39 @@ export class PostgresqlEngine {
     }
   }
 
+  private validateTable(name: string): void {
+    if (!TABLE_REGEX.test(name)) {
+      throw new BadRequestException(`Invalid table name: ${name}`);
+    }
+  }
+
+  private validateColumn(name: string): void {
+    if (!COLUMN_REGEX.test(name)) {
+      throw new BadRequestException(`Invalid column name: ${name}`);
+    }
+  }
+
   private async select(
     client: Client,
     table: string,
-    opts: { filter?: Record<string, unknown>; sort?: Record<string, string>; limit?: number; offset?: number },
+    opts: Pick<QueryOpts, 'filter' | 'sort' | 'limit' | 'offset'>,
   ): Promise<QueryResult> {
     const params: unknown[] = [];
     let sql = `SELECT * FROM "${table}"`;
 
-    // WHERE
     const where = this.buildWhere(opts.filter ?? {}, params);
     if (where) sql += ` WHERE ${where}`;
 
-    // ORDER BY
     if (opts.sort) {
       const orderParts: string[] = [];
       for (const [col, dir] of Object.entries(opts.sort)) {
         this.validateColumn(col);
-        orderParts.push(`"${col}" ${dir.toUpperCase() === 'ASC' ? 'ASC' : 'DESC'}`);
+        orderParts.push(`"${col}" ${String(dir).toUpperCase() === 'ASC' ? 'ASC' : 'DESC'}`);
       }
       if (orderParts.length) sql += ` ORDER BY ${orderParts.join(', ')}`;
     }
 
-    // LIMIT / OFFSET
-    const limit = Math.min(opts.limit ?? 100, 100);
+    const limit = Math.min(opts.limit ?? 100, 500);
     params.push(limit);
     sql += ` LIMIT $${params.length}`;
 
@@ -143,8 +160,12 @@ export class PostgresqlEngine {
     return { rows: res.rows as Record<string, unknown>[], rowCount: res.rowCount ?? 0 };
   }
 
-  private async insert(client: Client, table: string, data: Record<string, unknown>, userId?: string): Promise<QueryResult> {
-    // Auto-inject owner_id for tenant isolation (mirrors schema-service's auto-added column)
+  private async insert(
+    client: Client,
+    table: string,
+    data: Record<string, unknown>,
+    userId?: string,
+  ): Promise<QueryResult> {
     const enriched = { ...data };
     if (userId && !enriched['owner_id']) {
       enriched['owner_id'] = userId;
@@ -155,8 +176,8 @@ export class PostgresqlEngine {
     cols.forEach((c) => this.validateColumn(c));
 
     const placeholders = cols.map((_, i) => `$${i + 1}`);
-  const quotedColumns = cols.map((c) => `"${c}"`).join(', ');
-  const sql = `INSERT INTO "${table}" (${quotedColumns}) VALUES (${placeholders.join(', ')}) RETURNING *`;
+    const quotedColumns = cols.map((c) => `"${c}"`).join(', ');
+    const sql = `INSERT INTO "${table}" (${quotedColumns}) VALUES (${placeholders.join(', ')}) RETURNING *`;
 
     const res = await client.query(sql, Object.values(enriched));
     return { rows: res.rows as Record<string, unknown>[], rowCount: res.rowCount ?? 0 };

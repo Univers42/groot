@@ -6,7 +6,7 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/05/31 16:38:12 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -18,20 +18,18 @@ import { PostgresModule } from '@mini-baas/database';
 import { SubscriptionModule } from './subscription/subscription.module';
 import { CampaignModule } from './campaign/campaign.module';
 import { HealthController } from './health.controller';
+import { AuditModule, ObservabilityModule, createPinoHttpOptions } from '@mini-baas/common';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
-    LoggerModule.forRoot({
-      pinoHttp: {
-        level: process.env['LOG_LEVEL'] ?? 'info',
-        base: { service: 'newsletter-service' },
-      },
-    }),
+    LoggerModule.forRoot({ pinoHttp: createPinoHttpOptions('newsletter-service') }),
+    ObservabilityModule,
     TerminusModule,
     PostgresModule,
     SubscriptionModule,
     CampaignModule,
+    AuditModule,
   ],
   controllers: [HealthController],
 })

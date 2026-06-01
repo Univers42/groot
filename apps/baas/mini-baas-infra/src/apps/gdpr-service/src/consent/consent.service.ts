@@ -6,7 +6,7 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/05/31 16:38:21 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -43,7 +43,7 @@ export class ConsentService implements OnModuleInit {
           WHERE schemaname = 'gdpr' AND tablename = 'user_consent' AND policyname = 'consent_owner'
         ) THEN
           CREATE POLICY consent_owner ON gdpr.user_consent
-            FOR ALL USING (user_id = current_setting('app.current_user_id', true));
+            FOR ALL USING (user_id = auth.current_user_id()::text);
         END IF;
       END $$;
     `);

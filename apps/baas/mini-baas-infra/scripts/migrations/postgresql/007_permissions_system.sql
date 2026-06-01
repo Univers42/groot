@@ -1,14 +1,14 @@
-# **************************************************************************** #
-#                                                                              #
-#                                                         :::      ::::::::    #
-#    007_permissions_system.sql                         :+:      :+:    :+:    #
-#                                                     +:+ +:+         +:+      #
-#    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
-#                                                 +#+#+#+#+#+   +#+            #
-#    Created: 2026/05/18 21:19:15 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/18 21:19:15 by dlesieur         ###   ########.fr        #
-#                                                                              #
-# **************************************************************************** #
+-- ****************************************************************************
+--                                                                              
+--                                                         :::      ::::::::    
+--    007_permissions_system.sql                         :+:      :+:    :+:    
+--                                                     +:+ +:+         +:+      
+--    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         
+--                                                 +#+#+#+#+#+   +#+            
+--    Created: 2026/05/18 21:19:15 by dlesieur          #+#    #+#              
+--    Updated: 2026/05/18 21:19:15 by dlesieur         ###   ########.fr        
+--                                                                              
+-- ****************************************************************************
 
 -- File: scripts/migrations/postgresql/007_permissions_system.sql
 -- Migration 007: ABAC permission system
@@ -48,6 +48,16 @@ BEGIN
     updated_at  TIMESTAMPTZ DEFAULT now()
   );
 
+  CREATE TABLE IF NOT EXISTS public.user_roles (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     UUID NOT NULL,
+    role_id     UUID NOT NULL REFERENCES public.roles(id) ON DELETE CASCADE,
+    granted_by  UUID,
+    granted_at  TIMESTAMPTZ DEFAULT now(),
+    expires_at  TIMESTAMPTZ,
+    UNIQUE (user_id, role_id)
+  );
+
   ALTER TABLE public.roles ENABLE ROW LEVEL SECURITY;
 
   -- Authenticated users can read roles; only service_role can mutate.
@@ -60,7 +70,7 @@ BEGIN
       EXISTS (
         SELECT 1 FROM public.user_roles ur
           JOIN public.roles r ON r.id = ur.role_id
-        WHERE ur.user_id = auth.uid() AND r.name = admin_role
+        WHERE ur.user_id = auth.uid() AND r.name = 'admin'
       )
     );
 
@@ -79,16 +89,6 @@ BEGIN
   -- ══════════════════════════════════════════════════════════════════
   -- 2. User-role assignments
   -- ══════════════════════════════════════════════════════════════════
-  CREATE TABLE IF NOT EXISTS public.user_roles (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id     UUID NOT NULL,
-    role_id     UUID NOT NULL REFERENCES public.roles(id) ON DELETE CASCADE,
-    granted_by  UUID,
-    granted_at  TIMESTAMPTZ DEFAULT now(),
-    expires_at  TIMESTAMPTZ,
-    UNIQUE (user_id, role_id)
-  );
-
   ALTER TABLE public.user_roles ENABLE ROW LEVEL SECURITY;
 
   -- Users see their own roles; admins see all.
@@ -99,7 +99,7 @@ BEGIN
       OR EXISTS (
         SELECT 1 FROM public.user_roles ur2
           JOIN public.roles r ON r.id = ur2.role_id
-        WHERE ur2.user_id = auth.uid() AND r.name = admin_role
+        WHERE ur2.user_id = auth.uid() AND r.name = 'admin'
       )
     );
 
@@ -109,7 +109,7 @@ BEGIN
       EXISTS (
         SELECT 1 FROM public.user_roles ur2
           JOIN public.roles r ON r.id = ur2.role_id
-        WHERE ur2.user_id = auth.uid() AND r.name = admin_role
+        WHERE ur2.user_id = auth.uid() AND r.name = 'admin'
       )
     );
 
@@ -122,7 +122,7 @@ BEGIN
   DECLARE
     default_role_id UUID;
   BEGIN
-    SELECT id INTO default_role_id FROM public.roles WHERE name = user_role;
+    SELECT id INTO default_role_id FROM public.roles WHERE name = 'user';
     IF default_role_id IS NOT NULL THEN
       INSERT INTO public.user_roles (user_id, role_id)
       VALUES (NEW.id, default_role_id)
@@ -164,7 +164,7 @@ BEGIN
       EXISTS (
         SELECT 1 FROM public.user_roles ur
           JOIN public.roles r ON r.id = ur.role_id
-        WHERE ur.user_id = auth.uid() AND r.name = admin_role
+        WHERE ur.user_id = auth.uid() AND r.name = 'admin'
       )
     );
 
@@ -211,7 +211,7 @@ BEGIN
       ORDER BY rp.priority DESC, rp.effect ASC  -- deny-first at same priority
     LOOP
       -- Deny wins immediately
-      IF pol.effect = deny_effect THEN
+      IF pol.effect = 'deny' THEN
         RETURN false;
       END IF;
       found := true;

@@ -35,14 +35,27 @@ ENV NODE_ENV=production \
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 WORKDIR /app
 
+# Runtime does not need npm/npx. Removing the bundled npm tree avoids shipping
+# scanner-visible build tooling CVEs in production service images.
+RUN rm -rf \
+  /usr/local/bin/npm \
+  /usr/local/bin/npx \
+  /usr/local/lib/node_modules/npm
+
 # Copy production-only deps without a second registry install.
 COPY --from=prod-deps --chown=appuser:appgroup /app/node_modules ./node_modules
-COPY --from=prod-deps --chown=appuser:appgroup /app/package.json /app/package-lock.json ./
+COPY --from=prod-deps --chown=appuser:appgroup /app/package.json ./
 
 # Copy compiled output
 COPY --from=build --chown=appuser:appgroup --chmod=0555 /app/dist/ ./dist/
 
 USER appuser
+
+# Health probe: every NestJS app mounts /health/live via libs/health.
+# PORT is injected at runtime by docker-compose (3010, 3020, ... per service).
+# wget is included in the Alpine busybox base, no extra layer needed.
+HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=3 \
+  CMD wget -qO- "http://localhost:${PORT:-3000}/health/live" >/dev/null 2>&1 || exit 1
 
 # Default CMD — nest build outputs to dist/apps/<APP>/apps/<APP>/src/main.js
 CMD ["sh", "-c", "node dist/apps/${APP_NAME}/apps/${APP_NAME}/src/main.js"]

@@ -62,7 +62,14 @@ def probe(method, path, api_key="", jwt_token="", body=""):
         cmd = ["curl", "-s", "-X", method, f"{GATEWAY}{path}"] + headers
         if body:
             cmd.extend(["-d", body])
-        
+
+        # subprocess.run with shell=False (default) and a list of args is safe
+        # even when args contain user-controlled strings — argv is passed
+        # directly to execve, no shell metacharacters are interpreted. The
+        # semgrep rule below cannot prove that statically, so it is flagged
+        # as a false positive in this codebase. The list-vs-string contract
+        # is critical: never switch this call to a string + shell=True.
+        # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
         return result.stdout
     except Exception as e:

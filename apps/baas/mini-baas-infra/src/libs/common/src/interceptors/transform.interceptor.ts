@@ -6,7 +6,7 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/05/31 16:38:14 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -47,14 +47,18 @@ const METHOD_MESSAGES: Record<string, Record<number, string>> = {
  */
 @Injectable()
 export class TransformInterceptor<T>
-  implements NestInterceptor<T, ApiSuccessResponse<T>>
+  implements NestInterceptor<T, ApiSuccessResponse<T> | T>
 {
   intercept(
     context: ExecutionContext,
     next: CallHandler<T>,
-  ): Observable<ApiSuccessResponse<T>> {
+  ): Observable<ApiSuccessResponse<T> | T> {
     const req = context.switchToHttp().getRequest<Request>();
     const res = context.switchToHttp().getResponse<Response>();
+
+    if (req.path === '/metrics' || req.url === '/metrics' || req.url.startsWith('/metrics?')) {
+      return next.handle();
+    }
 
     return next.handle().pipe(
       map((data) => ({

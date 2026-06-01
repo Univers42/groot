@@ -6,7 +6,7 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/06/01 01:37:18 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -38,7 +38,7 @@ export const routes = {
     events: '/analytics/v1/events',
   },
   realtime: {
-    channel: (channel: string) => `/realtime/v1/ws/${encodePath(channel)}`,
+    channel: (channel: string) => `/realtime/v1/ws?channel=${encodeURIComponent(channel)}`,
   },
 } as const;
 

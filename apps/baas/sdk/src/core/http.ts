@@ -6,12 +6,11 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/06/01 01:51:48 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
 import { MiniBaasError, MiniBaasTimeoutError } from './errors.js';
-import { routes } from './routes.js';
 import { normalizeSession, type ClientSession, type SessionInput } from './session.js';
 import type { SessionStorageAdapter } from './storage.js';
 import type { RetryOptions } from '../index.js';
@@ -70,9 +69,30 @@ export class HttpClient {
   }
 
   createRealtimeUrl(channel: string): URL {
-    const url = new URL(routes.realtime.channel(channel), this.baseUrl);
-    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    const url = this.createRealtimeWsUrl();
+    url.searchParams.set('channel', channel);
     return url;
+  }
+
+  /**
+   * M10.b — Build the WS URL the *dlesieur/realtime-agnostic* server exposes.
+   *
+   * The Rust engine mounts `/ws` (no channel suffix); the channel travels in
+   * the subscribe message body. Kong routes `/realtime/v1/ws` → `realtime:4000/ws`
+   * with `strip_path: true`, so the SDK must hit exactly `/realtime/v1/ws`
+   * — no trailing channel. `apikey` + `access_token` go on the query string
+   * because the browser `WebSocket` constructor cannot set request headers.
+   */
+  createRealtimeWsUrl(): URL {
+    const url = new URL('/realtime/v1/ws', this.baseUrl);
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    url.searchParams.set('apikey', this.anonKey);
+    if (this.session?.accessToken) url.searchParams.set('access_token', this.session.accessToken);
+    return url;
+  }
+
+  getRealtimeAuthToken(): string {
+    return this.session?.accessToken ?? this.anonKey;
   }
 
   async request<T = unknown>(path: string, init: RequestOptions = {}): Promise<T> {

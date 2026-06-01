@@ -127,6 +127,15 @@
         "tsConfigPath": "apps/session-service/tsconfig.app.json"
       }
     },
+    "outbox-relay": {
+      "type": "application",
+      "root": "apps/outbox-relay",
+      "entryFile": "main",
+      "sourceRoot": "apps/outbox-relay/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/outbox-relay/tsconfig.app.json"
+      }
+    },
     "common": {
       "type": "library",
       "root": "libs/common",

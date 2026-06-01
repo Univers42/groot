@@ -1,0 +1,16 @@
+{
+	"mcpServers": {
+		"osionos": {
+			"type": "stdio",
+			"command": "bash",
+			"args": [
+				"-lc",
+				"cd \"/home/dlesieur/Documents/ft_transcendence/apps/osionos/app\" && PATH=\"$HOME/.nvm/versions/node/v22.22.2/bin:$PATH\" node scripts/osionos-mcp-server.mjs"
+			],
+			"env": {
+				"OSIONOS_MCP_BRIDGE_URL": "http://localhost:4000",
+				"OSIONOS_MCP_API_URL": "http://localhost:4000"
+			}
+		}
+	}
+}

@@ -6,7 +6,7 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/05/31 21:16:42 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -30,6 +30,10 @@ export interface TenantDatabase {
   last_healthy_at: string | null;
 }
 
+interface FdwRegistrationResult {
+  register_fdw_foreign_table: string;
+}
+
 export interface TenantDatabaseRow extends TenantDatabase {
   connection_enc: Buffer;
   connection_iv: Buffer;
@@ -49,10 +53,10 @@ export class DatabasesService implements OnModuleInit {
   async onModuleInit(): Promise<void> {
     // Ensure the tenant_databases table exists (idempotent DDL)
     await this.pg.adminQuery(`
-      CREATE TABLE IF NOT EXISTS tenant_databases (
+      CREATE TABLE IF NOT EXISTS public.tenant_databases (
         id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         tenant_id       UUID NOT NULL,
-        engine          TEXT NOT NULL CHECK (engine IN ('postgresql','mongodb','mysql','redis','sqlite')),
+        engine          TEXT NOT NULL CHECK (engine IN ('postgresql','mongodb','mysql','redis','sqlite','http','jdbc','cassandra','neo4j','elasticsearch','qdrant','influx')),
         name            TEXT NOT NULL CHECK (char_length(name) BETWEEN 1 AND 64),
         connection_enc  BYTEA NOT NULL,
         connection_iv   BYTEA NOT NULL,
@@ -63,14 +67,15 @@ export class DatabasesService implements OnModuleInit {
         UNIQUE (tenant_id, name)
       );
 
-      ALTER TABLE tenant_databases ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE public.tenant_databases ENABLE ROW LEVEL SECURITY;
 
       DO $$ BEGIN
         IF NOT EXISTS (
-          SELECT 1 FROM pg_policies WHERE tablename = 'tenant_databases' AND policyname = 'tenant_isolation'
+          SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'tenant_databases' AND policyname = 'tenant_isolation'
         ) THEN
-          CREATE POLICY tenant_isolation ON tenant_databases
-            FOR ALL USING (tenant_id::text = current_setting('app.current_user_id'));
+          CREATE POLICY tenant_isolation ON public.tenant_databases
+            FOR ALL USING (tenant_id::text = auth.current_user_id()::text)
+            WITH CHECK (tenant_id::text = auth.current_user_id()::text);
         END IF;
       END $$;
     `);
@@ -80,13 +85,13 @@ export class DatabasesService implements OnModuleInit {
   async register(
     userId: string,
     dto: RegisterDatabaseDto,
-  ): Promise<{ id: string; engine: string; name: string; created_at: string }> {
+  ): Promise<{ id: string; engine: string; name: string; created_at: string; fdw_alias?: string }> {
     const { encrypted, iv, tag, salt } = this.crypto.encrypt(dto.connection_string);
 
     try {
       const rows = await this.pg.tenantQuery<TenantDatabase>(
         userId,
-        `INSERT INTO tenant_databases (tenant_id, engine, name, connection_enc, connection_iv, connection_tag, connection_salt)
+        `INSERT INTO public.tenant_databases (tenant_id, engine, name, connection_enc, connection_iv, connection_tag, connection_salt)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING id, engine, name, created_at`,
         [userId, dto.engine, dto.name, encrypted, iv, tag, salt],
@@ -95,7 +100,10 @@ export class DatabasesService implements OnModuleInit {
       if (!row) {
         throw new NotFoundException('Database was not created');
       }
-      return row;
+      if (!dto.register_via_fdw) return row;
+
+      const fdwAlias = await this.registerFdwAlias(userId, row.id, dto);
+      return { ...row, fdw_alias: fdwAlias };
     } catch (err: unknown) {
       if ((err as { code?: string }).code === '23505') {
         throw new ConflictException(`Database "${dto.name}" already registered`);
@@ -104,11 +112,45 @@ export class DatabasesService implements OnModuleInit {
     }
   }
 
+  private async registerFdwAlias(
+    userId: string,
+    databaseId: string,
+    dto: RegisterDatabaseDto,
+  ): Promise<string> {
+    const fdw = dto.fdw ?? {};
+    const serverName = fdw.server_name ?? `mini_baas_${dto.engine}_${databaseId.replaceAll('-', '_')}`;
+    const foreignSchema = fdw.foreign_schema ?? 'fdw';
+    const foreignTable = fdw.foreign_table ?? dto.name.replace(/\W/g, '_');
+    const rows = await this.pg.adminQuery<FdwRegistrationResult>(
+      `SELECT public.register_fdw_foreign_table(
+         $1::uuid,
+         $2::uuid,
+         $3::text,
+         $4::text,
+         $5::text,
+         $6::text,
+         $7::jsonb,
+         $8::jsonb
+       ) AS register_fdw_foreign_table`,
+      [
+        userId,
+        databaseId,
+        dto.engine,
+        serverName,
+        foreignSchema,
+        foreignTable,
+        JSON.stringify(fdw.options ?? {}),
+        JSON.stringify(fdw.columns ?? []),
+      ],
+    );
+    return rows[0]?.register_fdw_foreign_table ?? `${foreignSchema}.${foreignTable}`;
+  }
+
   async listAll(userId: string): Promise<TenantDatabase[]> {
     return this.pg.tenantQuery<TenantDatabase>(
       userId,
       `SELECT id, tenant_id, engine, name, created_at, last_healthy_at
-         FROM tenant_databases
+         FROM public.tenant_databases
         ORDER BY created_at DESC`,
     );
   }
@@ -117,7 +159,7 @@ export class DatabasesService implements OnModuleInit {
     const rows = await this.pg.tenantQuery<TenantDatabase>(
       userId,
       `SELECT id, tenant_id, engine, name, created_at, last_healthy_at
-         FROM tenant_databases
+         FROM public.tenant_databases
         WHERE id = $1`,
       [id],
     );
@@ -131,7 +173,7 @@ export class DatabasesService implements OnModuleInit {
     const rows = await this.pg.tenantQuery<TenantDatabaseRow>(
       userId,
       `SELECT engine, connection_enc, connection_iv, connection_tag, connection_salt
-         FROM tenant_databases
+         FROM public.tenant_databases
         WHERE id = $1`,
       [id],
     );
@@ -149,7 +191,7 @@ export class DatabasesService implements OnModuleInit {
 
     // Update last_healthy_at (fire and forget)
     void this.pg
-      .tenantQuery(userId, `UPDATE tenant_databases SET last_healthy_at = now() WHERE id = $1`, [id])
+      .tenantQuery(userId, `UPDATE public.tenant_databases SET last_healthy_at = now() WHERE id = $1`, [id])
       .catch(() => {});
 
     return { engine: row.engine, connection_string: connectionString };
@@ -157,7 +199,7 @@ export class DatabasesService implements OnModuleInit {
 
   async remove(id: string): Promise<void> {
     const rows = await this.pg.adminQuery<{ id: string }>(
-      `DELETE FROM tenant_databases WHERE id = $1 RETURNING id`,
+      `DELETE FROM public.tenant_databases WHERE id = $1 RETURNING id`,
       [id],
     );
     if (!rows.length) {

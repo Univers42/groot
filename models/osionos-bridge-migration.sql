@@ -255,6 +255,34 @@ CREATE POLICY osionos_page_action_events_insert_own ON public.osionos_page_actio
     )
   );
 
+DROP POLICY IF EXISTS osionos_bridge_identities_service_role_all ON public.osionos_bridge_identities;
+CREATE POLICY osionos_bridge_identities_service_role_all ON public.osionos_bridge_identities
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS osionos_workspaces_service_role_all ON public.osionos_workspaces;
+CREATE POLICY osionos_workspaces_service_role_all ON public.osionos_workspaces
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS osionos_workspace_members_service_role_all ON public.osionos_workspace_members;
+CREATE POLICY osionos_workspace_members_service_role_all ON public.osionos_workspace_members
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS osionos_pages_service_role_all ON public.osionos_pages;
+CREATE POLICY osionos_pages_service_role_all ON public.osionos_pages
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS osionos_page_configurations_service_role_all ON public.osionos_page_configurations;
+CREATE POLICY osionos_page_configurations_service_role_all ON public.osionos_page_configurations
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS osionos_page_action_events_service_role_all ON public.osionos_page_action_events;
+CREATE POLICY osionos_page_action_events_service_role_all ON public.osionos_page_action_events
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS osionos_bridge_audit_events_service_role_all ON public.osionos_bridge_audit_events;
+CREATE POLICY osionos_bridge_audit_events_service_role_all ON public.osionos_bridge_audit_events
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
+
 GRANT SELECT ON public.osionos_bridge_identities TO authenticated;
 GRANT SELECT ON public.osionos_workspaces TO authenticated;
 GRANT SELECT ON public.osionos_workspace_members TO authenticated;
@@ -268,6 +296,40 @@ GRANT ALL ON public.osionos_pages TO service_role;
 GRANT ALL ON public.osionos_page_configurations TO service_role;
 GRANT ALL ON public.osionos_page_action_events TO service_role;
 GRANT ALL ON public.osionos_bridge_audit_events TO service_role;
+
+CREATE OR REPLACE FUNCTION public.osionos_bridge_list_workspaces(
+  p_user_id UUID,
+  p_workspace_ids UUID[]
+) RETURNS TABLE (
+  workspace_id UUID,
+  owner_id UUID,
+  workspace_name TEXT,
+  workspace_slug TEXT,
+  workspace_settings JSONB,
+  workspace_role TEXT,
+  permissions TEXT[],
+  created_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ
+) AS $$
+  SELECT
+    w.id,
+    w.owner_id,
+    w.name,
+    w.slug,
+    w.settings,
+    m.role,
+    m.permissions,
+    w.created_at,
+    w.updated_at
+  FROM public.osionos_workspaces w
+  JOIN public.osionos_workspace_members m ON m.workspace_id = w.id
+  WHERE m.user_id = p_user_id
+    AND w.id = ANY(p_workspace_ids)
+  ORDER BY w.updated_at DESC;
+$$ LANGUAGE SQL STABLE SECURITY DEFINER;
+
+REVOKE ALL ON FUNCTION public.osionos_bridge_list_workspaces(UUID, UUID[]) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.osionos_bridge_list_workspaces(UUID, UUID[]) TO service_role;
 
 CREATE OR REPLACE FUNCTION public.osionos_bridge_upsert_workspace(
   p_provider TEXT,
@@ -340,8 +402,13 @@ BEGIN
     RETURNING id INTO v_role_id;
 
     INSERT INTO public.user_roles (user_id, role_id)
-    VALUES (p_subject, v_role_id)
-    ON CONFLICT (user_id, role_id) DO NOTHING;
+    SELECT p_subject, v_role_id
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM public.user_roles ur
+      WHERE ur.user_id = p_subject
+        AND ur.role_id = v_role_id
+    );
 
     INSERT INTO public.resource_policies (role_id, resource_type, resource_name, actions, conditions, effect, priority)
     SELECT

@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/18 21:19:15 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/18 21:19:15 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/06/01 01:51:48 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -290,19 +290,30 @@ test-postgres: ## Run PostgreSQL MVP happy-path flow
 
 migrate: ## Run all pending PostgreSQL migrations
 	@echo -e "$(_B)Running PostgreSQL migrations…$(_0)"
-	@for f in $$(ls -1 scripts/migrations/postgresql/*.sql 2>/dev/null | sort); do \
+	@set -e; for f in $$(ls -1 scripts/migrations/postgresql/*.sql 2>/dev/null | sort); do \
 		echo "  Applying: $$f"; \
-		docker compose exec -T postgres psql -U postgres -d postgres -f /dev/stdin < "$$f"; \
+		sed '/^#/d' "$$f" | docker compose exec -T postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 -f -; \
 	done
 	@echo -e "$(_G)✓ PostgreSQL migrations applied$(_0)"
+
+migrate-all: migrate migrate-mongo migrate-mysql ## Run PostgreSQL, MongoDB, and MySQL migrations
+	@echo -e "$(_G)✓ Cross-engine migrations applied$(_0)"
 
 migrate-mongo: ## Run all MongoDB migrations
 	@echo -e "$(_B)Running MongoDB migrations…$(_0)"
 	@for f in $$(ls -1 scripts/migrations/mongodb/*.js 2>/dev/null | sort); do \
 		echo "  Applying: $$f"; \
-		docker compose exec -T mongo mongosh mini_baas < "$$f"; \
+		docker compose -f $(COMPOSE_FILE) --profile data-plane exec -T mongo mongosh mini_baas < "$$f"; \
 	done
 	@echo -e "$(_G)✓ MongoDB migrations applied$(_0)"
+
+migrate-mysql: ## Run all MySQL migrations
+	@echo -e "$(_B)Running MySQL migrations…$(_0)"
+	@set -e; for f in $$(ls -1 scripts/migrations/mysql/*.sql 2>/dev/null | sort); do \
+		echo "  Applying: $$f"; \
+		docker compose -f $(COMPOSE_FILE) --profile data-plane exec -T mysql sh -ec 'mysql -u"$${MYSQL_USER:-mini_baas}" -p"$${MYSQL_PASSWORD:-mini_baas_pw}" "$${MYSQL_DATABASE:-mini_baas}"' < "$$f"; \
+	done
+	@echo -e "$(_G)✓ MySQL migrations applied$(_0)"
 
 seed-mongo: _require-compose ## Seed MongoDB with demo data
 	@bash scripts/seed-mongo.sh
@@ -313,9 +324,16 @@ migrate-down: ## Show rollback hints (STEPS=1)
 	@ls -1r scripts/migrations/postgresql/*.sql | head -n $(STEPS)
 
 migrate-status: ## Show applied migration versions
+	@echo -e "$(_B)PostgreSQL migrations$(_0)"
 	@docker compose exec -T postgres psql -U postgres -d postgres \
 		-c "SELECT version, name, applied_at FROM schema_migrations ORDER BY version;" \
 		2>/dev/null || echo "  No migrations table — run make migrate first."
+	@echo -e "$(_B)MongoDB migrations$(_0)"
+	@docker compose -f $(COMPOSE_FILE) --profile data-plane exec -T mongo mongosh mini_baas --quiet --eval 'db.schema_migrations.find({}, {_id:0}).sort({version:1}).forEach(printjson)' \
+		2>/dev/null || echo "  No MongoDB schema_migrations collection — run make migrate-mongo first."
+	@echo -e "$(_B)MySQL migrations$(_0)"
+	@docker compose -f $(COMPOSE_FILE) --profile data-plane exec -T mysql sh -ec 'mysql -u"$${MYSQL_USER:-mini_baas}" -p"$${MYSQL_PASSWORD:-mini_baas_pw}" "$${MYSQL_DATABASE:-mini_baas}" -e "SELECT version, name, applied_at FROM schema_migrations ORDER BY version"' \
+		2>/dev/null || echo "  No MySQL schema_migrations table — run make migrate-mysql first."
 
 
 secrets: ## Generate all secrets → .env

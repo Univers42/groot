@@ -6,7 +6,7 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/06/01 01:37:19 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 import { AnalyticsClient } from './domains/analytics.js';
@@ -15,6 +15,8 @@ import { QueryClient } from './domains/query.js';
 import { RestClient } from './domains/rest.js';
 import { StorageClient } from './domains/storage.js';
 import { HttpClient } from './core/http.js';
+import { makeEngineClient } from './domains/engine-clients.js';
+import { ENGINE_IDS } from './generated/engines.js';
 import { createBrowserStorageAdapter, createMemoryStorageAdapter, } from './core/storage.js';
 export { MiniBaasError, MiniBaasTimeoutError } from './core/errors.js';
 export class MiniBaasClient {
@@ -53,6 +55,44 @@ export class MiniBaasClient {
     fromQuery(resource, databaseId) {
         return this.query.from(resource, databaseId);
     }
+    /**
+     * Open a **capability-typed** client against one engine + database + resource.
+     *
+     * The returned object's shape is derived from `ENGINE_CAPS[E]` at compile
+     * time: `.upsert()` is only present when the engine advertises
+     * `upsert: true`, `.subscribe()` only when `stream: true`, etc. Calling
+     * a missing method is a TypeScript compile error — not a runtime surprise.
+     *
+     * @example
+     *   const pg = client.engine<'postgresql', User>(dbId, 'users');
+     *   await pg.list({ filter: { active: true } });
+     *   await pg.transaction(async (tx) => tx.insert({ name: 'Alice' }));
+     *   await pg.upsert({ id: 1 });   // ❌ compile error
+     */
+    engine(engine, databaseId, resource) {
+        return makeEngineClient(this.http, engine, databaseId, resource);
+    }
+    /**
+     * Fetch `/engines` from the running query-router and compare it against
+     * the static catalog shipped in `generated/engines.ts`. Resolves to the
+     * server-side descriptor; throws if any engine drifts.
+     */
+    async introspectEngines() {
+        const response = await this.http.request('/query/v1/engines', { method: 'GET' });
+        const liveIds = new Set(response.engines);
+        const staticIds = new Set(ENGINE_IDS);
+        for (const id of liveIds) {
+            if (!staticIds.has(id)) {
+                throw new Error(`Engine '${id}' is live on the server but missing from the SDK catalog — regenerate with codegen-engines.mjs.`);
+            }
+        }
+        for (const id of staticIds) {
+            if (!liveIds.has(id)) {
+                throw new Error(`Engine '${id}' is in the SDK catalog but not registered on the server — drift detected.`);
+            }
+        }
+        return response;
+    }
     rpc(name, payload, options) {
         return this.rest.rpc(name, payload, options);
     }
@@ -67,16 +107,14 @@ export class MiniBaasClient {
     }
     realtimeUrl(channel = 'default') {
         const url = this.http.createRealtimeUrl(channel);
-        url.searchParams.set('apikey', this.anonKey);
-        const session = this.http.getSession();
-        if (session?.accessToken)
-            url.searchParams.set('access_token', session.accessToken);
         return url.toString();
     }
 }
 export function createClient(options) {
     return new MiniBaasClient(options);
 }
+// ── M10: engine-aware exports ────────────────────────────────────────────────
+export { ENGINE_CAPS, ENGINE_IDS } from './generated/engines.js';
 function resolveSessionStorage(options) {
     if (options.storage)
         return options.storage;
