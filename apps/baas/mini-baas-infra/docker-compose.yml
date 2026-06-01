@@ -10,6 +10,10 @@ services:
     container_name: mini-baas-waf
     ports:
       - "${WAF_HTTP_PORT:-8880}:80"
+      - "${WAF_HTTPS_PORT:-8443}:443"
+    volumes:
+      - ../certs/localhost.pem:/etc/nginx/certs/localhost.pem:ro
+      - ../certs/localhost-key.pem:/etc/nginx/certs/localhost-key.pem:ro
     depends_on:
       kong:
         condition: service_healthy
@@ -17,7 +21,7 @@ services:
       - mini-baas
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:80/waf-health || exit 1"]
+      test: ["CMD-SHELL", "grep -qi ':0050 .* 0A' /proc/net/tcp || exit 1"]
       interval: 10s
       timeout: 3s
       start_period: 5s
@@ -138,24 +142,177 @@ services:
     mem_limit: 1g
     cpus: 1.0
 
-  # ─── SQL Federation (extras) ─────────────────────────────────────
+  # ─── SQL Federation (M2) ─────────────────────────────────────────
   trino:
     image: trinodb/trino:467
     container_name: mini-baas-trino
     profiles: [analytics, data-plane, extras]
     env_file: [.env]
+    environment:
+      MYSQL_USER: ${MYSQL_USER:-mini_baas}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-mini_baas_pw}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     volumes:
       - ./docker/services/trino/conf/config.properties:/etc/trino/config.properties:ro
       - ./docker/services/trino/conf/catalog/postgresql.properties:/etc/trino/catalog/postgresql.properties:ro
       - ./docker/services/trino/conf/catalog/mongodb.properties:/etc/trino/catalog/mongodb.properties:ro
+      - ./docker/services/trino/conf/catalog/mysql.properties:/etc/trino/catalog/mysql.properties:ro
+      - ./docker/services/trino/conf/catalog/iceberg.properties:/etc/trino/catalog/iceberg.properties:ro
     depends_on:
       postgres:
         condition: service_healthy
       mongo:
         condition: service_healthy
+      mysql:
+        condition: service_healthy
+      iceberg-rest:
+        condition: service_started
     networks:
       - mini-baas
     restart: unless-stopped
+
+  # ─── MySQL (M2 federation — analytical + tenant CRUD via query-router) ──
+  mysql:
+    image: mysql:8.4
+    container_name: mini-baas-mysql
+    profiles: [analytics, data-plane, extras]
+    env_file: [.env]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-mysqlroot}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-mini_baas}
+      MYSQL_USER: ${MYSQL_USER:-mini_baas}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-mini_baas_pw}
+    command: ["--default-authentication-plugin=caching_sha2_password"]
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - mini-baas
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-mysqlroot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    mem_limit: 384m
+    cpus: 0.5
+
+  # ─── Iceberg REST Catalog (M2 federation) ────────────────────────
+  iceberg-rest:
+    image: apache/iceberg-rest-fixture:1.6.1
+    container_name: mini-baas-iceberg-rest
+    profiles: [analytics, data-plane, extras]
+    env_file: [.env]
+    environment:
+      CATALOG_WAREHOUSE: s3://iceberg/
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://minio:9000
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      AWS_REGION: us-east-1
+    ports:
+      - "${ICEBERG_REST_PORT:-8181}:8181"
+    depends_on:
+      minio-iceberg-init:
+        condition: service_completed_successfully
+    networks:
+      - mini-baas
+    restart: unless-stopped
+    mem_limit: 384m
+    cpus: 0.5
+
+  # ─── Outbox relay (M3 coherence — PG WAL → Redis Streams → Mongo projection) ──
+  outbox-relay:
+    build:
+      context: ./src
+      dockerfile: Dockerfile
+      args:
+        APP: outbox-relay
+    profiles: [adapter-plane, background]
+    container_name: mini-baas-outbox-relay
+    env_file: [.env]
+    environment:
+      PORT: 3130
+      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/postgres}
+      OUTBOX_REDIS_URL: ${OUTBOX_REDIS_URL:-redis://redis:6379}
+      OUTBOX_MONGO_URL: ${OUTBOX_MONGO_URL:-mongodb://${MONGO_INITDB_ROOT_USERNAME:-mongo}:${MONGO_INITDB_ROOT_PASSWORD:-mongo}@mongo:27017/mini_baas?authSource=admin}
+      MONGO_URI: ${OUTBOX_MONGO_URL:-mongodb://${MONGO_INITDB_ROOT_USERNAME:-mongo}:${MONGO_INITDB_ROOT_PASSWORD:-mongo}@mongo:27017/mini_baas?authSource=admin}
+      MONGO_DB_NAME: ${OUTBOX_MONGO_DB_NAME:-mini_baas}
+      REALTIME_PUBLISH_URL: ${REALTIME_PUBLISH_URL:-http://realtime:4000/v1/publish}
+      REALTIME_PUBLISH_TIMEOUT_MS: ${REALTIME_PUBLISH_TIMEOUT_MS:-1000}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      db-bootstrap:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      realtime:
+        condition: service_healthy
+    networks:
+      - mini-baas
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3130/health/live || exit 1"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+    mem_limit: 256m
+    cpus: 0.5
+
+  # ─── Debezium outbox CDC (M8 coherence — PG outbox → Redis Streams) ──
+  debezium:
+    image: quay.io/debezium/server:3.0
+    container_name: mini-baas-debezium
+    profiles: [data-plane]
+    env_file: [.env]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+    volumes:
+      - ./docker/services/debezium/application.properties:/debezium/conf/application.properties:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - mini-baas
+    restart: unless-stopped
+    mem_limit: 384m
+    cpus: 0.5
+
+  # ─── Iceberg warehouse bucket bootstrap (M2 federation) ──────────
+  minio-iceberg-init:
+    image: minio/mc:RELEASE.2025-04-08T15-39-49Z
+    container_name: mini-baas-minio-iceberg-init
+    profiles: [analytics, data-plane, extras, storage]
+    env_file: [.env]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    entrypoint: >
+      sh -c "
+        until mc alias set local http://minio:9000 \"$$MINIO_ROOT_USER\" \"$$MINIO_ROOT_PASSWORD\" >/dev/null 2>&1; do
+          echo 'waiting for minio…'; sleep 1;
+        done;
+        mc mb -p local/iceberg || true;
+        mc anonymous set none local/iceberg || true;
+        echo 'iceberg bucket ready';
+      "
+    depends_on:
+      minio:
+        condition: service_started
+    networks:
+      - mini-baas
+    restart: "no"
 
   # ─── Relational Database (custom image with pg_net) ───────────────
   postgres:
@@ -177,6 +334,7 @@ services:
     command: >
       postgres
         -c shared_preload_libraries=pg_net
+        -c wal_level=logical
         -c pg_net.database_name=${POSTGRES_DB:-postgres}
     networks:
       mini-baas:
@@ -473,17 +631,24 @@ services:
       REALTIME_JWT_AUDIENCE: ""
       REALTIME_PG_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}
       REALTIME_PG_CHANNEL: realtime_events
+      # Mongo change-streams producer (M10.b — close the realtime fan-out gap).
+      # Requires Mongo to run as a replica set, which mongo-init already ensures.
+      REALTIME_MONGO_URI: mongodb://${MONGO_INITDB_ROOT_USERNAME:-mongo}:${MONGO_INITDB_ROOT_PASSWORD:-mongo}@mongo:27017/?replicaSet=${MONGO_REPLICA_SET_NAME:-rs0}&authSource=admin
+      REALTIME_MONGO_DB: ${MONGO_DB_NAME:-mini_baas}
       RUST_LOG: ${RUST_LOG:-info}
     volumes:
       - ./docker/services/realtime/realtime-agnostic/realtime.toml:/etc/realtime/realtime.toml:ro
     depends_on:
       db-bootstrap:
         condition: service_completed_successfully
+      mongo-init:
+        condition: service_completed_successfully
+        required: false
     networks:
       - mini-baas
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:4000/v1/health > /dev/null || exit 1"]
+      test: ["CMD", "/app/realtime-server", "--healthcheck"]
       interval: 5s
       timeout: 3s
       start_period: 8s
@@ -504,6 +669,12 @@ services:
     networks:
       - mini-baas
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      start_period: 5s
+      retries: 5
     mem_limit: 128m
     cpus: 0.25
 
@@ -524,7 +695,7 @@ services:
       ADAPTER_REGISTRY_DB_PASSWORD: ${ADAPTER_REGISTRY_DB_PASSWORD:-adapter_registry_pw}
       JWT_SECRET: ${JWT_SECRET}
       VAULT_ENC_KEY: ${VAULT_ENC_KEY:-0123456789abcdef0123456789abcdef}
-      ADAPTER_REGISTRY_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN}
+      ADAPTER_REGISTRY_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       db-bootstrap:
@@ -576,7 +747,7 @@ services:
       QUERY_ROUTER_ASYNC_EVENT_BATCH_SIZE: ${QUERY_ROUTER_ASYNC_EVENT_BATCH_SIZE:-25}
       QUERY_ROUTER_ASYNC_EVENT_MAX_ENTRIES: ${QUERY_ROUTER_ASYNC_EVENT_MAX_ENTRIES:-1000}
       JWT_SECRET: ${JWT_SECRET}
-      ADAPTER_REGISTRY_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN}
+      ADAPTER_REGISTRY_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       adapter-registry:
@@ -679,6 +850,7 @@ services:
     environment:
       PORT: 3050
       DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/postgres}
+      ADAPTER_REGISTRY_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
       JWT_SECRET: ${JWT_SECRET}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
@@ -710,7 +882,7 @@ services:
       PORT: 3060
       DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/postgres}
       ADAPTER_REGISTRY_URL: http://adapter-registry:3020
-      ADAPTER_REGISTRY_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN}
+      ADAPTER_REGISTRY_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
       JWT_SECRET: ${JWT_SECRET}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
@@ -1072,6 +1244,7 @@ networks:
 volumes:
   postgres-data:
   mongo-data:
+  mysql-data:
   mongo-keyfile:
   redis-data:
   minio-data:

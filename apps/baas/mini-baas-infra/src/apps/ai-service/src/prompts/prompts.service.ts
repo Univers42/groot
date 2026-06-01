@@ -6,7 +6,7 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/05/31 22:11:47 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -77,7 +77,7 @@ export class PromptsService implements OnModuleInit {
       { returnDocument: 'after' },
     );
     if (!result) throw new NotFoundException(`Prompt mode "${mode}" not found`);
-    return result as unknown as PromptTemplate;
+    return result;
   }
 
   async remove(mode: string): Promise<{ deleted: boolean }> {

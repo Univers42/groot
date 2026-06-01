@@ -3,6 +3,8 @@ import { AuthClient } from './domains/auth.js';
 import { QueryClient, ResourceQueryBuilder } from './domains/query.js';
 import { RestClient, RestResourceBuilder } from './domains/rest.js';
 import { StorageClient } from './domains/storage.js';
+import { type EngineId, type EnginesResponse } from './generated/engines.js';
+import type { EngineClient } from './domains/engine-clients.js';
 import { type SessionStorageAdapter } from './core/storage.js';
 import type { ClientSession, SessionInput } from './core/session.js';
 import type { RestRequestOptions } from './types.js';
@@ -40,6 +42,27 @@ export declare class MiniBaasClient {
     constructor(options: MiniBaasClientOptions);
     from<Row = Record<string, unknown>>(resource: string): RestResourceBuilder<Row>;
     fromQuery<Row = Record<string, unknown>>(resource: string, databaseId?: string): ResourceQueryBuilder<Row>;
+    /**
+     * Open a **capability-typed** client against one engine + database + resource.
+     *
+     * The returned object's shape is derived from `ENGINE_CAPS[E]` at compile
+     * time: `.upsert()` is only present when the engine advertises
+     * `upsert: true`, `.subscribe()` only when `stream: true`, etc. Calling
+     * a missing method is a TypeScript compile error — not a runtime surprise.
+     *
+     * @example
+     *   const pg = client.engine<'postgresql', User>(dbId, 'users');
+     *   await pg.list({ filter: { active: true } });
+     *   await pg.transaction(async (tx) => tx.insert({ name: 'Alice' }));
+     *   await pg.upsert({ id: 1 });   // ❌ compile error
+     */
+    engine<E extends EngineId, Row = Record<string, unknown>>(engine: E, databaseId: string, resource: string): EngineClient<E, Row>;
+    /**
+     * Fetch `/engines` from the running query-router and compare it against
+     * the static catalog shipped in `generated/engines.ts`. Resolves to the
+     * server-side descriptor; throws if any engine drifts.
+     */
+    introspectEngines(): Promise<EnginesResponse>;
     rpc<TResult = unknown, TPayload = Record<string, unknown>>(name: string, payload?: TPayload, options?: RestRequestOptions): Promise<TResult>;
     setSession(session: SessionInput): void;
     getSession(): ClientSession | undefined;
@@ -47,3 +70,6 @@ export declare class MiniBaasClient {
     realtimeUrl(channel?: string): string;
 }
 export declare function createClient(options: MiniBaasClientOptions): MiniBaasClient;
+export { ENGINE_CAPS, ENGINE_IDS } from './generated/engines.js';
+export type { EngineCaps, EngineDescriptor, EngineId, EnginesResponse, StreamableEngine, TransactionalEngine, UpsertableEngine, } from './generated/engines.js';
+export type { EngineClient } from './domains/engine-clients.js';

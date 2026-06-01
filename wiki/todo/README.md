@@ -25,6 +25,13 @@ Each milestone is **autonomous**, **idempotent**, and **gated by a single `make`
 | [M3](./M3-coherence.md) | c, g | `outbox_events` migration, `outbox-relay` service (PG WAL → Redis Streams), idempotency middleware (`Idempotency-Key`), single RLS model (`current_setting('request.jwt.claims')`) | `make baas-verify-m3` |
 | [M4](./M4-observability.md) | e, g | `prometheus` + `grafana` + `loki` + `promtail` + `tempo` services, `/metrics` on every NestJS app, OpenTelemetry SDK with correlation-ID → traces in Tempo, `log-service` shipping to Loki | `make baas-verify-m4` |
 | [M5](./M5-security.md) | e | ModSecurity WAF in front of Kong, Kong rate-limit plugin, `helmet`/CSP defaults, automated JWT rotation via Vault, blocking SAST (Sonar) in CI | `make baas-verify-m5` |
+| [M11](./M11-external-app-integration.md) | b, d, e | Tenant onboarding flow (external app brings its PG+Mongo, gets a workspace + bridge token in Osionos UI), `tenant-onboarding` service, `030_tenants.sql`, per-tenant ABAC policies, schema introspection per tenant | `make baas-verify-m11` |
+
+> **Note on numbering**: M6 through M10 are tracked in
+> [`wiki/back/agent-prompt-agnostic-baas.md`](../back/agent-prompt-agnostic-baas.md)
+> (FDW, expanded adapters, Saga generalization, central ABAC, SDK codegen).
+> M11 is the first "tenant integration" milestone — it builds on M9's ABAC
+> and M2's adapter-registry to expose Osionos as a multi-tenant BaaS.
 
 ## Verification spine (to add first)
 

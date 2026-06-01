@@ -57,25 +57,20 @@ RUN touch crates/realtime-server/src/main.rs && \
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 3 – Minimal runtime image  (~15 MB stripped binary + libc)
 # ─────────────────────────────────────────────────────────────────────────────
-FROM public.ecr.aws/docker/library/debian:bookworm-slim AS runtime
-
-RUN apt-get update && \
-    apt-get install -y ca-certificates curl && \
-    rm -rf /var/lib/apt/lists/* && \
-    groupadd -r realtime && useradd -r -g realtime realtime
+FROM gcr.io/distroless/cc-debian12:nonroot AS runtime
 
 WORKDIR /app
 
-COPY --from=builder /build/target/release/realtime-server /app/realtime-server
+COPY --from=builder --chown=nonroot:nonroot /build/target/release/realtime-server /app/realtime-server
 
 # Default config file — override by mounting your own at this path.
-COPY realtime.toml /etc/realtime/realtime.toml
+COPY --chown=nonroot:nonroot realtime.toml /etc/realtime/realtime.toml
 
 # Default static files (can be overridden via volume mount at runtime).
-COPY sandbox/static/ /app/static/
+COPY --chown=nonroot:nonroot sandbox/static/ /app/static/
 
 # Drop to non-root.
-USER realtime
+USER nonroot:nonroot
 
 EXPOSE 4000
 
@@ -88,6 +83,6 @@ ENV RUST_LOG="info" \
     REALTIME_STATIC_DIR="/app/static"
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -sf http://localhost:${REALTIME_PORT}/v1/health > /dev/null || exit 1
+    CMD ["/app/realtime-server", "--healthcheck"]
 
 CMD ["/app/realtime-server"]

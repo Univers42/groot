@@ -6,7 +6,7 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:15 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/18 21:19:15 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/05/31 23:57:22 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -36,10 +36,16 @@
 //! | `RUST_LOG` | tracing filter (e.g. `info,realtime_engine=debug`) |
 
 use realtime_server::config::{AuthConfig, DatabaseConfig, ServerConfig};
+use std::net::{TcpStream, ToSocketAddrs};
+use std::time::Duration;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    if std::env::args().any(|arg| arg == "--healthcheck") {
+        return healthcheck();
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
@@ -66,6 +72,17 @@ async fn main() -> anyhow::Result<()> {
     );
 
     realtime_server::server::run(config).await
+}
+
+fn healthcheck() -> anyhow::Result<()> {
+    let host = std::env::var("REALTIME_HEALTH_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let port = std::env::var("REALTIME_PORT").unwrap_or_else(|_| "4000".to_string());
+    let addr = format!("{host}:{port}")
+        .to_socket_addrs()?
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("healthcheck address did not resolve"))?;
+    TcpStream::connect_timeout(&addr, Duration::from_secs(2))?;
+    Ok(())
 }
 
 fn load_config() -> anyhow::Result<ServerConfig> {

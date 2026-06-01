@@ -6,7 +6,7 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/06/01 01:37:19 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -16,6 +16,9 @@ import { QueryClient, ResourceQueryBuilder } from './domains/query.js';
 import { RestClient, RestResourceBuilder } from './domains/rest.js';
 import { StorageClient } from './domains/storage.js';
 import { HttpClient } from './core/http.js';
+import { makeEngineClient } from './domains/engine-clients.js';
+import { ENGINE_IDS, type EngineId, type EnginesResponse } from './generated/engines.js';
+import type { EngineClient } from './domains/engine-clients.js';
 import {
   createBrowserStorageAdapter,
   createMemoryStorageAdapter,
@@ -113,6 +116,54 @@ export class MiniBaasClient {
     return this.query.from<Row>(resource, databaseId);
   }
 
+  /**
+   * Open a **capability-typed** client against one engine + database + resource.
+   *
+   * The returned object's shape is derived from `ENGINE_CAPS[E]` at compile
+   * time: `.upsert()` is only present when the engine advertises
+   * `upsert: true`, `.subscribe()` only when `stream: true`, etc. Calling
+   * a missing method is a TypeScript compile error — not a runtime surprise.
+   *
+   * @example
+   *   const pg = client.engine<'postgresql', User>(dbId, 'users');
+   *   await pg.list({ filter: { active: true } });
+   *   await pg.transaction(async (tx) => tx.insert({ name: 'Alice' }));
+   *   await pg.upsert({ id: 1 });   // ❌ compile error
+   */
+  engine<E extends EngineId, Row = Record<string, unknown>>(
+    engine: E,
+    databaseId: string,
+    resource: string,
+  ): EngineClient<E, Row> {
+    return makeEngineClient<E, Row>(this.http, engine, databaseId, resource);
+  }
+
+  /**
+   * Fetch `/engines` from the running query-router and compare it against
+   * the static catalog shipped in `generated/engines.ts`. Resolves to the
+   * server-side descriptor; throws if any engine drifts.
+   */
+  async introspectEngines(): Promise<EnginesResponse> {
+    const response = await this.http.request<EnginesResponse>('/query/v1/engines', { method: 'GET' });
+    const liveIds = new Set(response.engines);
+    const staticIds = new Set(ENGINE_IDS);
+    for (const id of liveIds) {
+      if (!staticIds.has(id)) {
+        throw new Error(
+          `Engine '${id}' is live on the server but missing from the SDK catalog — regenerate with codegen-engines.mjs.`,
+        );
+      }
+    }
+    for (const id of staticIds) {
+      if (!liveIds.has(id)) {
+        throw new Error(
+          `Engine '${id}' is in the SDK catalog but not registered on the server — drift detected.`,
+        );
+      }
+    }
+    return response;
+  }
+
   rpc<TResult = unknown, TPayload = Record<string, unknown>>(
     name: string,
     payload?: TPayload,
@@ -135,11 +186,6 @@ export class MiniBaasClient {
 
   realtimeUrl(channel = 'default'): string {
     const url = this.http.createRealtimeUrl(channel);
-    url.searchParams.set('apikey', this.anonKey);
-
-    const session = this.http.getSession();
-    if (session?.accessToken) url.searchParams.set('access_token', session.accessToken);
-
     return url.toString();
   }
 }
@@ -147,6 +193,19 @@ export class MiniBaasClient {
 export function createClient(options: MiniBaasClientOptions): MiniBaasClient {
   return new MiniBaasClient(options);
 }
+
+// ── M10: engine-aware exports ────────────────────────────────────────────────
+export { ENGINE_CAPS, ENGINE_IDS } from './generated/engines.js';
+export type {
+  EngineCaps,
+  EngineDescriptor,
+  EngineId,
+  EnginesResponse,
+  StreamableEngine,
+  TransactionalEngine,
+  UpsertableEngine,
+} from './generated/engines.js';
+export type { EngineClient } from './domains/engine-clients.js';
 
 function resolveSessionStorage(options: MiniBaasClientOptions): SessionStorageAdapter {
   if (options.storage) return options.storage;

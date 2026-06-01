@@ -6,11 +6,11 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/05/31 22:11:47 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
-import { Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MongoService } from '@mini-baas/database';
 import { Collection, ObjectId } from 'mongodb';
@@ -106,13 +106,15 @@ export class ChatService implements OnModuleInit {
     conv.messages.push({ role: 'assistant', content: reply });
 
     // Persist
+    const conversationObjectId = conv._id;
+    if (!conversationObjectId) throw new InternalServerErrorException('Conversation id was not assigned');
     await this.conversations.updateOne(
-      { _id: conv._id },
+      { _id: conversationObjectId },
       { $set: { messages: conv.messages, updatedAt: new Date() } },
     );
 
     return {
-      conversationId: conv._id!.toHexString(),
+      conversationId: conversationObjectId.toHexString(),
       reply,
     };
   }
@@ -131,7 +133,7 @@ export class ChatService implements OnModuleInit {
       .toArray();
 
     return docs.map((d) => ({
-      id: d._id!.toHexString(),
+      id: d._id.toHexString(),
       mode: d.mode,
       createdAt: d.createdAt,
       updatedAt: d.updatedAt,
@@ -147,7 +149,7 @@ export class ChatService implements OnModuleInit {
     if (!doc) throw new NotFoundException('Conversation not found');
 
     return {
-      id: doc._id!.toHexString(),
+      id: doc._id.toHexString(),
       mode: doc.mode,
       messages: doc.messages.filter((m) => m.role !== 'system'),
       createdAt: doc.createdAt,

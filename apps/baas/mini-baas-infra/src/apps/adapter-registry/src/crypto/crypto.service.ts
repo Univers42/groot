@@ -6,7 +6,7 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/05/31 20:22:36 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -18,6 +18,7 @@ const ALGORITHM = 'aes-256-gcm';
 const KEY_LENGTH = 32;
 const IV_LENGTH = 16;
 const SALT_LENGTH = 16;
+const AUTH_TAG_LENGTH = 16;
 
 export interface EncryptedPayload {
   encrypted: Buffer;
@@ -47,7 +48,7 @@ export class CryptoService {
     const key = scryptSync(this.masterKey, salt, KEY_LENGTH);
     const iv = randomBytes(IV_LENGTH);
 
-    const cipher = createCipheriv(ALGORITHM, key, iv);
+    const cipher = createCipheriv(ALGORITHM, key, iv, { authTagLength: AUTH_TAG_LENGTH });
     const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
     const tag = cipher.getAuthTag();
 
@@ -55,8 +56,11 @@ export class CryptoService {
   }
 
   decrypt(payload: EncryptedPayload): string {
+    if (payload.iv.length !== IV_LENGTH || payload.salt.length !== SALT_LENGTH || payload.tag.length !== AUTH_TAG_LENGTH) {
+      throw new Error('Invalid encrypted payload');
+    }
     const key = scryptSync(this.masterKey, payload.salt, KEY_LENGTH);
-    const decipher = createDecipheriv(ALGORITHM, key, payload.iv);
+    const decipher = createDecipheriv(ALGORITHM, key, payload.iv, { authTagLength: AUTH_TAG_LENGTH });
     decipher.setAuthTag(payload.tag);
 
     return Buffer.concat([decipher.update(payload.encrypted), decipher.final()]).toString('utf8');

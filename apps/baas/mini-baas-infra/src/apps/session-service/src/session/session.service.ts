@@ -6,7 +6,7 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/05/31 16:38:11 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -55,7 +55,7 @@ export class SessionService implements OnModuleInit {
         ) THEN
           CREATE POLICY user_own_sessions ON session.user_sessions
             FOR ALL
-            USING (user_id = current_setting('app.current_user_id', true));
+            USING (user_id = auth.current_user_id()::text);
         END IF;
       END $$;
     `);

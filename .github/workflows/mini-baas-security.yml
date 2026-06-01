@@ -1,0 +1,269 @@
+# File: .github/workflows/mini-baas-security.yml
+# Security gatekeeper — runs SAST, SCA, container scan, secret scan, and
+# DAST against the mini-baas backend on every PR and main push.
+
+name: mini-baas security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+
+concurrency:
+  group: mini-baas-security-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  COMPOSE_BAKE: "true"
+  DOCKER_BUILDKIT: "1"
+
+jobs:
+  # ── 1. SAST — Semgrep ──────────────────────────────────────────────────────
+  sast-semgrep:
+    name: SAST · Semgrep
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Run Semgrep (community rules)
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/owasp-top-ten
+            p/typescript
+            p/dockerfile
+            p/nodejs
+            p/javascript
+          generateSarif: true
+        continue-on-error: true
+
+      - name: Upload SARIF to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  # ── 2. SCA — npm + pnpm audit ──────────────────────────────────────────────
+  sca-npm-audit:
+    name: SCA · npm + pnpm audit (${{ matrix.dir }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dir: apps/baas/mini-baas-infra/src
+            tool: npm
+          - dir: apps/baas/sdk
+            tool: npm
+          - dir: apps/opposite-osiris
+            tool: npm
+          - dir: apps/calendar
+            tool: npm
+          - dir: apps/mail
+            tool: npm
+          - dir: apps/osionos/app
+            tool: pnpm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Enable corepack for pnpm
+        if: matrix.tool == 'pnpm'
+        run: corepack enable && corepack prepare pnpm@10.32.1 --activate
+
+      - name: Audit (${{ matrix.tool }})
+        run: |
+          cd "${{ matrix.dir }}"
+          if [[ "${{ matrix.tool }}" == "pnpm" ]]; then
+            pnpm audit --prod --audit-level=high
+          else
+            npm audit --audit-level=high --no-fund
+          fi
+
+  # ── 3. SCA — Snyk (gated on token) ─────────────────────────────────────────
+  sca-snyk:
+    name: SCA · Snyk
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: ${{ github.event_name == 'pull_request' }}
+    env:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Skip if no token
+        if: env.SNYK_TOKEN == ''
+        run: echo "::notice::SNYK_TOKEN not configured — skipping Snyk"
+
+      - uses: snyk/actions/setup@master
+        if: env.SNYK_TOKEN != ''
+
+      - name: Snyk test
+        if: env.SNYK_TOKEN != ''
+        run: snyk test --all-projects --severity-threshold=high
+        continue-on-error: true
+
+  # ── 4. Container — Trivy ───────────────────────────────────────────────────
+  container-trivy:
+    name: Container · Trivy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: sarif
+          output: trivy-fs.sarif
+          skip-dirs: 'node_modules,dist,.git,coverage,playwright-report,vendor'
+
+      - name: Upload Trivy filesystem SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+
+      - name: Build a representative BaaS image
+        run: |
+          docker build \
+            --build-arg APP=query-router \
+            -t mini-baas/query-router:ci \
+            apps/baas/mini-baas-infra/src
+
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: mini-baas/query-router:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: sarif
+          output: trivy-image.sarif
+
+      - name: Upload Trivy image SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image
+
+  # ── 5. Secret — TruffleHog ─────────────────────────────────────────────────
+  secret-trufflehog:
+    name: Secret · TruffleHog
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: TruffleHog OSS
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.pull_request.base.sha || github.event.before }}
+          head: ${{ github.event.pull_request.head.sha || github.sha }}
+          extra_args: --only-verified --fail
+
+  # ── 6. DAST — ZAP baseline on main only (heavy) ────────────────────────────
+  dast-zap:
+    name: DAST · ZAP baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [sast-semgrep, sca-npm-audit, container-trivy, secret-trufflehog]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Bring the baas stack up (safe ports)
+        env:
+          BAAS_VERIFY_SAFE_PORTS: "1"
+          BAAS_VERIFY_NO_WAF: "0"
+        run: |
+          set -e
+          : > apps/baas/mini-baas-infra/.env
+          {
+            echo "POSTGRES_USER=postgres"
+            echo "POSTGRES_PASSWORD=postgres"
+            echo "POSTGRES_DB=postgres"
+            echo "JWT_SECRET=ci-jwt-secret-min-32-chars-long-xx"
+            echo "KONG_CORS_ORIGIN_APP=https://localhost:3000"
+            echo "KONG_CORS_ORIGIN_FRONTEND=https://localhost:4322"
+            echo "KONG_CORS_ORIGIN_PLAYGROUND=https://localhost:3100"
+            echo "KONG_CORS_ORIGIN_STUDIO=https://localhost:3001"
+            echo "ADAPTER_REGISTRY_SERVICE_TOKEN=ci-adapter-token"
+          } >> apps/baas/mini-baas-infra/.env
+          bash apps/baas/scripts/generate-localhost-cert.sh >/dev/null
+          BAAS_VERIFY_SAFE_PORTS=1 make baas-up
+
+      - name: ZAP baseline DAST
+        env:
+          WAF_HTTPS_PORT: "18443"
+        run: |
+          bash apps/baas/mini-baas-infra/scripts/verify/zap-baseline.sh \
+            "https://127.0.0.1:18443"
+
+      - name: Upload ZAP artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-baseline
+          path: apps/baas/mini-baas-infra/artifacts/security/zap-baseline.*
+
+      - name: Tear stack down
+        if: always()
+        run: BAAS_VERIFY_SAFE_PORTS=1 make baas-down || true
+
+  # ── 7. Summary gate ────────────────────────────────────────────────────────
+  security-gate:
+    name: Security gate
+    runs-on: ubuntu-latest
+    needs: [sast-semgrep, sca-npm-audit, container-trivy, secret-trufflehog]
+    if: always()
+    steps:
+      - name: Aggregate verdict
+        run: |
+          set -e
+          fail=0
+          for need in "${{ needs.sast-semgrep.result }}" \
+                     "${{ needs.sca-npm-audit.result }}" \
+                     "${{ needs.container-trivy.result }}" \
+                     "${{ needs.secret-trufflehog.result }}"; do
+            if [[ "${need}" != "success" && "${need}" != "skipped" ]]; then
+              fail=1
+            fi
+          done
+          if [[ ${fail} -eq 1 ]]; then
+            echo "::error::Security gate FAILED — see individual job logs"
+            exit 1
+          fi
+          echo "Security gate OK"

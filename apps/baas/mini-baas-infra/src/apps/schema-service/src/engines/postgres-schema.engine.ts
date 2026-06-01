@@ -6,7 +6,7 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/05/31 16:38:09 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -63,15 +63,20 @@ export class PostgresSchemaEngine {
       await client.query(ddl);
 
       if (enableRls) {
-        // Create a helper function on the external database for RLS evaluation.
-        // This matches the SET LOCAL app.current_user_id that query-router injects.
+        // Create unified helper functions on the external database for RLS evaluation.
         await client.query(`
+          CREATE SCHEMA IF NOT EXISTS auth;
+
+          CREATE OR REPLACE FUNCTION auth.current_user_id() RETURNS UUID AS $$
+            SELECT COALESCE(
+              NULLIF(current_setting('request.jwt.claims', true), '')::json ->> 'sub',
+              NULLIF(current_setting('app.current_user_id', true), '')
+            )::uuid;
+          $$ LANGUAGE SQL STABLE;
+
           CREATE OR REPLACE FUNCTION public.current_user_id() RETURNS TEXT AS $$
-            SELECT coalesce(
-              current_setting('app.current_user_id', true),
-              ''
-            );
-          $$ LANGUAGE SQL STABLE
+            SELECT auth.current_user_id()::text;
+          $$ LANGUAGE SQL STABLE;
         `);
 
         await client.query(`ALTER TABLE public."${tableName}" ENABLE ROW LEVEL SECURITY`);
@@ -79,8 +84,8 @@ export class PostgresSchemaEngine {
           `DO $$ BEGIN
              IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = '${tableName}' AND policyname = 'owner_isolation') THEN
                CREATE POLICY owner_isolation ON public."${tableName}" FOR ALL
-                 USING (owner_id::text = current_user_id())
-                 WITH CHECK (owner_id::text = current_user_id());
+                 USING (owner_id::text = auth.current_user_id()::text)
+                 WITH CHECK (owner_id::text = auth.current_user_id()::text);
              END IF;
            END $$`,
         );

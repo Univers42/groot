@@ -1,0 +1,50 @@
+# Repo-level Semgrep ignores. Anything matched here is excluded from
+# `semgrep scan` runs. Used by the security orchestrator
+# (`make baas-security-scan`).
+#
+# Rule of thumb: only ignore THIRD-PARTY paths or generated artifacts that we
+# do not own. Never ignore project source code — fix the issue or annotate
+# the specific line with `# nosemgrep:<rule-id>` + a comment explaining why.
+
+# ── Build artifacts and dependency trees ──────────────────────────────────
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+build/
+**/build/
+.next/
+**/.next/
+coverage/
+**/coverage/
+playwright-report/
+**/playwright-report/
+test-results/
+**/test-results/
+
+# ── Virtual environments (Python venv for the doc translator) ─────────────
+.venv/
+.venv-translate/
+**/.venv/
+**/.venv-translate/
+**/site-packages/
+
+# ── Third-party / vendored code ───────────────────────────────────────────
+vendor/
+**/vendor/
+
+# ── Generated / cached files ──────────────────────────────────────────────
+**/.git/
+**/__pycache__/
+**/*.pyc
+**/.mypy_cache/
+**/.pytest_cache/
+
+# ── Security artifacts (own scan output, never reanalyse) ─────────────────
+**/artifacts/security/
+
+# ── Lock files (scanned separately by SCA tools) ──────────────────────────
+**/package-lock.json
+**/pnpm-lock.yaml
+**/yarn.lock
+**/Cargo.lock

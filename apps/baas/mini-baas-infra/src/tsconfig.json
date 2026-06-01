@@ -9,7 +9,6 @@
     "target": "ES2022",
     "sourceMap": true,
     "outDir": "./dist",
-    "baseUrl": "./",
     "incremental": true,
     "skipLibCheck": true,
     "strict": true,
@@ -24,22 +23,22 @@
     "esModuleInterop": true,
     "paths": {
       "@mini-baas/common": [
-        "libs/common/src"
+        "./libs/common/src"
       ],
       "@mini-baas/common/*": [
-        "libs/common/src/*"
+        "./libs/common/src/*"
       ],
       "@mini-baas/database": [
-        "libs/database/src"
+        "./libs/database/src"
       ],
       "@mini-baas/database/*": [
-        "libs/database/src/*"
+        "./libs/database/src/*"
       ],
       "@mini-baas/health": [
-        "libs/health/src"
+        "./libs/health/src"
       ],
       "@mini-baas/health/*": [
-        "libs/health/src/*"
+        "./libs/health/src/*"
       ]
     }
   },
