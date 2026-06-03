@@ -73,6 +73,16 @@ CREATE POLICY calendar_sources_no_public_access ON public.calendar_sources FOR S
 DROP POLICY IF EXISTS calendar_event_cache_no_public_access ON public.calendar_event_cache;
 CREATE POLICY calendar_event_cache_no_public_access ON public.calendar_event_cache FOR SELECT TO authenticated USING (false);
 
+-- The bridge writes/reads these mirror tables with the service role. service_role does
+-- NOT bypass RLS in this BaaS, so an explicit allow-all policy is REQUIRED — without it
+-- every mirror upsert 403s. Mirrors the osionos_pages_service_role_all pattern.
+DROP POLICY IF EXISTS calendar_accounts_service_role_all ON public.calendar_accounts;
+CREATE POLICY calendar_accounts_service_role_all ON public.calendar_accounts FOR ALL TO service_role USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS calendar_sources_service_role_all ON public.calendar_sources;
+CREATE POLICY calendar_sources_service_role_all ON public.calendar_sources FOR ALL TO service_role USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS calendar_event_cache_service_role_all ON public.calendar_event_cache;
+CREATE POLICY calendar_event_cache_service_role_all ON public.calendar_event_cache FOR ALL TO service_role USING (true) WITH CHECK (true);
+
 REVOKE ALL ON public.calendar_accounts FROM anon, authenticated;
 REVOKE ALL ON public.calendar_sources FROM anon, authenticated;
 REVOKE ALL ON public.calendar_event_cache FROM anon, authenticated;

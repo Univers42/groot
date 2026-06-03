@@ -79,6 +79,20 @@ BAAS_VERIFY_PROFILES := \
 	$(if $(or $(BAAS_VERIFY_FULL),$(BAAS_VERIFY_OBSERVABILITY)),--profile observability,) \
 	$(if $(BAAS_VERIFY_FULL),--profile analytics --profile extras,)
 
+# Lean profile set: the smallest possible footprint to run a single-tenant
+# (or static-multi-tenant) deployment. Skips waf/kong/gotrue (auth via
+# signed envelopes only), realtime, observability, analytics, mongo, mysql,
+# trino, storage. The 5 Rust-backed engines are still reachable when the
+# corresponding upstream is provisioned via DATA_PLANE_MOUNTS env or a
+# user-supplied DB. Use:
+#   make baas-up-lean
+#   BAAS_VERIFY_LIVE=1 make baas-verify-m1 BAAS_VERIFY_PROFILES_OVERRIDE=lean
+BAAS_LEAN_PROFILES := \
+  --profile adapter-plane \
+  --profile control-plane \
+  --profile rust-data-plane \
+  --profile go-control-plane
+
 BAAS_COMPOSE_FILES := -f $(BAAS_COMPOSE_FILE)
 
 .PHONY: baas-verify-m1 baas-verify-m2 baas-verify-m3 baas-verify-m4 baas-verify-m5 baas-verify-m6 baas-verify-m7 baas-verify-m8 baas-verify-m9 baas-verify-m10 baas-verify-all baas-up baas-down
@@ -101,6 +115,19 @@ baas-up:
 baas-down:
 ## Stop the baas stack and remove its volumes.
 	$(BAAS_PORT_OVERRIDES) docker compose $(BAAS_COMPOSE_FILES) $(BAAS_VERIFY_PROFILES) down -v
+
+baas-up-lean:
+## Bring up the LEAN baas stack (postgres + adapter-registry-go +
+## permission-engine + query-router + rust-router). Skips waf/kong/gotrue/
+## realtime/observability/storage. ~5 containers, ~400 MB target RAM —
+## the cheapest footprint for single-tenant / per-tenant-instance deploys.
+	@set -e; \
+	$(BAAS_PORT_OVERRIDES) docker compose $(BAAS_COMPOSE_FILES) $(BAAS_LEAN_PROFILES) up -d --wait \
+	  postgres db-bootstrap adapter-registry-go permission-engine query-router data-plane-router-rust
+
+baas-down-lean:
+## Stop the lean baas stack and remove its volumes.
+	$(BAAS_PORT_OVERRIDES) docker compose $(BAAS_COMPOSE_FILES) $(BAAS_LEAN_PROFILES) down -v
 
 baas-verify-m1:
 ## Verify M1 hardening deliverables (HEALTHCHECK, IDatabaseAdapter, OpenAPI, audit_log).
@@ -145,6 +172,31 @@ baas-verify-m10: baas-verify-m9
 baas-verify-all: baas-verify-m10
 ## Run every milestone gate currently shipped.
 	@echo "[baas-verify] M1 + M2 + M3 + M4 + M5 + M6 + M7 + M8 + M9 + M10 OK."
+
+# ── Productization gates (M11+) — secure-baas roadmap ────────────────────────
+# These are independent of the M1-M10 foundation gates and may pass selectively.
+
+.PHONY: verify-trust-boundary verify-tenancy verify-rust-data-plane verify-go-control-plane verify-productization
+
+verify-trust-boundary:
+## M11 — signed identity envelopes, scoped service tokens, no raw X-User-Id in strict mode.
+	@$(BAAS_PORT_OVERRIDES) bash $(BAAS_VERIFY_DIR)/m11-trust-boundary.sh $(BAAS_VERIFY_FLAGS)
+
+verify-tenancy:
+## M12 — tenant_id !=  user_id, tenant-scoped projects/apps/keys, two-tenant isolation gate.
+	@$(BAAS_PORT_OVERRIDES) bash $(BAAS_VERIFY_DIR)/m12-tenancy.sh $(BAAS_VERIFY_FLAGS)
+
+verify-rust-data-plane:
+## M18 — Rust data-plane-router scaffold + capabilities + tx contract + cargo check.
+	@$(BAAS_PORT_OVERRIDES) bash $(BAAS_VERIFY_DIR)/m18-rust-data-plane.sh $(BAAS_VERIFY_FLAGS)
+
+verify-go-control-plane:
+## M19 — Go control-plane scaffold + crypto parity + go vet + go test.
+	@$(BAAS_PORT_OVERRIDES) bash $(BAAS_VERIFY_DIR)/m19-go-control-plane.sh $(BAAS_VERIFY_FLAGS)
+
+verify-productization: verify-trust-boundary verify-tenancy verify-rust-data-plane verify-go-control-plane
+## Run every productization gate (M11 + M12 + M18 + M19).
+	@echo "[verify-productization] M11 + M12 + M18 + M19 OK."
 
 # ── Security scanner suite (Docker-only) ──────────────────────────────────────
 # Runs Semgrep (SAST) + npm/pnpm audit (SCA) + Trivy (containers + fs) +

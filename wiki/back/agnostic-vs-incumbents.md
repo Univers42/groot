@@ -1,6 +1,11 @@
 # mini-baas-infra — agnostique ou pas ?
 ## Et qu'est-ce que ça change par rapport à Supabase, Firebase, Appwrite, PocketBase ?
 
+> **Note de lecture importante** : ce document compare la surface technique et
+> les gates M1-M10. Les garanties produit multi-tenant, la frontière de
+> confiance, l'ACID par moteur et la saga cross-engine sont cadrées séparément
+> dans [secure-baas-product-roadmap.md](./secure-baas-product-roadmap.md).
+
 Ce document fait deux choses :
 
 1. **Répond honnêtement** : ce backend est-il *vraiment* agnostique ? Sur quels axes oui, sur quels axes non.

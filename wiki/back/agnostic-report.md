@@ -1,5 +1,11 @@
 # Rapport — le BaaS est-il *agnostique* ?
 
+> **Note de lecture importante** : ce rapport valide les jalons techniques
+> M1-M10 et la surface adapter/SDK existante. Il ne doit pas être lu comme une
+> certification produit de multi-tenancy, de trust-boundary ou d'ACID
+> cross-engine universel. Pour la roadmap produit stricte, lire
+> [secure-baas-product-roadmap.md](./secure-baas-product-roadmap.md).
+
 **Date du rapport** : 2026-06-01
 **Couvre** : `apps/baas/mini-baas-infra` (backend) + `apps/baas/sdk` (client TypeScript)
 **Méthodologie** : exécution de `make baas-verify-all` (10 gates statiques fail-fast) + relecture des contrats.
