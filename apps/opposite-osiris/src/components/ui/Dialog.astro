@@ -34,21 +34,21 @@ const { id, titleId, title, closeLabel = 'Close dialog', class: className = '' }
 	</div>
 </dialog>
 
-<script is:inline define:vars={{ dialogId: id }}>
-	(() => {
-		const dialog = document.getElementById(dialogId);
-		if (!(dialog instanceof HTMLDialogElement)) return;
-		let previous = null;
-		const handleClick = (event) => {
+<script>
+	// Bundled global wiring for every <dialog class="ui-dialog"> on the page.
+	// No is:inline / define:vars, so it runs under a strict `script-src 'self'`
+	// CSP. Each loop iteration keeps its own `previous` via block scope.
+	for (const dialog of document.querySelectorAll('dialog.ui-dialog')) {
+		if (!(dialog instanceof HTMLDialogElement)) continue;
+		let previous: HTMLElement | null = null;
+		dialog.addEventListener('click', (event) => {
 			if (event.target === dialog) dialog.close('backdrop');
-		};
-		const handleClose = () => {
+		});
+		dialog.addEventListener('close', () => {
 			document.body.classList.remove('dialog-open');
 			previous?.focus({ preventScroll: true });
 			previous = null;
-		};
-		dialog.addEventListener('click', handleClick);
-		dialog.addEventListener('close', handleClose);
+		});
 		dialog.querySelectorAll('[data-ui-dialog-close]').forEach((button) => {
 			button.addEventListener('click', () => dialog.close('button'));
 		});
@@ -57,7 +57,7 @@ const { id, titleId, title, closeLabel = 'Close dialog', class: className = '' }
 			document.body.classList.add('dialog-open');
 			if (!dialog.open) dialog.showModal();
 		});
-	})();
+	}
 </script>
 
 <style is:global>

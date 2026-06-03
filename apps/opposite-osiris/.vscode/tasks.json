@@ -1,0 +1,62 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "docker: up opposite-osiris",
+      "type": "shell",
+      "command": "docker compose up -d --build opposite-osiris",
+      "options": {
+        "cwd": "${workspaceFolder}/.."
+      },
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "docker: logs opposite-osiris",
+      "type": "shell",
+      "command": "docker compose logs -f opposite-osiris",
+      "options": {
+        "cwd": "${workspaceFolder}/.."
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "docker: lint",
+      "type": "shell",
+      "command": "./scripts/docker-workflow.sh npm run lint",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "docker: check",
+      "type": "shell",
+      "command": "./scripts/docker-workflow.sh npm run check",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "docker: build",
+      "type": "shell",
+      "command": "./scripts/docker-workflow.sh npm run build",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "docker: shell opposite-osiris",
+      "type": "shell",
+      "command": "./scripts/docker-workflow.sh shell",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

@@ -14,6 +14,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig } from 'astro/config';
+import sitemap from '@astrojs/sitemap';
 import { loadEnv } from 'vite';
 
 const env = loadEnv(process.env.NODE_ENV ?? 'development', process.cwd(), '');
@@ -48,8 +49,8 @@ function devContentSecurityPolicy() {
 		"media-src 'self' data: blob:",
 		"worker-src 'self' blob:",
 		"manifest-src 'self'",
-		"font-src 'self' https://fonts.gstatic.com",
-		"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+		"font-src 'self'",
+		"style-src 'self' 'unsafe-inline'",
 		"script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com",
 		"connect-src 'self' http://localhost:* https://localhost:* ws://localhost:* wss://localhost:*",
 	].join('; ');
@@ -57,7 +58,39 @@ function devContentSecurityPolicy() {
 
 // https://astro.build/config
 export default defineConfig({
+	// Canonical origin for sitemap + <link rel="canonical">. Override per
+	// environment with PUBLIC_SITE_URL (compose sets it; prod sets the real domain).
+	site: env.PUBLIC_SITE_URL ?? 'https://localhost:4322',
+	integrations: [sitemap()],
 	devToolbar: { enabled: false },
+	// Astro generates a per-page CSP <meta> with SHA-256 hashes for every inline
+	// script/style it emits (Astro inlines small hoisted module scripts). This is
+	// what keeps `script-src` strict — 'self' + hashes, NO 'unsafe-inline'. We add
+	// the external script origins (bundle 'self' + Turnstile) and allow inline
+	// style ATTRIBUTES (the `--i`/`--node-color` props, which cannot be hashed).
+	security: {
+		csp: {
+			directives: [
+				"default-src 'self'",
+				"base-uri 'self'",
+				"object-src 'none'",
+				"form-action 'self'",
+				"img-src 'self'",
+				"media-src 'self'",
+				"worker-src 'self'",
+				"manifest-src 'self'",
+				"font-src 'self'",
+				"connect-src 'self' https:",
+				"trusted-types prismatica-static-markup",
+				"require-trusted-types-for 'script'",
+			],
+			scriptDirective: { resources: ["'self'", 'https://challenges.cloudflare.com'] },
+			// No inline style= attributes remain in live pages, so style-src needs
+			// only 'self' (external CSS) + Astro's per-page <style> hashes — no
+			// 'unsafe-inline'. scripts/audit/csp-check.mjs guards this.
+			styleDirective: { resources: ["'self'"] },
+		},
+	},
 	server: {
 		host: env.ASTRO_DEV_HOST ?? 'localhost',
 		port: Number(env.ASTRO_DEV_PORT ?? 4322),

@@ -2,6 +2,7 @@
   "name": "opposite-osiris",
   "type": "module",
   "version": "0.0.1",
+  "packageManager": "pnpm@11.5.1",
   "engines": {
     "node": ">=22.12.0"
   },
@@ -13,6 +14,14 @@
     "check": "node scripts/container-only.mjs astro check",
     "preview": "node scripts/container-only.mjs astro preview --host 0.0.0.0",
     "astro": "node scripts/container-only.mjs astro",
+    "lint": "node scripts/container-only.mjs eslint .",
+    "lint:fix": "node scripts/container-only.mjs eslint . --fix",
+    "lint:css": "node scripts/container-only.mjs stylelint \"src/**/*.scss\"",
+    "lint:css:fix": "node scripts/container-only.mjs stylelint \"src/**/*.scss\" --fix",
+    "lint:html": "node scripts/container-only.mjs html-validate \"dist/**/*.html\"",
+    "audit:a11y": "node scripts/container-only.mjs pa11y http://127.0.0.1:4322/ --config scripts/audit/pa11y.config.json",
+    "audit:csp": "node scripts/container-only.mjs node scripts/audit/csp-check.mjs http://127.0.0.1:4399",
+    "audit:all": "node scripts/container-only.mjs node scripts/audit/run-all.mjs",
     "cert:localhost": "node scripts/container-only.mjs sh ../../apps/baas/scripts/generate-localhost-cert.sh",
     "cert:trust": "node scripts/container-only.mjs sh ../../apps/baas/scripts/trust-localhost-cert.sh",
     "auth:gateway": "node scripts/container-only.mjs node scripts/auth-gateway.mjs",
@@ -39,14 +48,26 @@
   },
   "dependencies": {
     "@astrojs/check": "^0.9.4",
+    "@astrojs/sitemap": "^3.7.3",
     "@mini-baas/js": "file:../../apps/baas/sdk",
     "astro": "^6.2.1",
     "sanitize-html": "^2.17.4",
     "sass": "^1.94.2"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "@types/sanitize-html": "^2.16.1",
-    "typescript": "^5.9.3"
+    "eslint": "^9.39.4",
+    "eslint-plugin-astro": "^1.7.0",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "globals": "^17.6.0",
+    "html-validate": "^11.5.0",
+    "lighthouse": "^13.3.0",
+    "pa11y": "^9.1.1",
+    "stylelint": "^17.12.0",
+    "stylelint-config-standard-scss": "^17.0.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.60.1"
   },
   "overrides": {
     "devalue": "^5.8.1",

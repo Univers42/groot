@@ -28,7 +28,8 @@
 	<div id="mascot-anchor" class="mascot-dock__anchor"></div>
 </aside>
 
-<script is:inline>
+<script>
+	// Bundled (not is:inline) so it loads under a strict `script-src 'self'` CSP.
 	(() => {
 		const dock = document.querySelector('[data-component="mascot-dock"]');
 		if (!dock) return;

@@ -10,43 +10,69 @@
 /*                                                                            */
 /* ************************************************************************** */
 
-// Typography. The live landing page now follows the prototype stack:
+// Typography. The live landing page follows the prototype stack:
 // Space Grotesk for interface text, Instrument Serif for display, JetBrains Mono
-// for code and tiny labels, and Caveat for hand annotations.
+// for code and tiny labels, Caveat for hand annotations, plus Special Elite and
+// Architects Daughter for sketch captions/illustrations.
 //
-// We keep light local() probes here so users who already have a given face
-// installed skip the network entirely. We intentionally do NOT include
-// `src: url('/fonts/*.woff2')` — those self-hosted binaries don't ship in
-// this build and would trigger network 404s in Firefox/Chrome.
+// All faces are SELF-HOSTED (public/fonts/*.woff2, latin subset, variable where
+// available) — no Google Fonts CDN. This removes the render-blocking third-party
+// stylesheet and the pre-consent IP leak to Google (see docs/contrast-audit.md
+// and the GDPR consent flow). A `local()` probe lets users who already have the
+// face installed skip the download entirely.
 
 @font-face {
-	font-family: 'Inter Local';
-	src: local('Inter Regular'), local('Inter-Regular');
+	font-family: 'Space Grotesk';
+	src: local('Space Grotesk'), url('/fonts/space-grotesk.woff2') format('woff2');
+	font-weight: 300 700;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Instrument Serif';
+	src: local('Instrument Serif'), url('/fonts/instrument-serif.woff2') format('woff2');
 	font-weight: 400;
 	font-style: normal;
 	font-display: swap;
 }
 
 @font-face {
-	font-family: 'Inter Local';
-	src: local('Inter Medium'), local('Inter-Medium');
-	font-weight: 500;
+	font-family: 'Instrument Serif';
+	src: local('Instrument Serif Italic'), url('/fonts/instrument-serif-italic.woff2') format('woff2');
+	font-weight: 400;
+	font-style: italic;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'JetBrains Mono';
+	src: local('JetBrains Mono'), url('/fonts/jetbrains-mono.woff2') format('woff2');
+	font-weight: 100 800;
 	font-style: normal;
 	font-display: swap;
 }
 
 @font-face {
-	font-family: 'Inter Local';
-	src: local('Inter SemiBold'), local('Inter-SemiBold');
-	font-weight: 600;
+	font-family: 'Caveat';
+	src: local('Caveat'), url('/fonts/caveat.woff2') format('woff2');
+	font-weight: 400 700;
 	font-style: normal;
 	font-display: swap;
 }
 
 @font-face {
-	font-family: 'Inter Local';
-	src: local('Inter Bold'), local('Inter-Bold');
-	font-weight: 700;
+	font-family: 'Special Elite';
+	src: local('Special Elite'), url('/fonts/special-elite.woff2') format('woff2');
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Architects Daughter';
+	src: local('Architects Daughter'), url('/fonts/architects-daughter.woff2') format('woff2');
+	font-weight: 400;
 	font-style: normal;
 	font-display: swap;
 }

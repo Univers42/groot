@@ -56,6 +56,12 @@
 
 .button--primary {
 	color: var(--button-text);
+	// The visible fill lives on ::before (a pseudo-element contrast checkers and
+	// Windows High Contrast Mode can't see), so tools measured the light label
+	// against the page background and reported ~1:1. Mirror the fill onto the
+	// element itself: the larger rough ::before still defines the silhouette, but
+	// the measured contrast now matches what users see (light text on dark fill).
+	background-color: var(--button-fill);
 }
 
 .button--connect {

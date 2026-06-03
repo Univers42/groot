@@ -18,11 +18,28 @@ git config --global --add safe.directory /workspace 2>/dev/null || true
 APP_DIR=/workspace/apps/opposite-osiris
 SDK_DIR=/workspace/apps/baas/sdk
 STAMP_DIR="$APP_DIR/node_modules/.cache"
-STAMP="$STAMP_DIR/npm-deps.sha256"
+STAMP="$STAMP_DIR/pnpm-deps.sha256"
 SDK_STAMP_DIR="$SDK_DIR/node_modules/.cache"
-SDK_STAMP="$SDK_STAMP_DIR/npm-deps.sha256"
+SDK_STAMP="$SDK_STAMP_DIR/pnpm-deps.sha256"
 
-sdk_hash="$({ find "$SDK_DIR/src" -type f | sort | while IFS= read -r file; do sha256sum "$file"; done; cat "$SDK_DIR/package.json" "$SDK_DIR/package-lock.json" "$SDK_DIR/tsconfig.json"; } | sha256sum | awk '{print $1}')"
+# ---------------------------------------------------------------------------
+# One-time migration: convert npm package-lock.json → pnpm-lock.yaml.
+# Once pnpm-lock.yaml is committed these blocks become a no-op.
+# ---------------------------------------------------------------------------
+if [ ! -f "$SDK_DIR/pnpm-lock.yaml" ] && [ -f "$SDK_DIR/package-lock.json" ]; then
+  echo "[entrypoint] Migrating SDK lock file: package-lock.json → pnpm-lock.yaml ..."
+  (cd "$SDK_DIR" && pnpm import)
+fi
+
+if [ ! -f "$APP_DIR/pnpm-lock.yaml" ] && [ -f "$APP_DIR/package-lock.json" ]; then
+  echo "[entrypoint] Migrating app lock file: package-lock.json → pnpm-lock.yaml ..."
+  (cd "$APP_DIR" && pnpm import)
+fi
+
+# ---------------------------------------------------------------------------
+# SDK: install + build when sources or lock file change
+# ---------------------------------------------------------------------------
+sdk_hash="$({ find "$SDK_DIR/src" -type f | sort | while IFS= read -r file; do sha256sum "$file"; done; cat "$SDK_DIR/package.json" "$SDK_DIR/pnpm-lock.yaml" "$SDK_DIR/tsconfig.json"; } | sha256sum | awk '{print $1}')"
 sdk_cached_hash=""
 
 if [ -f "$SDK_STAMP" ]; then
@@ -31,7 +48,7 @@ fi
 
 if [ ! -d "$SDK_DIR/node_modules" ] || [ "$sdk_cached_hash" != "$sdk_hash" ]; then
   echo "[entrypoint] Installing mini-baas SDK dependencies in Docker volume..."
-  (cd "$SDK_DIR" && npm ci --ignore-scripts && npm run build)
+  (cd "$SDK_DIR" && pnpm install --frozen-lockfile --ignore-scripts && pnpm run build)
   mkdir -p "$SDK_STAMP_DIR"
   printf '%s' "$sdk_hash" > "$SDK_STAMP"
   echo "[entrypoint] SDK dependencies ready."
@@ -39,10 +56,13 @@ else
   echo "[entrypoint] SDK dependencies up to date."
 fi
 
-current_hash="$({ cat package.json package-lock.json ../../apps/baas/sdk/package.json ../../apps/baas/sdk/package-lock.json; printf '%s' "$sdk_hash"; } | sha256sum | awk '{print $1}')"
-cached_hash=""
-
+# ---------------------------------------------------------------------------
+# App: install when package manifest or lock file change
+# ---------------------------------------------------------------------------
 cd "$APP_DIR"
+
+current_hash="$({ cat package.json pnpm-lock.yaml ../../apps/baas/sdk/package.json ../../apps/baas/sdk/pnpm-lock.yaml; printf '%s' "$sdk_hash"; } | sha256sum | awk '{print $1}')"
+cached_hash=""
 
 if [ -f "$STAMP" ]; then
   cached_hash="$(cat "$STAMP")"
@@ -50,7 +70,7 @@ fi
 
 if [ ! -d node_modules ] || [ "$cached_hash" != "$current_hash" ]; then
   echo "[entrypoint] Installing opposite-osiris dependencies in Docker volume..."
-  npm ci --ignore-scripts
+  pnpm install --frozen-lockfile --ignore-scripts
   mkdir -p "$STAMP_DIR"
   printf '%s' "$current_hash" > "$STAMP"
   echo "[entrypoint] Dependencies ready."

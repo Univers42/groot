@@ -76,7 +76,9 @@ const navItems = [
 	</div>
 </header>
 
-<script is:inline>
+<script>
+	// Bundled (not is:inline) so it loads under a strict `script-src 'self'`
+	// CSP — no inline-script allowance needed.
 	(() => {
 		const root = document.querySelector('[data-component="header-new"]');
 		if (!root) return;
