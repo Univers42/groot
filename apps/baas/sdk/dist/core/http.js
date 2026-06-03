@@ -6,7 +6,7 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/06/01 01:37:17 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/06/01 01:51:48 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 import { MiniBaasError, MiniBaasTimeoutError } from './errors.js';

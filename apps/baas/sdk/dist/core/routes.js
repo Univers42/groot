@@ -28,6 +28,26 @@ export const routes = {
     },
     query: {
         execute: '/query/v1/execute',
+        txn: '/query/v1/txn',
+    },
+    webhooks: {
+        root: '/admin/v1/webhooks',
+        one: (id) => `/admin/v1/webhooks/${encodeURIComponent(id)}`,
+        deliveries: (id) => `/admin/v1/webhooks/${encodeURIComponent(id)}/deliveries`,
+    },
+    tenants: {
+        root: '/admin/v1/tenants',
+        one: (id) => `/admin/v1/tenants/${encodeURIComponent(id)}`,
+        bootstrap: (id) => `/admin/v1/tenants/${encodeURIComponent(id)}/bootstrap`,
+        provision: '/admin/v1/provision',
+    },
+    migrate: {
+        run: '/admin/v1/migrate',
+    },
+    functions: {
+        root: '/functions/v1',
+        one: (name) => `/functions/v1/${encodeURIComponent(name)}`,
+        invoke: (name) => `/functions/v1/${encodeURIComponent(name)}/invoke`,
     },
     storage: {
         sign: (bucket, key) => `/storage/v1/sign/${encodeURIComponent(bucket)}/${encodePath(key)}`,

@@ -118,12 +118,63 @@ await baas.analytics.track("user_signed_in", {
 const wsUrl = baas.realtimeUrl("project-events");
 ```
 
+### Transactions
+
+Single-mount atomic write batch — all ops commit together or none do. The
+target engine must be transactional (postgresql/mysql).
+
+```ts
+await baas.txn.execute({
+  databaseId: "default",
+  operations: [
+    { op: "insert", resource: "nodes", data: { id: "n1", label: "A" } },
+    { op: "insert", resource: "edges", data: { from: "n1", to: "n2" } },
+  ],
+});
+```
+
+### Edge functions
+
+```ts
+await baas.functions.deploy({ name: "hello", code: "export default (req) => ({ status: 200, body: { ok: true } });" });
+const fns = await baas.functions.list();
+const out = await baas.functions.invoke<{ ok: boolean }>("hello", { name: "world" });
+```
+
+## Admin-only / server-side clients
+
+The following clients call internal-only gateway routes (`ip-restriction` +
+service token) and **must not be used from a browser**. Construct the client with
+a `serviceRoleKey`; calling these without it throws.
+
+```ts
+const admin = createClient({ url, anonKey, serviceRoleKey: process.env.SERVICE_ROLE_KEY });
+
+// Webhooks (secrets are write-only, never echoed):
+await admin.webhooks.create({ name: "audit", url: "https://hooks.example/x", secret: "s3cr3t" });
+await admin.webhooks.list();
+
+// Tenants + declarative provision:
+await admin.admin.tenants.create({ id: "acme", name: "Acme" });
+await admin.admin.tenants.bootstrap("acme", { seed_roles: true });
+await admin.admin.provision({ tenant: "acme", mounts: [{ engine: "postgresql", name: "db", connection_string: "postgres://..." }] });
+
+// Per-tenant schema migration (Rust data plane):
+await admin.admin.migrate.run({
+  identity: { tenant_id: "acme", user_id: "ops", source: "service_token", roles: ["service_role"] },
+  mount: { id: "m1", tenant_id: "acme", engine: "postgresql", name: "db", credential_ref: { provider: "inline", reference: "db", version: "1" }, inline_dsn: "postgres://..." },
+  name: "create-schema",
+  statements: ["CREATE SCHEMA IF NOT EXISTS tenant_acme"],
+});
+```
+
 ## Architecture
 
 ```text
 Application code
   ↓
-Product SDK domains: auth / from / query / storage / analytics / realtime
+Product SDK domains: auth / from / query / storage / analytics / realtime / txn / functions
+  (+ admin-only: webhooks / admin.tenants / admin.provision / admin.migrate)
   ↓
 Private SDK core: session / retry / timeout / HTTP transport / route map
   ↓

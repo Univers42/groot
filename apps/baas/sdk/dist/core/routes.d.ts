@@ -17,6 +17,26 @@ export declare const routes: {
     };
     readonly query: {
         readonly execute: "/query/v1/execute";
+        readonly txn: "/query/v1/txn";
+    };
+    readonly webhooks: {
+        readonly root: "/admin/v1/webhooks";
+        readonly one: (id: string) => string;
+        readonly deliveries: (id: string) => string;
+    };
+    readonly tenants: {
+        readonly root: "/admin/v1/tenants";
+        readonly one: (id: string) => string;
+        readonly bootstrap: (id: string) => string;
+        readonly provision: "/admin/v1/provision";
+    };
+    readonly migrate: {
+        readonly run: "/admin/v1/migrate";
+    };
+    readonly functions: {
+        readonly root: "/functions/v1";
+        readonly one: (name: string) => string;
+        readonly invoke: (name: string) => string;
     };
     readonly storage: {
         readonly sign: (bucket: string, key: string) => string;
