@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/18 21:19:15 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/18 21:19:15 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/31 17:57:20 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -228,7 +228,7 @@ fi
 # Test 7: Reject forged/invalid JWT
 # ═══════════════════════════════════════════════════════════════════
 ui_step "7. Reject forged JWT"
-FORGED_TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+FORGED_TOKEN="not-a-valid-jwt"
 HTTP=$($CURL -o "$TMPDIR/forged.json" -w "$CURL_FMT" \
   "$BASE_URL/rest/v1/" \
   -H "Authorization: Bearer $FORGED_TOKEN" \

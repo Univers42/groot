@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PostgresService } from '@mini-baas/database';
 import { DecidePermissionDto } from './dto/decision.dto';
 
@@ -11,6 +12,7 @@ export interface PermissionDecision {
   allow: boolean;
   reason: string;
   mask?: FieldMask;
+  mode: PermissionMode;
 }
 
 interface PermissionRow {
@@ -21,11 +23,35 @@ interface ConditionsRow {
   conditions: Record<string, unknown> | null;
 }
 
+/**
+ * Permission model.
+ *
+ * - `abac` (default): roles match the request AND JSONB conditions on
+ *   resource_policies are evaluated; field masks (hide/redact) are returned
+ *   on allow.
+ * - `rbac`: roles match the request; no conditions evaluated, no masks
+ *   returned. Simpler, faster, no JSONB scan per request. Use when product
+ *   doesn't need attribute-level decisions.
+ *
+ * The two modes are mutually exclusive — set `PERMISSION_MODE` once at
+ * deploy time. Switching mid-stream invalidates any per-user cached
+ * decisions in the query-router.
+ */
+export type PermissionMode = 'abac' | 'rbac';
+
 @Injectable()
 export class DecisionsService {
   private readonly logger = new Logger(DecisionsService.name);
+  private readonly mode: PermissionMode;
 
-  constructor(private readonly pg: PostgresService) {}
+  constructor(
+    private readonly pg: PostgresService,
+    config: ConfigService,
+  ) {
+    const raw = (config.get<string>('PERMISSION_MODE', 'abac') ?? 'abac').toLowerCase();
+    this.mode = raw === 'rbac' ? 'rbac' : 'abac';
+    this.logger.log(`DecisionsService running in mode=${this.mode}`);
+  }
 
   async decide(dto: DecidePermissionDto): Promise<PermissionDecision> {
     const action = this.actionForOp(dto.op);
@@ -36,14 +62,17 @@ export class DecisionsService {
     const allow = rows[0]?.has_permission ?? false;
     const decision: PermissionDecision = {
       allow,
-      reason: allow ? 'Allowed by ABAC policy' : 'Denied by ABAC policy',
+      reason: allow ? `Allowed by ${this.mode.toUpperCase()} policy` : `Denied by ${this.mode.toUpperCase()} policy`,
+      mode: this.mode,
     };
-    if (allow) {
+    // RBAC mode short-circuits before mask resolution — that's the whole
+    // point of the simpler mode (no JSONB conditions, no per-field masks).
+    if (allow && this.mode === 'abac') {
       const mask = await this.resolveMask(dto.user.id, dto.resource_type, dto.resource_name, action);
       if (mask) decision.mask = mask;
     }
     this.logger.debug(
-      `ABAC decision user=${dto.user.id} resource=${dto.resource_type}/${dto.resource_name} op=${dto.op} allow=${allow}`,
+      `${this.mode.toUpperCase()} decision user=${dto.user.id} resource=${dto.resource_type}/${dto.resource_name} op=${dto.op} allow=${allow}`,
     );
     return decision;
   }

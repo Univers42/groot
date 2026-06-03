@@ -6,11 +6,12 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/31 21:17:43 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/06/01 22:30:37 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
 export * from './interfaces/user-context.interface';
+export * from './identity/request-identity';
 export * from './guards/auth.guard';
 export * from './guards/roles.guard';
 export * from './guards/optional-auth.guard';
@@ -25,6 +26,7 @@ export * from './observability/observability.module';
 export * from './tracing/otel.bootstrap';
 export * from './security/security.middleware';
 export * from './middleware/idempotency.middleware';
+export * from './middleware/api-key.middleware';
 export * from './audit/audit.service';
 export * from './audit/audit.interceptor';
 export * from './audit/audit.module';

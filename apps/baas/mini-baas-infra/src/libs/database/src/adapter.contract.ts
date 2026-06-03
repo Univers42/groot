@@ -6,7 +6,7 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/31 21:00:00 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/06/01 01:51:48 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/06/01 22:30:38 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -67,8 +67,35 @@ export interface QueryOpts {
   offset?: number;
   /** Calling user id — adapter uses it to enforce RLS / `owner_id` filters. */
   userId?: string;
+  /** Verified tenant id — adapter uses it for tenant filters and RLS. */
+  tenantId?: string;
+  /** Verified project id for future project-scoped mounts/resources. */
+  projectId?: string;
+  /** Verified app/client id for ABAC and auditing. */
+  appId?: string;
   /** Optional `Idempotency-Key` honoured by adapters that support it (M3). */
   idempotencyKey?: string;
+  /** Aggregation request — required when `op = 'aggregate'`, ignored otherwise. */
+  aggregate?: AggregateSpec;
+}
+
+/** An allowlisted SQL aggregate function (mirrors data-plane `AggFunc`). */
+export type AggregateFunc = 'count' | 'sum' | 'avg' | 'min' | 'max';
+
+/** One aggregate output column: `func(field) AS alias`. `field` is omitted for
+ *  `count` (→ `COUNT(*)`), required for the others. */
+export interface AggregateColumn {
+  func: AggregateFunc;
+  field?: string;
+  distinct?: boolean;
+  alias: string;
+}
+
+/** A GROUP BY + aggregate request (mirrors data-plane `AggregateSpec`). The
+ *  operation's `filter` scopes the rows before grouping. */
+export interface AggregateSpec {
+  groupBy?: string[];
+  aggregates: AggregateColumn[];
 }
 
 /** Standard shape returned by every adapter call. */
@@ -78,7 +105,7 @@ export interface QueryResult {
 }
 
 /** Canonical operation set the router dispatches across engines. */
-export type AdapterOp = 'list' | 'get' | 'insert' | 'update' | 'delete' | 'upsert';
+export type AdapterOp = 'list' | 'get' | 'insert' | 'update' | 'delete' | 'upsert' | 'aggregate';
 
 /**
  * Contract every database engine must satisfy to plug into the query-router.

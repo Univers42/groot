@@ -1,0 +1,69 @@
+package adapterregistry
+
+import "fmt"
+
+// allowedEngines mirrors the CHECK constraint on public.tenant_databases.
+var allowedEngines = map[string]bool{
+	"postgresql": true, "mongodb": true, "mysql": true, "redis": true,
+	"sqlite": true, "http": true, "jdbc": true, "cassandra": true,
+	"neo4j": true, "elasticsearch": true, "qdrant": true, "influx": true,
+}
+
+// allowedIsolation mirrors the tenant isolation strategies the data plane
+// understands (see data-plane-core DatabaseMount.isolation).
+var allowedIsolation = map[string]bool{
+	"shared_rls": true, "schema_per_tenant": true, "db_per_tenant": true,
+}
+
+// RegisterDatabaseRequest is the JSON body for POST /databases.
+type RegisterDatabaseRequest struct {
+	Engine           string `json:"engine"`
+	Name             string `json:"name"`
+	ConnectionString string `json:"connection_string"`
+	// Isolation is optional; empty defaults to "shared_rls" at store time.
+	Isolation string `json:"isolation"`
+}
+
+// Validate enforces the same constraints as the Node DTO + DB check.
+func (r RegisterDatabaseRequest) Validate() error {
+	if !allowedEngines[r.Engine] {
+		return fmt.Errorf("unsupported engine %q", r.Engine)
+	}
+	if l := len(r.Name); l < 1 || l > 64 {
+		return fmt.Errorf("name must be 1..64 chars")
+	}
+	if r.ConnectionString == "" {
+		return fmt.Errorf("connection_string is required")
+	}
+	if r.Isolation != "" && !allowedIsolation[r.Isolation] {
+		return fmt.Errorf("unsupported isolation %q", r.Isolation)
+	}
+	return nil
+}
+
+// TenantDatabase is the public metadata view (no secret material).
+type TenantDatabase struct {
+	ID            string  `json:"id"`
+	TenantID      string  `json:"tenant_id"`
+	Engine        string  `json:"engine"`
+	Name          string  `json:"name"`
+	CreatedAt     string  `json:"created_at"`
+	LastHealthyAt *string `json:"last_healthy_at"`
+}
+
+// RegisterResult is returned by POST /databases.
+type RegisterResult struct {
+	ID        string `json:"id"`
+	Engine    string `json:"engine"`
+	Name      string `json:"name"`
+	CreatedAt string `json:"created_at"`
+}
+
+// ConnectionResult is the internal decrypt response for the data plane.
+type ConnectionResult struct {
+	Engine           string `json:"engine"`
+	ConnectionString string `json:"connection_string"`
+	// Isolation tells the data plane how to scope this mount (shared_rls |
+	// schema_per_tenant | db_per_tenant).
+	Isolation string `json:"isolation"`
+}

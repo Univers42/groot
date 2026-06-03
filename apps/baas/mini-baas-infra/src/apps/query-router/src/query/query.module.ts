@@ -14,38 +14,25 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { HttpModule } from '@nestjs/axios';
 import { QueryController } from './query.controller';
+import { TxnController } from './txn.controller';
 import { EnginesController } from './engines.controller';
+import { CapabilitiesController } from './capabilities.controller';
 import { QueryService } from './query.service';
 import { OutboxService } from './outbox.service';
-import { PostgresqlEngine } from '../engines/postgresql.engine';
-import { MongodbEngine } from '../engines/mongodb.engine';
-import { MysqlEngine } from '../engines/mysql.engine';
-import { RedisEngine } from '../engines/redis.engine';
-import { HttpEngine } from '../engines/http.engine';
-import { JdbcEngine } from '../engines/jdbc.engine';
-import { CassandraEngine } from '../engines/cassandra.engine';
-import { Neo4jEngine } from '../engines/neo4j.engine';
-import { ElasticsearchEngine } from '../engines/elasticsearch.engine';
-import { QdrantEngine } from '../engines/qdrant.engine';
-import { InfluxEngine } from '../engines/influx.engine';
+import { RustDataPlaneProxy } from '../proxy/rust-data-plane.proxy';
+import { GraphController } from '../graph/graph.controller';
+import { GraphService } from '../graph/graph.service';
+// All TS engines have been removed. The 5 real engines (postgresql/mongodb/
+// mysql/redis/http) forward to the Rust data-plane-router via
+// RustDataPlaneProxy (see parity-probe.sh). The 6 former stubs
+// (jdbc/cassandra/neo4j/elasticsearch/qdrant/influx) were deleted because
+// they returned NotImplemented on most operations and advertising them in
+// /engines misled SDK consumers. To add a new engine: write a Rust adapter
+// in data-plane-pool and forward it via the proxy.
 
 @Module({
   imports: [ConfigModule, HttpModule],
-  controllers: [QueryController, EnginesController],
-  providers: [
-    QueryService,
-    OutboxService,
-    PostgresqlEngine,
-    MongodbEngine,
-    MysqlEngine,
-    RedisEngine,
-    HttpEngine,
-    JdbcEngine,
-    CassandraEngine,
-    Neo4jEngine,
-    ElasticsearchEngine,
-    QdrantEngine,
-    InfluxEngine,
-  ],
+  controllers: [QueryController, TxnController, EnginesController, CapabilitiesController, GraphController],
+  providers: [QueryService, OutboxService, RustDataPlaneProxy, GraphService],
 })
 export class QueryModule {}

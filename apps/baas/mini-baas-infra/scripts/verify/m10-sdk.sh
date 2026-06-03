@@ -58,14 +58,19 @@ done
 pass "engine catalog declares ENGINE_CAPS + 5 narrowed types"
 
 # ── 2) Catalog matches the server-side registry ──────────────────────────────
-step "checking SDK catalog matches query-router's registered engines"
+# Post-audit: the 5 Rust-backed engines are the only real catalog. The 6
+# former TS stubs (jdbc/cassandra/neo4j/elasticsearch/qdrant/influx) were
+# deleted because they returned NotImplemented on most ops; the SDK no
+# longer ships clients for them either. To add one, write a real Rust
+# adapter first (in data-plane-pool) and re-add to the SDK catalog.
+step "checking SDK catalog covers the 5 Rust-backed engines"
 SERVER_REG="${BAAS_DIR}/src/apps/query-router/src/query/query.service.ts"
 [[ -f "${SERVER_REG}" ]] || fail "${SERVER_REG} missing"
-for engine in postgresql mongodb mysql redis http jdbc cassandra neo4j elasticsearch qdrant influx; do
+for engine in postgresql mongodb mysql redis http; do
   grep -q "^  ${engine}:" "${ENG_FILE}" \
-    || fail "engine '${engine}' is registered in query-router but missing from SDK catalog"
+    || fail "engine '${engine}' is forwarded to Rust but missing from SDK catalog"
 done
-pass "SDK catalog matches the 11 server-side adapters"
+pass "SDK catalog matches the 5 server-side Rust-backed adapters"
 
 # ── 3) Capability-narrowed EngineClient ──────────────────────────────────────
 step "checking engine-clients.ts capability narrowing"
@@ -183,11 +188,17 @@ if [[ ${LIVE} -eq 1 ]]; then
   body=$(docker compose -f "${BAAS_DIR}/docker-compose.yml" exec -T query-router \
     node -e "fetch('http://127.0.0.1:4001/engines').then(r=>r.json()).then(j=>console.log(JSON.stringify(j)))") \
     || fail "GET /engines failed inside query-router"
-  for engine in postgresql mongodb mysql redis http jdbc cassandra neo4j elasticsearch qdrant influx; do
+  for engine in postgresql mongodb mysql redis http; do
     echo "${body}" | jq -e --arg e "${engine}" '.engines | index($e)' >/dev/null \
       || fail "live /engines is missing engine '${engine}'"
   done
-  pass "live /engines matches SDK"
+  # The deleted stubs MUST NOT appear (SDK truth vs catalog truth).
+  for stub in jdbc cassandra neo4j elasticsearch qdrant influx; do
+    if echo "${body}" | jq -e --arg e "${stub}" '.engines | index($e)' >/dev/null; then
+      fail "stub engine '${stub}' should not appear in live /engines post-deletion"
+    fi
+  done
+  pass "live /engines matches SDK (5 real adapters, 0 stubs)"
 
   step "live: codegen-engines.mjs --strict (no drift)"
   ENGINES_URL="http://127.0.0.1:4001/engines" \
@@ -196,15 +207,19 @@ if [[ ${LIVE} -eq 1 ]]; then
     || true   # soft check — most setups don't bind-mount the SDK into the container
 
   step "live: realtime engine /v1/health (HTTP)"
-  rt_health=$(docker compose -f "${BAAS_DIR}/docker-compose.yml" exec -T realtime \
-    sh -c "curl -fsS http://127.0.0.1:4000/v1/health || wget -qO- http://127.0.0.1:4000/v1/health") \
+  # The realtime image is distroless (no shell, no curl/wget), so we probe it
+  # from another container on the same docker network. permission-engine has
+  # wget baked in and depends on the same mini-baas network.
+  rt_health=$(docker compose -f "${BAAS_DIR}/docker-compose.yml" exec -T permission-engine \
+    sh -c "wget -qO- http://realtime:4000/v1/health") \
     || fail "realtime /v1/health unreachable on realtime:4000"
   echo "${rt_health}" | grep -qE 'status|ok|connections' \
     || fail "realtime /v1/health returned unexpected payload: ${rt_health}"
   pass "realtime engine alive and serving /v1/health"
 
   step "live: realtime engine has both PG + Mongo producers wired"
-  rt_env=$(docker compose -f "${BAAS_DIR}/docker-compose.yml" exec -T realtime env)
+  # Distroless image: read env via `docker inspect` rather than exec.
+  rt_env=$(docker inspect mini-baas-realtime --format '{{range .Config.Env}}{{println .}}{{end}}')
   echo "${rt_env}" | grep -q "REALTIME_PG_URL=" \
     || fail "realtime container missing REALTIME_PG_URL at runtime"
   echo "${rt_env}" | grep -q "REALTIME_MONGO_URI=" \
@@ -214,9 +229,10 @@ if [[ ${LIVE} -eq 1 ]]; then
   step "live: Kong forwards /realtime/v1/ws (WS upgrade)"
   # We don't run a full WS handshake here — that needs wscat. We just confirm
   # Kong returns 426 Upgrade Required (= reached the upstream realtime service
-  # which expects WS upgrade) instead of 404.
-  kong_status=$(docker compose -f "${BAAS_DIR}/docker-compose.yml" exec -T kong \
-    sh -c "curl -ksS -o /dev/null -w '%{http_code}\n' https://127.0.0.1:8443/realtime/v1/ws" || true)
+  # which expects WS upgrade) instead of 404. The kong image is slim and ships
+  # without curl, so we probe through the published host port instead.
+  KONG_HTTPS_PORT="${KONG_HTTPS_PORT:-8443}"
+  kong_status=$(curl -ksS -o /dev/null -w '%{http_code}\n' "https://127.0.0.1:${KONG_HTTPS_PORT}/realtime/v1/ws" || true)
   case "${kong_status}" in
     400|426|101|502)
       pass "Kong reaches realtime upstream on /realtime/v1/ws (status=${kong_status})"

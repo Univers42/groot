@@ -1,0 +1,25 @@
+[package]
+name = "data-plane-pool"
+version = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+
+[dependencies]
+data-plane-core = { path = "../data-plane-core" }
+async-trait = { workspace = true }
+bytes = "1"
+chrono = { workspace = true }
+bson = { workspace = true }
+deadpool-postgres = { workspace = true }
+futures = { workspace = true }
+uuid = { workspace = true }
+mongodb = { workspace = true }
+mysql_async = { workspace = true }
+percent-encoding = { workspace = true }
+redis = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tokio-postgres = { workspace = true }
+tracing = { workspace = true }

@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/18 21:19:15 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/18 21:19:15 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/31 17:57:21 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -88,7 +88,13 @@ openssl x509 -req \
   -sha256 \
   -extfile "$SERVER_EXT" >/dev/null 2>&1
 
-chmod 600 "$CA_KEY" "$SERVER_KEY"
+chmod 600 "$CA_KEY"
+if chgrp "${MINI_BAAS_WAF_TLS_GID:-101}" "$SERVER_KEY" 2>/dev/null; then
+  chmod 640 "$SERVER_KEY"
+else
+  chmod 600 "$SERVER_KEY"
+  printf 'Warning: could not set server key group to WAF gid %s; WAF may not read %s.\n' "${MINI_BAAS_WAF_TLS_GID:-101}" "$SERVER_KEY" >&2
+fi
 chmod 644 "$CA_CERT" "$SERVER_CERT"
 rm -f "$SERVER_CSR" "$OPENSSL_CONFIG" "$SERVER_EXT"
 

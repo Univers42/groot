@@ -1,0 +1,1665 @@
+use crate::ident::quote_ident;
+use crate::resolver::MountResolver;
+use async_trait::async_trait;
+use data_plane_core::{
+    AggFunc, Aggregate, CmpOp, DataOperation, DataOperationKind, DataPlaneError, DataPlaneResult,
+    DataResult, DatabaseMount, EngineAdapter, EngineCapabilities, EngineHealth, EnginePool, Filter,
+    Isolation, MigrationRequest, MigrationResult, MigrationStatus, RawStatement, RequestIdentity,
+    ReturningMode, TxBeginRequest, TxHandle,
+};
+use bytes::BytesMut;
+use deadpool_postgres::{Config as DeadpoolConfig, Object, PoolConfig, Runtime};
+use serde_json::Value;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tokio_postgres::types::{to_sql_checked, IsNull, ToSql, Type};
+use tokio_postgres::{GenericClient, NoTls};
+
+type BoxedParam = Box<dyn ToSql + Sync + Send>;
+
+/// PostgreSQL engine adapter. Opens long-lived pools keyed by mount instead of
+/// constructing a client per request (the legacy `new Client()` hot-path cost).
+pub struct PostgresEngineAdapter {
+    resolver: Arc<dyn MountResolver>,
+}
+
+impl PostgresEngineAdapter {
+    #[must_use]
+    pub fn new(resolver: Arc<dyn MountResolver>) -> Self {
+        Self { resolver }
+    }
+}
+
+#[async_trait]
+impl EngineAdapter for PostgresEngineAdapter {
+    fn engine(&self) -> &str {
+        "postgresql"
+    }
+
+    fn capabilities(&self) -> EngineCapabilities {
+        EngineCapabilities::postgresql()
+    }
+
+    fn supported_ops(&self) -> &'static [DataOperationKind] {
+        SUPPORTED_OPS
+    }
+
+    async fn open_pool(&self, mount: DatabaseMount) -> DataPlaneResult<Box<dyn EnginePool>> {
+        let dsn = self.resolver.resolve_dsn(&mount).await?;
+
+        let mut cfg = DeadpoolConfig::new();
+        cfg.url = Some(dsn);
+        cfg.pool = Some(PoolConfig::new(mount.pool_policy.max.max(1) as usize));
+
+        let pool =
+            cfg.create_pool(Some(Runtime::Tokio1), NoTls)
+                .map_err(|e| DataPlaneError::Backend {
+                    message: format!("pool create failed: {e}"),
+                })?;
+
+        // Resolve the isolation strategy ONCE here (parse-once contract). For a
+        // `schema_per_tenant` mount we also derive the `search_path` schema once
+        // now (identity-independent: the schema is per-mount, keyed on the
+        // mount's tenant_id) and cache it — mirroring mysql/mongo/redis, which
+        // resolve their namespace at open_pool. For shared_rls / db_per_tenant
+        // (the default and hot path) this is `None`: the per-request path stays
+        // allocation-free and byte-identical to before G5.
+        let isolation = mount.isolation();
+        let search_path_schema = mount.tenant_schema();
+        Ok(Box::new(PostgresPool {
+            mount_id: mount.id.clone(),
+            tenant_id: mount.tenant_id.clone(),
+            pool,
+            isolation,
+            search_path_schema,
+            mount,
+        }))
+    }
+
+    async fn health_check(&self, pool: &dyn EnginePool) -> DataPlaneResult<EngineHealth> {
+        Ok(EngineHealth {
+            engine: "postgresql".to_string(),
+            mount_id: pool.mount_id().to_string(),
+            status: "unknown".to_string(),
+        })
+    }
+}
+
+/// A pooled PostgreSQL connection set bound to a single mount.
+pub struct PostgresPool {
+    mount_id: String,
+    /// The mount's tenant, captured at `open_pool`, for the defense-in-depth
+    /// cross-check on every `execute`/`begin` (matching mysql/mongo/redis/http).
+    tenant_id: String,
+    pool: deadpool_postgres::Pool,
+    /// The resolved isolation strategy for this mount, parsed once at
+    /// `open_pool`. `SharedRls` (the default) means every request runs exactly
+    /// as it did before G5. Retained for diagnostics / future strategy gates.
+    #[allow(dead_code)]
+    isolation: Isolation,
+    /// The `search_path` schema to pin for this mount, resolved ONCE at
+    /// `open_pool` (the schema is per-mount, not per-request). `Some` only for
+    /// `schema_per_tenant`; `None` (shared_rls / db_per_tenant) is the parity
+    /// path — no `SET LOCAL search_path`, byte-identical to before G5.
+    search_path_schema: Option<String>,
+    /// Retained mount for migration-time schema derivation
+    /// ([`DatabaseMount::tenant_schema`] in `apply_migration`). Cheap: opened
+    /// once per pool, not per request.
+    mount: DatabaseMount,
+}
+
+impl PostgresPool {
+    /// The RLS principal applied via `app.current_user_id`.
+    fn principal(identity: &RequestIdentity) -> &str {
+        identity
+            .user_id
+            .as_deref()
+            .unwrap_or(identity.tenant_id.as_str())
+    }
+
+    /// Defense-in-depth tenant cross-check: the dispatcher (`routes::
+    /// validate_identity_mount`) should already have rejected a tenant/mount
+    /// mismatch, but the pool re-asserts it so a mis-keyed pool can never serve
+    /// a request for the wrong tenant. Matches mysql/mongo/redis/http.
+    fn check_tenant(&self, identity: &RequestIdentity) -> DataPlaneResult<()> {
+        if identity.tenant_id != self.tenant_id {
+            return Err(DataPlaneError::Backend {
+                message: "identity tenant does not match pool tenant".into(),
+            });
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl EnginePool for PostgresPool {
+    fn mount_id(&self) -> &str {
+        &self.mount_id
+    }
+
+    async fn execute(
+        &self,
+        operation: DataOperation,
+        identity: RequestIdentity,
+    ) -> DataPlaneResult<DataResult> {
+        self.check_tenant(&identity)?;
+        let mut client = self.pool.get().await.map_err(|e| DataPlaneError::Backend {
+            message: format!("pool checkout failed: {e}"),
+        })?;
+
+        let tx = client.transaction().await.map_err(|e| backend(&e))?;
+        // deadpool wraps tokio_postgres::Transaction in a newtype that does
+        // not implement GenericClient, so one explicit deref gets us back
+        // to the underlying tokio_postgres::Transaction.
+        apply_rls_context(&*tx, &identity).await?;
+        apply_search_path(&*tx, self.search_path_schema.as_deref()).await?;
+
+        let result = dispatch_op(&*tx, &operation, &identity).await?;
+
+        tx.commit().await.map_err(|e| backend(&e))?;
+        Ok(result)
+    }
+
+    async fn begin(&self, request: TxBeginRequest) -> DataPlaneResult<Box<dyn TxHandle>> {
+        // Multi-statement transaction: check out a conn, run `BEGIN`, set RLS
+        // GUCs once, then return a `PgTxHandle` that pins the conn until the
+        // caller commits or rolls back. The transaction registry in the
+        // server crate holds the handle by `tx_id`.
+        self.check_tenant(&request.identity)?;
+        let client = self.pool.get().await.map_err(|e| DataPlaneError::Backend {
+            message: format!("pool checkout failed: {e}"),
+        })?;
+
+        // Use raw `BEGIN` rather than `client.transaction()` so we can drop
+        // the conn back to the pool at COMMIT/ROLLBACK time without juggling
+        // self-referential lifetimes.
+        let isolation_sql = match request.isolation {
+            Some(data_plane_core::IsolationLevel::ReadCommitted) => {
+                "BEGIN ISOLATION LEVEL READ COMMITTED"
+            }
+            Some(data_plane_core::IsolationLevel::RepeatableRead) => {
+                "BEGIN ISOLATION LEVEL REPEATABLE READ"
+            }
+            Some(data_plane_core::IsolationLevel::Serializable) => {
+                "BEGIN ISOLATION LEVEL SERIALIZABLE"
+            }
+            // PG has no "Snapshot" isolation level; fall back to RR which is
+            // the closest snapshot semantics in standard PG.
+            Some(data_plane_core::IsolationLevel::Snapshot) | None => "BEGIN",
+        };
+        client
+            .execute(isolation_sql, &[])
+            .await
+            .map_err(|e| backend(&e))?;
+        // deadpool::Object derefs to ClientWrapper which derefs to
+        // tokio_postgres::Client (the GenericClient impl). Two derefs gets
+        // us to &Client.
+        apply_rls_context(&**client, &request.identity).await?;
+        apply_search_path(&**client, self.search_path_schema.as_deref()).await?;
+        // (the two-star form lands on the type GenericClient is implemented
+        // for; one-star would still be ClientWrapper.)
+
+        let tx_id = uuid::Uuid::now_v7().to_string();
+        Ok(Box::new(PgTxHandle {
+            tx_id,
+            mount_id: self.mount_id.clone(),
+            client: Mutex::new(client),
+        }))
+    }
+
+    async fn close(&self) -> DataPlaneResult<()> {
+        self.pool.close();
+        Ok(())
+    }
+
+    /// Raw SQL passthrough for admin-scoped callers (DDL, ALTER, indexes,
+    /// aggregations — anything outside safe CRUD). Identity is NOT applied
+    /// as an RLS context here because admin operations explicitly bypass
+    /// tenant scoping; the caller has already been authorised at the route
+    /// layer (`service_role` / `admin` scope).
+    async fn apply_migration(
+        &self,
+        request: MigrationRequest,
+        _identity: RequestIdentity,
+    ) -> DataPlaneResult<MigrationResult> {
+        let mut client = self.pool.get().await.map_err(|e| DataPlaneError::Backend {
+            message: format!("pool checkout failed: {e}"),
+        })?;
+        let tx = client.transaction().await.map_err(|e| backend(&e))?;
+
+        // For schema_per_tenant, the migration (marker table + every DDL/DML
+        // statement) targets the tenant schema: create it if absent and pin the
+        // transaction's `search_path` so unqualified table names in the
+        // migration body land there. For shared / db-per-tenant the schema is
+        // `None` → behaviour is BYTE-IDENTICAL to before G5 (`public`).
+        let schema = self.mount.tenant_schema();
+        if let Some(schema) = schema.as_deref() {
+            // `schema` is pre-sanitized to `[a-z0-9_]` by `safe_schema`, so
+            // interpolating it (DDL/SET cannot bind parameters) is injection-safe.
+            tx.batch_execute(&format!("CREATE SCHEMA IF NOT EXISTS {schema}"))
+                .await
+                .map_err(|e| backend(&e))?;
+            tx.batch_execute(&format!("SET LOCAL search_path TO {schema}, public"))
+                .await
+                .map_err(|e| backend(&e))?;
+        }
+        // Marker table lives in the tenant schema for schema_per_tenant (so each
+        // tenant tracks its own applied set), else in `public` as before.
+        let marker = match schema.as_deref() {
+            Some(schema) => format!("{schema}._baas_migrations"),
+            None => "public._baas_migrations".to_string(),
+        };
+        // Ensure the marker table exists on the tenant DB. Name chosen to be
+        // unlikely to collide with user tables.
+        tx.batch_execute(&format!(
+            "CREATE TABLE IF NOT EXISTS {marker} (
+                name TEXT PRIMARY KEY,
+                applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )"
+        ))
+        .await
+        .map_err(|e| backend(&e))?;
+        let already: Option<tokio_postgres::Row> = tx
+            .query_opt(
+                &format!("SELECT 1 FROM {marker} WHERE name = $1"),
+                &[&request.name],
+            )
+            .await
+            .map_err(|e| backend(&e))?;
+        if already.is_some() {
+            // No COMMIT needed (no mutating statements ran); ROLLBACK is fine.
+            let _ = tx.rollback().await;
+            return Ok(MigrationResult {
+                name: request.name,
+                status: MigrationStatus::Skipped,
+                statements_run: 0,
+            });
+        }
+        let mut run = 0u32;
+        for stmt in &request.statements {
+            tx.batch_execute(stmt).await.map_err(|e| backend(&e))?;
+            run += 1;
+        }
+        tx.execute(
+            &format!("INSERT INTO {marker} (name) VALUES ($1)"),
+            &[&request.name],
+        )
+        .await
+        .map_err(|e| backend(&e))?;
+        tx.commit().await.map_err(|e| backend(&e))?;
+        Ok(MigrationResult {
+            name: request.name,
+            status: MigrationStatus::Applied,
+            statements_run: run,
+        })
+    }
+
+    async fn execute_raw(
+        &self,
+        statement: RawStatement,
+        _identity: RequestIdentity,
+    ) -> DataPlaneResult<DataResult> {
+        let mut client = self.pool.get().await.map_err(|e| DataPlaneError::Backend {
+            message: format!("pool checkout failed: {e}"),
+        })?;
+        let params: Vec<BoxedParam> = statement.params.iter().map(json_param).collect();
+        if statement.expect_rows {
+            let rows = client
+                .query(statement.statement.as_str(), &as_param_refs(&params))
+                .await
+                .map_err(|e| backend(&e))?;
+            // Use `to_jsonb(row)` would require wrapping; instead serialise
+            // each cell into a JSON object keyed by column name.
+            let data: Vec<Value> = rows
+                .iter()
+                .map(|r| {
+                    let mut obj = serde_json::Map::new();
+                    for (idx, col) in r.columns().iter().enumerate() {
+                        let value: Value = r.try_get::<_, Value>(idx).unwrap_or(Value::Null);
+                        obj.insert(col.name().to_string(), value);
+                    }
+                    Value::Object(obj)
+                })
+                .collect();
+            let affected = data.len() as u64;
+            // Re-borrow as mutable just to satisfy the type checker — no
+            // method-call needed here, but the Object is kept alive.
+            let _ = &mut client;
+            Ok(DataResult {
+                rows: data,
+                affected_rows: affected,
+                next_cursor: None,
+            })
+        } else {
+            let affected = client
+                .execute(statement.statement.as_str(), &as_param_refs(&params))
+                .await
+                .map_err(|e| backend(&e))?;
+            Ok(DataResult {
+                rows: vec![],
+                affected_rows: affected,
+                next_cursor: None,
+            })
+        }
+    }
+}
+
+/// Pinned PostgreSQL transaction. Owns the checked-out connection for the
+/// full life of the tx; releases it to the pool when dropped.
+///
+/// Concurrency: `tokio::sync::Mutex` serializes the calls so that two
+/// concurrent `execute()` / `commit()` requests against the same `tx_id`
+/// don't interleave on the wire (which would be a SQL-level corruption).
+pub struct PgTxHandle {
+    tx_id: String,
+    mount_id: String,
+    client: Mutex<Object>,
+}
+
+#[async_trait]
+impl TxHandle for PgTxHandle {
+    fn tx_id(&self) -> &str {
+        &self.tx_id
+    }
+
+    fn mount_id(&self) -> &str {
+        &self.mount_id
+    }
+
+    async fn execute(
+        &self,
+        operation: DataOperation,
+        identity: RequestIdentity,
+    ) -> DataPlaneResult<DataResult> {
+        let client = self.client.lock().await;
+        // MutexGuard → Object → ClientWrapper → Client. Three derefs.
+        dispatch_op(&***client, &operation, &identity).await
+    }
+
+    async fn commit(&self) -> DataPlaneResult<()> {
+        let client = self.client.lock().await;
+        client
+            .execute("COMMIT", &[])
+            .await
+            .map_err(|e| backend(&e))?;
+        Ok(())
+    }
+
+    async fn rollback(&self) -> DataPlaneResult<()> {
+        let client = self.client.lock().await;
+        // Best-effort: if the tx is already aborted, ROLLBACK is a no-op.
+        let _ = client.execute("ROLLBACK", &[]).await;
+        Ok(())
+    }
+
+    async fn prepare(&self) -> DataPlaneResult<()> {
+        // 2PC (`PREPARE TRANSACTION`) is intentionally not exposed; the
+        // capability descriptor declares `two_phase_commit: false`.
+        Err(DataPlaneError::NotImplemented {
+            feature: "postgres PREPARE TRANSACTION (2PC)".to_string(),
+        })
+    }
+}
+
+/// Set the RLS GUCs that the tenant identity needs. Used by both auto-commit
+/// and multi-statement paths. `set_config(..., true)` scopes them to the
+/// current transaction, which is exactly what we want.
+async fn apply_rls_context<C: GenericClient + Sync>(
+    client: &C,
+    identity: &RequestIdentity,
+) -> DataPlaneResult<()> {
+    let principal = PostgresPool::principal(identity).to_string();
+    let tenant = identity.tenant_id.clone();
+    // Build the claims object with serde_json so a `"` or `}` in the identity
+    // cannot inject a chosen `sub` — which is the RLS principal that
+    // `auth.current_user_id()` reads first. Never hand-format the security
+    // principal. (Defense in depth; identity should also be validated upstream.)
+    let claims = serde_json::json!({ "sub": &principal, "tenant_id": &tenant }).to_string();
+    client
+        .execute(
+            "SELECT set_config('app.current_user_id', $1, true), \
+                    set_config('app.current_tenant_id', $2, true), \
+                    set_config('request.jwt.claims', $3, true)",
+            &[&principal, &tenant, &claims],
+        )
+        .await
+        .map_err(|e| backend(&e))?;
+    Ok(())
+}
+
+/// For `schema_per_tenant` mounts, pin the connection's `search_path` to the
+/// tenant schema for the current transaction (`SET LOCAL`). No-op for shared /
+/// db-per-tenant mounts. `public` is kept on the path so shared extensions and
+/// types still resolve. The schema name is pre-sanitized to `[a-z0-9_]` by
+/// [`DatabaseMount::tenant_schema`], so interpolating it here (SET cannot bind
+/// parameters) carries no injection risk.
+async fn apply_search_path<C: GenericClient + Sync>(
+    client: &C,
+    schema: Option<&str>,
+) -> DataPlaneResult<()> {
+    let Some(schema) = schema else {
+        return Ok(());
+    };
+    let sql = format!("SET LOCAL search_path TO {schema}, public");
+    client
+        .execute(sql.as_str(), &[])
+        .await
+        .map_err(|e| backend(&e))?;
+    Ok(())
+}
+
+/// Operation dispatch shared by auto-commit and tx paths.
+/// The operation kinds the Postgres adapter dispatches. `dispatch_op` rejects
+/// anything else; the capability descriptor (`EngineCapabilities::postgresql`)
+/// and the honesty test both derive from this — the single source of truth.
+pub(crate) const SUPPORTED_OPS: &[DataOperationKind] = &[
+    DataOperationKind::List,
+    DataOperationKind::Get,
+    DataOperationKind::Insert,
+    DataOperationKind::Update,
+    DataOperationKind::Delete,
+    DataOperationKind::Upsert,
+    DataOperationKind::Aggregate,
+];
+
+async fn dispatch_op<C: GenericClient + Sync>(
+    client: &C,
+    operation: &DataOperation,
+    identity: &RequestIdentity,
+) -> DataPlaneResult<DataResult> {
+    if !SUPPORTED_OPS.contains(&operation.op) {
+        return Err(DataPlaneError::NotImplemented {
+            feature: format!("postgres operation {:?}", operation.op),
+        });
+    }
+    match &operation.op {
+        DataOperationKind::List => run_list(client, operation).await,
+        DataOperationKind::Get => run_get(client, operation).await,
+        DataOperationKind::Insert => run_insert(client, operation, identity).await,
+        DataOperationKind::Update => run_update(client, operation, identity).await,
+        DataOperationKind::Delete => run_delete(client, operation, identity).await,
+        DataOperationKind::Upsert => run_upsert(client, operation, identity).await,
+        DataOperationKind::Aggregate => run_aggregate(client, operation).await,
+        // Exhaustive by enumeration (no wildcard): deleting a CRUD arm above is a
+        // compile error, so the match can't silently drift from SUPPORTED_OPS.
+        DataOperationKind::Batch => Err(DataPlaneError::NotImplemented {
+            feature: "postgres batch operation (not implemented)".to_string(),
+        }),
+    }
+}
+
+/// Grouped aggregation:
+/// `SELECT to_jsonb(g) FROM (SELECT <group cols>, <agg exprs> FROM t WHERE <filter>
+/// [GROUP BY <group cols>]) g`. Group columns and the filter are scoped by the
+/// per-tenant RLS context (this is a read, like `run_list`). **Safety:** every
+/// identifier (group column, aggregate field, alias) goes through `quote_ident`;
+/// the aggregate function comes from the allowlisted [`AggFunc`] enum, never
+/// client text; filter values are bound parameters.
+async fn run_aggregate<C: GenericClient + Sync>(
+    client: &C,
+    op: &DataOperation,
+) -> DataPlaneResult<DataResult> {
+    let table = quote_ident(&op.resource)?;
+    let spec = op
+        .aggregate
+        .as_ref()
+        .ok_or_else(|| DataPlaneError::InvalidRequest {
+            message: "aggregate requires an `aggregate` spec".to_string(),
+        })?;
+    if spec.aggregates.is_empty() {
+        return Err(DataPlaneError::InvalidRequest {
+            message: "aggregate requires at least one aggregate function".to_string(),
+        });
+    }
+    // Output column names (group columns + aggregate aliases) must be unique:
+    // a collision would make `to_jsonb` silently drop one value.
+    let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for name in spec
+        .group_by
+        .iter()
+        .map(String::as_str)
+        .chain(spec.aggregates.iter().map(|a| a.alias.as_str()))
+    {
+        if !seen.insert(name) {
+            return Err(DataPlaneError::InvalidRequest {
+                message: format!("duplicate aggregate output column '{name}'"),
+            });
+        }
+    }
+
+    let mut select_cols: Vec<String> =
+        Vec::with_capacity(spec.group_by.len() + spec.aggregates.len());
+    let mut group_cols: Vec<String> = Vec::with_capacity(spec.group_by.len());
+    for col in &spec.group_by {
+        let ident = quote_ident(col)?;
+        select_cols.push(ident.clone());
+        group_cols.push(ident);
+    }
+    for agg in &spec.aggregates {
+        select_cols.push(build_aggregate_expr(agg)?);
+    }
+
+    let mut params: Vec<BoxedParam> = Vec::new();
+    let where_sql = build_where(op.filter.as_ref(), &mut params)?;
+    let group_sql = if group_cols.is_empty() {
+        String::new()
+    } else {
+        format!(" GROUP BY {}", group_cols.join(", "))
+    };
+    // `op.sort` orders the output (a group column or an aggregate alias); `LIMIT`
+    // bounds the result so a high-cardinality `group_by` can't return unbounded
+    // rows.
+    let order_sql = build_order_by(op.sort.as_ref())?;
+    let limit = op.limit.unwrap_or(1000).min(10_000) as i64;
+    params.push(Box::new(limit));
+    let limit_idx = params.len();
+    let sql = format!(
+        "SELECT to_jsonb(g) AS row FROM (SELECT {} FROM {table} t{where_sql}{group_sql}) g{order_sql} LIMIT ${limit_idx}",
+        select_cols.join(", ")
+    );
+    let rows = client
+        .query(sql.as_str(), &as_param_refs(&params))
+        .await
+        .map_err(|e| backend(&e))?;
+    let data: Vec<Value> = rows.iter().map(|r| r.get::<_, Value>("row")).collect();
+    let affected = data.len() as u64;
+    Ok(DataResult {
+        rows: data,
+        affected_rows: affected,
+        next_cursor: None,
+    })
+}
+
+/// Builds one `func(arg) AS alias` aggregate expression. `func` is the
+/// allowlisted enum; `arg` is `*` for `count` with no field, else the quoted
+/// `field`; `sum`/`avg`/`min`/`max` require a field.
+fn build_aggregate_expr(agg: &Aggregate) -> DataPlaneResult<String> {
+    let alias = quote_ident(&agg.alias)?;
+    let func = match agg.func {
+        AggFunc::Count => "count",
+        AggFunc::Sum => "sum",
+        AggFunc::Avg => "avg",
+        AggFunc::Min => "min",
+        AggFunc::Max => "max",
+    };
+    let arg = match (&agg.field, agg.func) {
+        (Some(field), _) => quote_ident(field)?,
+        // `count(*)` only without DISTINCT; everything else needs a field.
+        (None, AggFunc::Count) if !agg.distinct => "*".to_string(),
+        (None, _) => {
+            return Err(DataPlaneError::InvalidRequest {
+                message: format!("aggregate '{func}' requires a `field`"),
+            })
+        }
+    };
+    let distinct = if agg.distinct { "DISTINCT " } else { "" };
+    Ok(format!("{func}({distinct}{arg}) AS {alias}"))
+}
+
+fn backend(e: &tokio_postgres::Error) -> DataPlaneError {
+    // SQLSTATE class 23 = integrity constraint violation (unique/PK, foreign key,
+    // not-null, check). That's the caller's fault (409 Conflict), not an engine
+    // failure (5xx). Use the DB error's own message (the top-level Display is
+    // just "db error") so the client learns *what* conflicted.
+    if let Some(db) = e.as_db_error() {
+        if db.code().code().starts_with("23") {
+            return DataPlaneError::Conflict {
+                message: db.message().to_string(),
+            };
+        }
+    }
+    DataPlaneError::Backend {
+        message: e.to_string(),
+    }
+}
+
+/// Boxes a JSON value as a Postgres parameter whose wire encoding adapts to the
+/// target column type (see [`JsonParam`]). One boxed param per value; the
+/// adaptation happens later, at serialize time, when the column type is known.
+fn json_param(value: &Value) -> BoxedParam {
+    Box::new(JsonParam(value.clone()))
+}
+
+/// A JSON value bound as a Postgres parameter whose binary encoding is chosen
+/// from the *target column type*, not from the JSON shape.
+///
+/// Postgres infers each `$n` placeholder's type from its use site (the column it
+/// is assigned to or compared against) during `PREPARE`, so by the time
+/// `to_sql` runs we know `ty` and can pick `i16`/`i32`/`i64`, `f32`/`f64`, a
+/// parsed `uuid`/timestamp, text, bool, or a jsonb document. The previous
+/// "every JSON integer is an `i64`" binding could not serialize into `int2`/
+/// `int4` columns (`error serializing parameter`); this adapts instead.
+///
+/// `accepts` returns `true` for every type: we adapt inside `to_sql`. A genuine
+/// mismatch (a JSON string for an `int4`/`bytea` column, a number for `numeric`)
+/// is rejected by the inner `to_sql_checked` delegation as a `WrongType`
+/// serialization error — never written as garbage bytes. That error currently
+/// surfaces as a `Backend` (502); reclassifying serialization failures as
+/// `InvalidRequest` (400), and adding real `numeric`/array support, is the
+/// shared value-coercion follow-up tracked in product-plan doc 02.
+#[derive(Debug)]
+struct JsonParam(Value);
+
+impl ToSql for JsonParam {
+    fn to_sql(
+        &self,
+        ty: &Type,
+        out: &mut BytesMut,
+    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>> {
+        // For the fall-through arms we delegate through `to_sql_checked` (not the
+        // raw `to_sql`) so the inner type's own `accepts` runs: a genuine
+        // mismatch (a JSON string for an `int4`/`bytea` column, a number for
+        // `numeric`) becomes a clean `WrongType` serialization error instead of
+        // garbage bytes written under that column's binary OID. Without this,
+        // `bytea` (which accepts any bytes) and length-coincident cases would be
+        // silently corrupted. The explicit arms already match `ty`, so they use
+        // the cheaper `to_sql`.
+        match &self.0 {
+            Value::Null => Ok(IsNull::Yes),
+            Value::Bool(b) => b.to_sql_checked(ty, out),
+            Value::Number(n) => match *ty {
+                Type::INT2 => i16::try_from(json_i64(n)?)?.to_sql(ty, out),
+                Type::INT4 => i32::try_from(json_i64(n)?)?.to_sql(ty, out),
+                Type::INT8 => json_i64(n)?.to_sql(ty, out),
+                Type::FLOAT4 => {
+                    (n.as_f64().ok_or("number is not representable as f64")? as f32).to_sql(ty, out)
+                }
+                Type::FLOAT8 => n.as_f64().ok_or("number is not representable as f64")?.to_sql(ty, out),
+                // json/jsonb → number document; numeric/anything else → checked
+                // delegate, which rejects a true mismatch rather than corrupt it.
+                _ => self.0.to_sql_checked(ty, out),
+            },
+            Value::String(s) => match *ty {
+                Type::UUID => s.parse::<uuid::Uuid>()?.to_sql(ty, out),
+                Type::TIMESTAMPTZ => s.parse::<chrono::DateTime<chrono::Utc>>()?.to_sql(ty, out),
+                Type::TIMESTAMP => s.parse::<chrono::NaiveDateTime>()?.to_sql(ty, out),
+                Type::DATE => s.parse::<chrono::NaiveDate>()?.to_sql(ty, out),
+                Type::JSON | Type::JSONB => self.0.to_sql(ty, out),
+                // text/varchar/bpchar/name accept the string; a non-text column
+                // (int4, bytea, …) is rejected by the inner `accepts`.
+                _ => s.to_sql_checked(ty, out),
+            },
+            // arrays and objects are sent as a jsonb document (rejected if the
+            // column is not json/jsonb).
+            other => other.to_sql_checked(ty, out),
+        }
+    }
+
+    fn accepts(_ty: &Type) -> bool {
+        true
+    }
+
+    to_sql_checked!();
+}
+
+/// Coerces a JSON number to `i64` for integer columns, accepting an
+/// integral-valued float (`3.0`) as well as a JSON integer (`3`).
+fn json_i64(n: &serde_json::Number) -> Result<i64, Box<dyn std::error::Error + Sync + Send>> {
+    if let Some(i) = n.as_i64() {
+        return Ok(i);
+    }
+    if let Some(f) = n.as_f64() {
+        if f.fract() == 0.0 && f >= i64::MIN as f64 && f <= i64::MAX as f64 {
+            return Ok(f as i64);
+        }
+    }
+    Err(format!("number {n} is not an integer").into())
+}
+
+fn as_param_refs(params: &[BoxedParam]) -> Vec<&(dyn ToSql + Sync)> {
+    params
+        .iter()
+        .map(|p| p.as_ref() as &(dyn ToSql + Sync))
+        .collect()
+}
+
+/// A compiled predicate, with **constant folding** so a filter that reduces to a
+/// tautology (`NOT (FALSE)`, `a OR TRUE`) is recognised as [`Pred::Unconstrained`]
+/// and refused by the mutation guards — never silently turned into `WHERE TRUE`.
+/// Constants never carry bound params (the params of a discarded branch are
+/// rolled back), so placeholder numbering stays correct.
+#[derive(Debug)]
+enum Pred {
+    /// Constrains nothing (logical TRUE) → rendered as no `WHERE` clause, so
+    /// update/delete's empty-filter guard fires.
+    Unconstrained,
+    /// Matches no rows (logical FALSE) → rendered as `FALSE`. A real predicate.
+    AlwaysFalse,
+    /// A concrete SQL boolean expression referencing bound params.
+    Sql(String),
+}
+
+/// Wraps [`compile_filter`] into a ` WHERE …` clause. A tautology folds to
+/// `Unconstrained` → `""`, so the no-full-table guard on update/delete fires;
+/// an explicit match-nothing (`$or:[]`, `$in:[]`) renders ` WHERE FALSE`.
+fn build_where(filter: Option<&Value>, params: &mut Vec<BoxedParam>) -> DataPlaneResult<String> {
+    Ok(match compile_filter(filter, params)? {
+        Pred::Unconstrained => String::new(),
+        Pred::AlwaysFalse => " WHERE FALSE".to_string(),
+        // Parenthesize the whole client predicate so a caller that appends an
+        // owner predicate (`{where_sql} AND owner_id = $n` in update/delete) ANDs
+        // it as one unit — a top-level `$or` must not leave a branch unscoped.
+        Pred::Sql(clause) => format!(" WHERE ({clause})"),
+    })
+}
+
+/// Parses the JSON filter into the shared engine-neutral [`Filter`] tree (the
+/// single grammar + validation, in `data-plane-core`) and lowers it to a
+/// Postgres boolean [`Pred`]. `None` constrains nothing. A thin wrapper so
+/// `build_where` and the unit tests share one entry point.
+fn compile_filter(filter: Option<&Value>, params: &mut Vec<BoxedParam>) -> DataPlaneResult<Pred> {
+    match filter {
+        Some(value) => lower_pg(&Filter::parse(value)?, params),
+        None => Ok(Pred::Unconstrained),
+    }
+}
+
+/// Joins AND-parts into a [`Pred`]; an empty set constrains nothing.
+fn and_join(parts: Vec<String>) -> Pred {
+    if parts.is_empty() {
+        Pred::Unconstrained
+    } else {
+        Pred::Sql(parts.join(" AND "))
+    }
+}
+
+/// `NOT` with constant folding: `NOT TRUE = FALSE`, `NOT FALSE = TRUE`.
+fn negate(p: Pred) -> Pred {
+    match p {
+        Pred::Unconstrained => Pred::AlwaysFalse,
+        Pred::AlwaysFalse => Pred::Unconstrained,
+        Pred::Sql(s) => Pred::Sql(format!("NOT ({s})")),
+    }
+}
+
+/// Lowers an engine-neutral [`Filter`] (already parsed + validated by
+/// `data-plane-core`) to a Postgres boolean [`Pred`], pushing every value as a
+/// bound `$n` parameter. Identifiers via `quote_ident`; comparison symbols are
+/// fixed — values are never interpolated. The [`Pred`] folding gives the mutation
+/// guard (a tautology → `Unconstrained` → empty `WHERE` → refused).
+fn lower_pg(filter: &Filter, params: &mut Vec<BoxedParam>) -> DataPlaneResult<Pred> {
+    Ok(match filter {
+        Filter::And(parts) => lower_and(parts, params)?,
+        Filter::Or(parts) => lower_or(parts, params)?,
+        Filter::Not(inner) => negate(lower_pg(inner, params)?),
+        Filter::Cmp { field, op, value } => {
+            let ident = quote_ident(field)?;
+            params.push(json_param(value));
+            Pred::Sql(format!("{ident} {} ${}", cmp_sql(*op), params.len()))
+        }
+        Filter::In { field, values } => {
+            let ident = quote_ident(field)?;
+            if values.is_empty() {
+                Pred::AlwaysFalse // `x IN ()` matches nothing
+            } else {
+                let mut ph = Vec::with_capacity(values.len());
+                for v in values {
+                    params.push(json_param(v));
+                    ph.push(format!("${}", params.len()));
+                }
+                Pred::Sql(format!("{ident} IN ({})", ph.join(", ")))
+            }
+        }
+        Filter::Like { field, pattern, ci } => {
+            let ident = quote_ident(field)?;
+            params.push(json_param(pattern));
+            Pred::Sql(format!(
+                "{ident} {} ${}",
+                if *ci { "ILIKE" } else { "LIKE" },
+                params.len()
+            ))
+        }
+        Filter::Between { field, low, high } => {
+            let ident = quote_ident(field)?;
+            params.push(json_param(low));
+            let lo = params.len();
+            params.push(json_param(high));
+            let hi = params.len();
+            Pred::Sql(format!("{ident} BETWEEN ${lo} AND ${hi}"))
+        }
+        Filter::IsNull { field, negate } => {
+            let ident = quote_ident(field)?;
+            Pred::Sql(format!("{ident} IS {}NULL", if *negate { "NOT " } else { "" }))
+        }
+    })
+}
+
+/// AND-combine: fold `AlwaysFalse` (rolling back its params) and drop
+/// `Unconstrained`; an empty/all-true set constrains nothing.
+fn lower_and(parts: &[Filter], params: &mut Vec<BoxedParam>) -> DataPlaneResult<Pred> {
+    let start = params.len();
+    let mut sql_parts: Vec<String> = Vec::with_capacity(parts.len());
+    for part in parts {
+        match lower_pg(part, params)? {
+            Pred::AlwaysFalse => {
+                params.truncate(start);
+                return Ok(Pred::AlwaysFalse);
+            }
+            Pred::Unconstrained => {}
+            Pred::Sql(s) => sql_parts.push(s),
+        }
+    }
+    Ok(and_join(sql_parts))
+}
+
+/// OR-combine: fold `Unconstrained` to TRUE (rolling back params) and drop
+/// `AlwaysFalse`; an empty/all-false `$or` matches nothing.
+fn lower_or(parts: &[Filter], params: &mut Vec<BoxedParam>) -> DataPlaneResult<Pred> {
+    let start = params.len();
+    let mut sql_parts: Vec<String> = Vec::with_capacity(parts.len());
+    for part in parts {
+        match lower_pg(part, params)? {
+            Pred::Sql(s) => sql_parts.push(s),
+            Pred::AlwaysFalse => {} // OR FALSE = identity
+            Pred::Unconstrained => {
+                params.truncate(start);
+                return Ok(Pred::Unconstrained); // OR TRUE = TRUE
+            }
+        }
+    }
+    if sql_parts.is_empty() {
+        return Ok(Pred::AlwaysFalse);
+    }
+    let ored: Vec<String> = sql_parts.into_iter().map(|p| format!("({p})")).collect();
+    Ok(Pred::Sql(ored.join(" OR ")))
+}
+
+fn cmp_sql(op: CmpOp) -> &'static str {
+    match op {
+        CmpOp::Eq => "=",
+        CmpOp::Ne => "<>",
+        CmpOp::Lt => "<",
+        CmpOp::Lte => "<=",
+        CmpOp::Gt => ">",
+        CmpOp::Gte => ">=",
+    }
+}
+
+/// Compiles the `sort` map (`{column: "asc"|"desc"}`) into ` ORDER BY …`, or
+/// `""` when absent. Columns via `quote_ident`; direction is an allowlist. The
+/// `BTreeMap` iterates in key order, so the clause is deterministic.
+fn build_order_by(
+    sort: Option<&std::collections::BTreeMap<String, String>>,
+) -> DataPlaneResult<String> {
+    let Some(sort) = sort.filter(|s| !s.is_empty()) else {
+        return Ok(String::new());
+    };
+    let mut parts = Vec::with_capacity(sort.len());
+    for (col, dir) in sort {
+        let ident = quote_ident(col)?;
+        let dir_sql = match dir.to_ascii_lowercase().as_str() {
+            "asc" => "ASC",
+            "desc" => "DESC",
+            other => {
+                return Err(DataPlaneError::InvalidRequest {
+                    message: format!("invalid sort direction '{other}' (use 'asc' or 'desc')"),
+                })
+            }
+        };
+        parts.push(format!("{ident} {dir_sql}"));
+    }
+    Ok(format!(" ORDER BY {}", parts.join(", ")))
+}
+
+async fn run_list<C: GenericClient + Sync>(
+    client: &C,
+    op: &DataOperation,
+) -> DataPlaneResult<DataResult> {
+    let table = quote_ident(&op.resource)?;
+    let mut params: Vec<BoxedParam> = Vec::new();
+    let where_sql = build_where(op.filter.as_ref(), &mut params)?;
+    let order_sql = build_order_by(op.sort.as_ref())?;
+
+    let limit = op.limit.unwrap_or(100).min(1000) as i64;
+    let offset = op.offset.unwrap_or(0) as i64;
+    params.push(Box::new(limit));
+    let limit_idx = params.len();
+    params.push(Box::new(offset));
+    let offset_idx = params.len();
+
+    let sql = format!(
+        "SELECT to_jsonb(t) AS row FROM {table} t{where_sql}{order_sql} LIMIT ${limit_idx} OFFSET ${offset_idx}"
+    );
+    let rows = client
+        .query(sql.as_str(), &as_param_refs(&params))
+        .await
+        .map_err(|e| backend(&e))?;
+
+    let data: Vec<Value> = rows.iter().map(|r| r.get::<_, Value>("row")).collect();
+    let affected = data.len() as u64;
+    Ok(DataResult {
+        rows: data,
+        affected_rows: affected,
+        next_cursor: None,
+    })
+}
+
+async fn run_get<C: GenericClient + Sync>(
+    client: &C,
+    op: &DataOperation,
+) -> DataPlaneResult<DataResult> {
+    let table = quote_ident(&op.resource)?;
+    let mut params: Vec<BoxedParam> = Vec::new();
+    let where_sql = build_where(op.filter.as_ref(), &mut params)?;
+
+    let sql = format!("SELECT to_jsonb(t) AS row FROM {table} t{where_sql} LIMIT 1");
+    let row = client
+        .query_opt(sql.as_str(), &as_param_refs(&params))
+        .await
+        .map_err(|e| backend(&e))?;
+
+    let data: Vec<Value> = row
+        .map(|r| vec![r.get::<_, Value>("row")])
+        .unwrap_or_default();
+    let affected = data.len() as u64;
+    Ok(DataResult {
+        rows: data,
+        affected_rows: affected,
+        next_cursor: None,
+    })
+}
+
+async fn run_insert<C: GenericClient + Sync>(
+    client: &C,
+    op: &DataOperation,
+    identity: &RequestIdentity,
+) -> DataPlaneResult<DataResult> {
+    let table = quote_ident(&op.resource)?;
+    let Some(Value::Object(map)) = op.data.as_ref() else {
+        return Err(DataPlaneError::InvalidRequest {
+            message: "insert requires a JSON object in `data`".to_string(),
+        });
+    };
+    if map.is_empty() {
+        return Err(DataPlaneError::InvalidRequest {
+            message: "insert `data` must not be empty".to_string(),
+        });
+    }
+
+    // Strip any client-supplied owner_id (server controls tenant scope) and
+    // re-inject the trusted value from the verified identity. Matches the
+    // defensive posture of the Mongo + MySQL adapters. Required because
+    // tenant tables typically declare `owner_id NOT NULL` and the per-row
+    // RLS policy compares it against `auth.current_user_id()`.
+    let owner = PostgresPool::principal(identity).to_string();
+    let mut columns = Vec::with_capacity(map.len() + 1);
+    let mut placeholders = Vec::with_capacity(map.len() + 1);
+    let mut params: Vec<BoxedParam> = Vec::with_capacity(map.len() + 1);
+    let mut saw_owner_id = false;
+    for (col, val) in map {
+        if col == "owner_id" {
+            // drop client override; trusted value injected below
+            saw_owner_id = true;
+            continue;
+        }
+        columns.push(quote_ident(col)?);
+        params.push(json_param(val));
+        placeholders.push(format!("${}", params.len()));
+    }
+    let _ = saw_owner_id; // reserved for future audit logging
+    columns.push(quote_ident("owner_id")?);
+    params.push(Box::new(owner));
+    placeholders.push(format!("${}", params.len()));
+
+    let sql = format!(
+        "INSERT INTO {table} AS t ({}) VALUES ({}) RETURNING to_jsonb(t) AS row",
+        columns.join(", "),
+        placeholders.join(", ")
+    );
+    let row = client
+        .query_one(sql.as_str(), &as_param_refs(&params))
+        .await
+        .map_err(|e| backend(&e))?;
+
+    Ok(DataResult {
+        rows: vec![row.get::<_, Value>("row")],
+        affected_rows: 1,
+        next_cursor: None,
+    })
+}
+
+// ── Mutating-op statement builders (pure; unit-tested below) ────────────────
+//
+// Each assembles the SQL + bound params for a mutating op. Invariants enforced
+// here (so they're testable without a live DB):
+//   * identifiers via `quote_ident` (allowlist), values via bound `$n` params;
+//   * column order canonicalised (sorted) → one cached prepared statement per
+//     shape regardless of JSON key order (serde_json preserves wire order here);
+//   * `owner_id` server-controlled — stripped from client `data`, injected as
+//     the trusted value, kept out of any SET, and added as a WHERE / conflict
+//     predicate (defense in depth alongside RLS, matching the Mongo/MySQL
+//     adapters);
+//   * target table aliased `t` so `to_jsonb(t)` is correct even for a
+//     schema-qualified resource;
+//   * `returning=false` omits RETURNING (count-only, no row materialisation) —
+//     honoring `ReturningMode::None`.
+
+/// Sorted, owner_id-stripped (column, value) pairs from a JSON object.
+fn writable_columns(data: &serde_json::Map<String, Value>) -> Vec<(&str, &Value)> {
+    let mut cols: Vec<(&str, &Value)> = data
+        .iter()
+        .filter(|(k, _)| k.as_str() != "owner_id")
+        .map(|(k, v)| (k.as_str(), v))
+        .collect();
+    cols.sort_by(|a, b| a.0.cmp(b.0));
+    cols
+}
+
+fn build_update_sql(
+    table: &str,
+    data: &serde_json::Map<String, Value>,
+    filter: Option<&Value>,
+    owner: &str,
+    returning: bool,
+) -> DataPlaneResult<(String, Vec<BoxedParam>)> {
+    let mut params: Vec<BoxedParam> = Vec::with_capacity(data.len() + 2);
+    let mut assignments: Vec<String> = Vec::with_capacity(data.len());
+    for (col, val) in writable_columns(data) {
+        let ident = quote_ident(col)?;
+        params.push(json_param(val));
+        assignments.push(format!("{ident} = ${}", params.len()));
+    }
+    if assignments.is_empty() {
+        return Err(DataPlaneError::InvalidRequest {
+            message: "update `data` has no updatable columns".to_string(),
+        });
+    }
+    let where_sql = build_where(filter, &mut params)?;
+    if where_sql.is_empty() {
+        return Err(DataPlaneError::InvalidRequest {
+            message: "update requires a non-empty `filter` (refusing full-table update)".to_string(),
+        });
+    }
+    params.push(Box::new(owner.to_string()));
+    let owner_pred = format!(" AND {} = ${}", quote_ident("owner_id")?, params.len());
+    let ret = if returning { " RETURNING to_jsonb(t) AS row" } else { "" };
+    let sql = format!(
+        "UPDATE {table} AS t SET {}{where_sql}{owner_pred}{ret}",
+        assignments.join(", ")
+    );
+    Ok((sql, params))
+}
+
+fn build_delete_sql(
+    table: &str,
+    filter: Option<&Value>,
+    owner: &str,
+    returning: bool,
+) -> DataPlaneResult<(String, Vec<BoxedParam>)> {
+    let mut params: Vec<BoxedParam> = Vec::with_capacity(4);
+    let where_sql = build_where(filter, &mut params)?;
+    if where_sql.is_empty() {
+        return Err(DataPlaneError::InvalidRequest {
+            message: "delete requires a non-empty `filter` (refusing full-table delete)".to_string(),
+        });
+    }
+    params.push(Box::new(owner.to_string()));
+    let owner_pred = format!(" AND {} = ${}", quote_ident("owner_id")?, params.len());
+    let ret = if returning { " RETURNING to_jsonb(t) AS row" } else { "" };
+    let sql = format!("DELETE FROM {table} AS t{where_sql}{owner_pred}{ret}");
+    Ok((sql, params))
+}
+
+fn build_upsert_sql(
+    table: &str,
+    data: &serde_json::Map<String, Value>,
+    filter: &serde_json::Map<String, Value>,
+    owner: &str,
+    returning: bool,
+) -> DataPlaneResult<(String, Vec<BoxedParam>)> {
+    let cap = data.len() + filter.len() + 1;
+    let mut columns: Vec<String> = Vec::with_capacity(cap);
+    let mut placeholders: Vec<String> = Vec::with_capacity(cap);
+    let mut params: Vec<BoxedParam> = Vec::with_capacity(cap);
+    // owner_id is part of the conflict target so ON CONFLICT arbitration (done
+    // at the unique index, below RLS) is tenant-local — a tenant cannot collide
+    // with another tenant's row. Requires a UNIQUE index on (owner_id, key…).
+    let mut conflict_cols: Vec<String> = vec![quote_ident("owner_id")?];
+    let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    seen.insert("owner_id");
+
+    let mut keys: Vec<(&str, &Value)> = filter
+        .iter()
+        .filter(|(k, _)| k.as_str() != "owner_id")
+        .map(|(k, v)| (k.as_str(), v))
+        .collect();
+    keys.sort_by(|a, b| a.0.cmp(b.0));
+    for (col, val) in keys {
+        let ident = quote_ident(col)?;
+        conflict_cols.push(ident.clone());
+        columns.push(ident);
+        params.push(json_param(val));
+        placeholders.push(format!("${}", params.len()));
+        seen.insert(col);
+    }
+    if conflict_cols.len() == 1 {
+        return Err(DataPlaneError::InvalidRequest {
+            message: "upsert `filter` (conflict key) must not be empty".to_string(),
+        });
+    }
+
+    let mut assignments: Vec<String> = Vec::new();
+    for (col, val) in writable_columns(data) {
+        if seen.contains(col) {
+            continue;
+        }
+        let ident = quote_ident(col)?;
+        columns.push(ident.clone());
+        params.push(json_param(val));
+        placeholders.push(format!("${}", params.len()));
+        assignments.push(format!("{ident} = EXCLUDED.{ident}"));
+        seen.insert(col);
+    }
+
+    // owner_id value, server-injected (immutable on conflict → not in SET).
+    columns.push(quote_ident("owner_id")?);
+    params.push(Box::new(owner.to_string()));
+    placeholders.push(format!("${}", params.len()));
+
+    if assignments.is_empty() {
+        // Only key columns supplied → re-assert a conflict key (no-op SET) so
+        // DO UPDATE fires and RETURNING still yields the row.
+        let first = conflict_cols
+            .get(1)
+            .expect("a non-owner conflict column exists (checked above)");
+        assignments.push(format!("{first} = EXCLUDED.{first}"));
+    }
+
+    let ret = if returning { " RETURNING to_jsonb(t) AS row" } else { "" };
+    let sql = format!(
+        "INSERT INTO {table} AS t ({}) VALUES ({}) ON CONFLICT ({}) DO UPDATE SET {}{ret}",
+        columns.join(", "),
+        placeholders.join(", "),
+        conflict_cols.join(", "),
+        assignments.join(", ")
+    );
+    Ok((sql, params))
+}
+
+/// Run a mutating statement. With `want_rows`, RETURNING rows are collected and
+/// counted; otherwise `execute` returns the affected count with no row
+/// materialisation. Used by update/delete/upsert alike — so an RLS-suppressed
+/// upsert `DO UPDATE` is an honest 0-row result, not a `query_one` 500.
+async fn execute_mutation<C: GenericClient + Sync>(
+    client: &C,
+    sql: &str,
+    params: &[BoxedParam],
+    want_rows: bool,
+) -> DataPlaneResult<DataResult> {
+    if want_rows {
+        let rows = client
+            .query(sql, &as_param_refs(params))
+            .await
+            .map_err(|e| backend(&e))?;
+        let data: Vec<Value> = rows.iter().map(|r| r.get::<_, Value>("row")).collect();
+        let affected = data.len() as u64;
+        Ok(DataResult {
+            rows: data,
+            affected_rows: affected,
+            next_cursor: None,
+        })
+    } else {
+        let affected = client
+            .execute(sql, &as_param_refs(params))
+            .await
+            .map_err(|e| backend(&e))?;
+        Ok(DataResult {
+            rows: vec![],
+            affected_rows: affected,
+            next_cursor: None,
+        })
+    }
+}
+
+/// `UPDATE … SET … WHERE … AND owner_id = $ RETURNING` — single round-trip,
+/// required filter, owner-scoped, owner_id immutable. Honors `ReturningMode`.
+async fn run_update<C: GenericClient + Sync>(
+    client: &C,
+    op: &DataOperation,
+    identity: &RequestIdentity,
+) -> DataPlaneResult<DataResult> {
+    let table = quote_ident(&op.resource)?;
+    let Some(Value::Object(data)) = op.data.as_ref() else {
+        return Err(DataPlaneError::InvalidRequest {
+            message: "update requires a JSON object in `data`".to_string(),
+        });
+    };
+    let owner = PostgresPool::principal(identity).to_string();
+    let want_rows = !matches!(op.returning, Some(ReturningMode::None));
+    let (sql, params) = build_update_sql(&table, data, op.filter.as_ref(), &owner, want_rows)?;
+    execute_mutation(client, &sql, &params, want_rows).await
+}
+
+/// `DELETE … WHERE … AND owner_id = $ RETURNING` — owner-scoped, required
+/// filter. Honors `ReturningMode`.
+async fn run_delete<C: GenericClient + Sync>(
+    client: &C,
+    op: &DataOperation,
+    identity: &RequestIdentity,
+) -> DataPlaneResult<DataResult> {
+    let table = quote_ident(&op.resource)?;
+    let owner = PostgresPool::principal(identity).to_string();
+    let want_rows = !matches!(op.returning, Some(ReturningMode::None));
+    let (sql, params) = build_delete_sql(&table, op.filter.as_ref(), &owner, want_rows)?;
+    execute_mutation(client, &sql, &params, want_rows).await
+}
+
+/// `INSERT … AS t ON CONFLICT (owner_id, key…) DO UPDATE …`. Conflict key(s)
+/// from `filter`; written columns from `data`; `owner_id` server-injected, part
+/// of the conflict target (tenant-local arbitration) and immutable on conflict.
+/// Uses `execute_mutation` (not `query_one`) so an RLS-suppressed `DO UPDATE` is
+/// an honest 0-row result. Target table must have a UNIQUE index on
+/// (owner_id, <conflict key(s)>). Honors `ReturningMode`.
+async fn run_upsert<C: GenericClient + Sync>(
+    client: &C,
+    op: &DataOperation,
+    identity: &RequestIdentity,
+) -> DataPlaneResult<DataResult> {
+    let table = quote_ident(&op.resource)?;
+    let Some(Value::Object(data)) = op.data.as_ref() else {
+        return Err(DataPlaneError::InvalidRequest {
+            message: "upsert requires a JSON object in `data`".to_string(),
+        });
+    };
+    let Some(Value::Object(filter)) = op.filter.as_ref() else {
+        return Err(DataPlaneError::InvalidRequest {
+            message: "upsert requires `filter` naming the conflict key column(s)".to_string(),
+        });
+    };
+    let owner = PostgresPool::principal(identity).to_string();
+    let want_rows = !matches!(op.returning, Some(ReturningMode::None));
+    let (sql, params) = build_upsert_sql(&table, data, filter, &owner, want_rows)?;
+    execute_mutation(client, &sql, &params, want_rows).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn obj(v: Value) -> serde_json::Map<String, Value> {
+        match v {
+            Value::Object(m) => m,
+            _ => panic!("expected a JSON object"),
+        }
+    }
+
+    #[test]
+    fn update_strips_owner_id_and_scopes_to_owner() {
+        let data = obj(json!({ "owner_id": "attacker", "name": "ok" }));
+        let filter = json!({ "id": 1 });
+        let (sql, params) =
+            build_update_sql("\"t\"", &data, Some(&filter), "u-trusted", true).unwrap();
+        assert!(sql.starts_with("UPDATE \"t\" AS t SET "), "{sql}");
+        assert!(sql.contains("\"name\" = $1"), "{sql}");
+        assert!(!sql.contains("SET \"owner_id\""), "owner_id must not be settable: {sql}");
+        assert!(sql.contains(" AND \"owner_id\" = $3"), "owner predicate missing: {sql}");
+        assert!(sql.contains("RETURNING to_jsonb(t)"), "{sql}");
+        assert_eq!(params.len(), 3); // name, filter id, owner
+    }
+
+    #[test]
+    fn update_refuses_empty_filter() {
+        let data = obj(json!({ "name": "x" }));
+        // A refused mutation is a client error (400), never a 5xx backend error.
+        let err = build_update_sql("\"t\"", &data, None, "u", true).unwrap_err();
+        assert!(matches!(err, DataPlaneError::InvalidRequest { .. }), "{err:?}");
+        assert!(build_update_sql("\"t\"", &data, Some(&json!({})), "u", true).is_err());
+    }
+
+    #[test]
+    fn update_rejects_injection_in_column_name() {
+        let data = obj(json!({ "evil;--": 1 }));
+        let err =
+            build_update_sql("\"t\"", &data, Some(&json!({ "id": 1 })), "u", true).unwrap_err();
+        assert!(matches!(err, DataPlaneError::InvalidIdentifier { .. }), "{err:?}");
+    }
+
+    #[test]
+    fn columns_sorted_for_statement_cache() {
+        let data = obj(json!({ "b": 1, "a": 2 }));
+        let (sql, _) =
+            build_update_sql("\"t\"", &data, Some(&json!({ "id": 1 })), "u", true).unwrap();
+        assert!(sql.find("\"a\"").unwrap() < sql.find("\"b\"").unwrap(), "{sql}");
+    }
+
+    #[test]
+    fn returning_false_omits_returning_clause() {
+        let data = obj(json!({ "name": "x" }));
+        let (sql, _) =
+            build_update_sql("\"t\"", &data, Some(&json!({ "id": 1 })), "u", false).unwrap();
+        assert!(!sql.contains("RETURNING"), "{sql}");
+    }
+
+    #[test]
+    fn delete_scopes_owner_and_refuses_empty_filter() {
+        let err = build_delete_sql("\"t\"", None, "u", true).unwrap_err();
+        assert!(matches!(err, DataPlaneError::InvalidRequest { .. }), "{err:?}");
+        let (sql, params) = build_delete_sql("\"t\"", Some(&json!({ "id": 1 })), "u-t", true).unwrap();
+        assert!(sql.starts_with("DELETE FROM \"t\" AS t"), "{sql}");
+        assert!(sql.contains(" AND \"owner_id\" = $2"), "{sql}");
+        assert_eq!(params.len(), 2);
+    }
+
+    #[test]
+    fn upsert_forces_owner_into_conflict_target() {
+        let data = obj(json!({ "name": "x" }));
+        let filter = obj(json!({ "email": "a@b.c" }));
+        let (sql, _) = build_upsert_sql("\"t\"", &data, &filter, "u", true).unwrap();
+        assert!(sql.contains("ON CONFLICT (\"owner_id\", \"email\")"), "{sql}");
+        assert!(sql.contains("\"name\" = EXCLUDED.\"name\""), "{sql}");
+        assert!(!sql.contains("\"owner_id\" = EXCLUDED"), "owner must be immutable on conflict: {sql}");
+        assert!(sql.starts_with("INSERT INTO \"t\" AS t ("), "{sql}");
+    }
+
+    #[test]
+    fn upsert_requires_a_real_conflict_key() {
+        let data = obj(json!({ "name": "x" }));
+        assert!(build_upsert_sql("\"t\"", &data, &obj(json!({})), "u", true).is_err());
+        assert!(build_upsert_sql("\"t\"", &data, &obj(json!({ "owner_id": "x" })), "u", true).is_err());
+    }
+
+    #[test]
+    fn upsert_key_only_data_uses_noop_set() {
+        let data = obj(json!({}));
+        let filter = obj(json!({ "id": 1 }));
+        let (sql, _) = build_upsert_sql("\"t\"", &data, &filter, "u", true).unwrap();
+        assert!(sql.contains("DO UPDATE SET \"id\" = EXCLUDED.\"id\""), "{sql}");
+    }
+
+    // --- JsonParam: the binary encoding adapts to the target column type ---
+
+    /// Encode `value` as if bound to a column of `ty`; returns the wire bytes or
+    /// the serialization error.
+    fn encode(value: Value, ty: &Type) -> Result<(IsNull, BytesMut), String> {
+        let mut buf = BytesMut::new();
+        match JsonParam(value).to_sql(ty, &mut buf) {
+            Ok(is_null) => Ok((is_null, buf)),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    #[test]
+    fn json_int_adapts_to_int2_int4_int8_widths() {
+        // The bug this fixes: a JSON integer used to bind only as i64 (8 bytes),
+        // failing on int2/int4 columns. Now the width follows the column type.
+        assert_eq!(encode(json!(5), &Type::INT2).unwrap().1.len(), 2);
+        assert_eq!(encode(json!(5), &Type::INT4).unwrap().1.len(), 4);
+        assert_eq!(encode(json!(5), &Type::INT8).unwrap().1.len(), 8);
+    }
+
+    #[test]
+    fn json_integral_float_binds_to_int() {
+        // 3.0 (a JSON float) is a valid integer value for an int column.
+        assert_eq!(encode(json!(3.0), &Type::INT4).unwrap().1.len(), 4);
+    }
+
+    #[test]
+    fn json_int_overflow_for_narrow_column_errors() {
+        // 5e9 does not fit in int4 → a real client error, not silent truncation.
+        assert!(encode(json!(5_000_000_000_i64), &Type::INT4).is_err());
+        // A fractional value cannot be an integer.
+        assert!(encode(json!(2.5), &Type::INT4).is_err());
+    }
+
+    #[test]
+    fn json_float_adapts_to_float4_float8() {
+        assert_eq!(encode(json!(2.5), &Type::FLOAT4).unwrap().1.len(), 4);
+        assert_eq!(encode(json!(2.5), &Type::FLOAT8).unwrap().1.len(), 8);
+    }
+
+    #[test]
+    fn json_string_parses_into_uuid() {
+        let (is_null, buf) =
+            encode(json!("550e8400-e29b-41d4-a716-446655440000"), &Type::UUID).unwrap();
+        assert!(matches!(is_null, IsNull::No));
+        assert_eq!(buf.len(), 16, "uuid is 16 binary bytes");
+        assert!(encode(json!("not-a-uuid"), &Type::UUID).is_err());
+    }
+
+    #[test]
+    fn json_string_parses_into_timestamptz() {
+        assert!(encode(json!("2026-06-02T12:00:00Z"), &Type::TIMESTAMPTZ).is_ok());
+        assert!(encode(json!("nonsense"), &Type::TIMESTAMPTZ).is_err());
+    }
+
+    #[test]
+    fn json_string_parses_into_naive_timestamp_and_date() {
+        assert!(encode(json!("2026-06-02T12:00:00"), &Type::TIMESTAMP).is_ok());
+        assert!(encode(json!("2026-06-02"), &Type::DATE).is_ok());
+        assert!(encode(json!("not-a-date"), &Type::DATE).is_err());
+    }
+
+    #[test]
+    fn json_string_into_jsonb_is_a_json_string_document() {
+        // A JSON string bound to a jsonb column is stored as a jsonb string.
+        let (_, buf) = encode(json!("hello"), &Type::JSONB).unwrap();
+        assert_eq!(buf[0], 1, "jsonb version byte");
+    }
+
+    // --- filter compiler (rich reads): operators, boolean, injection-safety ---
+
+    /// Compile a filter and return (sql_without_where, n_params). `Unconstrained`
+    /// renders `""`, `AlwaysFalse` renders `FALSE`.
+    fn wsql(filter: Value) -> (String, usize) {
+        let mut params: Vec<BoxedParam> = Vec::new();
+        let sql = match compile_filter(Some(&filter), &mut params).unwrap() {
+            Pred::Unconstrained => String::new(),
+            Pred::AlwaysFalse => "FALSE".to_string(),
+            Pred::Sql(s) => s,
+        };
+        (sql, params.len())
+    }
+
+    #[test]
+    fn filter_equality_is_backward_compatible_and_sorted() {
+        // Legacy `{col: scalar}` map still compiles to sorted equality predicates.
+        let (sql, n) = wsql(json!({ "b": 2, "a": 1 }));
+        assert_eq!(sql, "\"a\" = $1 AND \"b\" = $2", "{sql}");
+        assert_eq!(n, 2);
+    }
+
+    #[test]
+    fn filter_empty_contributes_no_predicate() {
+        // `{}`, absent, and empty `$and` constrain nothing → render to "" so the
+        // update/delete empty-filter guard fires.
+        assert_eq!(wsql(json!({})).0, "");
+        assert_eq!(wsql(json!({ "$and": [] })).0, "");
+        let mut p: Vec<BoxedParam> = Vec::new();
+        assert!(matches!(
+            compile_filter(None, &mut p).unwrap(),
+            Pred::Unconstrained
+        ));
+    }
+
+    #[test]
+    fn filter_tautology_folds_to_unconstrained_and_mutation_guard_refuses() {
+        // THE data-loss fix: a filter that constant-folds to TRUE must be treated
+        // as "no predicate" so update/delete refuse it, not run WHERE TRUE.
+        assert_eq!(wsql(json!({ "$not": { "$or": [] } })).0, "", "NOT(FALSE) → unconstrained");
+        assert_eq!(wsql(json!({ "$not": { "a": { "$in": [] } } })).0, "", "NOT(col IN ()) → unconstrained");
+        assert_eq!(wsql(json!({ "$or": [{ "a": 1 }, { "$not": { "$or": [] } }] })).0, "", "x OR TRUE → unconstrained");
+        // the discarded branch's param is rolled back (no orphan placeholders).
+        assert_eq!(wsql(json!({ "$or": [{ "a": 1 }, { "$not": { "$or": [] } }] })).1, 0);
+        // and the guard actually refuses it on a real mutation:
+        let data = obj(json!({ "name": "x" }));
+        for taut in [json!({ "$not": { "$or": [] } }), json!({ "$or": [{ "a": 1 }, { "$not": { "$or": [] } }] })] {
+            let e = build_update_sql("\"t\"", &data, Some(&taut), "u", true).unwrap_err();
+            assert!(matches!(e, DataPlaneError::InvalidRequest { .. }), "update {taut}: {e:?}");
+            let e = build_delete_sql("\"t\"", Some(&taut), "u", true).unwrap_err();
+            assert!(matches!(e, DataPlaneError::InvalidRequest { .. }), "delete {taut}: {e:?}");
+        }
+        // an explicit match-nothing is NOT a tautology — it's a safe predicate.
+        assert_eq!(wsql(json!({ "$or": [] })).0, "FALSE");
+        assert_eq!(wsql(json!({ "$not": {} })).0, "FALSE", "NOT(everything) = nothing");
+    }
+
+    #[test]
+    fn filter_comparison_operators() {
+        assert_eq!(wsql(json!({ "age": { "$gte": 18 } })).0, "\"age\" >= $1");
+        assert_eq!(wsql(json!({ "age": { "$ne": 0 } })).0, "\"age\" <> $1");
+        // multiple operators on one column AND together, operator keys sorted.
+        let (sql, n) = wsql(json!({ "age": { "$lt": 65, "$gte": 18 } }));
+        assert_eq!(sql, "\"age\" >= $1 AND \"age\" < $2", "{sql}");
+        assert_eq!(n, 2);
+    }
+
+    #[test]
+    fn filter_in_between_null_like() {
+        assert_eq!(wsql(json!({ "s": { "$in": ["a", "b"] } })).0, "\"s\" IN ($1, $2)");
+        assert_eq!(wsql(json!({ "s": { "$in": [] } })).0, "FALSE"); // matches nothing
+        assert_eq!(wsql(json!({ "age": { "$between": [18, 65] } })).0, "\"age\" BETWEEN $1 AND $2");
+        assert_eq!(wsql(json!({ "x": { "$null": true } })).0, "\"x\" IS NULL");
+        assert_eq!(wsql(json!({ "x": { "$null": false } })).0, "\"x\" IS NOT NULL");
+        assert_eq!(wsql(json!({ "n": { "$ilike": "%a%" } })).0, "\"n\" ILIKE $1");
+    }
+
+    #[test]
+    fn filter_all_binary_operators_map_to_correct_sql() {
+        for (op, sym) in [
+            ("$eq", "="), ("$ne", "<>"), ("$lt", "<"), ("$lte", "<="),
+            ("$gt", ">"), ("$gte", ">="), ("$like", "LIKE"), ("$ilike", "ILIKE"),
+        ] {
+            let (sql, n) = wsql(json!({ "c": { op: 1 } }));
+            assert_eq!(sql, format!("\"c\" {sym} $1"), "operator {op}");
+            assert_eq!(n, 1, "operator {op} binds one param");
+        }
+    }
+
+    #[test]
+    fn filter_nested_boolean_recursion() {
+        // $or containing a nested $and, and $not of a compound filter.
+        let (sql, n) = wsql(json!({ "$or": [{ "$and": [{ "a": 1 }, { "b": 2 }] }, { "c": 3 }] }));
+        assert_eq!(sql, "(\"a\" = $1 AND \"b\" = $2) OR (\"c\" = $3)", "{sql}");
+        assert_eq!(n, 3);
+        assert_eq!(
+            wsql(json!({ "$not": { "$or": [{ "a": 1 }, { "b": 2 }] } })).0,
+            "NOT ((\"a\" = $1) OR (\"b\" = $2))"
+        );
+    }
+
+    #[test]
+    fn filter_in_list_length_is_capped() {
+        let big: Vec<i64> = (0..=(data_plane_core::filter::MAX_IN_LEN as i64)).collect();
+        let mut p: Vec<BoxedParam> = Vec::new();
+        let e = compile_filter(Some(&json!({ "a": { "$in": big } })), &mut p).unwrap_err();
+        assert!(matches!(e, DataPlaneError::InvalidRequest { .. }), "{e:?}");
+    }
+
+    #[test]
+    fn filter_boolean_composition() {
+        let (sql, n) = wsql(json!({ "$or": [{ "a": 1 }, { "b": 2 }] }));
+        assert_eq!(sql, "(\"a\" = $1) OR (\"b\" = $2)", "{sql}");
+        assert_eq!(n, 2);
+        assert_eq!(wsql(json!({ "$not": { "a": 1 } })).0, "NOT (\"a\" = $1)");
+        // empty `$or` matches nothing.
+        assert_eq!(wsql(json!({ "$or": [] })).0, "FALSE");
+        // mixed: column predicate AND a nested $or ('$or' sorts before 'age').
+        let (sql, _) = wsql(json!({ "age": { "$gte": 18 }, "$or": [{ "a": 1 }, { "b": 2 }] }));
+        assert_eq!(sql, "(\"a\" = $1) OR (\"b\" = $2) AND \"age\" >= $3", "{sql}");
+    }
+
+    #[test]
+    fn filter_rejects_injection_and_unknown_operators() {
+        let mut p: Vec<BoxedParam> = Vec::new();
+        // column name injection → InvalidIdentifier (via quote_ident)
+        let e = compile_filter(Some(&json!({ "a;DROP TABLE x;--": 1 })), &mut p).unwrap_err();
+        assert!(matches!(e, DataPlaneError::InvalidIdentifier { .. }), "{e:?}");
+        // injection inside an operator column
+        let e = compile_filter(Some(&json!({ "x\"--": { "$gt": 1 } })), &mut p).unwrap_err();
+        assert!(matches!(e, DataPlaneError::InvalidIdentifier { .. }), "{e:?}");
+        // unknown operator → InvalidRequest (never interpolated)
+        let e = compile_filter(Some(&json!({ "a": { "$drop": 1 } })), &mut p).unwrap_err();
+        assert!(matches!(e, DataPlaneError::InvalidRequest { .. }), "{e:?}");
+        // malformed $between / $in / $null
+        assert!(compile_filter(Some(&json!({ "a": { "$between": [1] } })), &mut p).is_err());
+        assert!(compile_filter(Some(&json!({ "a": { "$in": 5 } })), &mut p).is_err());
+        assert!(compile_filter(Some(&json!({ "a": { "$null": 1 } })), &mut p).is_err());
+    }
+
+    #[test]
+    fn order_by_is_quoted_directioned_and_injection_safe() {
+        use std::collections::BTreeMap;
+        let mut s = BTreeMap::new();
+        s.insert("name".to_string(), "asc".to_string());
+        s.insert("age".to_string(), "DESC".to_string()); // case-insensitive
+        // BTreeMap key order → age before name.
+        assert_eq!(build_order_by(Some(&s)).unwrap(), " ORDER BY \"age\" DESC, \"name\" ASC");
+        assert_eq!(build_order_by(None).unwrap(), "");
+
+        let mut bad_dir = BTreeMap::new();
+        bad_dir.insert("a".to_string(), "sideways".to_string());
+        assert!(matches!(
+            build_order_by(Some(&bad_dir)).unwrap_err(),
+            DataPlaneError::InvalidRequest { .. }
+        ));
+
+        let mut bad_col = BTreeMap::new();
+        bad_col.insert("a; DROP".to_string(), "asc".to_string());
+        assert!(matches!(
+            build_order_by(Some(&bad_col)).unwrap_err(),
+            DataPlaneError::InvalidIdentifier { .. }
+        ));
+    }
+
+    #[test]
+    fn aggregate_expr_builds_safe_sql() {
+        let agg = |func, field: Option<&str>, alias: &str| Aggregate {
+            func,
+            field: field.map(str::to_string),
+            distinct: false,
+            alias: alias.to_string(),
+        };
+        assert_eq!(build_aggregate_expr(&agg(AggFunc::Count, None, "cnt")).unwrap(), "count(*) AS \"cnt\"");
+        assert_eq!(build_aggregate_expr(&agg(AggFunc::Sum, Some("amount"), "total")).unwrap(), "sum(\"amount\") AS \"total\"");
+        assert_eq!(build_aggregate_expr(&agg(AggFunc::Avg, Some("age"), "avg_age")).unwrap(), "avg(\"age\") AS \"avg_age\"");
+        assert_eq!(build_aggregate_expr(&agg(AggFunc::Count, Some("id"), "n")).unwrap(), "count(\"id\") AS \"n\"");
+        // DISTINCT
+        let cd = Aggregate { func: AggFunc::Count, field: Some("email".into()), distinct: true, alias: "uniq".into() };
+        assert_eq!(build_aggregate_expr(&cd).unwrap(), "count(DISTINCT \"email\") AS \"uniq\"");
+        // count(DISTINCT *) is invalid → distinct requires a field
+        let cd_nofield = Aggregate { func: AggFunc::Count, field: None, distinct: true, alias: "x".into() };
+        assert!(matches!(build_aggregate_expr(&cd_nofield).unwrap_err(), DataPlaneError::InvalidRequest { .. }));
+        // sum/avg/min/max require a field
+        assert!(matches!(
+            build_aggregate_expr(&agg(AggFunc::Sum, None, "x")).unwrap_err(),
+            DataPlaneError::InvalidRequest { .. }
+        ));
+        // injection in field or alias → InvalidIdentifier (allowlist), never SQL
+        assert!(matches!(
+            build_aggregate_expr(&agg(AggFunc::Count, Some("a); DROP TABLE t;--"), "x")).unwrap_err(),
+            DataPlaneError::InvalidIdentifier { .. }
+        ));
+        assert!(matches!(
+            build_aggregate_expr(&agg(AggFunc::Count, None, "a\" FROM secrets;--")).unwrap_err(),
+            DataPlaneError::InvalidIdentifier { .. }
+        ));
+    }
+
+    #[test]
+    fn type_mismatch_is_rejected_not_corrupted() {
+        // The corruption fix: a value whose JSON kind cannot encode into the
+        // target column type must error (WrongType), not write garbage bytes.
+        // bytea is the dangerous one — it accepts ANY bytes, so a string would
+        // otherwise be stored verbatim.
+        assert!(encode(json!("deadbeef"), &Type::BYTEA).is_err(), "string→bytea must reject");
+        assert!(encode(json!("42"), &Type::INT4).is_err(), "string→int4 must reject");
+        assert!(encode(json!(true), &Type::INT4).is_err(), "bool→int4 must reject");
+        assert!(encode(json!({ "a": 1 }), &Type::INT4).is_err(), "object→int4 must reject");
+        assert!(encode(json!(5), &Type::NUMERIC).is_err(), "number→numeric not yet supported, must reject not corrupt");
+    }
+
+    #[test]
+    fn json_string_and_bool_and_null_bind_directly() {
+        assert_eq!(encode(json!("hello"), &Type::TEXT).unwrap().1.len(), 5);
+        assert_eq!(encode(json!(true), &Type::BOOL).unwrap().1.len(), 1);
+        assert!(matches!(encode(json!(null), &Type::INT4).unwrap().0, IsNull::Yes));
+    }
+
+    #[test]
+    fn json_object_binds_as_jsonb() {
+        // Non-scalars go to the jsonb codec (version byte 0x01 prefix).
+        let (_, buf) = encode(json!({ "a": 1 }), &Type::JSONB).unwrap();
+        assert_eq!(buf[0], 1, "jsonb binary format starts with a version byte");
+    }
+}

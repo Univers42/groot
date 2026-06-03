@@ -1,0 +1,17 @@
+mini-baas edition "{{ .Values.edition | default "lean" }}" rendered.
+
+Enabled services ({{ len .Values.services }} defined):
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.enabled }}
+  • {{ $name }}{{ with $svc.ports }} (ports: {{ join "," . }}){{ end }}
+{{- end }}
+{{- end }}
+
+Env/secrets: this chart sources env from the (optional) ConfigMap
+"{{ .Release.Name }}-env" and Secret "{{ .Release.Name }}-secrets" — the K8s
+equivalent of compose `env_file: [.env]`. Create them before traffic:
+  kubectl create configmap {{ .Release.Name }}-env   --from-env-file=.env
+  kubectl create secret generic {{ .Release.Name }}-secrets --from-env-file=.env.secret
+
+These manifests are GENERATED — change the edition definitions in the Makefile or
+service facts in docker-compose.yml, then re-run `make deploy-gen`.

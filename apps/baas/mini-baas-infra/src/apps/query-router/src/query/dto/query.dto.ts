@@ -10,10 +10,59 @@
 /*                                                                            */
 /* ************************************************************************** */
 
-import { IsEnum, IsInt, IsObject, IsOptional, IsString, Max, Min } from 'class-validator';
-import { ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  IsArray,
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsObject,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import type { AdapterOp } from '@mini-baas/database';
+
+export const AGG_FUNCS = ['count', 'sum', 'avg', 'min', 'max'] as const;
+
+/** One aggregate output column: `func(field) AS alias`. */
+export class AggregateColumnDto {
+  @ApiProperty({ enum: AGG_FUNCS })
+  @IsEnum(AGG_FUNCS)
+  func!: (typeof AGG_FUNCS)[number];
+
+  @ApiPropertyOptional({ description: 'Column to aggregate; omit for count(*)' })
+  @IsOptional()
+  @IsString()
+  field?: string;
+
+  @ApiPropertyOptional({ description: '`func(DISTINCT field)` — requires `field`' })
+  @IsOptional()
+  @IsBoolean()
+  distinct?: boolean;
+
+  @ApiProperty({ description: 'Output column name' })
+  @IsString()
+  alias!: string;
+}
+
+/** A GROUP BY + aggregate request (`filter` scopes rows before grouping). */
+export class AggregateDto {
+  @ApiPropertyOptional({ type: [String], description: 'GROUP BY columns' })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  groupBy?: string[];
+
+  @ApiProperty({ type: [AggregateColumnDto], description: 'Aggregate output columns (≥1)' })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AggregateColumnDto)
+  aggregates!: AggregateColumnDto[];
+}
 
 /** Legacy actions accepted via the back-compat `action` field. */
 export const LEGACY_ACTIONS = [
@@ -40,7 +89,15 @@ const LEGACY_ACTION_MAP: Readonly<Record<LegacyAction, AdapterOp>> = Object.free
   deleteMany: 'delete',
 });
 
-export const ADAPTER_OPS = ['list', 'get', 'insert', 'update', 'delete', 'upsert'] as const;
+export const ADAPTER_OPS = [
+  'list',
+  'get',
+  'insert',
+  'update',
+  'delete',
+  'upsert',
+  'aggregate',
+] as const;
 
 export class ExecuteQueryDto {
   @ApiPropertyOptional({
@@ -103,6 +160,15 @@ export class ExecuteQueryDto {
   @IsOptional()
   @IsString()
   idempotencyKey?: string;
+
+  @ApiPropertyOptional({
+    type: AggregateDto,
+    description: 'Aggregation spec — required when `op: "aggregate"` (COUNT/SUM/AVG/MIN/MAX + GROUP BY).',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AggregateDto)
+  aggregate?: AggregateDto;
 
   /** Resolves the effective operation, preferring `op` over the legacy `action`. */
   resolveOp(): AdapterOp | undefined {

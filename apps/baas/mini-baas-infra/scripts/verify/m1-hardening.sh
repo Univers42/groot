@@ -56,14 +56,25 @@ for symbol in IDatabaseAdapter EngineCaps QueryOpts QueryResult AdapterOp; do
   grep -q "${symbol}" "${CONTRACT}" || fail "${symbol} not declared in ${CONTRACT}"
 done
 
+ROUTER_DIR="${BAAS_DIR}/docker/services/data-plane-router"
+# R2/R3 + R7/R8 cutover: the TS postgresql/mongodb (+mysql/redis/http) engines
+# were removed once parity was proven (see scripts/verify/parity-probe.sh).
+# Their replacement is the Rust data-plane-router; assert that the Rust
+# adapters still implement the contract and the TS files are gone.
 for engine_file in \
   "${BAAS_DIR}/src/apps/query-router/src/engines/postgresql.engine.ts" \
   "${BAAS_DIR}/src/apps/query-router/src/engines/mongodb.engine.ts"; do
-  grep -q "implements IDatabaseAdapter" "${engine_file}" \
-    || fail "${engine_file} does not implement IDatabaseAdapter"
-  for method in "capabilities()" "execute(" "listResources("; do
-    grep -q "${method}" "${engine_file}" \
-      || fail "${engine_file} missing method ${method}"
+  [[ -f "${engine_file}" ]] && fail "${engine_file} should be deleted post-cutover"
+done
+for rust_adapter in \
+  "${ROUTER_DIR}/crates/data-plane-pool/src/postgres.rs" \
+  "${ROUTER_DIR}/crates/data-plane-pool/src/mongo.rs"; do
+  [[ -f "${rust_adapter}" ]] || fail "${rust_adapter} (Rust replacement) missing"
+  grep -q "impl EngineAdapter" "${rust_adapter}" \
+    || fail "${rust_adapter} does not implement EngineAdapter"
+  for method in "fn engine" "fn capabilities" "fn open_pool"; do
+    grep -q "${method}" "${rust_adapter}" \
+      || fail "${rust_adapter} missing method ${method}"
   done
 done
 
@@ -152,7 +163,7 @@ if [[ ${LIVE} -eq 1 ]]; then
   step "live: /docs-json on every NestJS app"
   declare -A APP_PORTS=(
     [mongo-api]=3010
-    [adapter-registry]=3020
+    # adapter-registry retired (Go is primary); skip from NestJS app probes
     [email-service]=3030
     [storage-router]=3040
     [permission-engine]=3050

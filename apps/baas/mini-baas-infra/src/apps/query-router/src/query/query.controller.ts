@@ -6,7 +6,7 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/31 16:38:11 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/06/01 22:30:38 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -22,13 +22,17 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiParam } from '@nestjs/swagger';
-import { AuthGuard, CurrentUser, UserContext } from '@mini-baas/common';
+import { AuthGuard, CurrentIdentity, CurrentUser, UserContext, VerifiedRequestIdentity } from '@mini-baas/common';
 import { QueryService } from './query.service';
 import { ExecuteQueryDto } from './dto/query.dto';
 import type { Request } from 'express';
 
 @ApiTags('query')
-@Controller('query')
+// Root-mounted: the gateway prefix `/query/v1` is already stripped by Kong
+// (strip_path), so the controller serves the remainder (`/:dbId/tables/:table`)
+// at root — matching engines.controller (`@Controller('engines')` → /engines).
+// A `query` prefix here would double-count the stripped segment and 404.
+@Controller()
 @UseGuards(AuthGuard)
 export class QueryController {
   constructor(private readonly service: QueryService) {}
@@ -39,6 +43,7 @@ export class QueryController {
   @ApiOperation({ summary: 'Execute a query on a registered database' })
   async execute(
     @CurrentUser() user: UserContext,
+    @CurrentIdentity() identity: VerifiedRequestIdentity,
     @Param('dbId', ParseUUIDPipe) dbId: string,
     @Param('table') table: string,
     @Body() dto: ExecuteQueryDto,
@@ -48,6 +53,7 @@ export class QueryController {
     if (idempotencyKey && !dto.idempotencyKey) dto.idempotencyKey = idempotencyKey;
     return this.service.executeQuery(dbId, table, user.id, dto, {
       requestId: request.requestId,
+      identity,
     });
   }
 
@@ -56,8 +62,9 @@ export class QueryController {
   @ApiOperation({ summary: 'List tables/collections in a registered database' })
   async listTables(
     @CurrentUser() user: UserContext,
+    @CurrentIdentity() identity: VerifiedRequestIdentity,
     @Param('dbId', ParseUUIDPipe) dbId: string,
   ) {
-    return this.service.listTables(dbId, user.id);
+    return this.service.listTables(dbId, user.id, identity);
   }
 }

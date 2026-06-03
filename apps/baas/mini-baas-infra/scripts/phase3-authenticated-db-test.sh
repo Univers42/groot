@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/18 21:19:15 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/18 21:19:15 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/06/02 12:42:22 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -186,7 +186,7 @@ fi
 
 ui_step "Step 5: Test expired/invalid token rejection"
 
-INVALID_TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.invalid-signature"
+INVALID_TOKEN="not-a-valid-jwt"
 
 INVALID_HTTP=$(curl -sS -o "$TMPDIR/invalid_token.json" -w "$CURL_FMT" \
     -X GET "$BASE_URL/rest/v1/users" \

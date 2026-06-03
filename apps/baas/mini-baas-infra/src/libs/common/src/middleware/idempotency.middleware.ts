@@ -6,7 +6,7 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/31 15:30:00 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/31 16:38:11 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/06/01 22:30:38 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -32,7 +32,7 @@ type IdempotencyLabels = 'service' | 'result';
 
 function idempotencyCounter(): Counter<IdempotencyLabels> {
   const existing = register.getSingleMetric('mini_baas_idempotency_requests_total');
-  if (existing instanceof Counter) return existing as Counter<IdempotencyLabels>;
+  if (existing instanceof Counter) return existing;
   return new Counter<IdempotencyLabels>({
     name: 'mini_baas_idempotency_requests_total',
     help: 'Idempotency-Key decisions for mutating mini-BaaS requests.',
@@ -68,7 +68,7 @@ export class IdempotencyMiddleware implements NestMiddleware, OnModuleDestroy {
       return;
     }
 
-    const actorId = this.header(req, 'x-user-id') ?? req.user?.id ?? 'anonymous';
+    const actorId = req.identity?.tenantId ?? req.user?.tenantId ?? req.user?.id ?? 'anonymous';
     const cacheKey = this.cacheKey(actorId, idempotencyKey);
     const fingerprint = this.fingerprint(req);
 

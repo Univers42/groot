@@ -1,24 +1,15 @@
 {
   "$schema": "https://json.schemastore.org/nest-cli",
   "collection": "@nestjs/schematics",
-  "sourceRoot": "apps/adapter-registry/src",
+  "sourceRoot": "apps/query-router/src",
   "compilerOptions": {
     "deleteOutDir": true,
     "webpack": false,
     "tsConfigPath": "tsconfig.build.json"
   },
   "monorepo": true,
-  "root": "apps/adapter-registry",
+  "root": "apps/query-router",
   "projects": {
-    "adapter-registry": {
-      "type": "application",
-      "root": "apps/adapter-registry",
-      "entryFile": "main",
-      "sourceRoot": "apps/adapter-registry/src",
-      "compilerOptions": {
-        "tsConfigPath": "apps/adapter-registry/tsconfig.app.json"
-      }
-    },
     "mongo-api": {
       "type": "application",
       "root": "apps/mongo-api",

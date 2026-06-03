@@ -89,6 +89,22 @@ Dashboards          │ Grafana              │ grafana/grafana (observability)
 Log aggregation     │ Loki + Promtail      │ grafana/loki + grafana/promtail (observability)
 ```
 
+> **Architecture status (2026-06) — the 3-language plane pattern.** The table
+> above reflects the original single-language (TypeScript) snapshot. The stack
+> has since split into three planes, each language used to its strength:
+>
+> | Plane | Language | Services |
+> |---|---|---|
+> | Application / business | TypeScript (NestJS, `src/`) | query-router, mongo-api, permission-engine, schema-service, storage-router, + background services |
+> | Control | Go (`go/control-plane/`) | adapter-registry, tenant-control, webhook-dispatcher |
+> | Data (hot path) | Rust (`docker/services/data-plane-router/`) | engine pools (postgresql · mongodb · mysql · redis · http); realtime |
+>
+> The TS→Rust data-plane cutover is **live** (`DATA_PLANE_ROUTER_PRODUCT_MODE=enabled`,
+> query-router forwards all five engines); the Go adapter-registry is primary;
+> tenant-control + webhook-dispatcher run in `shadow`. The full plan to make the
+> platform layer-swappable lives in [`wiki/`](../wiki/README.md). Operate the
+> stack via `make` only (`make help`, `make planes`, `make up EDITION=query`).
+
 ---
 
 ## 3. Full architecture diagram
@@ -348,8 +364,16 @@ A custom Rust-based service (`dlesieur/realtime-agnostic`) that provides WebSock
 | Property | Value |
 |---|---|
 | Kong path | `/admin/v1/databases` |
-| Upstream | `adapter-registry:3020` |
+| Service-to-service upstream | `adapter-registry-go:3021` (Go control plane) |
 | Internal-only path | via service token |
+
+> **Cutover note (2026-06).** This is now the **Go** control-plane service
+> (`go/control-plane`, profile `go-control-plane`). The original NestJS
+> `adapter-registry:3020` was retired after `scripts/verify/parity-probe.sh`
+> proved the Go implementation byte-compatible (same AES-256-GCM scheme + same
+> RLS contract). The Kong `/admin/v1` route in `docker/services/kong/conf/kong.yml`
+> still points at the old upstream and is being rewired to the Go service — see
+> [`wiki/03-control-plane.md`](../wiki/03-control-plane.md) §2.3 (gap G4).
 
 Stores encrypted connection strings for external databases. Each record is scoped to a `tenant_id` (the user's JWT `sub`). Connection strings are encrypted with AES-256-GCM using a key derived from `VAULT_ENC_KEY` via scrypt — they are never returned to clients in plaintext. The adapter-registry uses PostgreSQL RLS (`tenant_databases`) to ensure users can only see their own registrations.
 

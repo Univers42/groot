@@ -17,7 +17,7 @@ import { LoggerModule } from 'nestjs-pino';
 import { TerminusModule } from '@nestjs/terminus';
 import { QueryModule } from './query/query.module';
 import { HealthController } from './health.controller';
-import { AuditModule, IdempotencyMiddleware, ObservabilityModule, createPinoHttpOptions } from '@mini-baas/common';
+import { ApiKeyMiddleware, AuditModule, IdempotencyMiddleware, ObservabilityModule, createPinoHttpOptions } from '@mini-baas/common';
 
 @Module({
   imports: [
@@ -30,10 +30,13 @@ import { AuditModule, IdempotencyMiddleware, ObservabilityModule, createPinoHttp
     AuditModule,
   ],
   controllers: [HealthController],
-  providers: [IdempotencyMiddleware],
+  providers: [ApiKeyMiddleware, IdempotencyMiddleware],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
+    // ApiKey first: it materialises tenant headers from X-Baas-Api-Key so
+    // the identity-resolution pipeline downstream sees a tenant envelope.
+    consumer.apply(ApiKeyMiddleware).forRoutes({ path: '*', method: RequestMethod.ALL });
     consumer.apply(IdempotencyMiddleware).forRoutes({ path: '*', method: RequestMethod.ALL });
   }
 }

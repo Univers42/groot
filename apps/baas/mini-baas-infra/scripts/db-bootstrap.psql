@@ -132,22 +132,22 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.schema_registry TO authenticated;
 DROP POLICY IF EXISTS tenant_databases_select ON public.tenant_databases;
 CREATE POLICY tenant_databases_select ON public.tenant_databases
   FOR SELECT USING (
-    tenant_id = current_tenant_id()
+    tenant_id::text = current_tenant_id()::text
   );
 
 -- INSERT: tenant can only insert rows for themselves
 DROP POLICY IF EXISTS tenant_databases_insert ON public.tenant_databases;
 CREATE POLICY tenant_databases_insert ON public.tenant_databases
   FOR INSERT WITH CHECK (
-    tenant_id = current_tenant_id()
+    tenant_id::text = current_tenant_id()::text
   );
 
 -- UPDATE: only last_healthy_at may be touched, and only own rows
 DROP POLICY IF EXISTS tenant_databases_update ON public.tenant_databases;
 CREATE POLICY tenant_databases_update ON public.tenant_databases
   FOR UPDATE USING (
-    tenant_id = current_tenant_id()
+    tenant_id::text = current_tenant_id()::text
   ) WITH CHECK (
-    tenant_id = current_tenant_id()
+    tenant_id::text = current_tenant_id()::text
   );
 GRANT UPDATE (last_healthy_at) ON public.tenant_databases TO adapter_registry_role;

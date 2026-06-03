@@ -6,7 +6,7 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/06/01 22:30:38 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -47,9 +47,10 @@ export class RolesGuard implements CanActivate {
     }
 
     const req = context.switchToHttp().getRequest<Request>();
-    const userRole = req.user?.role;
+    const userRole = req.identity?.role ?? req.user?.role;
+    const roleNames = req.identity?.roleNames ?? (userRole ? [userRole] : []);
 
-    if (!userRole || !requiredRoles.includes(userRole)) {
+    if (!roleNames.some((role) => requiredRoles.includes(role))) {
       throw new ForbiddenException(
         `Insufficient permissions — requires one of: ${requiredRoles.join(', ')}`,
       );

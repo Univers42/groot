@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/31 15:25:00 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/31 16:38:11 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/06/01 22:30:38 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -31,13 +31,23 @@ LANGUAGE sql STABLE AS $$
   SELECT auth.current_user_id();
 $$;
 
+CREATE OR REPLACE FUNCTION auth.current_tenant_id() RETURNS UUID
+LANGUAGE sql STABLE AS $$
+  SELECT COALESCE(
+    NULLIF(current_setting('request.jwt.claims', true), '')::json ->> 'tenant_id',
+    NULLIF(current_setting('app.current_tenant_id', true), ''),
+    auth.current_user_id()::text
+  )::uuid;
+$$;
+
 CREATE OR REPLACE FUNCTION public.current_tenant_id() RETURNS TEXT
 LANGUAGE sql STABLE AS $$
-  SELECT auth.current_user_id()::text;
+  SELECT auth.current_tenant_id()::text;
 $$;
 
 GRANT EXECUTE ON FUNCTION auth.current_user_id() TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION auth.uid() TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION auth.current_tenant_id() TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.current_tenant_id() TO anon, authenticated, service_role;
 
 DO $$
@@ -46,6 +56,7 @@ BEGIN
     GRANT USAGE ON SCHEMA auth TO adapter_registry_role;
     GRANT EXECUTE ON FUNCTION auth.current_user_id() TO adapter_registry_role;
     GRANT EXECUTE ON FUNCTION auth.uid() TO adapter_registry_role;
+    GRANT EXECUTE ON FUNCTION auth.current_tenant_id() TO adapter_registry_role;
     GRANT EXECUTE ON FUNCTION public.current_tenant_id() TO adapter_registry_role;
   END IF;
 END $$;
@@ -98,21 +109,21 @@ BEGIN
   IF to_regclass('public.tenant_databases') IS NOT NULL THEN
     DROP POLICY IF EXISTS tenant_databases_select ON public.tenant_databases;
     CREATE POLICY tenant_databases_select ON public.tenant_databases
-      FOR SELECT USING (tenant_id::text = auth.current_user_id()::text);
+      FOR SELECT USING (tenant_id::text = auth.current_tenant_id()::text);
 
     DROP POLICY IF EXISTS tenant_databases_insert ON public.tenant_databases;
     CREATE POLICY tenant_databases_insert ON public.tenant_databases
-      FOR INSERT WITH CHECK (tenant_id::text = auth.current_user_id()::text);
+      FOR INSERT WITH CHECK (tenant_id::text = auth.current_tenant_id()::text);
 
     DROP POLICY IF EXISTS tenant_databases_update ON public.tenant_databases;
     CREATE POLICY tenant_databases_update ON public.tenant_databases
-      FOR UPDATE USING (tenant_id::text = auth.current_user_id()::text)
-      WITH CHECK (tenant_id::text = auth.current_user_id()::text);
+      FOR UPDATE USING (tenant_id::text = auth.current_tenant_id()::text)
+      WITH CHECK (tenant_id::text = auth.current_tenant_id()::text);
 
     DROP POLICY IF EXISTS tenant_isolation ON public.tenant_databases;
     CREATE POLICY tenant_isolation ON public.tenant_databases
-      FOR ALL USING (tenant_id::text = auth.current_user_id()::text)
-      WITH CHECK (tenant_id::text = auth.current_user_id()::text);
+      FOR ALL USING (tenant_id::text = auth.current_tenant_id()::text)
+      WITH CHECK (tenant_id::text = auth.current_tenant_id()::text);
   END IF;
 
   IF to_regclass('gdpr.user_consent') IS NOT NULL THEN

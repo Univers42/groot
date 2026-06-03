@@ -27,6 +27,21 @@ export class DecidePermissionDto {
   @Type(() => DecisionUserDto)
   user!: DecisionUserDto;
 
+  @ApiPropertyOptional({ example: '00000000-0000-4000-8000-000000000002' })
+  @IsOptional()
+  @IsString()
+  tenant_id?: string;
+
+  @ApiPropertyOptional({ example: '00000000-0000-4000-8000-000000000002' })
+  @IsOptional()
+  @IsString()
+  project_id?: string;
+
+  @ApiPropertyOptional({ example: 'verify' })
+  @IsOptional()
+  @IsString()
+  app_id?: string;
+
   @ApiProperty({ example: 'postgresql' })
   @IsString()
   @IsNotEmpty()

@@ -6,7 +6,7 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/06/02 12:42:35 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -81,6 +81,46 @@ export class CollectionsService implements OnModuleInit {
     return { id: String(_id), ...rest };
   }
 
+  private isPlainRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value) && !(value instanceof Date) && !(value instanceof ObjectId);
+  }
+
+  private assertSafeFieldName(field: string): void {
+    if (!field || field === '_id' || field === 'owner_id' || field.startsWith('$') || field.includes('.')) {
+      throw new BadRequestException('Invalid filter field');
+    }
+  }
+
+  private assertNoMongoOperators(value: unknown): void {
+    if (Array.isArray(value)) {
+      value.forEach((item) => this.assertNoMongoOperators(item));
+      return;
+    }
+    if (!this.isPlainRecord(value)) return;
+
+    for (const [key, nested] of Object.entries(value)) {
+      if (key.startsWith('$') || key.includes('.')) {
+        throw new BadRequestException('Mongo operators are not allowed in filter values');
+      }
+      this.assertNoMongoOperators(nested);
+    }
+  }
+
+  private parseFilter(rawFilter: string): Record<string, unknown> {
+    const parsed = JSON.parse(rawFilter) as unknown;
+    if (!this.isPlainRecord(parsed)) {
+      throw new BadRequestException('Filter must be a JSON object');
+    }
+
+    const clean: Record<string, unknown> = {};
+    for (const [field, value] of Object.entries(parsed)) {
+      this.assertSafeFieldName(field);
+      this.assertNoMongoOperators(value);
+      clean[field] = value;
+    }
+    return clean;
+  }
+
   async create(collectionName: string, userId: string, data: Record<string, unknown>) {
     // Strip forbidden fields
     const { _id: _, owner_id: __, ...clean } = data;
@@ -105,16 +145,14 @@ export class CollectionsService implements OnModuleInit {
     opts: { limit: number; offset: number; sort?: string; filter?: string },
   ) {
     const col = this.getCollection(collectionName);
-    const query: Record<string, unknown> = { owner_id: userId };
+    let query: Record<string, unknown> = { owner_id: userId };
 
     // Merge optional filter (strip dangerous keys)
     if (opts.filter) {
       try {
-        const parsed = JSON.parse(opts.filter) as Record<string, unknown>;
-        delete parsed['owner_id'];
-        delete parsed['_id'];
-        Object.assign(query, parsed);
-      } catch {
+        query = { ...query, ...this.parseFilter(opts.filter) };
+      } catch (error) {
+        if (error instanceof BadRequestException) throw error;
         throw new BadRequestException('Invalid JSON in filter parameter');
       }
     }
@@ -124,6 +162,7 @@ export class CollectionsService implements OnModuleInit {
     if (opts.sort) {
       const [field, dir] = opts.sort.split(':');
       if (field && dir) {
+        this.assertSafeFieldName(field);
         sort = { [field]: dir.toLowerCase() === 'asc' ? 1 : -1 };
       }
     }
@@ -136,7 +175,7 @@ export class CollectionsService implements OnModuleInit {
     this.opsCounter.inc({ collection: collectionName, operation: 'find' });
 
     return {
-      data: data.map((d) => this.normalizeDoc(d as Record<string, unknown>)),
+      data: data.map((document) => this.normalizeDoc(document)),
       meta: { total, limit: opts.limit, offset: opts.offset },
     };
   }
@@ -154,7 +193,7 @@ export class CollectionsService implements OnModuleInit {
     }
 
     this.opsCounter.inc({ collection: collectionName, operation: 'findOne' });
-    return this.normalizeDoc(doc as Record<string, unknown>);
+    return this.normalizeDoc(doc);
   }
 
   async patch(collectionName: string, userId: string, docId: string, patch: Record<string, unknown>) {
@@ -177,7 +216,7 @@ export class CollectionsService implements OnModuleInit {
     }
 
     this.opsCounter.inc({ collection: collectionName, operation: 'update' });
-    return this.normalizeDoc(result as Record<string, unknown>);
+    return this.normalizeDoc(result);
   }
 
   async remove(collectionName: string, userId: string, docId: string) {

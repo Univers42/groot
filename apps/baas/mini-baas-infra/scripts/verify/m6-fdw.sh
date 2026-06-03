@@ -49,14 +49,17 @@ for token in \
 done
 pass "FDW migration declares extension bootstrap + registry helper functions"
 
-step "checking adapter-registry FDW registration path"
-DTO="${BAAS_DIR}/src/apps/adapter-registry/src/databases/dto/register-database.dto.ts"
-SERVICE="${BAAS_DIR}/src/apps/adapter-registry/src/databases/databases.service.ts"
-grep -q "register_via_fdw" "${DTO}" || fail "RegisterDatabaseDto missing register_via_fdw"
-grep -q "FdwRegistrationDto" "${DTO}" || fail "RegisterDatabaseDto missing FdwRegistrationDto"
-grep -q "registerFdwAlias" "${SERVICE}" || fail "DatabasesService does not call FDW registration helper"
-grep -q "register_fdw_foreign_table" "${SERVICE}" || fail "DatabasesService does not call public.register_fdw_foreign_table"
-pass "adapter-registry can record FDW aliases for user-registered external DBs"
+step "checking FDW registration migration is on disk (Go port TBD)"
+# The TS adapter-registry had a `register_via_fdw` flag + FdwRegistrationDto
+# that called `public.register_fdw_foreign_table` at mount-creation time.
+# That feature was NOT ported to the Go adapter-registry yet — the SQL
+# helper `register_fdw_foreign_table` is still available for operators to
+# call by hand, but auto-registration on POST /databases is deferred until
+# the Go service grows a `--with-fdw` mode.
+# This check is intentionally narrow: SQL helper exists in the migration.
+grep -q "register_fdw_foreign_table" "${MIG}" \
+  || fail "020 migration missing public.register_fdw_foreign_table helper"
+pass "FDW SQL helper available (auto-registration via Go adapter-registry: TBD)"
 
 if [[ ${LIVE} -eq 1 ]]; then
   command -v jq >/dev/null 2>&1 || fail "jq required for --live mode"

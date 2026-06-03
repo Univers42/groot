@@ -377,3 +377,6 @@ pyrightconfig.json
 # Local development TLS certificates generated for track-binocle Astro HTTPS.
 certs/*
 !certs/.gitkeep
+
+# Parity gate (G10) run artifacts — verdicts are per-run; route-sets + goldens stay tracked.
+.parity/

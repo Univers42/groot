@@ -15,8 +15,28 @@ scrape_configs:
       - targets: ["mongo-api:3010"]
     metrics_path: /metrics
 
-  # adapter-registry and query-router no longer expose /metrics;
-  # HTTP metrics are now collected by Kong's prometheus plugin.
+  # Go control plane — dependency-free /metrics exposed by internal/shared
+  # (baas_http_requests_total, baas_http_request_duration_ms_avg, baas_service_up,
+  # baas_uptime_seconds). See wiki/05-orchestration-observability-roadmap.md §2.
+  - job_name: "go-control-plane"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["adapter-registry-go:3021"]
+        labels: { plane: "control", service: "adapter-registry" }
+      - targets: ["tenant-control:3022"]
+        labels: { plane: "control", service: "tenant-control" }
+      - targets: ["webhook-dispatcher:3025"]
+        labels: { plane: "control", service: "webhook-dispatcher" }
+
+  # NOTE: query-router HTTP metrics are still collected via Kong's prometheus plugin.
+
+  # Rust data plane — dependency-free /metrics: baas_service_up, baas_uptime_seconds,
+  # baas_http_requests_total{status}, baas_data_plane_pool_connections{mount,engine,state}.
+  - job_name: "rust-data-plane"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["data-plane-router-rust:4011"]
+        labels: { plane: "data", service: "data-plane-router" }
 
   - job_name: "permission-engine"
     static_configs:

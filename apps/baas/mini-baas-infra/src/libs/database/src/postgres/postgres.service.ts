@@ -6,13 +6,22 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/31 16:38:08 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/06/01 22:30:37 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Pool, PoolClient, PoolConfig, QueryResultRow } from 'pg';
+
+export interface TenantQueryContext {
+  tenantId?: string;
+  projectId?: string;
+  appId?: string;
+  userId: string;
+  role?: string;
+  scopes?: string[];
+}
 
 /**
  * Managed PostgreSQL connection pool with RLS tenant isolation.
@@ -89,19 +98,31 @@ export class PostgresService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Run a query on the tenant pool with RLS context set.
-   * Wraps execution in a transaction that sets `app.current_user_id`.
+   * Wraps execution in a transaction that sets tenant and user GUCs.
    */
   async tenantQuery<T extends QueryResultRow = Record<string, unknown>>(
-    userId: string,
+    identityOrUserId: TenantQueryContext | string,
     text: string,
     params?: unknown[],
   ): Promise<T[]> {
+    const identity = this.resolveTenantQueryContext(identityOrUserId);
     const client: PoolClient = await this.tenantPool.connect();
     try {
       await client.query('BEGIN');
       await client.query(
-        `SELECT set_config('app.current_user_id', $1, true), set_config('request.jwt.claims', $2, true)`,
-        [userId, JSON.stringify({ sub: userId })],
+        `SELECT set_config('app.current_tenant_id', $1, true), set_config('app.current_user_id', $2, true), set_config('request.jwt.claims', $3, true)`,
+        [
+          identity.tenantId,
+          identity.userId,
+          JSON.stringify({
+            sub: identity.userId,
+            tenant_id: identity.tenantId,
+            project_id: identity.projectId,
+            app_id: identity.appId,
+            role: identity.role,
+            scopes: identity.scopes ?? [],
+          }),
+        ],
       );
       const result = await client.query<T>(text, params);
       await client.query('COMMIT');
@@ -117,6 +138,27 @@ export class PostgresService implements OnModuleInit, OnModuleDestroy {
   /** Get a raw client from the admin pool (caller must release). */
   async getAdminClient(): Promise<PoolClient> {
     return this.adminPool.connect();
+  }
+
+  private resolveTenantQueryContext(identityOrUserId: TenantQueryContext | string): Required<TenantQueryContext> {
+    if (typeof identityOrUserId === 'string') {
+      return {
+        tenantId: identityOrUserId,
+        projectId: identityOrUserId,
+        appId: 'legacy',
+        userId: identityOrUserId,
+        role: 'authenticated',
+        scopes: [],
+      };
+    }
+    return {
+      tenantId: identityOrUserId.tenantId ?? identityOrUserId.userId,
+      projectId: identityOrUserId.projectId ?? identityOrUserId.tenantId ?? identityOrUserId.userId,
+      appId: identityOrUserId.appId ?? 'legacy',
+      userId: identityOrUserId.userId,
+      role: identityOrUserId.role ?? 'authenticated',
+      scopes: identityOrUserId.scopes ?? [],
+    };
   }
 
   /** Check if the admin pool is healthy. */

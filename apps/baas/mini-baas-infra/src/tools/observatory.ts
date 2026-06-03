@@ -6,7 +6,7 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/06/02 12:42:32 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -683,8 +683,8 @@ interface FilterState {
 	services: Set<string>;
 	/** Pause output (buffer kept flowing, just not printed) */
 	paused: boolean;
-	/** Grep pattern */
-	grep: RegExp | null;
+	/** Case-insensitive text search */
+	grep: string | null;
 }
 
 function defaultFilter(): FilterState {
@@ -695,7 +695,7 @@ function matchesFilter(f: FilterState, level: LogLevel, service: string, formatt
 	if (f.paused) return false;
 	if (f.levels.size > 0 && !f.levels.has(level)) return false;
 	if (f.services.size > 0 && !f.services.has(service)) return false;
-	if (f.grep && !f.grep.test(stripAnsi(formatted))) return false;
+	if (f.grep && !stripAnsi(formatted).toLowerCase().includes(f.grep)) return false;
 	return true;
 }
 
@@ -710,7 +710,7 @@ ${BOLD}${CYAN}─── Observatory Commands ───────────�
   ${BOLD}${GREEN}info${RESET}  ${DIM}|${RESET} ${GREEN}i${RESET}                  Filter: show INFO and above
   ${BOLD}${GREEN}all${RESET}  ${DIM}|${RESET} ${GREEN}a${RESET}                   Reset: show all log levels
   ${BOLD}${GREEN}service${RESET} ${WHITE}<name,...>${RESET}       Filter: show only specific service(s)
-  ${BOLD}${GREEN}grep${RESET} ${WHITE}<pattern>${RESET}          Filter: show lines matching regex
+	${BOLD}${GREEN}grep${RESET} ${WHITE}<text>${RESET}             Filter: show lines containing text
   ${BOLD}${GREEN}grep${RESET}                       Clear grep filter
   ${BOLD}${GREEN}pause${RESET}  ${DIM}|${RESET} ${GREEN}p${RESET}                Pause log output
   ${BOLD}${GREEN}resume${RESET}  ${DIM}|${RESET} ${GREEN}r${RESET}               Resume log output
@@ -795,12 +795,8 @@ function serviceFilterCommand(arg: string, context: InteractiveCommandContext): 
 function grepCommand(arg: string, context: InteractiveCommandContext): boolean {
 	const { filterState } = context;
 	if (arg) {
-		try {
-			filterState.grep = new RegExp(arg, 'i');
-			process.stdout.write(`${GREEN}Grep: ${BOLD}/${arg}/i${RESET}\n`);
-		} catch {
-			process.stdout.write(`${RED}Invalid regex: ${arg}${RESET}\n`);
-		}
+		filterState.grep = arg.toLowerCase();
+		process.stdout.write(`${GREEN}Grep: ${BOLD}${arg}${RESET}\n`);
 	} else {
 		filterState.grep = null;
 		process.stdout.write(`${GREEN}Grep filter cleared${RESET}\n`);
@@ -830,8 +826,8 @@ function formattedSet<T extends string>(values: Set<T>): string {
 	return Array.from(values).join(', ');
 }
 
-function formattedGrep(grep: RegExp | null): string {
-	if (grep) return `/${grep.source}/${grep.flags}`;
+function formattedGrep(grep: string | null): string {
+	if (grep) return grep;
 	return `${DIM}none${RESET}`;
 }
 

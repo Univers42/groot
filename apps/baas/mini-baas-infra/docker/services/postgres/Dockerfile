@@ -66,7 +66,7 @@ ARG SQLITE_FDW_SHA256=sha256:sqlite-fdw-2-5-0-pinned-by-mini-baas
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
   apk upgrade --no-cache \
   && apk add --no-cache ca-certificates libcurl su-exec \
-  && printf '%s\n' '#!/bin/sh' 'exec su-exec "$@"' > /usr/local/bin/gosu \
+  && printf '%s\n' '#!/bin/sh' 'exec /sbin/su-exec "$@"' > /usr/local/bin/gosu \
   && chmod 0755 /usr/local/bin/gosu
 
 RUN mkdir -p /usr/local/share/mini-baas/fdw \

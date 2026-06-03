@@ -1,0 +1,98 @@
+// Package main boots the Go control-plane adapter-registry service.
+//
+// This is the control-plane replacement for the NestJS adapter-registry app.
+// It owns the tenant database registry: encrypted connection-string storage
+// (AES-256-GCM, byte-compatible with the legacy Node CryptoService) and the
+// metadata CRUD that the Rust data plane resolves mounts against.
+package main
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/dlesieur/mini-baas/control-plane/internal/adapterregistry"
+	"github.com/dlesieur/mini-baas/control-plane/internal/shared"
+)
+
+func main() {
+	log := shared.NewLogger("adapter-registry")
+
+	cfg, err := shared.LoadConfig("ADAPTER_REGISTRY")
+	if err != nil {
+		log.Error("config error", "err", err)
+		os.Exit(1)
+	}
+
+	// --healthcheck mode: used by the container HEALTHCHECK without a shell.
+	if len(os.Args) > 1 && os.Args[1] == "--healthcheck" {
+		os.Exit(healthcheck(cfg))
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+
+	db, err := shared.NewPostgres(ctx, cfg.DatabaseURL)
+	if err != nil {
+		log.Error("postgres connect failed", "err", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	encKey := os.Getenv("VAULT_ENC_KEY")
+	enc, err := adapterregistry.NewEncryptor(encKey)
+	if err != nil {
+		log.Error("encryptor init failed", "err", err)
+		os.Exit(1)
+	}
+
+	svc := adapterregistry.NewService(db, enc, log)
+	if err := svc.EnsureSchema(ctx); err != nil {
+		log.Error("ensure schema failed", "err", err)
+		os.Exit(1)
+	}
+
+	mux := shared.NewRouter("adapter-registry", db)
+	adapterregistry.Mount(mux, svc, cfg.ServiceToken)
+
+	srv := &http.Server{
+		Addr:              cfg.ListenAddr(),
+		Handler:           shared.WithMiddleware(mux, log),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	go func() {
+		log.Info("listening", "addr", cfg.ListenAddr(), "mode", cfg.ProductMode)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("server error", "err", err)
+			stop()
+		}
+	}()
+
+	<-ctx.Done()
+	log.Info("shutdown signal received")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Error("graceful shutdown failed", "err", err)
+	}
+	log.Info("stopped")
+}
+
+func healthcheck(cfg shared.Config) int {
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get("http://127.0.0.1:" + cfg.Port + "/health/live")
+	if err != nil {
+		return 1
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 1
+	}
+	return 0
+}

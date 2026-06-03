@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/18 21:19:15 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/18 21:19:15 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/06/02 12:42:57 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -91,15 +91,15 @@ PGRST_DB_URI=${PGRST_DB_URI}
 # Authorization: Bearer (jwt plugin), so they must be valid JWTs.
 KONG_PUBLIC_API_KEY=${ANON_KEY}
 KONG_SERVICE_API_KEY=${SERVICE_ROLE_KEY}
-KONG_CORS_ORIGIN_APP=http://localhost:3000
-KONG_CORS_ORIGIN_PLAYGROUND=http://localhost:3100
-KONG_CORS_ORIGIN_STUDIO=http://localhost:3001
-KONG_CORS_ORIGIN_FRONTEND=http://localhost:5173
+KONG_CORS_ORIGIN_APP=https://localhost:3000
+KONG_CORS_ORIGIN_PLAYGROUND=https://localhost:3100
+KONG_CORS_ORIGIN_STUDIO=https://localhost:3001
+KONG_CORS_ORIGIN_FRONTEND=https://localhost:5173
 
 # GoTrue
-API_EXTERNAL_URL=http://localhost:8000/auth/v1
-GOTRUE_SITE_URL=http://localhost:5173
-GOTRUE_URI_ALLOW_LIST=http://localhost:5173/**
+API_EXTERNAL_URL=https://localhost:8443/auth/v1
+GOTRUE_SITE_URL=https://localhost:5173
+GOTRUE_URI_ALLOW_LIST=https://localhost:5173/**
 JWT_SECRET=${JWT_SECRET}
 
 # PostgREST
@@ -123,8 +123,8 @@ VAULT_ENC_KEY=${VAULT_ENC_KEY}
 
 # Studio
 STUDIO_PG_META_URL=http://host.docker.internal:8080
-SUPABASE_URL=http://localhost:8000
-SUPABASE_PUBLIC_URL=http://localhost:8000
+SUPABASE_URL=https://localhost:8443
+SUPABASE_PUBLIC_URL=https://localhost:8443
 
 # MongoDB
 MONGO_URI=mongodb://mongo:27017
@@ -163,8 +163,9 @@ FORTYTWO_OAUTH_ENABLED=false
 FORTYTWO_CLIENT_ID=
 FORTYTWO_CLIENT_SECRET=
 
-# WAF (public HTTP entrypoint — non-privileged port to avoid bind conflicts)
+# WAF (public entrypoint; HTTPS is the production-like API surface)
 WAF_HTTP_PORT=8880
+WAF_HTTPS_PORT=8443
 
 # Vault (empty = disabled; services fall back to env vars)
 VAULT_ADDR=

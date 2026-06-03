@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/06/02 12:42:55 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -24,6 +24,7 @@ set -euo pipefail
 # ── Port map: ENV_VAR=default_port ──────────────────────────────────
 PORTS=(
   WAF_HTTP_PORT=8880
+  WAF_HTTPS_PORT=8443
   KONG_HTTP_PORT=8000
   KONG_ADMIN_PORT=8001
   PG_PORT=5432
@@ -37,7 +38,41 @@ PORTS=(
   MINIO_CONSOLE_PORT=9001
   SUPAVISOR_PORT=6543
   STUDIO_PORT=3001
+  PROMETHEUS_PORT=9090
+  GRAFANA_PORT=3030
+  LOKI_PORT=3101
+  PROMTAIL_PORT=9080
+  TEMPO_PORT=3200
+  OTEL_COLLECTOR_HTTP_PORT=4318
+  OTEL_COLLECTOR_GRPC_PORT=4317
+  OTEL_COLLECTOR_HEALTH_PORT=13133
 )
+
+declare -A SERVICE_PORTS=(
+  [waf]=WAF_HTTPS_PORT
+  [prometheus]=PROMETHEUS_PORT
+  [grafana]=GRAFANA_PORT
+  [loki]=LOKI_PORT
+  [promtail]=PROMTAIL_PORT
+  [tempo]=TEMPO_PORT
+  [otel-collector]=OTEL_COLLECTOR_HEALTH_PORT
+)
+
+if [[ $# -gt 0 ]]; then
+  for service in "$@"; do
+    var="${SERVICE_PORTS[$service]:-}"
+    [[ -n "$var" ]] || { echo "unknown service: $service" >&2; exit 2; }
+    default=""
+    for entry in "${PORTS[@]}"; do
+      if [[ "${entry%%=*}" == "$var" ]]; then
+        default="${entry#*=}"
+        break
+      fi
+    done
+    printf '%s\n' "${!var:-$default}"
+  done
+  exit 0
+fi
 
 # ── Helpers ─────────────────────────────────────────────────────────
 _used_ports=""  # track ports we've already claimed in this run

@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#              #
-#    Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/06/02 12:42:48 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -71,6 +71,13 @@ if [[ "$RUN_SHELLCHECK" == "1" ]]; then
   done < <(find scripts -type f -name '*.sh' -print0)
 fi
 
+if [[ "${RUN_SECURITY_SCANS:-1}" == "1" ]]; then
+  echo "[ci-local] Running M5 security scans..."
+  bash ./scripts/security/run-security-scans.sh
+else
+  echo "[ci-local] RUN_SECURITY_SCANS=0; skipping M5 security scans."
+fi
+
 echo "[ci-local] Resetting compose state (including volumes) for deterministic credentials..."
 make compose-down-volumes || true
 
@@ -105,18 +112,18 @@ if [[ "${status:-}" != "exited" ]]; then
   exit 1
 fi
 
-echo "[ci-local] Waiting for gateway health..."
+echo "[ci-local] Waiting for WAF HTTPS gateway health..."
 for _ in $(seq 1 60); do
-  code="$(curl -sS -o /dev/null -w '%{http_code}' http://localhost:8000/auth/v1/health -H 'apikey: public-anon-key' || true)"
+  code="$(curl -ksS -o /dev/null -w '%{http_code}' https://localhost:${WAF_HTTPS_PORT:-8443}/auth/v1/health -H 'apikey: public-anon-key' || true)"
   if [[ "$code" == "200" ]]; then
-    echo "[ci-local] Gateway health check passed"
+    echo "[ci-local] WAF gateway health check passed"
     break
   fi
   sleep 2
 done
 
 if [[ "${code:-000}" != "200" ]]; then
-  echo "[ci-local] Gateway health check failed" >&2
+  echo "[ci-local] WAF gateway health check failed" >&2
   exit 1
 fi
 

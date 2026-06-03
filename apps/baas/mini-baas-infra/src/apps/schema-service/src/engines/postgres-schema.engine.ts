@@ -6,7 +6,7 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/31 16:38:09 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/06/01 22:30:37 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -74,8 +74,20 @@ export class PostgresSchemaEngine {
             )::uuid;
           $$ LANGUAGE SQL STABLE;
 
+          CREATE OR REPLACE FUNCTION auth.current_tenant_id() RETURNS UUID AS $$
+            SELECT COALESCE(
+              NULLIF(current_setting('request.jwt.claims', true), '')::json ->> 'tenant_id',
+              NULLIF(current_setting('app.current_tenant_id', true), ''),
+              auth.current_user_id()::text
+            )::uuid;
+          $$ LANGUAGE SQL STABLE;
+
           CREATE OR REPLACE FUNCTION public.current_user_id() RETURNS TEXT AS $$
             SELECT auth.current_user_id()::text;
+          $$ LANGUAGE SQL STABLE;
+
+          CREATE OR REPLACE FUNCTION public.current_tenant_id() RETURNS TEXT AS $$
+            SELECT auth.current_tenant_id()::text;
           $$ LANGUAGE SQL STABLE;
         `);
 

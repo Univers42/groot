@@ -6,12 +6,12 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/06/01 22:30:38 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
 import { createParamDecorator, ExecutionContext } from '@nestjs/common';
-import { UserContext } from '../interfaces/user-context.interface';
+import { UserContext, VerifiedRequestIdentity } from '../interfaces/user-context.interface';
 import { Request } from 'express';
 
 /**
@@ -25,5 +25,15 @@ export const CurrentUser = createParamDecorator(
       throw new Error('CurrentUser decorator used without AuthGuard');
     }
     return request.user;
+  },
+);
+
+export const CurrentIdentity = createParamDecorator(
+  (_data: unknown, ctx: ExecutionContext): VerifiedRequestIdentity => {
+    const request = ctx.switchToHttp().getRequest<Request>();
+    if (!request.identity) {
+      throw new Error('CurrentIdentity decorator used without AuthGuard');
+    }
+    return request.identity;
   },
 );

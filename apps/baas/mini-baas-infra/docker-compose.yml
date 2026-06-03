@@ -136,6 +136,7 @@ services:
         condition: service_started
       realtime:
         condition: service_healthy
+        required: false
     networks:
       - mini-baas
     restart: unless-stopped
@@ -183,7 +184,8 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-mini_baas}
       MYSQL_USER: ${MYSQL_USER:-mini_baas}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-mini_baas_pw}
-    command: ["--default-authentication-plugin=caching_sha2_password"]
+    # MySQL 8.4 removed --default-authentication-plugin; caching_sha2_password
+    # has been the default since 8.0.4, so no command override is needed.
     ports:
       - "${MYSQL_PORT:-3306}:3306"
     volumes:
@@ -202,7 +204,7 @@ services:
 
   # ─── Iceberg REST Catalog (M2 federation) ────────────────────────
   iceberg-rest:
-    image: apache/iceberg-rest-fixture:1.6.1
+    image: apache/iceberg-rest-fixture:1.8.1
     container_name: mini-baas-iceberg-rest
     profiles: [analytics, data-plane, extras]
     env_file: [.env]
@@ -254,6 +256,7 @@ services:
         condition: service_healthy
       realtime:
         condition: service_healthy
+        required: false
     networks:
       - mini-baas
     restart: unless-stopped
@@ -277,7 +280,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-postgres}
     volumes:
-      - ./docker/services/debezium/application.properties:/debezium/conf/application.properties:ro
+      - ./docker/services/debezium/application.properties:/debezium/config/application.properties:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -491,7 +494,7 @@ services:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3010/health/live || exit 1"]
       interval: 5s
       timeout: 3s
-      start_period: 8s
+      start_period: 30s
       retries: 5
     mem_limit: 128m
     cpus: 0.25
@@ -622,6 +625,10 @@ services:
       context: ./docker/services/realtime/realtime-agnostic
       dockerfile: Dockerfile
       # Run:  docker compose build realtime  to rebuild with source fixes
+    # Opt-in: realtime fan-out is a feature, not a foundation. Single-tenant
+    # CRUD deployments that don't need WebSocket events can skip this
+    # service entirely by leaving the `realtime` profile off.
+    profiles: [realtime, data-plane]
     container_name: mini-baas-realtime
     env_file: [.env]
     environment:
@@ -651,7 +658,7 @@ services:
       test: ["CMD", "/app/realtime-server", "--healthcheck"]
       interval: 5s
       timeout: 3s
-      start_period: 8s
+      start_period: 30s
       retries: 5
     mem_limit: 128m
     cpus: 0.25
@@ -678,39 +685,11 @@ services:
     mem_limit: 128m
     cpus: 0.25
 
-  # ─── Adapter Registry (control plane — DB credential store) ───────
-  adapter-registry:
-    build:
-      context: ./src
-      dockerfile: Dockerfile
-      args:
-        APP: adapter-registry
-    profiles: [adapter-plane, control-plane]
-    container_name: mini-baas-adapter-registry
-    env_file: [.env]
-    environment:
-      PORT: 3020
-      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/postgres}
-      ADAPTER_REGISTRY_DB_USER: ${ADAPTER_REGISTRY_DB_USER:-adapter_registry_role}
-      ADAPTER_REGISTRY_DB_PASSWORD: ${ADAPTER_REGISTRY_DB_PASSWORD:-adapter_registry_pw}
-      JWT_SECRET: ${JWT_SECRET}
-      VAULT_ENC_KEY: ${VAULT_ENC_KEY:-0123456789abcdef0123456789abcdef}
-      ADAPTER_REGISTRY_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-    depends_on:
-      db-bootstrap:
-        condition: service_completed_successfully
-    networks:
-      - mini-baas
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3020/health/live || exit 1"]
-      interval: 5s
-      timeout: 3s
-      start_period: 8s
-      retries: 5
-    mem_limit: 128m
-    cpus: 0.25
+  # ─── Adapter Registry: see `adapter-registry-go` further below. The TS
+  # NestJS adapter-registry was retired after parity-probe.sh proved the Go
+  # implementation byte-compatible (same AES-256-GCM crypto scheme + same
+  # RLS contract + same /databases route surface). Removed: ~700 lines of
+  # TS, ~150 MB RAM in production, an entire build target.
 
   # ─── Query Router (adapter plane — normalized data API) ───────────
   query-router:
@@ -724,15 +703,32 @@ services:
     env_file: [.env]
     environment:
       PORT: 4001
-      ADAPTER_REGISTRY_URL: http://adapter-registry:3020
+      # Adapter-registry cutover: Go is the primary service now. The TS
+      # adapter-registry was retired after parity-probe.sh proved the Go
+      # implementation byte-compatible (same AES-GCM scheme, same RLS).
+      # Override `ADAPTER_REGISTRY_URL` if you need to point at the legacy
+      # TS service (only useful during the deprecation window).
+      ADAPTER_REGISTRY_URL: ${ADAPTER_REGISTRY_URL:-http://adapter-registry-go:3021}
       PERMISSION_ENGINE_URL: http://permission-engine:3050
       LOG_SERVICE_URL: http://log-service:3110
+      # Tenant-control: API-key auth exchange. The ApiKeyMiddleware in
+      # @mini-baas/common calls /v1/keys/verify on this URL with
+      # INTERNAL_SERVICE_TOKEN to translate X-Baas-Api-Key -> tenant headers.
+      TENANT_CONTROL_URL: ${TENANT_CONTROL_URL:-http://tenant-control:3022}
+      INTERNAL_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
+      API_KEY_VERIFY_TIMEOUT_MS: ${API_KEY_VERIFY_TIMEOUT_MS:-2000}
       CONTROL_PLANE_TIMEOUT_MS: ${CONTROL_PLANE_TIMEOUT_MS:-2000}
       CONTROL_PLANE_RETRY_ATTEMPTS: ${CONTROL_PLANE_RETRY_ATTEMPTS:-2}
       QUERY_ROUTER_ADAPTER_CACHE_TTL_MS: ${QUERY_ROUTER_ADAPTER_CACHE_TTL_MS:-30000}
       QUERY_ROUTER_PERMISSION_CACHE_TTL_MS: ${QUERY_ROUTER_PERMISSION_CACHE_TTL_MS:-5000}
       QUERY_ROUTER_READ_CACHE_TTL_MS: ${QUERY_ROUTER_READ_CACHE_TTL_MS:-3000}
       QUERY_ROUTER_CACHE_MAX_ENTRIES: ${QUERY_ROUTER_CACHE_MAX_ENTRIES:-2000}
+      # DSN lookup cache — avoids hitting adapter-registry's decrypt on the
+      # hot path. Set to `0` to disable (credentials change must propagate
+      # immediately). The default 30s window matches the credential rotation
+      # SLO; bump it for read-heavy steady-state, lower for security-critical.
+      QUERY_ROUTER_DSN_CACHE_TTL_MS: ${QUERY_ROUTER_DSN_CACHE_TTL_MS:-30000}
+      QUERY_ROUTER_DSN_CACHE_MAX_ENTRIES: ${QUERY_ROUTER_DSN_CACHE_MAX_ENTRIES:-500}
       QUERY_ROUTER_REDIS_CACHE_ENABLED: ${QUERY_ROUTER_REDIS_CACHE_ENABLED:-true}
       QUERY_ROUTER_REDIS_URL: ${QUERY_ROUTER_REDIS_URL:-redis://redis:6379}
       QUERY_ROUTER_REDIS_KEY_PREFIX: ${QUERY_ROUTER_REDIS_KEY_PREFIX:-query-router:}
@@ -749,8 +745,16 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       ADAPTER_REGISTRY_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # ── Rust data-plane cutover (parity proven via parity-probe.sh) ──
+      # All five R2/R3/R7/R8 engines now forward to the Rust pool registry
+      # by default. The proxy is the only path for these engines; the
+      # corresponding TypeScript engines have been removed.
+      RUST_DATA_PLANE_URL: ${RUST_DATA_PLANE_URL:-http://data-plane-router-rust:4011}
+      RUST_DATA_PLANE_FORWARD: ${RUST_DATA_PLANE_FORWARD:-1}
+      RUST_DATA_PLANE_FORWARD_ENGINES: ${RUST_DATA_PLANE_FORWARD_ENGINES:-postgresql,mongodb,mysql,redis,http}
+      RUST_DATA_PLANE_TIMEOUT_MS: ${RUST_DATA_PLANE_TIMEOUT_MS:-5000}
     depends_on:
-      adapter-registry:
+      adapter-registry-go:
         condition: service_healthy
       permission-engine:
         condition: service_healthy
@@ -759,6 +763,8 @@ services:
         required: false
       redis:
         condition: service_started
+      data-plane-router-rust:
+        condition: service_healthy
     networks:
       - mini-baas
     restart: unless-stopped
@@ -766,9 +772,168 @@ services:
       test: ["CMD-SHELL", "wget -qO- http://localhost:4001/health/live || exit 1"]
       interval: 5s
       timeout: 3s
-      start_period: 8s
+      start_period: 30s
       retries: 5
     mem_limit: 128m
+    cpus: 0.25
+
+  # ─── Rust Data Plane Router (live cutover — see parity-probe.sh) ──
+  data-plane-router-rust:
+    build:
+      context: ./docker/services/data-plane-router
+      dockerfile: Dockerfile
+    profiles: [adapter-plane, rust-data-plane]
+    container_name: mini-baas-data-plane-router-rust
+    env_file: [.env]
+    environment:
+      DATA_PLANE_ROUTER_HOST: 0.0.0.0
+      DATA_PLANE_ROUTER_PORT: 4011
+      DATA_PLANE_ROUTER_PRODUCT_MODE: ${DATA_PLANE_ROUTER_PRODUCT_MODE:-enabled}
+      DATA_PLANE_ADAPTER_REGISTRY_URL: ${DATA_PLANE_ADAPTER_REGISTRY_URL:-http://adapter-registry-go:3021}
+      DATA_PLANE_PERMISSION_BUNDLE_URL: http://permission-engine:3050/permissions/bundles/latest
+      DATA_PLANE_MOUNTS: ${DATA_PLANE_MOUNTS:-}
+      RUST_LOG: ${RUST_LOG:-info}
+    ports:
+      - "127.0.0.1:${DATA_PLANE_RUST_PORT:-4011}:4011"
+    networks:
+      - mini-baas
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/app/data-plane-router", "--healthcheck"]
+      interval: 5s
+      timeout: 3s
+      start_period: 30s
+      retries: 5
+    mem_limit: 96m
+    cpus: 0.25
+
+  # ─── Go Control Plane: adapter-registry (shadow migration path) ───
+  adapter-registry-go:
+    build:
+      context: ./go/control-plane
+      dockerfile: Dockerfile
+      args:
+        APP: adapter-registry
+        PORT: 3021
+    profiles: [control-plane, go-control-plane]
+    container_name: mini-baas-adapter-registry-go
+    env_file: [.env]
+    environment:
+      ADAPTER_REGISTRY_HOST: 0.0.0.0
+      ADAPTER_REGISTRY_PORT: 3021
+      ADAPTER_REGISTRY_PRODUCT_MODE: ${ADAPTER_REGISTRY_GO_PRODUCT_MODE:-shadow}
+      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/postgres}
+      VAULT_ENC_KEY: ${VAULT_ENC_KEY:-0123456789abcdef0123456789abcdef}
+      INTERNAL_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "127.0.0.1:${ADAPTER_REGISTRY_GO_PORT:-3021}:3021"
+    networks:
+      - mini-baas
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/app/app", "--healthcheck"]
+      interval: 5s
+      timeout: 3s
+      start_period: 30s
+      retries: 5
+    mem_limit: 48m
+    cpus: 0.25
+
+  # ─── Go Control Plane: tenant-control ─────────────────────────────
+  # Owns the top-level tenants registry + tenant_api_keys CRUD. Exposes
+  # /v1/tenants and /v1/keys/verify. Bootstrap endpoint wires a new tenant
+  # up with a default ABAC role + first API key in one call.
+  #
+  # JWT_SECRET (shared with GoTrue) enables POST /v1/tenants/me/bootstrap —
+  # the JWT-authenticated path the just-signed-up user calls to provision
+  # their tenant + receive their first API key.
+  tenant-control:
+    build:
+      context: ./go/control-plane
+      dockerfile: Dockerfile
+      args:
+        APP: tenant-control
+        PORT: 3022
+    profiles: [control-plane, go-control-plane]
+    container_name: mini-baas-tenant-control
+    env_file: [.env]
+    environment:
+      TENANT_CONTROL_HOST: 0.0.0.0
+      TENANT_CONTROL_PORT: 3022
+      TENANT_CONTROL_PRODUCT_MODE: ${TENANT_CONTROL_PRODUCT_MODE:-shadow}
+      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/postgres}
+      INTERNAL_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
+      # Enables POST /v1/provision to register a tenant's data mounts in one call,
+      # and to create the per-tenant schema for schema_per_tenant mounts.
+      ADAPTER_REGISTRY_URL: ${ADAPTER_REGISTRY_URL:-http://adapter-registry-go:3021}
+      RUST_DATA_PLANE_URL: ${RUST_DATA_PLANE_URL:-http://data-plane-router-rust:4011}
+      # ABAC seam: the provisioning reconciler self-verifies seeded roles/policies
+      # via permission-engine's POST /permissions/decide (service-token gated).
+      # Role/policy SEEDING works without this (direct SQL); only Decide() needs it.
+      PERMISSION_ENGINE_URL: ${PERMISSION_ENGINE_URL:-http://permission-engine:3050}
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_ISSUER: ${GOTRUE_JWT_ISSUER:-${API_EXTERNAL_URL:-http://localhost:8000/auth/v1}}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "127.0.0.1:${TENANT_CONTROL_PORT:-3022}:3022"
+    depends_on:
+      db-bootstrap:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    networks:
+      - mini-baas
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/app/app", "--healthcheck"]
+      interval: 5s
+      timeout: 3s
+      start_period: 30s
+      retries: 5
+    mem_limit: 64m
+    cpus: 0.25
+
+  # ─── Go Control Plane: webhook-dispatcher ─────────────────────────
+  # Owns webhook_subscriptions CRUD + consumes outbox.<aggregate> Redis
+  # streams + HMAC-signed POSTs to subscribers with retry + DLQ.
+  webhook-dispatcher:
+    build:
+      context: ./go/control-plane
+      dockerfile: Dockerfile
+      args:
+        APP: webhook-dispatcher
+        PORT: 3025
+    profiles: [control-plane, background, go-control-plane]
+    container_name: mini-baas-webhook-dispatcher
+    env_file: [.env]
+    environment:
+      WEBHOOK_DISPATCHER_HOST: 0.0.0.0
+      WEBHOOK_DISPATCHER_PORT: 3025
+      WEBHOOK_DISPATCHER_PRODUCT_MODE: ${WEBHOOK_DISPATCHER_PRODUCT_MODE:-shadow}
+      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/postgres}
+      WEBHOOK_REDIS_URL: ${WEBHOOK_REDIS_URL:-${OUTBOX_REDIS_URL:-redis://redis:6379}}
+      WEBHOOK_GROUP: ${WEBHOOK_GROUP:-webhook-dispatcher}
+      WEBHOOK_CONSUMER: ${WEBHOOK_CONSUMER:-webhook-dispatcher-0}
+      INTERNAL_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "127.0.0.1:${WEBHOOK_DISPATCHER_PORT:-3025}:3025"
+    depends_on:
+      db-bootstrap:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    networks:
+      - mini-baas
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/app/app", "--healthcheck"]
+      interval: 5s
+      timeout: 3s
+      start_period: 30s
+      retries: 5
+    mem_limit: 96m
     cpus: 0.25
 
   # ─── Email Service (background plane) ─────────────────────────────
@@ -798,7 +963,7 @@ services:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3030/health/live || exit 1"]
       interval: 5s
       timeout: 3s
-      start_period: 8s
+      start_period: 30s
       retries: 5
     mem_limit: 128m
     cpus: 0.25
@@ -832,7 +997,7 @@ services:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3040/health/live || exit 1"]
       interval: 5s
       timeout: 3s
-      start_period: 8s
+      start_period: 30s
       retries: 5
     mem_limit: 128m
     cpus: 0.25
@@ -852,6 +1017,11 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/postgres}
       ADAPTER_REGISTRY_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
       JWT_SECRET: ${JWT_SECRET}
+      # `abac` (default): role match + JSONB conditions + field masks.
+      # `rbac`         : role match only, no masks. Cheaper, simpler — pick
+      # this when the product does not need attribute-level decisions.
+      # The two modes are mutually exclusive; set once at deploy time.
+      PERMISSION_MODE: ${PERMISSION_MODE:-abac}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       db-bootstrap:
@@ -863,7 +1033,7 @@ services:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3050/health/live || exit 1"]
       interval: 5s
       timeout: 3s
-      start_period: 8s
+      start_period: 30s
       retries: 5
     mem_limit: 128m
     cpus: 0.25
@@ -881,12 +1051,17 @@ services:
     environment:
       PORT: 3060
       DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/postgres}
-      ADAPTER_REGISTRY_URL: http://adapter-registry:3020
+      # Adapter-registry cutover: Go is the primary service now. The TS
+      # adapter-registry was retired after parity-probe.sh proved the Go
+      # implementation byte-compatible (same AES-GCM scheme, same RLS).
+      # Override `ADAPTER_REGISTRY_URL` if you need to point at the legacy
+      # TS service (only useful during the deprecation window).
+      ADAPTER_REGISTRY_URL: ${ADAPTER_REGISTRY_URL:-http://adapter-registry-go:3021}
       ADAPTER_REGISTRY_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
       JWT_SECRET: ${JWT_SECRET}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
-      adapter-registry:
+      adapter-registry-go:
         condition: service_healthy
     networks:
       - mini-baas
@@ -895,7 +1070,7 @@ services:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3060/health/live || exit 1"]
       interval: 5s
       timeout: 3s
-      start_period: 8s
+      start_period: 30s
       retries: 5
     mem_limit: 128m
     cpus: 0.25
@@ -927,7 +1102,7 @@ services:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3070/health/live || exit 1"]
       interval: 5s
       timeout: 3s
-      start_period: 8s
+      start_period: 30s
       retries: 5
     mem_limit: 128m
     cpus: 0.25
@@ -959,7 +1134,7 @@ services:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3080/health/live || exit 1"]
       interval: 5s
       timeout: 3s
-      start_period: 8s
+      start_period: 30s
       retries: 5
     mem_limit: 128m
     cpus: 0.25
@@ -994,7 +1169,7 @@ services:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3090/health/live || exit 1"]
       interval: 5s
       timeout: 3s
-      start_period: 8s
+      start_period: 30s
       retries: 5
     mem_limit: 128m
     cpus: 0.25
@@ -1031,7 +1206,7 @@ services:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3100/health/live || exit 1"]
       interval: 5s
       timeout: 3s
-      start_period: 8s
+      start_period: 30s
       retries: 5
     mem_limit: 256m
     cpus: 0.5
@@ -1059,7 +1234,7 @@ services:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3110/health/live || exit 1"]
       interval: 5s
       timeout: 3s
-      start_period: 8s
+      start_period: 30s
       retries: 5
     mem_limit: 128m
     cpus: 0.25
@@ -1090,7 +1265,7 @@ services:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3120/health/live || exit 1"]
       interval: 5s
       timeout: 3s
-      start_period: 8s
+      start_period: 30s
       retries: 5
     mem_limit: 128m
     cpus: 0.25
@@ -1114,6 +1289,71 @@ services:
       - mini-baas
     restart: unless-stopped
 
+  # ─── Edge Functions Runtime (Deno worker-per-invocation MVP) ──────
+  # Tenants POST TS/JS code to /v1/functions and invoke them at
+  # /v1/functions/:name/invoke. Each invocation spawns a Deno Worker with a
+  # minimal permission set. Read wiki/back/08_edge_functions.md for the
+  # security trade-offs.
+  functions-runtime:
+    build:
+      context: ./docker/services/functions-runtime
+      dockerfile: Dockerfile
+    profiles: [functions, data-plane, extras]
+    container_name: mini-baas-functions
+    env_file: [.env]
+    environment:
+      FUNCTIONS_HOST: 0.0.0.0
+      FUNCTIONS_PORT: 3060
+      FUNCTIONS_DATA_DIR: /data
+      FUNCTIONS_INVOKE_TIMEOUT_MS: ${FUNCTIONS_INVOKE_TIMEOUT_MS:-5000}
+    ports:
+      - "127.0.0.1:${FUNCTIONS_PORT:-3060}:3060"
+    volumes:
+      - functions-data:/data
+    networks:
+      - mini-baas
+    restart: unless-stopped
+    mem_limit: 256m
+    cpus: 0.5
+
+  # ─── Postgres Backup (nightly logical dumps -> MinIO) ─────────────
+  # Profile `backups` keeps it out of the lean dev loop. Add `--profile backups`
+  # or include it in BAAS_LEAN_PROFILES_EXTRA for production deployments.
+  pg-backup:
+    build:
+      context: ./docker/services/pg-backup
+      dockerfile: Dockerfile
+    profiles: [backups, ops]
+    container_name: mini-baas-pg-backup
+    env_file: [.env]
+    environment:
+      DATABASE_URL: ${PG_BACKUP_DATABASE_URL:-${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/postgres}}
+      MINIO_ENDPOINT: ${PG_BACKUP_MINIO_ENDPOINT:-http://minio:9000}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      PG_BACKUP_SCHEDULE: ${PG_BACKUP_SCHEDULE:-0 3 * * *}
+      PG_BACKUP_BUCKET: ${PG_BACKUP_BUCKET:-backups}
+      PG_BACKUP_PREFIX: ${PG_BACKUP_PREFIX:-postgres}
+      PG_BACKUP_RETAIN_DAYS: ${PG_BACKUP_RETAIN_DAYS:-14}
+      PG_BACKUP_PHYSICAL: ${PG_BACKUP_PHYSICAL:-0}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+        required: false
+    networks:
+      - mini-baas
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/opt/pg-backup/entrypoint.sh", "liveness"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    mem_limit: 128m
+    cpus: 0.25
+
   # ─── Connection Pooler (control plane / close to Postgres) ────────
   supavisor:
     image: supabase/supavisor:2.7.4
@@ -1134,32 +1374,49 @@ services:
     restart: unless-stopped
 
   # ─── Admin Dashboard (extras) ────────────────────────────────────
+  # Studio talks to pg-meta for schema inspection and proxies postgres for
+  # the table editor. Open http://localhost:${STUDIO_PORT:-3000} once the
+  # container reports healthy. The DEFAULT_* env vars skip the first-run
+  # wizard so the dashboard loads straight into the dev project.
   studio:
     image: supabase/studio:2026.03.30-sha-12a43e5
     container_name: mini-baas-studio
-    profiles: [control-plane, extras]
+    profiles: [control-plane, extras, studio]
     env_file: [.env]
     environment:
       HOSTNAME: 0.0.0.0
       STUDIO_PG_META_URL: http://pg-meta:8080
-      SUPABASE_URL: ${SUPABASE_URL:-http://localhost:8000}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      DEFAULT_ORGANIZATION_NAME: ${STUDIO_DEFAULT_ORG_NAME:-Mini BaaS Dev}
+      DEFAULT_PROJECT_NAME: ${STUDIO_DEFAULT_PROJECT_NAME:-mini-baas}
+      SUPABASE_URL: ${SUPABASE_URL:-http://kong:8000}
       SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL:-http://localhost:8000}
       SUPABASE_ANON_KEY: ${ANON_KEY:-anon-key-placeholder}
       SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY:-service-key-placeholder}
+      LOGFLARE_API_KEY: ${STUDIO_LOGFLARE_API_KEY:-}
+      LOGFLARE_URL: ${STUDIO_LOGFLARE_URL:-}
+      NEXT_PUBLIC_ENABLE_LOGS: "false"
+      NEXT_ANALYTICS_BACKEND_PROVIDER: postgres
+    ports:
+      - "127.0.0.1:${STUDIO_PORT:-3000}:3000"
     depends_on:
       pg-meta:
         condition: service_started
+      postgres:
+        condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
       - mini-baas
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000').then(() => process.exit(0)).catch(() => process.exit(1))\""]
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/profile').then(r => process.exit(r.status < 500 ? 0 : 1)).catch(() => process.exit(1))\""]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 20s
+      start_period: 30s
+    mem_limit: 384m
+    cpus: 0.5
 
   # ─── Observability: Prometheus ───────────────────────────────────
   prometheus:
@@ -1201,6 +1458,8 @@ services:
       - ./config/loki/loki.yaml:/etc/loki/config.yaml:ro
       - loki-data:/loki
     command: ["-config.file=/etc/loki/config.yaml"]
+    ports:
+      - "${LOKI_PORT:-3100}:3100"
     networks:
       - mini-baas
     restart: unless-stopped
@@ -1252,3 +1511,4 @@ volumes:
   prometheus-data:
   grafana-data:
   loki-data:
+  functions-data:

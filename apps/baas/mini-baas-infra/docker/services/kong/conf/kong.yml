@@ -32,10 +32,14 @@ plugins:
         - __KONG_CORS_ORIGIN_PLAYGROUND__
         - __KONG_CORS_ORIGIN_STUDIO__
         - __KONG_CORS_ORIGIN_FRONTEND__
+        # osionos second-brain Vite dev server — plain http in dev (no TLS).
+        # Lets the in-browser BaaS graph mode call /query/v1/* across origins.
+        - http://localhost:3001
+        - http://127.0.0.1:3001
       methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
       headers:
-        [Authorization, Content-Type, Content-Profile, apikey, x-client-info,
-         X-Request-ID, Prefer, Range, Accept, Accept-Profile,
+        [Authorization, Content-Type, Content-Profile, apikey, X-Baas-Api-Key,
+         x-client-info, X-Request-ID, Prefer, Range, Accept, Accept-Profile,
          x-supabase-api-version]
       exposed_headers:
         [X-Kong-Upstream-Latency, X-Kong-Proxy-Latency, X-Request-ID]
@@ -282,8 +286,130 @@ services:
               minute: 180
               hour: 5000
 
+  - name: tenant-control-admin
+    # Control-plane admin: POST /admin/v1/provision -> tenant-control /v1/provision.
+    # The service URL carries the target path so strip_path on this exact route
+    # leaves /v1/provision (tenant-control uses a /v1 prefix, unlike adapter-
+    # registry's bare paths). This path is more specific than /admin/v1, so Kong
+    # matches it first. Provision is additionally X-Service-Token gated by
+    # tenant-control. See wiki/03-control-plane.md §2.3.
+    url: http://tenant-control:3022/v1/provision
+    routes:
+      - name: admin-provision
+        paths: [/admin/v1/provision]
+        strip_path: true
+        plugins:
+          - name: key-auth
+            config:
+              key_names: [apikey]
+              hide_credentials: false
+          - name: ip-restriction
+            config:
+              allow: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.1]
+          - name: request-size-limiting
+            config:
+              allowed_payload_size: 64
+              size_unit: kilobytes
+          - name: rate-limiting
+            config:
+              policy: local
+              limit_by: ip
+              minute: 30
+              hour: 500
+
+  # ── Control/Admin API (G4): coherent /admin/v1/* surface over the Go/Rust
+  # control plane. Each route is MORE specific than the /admin/v1 catch-all below
+  # (Kong matches longest path first), strip_path leaves the upstream's own path
+  # (carried in the service url), and all are internal-only via ip-restriction +
+  # the upstream's own service-token. service_role apikey + internal network only.
+  - name: admin-tenants
+    url: http://tenant-control:3022/v1/tenants
+    routes:
+      - name: admin-tenants
+        paths: [/admin/v1/tenants]
+        strip_path: true
+        plugins:
+          - name: key-auth
+            config: { key_names: [apikey], hide_credentials: false }
+          - name: ip-restriction
+            config: { allow: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.1] }
+          - name: request-size-limiting
+            config: { allowed_payload_size: 64, size_unit: kilobytes }
+          - name: rate-limiting
+            config: { policy: local, limit_by: ip, minute: 60, hour: 1000 }
+
+  - name: admin-keys
+    url: http://tenant-control:3022/v1/keys
+    routes:
+      - name: admin-keys
+        paths: [/admin/v1/keys]
+        strip_path: true
+        plugins:
+          - name: key-auth
+            config: { key_names: [apikey], hide_credentials: false }
+          - name: ip-restriction
+            config: { allow: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.1] }
+          - name: request-size-limiting
+            config: { allowed_payload_size: 64, size_unit: kilobytes }
+          - name: rate-limiting
+            config: { policy: local, limit_by: ip, minute: 60, hour: 1000 }
+
+  - name: admin-webhooks
+    url: http://webhook-dispatcher:3025/v1/webhooks
+    routes:
+      - name: admin-webhooks
+        paths: [/admin/v1/webhooks]
+        strip_path: true
+        plugins:
+          - name: key-auth
+            config: { key_names: [apikey], hide_credentials: false }
+          - name: ip-restriction
+            config: { allow: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.1] }
+          - name: request-size-limiting
+            config: { allowed_payload_size: 64, size_unit: kilobytes }
+          - name: rate-limiting
+            config: { policy: local, limit_by: ip, minute: 60, hour: 1000 }
+
+  - name: admin-migrate
+    url: http://data-plane-router-rust:4011/v1/admin/migrate
+    routes:
+      - name: admin-migrate
+        paths: [/admin/v1/migrate]
+        strip_path: true
+        plugins:
+          - name: key-auth
+            config: { key_names: [apikey], hide_credentials: false }
+          - name: ip-restriction
+            config: { allow: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.1] }
+          - name: request-size-limiting
+            config: { allowed_payload_size: 256, size_unit: kilobytes }
+          - name: rate-limiting
+            config: { policy: local, limit_by: ip, minute: 30, hour: 500 }
+
+  # G8 credential rotation: drains the stale per-mount pool + evicts the cached
+  # DSN after a credential_ref.version bump. Same internal-only guard as migrate.
+  - name: admin-rotate
+    url: http://data-plane-router-rust:4011/v1/admin/rotate
+    routes:
+      - name: admin-rotate
+        paths: [/admin/v1/rotate]
+        strip_path: true
+        plugins:
+          - name: key-auth
+            config: { key_names: [apikey], hide_credentials: false }
+          - name: ip-restriction
+            config: { allow: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.1] }
+          - name: request-size-limiting
+            config: { allowed_payload_size: 256, size_unit: kilobytes }
+          - name: rate-limiting
+            config: { policy: local, limit_by: ip, minute: 30, hour: 500 }
+
   - name: adapter-registry
-    url: http://adapter-registry:3020
+    # Go control plane (go-control-plane profile). The NestJS adapter-registry:3020
+    # was retired after parity-probe.sh. strip_path on /admin/v1 leaves
+    # /databases and /databases/{id}/connect, which match the Go handler's route
+    # surface exactly. See wiki/03-control-plane.md §2.3 (gap G4).
+    url: http://adapter-registry-go:3021
     routes:
       - name: admin-adapters
         paths: [/admin/v1]
@@ -316,6 +442,9 @@ services:
 
   - name: query-router
     url: http://query-router:4001
+    # /query/v1/{capabilities,engines} are the SDK introspection surface (G6):
+    # both are served at the query-router ROOT and reached through this same
+    # `/query/v1` route (strip_path drops the prefix) — no extra route needed.
     routes:
       - name: query-routes
         paths: [/query/v1]
@@ -532,6 +661,43 @@ services:
               limit_by: ip
               minute: 300
               hour: 8000
+
+  # Edge Functions Runtime (G9). The Deno runtime serves /v1/functions...;
+  # strip_path drops /functions/v1 and the upstream url re-adds /v1/functions, so
+  # /functions/v1            -> /v1/functions            (list/deploy)
+  # /functions/v1/<name>     -> /v1/functions/<name>     (read/delete)
+  # /functions/v1/<name>/invoke -> /v1/functions/<name>/invoke
+  # Tenant identity: the global pre-function plugin forwards X-User-Id from the
+  # verified JWT, which the runtime accepts as a tenant fallback. Plugins mirror
+  # an app route (key-auth + jwt(iss) + rate-limiting + request-size-limiting).
+  - name: functions
+    url: http://functions-runtime:3060/v1/functions
+    routes:
+      - name: functions-routes
+        paths: [/functions/v1]
+        strip_path: true
+        plugins:
+          - name: key-auth
+            config:
+              key_names: [apikey]
+              hide_credentials: false
+          - name: jwt
+            config:
+              header_names: [authorization]
+              key_claim_name: iss
+              claims_to_verify: [exp]
+              run_on_preflight: false
+              anonymous: __KONG_ANON_UUID__
+          - name: rate-limiting
+            config:
+              policy: local
+              limit_by: ip
+              minute: 120
+              hour: 3000
+          - name: request-size-limiting
+            config:
+              allowed_payload_size: 512
+              size_unit: kilobytes
 
   - name: gdpr-service
     url: http://gdpr-service:3080

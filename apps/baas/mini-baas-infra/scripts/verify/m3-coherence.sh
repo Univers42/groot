@@ -98,6 +98,18 @@ if [[ ${LIVE} -eq 1 ]]; then
   M3_PROBE_NAME="m3-idem-$(date +%s%N)"
   MONGO_DB_NAME="${MONGO_DB_NAME:-mini_baas}"
 
+  # Install signed-envelope helper into the NestJS containers so the inline
+  # Node test blocks can sign requests (raw X-User-Id is rejected in strict
+  # mode by libs/common/src/identity).
+  SIGN_HELPER="${BAAS_DIR}/scripts/verify/_signed-fetch.mjs"
+  [[ -f "${SIGN_HELPER}" ]] || fail "signed-fetch helper not found at ${SIGN_HELPER}"
+  # adapter-registry-go is distroless; no shell to host the helper. Copy only
+  # into query-router which runs the signed Node test blocks.
+  for svc in query-router; do
+    docker compose -f "${COMPOSE_FILE}" cp "${SIGN_HELPER}" "${svc}:/tmp/_signed-fetch.mjs" >/dev/null \
+      || fail "could not copy signed-fetch helper into ${svc}"
+  done
+
   step "live: migrations 015 + 016 applied"
   docker compose -f "${COMPOSE_FILE}" exec -T postgres \
     psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-postgres}" -tAc \
@@ -138,21 +150,22 @@ SQL
 
   step "live: register Postgres adapter for M3 probe"
   pg_db_id=$(docker compose -f "${COMPOSE_FILE}" exec -T -e M3_USER_ID="${M3_USER_ID}" query-router node --input-type=module - <<'NODE'
+const { signedFetch } = await import('file:///tmp/_signed-fetch.mjs');
 const userId = process.env.M3_USER_ID;
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
   console.error('query-router DATABASE_URL is missing');
   process.exit(1);
 }
-const response = await fetch('http://adapter-registry:3020/databases', {
+const response = await signedFetch('http://adapter-registry-go:3021/databases', {
   method: 'POST',
-  headers: { 'Content-Type': 'application/json', 'X-User-Id': userId, 'X-User-Role': 'authenticated' },
+  headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
     engine: 'postgresql',
     name: `m3-postgres-${Date.now()}`,
     connection_string: connectionString,
   }),
-});
+}, { userId, role: 'authenticated' });
 if (!response.ok) {
   console.error(await response.text());
   process.exit(1);
@@ -169,23 +182,23 @@ NODE
     -e M3_DB_ID="${pg_db_id}" \
     -e M3_PROBE_NAME="${M3_PROBE_NAME}" \
     query-router node --input-type=module - <<'NODE'
+const { signedFetch } = await import('file:///tmp/_signed-fetch.mjs');
 const userId = process.env.M3_USER_ID;
 const dbId = process.env.M3_DB_ID;
 const probeName = process.env.M3_PROBE_NAME;
 const key = `m3-${Date.now()}`;
-const headers = {
+const identity = { userId, role: 'authenticated' };
+const baseHeaders = {
   'Content-Type': 'application/json',
-  'X-User-Id': userId,
-  'X-User-Role': 'authenticated',
   'Idempotency-Key': key,
 };
 const body = JSON.stringify({ op: 'insert', data: { name: probeName } });
 async function call() {
-  const response = await fetch(`http://127.0.0.1:4001/query/${dbId}/tables/m3_idempotency_orders`, {
+  const response = await signedFetch(`http://127.0.0.1:4001/query/${dbId}/tables/m3_idempotency_orders`, {
     method: 'POST',
-    headers,
+    headers: baseHeaders,
     body,
-  });
+  }, identity);
   const text = await response.text();
   if (!response.ok) {
     console.error(text);
