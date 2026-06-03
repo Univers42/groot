@@ -15,6 +15,16 @@ Ce dossier regroupe la documentation **opérationnelle** du backend
 | [agnostic-vs-incumbents.md](./agnostic-vs-incumbents.md) | Tu veux savoir si ce BaaS est *vraiment* agnostique et **en quoi il diffère** de Supabase, Firebase, Appwrite, PocketBase. |
 | [agnostic_back.md](./agnostic_back.md) | Note de design originelle : comment lire/écrire dans n'importe quelle DB. C'est l'intention qui a guidé M2 (fédération). |
 | [agent-prompt-agnostic-baas.md](./agent-prompt-agnostic-baas.md) | Prompt d'ingénierie pour les jalons **M6-M10** (FDW, adapters étendus, saga généralisé, ABAC central, SDK codegen). |
+| [secure-baas-product-roadmap.md](./secure-baas-product-roadmap.md) | Roadmap critique pour transformer le backend actuel en **vrai produit BaaS multi-tenant** : trust boundary, tenancy, adapter SPI, ACID par moteur, saga, ABAC, realtime et modules. |
+| [secure-baas-trust-boundary.md](./secure-baas-trust-boundary.md) | Design de frontière de confiance : headers signés par Kong, service tokens scopés, mTLS/JWT, rejet des headers forgés. |
+| [secure-baas-tenancy-isolation.md](./secure-baas-tenancy-isolation.md) | Modèle tenant/project/app/user, isolation par plan, BYO DB, quotas, tenant keys. |
+| [secure-baas-adapter-spi.md](./secure-baas-adapter-spi.md) | SPI hexagonal des drivers, pool registry, mounts, capability matrix et suppression du coût connexion par requête. |
+| [secure-baas-transactions-acid-saga.md](./secure-baas-transactions-acid-saga.md) | Transaction sessions HTTP, ACID par moteur, limite 2PC, saga/outbox pour cross-engine. |
+| [secure-baas-abac-pdp-rls.md](./secure-baas-abac-pdp-rls.md) | ABAC comme gate obligatoire, PDP local cache, RLS en defense-in-depth, policy bundles. |
+| [secure-baas-realtime-event-plane.md](./secure-baas-realtime-event-plane.md) | Realtime multi-tenant/multi-app : topics namespacés, ACL, replay, quotas, outbox durable. |
+| [secure-baas-module-system.md](./secure-baas-module-system.md) | Kernel de sécurité non désactivable + manifests de modules pour générer Kong/Compose/capabilities. |
+| [secure-baas-verification-plan.md](./secure-baas-verification-plan.md) | Gates M11-M17 et plan de migration pour prouver les garanties produit. |
+| [secure-baas-runtime-migration.md](./secure-baas-runtime-migration.md) | Stratégie TypeScript/Go/Rust : TypeScript pour la surface produit, Go pour le control plane, Rust pour le data plane, avec migration progressive. |
 | [services/](../../apps/baas/mini-baas-infra/src/apps/) | README détaillé de chacun des 14 microservices NestJS (endpoints, comment les invoquer depuis SDK / Kong / `docker exec`). |
 
 ## TL;DR — état actuel
