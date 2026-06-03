@@ -84,15 +84,8 @@ const positions: Record<string, { x: number; y: number; w: number; h: number }> 
 };
 const center = (id: string) => ({ cx: positions[id].x + positions[id].w / 2, cy: positions[id].y + positions[id].h / 2 });
 
-const categoryColor: Record<ServiceCategory, string> = {
-	core:       'var(--system-action-bg)',
-	auth:       'var(--system-info-text)',
-	data:       'var(--system-success-text)',
-	engagement: 'var(--system-warning-text)',
-	ai:         'var(--brand-hl-blue)',
-	compliance: 'var(--system-danger-text)',
-	ops:        'var(--system-text-muted)',
-};
+// Node accent colour per category lives in CSS (.arch-node--<category> below),
+// not an inline style — so the page needs no inline-style CSP allowance.
 ---
 
 <section class="section section--surface backend-arch" id="architecture">
@@ -163,7 +156,6 @@ const categoryColor: Record<ServiceCategory, string> = {
 									data-category={svc.category}
 									data-required={svc.required ? 'true' : undefined}
 									transform={`translate(${p.x} ${p.y})`}
-									style={`--node-color: ${categoryColor[svc.category]}`}
 									role="button"
 									tabindex="0"
 									aria-label={`${svc.name}${svc.required ? ' (required)' : ''} — ${svc.desc}`}
@@ -197,28 +189,46 @@ const categoryColor: Record<ServiceCategory, string> = {
 	</div>
 </section>
 
-<script is:inline define:vars={{
-	servicesData: services.map((s) => ({
-		id: s.id, name: s.name, desc: s.desc, cost: s.cost, latencyMs: s.latencyMs,
-		gdprPoints: s.gdprPoints, risk: s.risk, complexity: s.complexity, required: !!s.required,
-	})),
-	presetsData: presets,
-}}>
+<script
+	type="application/json"
+	data-arch-data
+	set:html={JSON.stringify({
+		servicesData: services.map((s) => ({
+			id: s.id, name: s.name, desc: s.desc, cost: s.cost, latencyMs: s.latencyMs,
+			gdprPoints: s.gdprPoints, risk: s.risk, complexity: s.complexity, required: !!s.required,
+		})),
+		presetsData: presets,
+	}).replace(/</g, '\\u003c')}
+/>
+
+<script>
+	// Data arrives via the non-executable <script type="application/json"> node
+	// above, so this logic ships as a bundled module under a strict
+	// `script-src 'self'` CSP (no is:inline / define:vars).
 	(() => {
+		const dataEl = document.querySelector('[data-arch-data]');
+		if (!dataEl) return;
+		const data = JSON.parse(dataEl.textContent ?? '{}');
+		const servicesData = (data.servicesData ?? []) as any[];
+		const presetsData = (data.presetsData ?? []) as any[];
 		const root = document.querySelector('.backend-arch');
-		if (!root) return;
-		const svg = root.querySelector('[data-arch-svg]');
-		const titleEl = root.querySelector('[data-arch-title]');
-		const tradeoffEl = root.querySelector('[data-arch-tradeoff]');
-		const tooltipEl = root.querySelector('[data-arch-tooltip]');
+		const svg = root?.querySelector('[data-arch-svg]');
+		const titleEl = root?.querySelector('[data-arch-title]');
+		const tradeoffEl = root?.querySelector('[data-arch-tradeoff]');
+		const tooltipEl = root?.querySelector('[data-arch-tooltip]');
+		if (!root || !(svg instanceof SVGElement) || !(titleEl instanceof HTMLElement)
+			|| !(tradeoffEl instanceof HTMLElement) || !(tooltipEl instanceof HTMLElement)) return;
 		const presetButtons = root.querySelectorAll('[data-preset]');
 		const nodes = svg.querySelectorAll('[data-node]');
-		const metric = (key) => root.querySelector(`[data-metric="${key}"]`);
+		const setMetric = (key: string, value: string) => {
+			const el = root.querySelector(`[data-metric="${key}"]`);
+			if (el) el.textContent = value;
+		};
 
 		const enabled = new Set();
 		const TOTAL_GDPR_MAX = servicesData.reduce((s, x) => s + x.gdprPoints, 0);
 
-		function applyState() {
+		const applyState = () => {
 			servicesData.forEach((svc) => {
 				const node = svg.querySelector(`[data-node="${svc.id}"]`);
 				node?.setAttribute('data-active', enabled.has(svc.id) ? 'true' : 'false');
@@ -231,7 +241,7 @@ const categoryColor: Record<ServiceCategory, string> = {
 			recomputeMetrics();
 		}
 
-		function recomputeMetrics() {
+		const recomputeMetrics = () => {
 			let count = 0, cost = 0, latency = 0, gdpr = 0, risk = 0;
 			servicesData.forEach((svc) => {
 				if (!enabled.has(svc.id)) return;
@@ -248,12 +258,12 @@ const categoryColor: Record<ServiceCategory, string> = {
 				if (enabled.has('analytics')) mau += 25_000;
 				if (enabled.has('logs')) mau += 10_000;
 			}
-			metric('count').textContent = String(count);
-			metric('latency').textContent = String(latency);
-			metric('cost').textContent = String(cost);
-			metric('gdpr').textContent = String(gdprPct);
-			metric('risk').textContent = String(riskScore);
-			metric('mau').textContent = mau >= 1000 ? `${(mau / 1000).toFixed(0)}K` : String(mau);
+			setMetric('count', String(count));
+			setMetric('latency', String(latency));
+			setMetric('cost', String(cost));
+			setMetric('gdpr', String(gdprPct));
+			setMetric('risk', String(riskScore));
+			setMetric('mau', mau >= 1000 ? `${(mau / 1000).toFixed(0)}K` : String(mau));
 
 			const messages = [];
 			if (!enabled.has('gdpr')) messages.push('No GDPR module — DSAR exports become a manual job.');
@@ -267,18 +277,18 @@ const categoryColor: Record<ServiceCategory, string> = {
 			tradeoffEl.textContent = messages[0] ?? 'Balanced stack — production-ready out of the box.';
 		}
 
-		function applyPreset(id) {
+		const applyPreset = (id: any) => {
 			const preset = presetsData.find((p) => p.id === id);
 			if (!preset) return;
 			enabled.clear();
-			preset.enabled.forEach((s) => enabled.add(s));
+			preset.enabled.forEach((s: any) => enabled.add(s));
 			servicesData.forEach((svc) => { if (svc.required) enabled.add(svc.id); });
-			presetButtons.forEach((btn) => btn.setAttribute('aria-pressed', btn.dataset.preset === id ? 'true' : 'false'));
+			presetButtons.forEach((btn) => btn.setAttribute('aria-pressed', btn.getAttribute('data-preset') === id ? 'true' : 'false'));
 			titleEl.textContent = `preset · ${preset.label.toLowerCase()}`;
 			applyState();
 		}
 
-		function toggleService(id) {
+		const toggleService = (id: any) => {
 			const svc = servicesData.find((s) => s.id === id);
 			if (!svc || svc.required) return;
 			if (enabled.has(id)) enabled.delete(id); else enabled.add(id);
@@ -291,6 +301,7 @@ const categoryColor: Record<ServiceCategory, string> = {
 			const id = node.getAttribute('data-node');
 			node.addEventListener('click', () => toggleService(id));
 			node.addEventListener('keydown', (event) => {
+				if (!(event instanceof KeyboardEvent)) return;
 				if (event.key === 'Enter' || event.key === ' ') {
 					event.preventDefault();
 					toggleService(id);
@@ -309,10 +320,10 @@ const categoryColor: Record<ServiceCategory, string> = {
 			node.addEventListener('blur', hideTip);
 		});
 
-		presetButtons.forEach((btn) => btn.addEventListener('click', () => applyPreset(btn.dataset.preset)));
+		presetButtons.forEach((btn) => btn.addEventListener('click', () => applyPreset(btn.getAttribute('data-preset'))));
 
 		const defaultBtn = root.querySelector('[data-preset][data-default="true"]');
-		applyPreset(defaultBtn?.dataset.preset ?? presetsData[0].id);
+		applyPreset(defaultBtn?.getAttribute('data-preset') ?? presetsData[0].id);
 	})();
 </script>
 
@@ -398,6 +409,13 @@ const categoryColor: Record<ServiceCategory, string> = {
 	}
 
 	.arch-node { cursor: pointer; outline: none; }
+	.arch-node--core { --node-color: var(--system-action-bg); }
+	.arch-node--auth { --node-color: var(--system-info-text); }
+	.arch-node--data { --node-color: var(--system-success-text); }
+	.arch-node--engagement { --node-color: var(--system-warning-text); }
+	.arch-node--ai { --node-color: var(--brand-hl-blue); }
+	.arch-node--compliance { --node-color: var(--system-danger-text); }
+	.arch-node--ops { --node-color: var(--system-text-muted); }
 	.arch-node[data-required] { cursor: default; }
 	.arch-node__bg {
 		fill: color-mix(in srgb, var(--node-color) 14%, var(--system-surface));

@@ -28,9 +28,20 @@
 	z-index: calc(1 + var(--i, 0));
 }
 
+// Scene stacking order (was an inline `style="--i: N"` on each <section>; moved
+// to CSS so the page needs no inline-style CSP allowance).
+.swipe-stack__scene:nth-child(1) { --i: 0; }
+.swipe-stack__scene:nth-child(2) { --i: 1; }
+.swipe-stack__scene:nth-child(3) { --i: 2; }
+.swipe-stack__scene:nth-child(4) { --i: 3; }
+.swipe-stack__scene:nth-child(5) { --i: 4; }
+.swipe-stack__scene:nth-child(6) { --i: 5; }
+.swipe-stack__scene:nth-child(7) { --i: 6; }
+.swipe-stack__scene:nth-child(8) { --i: 7; }
+.swipe-stack__scene:nth-child(9) { --i: 8; }
+
 .swipe-stack__scene:first-child { padding-top: 0; }
 .swipe-stack__scene:last-child { padding-bottom: 0; }
-.swipe-stack__scene[style*='--tall'] { min-height: auto; }
 
 .swipe-stack__scene::before {
 	content: '';

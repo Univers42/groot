@@ -10,7 +10,7 @@ import { POLICY_VERSION } from '../../data/legal';
 			<p id="consent-description">We only use essential local preferences by default. Optional analytics, newsletter and marketing choices stay off unless you enable them.</p>
 			<p class="consent-banner__version">Policy version {POLICY_VERSION}</p>
 		</div>
-		<div class="consent-banner__actions" aria-label="Quick consent choices">
+		<div class="consent-banner__actions" role="group" aria-label="Quick consent choices">
 			<button class="button button--primary" type="button" data-consent-accept-all aria-label="Accept all optional cookies and preferences">Accept all</button>
 			<button class="button button--ghost" type="button" data-consent-reject-all aria-label="Reject all optional cookies and preferences">Reject all</button>
 			<button class="button button--ghost" type="button" data-consent-manage aria-expanded="false" aria-controls="consent-preferences" aria-label="Manage cookie and consent preferences">Manage preferences</button>

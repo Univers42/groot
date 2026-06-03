@@ -36,7 +36,7 @@ const { data, error } = await baas
 					{links.map((link) => (
 						<li><a href={link.href}>
 							{link.kind === 'quickstart' && <>Quickstart</>}
-							{link.kind === 'auth' && <><span class="term" title="Authentication: proving who a user is before giving access.">Auth</span> & sessions</>}
+							{link.kind === 'auth' && <><span class="term" title="Authentication: proving who a user is before giving access.">Auth</span> &amp; sessions</>}
 							{link.kind === 'postgrest' && <>PostgREST recipes</>}
 							{link.kind === 'gdpr' && <><abbr title="General Data Protection Regulation: European privacy law covering personal data.">GDPR</abbr> runbook</>}
 							 →
