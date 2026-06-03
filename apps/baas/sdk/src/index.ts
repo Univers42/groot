@@ -15,6 +15,10 @@ import { AuthClient } from './domains/auth.js';
 import { QueryClient, ResourceQueryBuilder } from './domains/query.js';
 import { RestClient, RestResourceBuilder } from './domains/rest.js';
 import { StorageClient } from './domains/storage.js';
+import { TxnClient } from './domains/txn.js';
+import { WebhooksClient } from './domains/webhooks.js';
+import { AdminClient } from './domains/admin.js';
+import { FunctionsClient } from './domains/functions.js';
 import { HttpClient } from './core/http.js';
 import { makeEngineClient } from './domains/engine-clients.js';
 import { ENGINE_IDS, type EngineId, type EnginesResponse } from './generated/engines.js';
@@ -50,7 +54,42 @@ export type {
   SignUpInput,
   UpdateUserInput,
   VerifyInput,
+  // ── G9: transactions / webhooks / tenants / migrate / functions ──────────
+  TxnExecuteInput,
+  TxnOp,
+  TxnOperation,
+  TxnOpResult,
+  TxnResult,
+  WebhookCreateInput,
+  WebhookDelivery,
+  WebhookSubscription,
+  WebhookUpdateInput,
+  Tenant,
+  TenantApiKey,
+  TenantApiKeyIssued,
+  TenantBootstrapInput,
+  TenantBootstrapResult,
+  TenantCreateInput,
+  TenantUpdateInput,
+  ProvisionInput,
+  ProvisionMountResult,
+  ProvisionMountSpec,
+  ProvisionResult,
+  MigrateCredentialRef,
+  MigrateIdentity,
+  MigrateInput,
+  MigrateMount,
+  FunctionDeployInput,
+  FunctionDeployResult,
+  FunctionInvokeOptions,
+  FunctionSource,
+  FunctionSummary,
 } from './types.js';
+
+export { TxnClient } from './domains/txn.js';
+export { WebhooksClient } from './domains/webhooks.js';
+export { AdminClient, MigrateClient, TenantsClient } from './domains/admin.js';
+export { FunctionsClient } from './domains/functions.js';
 
 export interface RetryOptions {
   attempts?: number;
@@ -79,6 +118,20 @@ export class MiniBaasClient {
   readonly rest: RestClient;
   readonly storage: StorageClient;
   readonly analytics: AnalyticsClient;
+  /** Single-mount atomic write batches (`POST /query/v1/txn`). */
+  readonly txn: TxnClient;
+  /** Edge functions (`/functions/v1`). */
+  readonly functions: FunctionsClient;
+  /**
+   * Webhook subscription registry. **Admin-only / server-side**: requires
+   * `serviceRoleKey`; the gateway route is internal-only.
+   */
+  readonly webhooks: WebhooksClient;
+  /**
+   * Control-plane surface (tenants / provision / migrate). **Admin-only /
+   * server-side**: requires `serviceRoleKey`; routes are internal-only.
+   */
+  readonly admin: AdminClient;
 
   private readonly http: HttpClient;
   private readonly anonKey: string;
@@ -106,6 +159,10 @@ export class MiniBaasClient {
     this.rest = new RestClient(this.http);
     this.storage = new StorageClient(this.http);
     this.analytics = new AnalyticsClient(this.http);
+    this.txn = new TxnClient(this.http);
+    this.functions = new FunctionsClient(this.http);
+    this.webhooks = new WebhooksClient(this.http, options.serviceRoleKey);
+    this.admin = new AdminClient(this.http, options.serviceRoleKey);
   }
 
   from<Row = Record<string, unknown>>(resource: string): RestResourceBuilder<Row> {

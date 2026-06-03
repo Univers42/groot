@@ -74,7 +74,10 @@ void http.subscribe;
 
 // ── 4) Discriminated-union helpers ──────────────────────────────────────────
 // `StreamableEngine` should equal exactly the engines whose caps.stream===true.
-const streamables: StreamableEngine[] = ['mongodb', 'cassandra'];
+// Post-audit: the 6 stub engines (jdbc/cassandra/neo4j/elasticsearch/qdrant/
+// influx) were dropped from ENGINE_CAPS, so they no longer appear in these
+// derived union types. Tests check the 5 real engines only.
+const streamables: StreamableEngine[] = ['mongodb'];
 void streamables;
 
 // @ts-expect-error postgresql.caps.stream === false → not a StreamableEngine
@@ -82,7 +85,7 @@ const wrongStream: StreamableEngine = 'postgresql';
 void wrongStream;
 
 // `TransactionalEngine` should equal exactly engines with txIntra===true.
-const tx: TransactionalEngine[] = ['postgresql', 'mysql', 'jdbc', 'neo4j'];
+const tx: TransactionalEngine[] = ['postgresql', 'mysql'];
 void tx;
 
 // @ts-expect-error mongodb.caps.txIntra === false → not a TransactionalEngine
@@ -90,7 +93,7 @@ const wrongTx: TransactionalEngine = 'mongodb';
 void wrongTx;
 
 // `UpsertableEngine` excludes postgresql (caps.upsert === false).
-const upsertable: UpsertableEngine[] = ['mysql', 'redis', 'http', 'cassandra', 'neo4j', 'elasticsearch', 'qdrant'];
+const upsertable: UpsertableEngine[] = ['mysql', 'redis', 'http'];
 void upsertable;
 
 // @ts-expect-error postgresql.caps.upsert === false → not an UpsertableEngine
