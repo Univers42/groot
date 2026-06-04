@@ -18,8 +18,8 @@
     "codegen:all": "npm run openapi:collect && npm run codegen && npm run codegen:engines"
   },
   "devDependencies": {
-    "openapi-typescript-codegen": "^0.29.0",
-    "typescript": "^5.8.3"
+    "openapi-typescript-codegen": "^0.30.0",
+    "typescript": "^6.0.3"
   },
   "engines": {
     "node": ">=18"
