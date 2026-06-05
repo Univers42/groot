@@ -350,11 +350,14 @@ services:
       - ./:/app
     restart: "no"
 
+  # osionos-bridge — the editor's persistence/gateway, as its own self-contained
+  # image (Docker Hub dlesieur/osionos-bridge), built FROM the osionos submodule
+  # without modifying it. Pure Node, no npm deps. Config via env_file at runtime.
   osionos-bridge:
-    image: public.ecr.aws/docker/library/node:22-bookworm-slim
-    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
-    working_dir: /app/apps/osionos/app
-    command: ["node", "scripts/bridge-api.mjs"]
+    image: ${OSIONOS_BRIDGE_IMAGE:-dlesieur/osionos-bridge:latest}
+    build:
+      context: ./apps/osionos/app
+      dockerfile: ../../../infrastructure/docker/osionos/bridge.Dockerfile
     env_file:
       - path: ./.env.local
         required: false
@@ -370,8 +373,6 @@ services:
       CLAUDE_BIN: ${CLAUDE_BIN:-claude}
       HOME: ${OSIONOS_BRIDGE_HOME:-/tmp}
       PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-    volumes:
-      - ./:/app:ro
     expose:
       - "4000"
     depends_on:
@@ -389,44 +390,35 @@ services:
       retries: 24
     restart: unless-stopped
 
+  # osionos-app — the block editor as a standalone STATIC image (Docker Hub
+  # dlesieur/osionos-app), built FROM the submodule without modifying it. VITE_*
+  # are baked at build; nginx serves the build on :80 and the editor talks to the
+  # osionos-bridge cross-origin at VITE_API_URL. Fronted by local-https-proxy :3001.
   osionos-app:
-    image: ${OSIONOS_APP_IMAGE:-track-binocle/osionos-app:local}
+    image: ${OSIONOS_APP_IMAGE:-dlesieur/osionos-app:latest}
     profiles:
       - dev
     build:
       context: ./apps/osionos/app
-      dockerfile: docker/services/node/Dockerfile
-    working_dir: /app
-    command: ["pnpm", "exec", "vite", "--host", "0.0.0.0", "--port", "3001", "--strictPort"]
-    env_file:
-      - path: ./.env.local
-        required: false
-      - path: ./apps/osionos/app/.env
-        required: false
-    environment:
-      NODE_ENV: development
-      CHOKIDAR_USEPOLLING: "true"
-      VITE_API_URL: https://localhost:4000
-      VITE_REQUIRE_BRIDGE_SESSION: "true"
-      VITE_ALLOW_OFFLINE_MODE: "false"
-      VITE_PAGE_ACTION_SYNC_ENABLED: "true"
-      VITE_PRISMATICA_URL: https://localhost:4322
-      VITE_MAIL_APP_URL: https://localhost:${MAIL_HOST_PORT:-3002}
-      VITE_CALENDAR_APP_URL: https://localhost:${CALENDAR_HOST_PORT:-3003}
-    volumes:
-      - ./apps/osionos/app:/app
-      - osionos-app-node-modules:/app/node_modules
-      - osionos-app-pnpm-store:/pnpm/store
+      dockerfile: ../../../infrastructure/docker/osionos/app.Dockerfile
+      args:
+        VITE_API_URL: https://localhost:${OSIONOS_BRIDGE_HOST_PORT:-4000}
+        VITE_PRISMATICA_URL: https://localhost:${OPPOSITE_OSIRIS_HOST_PORT:-4322}
+        VITE_MAIL_APP_URL: https://localhost:${MAIL_HOST_PORT:-3002}
+        VITE_CALENDAR_APP_URL: https://localhost:${CALENDAR_HOST_PORT:-3003}
+        VITE_REQUIRE_BRIDGE_SESSION: "true"
+        VITE_ALLOW_OFFLINE_MODE: "false"
+        VITE_PAGE_ACTION_SYNC_ENABLED: "true"
     expose:
-      - "3001"
+      - "80"
     depends_on:
       osionos-bridge:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3001').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
       interval: 5s
       timeout: 3s
-      start_period: 30s
+      start_period: 15s
       retries: 20
     restart: unless-stopped
 
