@@ -1,0 +1,27 @@
+# BuildKit per-Dockerfile ignore — applies ONLY to the web image build, so it
+# does not affect the other images that build from the repo root. Patterns are
+# relative to the build context root (the repository root).
+**/node_modules
+**/.git
+**/dist
+**/.astro
+**/*.log
+
+# Host-specific env files (the image regenerates .env.production.local from ARGs).
+**/.env.local
+**/.env.*.local
+
+# Apps / trees this image does not need (it only builds opposite-osiris + the SDK).
+apps/osionos
+apps/mail
+apps/calendar
+apps/prismatica
+apps/baas/mini-baas-infra
+apps/baas/wiki
+apps/baas/certs
+apps/baas/scripts
+go
+models
+wiki
+infrastructure
+docs
