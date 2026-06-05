@@ -1,0 +1,13 @@
+# Context = ./apps/osionos/app (the submodule). Keep the build lean.
+node_modules
+**/node_modules
+.git
+build
+dist
+test-results
+playwright-report
+tests
+docs
+coverage
+.turbo
+vendor/**/node_modules

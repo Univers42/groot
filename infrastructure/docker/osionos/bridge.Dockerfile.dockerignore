@@ -1,0 +1,13 @@
+# Context = ./apps/osionos/app. The bridge only needs scripts/*.mjs.
+node_modules
+**/node_modules
+.git
+build
+dist
+test-results
+playwright-report
+tests
+docs
+src
+public
+vendor
