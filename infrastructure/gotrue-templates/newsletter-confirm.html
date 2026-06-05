@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Confirm your Prismatica newsletter subscription</title>
+</head>
+<body style="margin:0; padding:0; background:#f7f4ed; color:#1c1612; font-family:Arial, Helvetica, sans-serif;">
+	<main style="background:#f7f4ed; margin:0; padding:28px 12px;">
+		<section style="max-width:640px; margin:0 auto; background:#fffaf0; border:3px solid #1c1612; border-radius:24px; box-shadow:8px 8px 0 #1c1612; overflow:hidden;">
+			<header style="padding:28px 28px 12px 28px;">
+				<p style="margin:0 0 10px 0; font-size:14px; letter-spacing:.08em; text-transform:uppercase; color:#6f5f42;">Prismatica newsletter</p>
+				<h1 style="margin:0; font-size:32px; line-height:1.08; color:#1c1612; font-family:Georgia, 'Times New Roman', serif;">Confirm your Prismatica newsletter subscription</h1>
+			</header>
+			<div style="padding:12px 28px 0 28px;">
+				<p style="margin:0 0 18px 0; font-size:17px; line-height:1.55;">Hello {{.Email}},</p>
+				<p style="margin:0 0 24px 0; font-size:17px; line-height:1.55;">You asked to receive Prismatica updates about product notes, privacy-friendly workspace patterns, design sketches, and release announcements. Confirm below to complete the double opt-in.</p>
+				<p style="margin:26px 0 26px 0;"><a href="{{.SiteURL}}/newsletter/confirm?token={{.Token}}" style="display:inline-block; padding:15px 24px; color:#1c1612; background:#f5d84a; border:3px solid #1c1612; border-radius:999px; box-shadow:4px 4px 0 #1c1612; font-weight:700; font-size:17px; text-decoration:none;">Yes, subscribe me →</a></p>
+				<div style="border:2px dashed #1c1612; border-radius:16px; padding:16px; background:#f7f4ed;">
+					<p style="margin:0; font-size:15px; line-height:1.5;">If you did not request this, ignore this email — you will not be subscribed.</p>
+				</div>
+				<p style="margin:22px 0 8px 0; font-size:14px; line-height:1.5; color:#4b4238;">Plain text fallback: open {{.SiteURL}}/newsletter/confirm?token={{.Token}} in your browser.</p>
+			</div>
+			<footer style="padding:22px 28px 28px 28px; border-top:2px solid #1c1612; background:#f0eadc;">
+				<p style="margin:0 0 8px 0; font-size:13px; line-height:1.45; color:#4b4238;">Prismatica — Company name placeholder</p>
+				<p style="margin:0; font-size:13px; line-height:1.45;"><a href="{{.SiteURL}}/newsletter/unsubscribe?email={{.Email}}" style="color:#1c1612; font-weight:700;">Unsubscribe</a> · <a href="{{.SiteURL}}/legal/privacy-policy/" style="color:#1c1612; font-weight:700;">Privacy Policy</a></p>
+			</footer>
+		</section>
+	</main>
+</body>
+</html>

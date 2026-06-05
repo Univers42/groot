@@ -81,7 +81,7 @@
 body {
 	font-family: var(--system-font-sans);
 	font-weight: 400;
-	font-size: clamp(15px, 0.9rem + 0.18vw, 17px);
+	font-size: clamp(0.9375rem, 0.9rem + 0.18vw, 1.0625rem);
 	line-height: 1.6;
 	letter-spacing: 0;
 	color: var(--system-text);

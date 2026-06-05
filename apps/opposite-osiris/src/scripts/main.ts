@@ -41,10 +41,10 @@ type MascotState = {
 	lastMove: number;
 	lockedUntil: number;
 	idleMoodShown: boolean;
-	moodTimer: number | undefined;
-	heartTimer: number | undefined;
-	zTimer: number | undefined;
-	laughTimer: number | undefined;
+	moodTimer: ReturnType<typeof setTimeout> | undefined;
+	heartTimer: ReturnType<typeof setInterval> | undefined;
+	zTimer: ReturnType<typeof setInterval> | undefined;
+	laughTimer: ReturnType<typeof setInterval> | undefined;
 	frame: number | undefined;
 	previousFocus: HTMLElement | null;
 	releaseFocusTrap: (() => void) | null;
@@ -1891,7 +1891,7 @@ function openPortal(mode: PortalMode): void {
 			updatePortalSubmitAvailability(portal, elements);
 		}
 	};
-	let availabilityTimer: number | undefined;
+	let availabilityTimer: ReturnType<typeof setTimeout> | undefined;
 	let availabilityRequest = 0;
 	const scheduleAvailabilityCheck = (): void => {
 		if (availabilityTimer !== undefined) {

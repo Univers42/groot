@@ -7,7 +7,7 @@ const anonKey = import.meta.env.PUBLIC_BAAS_ANON_KEY ?? '';
 ---
 
 <Layout title="Confirm your Prismatica account" description="Confirm your Prismatica account email address." noindex>
-	<main class="auth-page" data-auth-confirm data-baas-url={baasUrl} data-anon-key={anonKey}>
+	<main id="main-content" class="auth-page" data-auth-confirm data-baas-url={baasUrl} data-anon-key={anonKey}>
 		<section class="auth-card" aria-labelledby="confirm-title">
 			<p class="eyebrow">Email verification</p>
 			<h1 id="confirm-title">Confirming your Prismatica account…</h1>

@@ -70,7 +70,11 @@
     "typescript-eslint": "^8.60.1"
   },
   "overrides": {
-    "devalue": "^5.8.1",
-    "yaml": "^2.8.3"
+    "devalue": "^5.8.1"
+  },
+  "pnpm": {
+    "overrides": {
+      "yaml@<2.8.3": "^2.9.0"
+    }
   }
 }

@@ -23,7 +23,7 @@ export type NotificationOptions = {
 type NotificationRecord = {
 	id: string;
 	element: HTMLElement;
-	timer: number | undefined;
+	timer: ReturnType<typeof setTimeout> | undefined;
 };
 
 const DEFAULT_DURATIONS: Record<NotificationKind, number> = {

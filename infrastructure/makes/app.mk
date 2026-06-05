@@ -38,8 +38,6 @@ app-images-push: app-images app-login
 		'track-binocle/calendar-bridge:local track-binocle-calendar-bridge' \
 		'track-binocle/calendar:local track-binocle-calendar' \
 		'track-binocle/auth-gateway:local track-binocle-auth-gateway' \
-		'track-binocle/opposite-osiris:local track-binocle-opposite-osiris' \
-		'track-binocle/opposite-osiris-deps:local track-binocle-opposite-osiris-deps' \
 		'track-binocle/playground-simulation:local track-binocle-playground-simulation'; do \
 		set -- $$spec; \
 		local_image="$$1"; \
@@ -75,7 +73,6 @@ healthcheck: certs
 	docker compose exec -T mail-bridge node -e "fetch('http://127.0.0.1:' + (process.env.MAIL_BRIDGE_PORT || '4100') + '/session').then((r) => r.json()).then((session) => { if (!session.configured) console.warn('[healthcheck] Gmail OAuth credentials are not configured; Mail stays available with mock/local data, but Gmail connect and sync are disabled until this developer adds their own Google OAuth client credentials.'); }).catch((error) => { console.error(error.message); process.exit(1); })"
 	docker compose exec -T calendar-bridge node -e "fetch('http://127.0.0.1:' + (process.env.CALENDAR_BRIDGE_PORT || '4200') + '/session').then((r) => r.json()).then((session) => { if (!session.configured) console.warn('[healthcheck] Google Calendar OAuth credentials are not configured; Calendar stays available, but Google Calendar connect and sync are disabled until this developer adds their own Google OAuth client credentials.'); }).catch((error) => { console.error(error.message); process.exit(1); })"
 	docker compose exec -T calendar-bridge node -e "fetch('http://127.0.0.1:' + (process.env.CALENDAR_BRIDGE_PORT || '4200') + '/baas/status').then((r) => r.json()).then((status) => { if (!status.connected) { console.error('calendar bridge cannot reach the BaaS gateway'); process.exit(1); } }).catch((error) => { console.error(error.message); process.exit(1); })"
-	docker compose exec -T -e BAAS_INTERNAL_URL=http://kong:8000 opposite-osiris node scripts/container-only.mjs node scripts/verify-connection.mjs
 
 showcase:
 ## Print the local service URLs after the pipeline is healthy.

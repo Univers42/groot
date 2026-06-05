@@ -63,6 +63,16 @@ export default defineConfig({
 	site: env.PUBLIC_SITE_URL ?? 'https://localhost:4322',
 	integrations: [sitemap()],
 	devToolbar: { enabled: false },
+	// Inline all page CSS into <style> tags instead of render-blocking <link>s.
+	// On the landing page this removes two critical-path round-trips (~1.2s of
+	// blocked FCP under mobile throttling). Astro's security.csp auto-hashes the
+	// inline styles it emits, so style-src stays strict ('self' + hashes) and
+	// scripts/audit/csp-check.mjs proves no CSP violation in headless Chromium.
+	build: { inlineStylesheets: 'always' },
+	// No markdown code blocks exist in this site (no .md/.mdx, no <Code>), so the
+	// default Shiki highlighter is dead weight AND emits a build-time CSP warning
+	// (Shiki uses inline styles). Disable it to keep the build warning-free.
+	markdown: { syntaxHighlight: false },
 	// Astro generates a per-page CSP <meta> with SHA-256 hashes for every inline
 	// script/style it emits (Astro inlines small hoisted module scripts). This is
 	// what keeps `script-src` strict — 'self' + hashes, NO 'unsafe-inline'. We add
@@ -74,6 +84,11 @@ export default defineConfig({
 				"default-src 'self'",
 				"base-uri 'self'",
 				"object-src 'none'",
+				// NOTE: `frame-ancestors` is intentionally NOT here. Astro emits this
+				// CSP via <meta>, and browsers IGNORE frame-ancestors in <meta> (and
+				// log a console error). Clickjacking is enforced at the HTTP layer
+				// instead — the proxy sets `X-Frame-Options: DENY` and a real
+				// `Content-Security-Policy: frame-ancestors 'none'` response header.
 				"form-action 'self'",
 				"img-src 'self'",
 				"media-src 'self'",

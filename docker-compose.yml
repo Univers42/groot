@@ -226,7 +226,7 @@ services:
       GOTRUE_JWT_EXP: 3600
       GOTRUE_JWT_ISSUER: ${API_EXTERNAL_URL:-https://localhost:8000/auth/v1}
     volumes:
-      - ./apps/opposite-osiris/src/email-templates:/etc/gotrue/templates:ro
+      - ./infrastructure/gotrue-templates:/etc/gotrue/templates:ro
     depends_on:
       db-bootstrap:
         condition: service_completed_successfully
@@ -576,33 +576,16 @@ services:
       retries: 20
     restart: unless-stopped
 
-  opposite-osiris-deps:
-    image: ${OPPOSITE_OSIRIS_DEPS_IMAGE:-track-binocle/opposite-osiris-deps:local}
-    profiles:
-      - dev
-    build:
-      context: .
-      dockerfile: apps/opposite-osiris/docker/services/node/Dockerfile
-    working_dir: /workspace/apps/opposite-osiris
-    command: ["true"]
-    volumes:
-      - ./:/workspace
-      - opposite-osiris-node-modules:/workspace/apps/opposite-osiris/node_modules
-      - mini-baas-sdk-node-modules:/workspace/apps/baas/sdk/node_modules
-    restart: "no"
-
   # prismatica-auth-gateway — the custom API gateway / auth BFF, as its own
-  # self-contained image (published to Docker Hub dlesieur/prismatica-auth-gateway).
+  # self-contained image (Docker Hub dlesieur/prismatica-auth-gateway). PULL-ONLY:
+  # the opposite-osiris source was removed from this repo, so there is no local
+  # build path — rebuild the image from the opposite-osiris source elsewhere.
   # Server-only secrets (SERVICE_ROLE_KEY, OSIONOS_BRIDGE_SHARED_SECRET,
-  # TURNSTILE_SECRET_KEY, SMTP) are injected at RUNTIME via env_file below —
-  # never baked into the image. `build:` stays as a local rebuild path.
+  # TURNSTILE_SECRET_KEY, SMTP) are injected at RUNTIME via env_file below.
   auth-gateway:
     image: ${AUTH_GATEWAY_IMAGE:-dlesieur/prismatica-auth-gateway:latest}
     profiles:
       - dev
-    build:
-      context: .
-      dockerfile: apps/opposite-osiris/docker/services/api-gateway/Dockerfile
     env_file:
       - path: ./.env.local
         required: false
@@ -647,89 +630,16 @@ services:
       retries: 12
     restart: unless-stopped
 
-  # RETIRED (2026-06-05 cutover): the website is now served by the standalone
-  # `opposite-osiris-web` image, fronted by local-https-proxy at :4322. This
-  # in-repo `astro dev` website service is kept under an opt-in `legacy-website`
-  # profile so it no longer starts with the stack but can be revived for HMR dev
-  # work:  docker compose --profile legacy-website up -d opposite-osiris
-  opposite-osiris:
-    image: ${OPPOSITE_OSIRIS_IMAGE:-track-binocle/opposite-osiris:local}
-    profiles:
-      - legacy-website
-    build:
-      context: .
-      dockerfile: apps/opposite-osiris/docker/services/node/Dockerfile
-    working_dir: /workspace/apps/opposite-osiris
-    command: ["node", "scripts/container-only.mjs", "astro", "dev", "--host", "0.0.0.0", "--port", "4322"]
-    env_file:
-      - path: ./.env.local
-        required: false
-      - path: ./apps/baas/.env.local
-        required: false
-      - path: ./apps/opposite-osiris/.env.local
-        required: false
-    environment:
-      ASTRO_DEV_HOST: 0.0.0.0
-      ASTRO_DEV_PORT: 4322
-      ASTRO_DEV_HTTPS: "false"
-      PUBLIC_SITE_URL: https://localhost:${OPPOSITE_OSIRIS_HOST_PORT:-4322}
-      PUBLIC_BAAS_URL: /api
-      PUBLIC_AUTH_GATEWAY_URL: /api/auth
-      PUBLIC_OSIONOS_APP_URL: https://localhost:${OSIONOS_APP_HOST_PORT:-3001}
-      PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION: ${PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION:-false}
-      AUTH_REQUIRE_EMAIL_VERIFICATION: ${AUTH_REQUIRE_EMAIL_VERIFICATION:-false}
-      AUTH_GATEWAY_TARGET: http://auth-gateway:8787
-      BAAS_GATEWAY_TARGET: http://kong:8000
-      TURNSTILE_BYPASS_LOCAL: "true"
-    volumes:
-      - ./:/workspace
-      - opposite-osiris-node-modules:/workspace/apps/opposite-osiris/node_modules
-      - mini-baas-sdk-node-modules:/workspace/apps/baas/sdk/node_modules
-    expose:
-      - "4322"
-    depends_on:
-      auth-gateway:
-        condition: service_healthy
-      opposite-osiris-deps:
-        condition: service_completed_successfully
-      kong:
-        condition: service_healthy
-      osionos-app:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4322').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
-      interval: 5s
-      timeout: 3s
-      start_period: 30s
-      retries: 20
-    restart: unless-stopped
-
-  # opposite-osiris WEBSITE — served as a STANDALONE image (decoupled from the
-  # in-repo source): nginx serves the static `astro build` output AND reverse-
-  # proxies /api/* to the BaaS, mirroring the old Vite dev-proxy routing. This is
-  # the pipeline's website front end (fronted by local-https-proxy at :4322). The
-  # image is published to Docker Hub; `build:` stays as a local rebuild path while
-  # the source still lives in-repo. See apps/opposite-osiris/docker/services/web/.
+  # opposite-osiris WEBSITE — served as a STANDALONE image (Docker Hub
+  # dlesieur/opposite-osiris-web): nginx serves the static `astro build` output
+  # AND reverse-proxies /api/* to the BaaS, mirroring the old Vite dev-proxy
+  # routing. Fronted by local-https-proxy at :4322. PULL-ONLY: the opposite-osiris
+  # source was removed from this repo, so there is no local build path — rebuild
+  # the image from the opposite-osiris source elsewhere.
   opposite-osiris-web:
     profiles:
       - dev
-    # Published to Docker Hub (dlesieur/opposite-osiris-web). `docker compose pull`
-    # fetches it without the in-repo source; `build:` below stays as a local
-    # rebuild path while the source still lives here.
     image: ${OPPOSITE_OSIRIS_WEB_IMAGE:-dlesieur/opposite-osiris-web:latest}
-    build:
-      context: .
-      dockerfile: apps/opposite-osiris/docker/services/web/Dockerfile
-      args:
-        # PUBLIC_* values are INLINED into the browser bundle at build time.
-        # SITE_URL is the canonical pipeline origin (local-https-proxy :4322).
-        PUBLIC_BAAS_URL: /api
-        PUBLIC_AUTH_GATEWAY_URL: /api/auth
-        PUBLIC_BAAS_ANON_KEY: ${PUBLIC_BAAS_ANON_KEY:-}
-        PUBLIC_SITE_URL: https://localhost:${OPPOSITE_OSIRIS_HOST_PORT:-4322}
-        PUBLIC_OSIONOS_APP_URL: https://localhost:${OSIONOS_APP_HOST_PORT:-3001}
-        PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION: ${PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION:-false}
-        PUBLIC_TURNSTILE_SITE_KEY: ${PUBLIC_TURNSTILE_SITE_KEY:-}
     environment:
       # Runtime, env-driven BaaS upstreams. Default to the local stack's service
       # DNS; override (e.g. OO_BAAS_UPSTREAM=https://baas.example.com) for prod.

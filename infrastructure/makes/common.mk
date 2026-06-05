@@ -23,7 +23,7 @@ COMPOSE_BAKE ?= 1
 REGISTRY_CACHE_PREFIX ?=
 BAKE_FILE ?= docker-bake.hcl
 BAKE_GROUP ?= default
-BAKE_TARGETS ?= postgres kong osionos-app mail calendar opposite-osiris-node
+BAKE_TARGETS ?= postgres kong osionos-app mail calendar
 TRACK_BINOCLE_BIND_ADDR ?= $(shell if [ -r /sys/class/dmi/id/product_name ] && grep -qi 'VirtualBox' /sys/class/dmi/id/product_name 2>/dev/null && ip route 2>/dev/null | grep -q 'default via 10\.0\.2\.2'; then printf '0.0.0.0'; else printf '127.0.0.1'; fi)
 COMPOSE_PROFILES ?= dev
 export COMPOSE_PROFILES COMPOSE_PROGRESS BUILDKIT_PROGRESS BUILDX_BUILDER DOCKER_BUILDKIT COMPOSE_DOCKER_CLI_BUILD COMPOSE_BAKE REGISTRY_CACHE_PREFIX TRACK_BINOCLE_BIND_ADDR
@@ -35,12 +35,12 @@ DOCKER_PREFETCH_SCOPE ?= all
 COMPOSE_WAIT_TIMEOUT ?= 300
 COMPOSE_WAIT_INTERVAL ?= 2
 COMPOSE_HEALTHY_SERVICES_INFRA ?= postgres local-https-proxy pg-meta gotrue kong osionos-bridge
-COMPOSE_HEALTHY_SERVICES ?= $(COMPOSE_HEALTHY_SERVICES_INFRA) auth-gateway mail-bridge mail osionos-app opposite-osiris calendar-bridge calendar
+COMPOSE_HEALTHY_SERVICES ?= $(COMPOSE_HEALTHY_SERVICES_INFRA) auth-gateway mail-bridge mail osionos-app opposite-osiris-web calendar-bridge calendar
 # supavisor restarts intermittently in CI, but the stack does not depend on it for readiness.
 COMPOSE_RUNNING_SERVICES_INFRA ?= redis postgrest
 COMPOSE_RUNNING_SERVICES ?= $(COMPOSE_RUNNING_SERVICES_INFRA) mailpit
 COMPOSE_COMPLETED_SERVICES_INFRA ?= db-bootstrap project-db-init local-runtime-secrets
-COMPOSE_COMPLETED_SERVICES ?= $(COMPOSE_COMPLETED_SERVICES_INFRA) opposite-osiris-deps
+COMPOSE_COMPLETED_SERVICES ?= $(COMPOSE_COMPLETED_SERVICES_INFRA)
 VERSION ?=
 BAAS_VERSION ?= $(if $(VERSION),$(if $(filter v%,$(VERSION)),$(VERSION),v$(VERSION)),v$(shell date +%F))
 APP_VERSION ?= $(if $(VERSION),$(if $(filter v%,$(VERSION)),$(VERSION),v$(VERSION)),v$(shell date +%F))

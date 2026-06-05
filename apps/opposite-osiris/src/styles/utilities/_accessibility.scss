@@ -108,6 +108,22 @@ abbr[title],
 		transform: none;
 		transition: none;
 	}
+
+	/*
+	 * Global kill-switch: neutralise every animation/transition for users who
+	 * request reduced motion. Without this, the animated mascot (_mascot.scss)
+	 * and the _animations.scss keyframes keep playing (WCAG 2.3.3). We keep a
+	 * 0.01ms duration rather than `none` so animationend/transitionend handlers
+	 * in main.ts still fire and don't leave elements stuck mid-state.
+	 */
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+	}
 }
 
 /* High contrast mode support */
