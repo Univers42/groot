@@ -25,3 +25,6 @@
 [submodule "vendor/monkey-bot"]
 	path = vendor/monkey-bot
 	url = git@github.com:Univers42/monkey-bot.git
+[submodule "apps/vite-gourmand"]
+	path = apps/vite-gourmand
+	url = git@github.com:LESdylan/vite-gourmand.git
