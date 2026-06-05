@@ -1,0 +1,25 @@
+# BuildKit per-Dockerfile ignore — applies ONLY to the api-gateway build.
+# Patterns are relative to the build context root (the repository root).
+**/node_modules
+**/.git
+**/dist
+**/.astro
+**/*.log
+**/.env.local
+**/.env.*.local
+
+# Trees this image does not need (it only needs the SDK source + the gateway
+# script + email templates).
+apps/osionos
+apps/mail
+apps/calendar
+apps/prismatica
+apps/baas/mini-baas-infra
+apps/baas/wiki
+apps/baas/certs
+apps/baas/scripts
+go
+models
+wiki
+infrastructure
+docs

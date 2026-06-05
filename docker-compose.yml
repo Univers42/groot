@@ -599,15 +599,18 @@ services:
       - mini-baas-sdk-node-modules:/workspace/apps/baas/sdk/node_modules
     restart: "no"
 
+  # prismatica-auth-gateway — the custom API gateway / auth BFF, as its own
+  # self-contained image (published to Docker Hub dlesieur/prismatica-auth-gateway).
+  # Server-only secrets (SERVICE_ROLE_KEY, OSIONOS_BRIDGE_SHARED_SECRET,
+  # TURNSTILE_SECRET_KEY, SMTP) are injected at RUNTIME via env_file below —
+  # never baked into the image. `build:` stays as a local rebuild path.
   auth-gateway:
-    image: ${AUTH_GATEWAY_IMAGE:-track-binocle/auth-gateway:local}
+    image: ${AUTH_GATEWAY_IMAGE:-dlesieur/prismatica-auth-gateway:latest}
     profiles:
       - dev
     build:
       context: .
-      dockerfile: apps/opposite-osiris/docker/services/node/Dockerfile
-    working_dir: /workspace/apps/opposite-osiris
-    command: ["node", "scripts/auth-gateway.mjs"]
+      dockerfile: apps/opposite-osiris/docker/services/api-gateway/Dockerfile
     env_file:
       - path: ./.env.local
         required: false
@@ -631,10 +634,6 @@ services:
       SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Prismatica}
       MAILPIT_API_URL: http://mailpit:8025
       MAILPIT_VERIFY_DELIVERY: ${MAILPIT_VERIFY_DELIVERY:-true}
-    volumes:
-      - ./:/workspace
-      - opposite-osiris-node-modules:/workspace/apps/opposite-osiris/node_modules
-      - mini-baas-sdk-node-modules:/workspace/apps/baas/sdk/node_modules
     expose:
       - "8787"
     depends_on:
@@ -643,8 +642,6 @@ services:
       kong:
         condition: service_healthy
       project-db-init:
-        condition: service_completed_successfully
-      opposite-osiris-deps:
         condition: service_completed_successfully
       mailpit:
         condition: service_started
