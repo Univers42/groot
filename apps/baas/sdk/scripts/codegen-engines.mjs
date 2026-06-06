@@ -121,10 +121,17 @@ async function fetchLive(url) {
   }
 }
 
+// Strip control chars from values that originate in the live HTTP response
+// before logging them, so a malicious server reply cannot forge log lines
+// (jssecurity:S5145 — log injection).
+function logSafe(value) {
+  return String(value).replace(/[\u0000-\u001f\u007f]/g, ' ');
+}
+
 async function main() {
   const live = await fetchLive(DEFAULT_URL);
   if (live.error) {
-    console.error(`[codegen-engines] could not reach ${DEFAULT_URL}: ${live.error}`);
+    console.error(`[codegen-engines] could not reach ${DEFAULT_URL}: ${logSafe(live.error)}`);
     if (STRICT) {
       console.error('[codegen-engines] --strict mode requires a live stack');
       process.exit(2);
@@ -147,10 +154,12 @@ async function main() {
   }
 
   await fs.writeFile(OUT_FILE, next);
-  console.log(`[codegen-engines] wrote ${live.details.length} engines to ${path.relative(SDK_ROOT, OUT_FILE)}`);
+  console.log(`[codegen-engines] wrote ${logSafe(live.details.length)} engines to ${path.relative(SDK_ROOT, OUT_FILE)}`);
 }
 
-main().catch((err) => {
+try {
+  await main();
+} catch (err) {
   console.error('[codegen-engines] fatal:', err);
   process.exit(1);
-});
+}

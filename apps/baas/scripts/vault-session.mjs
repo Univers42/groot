@@ -123,13 +123,14 @@ function readTokenFile(filePath) {
 }
 
 function tokenSources() {
-  const sources = [];
-  if (process.env.VAULT_TOKEN) sources.push({ source: 'VAULT_TOKEN', token: process.env.VAULT_TOKEN });
-  if (process.env.VAULT_API_KEY) sources.push({ source: 'VAULT_API_KEY', token: process.env.VAULT_API_KEY });
-  sources.push({ source: sessionFile, token: readTokenFile(sessionFile) });
-  if (process.env.VAULT_TOKEN_FILE) sources.push({ source: process.env.VAULT_TOKEN_FILE, token: readTokenFile(process.env.VAULT_TOKEN_FILE) });
-  sources.push({ source: adminTokenFile, token: readTokenFile(adminTokenFile) });
-  sources.push({ source: cliTokenFile, token: readTokenFile(cliTokenFile) });
+  const sources = [
+    ...(process.env.VAULT_TOKEN ? [{ source: 'VAULT_TOKEN', token: process.env.VAULT_TOKEN }] : []),
+    ...(process.env.VAULT_API_KEY ? [{ source: 'VAULT_API_KEY', token: process.env.VAULT_API_KEY }] : []),
+    { source: sessionFile, token: readTokenFile(sessionFile) },
+    ...(process.env.VAULT_TOKEN_FILE ? [{ source: process.env.VAULT_TOKEN_FILE, token: readTokenFile(process.env.VAULT_TOKEN_FILE) }] : []),
+    { source: adminTokenFile, token: readTokenFile(adminTokenFile) },
+    { source: cliTokenFile, token: readTokenFile(cliTokenFile) },
+  ];
   return sources.filter((item) => item.token);
 }
 
@@ -200,7 +201,8 @@ async function vaultRequest(method, path, body, token) {
     } catch {
       detail = detail.replace(/\s+/g, ' ').trim();
     }
-    throw new SessionError(`[vault-session] Vault ${method} ${path} failed with HTTP ${response.status}${detail ? `: ${detail}` : ''}`);
+    const suffix = detail ? `: ${detail}` : '';
+    throw new SessionError(`[vault-session] Vault ${method} ${path} failed with HTTP ${response.status}${suffix}`);
   }
   if (response.status === 204) return {};
   return response.json();
@@ -218,7 +220,8 @@ function run(commandName, args, { input, env = {}, capture = true } = {}) {
   if (result.error) throw result.error;
   if (result.status !== 0) {
     const detail = sanitizeOutput(`${result.stderr ?? ''} ${result.stdout ?? ''}`);
-    throw new SessionError(`[vault-session] ${commandName} ${args.join(' ')} failed with exit ${result.status}${detail ? `: ${detail}` : ''}`);
+    const suffix = detail ? `: ${detail}` : '';
+    throw new SessionError(`[vault-session] ${commandName} ${args.join(' ')} failed with exit ${result.status}${suffix}`);
   }
   return result.stdout ?? '';
 }
@@ -331,6 +334,13 @@ async function loginFlyAdmin() {
   saveAdminSession(token, 'fly-admin', { VAULT_AUTH_METHOD: 'fly-admin', VAULT_ADMIN_TOKEN_TTL: ttl });
 }
 
+// Strip control characters (CR/LF/tabs/etc.) before logging values that come
+// from the Vault server response, so a forged token field cannot inject extra
+// log lines (jssecurity:S5145 — log injection).
+function logSafe(value) {
+  return String(value).replace(/[\u0000-\u001f\u007f]/g, ' ');
+}
+
 async function sessionStatus() {
   const { source, token } = activeToken();
   const payload = await vaultRequest('GET', 'auth/token/lookup-self', undefined, token);
@@ -338,9 +348,9 @@ async function sessionStatus() {
   console.log(`[vault-session] vault address: ${vaultAddr}`);
   console.log(`[vault-session] namespace: ${vaultNamespace || '<none>'}`);
   console.log(`[vault-session] token source: ${source}`);
-  console.log(`[vault-session] display name: ${data.display_name ?? '<unknown>'}`);
-  console.log(`[vault-session] policies: ${(data.policies ?? []).join(', ') || '<none>'}`);
-  console.log(`[vault-session] ttl: ${data.ttl ?? '<unknown>'}`);
+  console.log(`[vault-session] display name: ${logSafe(data.display_name ?? '<unknown>')}`);
+  console.log(`[vault-session] policies: ${logSafe((data.policies ?? []).join(', ') || '<none>')}`);
+  console.log(`[vault-session] ttl: ${logSafe(data.ttl ?? '<unknown>')}`);
   console.log(`[vault-session] renewable: ${data.renewable === true ? 'true' : 'false'}`);
 }
 

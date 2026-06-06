@@ -29,48 +29,48 @@ declare const redis: EngineClient<'redis', { id: string; value: string }>;
 declare const http: EngineClient<'http', { id: string; payload: unknown }>;
 
 // All five base ops exist on every engine — these must type-check.
-void pg.list;
-void pg.get;
-void pg.insert;
-void pg.update;
-void pg.delete;
-void mongo.list;
-void redis.list;
-void http.list;
+pg.list satisfies unknown;
+pg.get satisfies unknown;
+pg.insert satisfies unknown;
+pg.update satisfies unknown;
+pg.delete satisfies unknown;
+mongo.list satisfies unknown;
+redis.list satisfies unknown;
+http.list satisfies unknown;
 
 // ── 2) Capability narrowing — POSITIVE cases (must compile) ──────────────────
 // postgresql.caps.txIntra === true  → transaction() exists
-void pg.transaction;
+pg.transaction satisfies unknown;
 // postgresql.caps.upsert === false  → upsert is absent (positive: redis has it)
-void redis.upsert;
+redis.upsert satisfies unknown;
 // mongodb.caps.stream === true      → subscribe() exists
-void mongo.subscribe;
+mongo.subscribe satisfies unknown;
 // http.caps.upsert === true         → upsert() exists
-void http.upsert;
+http.upsert satisfies unknown;
 
 // ── 3) Capability narrowing — NEGATIVE cases (must FAIL to compile) ─────────
 // If any of these lines silently compile, the type narrowing is broken.
 
 // @ts-expect-error postgresql.caps.upsert === false → no .upsert()
-void pg.upsert;
+pg.upsert satisfies unknown;
 
 // @ts-expect-error postgresql.caps.stream === false → no .subscribe()
-void pg.subscribe;
+pg.subscribe satisfies unknown;
 
 // @ts-expect-error mongodb.caps.txIntra === false → no .transaction()
-void mongo.transaction;
+mongo.transaction satisfies unknown;
 
 // @ts-expect-error redis.caps.txIntra === false → no .transaction()
-void redis.transaction;
+redis.transaction satisfies unknown;
 
 // @ts-expect-error redis.caps.stream === false → no .subscribe()
-void redis.subscribe;
+redis.subscribe satisfies unknown;
 
 // @ts-expect-error http.caps.txIntra === false → no .transaction()
-void http.transaction;
+http.transaction satisfies unknown;
 
 // @ts-expect-error http.caps.stream === false → no .subscribe()
-void http.subscribe;
+http.subscribe satisfies unknown;
 
 // ── 4) Discriminated-union helpers ──────────────────────────────────────────
 // `StreamableEngine` should equal exactly the engines whose caps.stream===true.
@@ -78,24 +78,24 @@ void http.subscribe;
 // influx) were dropped from ENGINE_CAPS, so they no longer appear in these
 // derived union types. Tests check the 5 real engines only.
 const streamables: StreamableEngine[] = ['mongodb'];
-void streamables;
+streamables satisfies unknown;
 
 // @ts-expect-error postgresql.caps.stream === false → not a StreamableEngine
 const wrongStream: StreamableEngine = 'postgresql';
-void wrongStream;
+wrongStream satisfies unknown;
 
 // `TransactionalEngine` should equal exactly engines with txIntra===true.
 const tx: TransactionalEngine[] = ['postgresql', 'mysql'];
-void tx;
+tx satisfies unknown;
 
 // @ts-expect-error mongodb.caps.txIntra === false → not a TransactionalEngine
 const wrongTx: TransactionalEngine = 'mongodb';
-void wrongTx;
+wrongTx satisfies unknown;
 
 // `UpsertableEngine` excludes postgresql (caps.upsert === false).
 const upsertable: UpsertableEngine[] = ['mysql', 'redis', 'http'];
-void upsertable;
+upsertable satisfies unknown;
 
 // @ts-expect-error postgresql.caps.upsert === false → not an UpsertableEngine
 const wrongUpsert: UpsertableEngine = 'postgresql';
-void wrongUpsert;
+wrongUpsert satisfies unknown;

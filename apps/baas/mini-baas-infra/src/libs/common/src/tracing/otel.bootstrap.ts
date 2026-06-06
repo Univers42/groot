@@ -10,9 +10,7 @@
 /*                                                                            */
 /* ************************************************************************** */
 
-interface NodeSdkConstructor {
-  new (options: Record<string, unknown>): { start: () => void; shutdown: () => Promise<void> };
-}
+type NodeSdkConstructor = new (options: Record<string, unknown>) => { start: () => void; shutdown: () => Promise<void> };
 
 let started = false;
 

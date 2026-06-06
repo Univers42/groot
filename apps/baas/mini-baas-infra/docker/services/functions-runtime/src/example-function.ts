@@ -13,7 +13,7 @@
 //   curl -X POST http://localhost:3060/v1/functions/hello/invoke \
 //        -H "X-Baas-Tenant-Id: t-demo" -d '{"name":"world"}'
 
-export default async function (input: {
+export default async function exampleFunction(input: {
   tenant_id: string;
   method: string;
   headers: Record<string, string>;

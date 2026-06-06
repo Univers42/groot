@@ -58,6 +58,6 @@ export async function signedFetch(url, options = {}, identity = {}) {
   return fetch(url, {
     ...options,
     method,
-    headers: { ...(options.headers || {}), ...signed },
+    headers: { ...options.headers, ...signed },
   });
 }

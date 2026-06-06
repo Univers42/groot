@@ -555,7 +555,7 @@ export class QueryService implements OnModuleInit {
     identity: VerifiedRequestIdentity | undefined,
     op: string,
   ): PermissionDecision | undefined {
-    if (!identity || identity.authMethod !== 'kong-hmac') return undefined;
+    if (identity?.authMethod !== 'kong-hmac') return undefined;
     if (!identity.userId?.startsWith('api-key:')) return undefined;
 
     const scopes = new Set(identity.scopes ?? []);

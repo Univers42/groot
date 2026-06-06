@@ -36,7 +36,7 @@ Deno.serve({ port: PORT, hostname: HOST }, async (req) => {
     const url = new URL(req.url);
     for (const [method, pattern, handler] of ROUTES) {
       if (req.method !== method) continue;
-      const m = url.pathname.match(pattern);
+      const m = pattern.exec(url.pathname);
       if (m) return await handler(req, m);
     }
     return json(404, { error: "not_found", path: url.pathname });

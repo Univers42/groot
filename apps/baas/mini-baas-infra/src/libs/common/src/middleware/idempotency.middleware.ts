@@ -145,13 +145,11 @@ export class IdempotencyMiddleware implements NestMiddleware, OnModuleDestroy {
   }
 
   private async client(): Promise<Redis> {
-    if (!this.redisClient) {
-      this.redisClient = new Redis(this.redisUrl, {
-        lazyConnect: true,
-        enableOfflineQueue: false,
-        maxRetriesPerRequest: 1,
-      });
-    }
+    this.redisClient ??= new Redis(this.redisUrl, {
+      lazyConnect: true,
+      enableOfflineQueue: false,
+      maxRetriesPerRequest: 1,
+    });
     if (this.redisClient.status !== 'ready') {
       await this.redisClient.connect().catch((error: Error) => {
         if (this.redisClient?.status !== 'ready') throw error;

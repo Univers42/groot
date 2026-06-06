@@ -102,7 +102,9 @@ function camel(s) {
   return p.charAt(0).toLowerCase() + p.slice(1);
 }
 
-main().catch((err) => {
+try {
+  await main();
+} catch (err) {
   console.error('[codegen] fatal:', err);
   process.exit(1);
-});
+}
