@@ -28,6 +28,14 @@ fn boot_suite() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // WebKitGTK on Linux frequently binds its DMABUF renderer to the llvmpipe
+    // (software) EGL device -> severe slowness even on a capable GPU. Forcing the
+    // accelerated GL path fixes it. SCOPED to THIS app's process only: set_var here
+    // affects only this binary's own webview. It does NOT touch the website, which
+    // renders in a normal browser and never uses WebKitGTK.
+    #[cfg(target_os = "linux")]
+    std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+
     boot_suite();
     tauri::Builder::default()
         .setup(|app| {
