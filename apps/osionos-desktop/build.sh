@@ -32,6 +32,16 @@ rm -rf apps/osionos-desktop/build && mkdir -p apps/osionos-desktop/build
 docker cp "$cid:/usr/share/nginx/html/." apps/osionos-desktop/build/
 docker rm -f "$cid" >/dev/null
 
+echo "[2b/3] Injecting custom window chrome (titlebar) into the bundle…"
+docker run --rm -v "$REPO/apps/osionos-desktop":/d -w /d public.ecr.aws/docker/library/node:22-alpine node -e '
+  const fs=require("fs");
+  const idx="build/index.html";
+  let html=fs.readFileSync(idx,"utf8");
+  const snip=fs.readFileSync("chrome/titlebar.html","utf8");
+  if(!html.includes("osio-titlebar")) { html=html.replace("</body>", snip+"\n</body>"); fs.writeFileSync(idx,html); console.log("[chrome] titlebar injected"); }
+  else console.log("[chrome] already present");
+'
+
 echo "[3/3] Building the Tauri app (.deb + .AppImage)…"
 docker run --rm --user "$(id -u):$(id -g)" \
   -e HOME=/tmp -e CARGO_HOME=/tmp/cargo -e APPIMAGE_EXTRACT_AND_RUN=1 \

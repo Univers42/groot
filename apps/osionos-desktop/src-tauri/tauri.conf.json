@@ -1,13 +1,14 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "osionos",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "identifier": "fr.trackbinocle.osionos",
   "build": {
     "frontendDist": "../build",
     "devUrl": "http://localhost:3001"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "osionos — Track Binocle",
@@ -17,7 +18,8 @@
         "minHeight": 600,
         "resizable": true,
         "fullscreen": false,
-        "zoomHotkeysEnabled": true
+        "zoomHotkeysEnabled": true,
+        "decorations": false
       }
     ],
     "security": {
