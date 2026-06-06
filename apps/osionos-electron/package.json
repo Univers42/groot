@@ -1,0 +1,30 @@
+{
+  "name": "osionos-desktop",
+  "productName": "osionos",
+  "version": "0.3.0",
+  "description": "osionos — the Track Binocle editor + app suite (Electron shell)",
+  "main": "main.js",
+  "author": "Track Binocle",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --linux deb AppImage"
+  },
+  "devDependencies": {
+    "electron": "^32.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "fr.trackbinocle.osionos",
+    "productName": "osionos",
+    "directories": { "output": "dist" },
+    "files": ["main.js", "preload.js", "renderer/**/*"],
+    "linux": {
+      "target": ["deb", "AppImage"],
+      "category": "Office",
+      "icon": "icon.png",
+      "maintainer": "Track Binocle"
+    },
+    "deb": { "depends": ["libgtk-3-0", "libnotify4", "libnss3", "libxss1", "libxtst6", "xdg-utils"] }
+  }
+}
