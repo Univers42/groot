@@ -27,7 +27,7 @@
   "bundle": {
     "active": true,
     "targets": ["deb", "appimage"],
-    "category": "Office",
+    "category": "Productivity",
     "shortDescription": "osionos — the Track Binocle editor + app suite",
     "longDescription": "Native desktop shell for osionos: the editor that orchestrates Mail and Calendar, backed by the local Track Binocle BaaS.",
     "icon": [
