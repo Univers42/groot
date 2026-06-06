@@ -34,6 +34,9 @@ ARG VITE_REQUIRE_BRIDGE_SESSION=true
 ARG VITE_ALLOW_OFFLINE_MODE=false
 ARG VITE_PAGE_ACTION_SYNC_ENABLED=true
 ARG VITE_APP_VERSION=image
+# Asset base. Web/nginx image keeps "/" (absolute). The desktop bundle passes
+# "./" so assets resolve relative to index.html inside the Tauri webview.
+ARG VITE_BASE=/
 ENV VITE_API_URL=$VITE_API_URL \
     VITE_PRISMATICA_URL=$VITE_PRISMATICA_URL \
     VITE_MAIL_APP_URL=$VITE_MAIL_APP_URL \
@@ -43,7 +46,7 @@ ENV VITE_API_URL=$VITE_API_URL \
     VITE_PAGE_ACTION_SYNC_ENABLED=$VITE_PAGE_ACTION_SYNC_ENABLED \
     VITE_APP_VERSION=$VITE_APP_VERSION
 
-RUN pnpm exec vite build
+RUN pnpm exec vite build --base "$VITE_BASE"
 
 FROM public.ecr.aws/docker/library/nginx:1.27-alpine AS runtime
 LABEL org.opencontainers.image.title="osionos-app"

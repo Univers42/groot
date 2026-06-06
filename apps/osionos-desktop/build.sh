@@ -23,6 +23,7 @@ docker build -f infrastructure/docker/osionos/app.Dockerfile \
   --build-arg VITE_MAIL_APP_URL=https://localhost:3002 \
   --build-arg VITE_CALENDAR_APP_URL=https://localhost:3003 \
   --build-arg VITE_APP_VERSION=desktop \
+  --build-arg VITE_BASE=./ \
   -t osionos-desktop-frontend:latest apps/osionos/app
 
 echo "[2/3] Extracting osionos dist -> apps/osionos-desktop/build…"
