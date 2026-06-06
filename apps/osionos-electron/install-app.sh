@@ -3,7 +3,7 @@
 # rebuilds always replace the previous one). Run with sudo.
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-DEB="$(ls -t "$REPO"/apps/osionos-electron/dist/osionos_*.deb 2>/dev/null | head -1)"
+DEB="$(ls -t "$REPO"/apps/osionos-electron/dist/osionos*.deb 2>/dev/null | head -1)"
 [ -n "${DEB:-}" ] || { echo "No .deb found — run: bash apps/osionos-electron/build.sh"; exit 1; }
 echo "Installing $DEB …"
 dpkg -i "$DEB" || apt-get install -y -f

@@ -6,6 +6,7 @@
   "main": "main.js",
   "author": "Track Binocle",
   "license": "MIT",
+  "homepage": "https://github.com/Univers42/prismatica",
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --linux deb AppImage"
