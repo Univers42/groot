@@ -1,0 +1,5 @@
+# Generated osionos frontend dist (bundled into the app at build time)
+build/
+# Rust/Tauri build output
+src-tauri/target/
+src-tauri/gen/
