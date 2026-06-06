@@ -10,11 +10,6 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  security-events: write
-  pull-requests: write
-
 concurrency:
   group: mini-baas-security-${{ github.ref }}
   cancel-in-progress: true
@@ -28,6 +23,9 @@ jobs:
   sast-semgrep:
     name: SAST · Semgrep
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -58,6 +56,8 @@ jobs:
   sca-npm-audit:
     name: SCA · npm + pnpm audit (${{ matrix.dir }})
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 10
     strategy:
       fail-fast: false
@@ -101,6 +101,8 @@ jobs:
   sca-snyk:
     name: SCA · Snyk
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 15
     if: ${{ github.event_name == 'pull_request' }}
     env:
@@ -126,6 +128,9 @@ jobs:
   container-trivy:
     name: Container · Trivy
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -177,6 +182,8 @@ jobs:
   secret-trufflehog:
     name: Secret · TruffleHog
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -196,6 +203,8 @@ jobs:
   dast-zap:
     name: DAST · ZAP baseline
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 30
     needs: [sast-semgrep, sca-npm-audit, container-trivy, secret-trufflehog]
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
@@ -247,6 +256,8 @@ jobs:
   security-gate:
     name: Security gate
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: [sast-semgrep, sca-npm-audit, container-trivy, secret-trufflehog]
     if: always()
     steps:
