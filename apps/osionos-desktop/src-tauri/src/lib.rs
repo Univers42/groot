@@ -26,19 +26,43 @@ fn boot_suite() {
         .spawn();
 }
 
+/// True if an AMD/ATI GPU (PCI vendor 0x1002) is present, so we only pin the
+/// radeonsi driver on machines that actually have one.
+#[cfg(target_os = "linux")]
+fn is_amd_gpu() -> bool {
+    if let Ok(entries) = std::fs::read_dir("/sys/class/drm") {
+        for entry in entries.flatten() {
+            if let Ok(vendor) = std::fs::read_to_string(entry.path().join("device/vendor")) {
+                if vendor.trim().eq_ignore_ascii_case("0x1002") {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // WebKitGTK GPU path (Linux). Many Mesa/driver combos make WebKit fall back
-    // to the llvmpipe SOFTWARE renderer -> severe slowness even on a capable GPU.
-    // We DEFAULT to disabling the DMABUF renderer, but only if the user hasn't set
-    // it — so the right setting can be found by A/B testing without a rebuild, e.g.
-    //   WEBKIT_DISABLE_DMABUF_RENDERER=0 osionos    (try the GPU DMABUF path)
-    //   WEBKIT_DISABLE_COMPOSITING_MODE=1 osionos   (diagnostic)
-    // Scoped to this binary only; never touches the website (rendered in a browser).
+    // WebKitGTK GPU path (Linux). Keep WebKit's DMABUF (GPU) renderer ON — forcing
+    // it OFF made WebKit fall back to the llvmpipe SOFTWARE renderer (the cause of
+    // the severe latency). On AMD GPUs we additionally pin the radeonsi Gallium
+    // driver so EGL doesn't pick the software device. All defaults are only applied
+    // when unset, so they stay overridable, and radeonsi is gated on an AMD GPU
+    // being present so this is portable to Intel/NVIDIA machines. Scoped to this
+    // binary only; never touches the website (rendered in a browser).
     #[cfg(target_os = "linux")]
     {
         if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
-            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "0");
+        }
+        if is_amd_gpu() {
+            if std::env::var_os("MESA_LOADER_DRIVER_OVERRIDE").is_none() {
+                std::env::set_var("MESA_LOADER_DRIVER_OVERRIDE", "radeonsi");
+            }
+            if std::env::var_os("GALLIUM_DRIVER").is_none() {
+                std::env::set_var("GALLIUM_DRIVER", "radeonsi");
+            }
         }
     }
 
