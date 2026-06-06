@@ -611,6 +611,17 @@ services:
       SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Prismatica}
       MAILPIT_API_URL: http://mailpit:8025
       MAILPIT_VERIFY_DELIVERY: ${MAILPIT_VERIFY_DELIVERY:-true}
+      # --- security hardening (prismatica auth-gateway) ---
+      # Real browser traffic reaches the gateway through 2 appending reverse
+      # proxies: local-https-proxy(4322) -> opposite-osiris-web(8080) -> gateway.
+      # Deriving the client IP from that trusted hop count means a spoofed
+      # X-Forwarded-For cannot mint fresh rate-limit buckets (HIGH-1).
+      AUTH_TRUSTED_PROXY_HOPS: ${AUTH_TRUSTED_PROXY_HOPS:-2}
+      # Shared, restart-surviving rate-limit / lockout / anti-replay state.
+      # Falls back to a bounded in-memory store if Redis is unreachable.
+      REDIS_URL: ${AUTH_GATEWAY_REDIS_URL:-redis://redis:6379}
+      # osionos origin used to validate the bridge redirect target (LOW-3).
+      PUBLIC_OSIONOS_APP_URL: ${PUBLIC_OSIONOS_APP_URL:-https://localhost:3001}
     expose:
       - "8787"
     depends_on:
@@ -624,6 +635,8 @@ services:
         condition: service_started
       osionos-bridge:
         condition: service_healthy
+      redis:
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8787/api/auth/availability').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
       interval: 5s
