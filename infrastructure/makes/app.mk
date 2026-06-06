@@ -31,6 +31,7 @@ app-images-push: app-images app-login
 		exit 1; \
 	fi; \
 	for spec in \
+		'track-binocle-postgres:local track-binocle-postgres' \
 		'track-binocle/mini-baas-kong:local track-binocle-mini-baas-kong' \
 		'track-binocle/osionos-app:local track-binocle-osionos-app' \
 		'track-binocle/mail-bridge:local track-binocle-mail-bridge' \
