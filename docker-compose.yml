@@ -39,8 +39,6 @@ services:
         required: false
       - path: ./.env.local
         required: false
-      - path: ./apps/opposite-osiris/.env.local
-        required: false
       - path: ./apps/osionos/app/.env
         required: false
     environment:
@@ -591,8 +589,6 @@ services:
         required: false
       - path: ./apps/baas/.env.local
         required: false
-      - path: ./apps/opposite-osiris/.env.local
-        required: false
     environment:
       AUTH_GATEWAY_PORT: 8787
       PUBLIC_BAAS_URL: http://kong:8000
@@ -600,6 +596,12 @@ services:
       PUBLIC_SITE_URL: https://localhost:${OPPOSITE_OSIRIS_HOST_PORT:-4322}
       AUTH_REQUIRE_EMAIL_VERIFICATION: ${AUTH_REQUIRE_EMAIL_VERIFICATION:-false}
       PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION: ${PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION:-false}
+      # Turnstile config used to live in opposite-osiris/.env.local (now removed).
+      # Behavior flag defaults to bypass for local (prod sets it false). The
+      # SECRET itself is NOT set here on purpose — `environment:` overrides
+      # `env_file:`, so an empty default would clobber the Vault-fetched value.
+      # TURNSTILE_SECRET_KEY flows from env_file (apps/baas/.env.local <- Vault).
+      TURNSTILE_BYPASS_LOCAL: ${TURNSTILE_BYPASS_LOCAL:-true}
       SMTP_HOST: ${SMTP_HOST:-mailpit}
       SMTP_PORT: ${SMTP_PORT:-1025}
       SMTP_ENCRYPTION: ${SMTP_ENCRYPTION:-none}

@@ -99,16 +99,13 @@ const managedFiles = [
     recommended: ['PUBLIC_OSIONOS_APP_URL'],
     optional: ['DOCKER_PAT', 'DOCKER_USER', 'EMAIL_RECUP_ADMIN_VAULT', 'FLY_API_TOKEN', 'SONAR_TOK'],
   },
-  {
-    id: 'opposite-osiris',
-    title: 'opposite-osiris website and auth gateway',
-    envPath: 'apps/opposite-osiris/.env.local',
-    examplePath: 'apps/opposite-osiris/.env.example',
-    required: ['PUBLIC_BAAS_URL', 'PUBLIC_AUTH_GATEWAY_URL', 'PUBLIC_BAAS_ANON_KEY', 'PUBLIC_SITE_URL', 'PUBLIC_OSIONOS_APP_URL', 'ASTRO_DEV_HOST', 'ASTRO_DEV_PORT'],
-    recommended: ['AUTH_REQUIRE_EMAIL_VERIFICATION', 'AUTH_EMAIL_DOMAIN_ALLOWLIST', 'AUTH_TEST_EMAIL_DOMAIN', 'PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION', 'GOTRUE_MAILER_AUTOCONFIRM', 'TURNSTILE_BYPASS_LOCAL'],
-    optional: ['ASTRO_DEV_HTTPS', 'ASTRO_DEV_HTTPS_CERT', 'ASTRO_DEV_HTTPS_KEY', 'NEWSLETTER_HEALTHCHECK_EMAIL'],
-    legacy: ['NEXT_PUBLIC_BAAS_URL', 'NEXT_PUBLIC_BAAS_ANON_KEY'],
-  },
+  // NOTE: opposite-osiris (website + api-gateway) was externalized to its own
+  // repo + Docker Hub images (2026-06-06). Its build-time PUBLIC_* config is now
+  // managed by that repo. The api-gateway's RUNTIME secret it still needs from
+  // here (TURNSTILE_SECRET_KEY) was relocated into the `baas` entry below, and
+  // TURNSTILE_BYPASS_LOCAL defaults to true in docker-compose. So this repo no
+  // longer manages an opposite-osiris env file (which would resurrect the
+  // deleted apps/opposite-osiris/ directory on fetch).
   {
     id: 'osionos-app',
     title: 'osionos app and bridge API',
@@ -145,7 +142,10 @@ const managedFiles = [
     envPath: 'apps/baas/.env.local',
     examplePath: 'apps/baas/.env.example',
     required: ['POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB', 'DATABASE_URL', 'PGRST_DB_URI', 'PGRST_DB_ANON_ROLE', 'JWT_SECRET', 'ANON_KEY', 'SERVICE_ROLE_KEY', 'KONG_PUBLIC_API_KEY', 'KONG_SERVICE_API_KEY', 'KONG_ANON_UUID', 'GOTRUE_DB_DATABASE_URL', 'GOTRUE_JWT_SECRET', 'PGRST_JWT_SECRET', 'PG_META_DB_HOST', 'PG_META_DB_PORT', 'PG_META_DB_NAME', 'PG_META_DB_USER', 'PG_META_DB_PASSWORD', 'SECRET_KEY_BASE', 'VAULT_ENC_KEY'],
-    recommended: ['PROJECT_INIT_MARKER', 'GOTRUE_SITE_URL', 'GOTRUE_URI_ALLOW_LIST'],
+    // TURNSTILE_SECRET_KEY: the api-gateway's anti-abuse secret, relocated here
+    // from the externalized opposite-osiris so it is fetched from Vault on a
+    // fresh start (empty locally where TURNSTILE_BYPASS_LOCAL=true).
+    recommended: ['PROJECT_INIT_MARKER', 'GOTRUE_SITE_URL', 'GOTRUE_URI_ALLOW_LIST', 'TURNSTILE_SECRET_KEY'],
   },
   {
     id: 'mini-baas-infra',
