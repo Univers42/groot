@@ -171,6 +171,7 @@ services:
       - ./models/osionos-bridge-migration.sql:/project-init/04-osionos-bridge.sql:ro
       - ./models/calendar-migration.sql:/project-init/05-calendar.sql:ro
       - ./models/seeds.sql:/project-init/06-seeds.sql:ro
+      - ./models/rls-hardening-migration.sql:/project-init/07-rls-hardening.sql:ro
     depends_on:
       db-bootstrap:
         condition: service_completed_successfully
