@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>osionos — Track Binocle</title>
+    <style>
+      html, body { height: 100%; margin: 0; background: #0e0f13; color: #e8e8ea;
+        font: 16px/1.5 system-ui, sans-serif; display: grid; place-items: center; }
+      .card { text-align: center; opacity: .9; }
+      .dot { display:inline-block; width:10px; height:10px; border-radius:50%;
+        background:#6ea8fe; animation: p 1s infinite alternate; }
+      @keyframes p { to { opacity:.3; transform: translateY(-3px); } }
+      a { color:#6ea8fe; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>osionos <span class="dot"></span></h1>
+      <p>Starting the Track Binocle suite…</p>
+      <p style="opacity:.6">If this persists, ensure the suite is running
+        (the <strong>Track Binocle</strong> launcher) and reload.</p>
+    </div>
+    <!-- The window normally loads https://localhost:3001 directly; this is the
+         bundled fallback (frontendDist) shown if the suite is not yet reachable. -->
+  </body>
+</html>

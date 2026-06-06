@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "osionos",
+  "version": "0.1.0",
+  "identifier": "fr.trackbinocle.osionos",
+  "build": {
+    "frontendDist": "../build",
+    "devUrl": "http://localhost:3001"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "osionos — Track Binocle",
+        "url": "https://localhost:3001",
+        "width": 1280,
+        "height": 832,
+        "minWidth": 960,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "appimage"],
+    "category": "Office",
+    "shortDescription": "osionos — the Track Binocle editor + app suite",
+    "longDescription": "Native desktop shell for osionos: the editor that orchestrates Mail and Calendar, backed by the local Track Binocle BaaS.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}
