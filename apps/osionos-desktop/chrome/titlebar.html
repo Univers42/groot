@@ -82,6 +82,22 @@
       h.addEventListener('mousedown', function (e) { if (e.button === 0) { e.preventDefault(); win.startResizeDragging(dirs[k]); } });
       document.body.appendChild(h);
     });
+
+    // GPU renderer indicator (diagnostic): shows "AMD Radeon …" if hardware-
+    // accelerated, or "⚠ llvmpipe" if WebKit fell back to software rendering.
+    try {
+      var gl = document.createElement('canvas').getContext('webgl')
+            || document.createElement('canvas').getContext('experimental-webgl');
+      var ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
+      var r = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
+      var dim = bar.querySelector('.tb-dim');
+      if (r && dim) {
+        var soft = /llvmpipe|software|swrast/i.test(r);
+        dim.textContent = (soft ? '⚠ ' : '') + r.replace(/\s*\(.*$/, '').trim();
+        dim.title = 'GPU renderer: ' + r;
+        dim.style.color = soft ? '#e8821a' : 'var(--tb-sub)';
+      }
+    } catch (e) {}
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount);
   else mount();
