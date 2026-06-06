@@ -16,6 +16,10 @@ const { spawn } = require("node:child_process");
 app.commandLine.appendSwitch("enable-gpu-rasterization");
 app.commandLine.appendSwitch("ignore-gpu-blocklist");
 app.commandLine.appendSwitch("enable-zero-copy");
+// Mouse wheel: Chromium eases each notch over ~100ms ("smooth scrolling"), which
+// on Linux feels like hesitation/lag with a real mouse. Disable -> instant,
+// 1:1 wheel scrolling.
+app.commandLine.appendSwitch("disable-smooth-scrolling");
 
 function trackBinocleHome() {
   return process.env.TRACK_BINOCLE_HOME
