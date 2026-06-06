@@ -11,7 +11,6 @@
     "windows": [
       {
         "title": "osionos — Track Binocle",
-        "url": "https://localhost:3001",
         "width": 1280,
         "height": 832,
         "minWidth": 960,
