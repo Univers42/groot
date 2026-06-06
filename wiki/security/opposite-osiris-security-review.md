@@ -12,6 +12,34 @@ bridge). Reviewed 2026-06-06 against the source at the pre-removal snapshot
 > bounded. The gateway is already well-built; the findings below are about
 > closing the gaps that remain, in priority order.
 
+## ✅ Remediation status — 2026-06-06 (all findings closed + verified)
+
+Every finding below has been remediated, with automated tests proving each fix.
+The hardened website + auth-gateway source now lives in the standalone
+**prismatica** repo (`github.com/Univers42/prismatica`); the BaaS RLS fixes are in
+`models/rls-hardening-migration.sql` (applied + verified on the local stack).
+
+| Finding | Fix | Where | Verified by |
+|---|---|---|---|
+| **HIGH-1** XFF rate-limit bypass | client IP derived from a trusted proxy-hop count (right-counted XFF), spoof-immune | `scripts/auth/net-ip.mjs`, `AUTH_TRUSTED_PROXY_HOPS=2` | unit (spoof-prepend) + integration (rotating XFF still 429 via 2-hop path) |
+| **MEDIUM-1** access token in `localStorage` | token kept in memory only; rehydrated via the HttpOnly `/refresh` cookie on load | `src/scripts/main.ts` | grep (no token persisted) + playground e2e |
+| **MEDIUM-2** unthrottled `/availability` | per-IP rate limit (30/min) | `auth-gateway.mjs` | integration (429 + retry-after) |
+| **MEDIUM-3** unbounded in-process state | shared store: zero-dep Redis (RESP) + bounded in-memory fallback w/ TTL | `scripts/auth/store.mjs`, `REDIS_URL` | unit (TTL/eviction/RESP) + live "connected to Redis" |
+| **MEDIUM-4** no per-account lockout | hashed-email failure counter → temporary lock | `auth-gateway.mjs` | subprocess (A locks, B unaffected) |
+| **MEDIUM-5** anti-abuse fails open | fail-closed startup guard refuses to boot on a public-https origin with bypass flags/missing secrets | `scripts/auth/guards.mjs` | unit + subprocess (exit 1) |
+| **LOW-1** newsletter email-bomb | per-target (email) rate limit | `auth-gateway.mjs` | integration (per-target 429) |
+| **LOW-2** bridge HMAC replay | already enforced: timestamp window + single-use `jti` (409) | `osionos-bridge` `verifyBridgeRequest` | code review |
+| **LOW-3** error leak / open redirect | login returns fixed generic 401 (no enumeration); bridge redirect origin validated (client + server) | `auth-gateway.mjs`, `main.ts` | integration (identical 401 known/unknown) |
+| **BaaS RLS (CRITICAL F1)** anon could destroy any account (`anonymise_user`) | revoked PUBLIC execute; +F2 audit-forge, F3/F4 open tables (RLS), F5 email harvest, F7 blanket grants | `models/rls-hardening-migration.sql` | anon-key probes now 401 (was 200) |
+
+Re-run the proof at any time (stack up):
+```bash
+# unit (no stack)
+docker run --rm -v <prismatica>:/app -w /app node:22-alpine node scripts/security/unit/run-all.mjs
+# integration via the real 2-hop surface + subprocess (needs the project CA + anon/service keys)
+#   AUTH_GATEWAY_TEST_URL=https://localhost:4322  (see scripts/security/{10,11}-*.mjs)
+```
+
 ## What is already strong (keep it)
 - **Auth BFF pattern**: the browser never holds the service-role key; private
   secrets are runtime-injected from Vault, never baked into images.
