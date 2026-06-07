@@ -18,4 +18,12 @@ echo "Installing $DEB …"
 # --force-depends covers Ubuntu 24.04's GTK package rename (libgtk-3-0 ->
 # libgtk-3-0t64): GTK is installed, only the dependency *name* differs.
 dpkg -i "$DEB" || apt-get install -y -f || dpkg -i --force-depends "$DEB"
+
+# Electron's sandbox helper must be setuid root. On Ubuntu 24.04 unprivileged
+# user namespaces are restricted (kernel.apparmor_restrict_unprivileged_userns=1),
+# so without this the app silently fails to launch.
+for sb in /opt/osionos/chrome-sandbox; do
+  [ -f "$sb" ] && { chown root:root "$sb" && chmod 4755 "$sb" && echo "Set $sb setuid root."; }
+done
+
 echo "Installed. Launch 'osionos' from your app menu (or run: osionos-desktop)."
