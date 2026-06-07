@@ -21,7 +21,7 @@ docker build -f infrastructure/docker/osionos/app.Dockerfile \
   --build-arg VITE_ALLOW_OFFLINE_MODE=false \
   --build-arg VITE_REQUIRE_BRIDGE_SESSION=false \
   --build-arg VITE_AUTH_MODE=portal \
-  --build-arg VITE_BAAS_URL=https://localhost:8000 \
+  --build-arg VITE_BAAS_URL=http://localhost:8002 \
   --build-arg VITE_API_URL=https://localhost:4000 \
   --build-arg VITE_MAIL_APP_URL=https://localhost:3002 \
   --build-arg VITE_CALENDAR_APP_URL=https://localhost:3003 \
