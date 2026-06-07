@@ -34,6 +34,9 @@ ARG VITE_REQUIRE_BRIDGE_SESSION=true
 ARG VITE_ALLOW_OFFLINE_MODE=false
 ARG VITE_PAGE_ACTION_SYNC_ENABLED=true
 ARG VITE_APP_VERSION=image
+# Auth mode: "portal" makes the app show its own login/sign-up portal (no mock,
+# no website redirect). Empty = legacy bridge/offline behavior (web image).
+ARG VITE_AUTH_MODE=
 # Asset base. Web/nginx image keeps "/" (absolute). The desktop bundle passes
 # "./" so assets resolve relative to index.html inside the Tauri webview.
 ARG VITE_BASE=/
@@ -44,6 +47,7 @@ ENV VITE_API_URL=$VITE_API_URL \
     VITE_REQUIRE_BRIDGE_SESSION=$VITE_REQUIRE_BRIDGE_SESSION \
     VITE_ALLOW_OFFLINE_MODE=$VITE_ALLOW_OFFLINE_MODE \
     VITE_PAGE_ACTION_SYNC_ENABLED=$VITE_PAGE_ACTION_SYNC_ENABLED \
+    VITE_AUTH_MODE=$VITE_AUTH_MODE \
     VITE_APP_VERSION=$VITE_APP_VERSION
 
 RUN pnpm exec vite build --base "$VITE_BASE"
