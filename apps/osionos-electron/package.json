@@ -18,6 +18,7 @@
   "build": {
     "appId": "fr.trackbinocle.osionos",
     "productName": "osionos",
+    "executableName": "osionos",
     "directories": { "output": "dist" },
     "files": ["main.js", "preload.js", "renderer/**/*"],
     "linux": {
@@ -26,6 +27,6 @@
       "icon": "icon.png",
       "maintainer": "Track Binocle"
     },
-    "deb": { "depends": ["libgtk-3-0", "libnotify4", "libnss3", "libxss1", "libxtst6", "xdg-utils"] }
+    "deb": { "depends": ["libgtk-3-0t64 | libgtk-3-0", "libnotify4", "libnss3", "libxss1", "libxtst6", "xdg-utils"] }
   }
 }
