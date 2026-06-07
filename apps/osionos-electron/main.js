@@ -63,6 +63,13 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       spellcheck: true,
+      // Local desktop app: it loads ONLY its own bundled content (app://osionos)
+      // and talks to several LOCAL backends (bridge:4000, kong:8000). Disabling
+      // the renderer's same-origin/CORS/mixed-content enforcement lets those
+      // direct calls work without configuring CORS on every service. Real
+      // security stays in the auth-gateway + Postgres RLS; external links open
+      // in the system browser (setWindowOpenHandler), so no untrusted content runs.
+      webSecurity: false,
     },
   });
 
