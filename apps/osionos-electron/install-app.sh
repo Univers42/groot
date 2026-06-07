@@ -5,6 +5,17 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DEB="$(ls -t "$REPO"/apps/osionos-electron/dist/osionos*.deb 2>/dev/null | head -1)"
 [ -n "${DEB:-}" ] || { echo "No .deb found — run: bash apps/osionos-electron/build.sh"; exit 1; }
+
+# Remove the older Tauri build if present — it installs as package 'osionos'
+# (binary /usr/bin/app, osionos.desktop) and would keep shadowing the menu entry,
+# so you'd keep launching Tauri instead of this Electron build.
+if dpkg -s osionos >/dev/null 2>&1; then
+  echo "Removing the old Tauri osionos so the menu launches the Electron build…"
+  apt-get remove -y osionos 2>/dev/null || dpkg -r osionos || true
+fi
+
 echo "Installing $DEB …"
-dpkg -i "$DEB" || apt-get install -y -f
-echo "Installed. Launch 'osionos' from your app menu, or run: osionos"
+# --force-depends covers Ubuntu 24.04's GTK package rename (libgtk-3-0 ->
+# libgtk-3-0t64): GTK is installed, only the dependency *name* differs.
+dpkg -i "$DEB" || apt-get install -y -f || dpkg -i --force-depends "$DEB"
+echo "Installed. Launch 'osionos' from your app menu (or run: osionos-desktop)."
