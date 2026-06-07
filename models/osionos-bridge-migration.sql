@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS public.osionos_pages (
   icon TEXT,
   cover TEXT,
   database_id TEXT,
-  surface TEXT CHECK (surface IS NULL OR surface IN ('page', 'agent', 'home')),
+  surface TEXT CHECK (surface IS NULL OR surface IN ('page', 'agent', 'home', 'folder')),
   visibility TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private', 'shared', 'public')),
   collaborators JSONB NOT NULL DEFAULT '[]'::jsonb,
   properties JSONB NOT NULL DEFAULT '[]'::jsonb,
