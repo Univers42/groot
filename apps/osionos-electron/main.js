@@ -6,10 +6,19 @@
 // the background, and provides a frameless window driven by the shared custom
 // titlebar (see chrome/titlebar.html, injected into renderer/index.html).
 // ===========================================================================
-const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, protocol, net } = require("electron");
 const path = require("node:path");
 const os = require("node:os");
 const { spawn } = require("node:child_process");
+const { pathToFileURL } = require("node:url");
+const { existsSync } = require("node:fs");
+
+// Serve the bundled renderer from a stable app:// origin (so the bridge's CORS
+// can allow it) instead of file:// (origin "null", which CORS rejects). Keeps
+// webSecurity ON. Must be registered before the app is ready.
+protocol.registerSchemesAsPrivileged([
+  { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
+]);
 
 // Chromium GPU: rasterize on the GPU even if the driver is on the blocklist
 // (helps AMD/Mesa on Linux). Safe no-ops elsewhere.
@@ -58,7 +67,7 @@ function createWindow() {
   });
 
   win.once("ready-to-show", () => win.show());
-  win.loadFile(path.join(__dirname, "renderer", "index.html"));
+  win.loadURL("app://osionos/index.html");
 
   // Open external links in the real browser, not inside the app.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -76,8 +85,10 @@ function createWindow() {
   // Keyboard: Ctrl/Cmd +  /  -  /  0
   wc.on("before-input-event", (event, input) => {
     if (input.type !== "keyDown" || !(input.control || input.meta)) return;
-    if (input.key === "=" || input.key === "+") { wc.setZoomLevel(clamp(wc.getZoomLevel() + 0.5)); event.preventDefault(); }
-    else if (input.key === "-" || input.key === "_") { wc.setZoomLevel(clamp(wc.getZoomLevel() - 0.5)); event.preventDefault(); }
+    const zoomIn = input.key === "=" || input.key === "+" || input.code === "Equal" || input.code === "NumpadAdd";
+    const zoomOut = input.key === "-" || input.key === "_" || input.code === "Minus" || input.code === "NumpadSubtract";
+    if (zoomIn) { wc.setZoomLevel(clamp(wc.getZoomLevel() + 0.5)); event.preventDefault(); }
+    else if (zoomOut) { wc.setZoomLevel(clamp(wc.getZoomLevel() - 0.5)); event.preventDefault(); }
     else if (input.key === "0") { wc.setZoomLevel(0); event.preventDefault(); }
   });
   // Ctrl + mouse-wheel: Chromium emits zoom-changed (no custom wheel listener,
@@ -88,6 +99,14 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  const rendererDir = path.join(__dirname, "renderer");
+  protocol.handle("app", (request) => {
+    let pathname = decodeURIComponent(new URL(request.url).pathname);
+    if (pathname === "/" || pathname === "") pathname = "/index.html";
+    let filePath = path.join(rendererDir, pathname);
+    if (!filePath.startsWith(rendererDir) || !existsSync(filePath)) filePath = path.join(rendererDir, "index.html");
+    return net.fetch(pathToFileURL(filePath).toString());
+  });
   bootSuite();
   createWindow();
   app.on("activate", () => {
