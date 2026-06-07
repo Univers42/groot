@@ -69,6 +69,22 @@ function createWindow() {
   ipcMain.on("win:minimize", () => win.minimize());
   ipcMain.on("win:toggle-maximize", () => (win.isMaximized() ? win.unmaximize() : win.maximize()));
   ipcMain.on("win:close", () => win.close());
+
+  // Zoom — wired explicitly (Tauri's zoomHotkeysEnabled has no Electron equivalent).
+  const wc = win.webContents;
+  const clamp = (z) => Math.max(-3, Math.min(6, z));
+  // Keyboard: Ctrl/Cmd +  /  -  /  0
+  wc.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown" || !(input.control || input.meta)) return;
+    if (input.key === "=" || input.key === "+") { wc.setZoomLevel(clamp(wc.getZoomLevel() + 0.5)); event.preventDefault(); }
+    else if (input.key === "-" || input.key === "_") { wc.setZoomLevel(clamp(wc.getZoomLevel() - 0.5)); event.preventDefault(); }
+    else if (input.key === "0") { wc.setZoomLevel(0); event.preventDefault(); }
+  });
+  // Ctrl + mouse-wheel: Chromium emits zoom-changed (no custom wheel listener,
+  // so this can't slow scrolling back down).
+  wc.on("zoom-changed", (_event, dir) => {
+    wc.setZoomLevel(clamp(wc.getZoomLevel() + (dir === "in" ? 0.5 : -0.5)));
+  });
 }
 
 app.whenReady().then(() => {
