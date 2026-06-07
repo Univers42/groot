@@ -1,7 +1,7 @@
 {
   "name": "osionos-desktop",
   "productName": "osionos",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "osionos — the Track Binocle editor + app suite (Electron shell)",
   "main": "main.js",
   "author": "Track Binocle",
