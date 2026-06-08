@@ -6,6 +6,9 @@
 #   bash apps/osionos-electron/build.sh            # FULL edition (HTTPS, BaaS-wired)
 #   bash apps/osionos-electron/build.sh --local    # LOCAL edition (HTTP :4000, lean
 #                                                  # backend, no mini-baas) -> dist-local/
+#   add --win   -> also/only build a Windows .exe (NSIS) via the wine builder image
+#   add --all   -> build Linux (.deb/.AppImage) AND Windows (.exe) in one pass
+#   e.g.  bash apps/osionos-electron/build.sh --local --all
 #
 # 1. Build the STANDALONE osionos frontend (offline-capable, base=./).
 # 2. Extract the dist into renderer/ and inject the shared custom titlebar.
@@ -19,7 +22,20 @@ cd "$REPO"
 EL="apps/osionos-electron"
 
 # ---- edition: full (default) or local (--local) ---------------------------
-EDITION="full"; case "${1:-}" in --local|local) EDITION="local";; esac
+# ---- platform: linux (default), --win (Windows .exe), --all (both) ---------
+# Windows cross-builds from Linux via electron-builder's wine image; the
+# Windows app still needs the Docker backend (Docker Desktop / WSL2) at runtime.
+EDITION="full"; PLATFORM="linux"
+for a in "$@"; do case "$a" in
+  --local|local)      EDITION="local";;
+  --win|--windows)    PLATFORM="win";;
+  --all|--all-os)     PLATFORM="all";;
+esac; done
+case "$PLATFORM" in
+  win) BUILDER_IMG="electronuserland/builder:wine"; DIST_SCRIPT="dist:win";;
+  all) BUILDER_IMG="electronuserland/builder:wine"; DIST_SCRIPT="dist:all";;
+  *)   BUILDER_IMG="electronuserland/builder:latest"; DIST_SCRIPT="dist";;
+esac
 VER="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$EL/package.json" | head -1)"
 
 if [ "$EDITION" = "local" ]; then
@@ -94,17 +110,17 @@ echo "[3/4] Preparing icon…"
 cp -f apps/osionos-desktop/src-tauri/icons/128x128@2x.png "$EL/icon.png" 2>/dev/null \
   || cp -f apps/osionos-desktop/src-tauri/icons/icon.png "$EL/icon.png" 2>/dev/null || true
 
-echo "[4/4] Packaging with electron-builder (container; first run pulls the image)…"
+echo "[4/4] Packaging with electron-builder ($PLATFORM, $BUILDER_IMG; first run pulls the image)…"
 docker run --rm --user "$(id -u):$(id -g)" \
   -e HOME=/tmp -e ELECTRON_CACHE=/tmp/.cache/electron -e ELECTRON_BUILDER_CACHE=/tmp/.cache/electron-builder \
   -e npm_config_cache=/tmp/.npm \
   -v "$REPO/$EL":/project -w /project \
-  electronuserland/builder:latest \
-  sh -c "npm install --no-audit --no-fund && npm run dist $DIST_EXTRA"
+  "$BUILDER_IMG" \
+  sh -c "npm install --no-audit --no-fund && npm run $DIST_SCRIPT $DIST_EXTRA"
 
 echo
-echo "Done ($EDITION). Artifacts in $EL/$OUT_DIR/ :"
-ls -1 "$EL"/"$OUT_DIR"/*.deb "$EL"/"$OUT_DIR"/*.AppImage 2>/dev/null || true
+echo "Done ($EDITION/$PLATFORM). Artifacts in $EL/$OUT_DIR/ :"
+ls -1 "$EL"/"$OUT_DIR"/*.deb "$EL"/"$OUT_DIR"/*.AppImage "$EL"/"$OUT_DIR"/*.exe 2>/dev/null || true
 if [ "$EDITION" = "local" ]; then
   echo "Install the local edition with:  bash apps/osionos-electron/local-edition/install.sh"
 else

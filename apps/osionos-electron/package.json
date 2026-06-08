@@ -9,7 +9,9 @@
   "homepage": "https://github.com/Univers42/prismatica",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --linux deb AppImage"
+    "dist": "electron-builder --linux deb AppImage",
+    "dist:win": "electron-builder --win nsis",
+    "dist:all": "electron-builder --linux deb AppImage --win nsis"
   },
   "devDependencies": {
     "electron": "^32.2.0",
@@ -27,6 +29,17 @@
       "icon": "icon.png",
       "maintainer": "Track Binocle"
     },
-    "deb": { "depends": ["libgtk-3-0t64 | libgtk-3-0", "libnotify4", "libnss3", "libxss1", "libxtst6", "xdg-utils"] }
+    "deb": { "depends": ["libgtk-3-0t64 | libgtk-3-0", "libnotify4", "libnss3", "libxss1", "libxtst6", "xdg-utils"] },
+    "win": {
+      "target": ["nsis"],
+      "icon": "icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "osionos"
+    }
   }
 }
