@@ -19,13 +19,25 @@ cd "$REPO"
 
 echo "==> osionos local edition installer"
 
-# 1) Docker present?
+# 1) Docker present, daemon reachable, compose plugin available?
 if ! command -v docker >/dev/null 2>&1; then
-  echo "Docker is required. Install it first:"
-  echo "  https://docs.docker.com/engine/install/ubuntu/   (then: sudo usermod -aG docker \$USER; re-login)"
+  echo "✗ Docker is required but not installed. Install Docker Engine first:"
+  echo "    https://docs.docker.com/engine/install/ubuntu/"
+  echo "  then add yourself to the docker group:  sudo usermod -aG docker \$USER  (re-login after)."
   exit 1
 fi
-docker compose version >/dev/null 2>&1 || { echo "The Docker Compose plugin is required (docker compose ...)."; exit 1; }
+if ! docker info >/dev/null 2>&1; then
+  echo "✗ Docker is installed but the daemon isn't reachable. Common fixes:"
+  echo "    - start it:           sudo systemctl start docker"
+  echo "    - permission denied:  sudo usermod -aG docker \$USER  (then log out/in)"
+  exit 1
+fi
+docker compose version >/dev/null 2>&1 || {
+  echo "✗ The Docker Compose plugin is required (the 'docker compose ...' subcommand)."
+  echo "    https://docs.docker.com/compose/install/linux/"
+  exit 1
+}
+echo "✓ Docker $(docker version --format '{{.Server.Version}}' 2>/dev/null) ready."
 
 # 2) Pull the lean backend from Docker Hub (override the local-build image tags so
 #    nothing is built on this machine).
@@ -39,7 +51,12 @@ COMPOSE_PROFILES=local docker compose -f docker-compose.yml -f docker-compose.lo
 
 # 3) Bring up the lean stack (generates local secrets, HTTP :4000, no TLS/cloud).
 echo "==> Starting the lean local stack (make local)…"
-make local
+if ! make local; then
+  echo "✗ 'make local' failed to bring up the backend. Inspect with:"
+  echo "    docker compose -f docker-compose.yml -f docker-compose.local.yml --profile local ps"
+  echo "    docker compose -f docker-compose.yml -f docker-compose.local.yml --profile local logs --tail=50"
+  exit 1
+fi
 
 # 4) Install the desktop app (local edition artifacts live in dist-local/).
 DIST="apps/osionos-electron/dist-local"
