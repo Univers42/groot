@@ -3,34 +3,79 @@
 # Build the native osionos desktop app with ELECTRON (.deb + .AppImage).
 # Chromium renderer -> fast on every OS (unlike Tauri's WebKitGTK on Linux).
 #
-# 1. Build the STANDALONE osionos frontend (offline-capable, base=./, no
-#    prismatica redirect) — same image build as the Tauri shell.
+#   bash apps/osionos-electron/build.sh            # FULL edition (HTTPS, BaaS-wired)
+#   bash apps/osionos-electron/build.sh --local    # LOCAL edition (HTTP :4000, lean
+#                                                  # backend, no mini-baas) -> dist-local/
+#
+# 1. Build the STANDALONE osionos frontend (offline-capable, base=./).
 # 2. Extract the dist into renderer/ and inject the shared custom titlebar.
 # 3. Package with electron-builder inside a container (no host Node).
-#
-# Run from anywhere:  bash apps/osionos-electron/build.sh
-# Then install:        sudo bash apps/osionos-electron/install-app.sh
+# Install:  sudo bash apps/osionos-electron/install-app.sh   (full)
+#           bash apps/osionos-electron/local-edition/install.sh  (local edition)
 # ===========================================================================
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO"
 EL="apps/osionos-electron"
 
-echo "[1/4] Building standalone osionos frontend (offline, base=./)…"
+# ---- edition: full (default) or local (--local) ---------------------------
+EDITION="full"; case "${1:-}" in --local|local) EDITION="local";; esac
+VER="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$EL/package.json" | head -1)"
+
+if [ "$EDITION" = "local" ]; then
+  # LOCAL edition: HTTP loopback to the lean bridge. NO mini-baas — the Second Brain
+  # graph runs from the note layer (bridge /api/graph/pages) and Database mode from
+  # local pages (WorkspaceDatabaseBlock); empty VITE_BAAS_* keeps it from ever calling
+  # the absent query-router. Real local login (portal) against the local auth-gateway.
+  API_URL="http://localhost:4000"; BAAS_URL=""
+  B_API_KEY=""; B_KONG_KEY=""; B_EDGES_DB=""; B_EDGES_TBL=""; B_RESOURCES=""
+  B_GENERATORS=""; B_NOTES_TBL=""; B_OVERLAY_TBL=""; B_SBV2=""
+  FE_TAG="osionos-electron-frontend:local"; OUT_DIR="dist-local"
+  DIST_EXTRA="-- --config.directories.output=dist-local --config.extraMetadata.version=${VER}-local"
+  echo "  ▶ LOCAL edition — HTTP http://localhost:4000, lean backend, no mini-baas."
+else
+  # The FULL bundle bakes the BaaS auth + graph wiring from the local .env (.env is
+  # dockerignored, so pass it explicitly as build-args).
+  ENV_FILE="apps/osionos/app/.env"
+  baas_env() { [ -f "$ENV_FILE" ] && sed -n "s|^$1=||p" "$ENV_FILE" | head -1; }
+  B_API_KEY="$(baas_env VITE_BAAS_API_KEY)"; B_KONG_KEY="$(baas_env VITE_BAAS_KONG_KEY)"
+  B_EDGES_DB="$(baas_env VITE_BAAS_EDGES_DB_ID)"; B_EDGES_TBL="$(baas_env VITE_BAAS_EDGES_TABLE)"
+  B_RESOURCES="$(baas_env VITE_BAAS_GRAPH_RESOURCES)"; B_GENERATORS="$(baas_env VITE_BAAS_GRAPH_GENERATORS)"
+  B_NOTES_TBL="$(baas_env VITE_BAAS_NOTES_TABLE)"; B_OVERLAY_TBL="$(baas_env VITE_BAAS_OVERLAY_TABLE)"
+  B_SBV2="$(baas_env VITE_SECOND_BRAIN_V2)"
+  API_URL="https://localhost:4000"; BAAS_URL="app://osionos/__baas"
+  FE_TAG="osionos-electron-frontend:latest"; OUT_DIR="dist"; DIST_EXTRA=""
+  if [ -z "$B_API_KEY" ] || [ -z "$B_KONG_KEY" ]; then
+    echo "  ⚠️  BaaS keys missing in $ENV_FILE — the graph/database will show 'no nodes'."
+  else
+    echo "  ✓ baking BaaS keys (api=${B_API_KEY:0:8}…, kong set, edges_db=${B_EDGES_DB:0:8}…)"
+  fi
+fi
+
+echo "[1/4] Building standalone osionos frontend ($EDITION, base=./)…"
 docker build -f infrastructure/docker/osionos/app.Dockerfile \
   --build-arg VITE_ALLOW_OFFLINE_MODE=false \
   --build-arg VITE_REQUIRE_BRIDGE_SESSION=false \
   --build-arg VITE_AUTH_MODE=portal \
-  --build-arg VITE_BAAS_URL=http://localhost:8002 \
-  --build-arg VITE_API_URL=https://localhost:4000 \
+  --build-arg VITE_BAAS_URL="$BAAS_URL" \
+  --build-arg VITE_BAAS_API_KEY="$B_API_KEY" \
+  --build-arg VITE_BAAS_KONG_KEY="$B_KONG_KEY" \
+  --build-arg VITE_BAAS_EDGES_DB_ID="$B_EDGES_DB" \
+  --build-arg VITE_BAAS_EDGES_TABLE="$B_EDGES_TBL" \
+  --build-arg VITE_BAAS_GRAPH_RESOURCES="$B_RESOURCES" \
+  --build-arg VITE_BAAS_GRAPH_GENERATORS="$B_GENERATORS" \
+  --build-arg VITE_BAAS_NOTES_TABLE="$B_NOTES_TBL" \
+  --build-arg VITE_BAAS_OVERLAY_TABLE="$B_OVERLAY_TBL" \
+  --build-arg VITE_SECOND_BRAIN_V2="$B_SBV2" \
+  --build-arg VITE_API_URL="$API_URL" \
   --build-arg VITE_MAIL_APP_URL=https://localhost:3002 \
   --build-arg VITE_CALENDAR_APP_URL=https://localhost:3003 \
-  --build-arg VITE_APP_VERSION=desktop \
+  --build-arg VITE_APP_VERSION="desktop-$EDITION" \
   --build-arg VITE_BASE=./ \
-  -t osionos-electron-frontend:latest apps/osionos/app
+  -t "$FE_TAG" apps/osionos/app
 
 echo "[2/4] Extracting dist -> $EL/renderer …"
-cid="$(docker create osionos-electron-frontend:latest)"
+cid="$(docker create "$FE_TAG")"
 rm -rf "$EL/renderer" && mkdir -p "$EL/renderer"
 docker cp "$cid:/usr/share/nginx/html/." "$EL/renderer/"
 docker rm -f "$cid" >/dev/null
@@ -55,9 +100,13 @@ docker run --rm --user "$(id -u):$(id -g)" \
   -e npm_config_cache=/tmp/.npm \
   -v "$REPO/$EL":/project -w /project \
   electronuserland/builder:latest \
-  sh -c "npm install --no-audit --no-fund && npm run dist"
+  sh -c "npm install --no-audit --no-fund && npm run dist $DIST_EXTRA"
 
 echo
-echo "Done. Artifacts in $EL/dist/ :"
-ls -1 "$EL"/dist/*.deb "$EL"/dist/*.AppImage 2>/dev/null || true
-echo "Install with:  sudo bash apps/osionos-electron/install-app.sh"
+echo "Done ($EDITION). Artifacts in $EL/$OUT_DIR/ :"
+ls -1 "$EL"/"$OUT_DIR"/*.deb "$EL"/"$OUT_DIR"/*.AppImage 2>/dev/null || true
+if [ "$EDITION" = "local" ]; then
+  echo "Install the local edition with:  bash apps/osionos-electron/local-edition/install.sh"
+else
+  echo "Install with:  sudo bash apps/osionos-electron/install-app.sh"
+fi

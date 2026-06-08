@@ -1,0 +1,30 @@
+# ============================================================================
+# Lean LOCAL edition overlay — `make local` / desktop bootSuite.
+#
+# Used WITH the base file:  docker compose -f docker-compose.yml -f docker-compose.local.yml \
+#                             --profile local up -d
+#
+# Everything local, HTTP loopback, no TLS/CA, no cloud plane:
+#   - the bridge serves plain HTTP on 127.0.0.1:4000 directly (no local-https-proxy),
+#   - the desktop renderer (app:// origin, webSecurity off) calls it at http://localhost:4000,
+#   - local-https-proxy + pg-meta are parked on an inactive profile so they don't start,
+#   - the heavy mini-baas plane, mail, calendar and the website are simply not in the
+#     `local` profile, so the lean set is: postgres, redis, kong, gotrue, postgrest,
+#     auth-gateway, osionos-bridge (+ db init + local-runtime-secrets).
+# ============================================================================
+services:
+  osionos-bridge:
+    # Publish the bridge directly over HTTP (local-https-proxy used to terminate TLS here).
+    ports:
+      - "127.0.0.1:${OSIONOS_BRIDGE_HOST_PORT:-4000}:4000"
+    environment:
+      # The desktop renderer runs from the app:// origin.
+      OSIONOS_APP_URL: app://osionos
+      OSIONOS_ALLOWED_ORIGIN: app://osionos
+
+  # Park the TLS proxy on an inactive profile: not started under `--profile local`
+  # (the bridge is reached over plain HTTP instead). pg-meta stays because kong
+  # depends on it; it's a tiny admin sidecar.
+  local-https-proxy:
+    profiles:
+      - disabled
