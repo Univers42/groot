@@ -111,8 +111,13 @@ cp -f apps/osionos-desktop/src-tauri/icons/128x128@2x.png "$EL/icon.png" 2>/dev/
   || cp -f apps/osionos-desktop/src-tauri/icons/icon.png "$EL/icon.png" 2>/dev/null || true
 
 echo "[4/4] Packaging with electron-builder ($PLATFORM, $BUILDER_IMG; first run pulls the image)…"
+# Wine (Windows target) refuses a HOME it doesn't own — /tmp is root-owned — so give the
+# builder a project-local, user-owned HOME for its wine prefix. Electron/npm caches stay in
+# /tmp (sticky-writable, reused across builds, no re-download).
+mkdir -p "$REPO/$EL/.builder-home"
 docker run --rm --user "$(id -u):$(id -g)" \
-  -e HOME=/tmp -e ELECTRON_CACHE=/tmp/.cache/electron -e ELECTRON_BUILDER_CACHE=/tmp/.cache/electron-builder \
+  -e HOME=/project/.builder-home -e WINEPREFIX=/project/.builder-home/.wine \
+  -e ELECTRON_CACHE=/tmp/.cache/electron -e ELECTRON_BUILDER_CACHE=/tmp/.cache/electron-builder \
   -e npm_config_cache=/tmp/.npm \
   -v "$REPO/$EL":/project -w /project \
   "$BUILDER_IMG" \

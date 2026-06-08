@@ -5,3 +5,4 @@ renderer/
 icon.png
 package-lock.json
 .electron-cache/
+.builder-home/
