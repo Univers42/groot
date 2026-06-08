@@ -3,3 +3,4 @@ dist/
 renderer/
 icon.png
 package-lock.json
+.electron-cache/

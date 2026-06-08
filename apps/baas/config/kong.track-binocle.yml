@@ -63,8 +63,8 @@ services:
             config:
               policy: local
               limit_by: ip
-              minute: 10
-              hour: 3000
+              minute: 600
+              hour: 20000
 
   - name: rest
     url: http://postgrest:3000
@@ -88,8 +88,8 @@ services:
             config:
               policy: local
               limit_by: ip
-              minute: 180
-              hour: 5000
+              minute: 6000
+              hour: 120000
           - name: request-size-limiting
             config:
               allowed_payload_size: 1

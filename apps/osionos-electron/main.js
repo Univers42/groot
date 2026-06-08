@@ -11,7 +11,22 @@ const path = require("node:path");
 const os = require("node:os");
 const { spawn } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
-const { existsSync } = require("node:fs");
+const { existsSync, statSync } = require("node:fs");
+
+// The local mini-baas query-router speaks plain HTTP. The renderer runs from the
+// secure `app://` origin, where a direct http://localhost:8002 fetch is upgraded
+// to https and fails (ERR_SSL_PROTOCOL_ERROR — the router has no TLS). So the
+// renderer calls it same-origin via app://osionos/__baas/* and the app:// handler
+// relays to this target in the main process, where no mixed-content/upgrade rules
+// apply. Override with OSIONOS_BAAS_URL if the router runs elsewhere.
+//
+// MUST be 127.0.0.1, not "localhost": Chromium's net.fetch resolves "localhost" to
+// IPv6 ::1 first, but the mini-baas Kong binds IPv4-only (127.0.0.1:8002), so an
+// ::1 attempt is refused → net.fetch throws → the proxy returns 502 (the graph /
+// database calls fail). Coerce any localhost override to IPv4 too.
+const BAAS_TARGET = (process.env.OSIONOS_BAAS_URL || "http://127.0.0.1:8002")
+  .replace(/\/+$/, "")
+  .replace(/\/\/localhost(?=[:/]|$)/, "//127.0.0.1");
 
 // Serve the bundled renderer from a stable app:// origin (so the bridge's CORS
 // can allow it) instead of file:// (origin "null", which CORS rejects). Keeps
@@ -29,6 +44,19 @@ app.commandLine.appendSwitch("enable-zero-copy");
 // on Linux feels like hesitation/lag with a real mouse. Disable -> instant,
 // 1:1 wheel scrolling.
 app.commandLine.appendSwitch("disable-smooth-scrolling");
+// Disable the chrome sandbox ONLY when its setuid helper isn't usable — i.e. the
+// AppImage (read-only temp mount) or a kernel that restricts unprivileged user
+// namespaces (Ubuntu 24.04). The installed .deb setuids /opt/osionos/chrome-sandbox,
+// so it KEEPS its sandbox. (process.env.APPIMAGE is not reliably set, so probe the
+// helper's mode directly.)
+try {
+  const sandbox = path.join(path.dirname(process.execPath), "chrome-sandbox");
+  const st = statSync(sandbox);
+  const setuidRoot = st.uid === 0 && (st.mode & 0o4000) !== 0;
+  if (!setuidRoot) app.commandLine.appendSwitch("no-sandbox");
+} catch {
+  app.commandLine.appendSwitch("no-sandbox"); // helper missing → can't sandbox anyway
+}
 
 function trackBinocleHome() {
   return process.env.TRACK_BINOCLE_HOME
@@ -37,12 +65,17 @@ function trackBinocleHome() {
 
 // Best-effort: bring the local suite up so opening the app starts the backend.
 function bootSuite() {
-  const home = trackBinocleHome();
+  // LOCAL edition: the installer points OSIONOS_LOCAL_COMPOSE at the bundled
+  // docker-compose.local.yml and we bring up only the lean `local` profile (HTTP).
+  // Otherwise (dev repo) fall back to the full `dev` profile in the repo checkout.
+  const localCompose = process.env.OSIONOS_LOCAL_COMPOSE;
+  const cwd = localCompose ? path.dirname(localCompose) : trackBinocleHome();
+  const args = localCompose
+    ? ["compose", "-f", localCompose, "--profile", "local", "up", "-d"]
+    : ["compose", "--profile", "dev", "up", "-d"];
   try {
-    const child = spawn("docker", ["compose", "--profile", "dev", "up", "-d"], {
-      cwd: home, detached: true, stdio: "ignore",
-    });
-    child.on("error", () => {}); // docker not installed -> offline mode covers it
+    const child = spawn("docker", args, { cwd, detached: true, stdio: "ignore" });
+    child.on("error", () => {}); // docker missing / no compose -> the app just shows offline
     child.unref();
   } catch { /* ignore */ }
 }
@@ -107,8 +140,39 @@ function createWindow() {
 
 app.whenReady().then(() => {
   const rendererDir = path.join(__dirname, "renderer");
-  protocol.handle("app", (request) => {
-    let pathname = decodeURIComponent(new URL(request.url).pathname);
+  protocol.handle("app", async (request) => {
+    const url = new URL(request.url);
+    // BaaS proxy: relay same-origin app://osionos/__baas/* to the plain-HTTP
+    // query-router from the main process (no renderer HTTPS-upgrade). Buffer both
+    // directions and forward only the headers the router needs, so the response
+    // can't trip Chromium with a content-encoding/length mismatch (which showed
+    // up as net::ERR_UNEXPECTED). Never throw — return a 502 on failure.
+    if (url.pathname.startsWith("/__baas/")) {
+      const target = BAAS_TARGET + url.pathname.slice("/__baas".length) + url.search;
+      const headers = new Headers();
+      for (const name of ["content-type", "accept", "x-baas-api-key", "apikey", "authorization"]) {
+        const value = request.headers.get(name);
+        if (value) headers.set(name, value);
+      }
+      const init = { method: request.method, headers };
+      if (request.method !== "GET" && request.method !== "HEAD") {
+        init.body = await request.arrayBuffer();
+      }
+      try {
+        const upstream = await net.fetch(target, init);
+        const body = await upstream.arrayBuffer();
+        const out = new Headers();
+        const contentType = upstream.headers.get("content-type");
+        if (contentType) out.set("content-type", contentType);
+        return new Response(body, { status: upstream.status, statusText: upstream.statusText, headers: out });
+      } catch (error) {
+        return new Response(JSON.stringify({ error: "baas proxy failed", detail: String(error) }), {
+          status: 502,
+          headers: { "content-type": "application/json" },
+        });
+      }
+    }
+    let pathname = decodeURIComponent(url.pathname);
     if (pathname === "/" || pathname === "") pathname = "/index.html";
     let filePath = path.join(rendererDir, pathname);
     if (!filePath.startsWith(rendererDir) || !existsSync(filePath)) filePath = path.join(rendererDir, "index.html");

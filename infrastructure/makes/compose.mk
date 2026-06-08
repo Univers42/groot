@@ -63,3 +63,17 @@ up-infra: certs docker-prefetch-images compose-build
 	$(MAKE) db-password-apply
 	COMPOSE_PROFILES= docker compose up -d --no-build --pull never
 	$(MAKE) compose-wait COMPOSE_HEALTHY_SERVICES='$(COMPOSE_HEALTHY_SERVICES_INFRA)' COMPOSE_RUNNING_SERVICES='$(COMPOSE_RUNNING_SERVICES_INFRA)' COMPOSE_COMPLETED_SERVICES='$(COMPOSE_COMPLETED_SERVICES_INFRA)'
+
+# --- Lean LOCAL edition (HTTP loopback, real login; no TLS proxy / website / mail / calendar / mini-baas) ---
+LOCAL_COMPOSE := COMPOSE_PROFILES=local docker compose -f docker-compose.yml -f docker-compose.local.yml
+LOCAL_SERVICES := postgres redis kong pg-meta gotrue postgrest mailpit auth-gateway osionos-bridge
+LOCAL_EXTRA := local-https-proxy osionos-app opposite-osiris-web mail mail-bridge calendar calendar-bridge supavisor
+
+up-local:
+## Start ONLY the lean local-edition services (DB+auth+pages over HTTP :4000); stops the cloud/UI extras so :4000 is free for the bridge.
+	@docker compose kill $(LOCAL_EXTRA) >/dev/null 2>&1 || true
+	@docker compose rm -f $(LOCAL_EXTRA) >/dev/null 2>&1 || true
+	$(LOCAL_COMPOSE) up -d --wait postgres
+	-$(MAKE) db-password-apply
+	$(LOCAL_COMPOSE) up -d --wait $(LOCAL_SERVICES)
+	@echo "[local] lean edition up — bridge on http://localhost:$${OSIONOS_BRIDGE_HOST_PORT:-4000}"
