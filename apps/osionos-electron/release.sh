@@ -33,8 +33,9 @@ esac; shift; done
 VER="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$EL/package.json" | head -1)"
 TAG="${TAG:-osionos-v${VER}-local}"
 
-# ---- build if no artifacts present ----------------------------------------
-if ! ls "$DIST"/*.deb "$DIST"/*.AppImage "$DIST"/*.exe >/dev/null 2>&1; then
+# ---- build if no artifacts present (a non-matching glob makes ls exit non-zero
+#      even when others match, so test for any printed line instead) -----------
+if ! ls "$DIST"/*.deb "$DIST"/*.AppImage "$DIST"/*.exe 2>/dev/null | grep -q .; then
   echo "==> No artifacts in $DIST — building (build.sh $BUILD_ARGS)…"
   bash "$EL/build.sh" $BUILD_ARGS
 fi
