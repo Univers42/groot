@@ -28,3 +28,17 @@ adversarial-reviewer-SKILL.md
 # Python venvs (translation / md-to-pdf bootstraps)
 wiki/.venv-translate/
 wiki/.venv/
+
+# Python caches (seed generators in tools/seeds/, etc.)
+__pycache__/
+*.pyc
+
+# Scratch dir — never commit (held a 148MB guide + build junk). Real seeders
+# now live in tools/seeds/.
+temp/
+
+# Desktop build artifacts (ship via GitHub Releases, never git)
+apps/osionos-desktop/src-tauri/target/
+
+# Vault root-token retrieval runbook — operational, keep out of the repo
+wiki/security/retrieve_fly_seed_admin_right.md
