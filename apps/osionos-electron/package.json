@@ -11,7 +11,8 @@
     "start": "electron .",
     "dist": "electron-builder --linux deb AppImage",
     "dist:win": "electron-builder --win nsis",
-    "dist:all": "electron-builder --linux deb AppImage --win nsis"
+    "dist:all": "electron-builder --linux deb AppImage --win nsis",
+    "dist:native": "electron-builder --config electron-builder.native.json --linux deb AppImage"
   },
   "devDependencies": {
     "electron": "^32.2.0",

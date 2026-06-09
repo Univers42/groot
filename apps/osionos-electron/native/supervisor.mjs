@@ -83,7 +83,7 @@ export async function startSuite(opts) {
     //    No gotrue service (marker only), no Redis (store.mjs falls back to a bounded
     //    in-memory map when REDIS_URL is empty). Talks to the DB via the SDK -> restProxy.
     //    cwd = gateway dir so its bundled node_modules resolve.
-    const gw = spawn(bin.node, [bin.gatewayScript], { cwd: bin.gatewayDir, stdio: "ignore", env: { ...process.env,
+    const gw = spawn(bin.node, [bin.gatewayScript], { cwd: bin.gatewayDir, stdio: "ignore", env: { ...process.env, ...(bin.nodeEnv || {}),
       AUTH_GATEWAY_PORT: String(ports.gateway),
       PUBLIC_BAAS_URL: `http://127.0.0.1:${ports.restProxy}`,
       PUBLIC_BAAS_ANON_KEY: secrets.anonKey, SERVICE_ROLE_KEY: secrets.serviceRoleKey,
@@ -96,7 +96,7 @@ export async function startSuite(opts) {
     await waitUntil("auth-gateway", () => httpOk(`http://127.0.0.1:${ports.gateway}/`));
 
     // 6. bridge (zero-dep Node) — what the renderer talks to on :4000
-    const bridge = spawn(bin.node, [bin.bridgeScript], { stdio: "ignore", env: { ...process.env,
+    const bridge = spawn(bin.node, [bin.bridgeScript], { stdio: "ignore", env: { ...process.env, ...(bin.nodeEnv || {}),
       OSIONOS_BRIDGE_PORT: String(ports.bridge),
       OSIONOS_BAAS_URL: `http://127.0.0.1:${ports.restProxy}`,
       AUTH_GATEWAY_URL: `http://127.0.0.1:${ports.gateway}`,
