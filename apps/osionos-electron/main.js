@@ -6,7 +6,7 @@
 // the background, and provides a frameless window driven by the shared custom
 // titlebar (see chrome/titlebar.html, injected into renderer/index.html).
 // ===========================================================================
-const { app, BrowserWindow, ipcMain, shell, protocol, net } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, protocol, net, Menu, globalShortcut } = require("electron");
 const path = require("node:path");
 const os = require("node:os");
 const { spawn } = require("node:child_process");
@@ -145,6 +145,24 @@ function createWindow() {
     return { action: "allow" };
   });
 
+  // Keep the main window ALWAYS on osionos. The Mail/Calendar buttons navigate via
+  // location.href to an external URL; in the desktop app that would replace osionos
+  // (losing the titlebar + stranding you on a blank page). Cancel any navigation that
+  // leaves app://osionos and open it in the system browser instead — so you can never
+  // get stuck and never lose the window controls.
+  win.webContents.on("will-navigate", (event, url) => {
+    if (!url.startsWith("app://osionos")) {
+      event.preventDefault();
+      if (/^https?:/i.test(url)) shell.openExternal(url);
+    }
+  });
+
+  // Black-screen recovery: the titlebar + UI live in the renderer, so a crashed or
+  // hung renderer leaves you with no window controls. Reload back to the app home
+  // automatically; Ctrl/Cmd+Shift+R (global, below) is the manual escape hatch.
+  win.webContents.on("render-process-gone", () => { try { win.loadURL("app://osionos/index.html"); } catch { /* */ } });
+  win.webContents.on("unresponsive", () => { try { win.webContents.reload(); } catch { /* */ } });
+
   ipcMain.on("win:minimize", () => win.minimize());
   ipcMain.on("win:toggle-maximize", () => (win.isMaximized() ? win.unmaximize() : win.maximize()));
   ipcMain.on("win:close", () => win.close());
@@ -154,7 +172,11 @@ function createWindow() {
   const clamp = (z) => Math.max(-3, Math.min(6, z));
   // Keyboard: Ctrl/Cmd +  /  -  /  0
   wc.on("before-input-event", (event, input) => {
-    if (input.type !== "keyDown" || !(input.control || input.meta)) return;
+    if (input.type !== "keyDown") return;
+    // Reload / back-to-home recovery (F5, Ctrl/Cmd+R, Ctrl/Cmd+Shift+H).
+    if (input.key === "F5" || ((input.control || input.meta) && /^r$/i.test(input.key))) { wc.reload(); event.preventDefault(); return; }
+    if ((input.control || input.meta) && input.shift && /^h$/i.test(input.key)) { wc.loadURL("app://osionos/index.html"); event.preventDefault(); return; }
+    if (!(input.control || input.meta)) return;
     const zoomIn = input.key === "=" || input.key === "+" || input.code === "Equal" || input.code === "NumpadAdd";
     const zoomOut = input.key === "-" || input.key === "_" || input.code === "Minus" || input.code === "NumpadSubtract";
     if (zoomIn) { wc.setZoomLevel(clamp(wc.getZoomLevel() + 0.5)); event.preventDefault(); }
@@ -169,6 +191,9 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  // No native application menu: the app uses its own custom titlebar, and the GTK
+  // global-menu integration otherwise spams LIBDBUSMENU-GLIB-WARNING on Linux.
+  Menu.setApplicationMenu(null);
   const rendererDir = path.join(__dirname, "renderer");
   protocol.handle("app", async (request) => {
     const url = new URL(request.url);
@@ -214,13 +239,22 @@ app.whenReady().then(async () => {
     bootSuite();
   }
   createWindow();
+  // OS-level recovery that works even if the renderer is completely dead (a black
+  // screen can't receive in-page keystrokes): Ctrl/Cmd+Shift+R reloads to the app home.
+  globalShortcut.register("CommandOrControl+Shift+R", () => {
+    const w = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    if (w) w.loadURL("app://osionos/index.html");
+  });
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
 // Tear down the bundled native backend (postgres/postgrest/gateway/bridge) on exit.
-app.on("before-quit", () => { if (nativeHandle) { try { nativeHandle.stop(); } catch { /* */ } nativeHandle = null; } });
+app.on("before-quit", () => {
+  globalShortcut.unregisterAll();
+  if (nativeHandle) { try { nativeHandle.stop(); } catch { /* */ } nativeHandle = null; }
+});
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
