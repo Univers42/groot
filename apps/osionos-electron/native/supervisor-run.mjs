@@ -11,11 +11,13 @@ import { join } from "node:path";
 
 const RT = "/rt";
 const dataDir = process.env.OSIO_DATA || "/tmp/osio-data";
-const PGBIN = process.env.PGBIN || "/usr/lib/postgresql/16/bin";
+// Use the BUNDLED binaries (zonky postgres + postgrest) so the test exercises the
+// real shippable bundle — not a fuller system Postgres that happens to have psql.
+const PGBIN = process.env.PGBIN || `${RT}/pgsql/bin`;
 const bin = {
   node: process.execPath,
-  initdb: `${PGBIN}/initdb`, postgres: `${PGBIN}/postgres`, pg_isready: `${PGBIN}/pg_isready`, psql: `${PGBIN}/psql`,
-  postgrest: "/usr/local/bin/postgrest",
+  initdb: `${PGBIN}/initdb`, postgres: `${PGBIN}/postgres`,
+  postgrest: process.env.POSTGREST_BIN || `${RT}/bin/postgrest`,
   gatewayDir: join(RT, "gateway"), gatewayScript: join(RT, "gateway/scripts/auth-gateway.mjs"),
   bridgeScript: join(RT, "bridge/bridge-api.mjs"),
 };

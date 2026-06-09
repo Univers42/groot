@@ -61,10 +61,10 @@ export async function startSuite(opts) {
     // 1. Postgres
     const pgdata = ensurePgData({ bin, dataDir, superPass });
     startPostgres({ bin, pgdata, port: ports.pg }, children);
-    await waitUntil("postgres", () => spawnSync(bin.pg_isready, ["-h", "127.0.0.1", "-p", String(ports.pg), "-U", "postgres"]).status === 0);
 
-    // 2. Schema + secrets (idempotent)
-    const { secrets } = firstRun({ psqlBin: bin.psql, host: "127.0.0.1", port: ports.pg, db: "postgres", superUser: "postgres", superPass, migrationsDir, dataDir });
+    // 2. Schema + secrets (idempotent). firstRun connect-retries via the pure-JS
+    //    `pg` client == the postgres readiness gate (zonky ships no pg_isready/psql).
+    const { secrets } = await firstRun({ host: "127.0.0.1", port: ports.pg, db: "postgres", superUser: "postgres", superPass, migrationsDir, dataDir });
 
     // 3. PostgREST (connects as authenticator; JWT-gated) — proven path
     const rest = spawn(bin.postgrest, [], { stdio: "ignore", env: { ...process.env,
