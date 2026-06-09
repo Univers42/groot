@@ -47,6 +47,14 @@ try {
   const loginBody = typeof login.text === "function" ? await login.text() : "";
   ok("login returns a session", login.status === 200 && /accessToken|session|user/.test(loginBody), `${login.status} ${loginBody.slice(0, 90)}`);
 
+  // Imported-account login (Phase B): after a migration dump was imported, the real
+  // account must log in. Set TEST_LOGIN_EMAIL / TEST_LOGIN_PASSWORD to check it.
+  if (process.env.TEST_LOGIN_EMAIL) {
+    const le = await fetch(`${bridgeUrl}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: process.env.TEST_LOGIN_EMAIL, password: process.env.TEST_LOGIN_PASSWORD }) }).catch((e) => ({ status: "ERR", text: async () => String(e) }));
+    const lb = typeof le.text === "function" ? await le.text() : "";
+    ok(`imported account login (${process.env.TEST_LOGIN_EMAIL})`, le.status === 200 && /accessToken|session|user/.test(lb), `${le.status} ${lb.slice(0, 110)}`);
+  }
+
   stop();
   console.log("[run] ✅ DONE — full native stack booted with NO docker-compose, data path served.");
   setTimeout(() => process.exit(0), 500);
