@@ -15,8 +15,8 @@ use std::net::SocketAddr;
 use bytes::Bytes;
 use chrono::Utc;
 use realtime_core::{
-    filter::FilterExpr, AuthContext, ConnectionId, EventEnvelope, ServerMessage, SubscribeItem,
-    Subscription, SubscriptionId, TopicPath, TopicPattern,
+    filter::FilterExpr, AuthContext, ConnectionId, EventEnvelope, EventSource, ServerMessage,
+    SourceKind, SubscribeItem, Subscription, SubscriptionId, TopicPath, TopicPattern,
 };
 use smol_str::SmolStr;
 use tokio::sync::mpsc;
@@ -178,11 +178,30 @@ pub(super) async fn handle_publish(
             return Action::Continue;
         }
     };
-    let envelope = EventEnvelope::new(
+    let mut envelope = EventEnvelope::new(
         TopicPath::new(&topic),
         &event_type,
         Bytes::from(payload_bytes),
     );
+    // Stamp the originating platform user so identity-aware buses (e.g. the IRC
+    // bridge) can attribute the event to that user rather than a service nick.
+    if let Some(claims) = &auth.claims {
+        let mut metadata = std::collections::HashMap::new();
+        if let Some(handle) = claims
+            .metadata
+            .get("handle")
+            .or_else(|| claims.metadata.get("name"))
+            .or_else(|| claims.metadata.get("preferred_username"))
+            .and_then(serde_json::Value::as_str)
+        {
+            metadata.insert("handle".to_string(), handle.to_string());
+        }
+        envelope.source = Some(EventSource {
+            kind: SourceKind::Api,
+            id: claims.sub.clone(),
+            metadata,
+        });
+    }
     if let Err(e) = state
         .bus_publisher
         .publish(envelope.topic.as_str(), &envelope)
