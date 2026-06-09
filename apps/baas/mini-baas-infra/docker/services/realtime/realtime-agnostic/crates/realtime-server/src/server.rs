@@ -25,6 +25,7 @@ use axum::{
 };
 use realtime_auth::NoAuthProvider;
 use realtime_bus_inprocess::InProcessBus;
+use realtime_bus_irc::{IrcBus, IrcBusConfig};
 use realtime_core::{AuthProvider, DatabaseProducer, EventBus, EventBusPublisher};
 use realtime_engine::{
     registry::SubscriptionRegistry, router::EventRouter, sequence::SequenceGenerator,
@@ -83,6 +84,27 @@ pub async fn run(config: ServerConfig) -> anyhow::Result<()> {
 fn build_event_bus(config: &ServerConfig) -> Arc<dyn EventBus> {
     let bus: Arc<dyn EventBus> = match &config.event_bus {
         EventBusConfig::InProcess { capacity } => Arc::new(InProcessBus::new(*capacity)),
+        EventBusConfig::Irc {
+            host,
+            port,
+            password,
+            nick,
+            user,
+            realname,
+            channels,
+            namespace,
+            capacity,
+        } => Arc::new(IrcBus::new(IrcBusConfig {
+            host: host.clone(),
+            port: *port,
+            password: password.clone(),
+            nick: nick.clone(),
+            user: user.clone(),
+            realname: realname.clone(),
+            channels: channels.clone(),
+            namespace: namespace.clone(),
+            capacity: *capacity,
+        })),
     };
     bus
 }

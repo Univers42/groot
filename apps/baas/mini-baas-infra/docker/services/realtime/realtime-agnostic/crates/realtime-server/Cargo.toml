@@ -11,6 +11,7 @@ path = "src/main.rs"
 realtime-core = { path = "../realtime-core" }
 realtime-engine = { path = "../realtime-engine" }
 realtime-bus-inprocess = { path = "../realtime-bus-inprocess" }
+realtime-bus-irc = { path = "../realtime-bus-irc" }
 realtime-auth = { path = "../realtime-auth" }
 realtime-gateway = { path = "../realtime-gateway" }
 realtime-db-postgres = { path = "../realtime-db-postgres" }
