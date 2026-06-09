@@ -4,6 +4,7 @@ members = [
     "crates/realtime-core",
     "crates/realtime-engine",
     "crates/realtime-bus-inprocess",
+    "crates/realtime-bus-irc",
     "crates/realtime-auth",
     "crates/realtime-gateway",
     "crates/realtime-db-postgres",

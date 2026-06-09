@@ -2247,6 +2247,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "realtime-bus-irc"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "dashmap",
+ "realtime-core",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "realtime-client"
 version = "0.2.0"
 dependencies = [
@@ -2418,6 +2433,7 @@ dependencies = [
  "futures",
  "realtime-auth",
  "realtime-bus-inprocess",
+ "realtime-bus-irc",
  "realtime-core",
  "realtime-db-mongodb",
  "realtime-db-postgres",
