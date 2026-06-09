@@ -14,6 +14,7 @@ import { AnalyticsClient } from './domains/analytics.js';
 import { AuthClient } from './domains/auth.js';
 import { QueryClient, ResourceQueryBuilder } from './domains/query.js';
 import { RestClient, RestResourceBuilder } from './domains/rest.js';
+import { SchemaClient } from './domains/schema.js';
 import { StorageClient } from './domains/storage.js';
 import { TxnClient } from './domains/txn.js';
 import { WebhooksClient } from './domains/webhooks.js';
@@ -84,8 +85,25 @@ export type {
   FunctionInvokeOptions,
   FunctionSource,
   FunctionSummary,
+  // ── M22: schema introspection + DDL ──────────────────────────────────────
+  ColumnSchema,
+  DdlColumnDef,
+  DdlColumnType,
+  NormalizedSchema,
+  NormalizedType,
+  SchemaDdlAddColumnInput,
+  SchemaDdlAlterColumnTypeInput,
+  SchemaDdlCreateTableInput,
+  SchemaDdlDropColumnInput,
+  SchemaDdlDropTableInput,
+  SchemaDdlInput,
+  SchemaDdlOp,
+  SchemaDdlResult,
+  SchemaEngineCapabilities,
+  TableSchema,
 } from './types.js';
 
+export { SchemaClient } from './domains/schema.js';
 export { TxnClient } from './domains/txn.js';
 export { WebhooksClient } from './domains/webhooks.js';
 export { AdminClient, MigrateClient, TenantsClient } from './domains/admin.js';
@@ -120,6 +138,8 @@ export class MiniBaasClient {
   readonly analytics: AnalyticsClient;
   /** Single-mount atomic write batches (`POST /query/v1/txn`). */
   readonly txn: TxnClient;
+  /** Engine-agnostic schema introspection + DDL (`/query/v1/:dbId/schema`). */
+  readonly schema: SchemaClient;
   /** Edge functions (`/functions/v1`). */
   readonly functions: FunctionsClient;
   /**
@@ -160,6 +180,7 @@ export class MiniBaasClient {
     this.storage = new StorageClient(this.http);
     this.analytics = new AnalyticsClient(this.http);
     this.txn = new TxnClient(this.http);
+    this.schema = new SchemaClient(this.http);
     this.functions = new FunctionsClient(this.http);
     this.webhooks = new WebhooksClient(this.http, options.serviceRoleKey);
     this.admin = new AdminClient(this.http, options.serviceRoleKey);

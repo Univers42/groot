@@ -33,9 +33,14 @@ import type { EngineCaps, IDatabaseAdapter, QueryResult } from '@mini-baas/datab
 import { ExecuteQueryDto } from './dto/query.dto';
 import { TxnOpDto } from './dto/txn.dto';
 import { OutboxService } from './outbox.service';
+import { RealtimePublisherService, RealtimeWriteOp } from './realtime-publisher.service';
 import { RustDataPlaneProxy, RustProxyContext } from '../proxy/rust-data-plane.proxy';
 
-interface AdapterResponse {
+/** Ops that fan out as best-effort `row_changed` realtime events (mirrors the
+ *  outbox's MUTATING_OPS — reads never publish). */
+const REALTIME_WRITE_OPS: ReadonlySet<string> = new Set(['insert', 'update', 'delete', 'upsert']);
+
+export interface AdapterResponse {
   engine: string;
   connection_string: string;
   // Tenant isolation strategy from adapter-registry (shared_rls default |
@@ -190,6 +195,7 @@ export class QueryService implements OnModuleInit {
     private readonly http: HttpService,
     private readonly outbox: OutboxService,
     private readonly rustProxy: RustDataPlaneProxy,
+    private readonly realtime: RealtimePublisherService,
   ) {
     this.registryUrl = this.config.getOrThrow<string>('ADAPTER_REGISTRY_URL');
     this.permissionUrl = this.config.get<string>('PERMISSION_ENGINE_URL', 'http://permission-engine:3050');
@@ -233,6 +239,17 @@ export class QueryService implements OnModuleInit {
       engine: a.engine,
       capabilities: a.capabilities(),
     }));
+  }
+
+  /**
+   * Public, additive wrapper over the private {@link fetchConnection} so
+   * sibling services (SchemaService) can resolve a mount's engine + DSN +
+   * isolation without duplicating the static-mount/registry/cache logic.
+   * Same semantics: static `DATA_PLANE_MOUNTS` bypass first, then the
+   * TTL-cached adapter-registry `/connect` hop.
+   */
+  async resolveConnection(dbId: string, tenantId: string): Promise<AdapterResponse> {
+    return this.fetchConnection(dbId, tenantId);
   }
 
   private async fetchConnection(dbId: string, userId: string): Promise<AdapterResponse> {
@@ -396,6 +413,16 @@ export class QueryService implements OnModuleInit {
         this.logger.warn(`outbox emission failed for ${engine}.${resource}.${op}: ${error.message}`);
       });
 
+    // Best-effort realtime fan-out — fire-and-forget so the write response is
+    // never delayed; the publisher swallows every failure internally.
+    if (REALTIME_WRITE_OPS.has(op)) {
+      void this.realtime.publishRowChanged(dbId, resource, op as RealtimeWriteOp, {
+        filter: dto.filter,
+        idempotencyKey: dto.idempotencyKey,
+        pk: result.rows[0]?.['id'] ?? dto.data?.['id'] ?? dto.filter?.['id'],
+      });
+    }
+
     return this.applyFieldMask(result, decision.mask);
   }
 
@@ -441,6 +468,16 @@ export class QueryService implements OnModuleInit {
 
     const results = await this.runTransaction(proxyCtx, ops);
     this.emitTxnOutbox(engine, ops, results, userId, context);
+    // Post-commit realtime fan-out: one best-effort `row_changed` per op in
+    // the committed batch (TXN_OPS are all writes). Fire-and-forget — the
+    // publisher never rejects.
+    for (const o of ops) {
+      void this.realtime.publishRowChanged(dbId, o.resource, o.op as RealtimeWriteOp, {
+        filter: o.filter,
+        idempotencyKey: o.idempotencyKey,
+        pk: o.data?.['id'] ?? o.filter?.['id'],
+      });
+    }
     return { guarantee: 'atomic', mount: dbId, results };
   }
 

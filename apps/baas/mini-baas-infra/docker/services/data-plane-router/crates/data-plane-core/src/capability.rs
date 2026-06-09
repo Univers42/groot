@@ -61,6 +61,26 @@ pub struct EngineCapabilities {
     /// + group_by). `#[serde(default)]` for wire back-compat.
     #[serde(default)]
     pub aggregate: bool,
+    /// Whether the adapter implements `describe_schema` (engine-agnostic schema
+    /// introspection, M22). A *route* capability like `ddl` — gated at
+    /// `POST /v1/schema`, never consulted by `supports_op`. `#[serde(default)]`
+    /// lets a descriptor payload without the field deserialise to `false` (the
+    /// honest value for redis/http), so adding it is wire backward-compatible.
+    #[serde(default)]
+    pub introspect: bool,
+    /// Whether the adapter implements `apply_schema_ddl` (engine-agnostic,
+    /// single-operation schema DDL: add/drop/retype column, create/drop
+    /// table — M22 step 2). A *route* capability gated at
+    /// `POST /v1/schema/ddl`, never consulted by `supports_op`.
+    ///
+    /// Deliberately DISTINCT from `ddl` (which gates the admin migration
+    /// batch at `/v1/admin/migrate`): mongodb implements the
+    /// `$jsonSchema`-validator DDL surface but NOT `apply_migration`, so
+    /// flipping its `ddl` flag instead would break capability honesty.
+    /// `#[serde(default)]` for wire back-compat (same precedent as
+    /// `batch`/`aggregate`/`introspect`).
+    #[serde(default)]
+    pub schema_ddl: bool,
     pub stream: bool,
     pub ddl: bool,
     pub transactions: bool,
@@ -100,6 +120,8 @@ impl EngineCapabilities {
             upsert: true,
             batch: false,
             aggregate: true,
+            introspect: true,
+            schema_ddl: true,
             stream: true,
             ddl: true,
             transactions: true,
@@ -128,6 +150,11 @@ impl EngineCapabilities {
             upsert: true,
             batch: false,
             aggregate: false,
+            introspect: true,
+            // The validator-based DDL surface (collMod / createCollection) IS
+            // implemented — distinct from `ddl: false` below, which honestly
+            // reports that `apply_migration` is NotImplemented on mongo.
+            schema_ddl: true,
             stream: true,
             ddl: false,
             // mongo's `begin()` returns NotImplemented (session-threading
@@ -154,6 +181,8 @@ impl EngineCapabilities {
             upsert: true,
             batch: false,
             aggregate: false,
+            introspect: true,
+            schema_ddl: true,
             stream: false,
             ddl: true,
             transactions: true,
@@ -182,6 +211,8 @@ impl EngineCapabilities {
             upsert: true,
             batch: false,
             aggregate: false,
+            introspect: false,
+            schema_ddl: false,
             stream: false,
             ddl: false,
             transactions: false,
@@ -206,6 +237,8 @@ impl EngineCapabilities {
             upsert: true,
             batch: false,
             aggregate: false,
+            introspect: false,
+            schema_ddl: false,
             stream: false,
             ddl: false,
             transactions: false,
@@ -220,5 +253,111 @@ impl EngineCapabilities {
                 joins: JoinCapability::None,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn introspect_flag_matches_each_engine_introspection_surface() {
+        // M22: engines with a describe_schema implementation advertise it;
+        // engines without one (redis KV, http passthrough) honestly do not.
+        assert!(EngineCapabilities::postgresql().introspect);
+        assert!(EngineCapabilities::mysql().introspect);
+        assert!(EngineCapabilities::mongodb().introspect);
+        assert!(!EngineCapabilities::redis().introspect);
+        assert!(!EngineCapabilities::http().introspect);
+    }
+
+    #[test]
+    fn capabilities_payload_without_introspect_still_deserializes() {
+        // Wire back-compat (same precedent as `batch`/`aggregate`): a
+        // descriptor serialized BEFORE the field existed must keep
+        // deserializing, with `introspect` defaulting to false.
+        let mut payload = serde_json::to_value(EngineCapabilities::postgresql())
+            .expect("descriptor serializes");
+        payload
+            .as_object_mut()
+            .expect("descriptor is a JSON object")
+            .remove("introspect")
+            .expect("introspect was present before removal");
+        let parsed: EngineCapabilities =
+            serde_json::from_value(payload).expect("old payload still deserializes");
+        assert!(!parsed.introspect, "absent introspect defaults to false");
+        // Everything else survives untouched.
+        assert!(parsed.read && parsed.ddl && parsed.transactions);
+    }
+
+    #[test]
+    fn introspect_never_leaks_into_supports_op() {
+        // `introspect` is a route capability (like `ddl`), not an operation
+        // kind: flipping it must not change any supports_op answer.
+        let mut caps = EngineCapabilities::redis();
+        let before: Vec<bool> = DataOperationKind::ALL
+            .iter()
+            .map(|k| caps.supports_op(k))
+            .collect();
+        caps.introspect = true;
+        let after: Vec<bool> = DataOperationKind::ALL
+            .iter()
+            .map(|k| caps.supports_op(k))
+            .collect();
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn schema_ddl_flag_matches_each_engine_ddl_surface() {
+        // M22 step 2: engines with an apply_schema_ddl implementation
+        // advertise it; engines without one (redis KV, http passthrough)
+        // honestly do not. Mongo advertises schema_ddl (the jsonSchema
+        // validator surface) while still NOT advertising `ddl`
+        // (apply_migration is NotImplemented there) — the two flags are
+        // deliberately independent.
+        assert!(EngineCapabilities::postgresql().schema_ddl);
+        assert!(EngineCapabilities::mysql().schema_ddl);
+        assert!(EngineCapabilities::mongodb().schema_ddl);
+        assert!(!EngineCapabilities::redis().schema_ddl);
+        assert!(!EngineCapabilities::http().schema_ddl);
+        // The capability-honesty invariant the plan pins: mongodb's migrate
+        // gate stays false even though its schema_ddl gate is true.
+        assert!(!EngineCapabilities::mongodb().ddl);
+    }
+
+    #[test]
+    fn capabilities_payload_without_schema_ddl_still_deserializes() {
+        // Wire back-compat (same precedent as `batch`/`aggregate`/
+        // `introspect`): a descriptor serialized BEFORE the field existed must
+        // keep deserializing, with `schema_ddl` defaulting to false.
+        let mut payload = serde_json::to_value(EngineCapabilities::postgresql())
+            .expect("descriptor serializes");
+        payload
+            .as_object_mut()
+            .expect("descriptor is a JSON object")
+            .remove("schema_ddl")
+            .expect("schema_ddl was present before removal");
+        let parsed: EngineCapabilities =
+            serde_json::from_value(payload).expect("old payload still deserializes");
+        assert!(!parsed.schema_ddl, "absent schema_ddl defaults to false");
+        // Everything else survives untouched.
+        assert!(parsed.read && parsed.ddl && parsed.introspect && parsed.transactions);
+    }
+
+    #[test]
+    fn schema_ddl_never_leaks_into_supports_op() {
+        // `schema_ddl` is a route capability: flipping it must not change any
+        // supports_op answer.
+        let mut caps = EngineCapabilities::redis();
+        let before: Vec<bool> = DataOperationKind::ALL
+            .iter()
+            .map(|k| caps.supports_op(k))
+            .collect();
+        caps.schema_ddl = true;
+        let after: Vec<bool> = DataOperationKind::ALL
+            .iter()
+            .map(|k| caps.supports_op(k))
+            .collect();
+        assert_eq!(before, after);
     }
 }

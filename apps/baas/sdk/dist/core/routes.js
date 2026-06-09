@@ -29,6 +29,8 @@ export const routes = {
     query: {
         execute: '/query/v1/execute',
         txn: '/query/v1/txn',
+        schema: (dbId) => `/query/v1/${encodeURIComponent(dbId)}/schema`,
+        schemaDdl: (dbId) => `/query/v1/${encodeURIComponent(dbId)}/schema/ddl`,
     },
     webhooks: {
         root: '/admin/v1/webhooks',
@@ -57,6 +59,9 @@ export const routes = {
     },
     realtime: {
         channel: (channel) => `/realtime/v1/ws?channel=${encodeURIComponent(channel)}`,
+        // Topic name (NOT a URL) for one table's `row_changed` stream. Compose it
+        // with `client.realtimeUrl(...)` or send it in a SUBSCRIBE frame.
+        tableChannel: (dbId, table) => `table:${dbId}:${table}`,
     },
 };
 function encodePath(value) {

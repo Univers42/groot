@@ -15,8 +15,8 @@ use axum::response::Response;
 use crate::metrics::{escape_label, Metrics};
 use data_plane_core::{
     DataOperation, DataPlaneError, DatabaseMount, EngineAdapter, EngineCapabilities,
-    MigrationRequest, Plan, PoolRegistry, RawStatement, RequestIdentity, TxBeginRequest, TxHandle,
-    WorkloadContext,
+    MigrationRequest, Plan, PoolRegistry, RawStatement, RequestIdentity, SchemaDdlRequest,
+    TxBeginRequest, TxHandle, WorkloadContext,
 };
 use data_plane_pool::{
     DefaultPoolRegistry, EnvMountResolver, HttpEngineAdapter, MongoEngineAdapter,
@@ -292,6 +292,8 @@ pub fn router(state: AppState) -> Router {
         .route("/metrics", get(metrics_handler))
         .route("/v1/capabilities", get(capabilities))
         .route("/v1/query", post(execute_query))
+        .route("/v1/schema", post(describe_schema))
+        .route("/v1/schema/ddl", post(apply_schema_ddl))
         .route("/v1/transactions", post(begin_transaction))
         .route("/v1/transactions/:tx_id/execute", post(execute_in_transaction))
         .route("/v1/transactions/:tx_id/commit", post(commit_transaction))
@@ -574,6 +576,91 @@ fn map_data_plane_error(err: &DataPlaneError) -> axum::response::Response {
         }),
     )
         .into_response()
+}
+
+// ── /v1/schema ───────────────────────────────────────────────────────────────
+//
+// Engine-agnostic schema introspection (M22, live-database mode). Returns the
+// mount's tables/collections with normalized column types, PK/FK metadata and
+// enum values (`SchemaDescriptor` in data-plane-core). NOT admin-gated: any
+// authenticated identity that passes `validate_identity_mount` may read its
+// OWN mount's schema (same gating as `begin_transaction` — identity/mount
+// validation + a capability gate, nothing more). Engines without an
+// introspection surface (redis, http) advertise `introspect: false` and are
+// rejected here with a clean 422 instead of a deep 501.
+
+#[derive(Debug, Clone, Deserialize)]
+struct DescribeSchemaRequest {
+    identity: RequestIdentity,
+    mount: DatabaseMount,
+}
+
+async fn describe_schema(
+    State(state): State<AppState>,
+    Json(request): Json<DescribeSchemaRequest>,
+) -> impl IntoResponse {
+    if let Err(message) = validate_identity_mount(&state, &request.identity, &request.mount) {
+        return bad_request(message);
+    }
+    // Honesty gate: only engines advertising `introspect` serve the schema
+    // surface (a route capability like `ddl`, not an operation kind).
+    if let Err(resp) =
+        require_capability(&state, &request.mount.engine, "introspect", |c| c.introspect)
+    {
+        return resp;
+    }
+    let pool = match state.registry.get_or_create(request.mount).await {
+        Ok(pool) => pool,
+        Err(err) => return map_data_plane_error(&err),
+    };
+    match pool.describe_schema(request.identity).await {
+        Ok(result) => (StatusCode::OK, Json(result)).into_response(),
+        Err(err) => map_data_plane_error(&err),
+    }
+}
+
+// ── /v1/schema/ddl ────────────────────────────────────────────────────────────
+//
+// Engine-agnostic schema DDL (M22, step 2): ONE operation per request
+// (add_column | drop_column | alter_column_type | create_table | drop_table)
+// — single-op by contract because MySQL DDL self-commits, so a batch would
+// fake atomicity. NOT admin-gated (mirrors /v1/schema): mount ownership is
+// enforced upstream by the query-router's resolveConnection, the same trust
+// model as /v1/query writes. Gated on the `schema_ddl` capability flag —
+// deliberately distinct from `ddl` (the /v1/admin/migrate gate), because
+// mongodb serves this surface but not migrations.
+
+#[derive(Debug, Clone, Deserialize)]
+struct SchemaDdlEnvelope {
+    identity: RequestIdentity,
+    mount: DatabaseMount,
+    ddl: SchemaDdlRequest,
+}
+
+async fn apply_schema_ddl(
+    State(state): State<AppState>,
+    Json(request): Json<SchemaDdlEnvelope>,
+) -> impl IntoResponse {
+    if let Err(message) = validate_identity_mount(&state, &request.identity, &request.mount) {
+        return bad_request(message);
+    }
+    if request.ddl.table.trim().is_empty() {
+        return bad_request("ddl.table is required".to_string());
+    }
+    // Honesty gate: only engines advertising `schema_ddl` serve this surface.
+    if let Err(resp) =
+        require_capability(&state, &request.mount.engine, "schema_ddl", |c| c.schema_ddl)
+    {
+        return resp;
+    }
+    let pool = match state.registry.get_or_create(request.mount).await {
+        Ok(pool) => pool,
+        Err(err) => return map_data_plane_error(&err),
+    };
+    match pool.apply_schema_ddl(request.ddl, request.identity).await {
+        Ok(result) => (StatusCode::OK, Json(result)).into_response(),
+        Err(err) => map_data_plane_error(&err),
+    }
 }
 
 // Default transaction TTL — after this the registry stops handing out the

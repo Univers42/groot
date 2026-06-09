@@ -1,6 +1,6 @@
 use crate::{
     DataOperation, DataOperationKind, DataPlaneError, DataPlaneResult, DataResult, DatabaseMount,
-    EngineCapabilities, RequestIdentity,
+    EngineCapabilities, RequestIdentity, SchemaDdlRequest, SchemaDdlResult, SchemaDescriptor,
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -60,6 +60,41 @@ pub trait EnginePool: Send + Sync {
         let _ = (statement, identity);
         Err(DataPlaneError::NotImplemented {
             feature: format!("raw statement execution on {}", self.mount_id()),
+        })
+    }
+
+    /// Engine-agnostic schema introspection (M22). Returns every table /
+    /// collection visible to this mount (scoped exactly like the request
+    /// path — schema_per_tenant mounts only see their tenant schema) with
+    /// normalized column types, PK/FK metadata and enum values. Default
+    /// returns NotImplemented so engines without an introspection surface
+    /// (redis, http) opt out explicitly; the route gates on the
+    /// `introspect` capability flag before ever reaching this.
+    async fn describe_schema(
+        &self,
+        identity: RequestIdentity,
+    ) -> DataPlaneResult<SchemaDescriptor> {
+        let _ = identity;
+        Err(DataPlaneError::NotImplemented {
+            feature: format!("schema introspection on {}", self.mount_id()),
+        })
+    }
+
+    /// Apply ONE engine-agnostic schema-DDL operation (M22 step 2): add /
+    /// drop / retype a column, create / drop a table. Engines lower the
+    /// request through pure, identifier-validated builders (never raw client
+    /// SQL). Single-op by contract — MySQL DDL self-commits, so a batch here
+    /// would fake atomicity. Default returns NotImplemented so engines
+    /// without a DDL surface (redis, http) opt out explicitly; the route
+    /// gates on the `schema_ddl` capability flag before ever reaching this.
+    async fn apply_schema_ddl(
+        &self,
+        ddl: SchemaDdlRequest,
+        identity: RequestIdentity,
+    ) -> DataPlaneResult<SchemaDdlResult> {
+        let _ = (ddl, identity);
+        Err(DataPlaneError::NotImplemented {
+            feature: format!("schema DDL on {}", self.mount_id()),
         })
     }
 

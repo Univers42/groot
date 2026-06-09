@@ -133,6 +133,34 @@ await baas.txn.execute({
 });
 ```
 
+### Schema introspection & DDL
+
+Engine-agnostic live-database mode — one call describes any mount (normalized
+column types + the engine's live capabilities), one call applies a single
+schema operation. Engines without the surface (redis/http) reject with 422
+`unsupported_capability`; data-incompatible `alter_column_type` rejects with 409.
+
+```ts
+const schema = await baas.schema.describe(dbId);
+// → { dbId, engine: "postgresql", capabilities: { schema_ddl: true, ... }, tables: [...] }
+
+await baas.schema.ddl(dbId, {
+  op: "add_column",
+  table: "todos",
+  column: { name: "done", normalized_type: "boolean", nullable: false, default: "false" },
+});
+
+// Destructive ops (drop_column / drop_table) require confirm: true — both at
+// compile time and client-side before any request is sent:
+await baas.schema.ddl(dbId, { op: "drop_table", table: "scratch", confirm: true });
+```
+
+Realtime row changes for a table travel on the `table:<dbId>:<table>` topic:
+
+```ts
+const wsUrl = baas.realtimeUrl(`table:${dbId}:todos`);
+```
+
 ### Edge functions
 
 ```ts
@@ -173,7 +201,7 @@ await admin.admin.migrate.run({
 ```text
 Application code
   ↓
-Product SDK domains: auth / from / query / storage / analytics / realtime / txn / functions
+Product SDK domains: auth / from / query / schema / storage / analytics / realtime / txn / functions
   (+ admin-only: webhooks / admin.tenants / admin.provision / admin.migrate)
   ↓
 Private SDK core: session / retry / timeout / HTTP transport / route map

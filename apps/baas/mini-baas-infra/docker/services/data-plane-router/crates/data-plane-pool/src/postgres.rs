@@ -2,10 +2,12 @@ use crate::ident::quote_ident;
 use crate::resolver::MountResolver;
 use async_trait::async_trait;
 use data_plane_core::{
-    AggFunc, Aggregate, CmpOp, DataOperation, DataOperationKind, DataPlaneError, DataPlaneResult,
-    DataResult, DatabaseMount, EngineAdapter, EngineCapabilities, EngineHealth, EnginePool, Filter,
-    Isolation, MigrationRequest, MigrationResult, MigrationStatus, RawStatement, RequestIdentity,
-    ReturningMode, TxBeginRequest, TxHandle,
+    validate_default_expr, AggFunc, Aggregate, CmpOp, ColumnSchema, DataOperation,
+    DataOperationKind, DataPlaneError, DataPlaneResult, DataResult, DatabaseMount, DdlColumnDef,
+    EngineAdapter, EngineCapabilities, EngineHealth, EnginePool, Filter, ForeignKeyRef, Isolation,
+    MigrationRequest, MigrationResult, MigrationStatus, NormalizedType, RawStatement,
+    RequestIdentity, ReturningMode, SchemaDdlOp, SchemaDdlRequest, SchemaDdlResult,
+    SchemaDdlStatus, SchemaDescriptor, TableSchema, TxBeginRequest, TxHandle,
 };
 use bytes::BytesMut;
 use deadpool_postgres::{Config as DeadpoolConfig, Object, PoolConfig, Runtime};
@@ -342,6 +344,460 @@ impl EnginePool for PostgresPool {
             })
         }
     }
+
+    /// Engine-agnostic schema introspection (M22). Reads
+    /// `information_schema.columns` + `table_constraints`/`key_column_usage`
+    /// (PK + FK) + `pg_enum`/`pg_type` (enum values), scoped to the SAME schema
+    /// the request path executes in: a `schema_per_tenant` mount introspects
+    /// its tenant schema (the one `apply_search_path` pins per transaction);
+    /// shared_rls / db_per_tenant introspect `public` (the DSN-default search
+    /// path) — so the descriptor never reveals another tenant's tables. The
+    /// internal `_baas_migrations` marker table is excluded.
+    async fn describe_schema(
+        &self,
+        identity: RequestIdentity,
+    ) -> DataPlaneResult<SchemaDescriptor> {
+        self.check_tenant(&identity)?;
+        let client = self.pool.get().await.map_err(|e| DataPlaneError::Backend {
+            message: format!("pool checkout failed: {e}"),
+        })?;
+        // Same scoping rule as the per-request `apply_search_path`: the tenant
+        // schema when isolation is schema_per_tenant, else `public`.
+        let schema = self
+            .search_path_schema
+            .clone()
+            .unwrap_or_else(|| "public".to_string());
+
+        // Enum types and their labels (sorted by declared order). Keyed by
+        // udt_name so a USER-DEFINED column can be resolved to its values.
+        let mut enums: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+        let enum_rows = client
+            .query(
+                "SELECT t.typname, e.enumlabel
+                 FROM pg_type t
+                 JOIN pg_enum e ON e.enumtypid = t.oid
+                 ORDER BY t.typname, e.enumsortorder",
+                &[],
+            )
+            .await
+            .map_err(|e| backend(&e))?;
+        for row in &enum_rows {
+            enums
+                .entry(row.get::<_, String>(0))
+                .or_default()
+                .push(row.get::<_, String>(1));
+        }
+
+        // Primary keys, per table, in key ordinal order.
+        let mut pks: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+        let pk_rows = client
+            .query(
+                "SELECT tc.table_name, kcu.column_name
+                 FROM information_schema.table_constraints tc
+                 JOIN information_schema.key_column_usage kcu
+                   ON kcu.constraint_name = tc.constraint_name
+                  AND kcu.table_schema = tc.table_schema
+                 WHERE tc.table_schema = $1 AND tc.constraint_type = 'PRIMARY KEY'
+                 ORDER BY tc.table_name, kcu.ordinal_position",
+                &[&schema],
+            )
+            .await
+            .map_err(|e| backend(&e))?;
+        for row in &pk_rows {
+            pks.entry(row.get::<_, String>(0))
+                .or_default()
+                .push(row.get::<_, String>(1));
+        }
+
+        // Foreign keys: (table, column) → referenced (table, column).
+        let mut fks: std::collections::BTreeMap<(String, String), ForeignKeyRef> =
+            Default::default();
+        let fk_rows = client
+            .query(
+                "SELECT tc.table_name, kcu.column_name, ccu.table_name, ccu.column_name
+                 FROM information_schema.table_constraints tc
+                 JOIN information_schema.key_column_usage kcu
+                   ON kcu.constraint_name = tc.constraint_name
+                  AND kcu.table_schema = tc.table_schema
+                 JOIN information_schema.constraint_column_usage ccu
+                   ON ccu.constraint_name = tc.constraint_name
+                  AND ccu.table_schema = tc.table_schema
+                 WHERE tc.table_schema = $1 AND tc.constraint_type = 'FOREIGN KEY'",
+                &[&schema],
+            )
+            .await
+            .map_err(|e| backend(&e))?;
+        for row in &fk_rows {
+            fks.insert(
+                (row.get::<_, String>(0), row.get::<_, String>(1)),
+                ForeignKeyRef { table: row.get::<_, String>(2), column: row.get::<_, String>(3) },
+            );
+        }
+
+        // Columns of every BASE TABLE in the scoped schema, in ordinal order.
+        let mut tables: std::collections::BTreeMap<String, Vec<ColumnSchema>> = Default::default();
+        let col_rows = client
+            .query(
+                "SELECT c.table_name, c.column_name, c.udt_name, c.data_type,
+                        c.is_nullable, c.column_default
+                 FROM information_schema.columns c
+                 JOIN information_schema.tables t
+                   ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+                 WHERE c.table_schema = $1
+                   AND t.table_type = 'BASE TABLE'
+                   AND c.table_name <> '_baas_migrations'
+                 ORDER BY c.table_name, c.ordinal_position",
+                &[&schema],
+            )
+            .await
+            .map_err(|e| backend(&e))?;
+        for row in &col_rows {
+            let table: String = row.get(0);
+            let name: String = row.get(1);
+            let udt: String = row.get(2);
+            let data_type: String = row.get(3);
+            let is_nullable: String = row.get(4);
+            let default: Option<String> = row.get(5);
+
+            let (normalized_type, enum_values) = match enums.get(&udt) {
+                // USER-DEFINED type with pg_enum rows → enum + its labels.
+                Some(values) if data_type == "USER-DEFINED" => {
+                    (NormalizedType::Enum, Some(values.clone()))
+                }
+                _ => (normalize_pg_type(&udt), None),
+            };
+            let references = fks.get(&(table.clone(), name.clone())).cloned();
+            tables.entry(table).or_default().push(ColumnSchema {
+                name,
+                native_type: udt,
+                normalized_type,
+                nullable: is_nullable.eq_ignore_ascii_case("yes"),
+                default,
+                enum_values,
+                references,
+                inferred: false,
+            });
+        }
+
+        Ok(SchemaDescriptor {
+            engine: "postgresql".to_string(),
+            tables: tables
+                .into_iter()
+                .map(|(name, columns)| TableSchema {
+                    primary_key: pks.remove(&name).unwrap_or_default(),
+                    name,
+                    columns,
+                })
+                .collect(),
+        })
+    }
+
+    /// Engine-agnostic schema DDL (M22 step 2). The request is lowered to SQL
+    /// by the pure [`build_pg_ddl`] builder (identifier-validated, golden-
+    /// tested), then executed in ONE transaction — PostgreSQL DDL is
+    /// transactional, so a multi-statement op (alter_column_type) is atomic.
+    /// Enum types are ensured FIRST in auto-commit (`duplicate_object` =
+    /// reuse existing, per contract). Statements are schema-qualified to the
+    /// SAME schema `describe_schema` reads (tenant schema for
+    /// schema_per_tenant, else `public`), so DDL and introspection can never
+    /// disagree about which namespace they touch.
+    async fn apply_schema_ddl(
+        &self,
+        ddl: SchemaDdlRequest,
+        identity: RequestIdentity,
+    ) -> DataPlaneResult<SchemaDdlResult> {
+        self.check_tenant(&identity)?;
+        let schema = self
+            .search_path_schema
+            .clone()
+            .unwrap_or_else(|| "public".to_string());
+        let plan = build_pg_ddl(&schema, &ddl)?;
+
+        let mut client = self.pool.get().await.map_err(|e| DataPlaneError::Backend {
+            message: format!("pool checkout failed: {e}"),
+        })?;
+        // schema_per_tenant: the tenant schema may not exist yet (first DDL on
+        // a fresh tenant). `schema` is pre-sanitized by `safe_schema`, so
+        // interpolating it (DDL cannot bind parameters) is injection-safe.
+        if self.search_path_schema.is_some() {
+            client
+                .batch_execute(&format!("CREATE SCHEMA IF NOT EXISTS {schema}"))
+                .await
+                .map_err(|e| backend(&e))?;
+        }
+        // Enum types auto-commit BEFORE the transactional DDL: an aborted
+        // CREATE TYPE inside the tx would poison it, and `duplicate_object`
+        // here means the named type already exists — reuse it.
+        for stmt in &plan.ensure_enum_types {
+            if let Err(e) = client.execute(stmt.as_str(), &[]).await {
+                if !is_duplicate_object(&e) {
+                    return Err(ddl_backend(&e));
+                }
+            }
+        }
+
+        let tx = client.transaction().await.map_err(|e| backend(&e))?;
+        for stmt in &plan.statements {
+            tx.execute(stmt.as_str(), &[]).await.map_err(|e| ddl_backend(&e))?;
+        }
+        tx.commit().await.map_err(|e| backend(&e))?;
+        Ok(SchemaDdlResult {
+            op: ddl.op,
+            table: ddl.table,
+            status: SchemaDdlStatus::Applied,
+        })
+    }
+}
+
+/// Maps a Postgres `udt_name` to the engine-neutral [`NormalizedType`]. Pure
+/// (testable without a DB); enum resolution happens at the call site, which
+/// holds the `pg_enum` rows. Array types surface as `_<element>` udt names (or
+/// the literal `ARRAY` data_type, which callers pass through here unchanged).
+pub(crate) fn normalize_pg_type(native: &str) -> NormalizedType {
+    match native {
+        "int2" | "int4" | "int8" => NormalizedType::Integer,
+        "float4" | "float8" => NormalizedType::Float,
+        "numeric" => NormalizedType::Decimal,
+        "bool" => NormalizedType::Boolean,
+        "date" => NormalizedType::Date,
+        "json" | "jsonb" => NormalizedType::Json,
+        "uuid" => NormalizedType::Uuid,
+        "text" | "varchar" | "char" | "bpchar" => NormalizedType::Text,
+        "ARRAY" => NormalizedType::Array,
+        n if n.starts_with("timestamp") => NormalizedType::Datetime,
+        n if n.starts_with('_') => NormalizedType::Array,
+        _ => NormalizedType::Unknown,
+    }
+}
+
+// ── M22 step 2: engine-agnostic schema DDL (pure SQL builders) ───────────────
+//
+// Everything below is pure (testable without a DB). Identifiers go through
+// `quote_ident` (allowlist + quoting); enum VALUES are SQL string literals
+// escaped by `pg_literal`; caller-supplied DEFAULT expressions pass the shared
+// `validate_default_expr` guard (no `;`, comments, or control chars — defense
+// in depth on top of the driver's single-statement extended protocol).
+
+/// The statement plan for one schema-DDL operation.
+#[derive(Debug)]
+pub(crate) struct PgDdlPlan {
+    /// `CREATE TYPE … AS ENUM (…)` statements run BEFORE the transactional
+    /// DDL, auto-commit; a `duplicate_object` (42710) error means "reuse the
+    /// existing type" (per contract).
+    pub(crate) ensure_enum_types: Vec<String>,
+    /// The DDL statements, executed in order inside ONE transaction.
+    pub(crate) statements: Vec<String>,
+}
+
+/// `'…'`-quoted SQL string literal: single quotes double. Backslash is
+/// literal under `standard_conforming_strings` (the PG default since 9.1).
+fn pg_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+/// The schema-qualified, quoted name of the per-column enum type:
+/// `"schema"."{table}_{column}_enum"`. Both parts go through `quote_ident`,
+/// so an over-long or invalid combination fails closed (InvalidIdentifier)
+/// instead of being silently truncated by the server.
+fn pg_enum_type_name(schema: &str, table: &str, column: &str) -> DataPlaneResult<String> {
+    quote_ident(&format!("{schema}.{table}_{column}_enum"))
+}
+
+/// Reverse type mapping (the inverse of [`normalize_pg_type`]): lowers a
+/// [`DdlColumnDef`] to the PostgreSQL column type SQL. Enum columns map to a
+/// named type `"{table}_{column}_enum"` (created/reused via the plan's
+/// `ensure_enum_types`). `objectid`/`unknown` are describe-only and rejected.
+pub(crate) fn pg_sql_type(
+    schema: &str,
+    table: &str,
+    def: &DdlColumnDef,
+) -> DataPlaneResult<String> {
+    Ok(match def.normalized_type {
+        NormalizedType::Text => "text".to_string(),
+        NormalizedType::Integer => "bigint".to_string(),
+        NormalizedType::Float => "double precision".to_string(),
+        NormalizedType::Decimal => "numeric".to_string(),
+        NormalizedType::Boolean => "boolean".to_string(),
+        NormalizedType::Date => "date".to_string(),
+        NormalizedType::Datetime => "timestamptz".to_string(),
+        NormalizedType::Json => "jsonb".to_string(),
+        NormalizedType::Uuid => "uuid".to_string(),
+        // v1: arrays are text[] — element typing is a follow-up.
+        NormalizedType::Array => "text[]".to_string(),
+        NormalizedType::Enum => pg_enum_type_name(schema, table, &def.name)?,
+        NormalizedType::Objectid | NormalizedType::Unknown => {
+            return Err(DataPlaneError::InvalidRequest {
+                message: format!(
+                    "column '{}': normalized_type '{:?}' cannot be created on postgresql",
+                    def.name, def.normalized_type
+                ),
+            })
+        }
+    })
+}
+
+/// The `CREATE TYPE … AS ENUM (…)` statement for an enum column, or `None`
+/// for any other type. Values are escaped literals; an enum without values
+/// is a client error.
+fn pg_create_enum_stmt(
+    schema: &str,
+    table: &str,
+    def: &DdlColumnDef,
+) -> DataPlaneResult<Option<String>> {
+    if def.normalized_type != NormalizedType::Enum {
+        return Ok(None);
+    }
+    let values = def
+        .enum_values
+        .as_deref()
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| DataPlaneError::InvalidRequest {
+            message: format!("enum column '{}' requires non-empty enum_values", def.name),
+        })?;
+    let name = pg_enum_type_name(schema, table, &def.name)?;
+    let literals: Vec<String> = values.iter().map(|v| pg_literal(v)).collect();
+    Ok(Some(format!(
+        "CREATE TYPE {name} AS ENUM ({})",
+        literals.join(", ")
+    )))
+}
+
+/// One column clause (`"name" type [NOT NULL] [DEFAULT expr]`), collecting
+/// any enum-type prerequisite into the plan.
+fn pg_column_clause(
+    schema: &str,
+    table: &str,
+    def: &DdlColumnDef,
+    plan: &mut PgDdlPlan,
+) -> DataPlaneResult<String> {
+    let col = quote_ident(&def.name)?;
+    let ty = pg_sql_type(schema, table, def)?;
+    if let Some(stmt) = pg_create_enum_stmt(schema, table, def)? {
+        plan.ensure_enum_types.push(stmt);
+    }
+    let mut clause = format!("{col} {ty}");
+    if !def.nullable {
+        clause.push_str(" NOT NULL");
+    }
+    if let Some(default) = def.default.as_deref() {
+        validate_default_expr(default)?;
+        clause.push_str(&format!(" DEFAULT {default}"));
+    }
+    Ok(clause)
+}
+
+/// Lowers a [`SchemaDdlRequest`] to its PostgreSQL statement plan, targeting
+/// `schema` explicitly (`"schema"."table"` on every statement).
+pub(crate) fn build_pg_ddl(schema: &str, ddl: &SchemaDdlRequest) -> DataPlaneResult<PgDdlPlan> {
+    let table = quote_ident(&format!("{schema}.{}", ddl.table))?;
+    let mut plan = PgDdlPlan {
+        ensure_enum_types: Vec::new(),
+        statements: Vec::new(),
+    };
+    match ddl.op {
+        SchemaDdlOp::AddColumn => {
+            let def = ddl.require_column()?;
+            let clause = pg_column_clause(schema, &ddl.table, def, &mut plan)?;
+            plan.statements
+                .push(format!("ALTER TABLE {table} ADD COLUMN {clause}"));
+        }
+        SchemaDdlOp::DropColumn => {
+            let col = quote_ident(ddl.require_column_name()?)?;
+            plan.statements
+                .push(format!("ALTER TABLE {table} DROP COLUMN {col}"));
+        }
+        SchemaDdlOp::AlterColumnType => {
+            // The caller composed the FULL target definition; lower it as a
+            // 4-step sequence (one tx → atomic):
+            //   1. DROP DEFAULT — the old default may not be castable to the
+            //      new type (PG would refuse the TYPE change otherwise);
+            //   2. TYPE … USING — enums cast via ::text (every type reaches
+            //      text; text reaches any enum);
+            //   3. SET/DROP NOT NULL per the target def;
+            //   4. SET DEFAULT per the target def (when one is declared).
+            let def = ddl.require_column()?;
+            let col = quote_ident(&def.name)?;
+            let ty = pg_sql_type(schema, &ddl.table, def)?;
+            if let Some(stmt) = pg_create_enum_stmt(schema, &ddl.table, def)? {
+                plan.ensure_enum_types.push(stmt);
+            }
+            plan.statements
+                .push(format!("ALTER TABLE {table} ALTER COLUMN {col} DROP DEFAULT"));
+            let using = if def.normalized_type == NormalizedType::Enum {
+                format!("{col}::text::{ty}")
+            } else {
+                format!("{col}::{ty}")
+            };
+            plan.statements.push(format!(
+                "ALTER TABLE {table} ALTER COLUMN {col} TYPE {ty} USING {using}"
+            ));
+            plan.statements.push(format!(
+                "ALTER TABLE {table} ALTER COLUMN {col} {} NOT NULL",
+                if def.nullable { "DROP" } else { "SET" }
+            ));
+            if let Some(default) = def.default.as_deref() {
+                validate_default_expr(default)?;
+                plan.statements.push(format!(
+                    "ALTER TABLE {table} ALTER COLUMN {col} SET DEFAULT {default}"
+                ));
+            }
+        }
+        SchemaDdlOp::CreateTable => {
+            let (columns, primary_key) = ddl.require_create_spec()?;
+            let mut clauses = Vec::with_capacity(columns.len() + 2);
+            let mut has_owner = false;
+            for def in columns {
+                if def.name == "owner_id" {
+                    has_owner = true;
+                }
+                clauses.push(pg_column_clause(schema, &ddl.table, def, &mut plan)?);
+            }
+            if !has_owner {
+                // The platform's write path owner-scopes every row (insert
+                // injects owner_id; update/delete filter on it) — a table
+                // without the column would 500 on its first write. The
+                // principal is NOT always a uuid: API-key callers get the
+                // synthetic `api-key:<uuid>` string and the insert path binds
+                // it as text, so the column must be text.
+                clauses.push(format!("{} text", quote_ident("owner_id")?));
+            }
+            let pk: Vec<String> = primary_key
+                .iter()
+                .map(|c| quote_ident(c))
+                .collect::<DataPlaneResult<_>>()?;
+            clauses.push(format!("PRIMARY KEY ({})", pk.join(", ")));
+            plan.statements
+                .push(format!("CREATE TABLE {table} ({})", clauses.join(", ")));
+        }
+        SchemaDdlOp::DropTable => {
+            plan.statements.push(format!("DROP TABLE {table}"));
+        }
+    }
+    Ok(plan)
+}
+
+/// DDL-path error classifier. Class 22 data exceptions (invalid text
+/// representation, numeric out of range, …) and 42804 datatype_mismatch
+/// during `ALTER … USING` mean the EXISTING DATA is incompatible with the
+/// requested type — the caller's conflict (409), not an engine failure (502).
+/// Scoped to the DDL path only (additive): `/v1/query` keeps the existing
+/// [`backend`] mapping, which this falls back to (23xxx → Conflict, rest →
+/// Backend).
+fn ddl_backend(e: &tokio_postgres::Error) -> DataPlaneError {
+    if let Some(db) = e.as_db_error() {
+        let code = db.code().code();
+        if code.starts_with("22") || code == "42804" {
+            return DataPlaneError::Conflict {
+                message: db.message().to_string(),
+            };
+        }
+    }
+    backend(e)
+}
+
+/// SQLSTATE 42710 duplicate_object — the enum type already exists.
+fn is_duplicate_object(e: &tokio_postgres::Error) -> bool {
+    e.as_db_error().is_some_and(|db| db.code().code() == "42710")
 }
 
 /// Pinned PostgreSQL transaction. Owns the checked-out connection for the
@@ -1661,5 +2117,297 @@ mod tests {
         // Non-scalars go to the jsonb codec (version byte 0x01 prefix).
         let (_, buf) = encode(json!({ "a": 1 }), &Type::JSONB).unwrap();
         assert_eq!(buf[0], 1, "jsonb binary format starts with a version byte");
+    }
+
+    // --- M22 schema introspection: pure type normalizer (golden table) ---
+
+    #[test]
+    fn normalize_pg_type_golden_table() {
+        use NormalizedType as N;
+        for (native, expected) in [
+            ("int2", N::Integer),
+            ("int4", N::Integer),
+            ("int8", N::Integer),
+            ("float4", N::Float),
+            ("float8", N::Float),
+            ("numeric", N::Decimal),
+            ("bool", N::Boolean),
+            ("date", N::Date),
+            ("timestamp", N::Datetime),
+            ("timestamptz", N::Datetime),
+            ("json", N::Json),
+            ("jsonb", N::Json),
+            ("uuid", N::Uuid),
+            ("text", N::Text),
+            ("varchar", N::Text),
+            ("char", N::Text),
+            ("bpchar", N::Text),
+            ("ARRAY", N::Array),
+            ("_int4", N::Array),
+            ("_text", N::Array),
+            // USER-DEFINED enums are resolved at the call site (needs pg_enum
+            // rows); the bare normalizer honestly says Unknown.
+            ("order_status", N::Unknown),
+            ("bytea", N::Unknown),
+            ("tsvector", N::Unknown),
+        ] {
+            assert_eq!(normalize_pg_type(native), expected, "udt_name {native}");
+        }
+    }
+
+    // --- M22 step 2: schema DDL — pure SQL builders (golden tables) ---
+
+    use data_plane_core::{DdlColumnDef, SchemaDdlOp, SchemaDdlRequest};
+
+    fn col(name: &str, ty: NormalizedType) -> DdlColumnDef {
+        DdlColumnDef {
+            name: name.to_string(),
+            normalized_type: ty,
+            nullable: true,
+            default: None,
+            enum_values: None,
+        }
+    }
+
+    fn ddl(op: SchemaDdlOp, table: &str) -> SchemaDdlRequest {
+        SchemaDdlRequest {
+            op,
+            table: table.to_string(),
+            column: None,
+            column_name: None,
+            columns: None,
+            primary_key: None,
+        }
+    }
+
+    #[test]
+    fn pg_sql_type_golden_table() {
+        use NormalizedType as N;
+        for (ty, expected) in [
+            (N::Text, "text"),
+            (N::Integer, "bigint"),
+            (N::Float, "double precision"),
+            (N::Decimal, "numeric"),
+            (N::Boolean, "boolean"),
+            (N::Date, "date"),
+            (N::Datetime, "timestamptz"),
+            (N::Json, "jsonb"),
+            (N::Uuid, "uuid"),
+            (N::Array, "text[]"),
+        ] {
+            assert_eq!(
+                pg_sql_type("public", "orders", &col("c", ty)).unwrap(),
+                expected,
+                "{ty:?}"
+            );
+        }
+        // enum → the per-column named type, schema-qualified + quoted.
+        assert_eq!(
+            pg_sql_type("public", "orders", &col("status", NormalizedType::Enum)).unwrap(),
+            "\"public\".\"orders_status_enum\""
+        );
+        // describe-only types are rejected, not guessed.
+        for ty in [NormalizedType::Objectid, NormalizedType::Unknown] {
+            assert!(matches!(
+                pg_sql_type("public", "orders", &col("c", ty)).unwrap_err(),
+                DataPlaneError::InvalidRequest { .. }
+            ));
+        }
+    }
+
+    #[test]
+    fn pg_ddl_add_column_with_default_and_not_null() {
+        let mut req = ddl(SchemaDdlOp::AddColumn, "orders");
+        req.column = Some(DdlColumnDef {
+            name: "qty".into(),
+            normalized_type: NormalizedType::Integer,
+            nullable: false,
+            default: Some("0".into()),
+            enum_values: None,
+        });
+        let plan = build_pg_ddl("public", &req).unwrap();
+        assert!(plan.ensure_enum_types.is_empty());
+        assert_eq!(
+            plan.statements,
+            vec![
+                "ALTER TABLE \"public\".\"orders\" ADD COLUMN \"qty\" bigint NOT NULL DEFAULT 0"
+                    .to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn pg_ddl_add_enum_column_ensures_named_type_with_escaped_literals() {
+        let mut req = ddl(SchemaDdlOp::AddColumn, "orders");
+        req.column = Some(DdlColumnDef {
+            name: "status".into(),
+            normalized_type: NormalizedType::Enum,
+            nullable: true,
+            default: None,
+            enum_values: Some(vec!["pending".into(), "it's".into()]),
+        });
+        let plan = build_pg_ddl("public", &req).unwrap();
+        // `''` escaping locks the literal quoting (injection cannot escape).
+        assert_eq!(
+            plan.ensure_enum_types,
+            vec![
+                "CREATE TYPE \"public\".\"orders_status_enum\" AS ENUM ('pending', 'it''s')"
+                    .to_string()
+            ]
+        );
+        assert_eq!(
+            plan.statements,
+            vec![
+                "ALTER TABLE \"public\".\"orders\" ADD COLUMN \"status\" \"public\".\"orders_status_enum\""
+                    .to_string()
+            ]
+        );
+        // enum without values is a client error.
+        let mut bad = ddl(SchemaDdlOp::AddColumn, "orders");
+        bad.column = Some(col("status", NormalizedType::Enum));
+        assert!(matches!(
+            build_pg_ddl("public", &bad).unwrap_err(),
+            DataPlaneError::InvalidRequest { .. }
+        ));
+    }
+
+    #[test]
+    fn pg_ddl_alter_column_type_emits_full_target_sequence() {
+        // The contract: caller sends the FULL target def; the builder lowers
+        // it to DROP DEFAULT → TYPE…USING → NOT NULL → SET DEFAULT, in one tx.
+        let mut req = ddl(SchemaDdlOp::AlterColumnType, "orders");
+        req.column = Some(DdlColumnDef {
+            name: "qty".into(),
+            normalized_type: NormalizedType::Integer,
+            nullable: false,
+            default: Some("0".into()),
+            enum_values: None,
+        });
+        let plan = build_pg_ddl("public", &req).unwrap();
+        assert_eq!(
+            plan.statements,
+            vec![
+                "ALTER TABLE \"public\".\"orders\" ALTER COLUMN \"qty\" DROP DEFAULT".to_string(),
+                "ALTER TABLE \"public\".\"orders\" ALTER COLUMN \"qty\" TYPE bigint USING \"qty\"::bigint"
+                    .to_string(),
+                "ALTER TABLE \"public\".\"orders\" ALTER COLUMN \"qty\" SET NOT NULL".to_string(),
+                "ALTER TABLE \"public\".\"orders\" ALTER COLUMN \"qty\" SET DEFAULT 0".to_string(),
+            ]
+        );
+        // nullable + no default → DROP NOT NULL, and no SET DEFAULT step.
+        let mut relaxed = ddl(SchemaDdlOp::AlterColumnType, "orders");
+        relaxed.column = Some(col("qty", NormalizedType::Text));
+        let plan = build_pg_ddl("public", &relaxed).unwrap();
+        assert!(plan.statements[2].ends_with("DROP NOT NULL"), "{:?}", plan.statements);
+        assert_eq!(plan.statements.len(), 3, "no default → no SET DEFAULT");
+    }
+
+    #[test]
+    fn pg_ddl_alter_to_enum_casts_via_text() {
+        let mut req = ddl(SchemaDdlOp::AlterColumnType, "orders");
+        req.column = Some(DdlColumnDef {
+            name: "status".into(),
+            normalized_type: NormalizedType::Enum,
+            nullable: true,
+            default: None,
+            enum_values: Some(vec!["a".into(), "b".into()]),
+        });
+        let plan = build_pg_ddl("public", &req).unwrap();
+        assert_eq!(plan.ensure_enum_types.len(), 1, "enum type ensured first");
+        assert!(
+            plan.statements[1].contains(
+                "USING \"status\"::text::\"public\".\"orders_status_enum\""
+            ),
+            "{:?}",
+            plan.statements
+        );
+    }
+
+    #[test]
+    fn pg_ddl_create_table_appends_owner_id_and_primary_key() {
+        let mut req = ddl(SchemaDdlOp::CreateTable, "orders");
+        req.columns = Some(vec![
+            DdlColumnDef {
+                name: "id".into(),
+                normalized_type: NormalizedType::Integer,
+                nullable: false,
+                default: None,
+                enum_values: None,
+            },
+            col("note", NormalizedType::Text),
+        ]);
+        req.primary_key = Some(vec!["id".into()]);
+        let plan = build_pg_ddl("public", &req).unwrap();
+        assert_eq!(
+            plan.statements,
+            vec![
+                "CREATE TABLE \"public\".\"orders\" (\"id\" bigint NOT NULL, \"note\" text, \
+                 \"owner_id\" text, PRIMARY KEY (\"id\"))"
+                    .to_string()
+            ]
+        );
+        // An explicit owner_id column is respected, never duplicated.
+        let mut explicit = ddl(SchemaDdlOp::CreateTable, "orders");
+        explicit.columns = Some(vec![
+            DdlColumnDef {
+                name: "id".into(),
+                normalized_type: NormalizedType::Integer,
+                nullable: false,
+                default: None,
+                enum_values: None,
+            },
+            col("owner_id", NormalizedType::Uuid),
+        ]);
+        explicit.primary_key = Some(vec!["id".into()]);
+        let plan = build_pg_ddl("public", &explicit).unwrap();
+        assert_eq!(plan.statements[0].matches("owner_id").count(), 1, "{:?}", plan.statements);
+    }
+
+    #[test]
+    fn pg_ddl_drop_ops_and_schema_scoping() {
+        let mut drop_col = ddl(SchemaDdlOp::DropColumn, "orders");
+        drop_col.column_name = Some("note".into());
+        // schema_per_tenant: every statement targets the tenant schema.
+        let plan = build_pg_ddl("tenant_acme_12345678", &drop_col).unwrap();
+        assert_eq!(
+            plan.statements,
+            vec!["ALTER TABLE \"tenant_acme_12345678\".\"orders\" DROP COLUMN \"note\"".to_string()]
+        );
+        let plan = build_pg_ddl("public", &ddl(SchemaDdlOp::DropTable, "orders")).unwrap();
+        assert_eq!(plan.statements, vec!["DROP TABLE \"public\".\"orders\"".to_string()]);
+    }
+
+    #[test]
+    fn pg_ddl_rejects_injection_and_unsafe_defaults() {
+        // table name injection
+        assert!(matches!(
+            build_pg_ddl("public", &ddl(SchemaDdlOp::DropTable, "orders; DROP TABLE x")).unwrap_err(),
+            DataPlaneError::InvalidIdentifier { .. }
+        ));
+        // column name injection
+        let mut bad_col = ddl(SchemaDdlOp::AddColumn, "orders");
+        bad_col.column = Some(col("evil\"; --", NormalizedType::Text));
+        assert!(matches!(
+            build_pg_ddl("public", &bad_col).unwrap_err(),
+            DataPlaneError::InvalidIdentifier { .. }
+        ));
+        // unsafe default expression
+        let mut bad_default = ddl(SchemaDdlOp::AddColumn, "orders");
+        bad_default.column = Some(DdlColumnDef {
+            name: "c".into(),
+            normalized_type: NormalizedType::Text,
+            nullable: true,
+            default: Some("'x'; DROP TABLE orders".into()),
+            enum_values: None,
+        });
+        assert!(matches!(
+            build_pg_ddl("public", &bad_default).unwrap_err(),
+            DataPlaneError::InvalidRequest { .. }
+        ));
+        // missing op-specific field surfaces the shared require_* error.
+        assert!(matches!(
+            build_pg_ddl("public", &ddl(SchemaDdlOp::AddColumn, "orders")).unwrap_err(),
+            DataPlaneError::InvalidRequest { .. }
+        ));
     }
 }

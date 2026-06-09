@@ -13,6 +13,7 @@ import { AnalyticsClient } from './domains/analytics.js';
 import { AuthClient } from './domains/auth.js';
 import { QueryClient } from './domains/query.js';
 import { RestClient } from './domains/rest.js';
+import { SchemaClient } from './domains/schema.js';
 import { StorageClient } from './domains/storage.js';
 import { TxnClient } from './domains/txn.js';
 import { WebhooksClient } from './domains/webhooks.js';
@@ -23,6 +24,7 @@ import { makeEngineClient } from './domains/engine-clients.js';
 import { ENGINE_IDS } from './generated/engines.js';
 import { createBrowserStorageAdapter, createMemoryStorageAdapter, } from './core/storage.js';
 export { MiniBaasError, MiniBaasTimeoutError } from './core/errors.js';
+export { SchemaClient } from './domains/schema.js';
 export { TxnClient } from './domains/txn.js';
 export { WebhooksClient } from './domains/webhooks.js';
 export { AdminClient, MigrateClient, TenantsClient } from './domains/admin.js';
@@ -35,6 +37,8 @@ export class MiniBaasClient {
     analytics;
     /** Single-mount atomic write batches (`POST /query/v1/txn`). */
     txn;
+    /** Engine-agnostic schema introspection + DDL (`/query/v1/:dbId/schema`). */
+    schema;
     /** Edge functions (`/functions/v1`). */
     functions;
     /**
@@ -71,6 +75,7 @@ export class MiniBaasClient {
         this.storage = new StorageClient(this.http);
         this.analytics = new AnalyticsClient(this.http);
         this.txn = new TxnClient(this.http);
+        this.schema = new SchemaClient(this.http);
         this.functions = new FunctionsClient(this.http);
         this.webhooks = new WebhooksClient(this.http, options.serviceRoleKey);
         this.admin = new AdminClient(this.http, options.serviceRoleKey);

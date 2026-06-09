@@ -23,14 +23,16 @@
 use async_trait::async_trait;
 use bson::{Bson, Document};
 use data_plane_core::{
-    DataOperation, DataOperationKind, DataPlaneError, DataPlaneResult, DataResult, DatabaseMount,
-    EngineAdapter, EngineCapabilities, EngineHealth, EnginePool, RequestIdentity, ScopeDirective,
-    TxBeginRequest, TxHandle,
+    ColumnSchema, DataOperation, DataOperationKind, DataPlaneError, DataPlaneResult, DataResult,
+    DatabaseMount, DdlColumnDef, EngineAdapter, EngineCapabilities, EngineHealth, EnginePool,
+    NormalizedType, RequestIdentity, SchemaDdlOp, SchemaDdlRequest, SchemaDdlResult,
+    SchemaDdlStatus, SchemaDescriptor, ScopeDirective, TableSchema, TxBeginRequest, TxHandle,
 };
 use futures::TryStreamExt;
 use mongodb::{
-    options::{ClientOptions, FindOptions, UpdateOptions},
-    Client, Collection,
+    options::{ClientOptions, CreateCollectionOptions, FindOptions, UpdateOptions},
+    results::{CollectionSpecification, CollectionType},
+    Client, Collection, Database,
 };
 use serde_json::Value;
 use std::{sync::Arc, time::Duration};
@@ -277,9 +279,325 @@ impl EnginePool for MongoPool {
         // shutdown handshake required.
         Ok(())
     }
+
+    /// Engine-agnostic schema introspection (M22). Lists collections of the
+    /// pool's database (the per-tenant database for `schema_per_tenant`, the
+    /// DSN-default otherwise — same namespace the request path uses). A
+    /// collection with a `$jsonSchema` validator yields its declared columns
+    /// exactly (`inferred: false`); otherwise the shape is inferred from a
+    /// `$sample` of up to [`SCHEMA_SAMPLE_SIZE`] documents per-field majority
+    /// type (`inferred: true`). `primary_key` is always `["_id"]`.
+    async fn describe_schema(
+        &self,
+        identity: RequestIdentity,
+    ) -> DataPlaneResult<SchemaDescriptor> {
+        if identity.tenant_id != self.tenant_id {
+            return Err(DataPlaneError::Backend {
+                message: "identity tenant does not match pool tenant".into(),
+            });
+        }
+        let db = self.client.database(&self.db_name);
+        let mut specs: Vec<CollectionSpecification> = db
+            .list_collections(None, None)
+            .await
+            .map_err(mongo_err)?
+            .try_collect()
+            .await
+            .map_err(mongo_err)?;
+        specs.sort_by(|a, b| a.name.cmp(&b.name));
+
+        let mut tables = Vec::with_capacity(specs.len());
+        for spec in specs {
+            // Only real collections: views have no stable shape of their own
+            // and system collections are internal.
+            if !matches!(spec.collection_type, CollectionType::Collection) {
+                continue;
+            }
+            if spec.name.starts_with("system.") {
+                continue;
+            }
+            let json_schema = spec
+                .options
+                .validator
+                .as_ref()
+                .and_then(|v| v.get_document("$jsonSchema").ok());
+            let columns = match json_schema {
+                // Declared contract → exact mapping, not inference.
+                Some(schema) => jsonschema_to_columns(schema),
+                None => {
+                    // The name comes from the server's own listCollections, so
+                    // it is trusted — no quote_ident gate (which would reject
+                    // legitimate dotted names).
+                    let col: Collection<Document> = db.collection(&spec.name);
+                    let cursor = col
+                        .aggregate(
+                            vec![bson::doc! { "$sample": { "size": SCHEMA_SAMPLE_SIZE } }],
+                            None,
+                        )
+                        .await
+                        .map_err(mongo_err)?;
+                    let docs: Vec<Document> = cursor.try_collect().await.map_err(mongo_err)?;
+                    infer_columns_from_samples(&docs)
+                }
+            };
+            tables.push(TableSchema {
+                name: spec.name,
+                primary_key: vec!["_id".to_string()],
+                columns,
+            });
+        }
+        Ok(SchemaDescriptor { engine: "mongodb".to_string(), tables })
+    }
+
+    /// Engine-agnostic schema DDL (M22 step 2) over the collection's
+    /// `$jsonSchema` validator — the same declared contract
+    /// [`Self::describe_schema`] reads back, so DDL and introspection stay
+    /// one source of truth:
+    ///   * `create_table` → `createCollection` with a built validator
+    ///     (owner_id string auto-appended, like the relational adapters);
+    ///   * `drop_table`   → `drop()`;
+    ///   * column ops     → read the current validator, transform it with
+    ///     the pure `jsonschema_*` helpers, and `collMod` it back.
+    /// Mongo's PK is always `_id`; a declared `primary_key` is accepted but
+    /// only validated (a validator cannot express key constraints).
+    async fn apply_schema_ddl(
+        &self,
+        ddl: SchemaDdlRequest,
+        identity: RequestIdentity,
+    ) -> DataPlaneResult<SchemaDdlResult> {
+        if identity.tenant_id != self.tenant_id {
+            return Err(DataPlaneError::Backend {
+                message: "identity tenant does not match pool tenant".into(),
+            });
+        }
+        // Same name gate the request path uses (rejects `$`, dots, etc.).
+        let _ = self.collection(&ddl.table)?;
+        let db = self.client.database(&self.db_name);
+        match ddl.op {
+            SchemaDdlOp::CreateTable => {
+                let (columns, _primary_key) = ddl.require_create_spec()?;
+                let schema = columns_to_jsonschema(columns)?;
+                let options = CreateCollectionOptions::builder()
+                    .validator(bson::doc! { "$jsonSchema": schema })
+                    .build();
+                db.create_collection(&ddl.table, options)
+                    .await
+                    .map_err(mongo_ddl_err)?;
+            }
+            SchemaDdlOp::DropTable => {
+                db.collection::<Document>(&ddl.table)
+                    .drop(None)
+                    .await
+                    .map_err(mongo_ddl_err)?;
+            }
+            SchemaDdlOp::AddColumn | SchemaDdlOp::AlterColumnType | SchemaDdlOp::DropColumn => {
+                let current = self.collection_jsonschema(&db, &ddl.table).await?;
+                let next = match ddl.op {
+                    SchemaDdlOp::AddColumn => {
+                        jsonschema_with_column_set(&current, ddl.require_column()?, ColumnMode::Add)?
+                    }
+                    SchemaDdlOp::AlterColumnType => jsonschema_with_column_set(
+                        &current,
+                        ddl.require_column()?,
+                        ColumnMode::Alter,
+                    )?,
+                    SchemaDdlOp::DropColumn => {
+                        jsonschema_with_column_dropped(&current, ddl.require_column_name()?)?
+                    }
+                    _ => unreachable!("outer match restricts to column ops"),
+                };
+                db.run_command(
+                    bson::doc! { "collMod": &ddl.table, "validator": { "$jsonSchema": next } },
+                    None,
+                )
+                .await
+                .map_err(mongo_ddl_err)?;
+            }
+        }
+        Ok(SchemaDdlResult {
+            op: ddl.op,
+            table: ddl.table,
+            status: SchemaDdlStatus::Applied,
+        })
+    }
+}
+
+/// How many documents `describe_schema` samples per collection when no
+/// `$jsonSchema` validator declares the shape.
+const SCHEMA_SAMPLE_SIZE: i32 = 200;
+
+/// Maps a BSON type *name* (a `bsonType` string, or [`bson_value_type_name`]
+/// output) to the engine-neutral [`NormalizedType`]. Pure.
+fn bson_type_to_normalized(bson_type: &str) -> NormalizedType {
+    match bson_type {
+        "objectId" => NormalizedType::Objectid,
+        "string" => NormalizedType::Text,
+        "int" | "long" => NormalizedType::Integer,
+        "double" => NormalizedType::Float,
+        "decimal" => NormalizedType::Decimal,
+        "bool" => NormalizedType::Boolean,
+        "date" => NormalizedType::Datetime,
+        "array" => NormalizedType::Array,
+        "object" => NormalizedType::Json,
+        _ => NormalizedType::Unknown,
+    }
+}
+
+/// The `bsonType` name of a live BSON value, matching the names a
+/// `$jsonSchema` validator uses. Pure.
+fn bson_value_type_name(value: &Bson) -> &'static str {
+    match value {
+        Bson::Double(_) => "double",
+        Bson::String(_) => "string",
+        Bson::Array(_) => "array",
+        Bson::Document(_) => "object",
+        Bson::Boolean(_) => "bool",
+        Bson::Null => "null",
+        Bson::Int32(_) => "int",
+        Bson::Int64(_) => "long",
+        Bson::ObjectId(_) => "objectId",
+        Bson::DateTime(_) => "date",
+        Bson::Decimal128(_) => "decimal",
+        _ => "unknown",
+    }
+}
+
+/// Derives columns from a `$jsonSchema` validator document — the collection's
+/// *declared* contract, so `inferred: false`. Handles `bsonType` as a string
+/// or an array of strings (a `"null"` entry means nullable), `required` for
+/// nullability, and `enum` for allowed values. Pure (unit-tested without a DB).
+fn jsonschema_to_columns(schema: &Document) -> Vec<ColumnSchema> {
+    let required: std::collections::BTreeSet<&str> = schema
+        .get_array("required")
+        .map(|arr| arr.iter().filter_map(Bson::as_str).collect())
+        .unwrap_or_default();
+    let Ok(props) = schema.get_document("properties") else {
+        return Vec::new();
+    };
+    let mut out = Vec::with_capacity(props.len());
+    for (name, spec) in props {
+        let spec_doc = spec.as_document();
+        // bsonType: "string" | ["string", "null"] | absent.
+        let mut nullable_by_type = false;
+        let bson_type = match spec_doc.and_then(|d| d.get("bsonType")) {
+            Some(Bson::String(s)) => s.clone(),
+            Some(Bson::Array(items)) => {
+                nullable_by_type = items.iter().any(|b| b.as_str() == Some("null"));
+                items
+                    .iter()
+                    .filter_map(Bson::as_str)
+                    .find(|s| *s != "null")
+                    .unwrap_or("unknown")
+                    .to_string()
+            }
+            _ => "unknown".to_string(),
+        };
+        let enum_values: Option<Vec<String>> = spec_doc
+            .and_then(|d| d.get_array("enum").ok())
+            .map(|arr| {
+                arr.iter()
+                    .map(|b| match b {
+                        Bson::String(s) => s.clone(),
+                        other => other.to_string(),
+                    })
+                    .collect()
+            });
+        let normalized_type = if enum_values.is_some() {
+            NormalizedType::Enum
+        } else {
+            bson_type_to_normalized(&bson_type)
+        };
+        out.push(ColumnSchema {
+            name: name.clone(),
+            native_type: bson_type,
+            normalized_type,
+            nullable: !required.contains(name.as_str()) || nullable_by_type,
+            default: None,
+            enum_values,
+            references: None,
+            inferred: false,
+        });
+    }
+    out
+}
+
+/// Infers columns from sampled documents: per-field majority (non-null) BSON
+/// type; a field absent from some documents or carrying nulls is nullable.
+/// Always `inferred: true` — a statistical guess, not a declared contract.
+/// Pure (unit-tested without a DB).
+fn infer_columns_from_samples(docs: &[Document]) -> Vec<ColumnSchema> {
+    use std::collections::BTreeMap;
+    let total = docs.len();
+    // field → (present count, null count, type → count)
+    let mut fields: BTreeMap<String, (usize, usize, BTreeMap<&'static str, usize>)> =
+        BTreeMap::new();
+    for doc in docs {
+        for (key, value) in doc {
+            let entry = fields.entry(key.clone()).or_default();
+            entry.0 += 1;
+            let type_name = bson_value_type_name(value);
+            if type_name == "null" {
+                entry.1 += 1;
+            } else {
+                *entry.2.entry(type_name).or_default() += 1;
+            }
+        }
+    }
+    fields
+        .into_iter()
+        .map(|(name, (present, nulls, counts))| {
+            // Majority vote over non-null types; BTreeMap iteration makes the
+            // tie-break deterministic (first alphabetically wins).
+            let majority = counts
+                .iter()
+                .max_by_key(|(_, count)| *count)
+                .map(|(ty, _)| *ty)
+                .unwrap_or("unknown");
+            ColumnSchema {
+                nullable: present < total || nulls > 0,
+                native_type: majority.to_string(),
+                normalized_type: bson_type_to_normalized(majority),
+                name,
+                default: None,
+                enum_values: None,
+                references: None,
+                inferred: true,
+            }
+        })
+        .collect()
 }
 
 impl MongoPool {
+    /// The collection's current `$jsonSchema` validator, or the empty
+    /// baseline (`{bsonType:"object", properties:{}}`) when it has none.
+    /// A missing collection is a clean client error — column DDL cannot
+    /// target a collection that does not exist.
+    async fn collection_jsonschema(
+        &self,
+        db: &Database,
+        name: &str,
+    ) -> DataPlaneResult<Document> {
+        let mut specs: Vec<CollectionSpecification> = db
+            .list_collections(bson::doc! { "name": name }, None)
+            .await
+            .map_err(mongo_err)?
+            .try_collect()
+            .await
+            .map_err(mongo_err)?;
+        let Some(spec) = specs.pop() else {
+            return Err(DataPlaneError::InvalidRequest {
+                message: format!("collection '{name}' does not exist"),
+            });
+        };
+        Ok(spec
+            .options
+            .validator
+            .as_ref()
+            .and_then(|v| v.get_document("$jsonSchema").ok())
+            .cloned()
+            .unwrap_or_else(|| bson::doc! { "bsonType": "object", "properties": {} }))
+    }
+
     async fn run_list(
         &self,
         col: &Collection<Document>,
@@ -434,6 +752,185 @@ fn mongo_err(e: mongodb::error::Error) -> DataPlaneError {
     DataPlaneError::Backend {
         message: format!("mongo backend: {e}"),
     }
+}
+
+/// DDL-path error classifier (additive — the query path keeps [`mongo_err`]):
+/// `createCollection` on an existing namespace is the caller's conflict
+/// (409), and dropping / modifying a namespace that doesn't exist is a client
+/// error (400), not an engine failure.
+fn mongo_ddl_err(e: mongodb::error::Error) -> DataPlaneError {
+    classify_mongo_ddl_message(format!("mongo backend: {e}"))
+}
+
+/// Pure message classifier behind [`mongo_ddl_err`] (testable without a
+/// driver error). The server's NamespaceExists / NamespaceNotFound errors
+/// carry these tokens in their message.
+fn classify_mongo_ddl_message(message: String) -> DataPlaneError {
+    let lower = message.to_lowercase();
+    if lower.contains("already exists") || lower.contains("namespaceexists") {
+        return DataPlaneError::Conflict { message };
+    }
+    if lower.contains("ns not found") || lower.contains("namespacenotfound") {
+        return DataPlaneError::InvalidRequest { message };
+    }
+    DataPlaneError::Backend { message }
+}
+
+// ── M22 step 2: engine-agnostic schema DDL ($jsonSchema transforms, pure) ────
+
+/// Whether [`jsonschema_with_column_set`] adds a new column (must NOT exist)
+/// or alters an existing one (must exist).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ColumnMode {
+    Add,
+    Alter,
+}
+
+/// The `bsonType` name for a creatable DDL column. The exact inverse of
+/// [`bson_type_to_normalized`] over the creatable set; `objectid`/`unknown`
+/// are describe-only and rejected (enums use `enum:` instead of `bsonType`).
+fn ddl_bson_type(def: &DdlColumnDef) -> DataPlaneResult<&'static str> {
+    Ok(match def.normalized_type {
+        NormalizedType::Text | NormalizedType::Uuid => "string",
+        NormalizedType::Integer => "long",
+        NormalizedType::Float => "double",
+        NormalizedType::Decimal => "decimal",
+        NormalizedType::Boolean => "bool",
+        NormalizedType::Date | NormalizedType::Datetime => "date",
+        NormalizedType::Json => "object",
+        NormalizedType::Array => "array",
+        NormalizedType::Enum => "string",
+        NormalizedType::Objectid | NormalizedType::Unknown => {
+            return Err(DataPlaneError::InvalidRequest {
+                message: format!(
+                    "column '{}': normalized_type '{:?}' cannot be created on mongodb",
+                    def.name, def.normalized_type
+                ),
+            })
+        }
+    })
+}
+
+/// One `$jsonSchema` property document for a DDL column. Nullable columns
+/// declare `bsonType: [ty, "null"]` (absent OR explicit null both validate);
+/// enum columns declare `enum: [...]` — exactly the shapes
+/// [`jsonschema_to_columns`] reads back.
+fn ddl_column_to_property(def: &DdlColumnDef) -> DataPlaneResult<Document> {
+    if def.normalized_type == NormalizedType::Enum {
+        let values = def
+            .enum_values
+            .as_deref()
+            .filter(|v| !v.is_empty())
+            .ok_or_else(|| DataPlaneError::InvalidRequest {
+                message: format!("enum column '{}' requires non-empty enum_values", def.name),
+            })?;
+        return Ok(bson::doc! { "enum": values });
+    }
+    let ty = ddl_bson_type(def)?;
+    Ok(if def.nullable {
+        bson::doc! { "bsonType": [ty, "null"] }
+    } else {
+        bson::doc! { "bsonType": ty }
+    })
+}
+
+/// Builds the full `$jsonSchema` for `create_table` from its columns,
+/// auto-appending a nullable `owner_id` string when the caller didn't declare
+/// one — matching the platform's owner-scoped write path (every Mongo write
+/// injects `owner_id`/`tenant_id`).
+fn columns_to_jsonschema(columns: &[DdlColumnDef]) -> DataPlaneResult<Document> {
+    let mut properties = Document::new();
+    let mut required: Vec<String> = Vec::new();
+    let mut has_owner = false;
+    for def in columns {
+        if def.name == "owner_id" {
+            has_owner = true;
+        }
+        properties.insert(def.name.clone(), ddl_column_to_property(def)?);
+        if !def.nullable {
+            required.push(def.name.clone());
+        }
+    }
+    if !has_owner {
+        properties.insert("owner_id", bson::doc! { "bsonType": ["string", "null"] });
+    }
+    let mut schema = bson::doc! { "bsonType": "object", "properties": properties };
+    if !required.is_empty() {
+        schema.insert("required", required);
+    }
+    Ok(schema)
+}
+
+/// The `required` list of a `$jsonSchema`, as owned strings.
+fn jsonschema_required(schema: &Document) -> Vec<String> {
+    schema
+        .get_array("required")
+        .map(|arr| arr.iter().filter_map(Bson::as_str).map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
+/// Returns a new `$jsonSchema` with `def` set (added or altered). `Add`
+/// refuses an existing column (409 — same conflict PG raises for a duplicate
+/// column); `Alter` refuses a missing one (400).
+fn jsonschema_with_column_set(
+    schema: &Document,
+    def: &DdlColumnDef,
+    mode: ColumnMode,
+) -> DataPlaneResult<Document> {
+    let mut out = schema.clone();
+    let mut properties = out.get_document("properties").cloned().unwrap_or_default();
+    let exists = properties.contains_key(&def.name);
+    match mode {
+        ColumnMode::Add if exists => {
+            return Err(DataPlaneError::Conflict {
+                message: format!("column '{}' already exists", def.name),
+            })
+        }
+        ColumnMode::Alter if !exists => {
+            return Err(DataPlaneError::InvalidRequest {
+                message: format!("column '{}' does not exist", def.name),
+            })
+        }
+        _ => {}
+    }
+    properties.insert(def.name.clone(), ddl_column_to_property(def)?);
+    out.insert("bsonType", "object");
+    out.insert("properties", properties);
+    let mut required = jsonschema_required(&out);
+    required.retain(|r| r != &def.name);
+    if !def.nullable {
+        required.push(def.name.clone());
+    }
+    if required.is_empty() {
+        out.remove("required");
+    } else {
+        out.insert("required", required);
+    }
+    Ok(out)
+}
+
+/// Returns a new `$jsonSchema` with `name` removed (property + required).
+/// A missing column is a client error.
+fn jsonschema_with_column_dropped(schema: &Document, name: &str) -> DataPlaneResult<Document> {
+    let mut out = schema.clone();
+    let mut properties = out.get_document("properties").cloned().unwrap_or_default();
+    if properties.remove(name).is_none() {
+        return Err(DataPlaneError::InvalidRequest {
+            message: format!("column '{name}' does not exist"),
+        });
+    }
+    out.insert("bsonType", "object");
+    out.insert("properties", properties);
+    let required: Vec<String> = jsonschema_required(&out)
+        .into_iter()
+        .filter(|r| r != name)
+        .collect();
+    if required.is_empty() {
+        out.remove("required");
+    } else {
+        out.insert("required", required);
+    }
+    Ok(out)
 }
 
 /// The per-tenant database name for a `schema_per_tenant` mount, or `None`
@@ -630,5 +1127,258 @@ mod tests {
         }
         // ordinary and dotted (nested-path) keys are allowed.
         assert!(reject_top_level_operators(&json!({ "name": "x", "profile.age": 3 })).is_ok());
+    }
+
+    // --- M22 schema introspection: pure mappers ---
+
+    #[test]
+    fn jsonschema_maps_declared_columns_exactly() {
+        let schema = bson::doc! {
+            "bsonType": "object",
+            "required": ["name", "qty"],
+            "properties": {
+                "name": { "bsonType": "string" },
+                "qty": { "bsonType": "int" },
+                "price": { "bsonType": "decimal" },
+                "tags": { "bsonType": "array" },
+                "meta": { "bsonType": "object" },
+                "created_at": { "bsonType": "date" },
+                "owner": { "bsonType": "objectId" },
+                "active": { "bsonType": "bool" },
+                "ratio": { "bsonType": "double" },
+                "big": { "bsonType": "long" },
+            }
+        };
+        let cols = jsonschema_to_columns(&schema);
+        let by_name = |n: &str| cols.iter().find(|c| c.name == n).unwrap_or_else(|| panic!("{n}"));
+        use NormalizedType as N;
+        for (name, native, normalized, nullable) in [
+            ("name", "string", N::Text, false),
+            ("qty", "int", N::Integer, false),
+            ("price", "decimal", N::Decimal, true),
+            ("tags", "array", N::Array, true),
+            ("meta", "object", N::Json, true),
+            ("created_at", "date", N::Datetime, true),
+            ("owner", "objectId", N::Objectid, true),
+            ("active", "bool", N::Boolean, true),
+            ("ratio", "double", N::Float, true),
+            ("big", "long", N::Integer, true),
+        ] {
+            let col = by_name(name);
+            assert_eq!(col.native_type, native, "{name}");
+            assert_eq!(col.normalized_type, normalized, "{name}");
+            assert_eq!(col.nullable, nullable, "{name}");
+            assert!(!col.inferred, "{name}: jsonSchema columns are declared, not inferred");
+            assert!(col.references.is_none() && col.default.is_none(), "{name}");
+        }
+    }
+
+    #[test]
+    fn jsonschema_enum_and_nullable_type_arrays() {
+        let schema = bson::doc! {
+            "bsonType": "object",
+            "required": ["status", "note"],
+            "properties": {
+                "status": { "enum": ["pending", "paid"] },
+                // ["string","null"] → string but nullable, even though required.
+                "note": { "bsonType": ["string", "null"] },
+            }
+        };
+        let cols = jsonschema_to_columns(&schema);
+        let status = cols.iter().find(|c| c.name == "status").unwrap();
+        assert_eq!(status.normalized_type, NormalizedType::Enum);
+        assert_eq!(
+            status.enum_values,
+            Some(vec!["pending".to_string(), "paid".to_string()])
+        );
+        let note = cols.iter().find(|c| c.name == "note").unwrap();
+        assert_eq!(note.normalized_type, NormalizedType::Text);
+        assert!(note.nullable, "a 'null' bsonType entry means nullable");
+        // No properties → no columns (never a panic).
+        assert!(jsonschema_to_columns(&bson::doc! { "bsonType": "object" }).is_empty());
+    }
+
+    #[test]
+    fn sample_inference_majority_type_and_nullability() {
+        let docs = vec![
+            bson::doc! { "n": 1_i32, "s": "a", "maybe": Bson::Null },
+            bson::doc! { "n": 2_i32, "s": "b" },
+            bson::doc! { "n": "three", "s": "c", "maybe": 5_i32 },
+        ];
+        let cols = infer_columns_from_samples(&docs);
+        let by_name = |n: &str| cols.iter().find(|c| c.name == n).unwrap();
+        // Majority of `n` values are int.
+        let n = by_name("n");
+        assert_eq!(n.normalized_type, NormalizedType::Integer);
+        assert_eq!(n.native_type, "int");
+        assert!(!n.nullable, "present in every doc, never null");
+        assert!(n.inferred, "sample-based columns are inferred");
+        // `maybe` is missing from one doc AND null in another → nullable.
+        assert!(by_name("maybe").nullable);
+        // Empty sample set → no columns.
+        assert!(infer_columns_from_samples(&[]).is_empty());
+    }
+
+    // --- M22 step 2: schema DDL — pure $jsonSchema transforms ---
+
+    use data_plane_core::DdlColumnDef;
+
+    fn col(name: &str, ty: NormalizedType, nullable: bool) -> DdlColumnDef {
+        DdlColumnDef {
+            name: name.to_string(),
+            normalized_type: ty,
+            nullable,
+            default: None,
+            enum_values: None,
+        }
+    }
+
+    #[test]
+    fn ddl_property_mapping_golden_table() {
+        use NormalizedType as N;
+        for (ty, bson_ty) in [
+            (N::Text, "string"),
+            (N::Uuid, "string"),
+            (N::Integer, "long"),
+            (N::Float, "double"),
+            (N::Decimal, "decimal"),
+            (N::Boolean, "bool"),
+            (N::Date, "date"),
+            (N::Datetime, "date"),
+            (N::Json, "object"),
+            (N::Array, "array"),
+        ] {
+            assert_eq!(
+                ddl_column_to_property(&col("c", ty, false)).unwrap(),
+                bson::doc! { "bsonType": bson_ty },
+                "{ty:?}"
+            );
+            // nullable columns accept null explicitly (bsonType array).
+            assert_eq!(
+                ddl_column_to_property(&col("c", ty, true)).unwrap(),
+                bson::doc! { "bsonType": [bson_ty, "null"] },
+                "nullable {ty:?}"
+            );
+        }
+        // enum → `enum:` (no bsonType), and requires values.
+        let mut status = col("status", NormalizedType::Enum, false);
+        status.enum_values = Some(vec!["a".into(), "b".into()]);
+        assert_eq!(
+            ddl_column_to_property(&status).unwrap(),
+            bson::doc! { "enum": ["a", "b"] }
+        );
+        assert!(ddl_column_to_property(&col("status", NormalizedType::Enum, false)).is_err());
+        // describe-only types are rejected.
+        for ty in [NormalizedType::Objectid, NormalizedType::Unknown] {
+            assert!(matches!(
+                ddl_column_to_property(&col("c", ty, false)).unwrap_err(),
+                DataPlaneError::InvalidRequest { .. }
+            ));
+        }
+    }
+
+    #[test]
+    fn create_table_jsonschema_appends_owner_and_round_trips_describe() {
+        let columns = vec![
+            col("name", NormalizedType::Text, false),
+            col("qty", NormalizedType::Integer, true),
+        ];
+        let schema = columns_to_jsonschema(&columns).unwrap();
+        assert_eq!(
+            schema,
+            bson::doc! {
+                "bsonType": "object",
+                "properties": {
+                    "name": { "bsonType": "string" },
+                    "qty": { "bsonType": ["long", "null"] },
+                    "owner_id": { "bsonType": ["string", "null"] },
+                },
+                "required": ["name"],
+            }
+        );
+        // Round trip through the M22 describe mapper: DDL writes exactly the
+        // shapes describe_schema reads back.
+        let described = jsonschema_to_columns(&schema);
+        let by_name = |n: &str| described.iter().find(|c| c.name == n).unwrap();
+        assert_eq!(by_name("name").normalized_type, NormalizedType::Text);
+        assert!(!by_name("name").nullable);
+        assert_eq!(by_name("qty").normalized_type, NormalizedType::Integer);
+        assert!(by_name("qty").nullable);
+        assert!(by_name("owner_id").nullable);
+        // An explicit owner_id is respected, never duplicated.
+        let explicit = columns_to_jsonschema(&[col("owner_id", NormalizedType::Text, false)]).unwrap();
+        let props = explicit.get_document("properties").unwrap();
+        assert_eq!(props.get_document("owner_id").unwrap(), &bson::doc! { "bsonType": "string" });
+    }
+
+    #[test]
+    fn jsonschema_add_alter_drop_column_transforms() {
+        let base = columns_to_jsonschema(&[col("name", NormalizedType::Text, false)]).unwrap();
+
+        // add: new column lands in properties (+required when non-nullable).
+        let added = jsonschema_with_column_set(
+            &base,
+            &col("qty", NormalizedType::Integer, false),
+            ColumnMode::Add,
+        )
+        .unwrap();
+        assert!(added.get_document("properties").unwrap().contains_key("qty"));
+        assert_eq!(jsonschema_required(&added), vec!["name", "qty"]);
+        // add of an existing column is a 409 conflict.
+        assert!(matches!(
+            jsonschema_with_column_set(&base, &col("name", NormalizedType::Text, true), ColumnMode::Add)
+                .unwrap_err(),
+            DataPlaneError::Conflict { .. }
+        ));
+
+        // alter: full target def replaces the property AND nullability.
+        let altered = jsonschema_with_column_set(
+            &added,
+            &col("qty", NormalizedType::Text, true),
+            ColumnMode::Alter,
+        )
+        .unwrap();
+        assert_eq!(
+            altered.get_document("properties").unwrap().get_document("qty").unwrap(),
+            &bson::doc! { "bsonType": ["string", "null"] }
+        );
+        assert_eq!(jsonschema_required(&altered), vec!["name"], "now nullable → not required");
+        // alter of a missing column is a 400.
+        assert!(matches!(
+            jsonschema_with_column_set(&base, &col("ghost", NormalizedType::Text, true), ColumnMode::Alter)
+                .unwrap_err(),
+            DataPlaneError::InvalidRequest { .. }
+        ));
+
+        // drop: property + required entry removed; missing column is a 400.
+        let dropped = jsonschema_with_column_dropped(&added, "qty").unwrap();
+        assert!(!dropped.get_document("properties").unwrap().contains_key("qty"));
+        assert_eq!(jsonschema_required(&dropped), vec!["name"]);
+        assert!(matches!(
+            jsonschema_with_column_dropped(&added, "ghost").unwrap_err(),
+            DataPlaneError::InvalidRequest { .. }
+        ));
+        // dropping the LAST required column removes the (must-be-non-empty)
+        // `required` key entirely instead of leaving an invalid empty array.
+        let only = columns_to_jsonschema(&[col("name", NormalizedType::Text, false)]).unwrap();
+        let none_required = jsonschema_with_column_dropped(&only, "name").unwrap();
+        assert!(!none_required.contains_key("required"));
+    }
+
+    #[test]
+    fn mongo_ddl_error_classifier_maps_namespace_errors() {
+        // Pure classification by message (the live errors carry these tokens).
+        assert!(matches!(
+            classify_mongo_ddl_message("Collection already exists. NS: db.t".into()),
+            DataPlaneError::Conflict { .. }
+        ));
+        assert!(matches!(
+            classify_mongo_ddl_message("Command failed: ns not found".into()),
+            DataPlaneError::InvalidRequest { .. }
+        ));
+        assert!(matches!(
+            classify_mongo_ddl_message("socket closed".into()),
+            DataPlaneError::Backend { .. }
+        ));
     }
 }

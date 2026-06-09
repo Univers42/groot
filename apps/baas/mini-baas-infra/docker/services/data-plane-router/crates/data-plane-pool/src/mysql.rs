@@ -28,9 +28,11 @@ use crate::ident::quote_mysql_ident;
 use crate::resolver::MountResolver;
 use async_trait::async_trait;
 use data_plane_core::{
-    CmpOp, DataOperation, DataOperationKind, DataPlaneError, DataPlaneResult, DataResult,
-    DatabaseMount, EngineAdapter, EngineCapabilities, EngineHealth, EnginePool, Filter, Folded,
-    MigrationRequest, MigrationResult, MigrationStatus, RawStatement, RequestIdentity, ScopeDirective,
+    validate_default_expr, CmpOp, ColumnSchema, DataOperation, DataOperationKind, DataPlaneError,
+    DataPlaneResult, DataResult, DatabaseMount, DdlColumnDef, EngineAdapter, EngineCapabilities,
+    EngineHealth, EnginePool, Filter, Folded, ForeignKeyRef, MigrationRequest, MigrationResult,
+    MigrationStatus, NormalizedType, RawStatement, RequestIdentity, SchemaDdlOp, SchemaDdlRequest,
+    SchemaDdlResult, SchemaDdlStatus, SchemaDescriptor, ScopeDirective, TableSchema,
     TxBeginRequest, TxHandle,
 };
 use mysql_async::prelude::Queryable;
@@ -400,6 +402,307 @@ impl EnginePool for MysqlPool {
             statements_run: run,
         })
     }
+
+    /// Engine-agnostic schema introspection (M22). Reads
+    /// `information_schema.COLUMNS` (+ `KEY_COLUMN_USAGE` for PK/FK), scoped to
+    /// the database the connection is on (`TABLE_SCHEMA = DATABASE()`): a
+    /// `schema_per_tenant` mount introspects its per-tenant database (pinned by
+    /// `select_namespace`, same as the request path); shared_rls /
+    /// db_per_tenant introspect the DSN-default database. Excludes the
+    /// `_baas_migrations` marker table.
+    async fn describe_schema(
+        &self,
+        identity: RequestIdentity,
+    ) -> DataPlaneResult<SchemaDescriptor> {
+        if identity.tenant_id != self.tenant_id {
+            return Err(DataPlaneError::Backend {
+                message: "identity tenant does not match pool tenant".into(),
+            });
+        }
+        let mut conn = self.pool.get_conn().await.map_err(backend)?;
+        self.select_namespace(&mut conn).await?;
+
+        // Primary keys, per table, in key ordinal order.
+        let pk_rows: Vec<(String, String)> = conn
+            .query(
+                "SELECT TABLE_NAME, COLUMN_NAME \
+                 FROM information_schema.KEY_COLUMN_USAGE \
+                 WHERE TABLE_SCHEMA = DATABASE() AND CONSTRAINT_NAME = 'PRIMARY' \
+                 ORDER BY TABLE_NAME, ORDINAL_POSITION",
+            )
+            .await
+            .map_err(backend)?;
+        let mut pks: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for (table, column) in pk_rows {
+            pks.entry(table).or_default().push(column);
+        }
+
+        // Foreign keys: (table, column) → referenced (table, column).
+        let fk_rows: Vec<(String, String, String, String)> = conn
+            .query(
+                "SELECT TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME \
+                 FROM information_schema.KEY_COLUMN_USAGE \
+                 WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME IS NOT NULL",
+            )
+            .await
+            .map_err(backend)?;
+        let mut fks: BTreeMap<(String, String), ForeignKeyRef> = BTreeMap::new();
+        for (table, column, ref_table, ref_column) in fk_rows {
+            fks.insert((table, column), ForeignKeyRef { table: ref_table, column: ref_column });
+        }
+
+        // Columns of every BASE TABLE on the connected database.
+        let col_rows: Vec<(String, String, String, String, Option<String>)> = conn
+            .query(
+                "SELECT c.TABLE_NAME, c.COLUMN_NAME, c.COLUMN_TYPE, c.IS_NULLABLE, c.COLUMN_DEFAULT \
+                 FROM information_schema.COLUMNS c \
+                 JOIN information_schema.TABLES t \
+                   ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME \
+                 WHERE c.TABLE_SCHEMA = DATABASE() \
+                   AND t.TABLE_TYPE = 'BASE TABLE' \
+                   AND c.TABLE_NAME <> '_baas_migrations' \
+                 ORDER BY c.TABLE_NAME, c.ORDINAL_POSITION",
+            )
+            .await
+            .map_err(backend)?;
+        let mut tables: BTreeMap<String, Vec<ColumnSchema>> = BTreeMap::new();
+        for (table, name, column_type, is_nullable, default) in col_rows {
+            let (normalized_type, enum_values) = normalize_mysql_type(&column_type);
+            let references = fks.get(&(table.clone(), name.clone())).cloned();
+            tables.entry(table).or_default().push(ColumnSchema {
+                name,
+                native_type: column_type,
+                normalized_type,
+                nullable: is_nullable.eq_ignore_ascii_case("yes"),
+                default,
+                enum_values,
+                references,
+                inferred: false,
+            });
+        }
+
+        Ok(SchemaDescriptor {
+            engine: "mysql".to_string(),
+            tables: tables
+                .into_iter()
+                .map(|(name, columns)| TableSchema {
+                    primary_key: pks.remove(&name).unwrap_or_default(),
+                    name,
+                    columns,
+                })
+                .collect(),
+        })
+    }
+
+    /// Engine-agnostic schema DDL (M22 step 2). Lowered to ONE statement by
+    /// the pure [`build_mysql_ddl`] builder and executed on the same
+    /// namespace the request path uses (`select_namespace` pins the
+    /// per-tenant database for schema_per_tenant; DSN-default otherwise).
+    /// MySQL DDL is auto-commit — exactly why the contract is single-op:
+    /// there is no multi-statement atomicity to fake. Unlike the admin-gated
+    /// `apply_migration`, this path never issues `CREATE DATABASE`: a
+    /// schema_per_tenant namespace must already be provisioned.
+    async fn apply_schema_ddl(
+        &self,
+        ddl: SchemaDdlRequest,
+        identity: RequestIdentity,
+    ) -> DataPlaneResult<SchemaDdlResult> {
+        if identity.tenant_id != self.tenant_id {
+            return Err(DataPlaneError::Backend {
+                message: "identity tenant does not match pool tenant".into(),
+            });
+        }
+        let stmt = build_mysql_ddl(&ddl)?;
+        let mut conn = self.pool.get_conn().await.map_err(backend)?;
+        self.select_namespace(&mut conn).await?;
+        conn.query_drop(stmt).await.map_err(ddl_backend)?;
+        Ok(SchemaDdlResult {
+            op: ddl.op,
+            table: ddl.table,
+            status: SchemaDdlStatus::Applied,
+        })
+    }
+}
+
+/// Maps a MySQL `COLUMN_TYPE` (the full rendered type, e.g. `varchar(255)`,
+/// `enum('a','b')`, `tinyint(1) unsigned`) to the engine-neutral
+/// [`NormalizedType`], returning the parsed enum labels for `enum(...)` types.
+/// Pure — testable without a DB.
+pub(crate) fn normalize_mysql_type(column_type: &str) -> (NormalizedType, Option<Vec<String>>) {
+    let lower = column_type.trim().to_ascii_lowercase();
+    if lower.starts_with("enum(") {
+        return (NormalizedType::Enum, Some(parse_mysql_enum_values(column_type)));
+    }
+    // `tinyint(1)` (the MySQL boolean convention) before the generic int arm.
+    if lower == "tinyint(1)" || lower.starts_with("tinyint(1) ") {
+        return (NormalizedType::Boolean, None);
+    }
+    let base = lower.split(['(', ' ']).next().unwrap_or("");
+    let ty = match base {
+        "int" | "integer" | "bigint" | "smallint" | "mediumint" | "tinyint" => {
+            NormalizedType::Integer
+        }
+        "float" | "double" => NormalizedType::Float,
+        "decimal" | "numeric" => NormalizedType::Decimal,
+        "date" => NormalizedType::Date,
+        "datetime" | "timestamp" => NormalizedType::Datetime,
+        "json" => NormalizedType::Json,
+        "char" | "varchar" | "text" | "tinytext" | "mediumtext" | "longtext" => {
+            NormalizedType::Text
+        }
+        _ => NormalizedType::Unknown,
+    };
+    (ty, None)
+}
+
+// ── M22 step 2: engine-agnostic schema DDL (pure SQL builders) ───────────────
+//
+// Pure (testable without a DB). Identifiers via `quote_mysql_ident`; enum
+// VALUES are escaped string literals (`mysql_literal`, which doubles quotes
+// AND escapes backslash — MySQL's default sql_mode treats `\` as an escape);
+// caller DEFAULT expressions pass the shared `validate_default_expr` guard.
+
+/// `'…'`-quoted MySQL string literal.
+fn mysql_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "''"))
+}
+
+/// Reverse type mapping (the inverse of [`normalize_mysql_type`]): lowers a
+/// [`DdlColumnDef`] to its MySQL column type SQL. `in_primary_key` switches
+/// text to `VARCHAR(255)` — `TEXT` cannot be a PK without a prefix length.
+/// `objectid`/`unknown` are describe-only and rejected.
+pub(crate) fn mysql_sql_type(def: &DdlColumnDef, in_primary_key: bool) -> DataPlaneResult<String> {
+    Ok(match def.normalized_type {
+        NormalizedType::Text => {
+            if in_primary_key { "VARCHAR(255)".to_string() } else { "TEXT".to_string() }
+        }
+        NormalizedType::Integer => "BIGINT".to_string(),
+        NormalizedType::Float => "DOUBLE".to_string(),
+        NormalizedType::Decimal => "DECIMAL(18,6)".to_string(),
+        NormalizedType::Boolean => "TINYINT(1)".to_string(),
+        NormalizedType::Date => "DATE".to_string(),
+        NormalizedType::Datetime => "DATETIME".to_string(),
+        NormalizedType::Json => "JSON".to_string(),
+        NormalizedType::Uuid => "CHAR(36)".to_string(),
+        // v1: arrays land in JSON (MySQL has no array type).
+        NormalizedType::Array => "JSON".to_string(),
+        NormalizedType::Enum => {
+            let values = def
+                .enum_values
+                .as_deref()
+                .filter(|v| !v.is_empty())
+                .ok_or_else(|| DataPlaneError::InvalidRequest {
+                    message: format!("enum column '{}' requires non-empty enum_values", def.name),
+                })?;
+            let literals: Vec<String> = values.iter().map(|v| mysql_literal(v)).collect();
+            format!("ENUM({})", literals.join(", "))
+        }
+        NormalizedType::Objectid | NormalizedType::Unknown => {
+            return Err(DataPlaneError::InvalidRequest {
+                message: format!(
+                    "column '{}': normalized_type '{:?}' cannot be created on mysql",
+                    def.name, def.normalized_type
+                ),
+            })
+        }
+    })
+}
+
+/// One full column clause: `` `name` TYPE NULL|NOT NULL [DEFAULT expr] ``.
+/// Nullability is ALWAYS rendered (`NULL` explicitly) because `MODIFY COLUMN`
+/// resets every attribute — the caller sends the full target def precisely so
+/// nothing is silently lost.
+fn mysql_column_clause(def: &DdlColumnDef, in_primary_key: bool) -> DataPlaneResult<String> {
+    let col = quote_mysql_ident(&def.name)?;
+    let ty = mysql_sql_type(def, in_primary_key)?;
+    let mut clause = format!("{col} {ty} {}", if def.nullable { "NULL" } else { "NOT NULL" });
+    if let Some(default) = def.default.as_deref() {
+        validate_default_expr(default)?;
+        clause.push_str(&format!(" DEFAULT {default}"));
+    }
+    Ok(clause)
+}
+
+/// Lowers a [`SchemaDdlRequest`] to its single MySQL DDL statement
+/// (namespace selection happens at the connection via `USE`, mirroring the
+/// request path, so statements stay unqualified).
+pub(crate) fn build_mysql_ddl(ddl: &SchemaDdlRequest) -> DataPlaneResult<String> {
+    let table = quote_mysql_ident(&ddl.table)?;
+    Ok(match ddl.op {
+        SchemaDdlOp::AddColumn => format!(
+            "ALTER TABLE {table} ADD COLUMN {}",
+            mysql_column_clause(ddl.require_column()?, false)?
+        ),
+        SchemaDdlOp::DropColumn => format!(
+            "ALTER TABLE {table} DROP COLUMN {}",
+            quote_mysql_ident(ddl.require_column_name()?)?
+        ),
+        // MODIFY COLUMN resets attributes — full target def by contract.
+        SchemaDdlOp::AlterColumnType => format!(
+            "ALTER TABLE {table} MODIFY COLUMN {}",
+            mysql_column_clause(ddl.require_column()?, false)?
+        ),
+        SchemaDdlOp::CreateTable => {
+            let (columns, primary_key) = ddl.require_create_spec()?;
+            let pk_set: std::collections::BTreeSet<&str> =
+                primary_key.iter().map(String::as_str).collect();
+            let mut clauses = Vec::with_capacity(columns.len() + 2);
+            let mut has_owner = false;
+            for def in columns {
+                if def.name == "owner_id" {
+                    has_owner = true;
+                }
+                clauses.push(mysql_column_clause(def, pk_set.contains(def.name.as_str()))?);
+            }
+            if !has_owner {
+                // The MySQL adapter owner-scopes every read/write on owner_id
+                // — a table without the column would fail its first request.
+                // VARCHAR(64), not CHAR(36): API-key principals are the
+                // synthetic `api-key:<uuid>` string (44 chars), not a uuid.
+                clauses.push(format!("{} VARCHAR(64)", quote_mysql_ident("owner_id")?));
+            }
+            let pk: Vec<String> = primary_key
+                .iter()
+                .map(|c| quote_mysql_ident(c))
+                .collect::<DataPlaneResult<_>>()?;
+            clauses.push(format!("PRIMARY KEY ({})", pk.join(", ")));
+            format!("CREATE TABLE {table} ({})", clauses.join(", "))
+        }
+        SchemaDdlOp::DropTable => format!("DROP TABLE {table}"),
+    })
+}
+
+/// Parses the labels out of a MySQL `enum('a','b','it''s')` COLUMN_TYPE.
+/// Handles the `''` escape for a literal quote. Pure helper for
+/// [`normalize_mysql_type`].
+fn parse_mysql_enum_values(column_type: &str) -> Vec<String> {
+    let inner = column_type
+        .find('(')
+        .and_then(|start| column_type.rfind(')').map(|end| &column_type[start + 1..end]))
+        .unwrap_or("");
+    let mut values = Vec::new();
+    let mut current = String::new();
+    let mut in_quote = false;
+    let mut chars = inner.chars().peekable();
+    while let Some(c) = chars.next() {
+        if in_quote {
+            if c == '\'' {
+                if chars.peek() == Some(&'\'') {
+                    current.push('\'');
+                    chars.next();
+                } else {
+                    in_quote = false;
+                    values.push(std::mem::take(&mut current));
+                }
+            } else {
+                current.push(c);
+            }
+        } else if c == '\'' {
+            in_quote = true;
+        }
+        // Anything outside quotes (commas, spaces) is a separator — skipped.
+    }
+    values
 }
 
 /// Pinned MySQL transaction. Holds the checked-out connection across
@@ -697,12 +1000,33 @@ async fn run_upsert(
 // ── shared helpers ──────────────────────────────────────────────────────────
 
 fn backend<E: std::fmt::Display>(e: E) -> DataPlaneError {
-    let message = format!("mysql backend: {e}");
-    // Best-effort integrity-violation detection from the server message (the
-    // generic helper only has the Display text): 1062 "Duplicate entry", 1452
-    // foreign-key failure → a client error (409 Conflict), not an engine 5xx.
+    classify_mysql_error(format!("mysql backend: {e}"), false)
+}
+
+/// DDL-path variant of [`backend`]: additionally maps the "existing data is
+/// incompatible with the new type" server errors raised by `MODIFY COLUMN`
+/// — 1265 "Data truncated", 1366 "Incorrect <type> value", 1292 "Truncated
+/// incorrect <type> value" — to a 409 Conflict. Scoped to the DDL path only
+/// (additive): the query path keeps [`backend`]'s existing mapping.
+fn ddl_backend<E: std::fmt::Display>(e: E) -> DataPlaneError {
+    classify_mysql_error(format!("mysql backend: {e}"), true)
+}
+
+/// Best-effort integrity-violation detection from the server message (the
+/// generic helper only has the Display text): 1062 "Duplicate entry", 1452
+/// foreign-key failure → a client error (409 Conflict), not an engine 5xx.
+/// With `ddl` set, truncation/cast errors (1265/1292/1366) also classify as
+/// Conflict — they mean the table's data conflicts with the requested type.
+fn classify_mysql_error(message: String, ddl: bool) -> DataPlaneError {
     let lower = message.to_lowercase();
     if lower.contains("duplicate entry") || lower.contains("foreign key constraint fails") {
+        return DataPlaneError::Conflict { message };
+    }
+    if ddl
+        && (lower.contains("data truncated")
+            || lower.contains("truncated incorrect")
+            || (lower.contains("incorrect") && lower.contains("value")))
+    {
         return DataPlaneError::Conflict { message };
     }
     DataPlaneError::Backend { message }
@@ -1267,5 +1591,241 @@ mod tests {
         assert_eq!(resolve_namespace(&mk(Some("db_per_tenant"))), None);
         let ns = resolve_namespace(&mk(Some("schema_per_tenant"))).unwrap();
         assert!(ns.starts_with("tenant_t_1_"), "{ns}");
+    }
+
+    // --- M22 schema introspection: pure type normalizer (golden table) ---
+
+    #[test]
+    fn normalize_mysql_type_golden_table() {
+        use NormalizedType as N;
+        for (native, expected) in [
+            ("int", N::Integer),
+            ("int(11)", N::Integer),
+            ("bigint(20) unsigned", N::Integer),
+            ("smallint", N::Integer),
+            ("tinyint(4)", N::Integer),
+            ("tinyint(1)", N::Boolean), // the MySQL boolean convention
+            ("tinyint(1) unsigned", N::Boolean),
+            ("float", N::Float),
+            ("double", N::Float),
+            ("decimal(10,2)", N::Decimal),
+            ("date", N::Date),
+            ("datetime", N::Datetime),
+            ("timestamp", N::Datetime),
+            ("json", N::Json),
+            ("char(36)", N::Text),
+            ("varchar(255)", N::Text),
+            ("text", N::Text),
+            ("blob", N::Unknown),
+            ("geometry", N::Unknown),
+        ] {
+            let (ty, values) = normalize_mysql_type(native);
+            assert_eq!(ty, expected, "COLUMN_TYPE {native}");
+            assert_eq!(values, None, "{native} carries no enum values");
+        }
+    }
+
+    #[test]
+    fn normalize_mysql_type_parses_enum_values() {
+        let (ty, values) = normalize_mysql_type("enum('pending','paid','shipped','cancelled')");
+        assert_eq!(ty, NormalizedType::Enum);
+        assert_eq!(
+            values,
+            Some(vec![
+                "pending".to_string(),
+                "paid".to_string(),
+                "shipped".to_string(),
+                "cancelled".to_string(),
+            ])
+        );
+        // Quote escaping (`''` → literal quote) and case-insensitive keyword.
+        let (ty, values) = normalize_mysql_type("ENUM('it''s','b')");
+        assert_eq!(ty, NormalizedType::Enum);
+        assert_eq!(values, Some(vec!["it's".to_string(), "b".to_string()]));
+        // Single value, no trailing garbage.
+        let (_, values) = normalize_mysql_type("enum('only')");
+        assert_eq!(values, Some(vec!["only".to_string()]));
+    }
+
+    // --- M22 step 2: schema DDL — pure SQL builders (golden tables) ---
+
+    use data_plane_core::{DdlColumnDef, SchemaDdlOp, SchemaDdlRequest};
+
+    fn col(name: &str, ty: NormalizedType) -> DdlColumnDef {
+        DdlColumnDef {
+            name: name.to_string(),
+            normalized_type: ty,
+            nullable: true,
+            default: None,
+            enum_values: None,
+        }
+    }
+
+    fn ddl(op: SchemaDdlOp, table: &str) -> SchemaDdlRequest {
+        SchemaDdlRequest {
+            op,
+            table: table.to_string(),
+            column: None,
+            column_name: None,
+            columns: None,
+            primary_key: None,
+        }
+    }
+
+    #[test]
+    fn mysql_sql_type_golden_table() {
+        use NormalizedType as N;
+        for (ty, expected) in [
+            (N::Text, "TEXT"),
+            (N::Integer, "BIGINT"),
+            (N::Float, "DOUBLE"),
+            (N::Decimal, "DECIMAL(18,6)"),
+            (N::Boolean, "TINYINT(1)"),
+            (N::Date, "DATE"),
+            (N::Datetime, "DATETIME"),
+            (N::Json, "JSON"),
+            (N::Uuid, "CHAR(36)"),
+            (N::Array, "JSON"),
+        ] {
+            assert_eq!(mysql_sql_type(&col("c", ty), false).unwrap(), expected, "{ty:?}");
+        }
+        // text inside a PRIMARY KEY needs a bounded type.
+        assert_eq!(mysql_sql_type(&col("c", N::Text), true).unwrap(), "VARCHAR(255)");
+        // enum values are escaped literals (quote doubled, backslash escaped).
+        let mut status = col("status", N::Enum);
+        status.enum_values = Some(vec!["pending".into(), "it's".into(), "a\\b".into()]);
+        assert_eq!(
+            mysql_sql_type(&status, false).unwrap(),
+            "ENUM('pending', 'it''s', 'a\\\\b')"
+        );
+        // enum without values, and describe-only types, are client errors.
+        assert!(mysql_sql_type(&col("c", N::Enum), false).is_err());
+        for ty in [N::Objectid, N::Unknown] {
+            assert!(matches!(
+                mysql_sql_type(&col("c", ty), false).unwrap_err(),
+                DataPlaneError::InvalidRequest { .. }
+            ));
+        }
+    }
+
+    #[test]
+    fn mysql_ddl_statements_golden() {
+        // add_column with full attributes
+        let mut add = ddl(SchemaDdlOp::AddColumn, "orders");
+        add.column = Some(DdlColumnDef {
+            name: "qty".into(),
+            normalized_type: NormalizedType::Integer,
+            nullable: false,
+            default: Some("0".into()),
+            enum_values: None,
+        });
+        assert_eq!(
+            build_mysql_ddl(&add).unwrap(),
+            "ALTER TABLE `orders` ADD COLUMN `qty` BIGINT NOT NULL DEFAULT 0"
+        );
+        // drop_column
+        let mut drop_col = ddl(SchemaDdlOp::DropColumn, "orders");
+        drop_col.column_name = Some("qty".into());
+        assert_eq!(
+            build_mysql_ddl(&drop_col).unwrap(),
+            "ALTER TABLE `orders` DROP COLUMN `qty`"
+        );
+        // alter_column_type → MODIFY with the FULL def (nullability explicit,
+        // because MODIFY resets attributes).
+        let mut alter = ddl(SchemaDdlOp::AlterColumnType, "orders");
+        alter.column = Some(col("note", NormalizedType::Text));
+        assert_eq!(
+            build_mysql_ddl(&alter).unwrap(),
+            "ALTER TABLE `orders` MODIFY COLUMN `note` TEXT NULL"
+        );
+        // drop_table
+        assert_eq!(
+            build_mysql_ddl(&ddl(SchemaDdlOp::DropTable, "orders")).unwrap(),
+            "DROP TABLE `orders`"
+        );
+    }
+
+    #[test]
+    fn mysql_ddl_create_table_appends_owner_and_uses_varchar_pk() {
+        let mut create = ddl(SchemaDdlOp::CreateTable, "orders");
+        create.columns = Some(vec![
+            DdlColumnDef {
+                name: "sku".into(),
+                normalized_type: NormalizedType::Text,
+                nullable: false,
+                default: None,
+                enum_values: None,
+            },
+            col("note", NormalizedType::Text),
+        ]);
+        create.primary_key = Some(vec!["sku".into()]);
+        assert_eq!(
+            build_mysql_ddl(&create).unwrap(),
+            "CREATE TABLE `orders` (`sku` VARCHAR(255) NOT NULL, `note` TEXT NULL, \
+             `owner_id` VARCHAR(64), PRIMARY KEY (`sku`))"
+        );
+        // explicit owner_id is respected, not duplicated.
+        let mut explicit = ddl(SchemaDdlOp::CreateTable, "orders");
+        explicit.columns = Some(vec![
+            DdlColumnDef {
+                name: "id".into(),
+                normalized_type: NormalizedType::Integer,
+                nullable: false,
+                default: None,
+                enum_values: None,
+            },
+            col("owner_id", NormalizedType::Uuid),
+        ]);
+        explicit.primary_key = Some(vec!["id".into()]);
+        let sql = build_mysql_ddl(&explicit).unwrap();
+        assert_eq!(sql.matches("owner_id").count(), 1, "{sql}");
+    }
+
+    #[test]
+    fn mysql_ddl_rejects_injection_and_unsafe_defaults() {
+        assert!(matches!(
+            build_mysql_ddl(&ddl(SchemaDdlOp::DropTable, "orders`; DROP TABLE x")).unwrap_err(),
+            DataPlaneError::InvalidIdentifier { .. }
+        ));
+        let mut bad_default = ddl(SchemaDdlOp::AddColumn, "orders");
+        bad_default.column = Some(DdlColumnDef {
+            name: "c".into(),
+            normalized_type: NormalizedType::Text,
+            nullable: true,
+            default: Some("'x'; DROP TABLE orders".into()),
+            enum_values: None,
+        });
+        assert!(matches!(
+            build_mysql_ddl(&bad_default).unwrap_err(),
+            DataPlaneError::InvalidRequest { .. }
+        ));
+    }
+
+    #[test]
+    fn mysql_error_classifier_maps_ddl_cast_errors_to_conflict() {
+        // DDL path: truncation / incorrect-value (1265/1292/1366) → Conflict.
+        for msg in [
+            "Server error: `ERROR 1265 (01000): Data truncated for column 'n' at row 1'",
+            "Server error: `ERROR 1292 (22007): Truncated incorrect DOUBLE value: 'abc'",
+            "Server error: `ERROR 1366 (HY000): Incorrect integer value: 'abc' for column 'n' at row 1",
+        ] {
+            assert!(
+                matches!(ddl_backend(msg), DataPlaneError::Conflict { .. }),
+                "{msg}"
+            );
+            // …and the SAME message on the query path keeps its existing
+            // (Backend) classification — the DDL mapping is additive.
+            assert!(
+                matches!(backend(msg), DataPlaneError::Backend { .. }),
+                "{msg}"
+            );
+        }
+        // Integrity violations stay Conflict on BOTH paths (pre-existing).
+        for msg in ["Duplicate entry 'x' for key 'PRIMARY'", "a foreign key constraint fails"] {
+            assert!(matches!(backend(msg), DataPlaneError::Conflict { .. }), "{msg}");
+            assert!(matches!(ddl_backend(msg), DataPlaneError::Conflict { .. }), "{msg}");
+        }
+        // Anything else is a Backend error on both paths.
+        assert!(matches!(ddl_backend("connection reset"), DataPlaneError::Backend { .. }));
     }
 }

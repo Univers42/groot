@@ -8,6 +8,8 @@ pub mod operation;
 pub mod plan;
 pub mod planner;
 pub mod ports;
+pub mod schema;
+pub mod schema_ddl;
 pub mod transaction;
 
 pub use capability::{CostCapabilities, EngineCapabilities, IsolationLevel};
@@ -24,5 +26,10 @@ pub use operation::{
 pub use ports::{
     EngineAdapter, EngineHealth, EnginePool, MigrationRequest, MigrationResult, MigrationStatus,
     PoolRegistry, PoolStats, RawStatement, TxHandle,
+};
+pub use schema::{ColumnSchema, ForeignKeyRef, NormalizedType, SchemaDescriptor, TableSchema};
+pub use schema_ddl::{
+    validate_default_expr, DdlColumnDef, SchemaDdlOp, SchemaDdlRequest, SchemaDdlResult,
+    SchemaDdlStatus,
 };
 pub use transaction::{TxBeginRequest, TxSession, TxState};

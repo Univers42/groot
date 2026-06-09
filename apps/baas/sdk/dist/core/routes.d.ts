@@ -18,6 +18,8 @@ export declare const routes: {
     readonly query: {
         readonly execute: "/query/v1/execute";
         readonly txn: "/query/v1/txn";
+        readonly schema: (dbId: string) => string;
+        readonly schemaDdl: (dbId: string) => string;
     };
     readonly webhooks: {
         readonly root: "/admin/v1/webhooks";
@@ -46,5 +48,6 @@ export declare const routes: {
     };
     readonly realtime: {
         readonly channel: (channel: string) => string;
+        readonly tableChannel: (dbId: string, table: string) => string;
     };
 };

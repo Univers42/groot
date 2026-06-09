@@ -17,8 +17,11 @@ import { QueryController } from './query.controller';
 import { TxnController } from './txn.controller';
 import { EnginesController } from './engines.controller';
 import { CapabilitiesController } from './capabilities.controller';
+import { SchemaController } from './schema.controller';
 import { QueryService } from './query.service';
 import { OutboxService } from './outbox.service';
+import { RealtimePublisherService } from './realtime-publisher.service';
+import { SchemaService } from './schema.service';
 import { RustDataPlaneProxy } from '../proxy/rust-data-plane.proxy';
 import { GraphController } from '../graph/graph.controller';
 import { GraphService } from '../graph/graph.service';
@@ -32,7 +35,21 @@ import { GraphService } from '../graph/graph.service';
 
 @Module({
   imports: [ConfigModule, HttpModule],
-  controllers: [QueryController, TxnController, EnginesController, CapabilitiesController, GraphController],
-  providers: [QueryService, OutboxService, RustDataPlaneProxy, GraphService],
+  controllers: [
+    QueryController,
+    TxnController,
+    EnginesController,
+    CapabilitiesController,
+    SchemaController,
+    GraphController,
+  ],
+  providers: [
+    QueryService,
+    OutboxService,
+    RealtimePublisherService,
+    RustDataPlaneProxy,
+    SchemaService,
+    GraphService,
+  ],
 })
 export class QueryModule {}

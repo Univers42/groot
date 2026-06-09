@@ -2,6 +2,7 @@ import { AnalyticsClient } from './domains/analytics.js';
 import { AuthClient } from './domains/auth.js';
 import { QueryClient, ResourceQueryBuilder } from './domains/query.js';
 import { RestClient, RestResourceBuilder } from './domains/rest.js';
+import { SchemaClient } from './domains/schema.js';
 import { StorageClient } from './domains/storage.js';
 import { TxnClient } from './domains/txn.js';
 import { WebhooksClient } from './domains/webhooks.js';
@@ -15,7 +16,8 @@ import type { RestRequestOptions } from './types.js';
 export type { AuthSession, ClientSession, SessionInput, User, } from './core/session.js';
 export type { SessionStorageAdapter } from './core/storage.js';
 export { MiniBaasError, MiniBaasTimeoutError } from './core/errors.js';
-export type { AnalyticsTrackInput, PresignInput, QueryRunInput, QueryRunResponse, RecoverInput, RestFilterOperator, RestMutationOptions, RestQueryOptions, RestRequestOptions, RestResourceBuilder as RestResourceBuilderApi, SignInWithPasswordInput, SignUpInput, UpdateUserInput, VerifyInput, TxnExecuteInput, TxnOp, TxnOperation, TxnOpResult, TxnResult, WebhookCreateInput, WebhookDelivery, WebhookSubscription, WebhookUpdateInput, Tenant, TenantApiKey, TenantApiKeyIssued, TenantBootstrapInput, TenantBootstrapResult, TenantCreateInput, TenantUpdateInput, ProvisionInput, ProvisionMountResult, ProvisionMountSpec, ProvisionResult, MigrateCredentialRef, MigrateIdentity, MigrateInput, MigrateMount, FunctionDeployInput, FunctionDeployResult, FunctionInvokeOptions, FunctionSource, FunctionSummary, } from './types.js';
+export type { AnalyticsTrackInput, PresignInput, QueryRunInput, QueryRunResponse, RecoverInput, RestFilterOperator, RestMutationOptions, RestQueryOptions, RestRequestOptions, RestResourceBuilder as RestResourceBuilderApi, SignInWithPasswordInput, SignUpInput, UpdateUserInput, VerifyInput, TxnExecuteInput, TxnOp, TxnOperation, TxnOpResult, TxnResult, WebhookCreateInput, WebhookDelivery, WebhookSubscription, WebhookUpdateInput, Tenant, TenantApiKey, TenantApiKeyIssued, TenantBootstrapInput, TenantBootstrapResult, TenantCreateInput, TenantUpdateInput, ProvisionInput, ProvisionMountResult, ProvisionMountSpec, ProvisionResult, MigrateCredentialRef, MigrateIdentity, MigrateInput, MigrateMount, FunctionDeployInput, FunctionDeployResult, FunctionInvokeOptions, FunctionSource, FunctionSummary, ColumnSchema, DdlColumnDef, DdlColumnType, NormalizedSchema, NormalizedType, SchemaDdlAddColumnInput, SchemaDdlAlterColumnTypeInput, SchemaDdlCreateTableInput, SchemaDdlDropColumnInput, SchemaDdlDropTableInput, SchemaDdlInput, SchemaDdlOp, SchemaDdlResult, SchemaEngineCapabilities, TableSchema, } from './types.js';
+export { SchemaClient } from './domains/schema.js';
 export { TxnClient } from './domains/txn.js';
 export { WebhooksClient } from './domains/webhooks.js';
 export { AdminClient, MigrateClient, TenantsClient } from './domains/admin.js';
@@ -47,6 +49,8 @@ export declare class MiniBaasClient {
     readonly analytics: AnalyticsClient;
     /** Single-mount atomic write batches (`POST /query/v1/txn`). */
     readonly txn: TxnClient;
+    /** Engine-agnostic schema introspection + DDL (`/query/v1/:dbId/schema`). */
+    readonly schema: SchemaClient;
     /** Edge functions (`/functions/v1`). */
     readonly functions: FunctionsClient;
     /**

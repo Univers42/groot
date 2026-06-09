@@ -105,6 +105,62 @@ export interface RustCapabilitiesResponse {
   engines: RustEngineDescriptor[];
 }
 
+/** One column from the Rust router's `POST /v1/schema` descriptor. Mirrors
+ *  `data_plane_core::ColumnSchema` (snake_case on the wire). */
+export interface RustColumnSchema {
+  name: string;
+  native_type: string;
+  /** text|integer|float|decimal|boolean|date|datetime|json|uuid|enum|array|objectid|unknown */
+  normalized_type: string;
+  nullable: boolean;
+  default: string | null;
+  enum_values: string[] | null;
+  references: { table: string; column: string } | null;
+  /** true only for Mongo sample-based inference. */
+  inferred: boolean;
+}
+
+/** One table/collection from `POST /v1/schema`. */
+export interface RustTableSchema {
+  name: string;
+  primary_key: string[];
+  columns: RustColumnSchema[];
+}
+
+/** The full `POST /v1/schema` payload — `data_plane_core::SchemaDescriptor`. */
+export interface RustSchemaDescriptor {
+  engine: string;
+  tables: RustTableSchema[];
+}
+
+/** One DDL column definition — `data_plane_core::DdlColumnDef` (snake_case on
+ *  the wire). The FULL definition: the service composes it before calling,
+ *  because engines like MySQL (`MODIFY COLUMN`) reset omitted attributes. */
+export interface RustDdlColumnDef {
+  name: string;
+  normalized_type: string;
+  nullable: boolean;
+  default: string | null;
+  enum_values: string[] | null;
+}
+
+/** The `ddl` object of `POST /v1/schema/ddl` — `data_plane_core::SchemaDdlRequest`. */
+export interface RustSchemaDdlRequest {
+  op: string;
+  table: string;
+  column?: RustDdlColumnDef | null;
+  column_name?: string | null;
+  columns?: RustDdlColumnDef[] | null;
+  primary_key?: string[] | null;
+}
+
+/** `POST /v1/schema/ddl` response — `data_plane_core::SchemaDdlResult`. */
+export interface RustSchemaDdlResult {
+  op: string;
+  table: string;
+  status: string;
+}
+
 @Injectable()
 export class RustDataPlaneProxy {
   private readonly logger = new Logger(RustDataPlaneProxy.name);
@@ -227,6 +283,53 @@ export class RustDataPlaneProxy {
       `${context.engine}.${resource}.${op}`,
     );
     return this.normalizeResult(data);
+  }
+
+  /**
+   * Engine-agnostic schema introspection (M22): POSTs the `{ identity, mount }`
+   * envelope to the Rust router's `/v1/schema` and returns its
+   * `SchemaDescriptor` verbatim (tables + normalized columns + PK/FK + enum
+   * values). Engines without an introspection surface (redis/http) are
+   * rejected upstream with 422 `unsupported_capability`, which `postJson`
+   * surfaces as a clean `UnprocessableEntityException`.
+   */
+  async describeSchema(context: RustProxyContext): Promise<RustSchemaDescriptor> {
+    const body = {
+      identity: this.buildIdentity(context),
+      mount: this.buildMount(context, 'schema'),
+    };
+    return this.postJson<RustSchemaDescriptor>(
+      '/v1/schema',
+      body,
+      context,
+      `${context.engine}.schema`,
+    );
+  }
+
+  /**
+   * Engine-agnostic schema DDL (M22 step 2): POSTs the
+   * `{ identity, mount, ddl }` envelope to the Rust router's `/v1/schema/ddl`
+   * (one operation per request) and returns its `SchemaDdlResult` verbatim.
+   * Error mapping mirrors {@link describeSchema}: a capability rejection
+   * (redis/http) surfaces as 422 `unsupported_capability`, and "existing data
+   * is incompatible with the new type" surfaces as a 409 Conflict — both
+   * preserved by `postJson`.
+   */
+  async applySchemaDdl(
+    context: RustProxyContext,
+    ddl: RustSchemaDdlRequest,
+  ): Promise<RustSchemaDdlResult> {
+    const body = {
+      identity: this.buildIdentity(context),
+      mount: this.buildMount(context, 'schema'),
+      ddl,
+    };
+    return this.postJson<RustSchemaDdlResult>(
+      '/v1/schema/ddl',
+      body,
+      context,
+      `${context.engine}.schema.ddl.${ddl.op}`,
+    );
   }
 
   // ── Single-mount transactions ──────────────────────────────────────────────

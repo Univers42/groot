@@ -171,6 +171,177 @@ export interface TxnResult {
   results: TxnOpResult[];
 }
 
+// ── Schema introspection + DDL (/query/v1/:dbId/schema) ─────────────────────
+
+/**
+ * Engine-agnostic normalized column types returned by `schema.describe()`.
+ * `objectid` and `unknown` are describe-only — DDL rejects them (see
+ * {@link DdlColumnType}).
+ */
+export type NormalizedType =
+  | 'text'
+  | 'integer'
+  | 'float'
+  | 'decimal'
+  | 'boolean'
+  | 'date'
+  | 'datetime'
+  | 'json'
+  | 'uuid'
+  | 'enum'
+  | 'array'
+  | 'objectid'
+  | 'unknown';
+
+/** Normalized types creatable via DDL (`objectid`/`unknown` are describe-only). */
+export type DdlColumnType = Exclude<NormalizedType, 'objectid' | 'unknown'>;
+
+/** One column of a described table (snake_case — the exact wire shape). */
+export interface ColumnSchema {
+  name: string;
+  /** Engine-native type, e.g. `character varying(255)` or `int unsigned`. */
+  native_type: string;
+  normalized_type: NormalizedType;
+  nullable: boolean;
+  /** Raw engine default expression, or `null` when the column has none. */
+  default: string | null;
+  /** Allowed values when `normalized_type` is `enum`; `null` otherwise. */
+  enum_values: string[] | null;
+  /** Foreign-key target, or `null` when the column references nothing. */
+  references: { table: string; column: string } | null;
+  /** `true` only for Mongo sample-based inference (no `$jsonSchema` validator). */
+  inferred: boolean;
+}
+
+/** One table/collection of a described database. */
+export interface TableSchema {
+  name: string;
+  primary_key: string[];
+  columns: ColumnSchema[];
+}
+
+/**
+ * Live engine capability descriptor embedded in `schema.describe()` responses.
+ * Mirrors the Rust router's `/v1/capabilities` per-engine payload (the same
+ * source `introspectEngines()` validates against). Kept loose
+ * (`[key: string]: unknown`) so a new Rust flag does not break the SDK.
+ */
+export interface SchemaEngineCapabilities {
+  read: boolean;
+  write: boolean;
+  upsert: boolean;
+  batch?: boolean;
+  aggregate?: boolean;
+  /** Engine answers `GET /query/v1/:dbId/schema` (describe). */
+  introspect?: boolean;
+  /** Engine answers `POST /query/v1/:dbId/schema/ddl` — distinct from `ddl`. */
+  schema_ddl?: boolean;
+  stream: boolean;
+  /** Admin migration-batch surface (`/admin/v1/migrate`) — NOT `schema_ddl`. */
+  ddl: boolean;
+  transactions: boolean;
+  [key: string]: unknown;
+}
+
+/**
+ * Response of `client.schema.describe()` (`GET /query/v1/:dbId/schema`) —
+ * the mount's tables with normalized column types plus the engine's live
+ * capability descriptor, so one call tells a client both what the data looks
+ * like and what it may do with it.
+ */
+export interface NormalizedSchema {
+  dbId: string;
+  engine: string;
+  /** `null` when the capabilities fetch failed (the schema is still served). */
+  capabilities: SchemaEngineCapabilities | null;
+  tables: TableSchema[];
+}
+
+/**
+ * One DDL column definition (snake_case — the exact wire shape).
+ * `nullable`/`default`/`enum_values` may be omitted: for `add_column` /
+ * `create_table` the server defaults them (nullable, no default); for
+ * `alter_column_type` an omitted attribute means "keep what the column has
+ * today" (the server merges with the current column).
+ */
+export interface DdlColumnDef {
+  name: string;
+  normalized_type: DdlColumnType;
+  /** Whether NULLs are allowed (defaults to `true` on create/add). */
+  nullable?: boolean;
+  /** Raw engine default expression (`0`, `'pending'`, `now()`); `null` clears it. */
+  default?: string | null;
+  /** Allowed values — required when `normalized_type` is `enum`. */
+  enum_values?: string[] | null;
+}
+
+/** The supported schema-DDL operations (snake_case, the wire values). */
+export type SchemaDdlOp =
+  | 'add_column'
+  | 'drop_column'
+  | 'alter_column_type'
+  | 'create_table'
+  | 'drop_table';
+
+/** `add_column`: append `column` to `table`. */
+export interface SchemaDdlAddColumnInput {
+  op: 'add_column';
+  table: string;
+  column: DdlColumnDef;
+}
+
+/** `alter_column_type`: retype `column.name` (omitted attributes are kept). */
+export interface SchemaDdlAlterColumnTypeInput {
+  op: 'alter_column_type';
+  table: string;
+  column: DdlColumnDef;
+}
+
+/** `create_table`: create `table` with `columns` and a `primary_key`. */
+export interface SchemaDdlCreateTableInput {
+  op: 'create_table';
+  table: string;
+  columns: DdlColumnDef[];
+  primary_key: string[];
+}
+
+/** `drop_column`: destructive — requires `confirm: true` (400 otherwise). */
+export interface SchemaDdlDropColumnInput {
+  op: 'drop_column';
+  table: string;
+  column_name: string;
+  confirm: true;
+}
+
+/** `drop_table`: destructive — requires `confirm: true` (400 otherwise). */
+export interface SchemaDdlDropTableInput {
+  op: 'drop_table';
+  table: string;
+  confirm: true;
+}
+
+/**
+ * Body of `client.schema.ddl()` — ONE operation per request (deliberate:
+ * MySQL DDL is auto-commit, a batch would fake atomicity). The union makes
+ * each op's required fields — and `confirm: true` on destructive ops — a
+ * compile-time requirement, mirroring the server's 400 guard.
+ */
+export type SchemaDdlInput =
+  | SchemaDdlAddColumnInput
+  | SchemaDdlAlterColumnTypeInput
+  | SchemaDdlCreateTableInput
+  | SchemaDdlDropColumnInput
+  | SchemaDdlDropTableInput;
+
+/** Result of an applied schema-DDL operation. */
+export interface SchemaDdlResult {
+  op: SchemaDdlOp;
+  table: string;
+  /** `'applied'` on success (failures surface as `MiniBaasError` instead). */
+  status: string;
+  dbId: string;
+}
+
 // ── Webhooks (admin-only, /admin/v1/webhooks) ────────────────────────────────
 
 /** Public webhook subscription view (secrets are write-only and never echoed). */

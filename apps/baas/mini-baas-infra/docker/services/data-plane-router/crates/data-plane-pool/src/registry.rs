@@ -296,6 +296,21 @@ impl EnginePool for SharedPool {
     ) -> DataPlaneResult<data_plane_core::MigrationResult> {
         self.0.apply_migration(request, identity).await
     }
+
+    async fn describe_schema(
+        &self,
+        identity: RequestIdentity,
+    ) -> DataPlaneResult<data_plane_core::SchemaDescriptor> {
+        self.0.describe_schema(identity).await
+    }
+
+    async fn apply_schema_ddl(
+        &self,
+        ddl: data_plane_core::SchemaDdlRequest,
+        identity: RequestIdentity,
+    ) -> DataPlaneResult<data_plane_core::SchemaDdlResult> {
+        self.0.apply_schema_ddl(ddl, identity).await
+    }
 }
 
 #[cfg(test)]
