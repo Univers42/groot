@@ -20,6 +20,7 @@ services:
     volumes:
       - track-binocle-vault-data:/vault/data
     restart: unless-stopped
+    mem_limit: 512m
     healthcheck:
       test: ["CMD-SHELL", "vault status -address=http://127.0.0.1:8200 2>/dev/null | grep -q 'Sealed.*false' || exit 1"]
       interval: 5s
@@ -111,6 +112,7 @@ services:
       start_period: 5s
       retries: 6
     restart: unless-stopped
+    mem_limit: 128m
 
   postgres:
     image: ${BAAS_POSTGRES_IMAGE:-track-binocle-postgres:local}
@@ -127,6 +129,7 @@ services:
     volumes:
       - track-binocle-postgres-data:/var/lib/postgresql/data
     restart: unless-stopped
+    mem_limit: 512m
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-postgres}"]
       interval: 5s
@@ -183,6 +186,7 @@ services:
     volumes:
       - track-binocle-redis-data:/data
     restart: unless-stopped
+    mem_limit: 128m
 
   mailpit:
     image: ${MAILPIT_IMAGE:-axllent/mailpit:v1.22.3}
@@ -195,6 +199,7 @@ services:
     ports:
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${MAILPIT_HOST_PORT:-8025}:8025"
     restart: unless-stopped
+    mem_limit: 256m
 
   gotrue:
     image: ${BAAS_GOTRUE_IMAGE:-public.ecr.aws/supabase/gotrue:v2.188.1}
@@ -231,6 +236,7 @@ services:
       db-bootstrap:
         condition: service_completed_successfully
     restart: unless-stopped
+    mem_limit: 256m
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:9999/health || exit 1"]
       interval: 5s
@@ -254,6 +260,7 @@ services:
       project-db-init:
         condition: service_completed_successfully
     restart: unless-stopped
+    mem_limit: 256m
 
   pg-meta:
     image: ${BAAS_PG_META_IMAGE:-public.ecr.aws/supabase/postgres-meta:v0.91.0}
@@ -268,6 +275,7 @@ services:
       project-db-init:
         condition: service_completed_successfully
     restart: unless-stopped
+    mem_limit: 256m
 
   supavisor:
     profiles:
@@ -280,6 +288,7 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    mem_limit: 512m
 
   kong:
     image: ${BAAS_KONG_IMAGE:-track-binocle/mini-baas-kong:local}
@@ -340,6 +349,7 @@ services:
       pg-meta:
         condition: service_started
     restart: unless-stopped
+    mem_limit: 1g
 
   local-runtime-secrets:
     image: public.ecr.aws/docker/library/node:22-alpine
@@ -390,6 +400,7 @@ services:
       start_period: 45s
       retries: 24
     restart: unless-stopped
+    mem_limit: 512m
 
   # osionos-app — the block editor as a standalone STATIC image (Docker Hub
   # dlesieur/osionos-app), built FROM the submodule without modifying it. VITE_*
@@ -422,6 +433,7 @@ services:
       start_period: 15s
       retries: 20
     restart: unless-stopped
+    mem_limit: 128m
 
   mail-bridge:
     image: ${MAIL_BRIDGE_IMAGE:-track-binocle/mail-bridge:local}
@@ -458,6 +470,7 @@ services:
       start_period: 20s
       retries: 12
     restart: unless-stopped
+    mem_limit: 512m
 
   mail:
     image: ${MAIL_IMAGE:-track-binocle/mail:local}
@@ -492,6 +505,7 @@ services:
       start_period: 30s
       retries: 20
     restart: unless-stopped
+    mem_limit: 1g
 
   calendar-bridge:
     image: ${CALENDAR_BRIDGE_IMAGE:-track-binocle/calendar-bridge:local}
@@ -541,6 +555,7 @@ services:
       start_period: 20s
       retries: 12
     restart: unless-stopped
+    mem_limit: 512m
 
   calendar:
     image: ${CALENDAR_IMAGE:-track-binocle/calendar:local}
@@ -576,6 +591,7 @@ services:
       start_period: 30s
       retries: 20
     restart: unless-stopped
+    mem_limit: 1g
 
   # prismatica-auth-gateway — the custom API gateway / auth BFF, as its own
   # self-contained image (Docker Hub dlesieur/prismatica-auth-gateway). PULL-ONLY:
@@ -648,6 +664,7 @@ services:
       start_period: 20s
       retries: 12
     restart: unless-stopped
+    mem_limit: 256m
 
   # opposite-osiris WEBSITE — served as a STANDALONE image (Docker Hub
   # dlesieur/opposite-osiris-web): nginx serves the static `astro build` output
@@ -682,6 +699,7 @@ services:
       start_period: 5s
       retries: 5
     restart: unless-stopped
+    mem_limit: 128m
 
   playground-simulation:
     profiles:
