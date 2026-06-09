@@ -18,6 +18,7 @@ const bin = {
   node: process.execPath,
   initdb: `${PGBIN}/initdb`, postgres: `${PGBIN}/postgres`,
   postgrest: process.env.POSTGREST_BIN || `${RT}/bin/postgrest`,
+  gotrue: `${RT}/bin/gotrue`, gotrueMigrations: `${RT}/gotrue-migrations`,
   gatewayDir: join(RT, "gateway"), gatewayScript: join(RT, "gateway/scripts/auth-gateway.mjs"),
   bridgeScript: join(RT, "bridge/bridge-api.mjs"),
 };
@@ -36,6 +37,15 @@ try {
   ok("data path: restProxy /rest/v1 -> postgrest 200", r.status === 200, `${r.status} ${(await r.text()).slice(0, 40)}`);
   const g = await fetch(`http://127.0.0.1:${DEFAULT_PORTS.gateway}/`).catch((e) => ({ status: "ERR " + e }));
   ok("auth-gateway listening", typeof g.status === "number" && g.status < 500, String(g.status));
+
+  // Full auth round-trip: register a fresh user via bridge -> gateway -> gotrue, then log in.
+  const email = `poc${Date.now()}@gmail.com`, password = "PocPass123!"; // gmail.com has MX (gateway checks deliverability)
+  const reg = await fetch(`${bridgeUrl}/api/auth/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email, password, username: "poctest" }) }).catch((e) => ({ status: "ERR", text: async () => String(e) }));
+  const regBody = typeof reg.text === "function" ? await reg.text() : "";
+  ok("register (bridge->gateway->gotrue)", reg.status === 200, `${reg.status} ${regBody.slice(0, 90)}`);
+  const login = await fetch(`${bridgeUrl}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email, password }) }).catch((e) => ({ status: "ERR", text: async () => String(e) }));
+  const loginBody = typeof login.text === "function" ? await login.text() : "";
+  ok("login returns a session", login.status === 200 && /accessToken|session|user/.test(loginBody), `${login.status} ${loginBody.slice(0, 90)}`);
 
   stop();
   console.log("[run] ✅ DONE — full native stack booted with NO docker-compose, data path served.");
