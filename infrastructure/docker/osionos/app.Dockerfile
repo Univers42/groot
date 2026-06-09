@@ -75,7 +75,13 @@ ENV VITE_API_URL=$VITE_API_URL \
     VITE_BAAS_OVERLAY_TABLE=$VITE_BAAS_OVERLAY_TABLE \
     VITE_SECOND_BRAIN_V2=$VITE_SECOND_BRAIN_V2
 
-RUN pnpm exec vite build --base "$VITE_BASE"
+# Build, then strip source maps from the shipped image (they tripled its size
+# and leak source; keep them only in local builds) and precompress static
+# assets so nginx's gzip_static serves them with zero CPU per request.
+RUN pnpm exec vite build --base "$VITE_BASE" \
+ && find build -name '*.map' -delete \
+ && find build -type f \( -name '*.js' -o -name '*.css' -o -name '*.svg' \
+      -o -name '*.json' -o -name '*.wasm' \) -size +1k -exec gzip -9k {} +
 
 FROM public.ecr.aws/docker/library/nginx:1.27-alpine AS runtime
 LABEL org.opencontainers.image.title="osionos-app"
