@@ -117,6 +117,39 @@ PG with a locally-generated JWT secret, then a full page round-trip through the 
 **Conclusion:** Option A is viable. Embedded DB = stock Postgres binary + the ~10-line trimmed
 bootstrap above + the 5 migrations in order. No custom image, no Mongo, no Kong.
 
+## Build progress (2026-06-09)
+
+**Data path fully proven** (PoC, throwaway containers): real **PostgREST v12.2.3** against the
+osionos schema, connecting as `authenticator`, with a `service_role` JWT (HS256, `PGRST_JWT_SECRET`)
+→ `GET /osionos_workspaces` = **200**; no/invalid JWT = **401**. So bridge → (shim) → PostgREST →
+Postgres is locked.
+
+**Modules written** (in `apps/osionos-electron/native/`, all `node --check` clean):
+- `bootstrap.sql` — the validated trimmed bootstrap (pgcrypto + anon/authenticated/service_role +
+  the `authenticator` LOGIN role + grants).
+- `firstrun.mjs` — applies bootstrap + the 5 migrations in order via the bundled `psql`, idempotent,
+  generates + persists local secrets (JWT secret, signed `service_role`/`anon` tokens, app-session +
+  bridge-shared secrets) to `userData/secrets.json` (mode 600), sets the `authenticator` password.
+- `restProxy.mjs` — the loopback `/rest/v1`→PostgREST rewrite shim (so the bridge stays unchanged).
+- `supervisor.mjs` — boots postgres → firstRun → PostgREST → restProxy → auth-gateway → bridge with
+  health gates; `stop()` tears down in reverse. PostgREST + bridge env is the proven wiring.
+
+**Open decision — native auth (the auth-gateway is OUT-OF-REPO).** The Go `auth-gateway` is
+**pull-only** (`dlesieur/prismatica-auth-gateway`, source in the separate **prismatica** repo), so it
+can't be cross-compiled from this monorepo. Two ways forward:
+- **A1 — bundle the gateway binary:** build it from the prismatica repo (Go static, linux+win) and
+  ship it. Keeps the bridge untouched + the gateway's lockout/policy hardening. Cost: cross-repo build.
+- **A2 — minimal local auth (recommended for a single-user app):** drop the gateway; add a small local
+  credential path to the bridge (`handleAuthProxy` → INSERT/verify against `public.users` with a
+  hashed password via the service-role PostgREST path, then the bridge's existing app-session mint).
+  Removes the hardest-to-bundle binary; native then ships only **postgres + postgrest + bridge**. Cost:
+  edits the constrained `apps/osionos/app` submodule (≤200-line / `"updated"` rules) + reimplements a
+  slice of the gateway's register/login.
+
+**Remaining work:** pick A1/A2; `build.sh --native` to acquire+bundle the binaries (embedded-postgres
++ PostgREST release + [gateway or local-auth]); `package.json` `extraResources`; `main.js` native mode
+(spawn `supervisor.startSuite` before `app://`, route shutdown through `stop()`); first full bring-up.
+
 ## Targets & constraints
 
 - **Linux** (`.deb`/`.AppImage`) + **Windows** (`.exe`/NSIS) — same electron-builder targets as the
