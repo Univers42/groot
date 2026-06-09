@@ -151,12 +151,25 @@ contract (wired in `supervisor.mjs`): `AUTH_GATEWAY_PORT`, `PUBLIC_BAAS_URL`→r
 `OSIONOS_BRIDGE_SHARED_SECRET`/`OSIONOS_APP_SESSION_SECRET`, `REDIS_URL=""`. (Gateway ⇄ bridge call
 each other at login time — both up by then.)
 
-**Remaining work:** `build.sh --native` to assemble the bundle — acquire **embedded-postgres** +
-the **PostgREST** release binary (per platform), extract the **gateway** Node bundle from the image,
-copy the bridge's 2 `.mjs` + the `native/` modules + `models/*.sql` — into electron-builder
-`extraResources`; `package.json` `extraResources`; `main.js` native mode (resolve `bin.*` paths,
-`supervisor.startSuite()` before `app://`, route window-close through `stop()`); then first full
-bring-up + a real `/api/pages` round-trip.
+**Bring-up: ✅ GREEN (end-to-end, no docker-compose).** `build-native.sh --test` assembles the
+runtime bundle (`native-runtime/`: gateway + bridge + `native/` + `models/`, ~528K excl. binaries)
+and boots the whole stack inside one container acting as "the machine" (`Dockerfile.native-test` =
+postgres16 + node22 + the PostgREST static binary). `supervisor.mjs` spawned **postgres → firstRun →
+PostgREST → restProxy → gateway → bridge** as native child processes; all health gates passed and:
+bridge `/api/auth/bridge/health` → **200**, the bridge's data path `restProxy /rest/v1 → PostgREST`
+→ **200**, auth-gateway listening. The orchestration + data + auth wiring are proven on real binaries
+(`supervisor.mjs` had never been *run* before — now it has).
+
+**Remaining work (packaging only — no unknowns left):**
+- `build-native.sh --dist`: acquire per-platform binaries — **embedded-postgres** (glibc/win) + the
+  **PostgREST** release — into `native-runtime/bin/<platform>/`, build the frontend in native mode
+  (`VITE_API_URL=http://127.0.0.1:4000`, `VITE_BAAS_URL=""`), then electron-builder with
+  `native-runtime/` as `extraResources`.
+- `package.json`: `extraResources` + a `dist:native` script.
+- `main.js`: native mode — resolve `bin.*` from `process.resourcesPath` (Node = Electron's own via
+  `ELECTRON_RUN_AS_NODE`), `supervisor.startSuite()` before loading `app://`, route window-close
+  through `stop()`.
+- Then a real desktop install + `/api/pages` round-trip with Docker absent.
 
 ## Targets & constraints
 

@@ -1,0 +1,14 @@
+# Integration test image for the NATIVE edition supervisor: one box with
+# postgres 16 (glibc) + node 22 + the PostgREST static binary. The supervisor
+# spawns them as native child processes (mirrors the bundled desktop app).
+# Not shipped — just proves the orchestration before electron-builder packaging.
+FROM postgres:16-bookworm
+COPY --from=node:22-bookworm-slim /usr/local/bin/node /usr/local/bin/node
+ARG PGRST=v12.2.3
+RUN apt-get update && apt-get install -y --no-install-recommends curl xz-utils ca-certificates \
+  && curl -fsSL -o /tmp/p.tar.xz "https://github.com/PostgREST/postgrest/releases/download/${PGRST}/postgrest-${PGRST}-linux-static-x64.tar.xz" \
+  && tar -xJf /tmp/p.tar.xz -C /usr/local/bin && rm /tmp/p.tar.xz \
+  && apt-get purge -y curl xz-utils && apt-get autoremove -y && rm -rf /var/lib/apt/lists/* \
+  && node --version && postgrest --help >/dev/null 2>&1 && echo "tools ok"
+USER postgres
+ENTRYPOINT ["node", "/rt/native/supervisor-run.mjs"]
