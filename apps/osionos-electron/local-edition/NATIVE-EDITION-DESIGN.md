@@ -83,18 +83,39 @@ Migrations to bundle (osionos-only): `models/osionos-bridge-migration.sql`,
 `user.sql`. **Skip** `mail-migration.sql`, `calendar-migration.sql`, and the cloud-only `gdpr`
 pieces unless needed.
 
-## De-risk first (the spike PoC — do this before committing to the build)
+## De-risk PoC — RESULTS (validated 2026-06-09, throwaway containers, `make all` untouched)
 
-Prove the riskiest assumption cheaply, **without** Electron, in a throwaway container:
+**Verdict: GREEN.** The two riskiest assumptions are proven; what remains is mechanical.
 
-1. `postgres:16` fresh → apply the osionos `models/*.sql` subset → confirm it's clean (this is the
-   one thing that can silently rot).
-2. Start **PostgREST** + **auth-gateway** against it with a locally-generated JWT secret.
-3. Run `node scripts/bridge-api.mjs` with `OSIONOS_BAAS_URL`/`AUTH_GATEWAY_URL` → those processes;
-   `curl http://127.0.0.1:4000/api/auth/bridge/health` and a page round-trip.
+✅ **Stock Postgres is enough — no custom image.** The entire osionos schema applies cleanly on
+**`postgres:16-alpine`** (the heavy `track-binocle-postgres` FDW image — mongo/mysql/oracle fdw,
+pg_net — is all mini-baas machinery osionos never touches). Bootstrap needed beyond stock:
+- `CREATE EXTENSION pgcrypto;`
+- roles `anon` / `authenticated` (NOLOGIN) + `service_role` (NOLOGIN BYPASSRLS) + `GRANT USAGE ON
+  SCHEMA public` to them. (The mini-baas `db-bootstrap.psql` extras — `supabase_admin`, realtime db,
+  `adapter_registry_role`, tenant/schema registries — are **not** needed.)
+- The migrations self-create the `auth` schema + `auth.uid()`; they only need the 3 roles to pre-exist.
 
-If that green-lights, the Electron supervisor is mechanical. If a migration or PostgREST/gateway
-wiring fails, fix it here before touching packaging.
+✅ **Migration order matters** (the one gotcha found): apply in this order —
+`osionos-bridge-migration` → `osionos-folder-surface-migration` → **`user.sql`** →
+`auth-security-migration` → `rls-hardening-migration`. `user.sql` must precede `auth-security`
+(`auth_audit_events` FKs `public.users(id)`). `rls-hardening` is self-guarding (skips absent gdpr fns).
+Result: **12 tables** land clean — `osionos_pages`, `osionos_workspaces`, `osionos_workspace_members`,
+`osionos_bridge_identities`, `osionos_bridge_audit_events`, `osionos_page_configurations`,
+`osionos_page_action_events`, + `users`, `sessions`, `user_tokens`, `user_activities`,
+`auth_audit_events`.
+
+✅ **The bridge is zero-dependency, portable.** `scripts/bridge-api.mjs` + `bridge-graph.mjs` import
+only Node built-ins (no `npm install`). Run as a bare `node scripts/bridge-api.mjs` in a plain
+`node:22-alpine` → `GET /api/auth/bridge/health` returns `200 {"ok":true,"service":"osionos-bridge"}`.
+So bundling the bridge = ship Node + 2 files; the Electron supervisor just spawns it.
+
+⏳ **Remaining (mechanical, not yet wired):** PostgREST + the Go auth-gateway pointed at the embedded
+PG with a locally-generated JWT secret, then a full page round-trip through the bridge
+(`/api/pages`). This is standard PostgREST JWT setup — low risk, do it during implementation.
+
+**Conclusion:** Option A is viable. Embedded DB = stock Postgres binary + the ~10-line trimmed
+bootstrap above + the 5 migrations in order. No custom image, no Mongo, no Kong.
 
 ## Targets & constraints
 
