@@ -12,20 +12,24 @@
 // ===========================================================================
 import pg from "pg";
 import { randomBytes, createHmac } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// PoC-validated order: user.sql before auth-security (FK to public.users);
-// rls-hardening last (self-guarding for absent gdpr fns).
+// Authoritative production order (apps/baas/scripts/apply-project-sql.sh):
+// user -> gdpr -> auth-security -> osionos-bridge -> folder-surface -> rls-hardening.
+// gdpr adds users.deletion_requested_at/deleted_at (a migrated dump needs them);
+// rls-hardening last (it grants on the gdpr functions). Calendar/mail are skipped
+// (separate apps). bootstrap.sql (roles) runs before all of these.
 const MIGRATIONS = [
+  "user.sql",
+  "gdpr-migration.sql",
+  "auth-security-migration.sql",
   "osionos-bridge-migration.sql",
   "osionos-folder-surface-migration.sql",
-  "user.sql",
-  "auth-security-migration.sql",
   "rls-hardening-migration.sql",
 ];
 
@@ -65,8 +69,9 @@ async function connectWithRetry(cfg, tries = 90, delayMs = 500) {
   throw new Error(`postgres did not become ready: ${lastErr?.message || "unknown"}`);
 }
 
-// Apply bootstrap + migrations (idempotent) + (re)assert the authenticator
-// password; return the local secrets the supervisor wires into the services.
+// Apply bootstrap + osionos migrations (idempotent) + (re)assert the authenticator
+// password; return the local secrets. NOTE: gotrue's auth.users is created later
+// (when gotrue starts), so the data import runs separately, after gotrue — see importDump.
 export async function firstRun(cfg) {
   const secrets = ensureSecrets(cfg.dataDir);
   const client = await connectWithRetry(cfg);
@@ -79,6 +84,32 @@ export async function firstRun(cfg) {
     }
     await client.query(`ALTER ROLE authenticator LOGIN PASSWORD '${secrets.authenticatorPassword}'`);
     return { secrets, bootstrapped };
+  } finally {
+    await client.end();
+  }
+}
+
+// One-time data import, run AFTER gotrue (which owns auth.users). If native-migrate.sh
+// placed a dump at <dataDir>/import.sql, load it with FK triggers relaxed (order-
+// independent), then mark it done so it only runs once. Superuser → bypasses RLS.
+export async function importDump(cfg) {
+  const file = join(cfg.dataDir, "import.sql");
+  if (!existsSync(file)) return false;
+  const client = await connectWithRetry(cfg);
+  try {
+    // Strip psql-only meta-commands (pg_dump 16.4 emits \restrict/\unrestrict) — the
+    // pure-JS pg client speaks SQL, not psql backslash commands.
+    const sql = readFileSync(file, "utf8").split("\n").filter((l) => !/^\\/.test(l)).join("\n");
+    await client.query("SET session_replication_role = replica");
+    try {
+      await client.query(sql);
+      // Some source rows carry an empty aud/role (older gotrue); this edition's gotrue
+      // looks users up by aud='authenticated', so normalize imported accounts to match.
+      await client.query("UPDATE auth.users SET aud = 'authenticated' WHERE aud IS NULL OR aud = ''");
+      await client.query("UPDATE auth.users SET role = 'authenticated' WHERE role IS NULL OR role = ''");
+    } finally { await client.query("SET session_replication_role = DEFAULT"); }
+    renameSync(file, join(cfg.dataDir, `import-${Date.now()}.done.sql`));
+    return true;
   } finally {
     await client.end();
   }

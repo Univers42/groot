@@ -15,7 +15,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { firstRun } from "./firstrun.mjs";
+import { firstRun, importDump } from "./firstrun.mjs";
 import { startRestProxy } from "./restProxy.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -81,6 +81,11 @@ export async function startSuite(opts) {
       GOTRUE_DISABLE_SIGNUP: "false", GOTRUE_LOG_LEVEL: "warn" } });
     children.push({ name: "gotrue", child: gotrue });
     await waitUntil("gotrue", () => httpOk(`http://127.0.0.1:${ports.gotrue}/health`), { tries: 90 });
+
+    // 2c. One-time account/data import (now that gotrue owns auth.users).
+    if (await importDump({ host: "127.0.0.1", port: ports.pg, db: "postgres", superUser: "postgres", superPass, dataDir })) {
+      console.log("[supervisor] imported account + data dump");
+    }
 
     // 3. PostgREST (connects as authenticator; JWT-gated) — proven path
     const rest = spawn(bin.postgrest, [], { stdio: "ignore", env: { ...process.env,
