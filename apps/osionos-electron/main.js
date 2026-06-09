@@ -45,10 +45,6 @@ app.commandLine.appendSwitch("enable-zero-copy");
 // on Linux feels like hesitation/lag with a real mouse. Disable -> instant,
 // 1:1 wheel scrolling.
 app.commandLine.appendSwitch("disable-smooth-scrolling");
-// Some VMs/containers have a tiny or restricted /dev/shm; Chromium then aborts
-// ("Creating shared memory in /dev/shm … failed"). Fall back to writing shared
-// memory under /tmp instead. Harmless on normal desktops.
-app.commandLine.appendSwitch("disable-dev-shm-usage");
 // Disable the chrome sandbox ONLY when its setuid helper isn't usable — i.e. the
 // AppImage (read-only temp mount) or a kernel that restricts unprivileged user
 // namespaces (Ubuntu 24.04). The installed .deb setuids /opt/osionos/chrome-sandbox,
