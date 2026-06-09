@@ -15,6 +15,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"; cd "$REPO"
 EL=apps/osionos-electron; RT="$EL/native-runtime"; CACHE="$EL/.native-cache"
 GW_IMAGE="${AUTH_GATEWAY_IMAGE:-dlesieur/prismatica-auth-gateway:latest}"
+GOTRUE_IMAGE="${BAAS_GOTRUE_IMAGE:-public.ecr.aws/supabase/gotrue:v2.188.1}"
 PG_VER="${PG_VER:-16.4.0}"; PGRST_VER="${PGRST_VER:-v12.2.3}"
 MODE="${1:-}"
 
@@ -46,6 +47,11 @@ if [ ! -f "$CACHE/postgrest-$PGRST_VER" ]; then
   tar -xJf "$CACHE/pgrst.tar.xz" -C "$CACHE"; mv "$CACHE/postgrest" "$CACHE/postgrest-$PGRST_VER"; rm -f "$CACHE/pgrst.tar.xz"
 fi
 cp "$CACHE/postgrest-$PGRST_VER" "$RT/bin/postgrest"; chmod +x "$RT/bin/postgrest"
+echo "  + gotrue (static Go binary) + its 69 migrations from $GOTRUE_IMAGE"
+gid="$(docker create "$GOTRUE_IMAGE")"
+docker cp "$gid:/usr/local/bin/auth" "$RT/bin/gotrue" >/dev/null; chmod +x "$RT/bin/gotrue"
+mkdir -p "$RT/gotrue-migrations"; docker cp "$gid:/usr/local/etc/auth/migrations/." "$RT/gotrue-migrations/" >/dev/null
+docker rm -f "$gid" >/dev/null
 
 echo "[5/5] bundle the pure-JS pg client (zonky ships no psql)"
 docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e npm_config_cache=/tmp/.npm \

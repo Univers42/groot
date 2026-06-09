@@ -103,6 +103,7 @@ async function startNative() {
     node: process.execPath, nodeEnv: { ELECTRON_RUN_AS_NODE: "1" },
     initdb: path.join(pgBin, "initdb"), postgres: path.join(pgBin, "postgres"),
     postgrest: path.join(NATIVE_DIR, "bin", "postgrest"),
+    gotrue: path.join(NATIVE_DIR, "bin", "gotrue"), gotrueMigrations: path.join(NATIVE_DIR, "gotrue-migrations"),
     gatewayDir: path.join(NATIVE_DIR, "gateway"), gatewayScript: path.join(NATIVE_DIR, "gateway", "scripts", "auth-gateway.mjs"),
     bridgeScript: path.join(NATIVE_DIR, "bridge", "bridge-api.mjs"),
   };
