@@ -134,21 +134,29 @@ Postgres is locked.
 - `supervisor.mjs` — boots postgres → firstRun → PostgREST → restProxy → auth-gateway → bridge with
   health gates; `stop()` tears down in reverse. PostgREST + bridge env is the proven wiring.
 
-**Open decision — native auth (the auth-gateway is OUT-OF-REPO).** The Go `auth-gateway` is
-**pull-only** (`dlesieur/prismatica-auth-gateway`, source in the separate **prismatica** repo), so it
-can't be cross-compiled from this monorepo. Two ways forward:
-- **A1 — bundle the gateway binary:** build it from the prismatica repo (Go static, linux+win) and
-  ship it. Keeps the bridge untouched + the gateway's lockout/policy hardening. Cost: cross-repo build.
-- **A2 — minimal local auth (recommended for a single-user app):** drop the gateway; add a small local
-  credential path to the bridge (`handleAuthProxy` → INSERT/verify against `public.users` with a
-  hashed password via the service-role PostgREST path, then the bridge's existing app-session mint).
-  Removes the hardest-to-bundle binary; native then ships only **postgres + postgrest + bridge**. Cost:
-  edits the constrained `apps/osionos/app` submodule (≤200-line / `"updated"` rules) + reimplements a
-  slice of the gateway's register/login.
+**Native auth — DECIDED: A1 (bundle the gateway), and it's far cheaper than first thought.** The
+auth-gateway turned out to be a **Node script, not a Go binary** (`node scripts/auth-gateway.mjs`).
+Inspected from the running image: **no live gotrue service** (only a `managed-by-gotrue` marker
+string), **no Redis service** (`scripts/auth/store.mjs` falls back to a bounded in-memory map when
+`REDIS_URL` is empty), only external `fetch` is Cloudflare Turnstile (bypassed via
+`TURNSTILE_BYPASS_LOCAL=true`). It talks to the DB through `@mini-baas/js` → PostgREST. The whole
+bundle is **~232K**: `scripts/auth-gateway.mjs` + `scripts/auth/{guards,net-ip,store}.mjs` +
+`node_modules/@mini-baas/js` (dist-only).
 
-**Remaining work:** pick A1/A2; `build.sh --native` to acquire+bundle the binaries (embedded-postgres
-+ PostgREST release + [gateway or local-auth]); `package.json` `extraResources`; `main.js` native mode
-(spawn `supervisor.startSuite` before `app://`, route shutdown through `stop()`); first full bring-up.
+So A1 = **extract that bundle from `dlesieur/prismatica-auth-gateway` and run it with the bundled
+Node** — no prismatica checkout, no Go, no gotrue, no Redis. The bridge stays untouched. Its env
+contract (wired in `supervisor.mjs`): `AUTH_GATEWAY_PORT`, `PUBLIC_BAAS_URL`→restProxy,
+`PUBLIC_BAAS_ANON_KEY`/`SERVICE_ROLE_KEY` (the signed JWTs), `TURNSTILE_BYPASS_LOCAL=true`,
+`AUTH_REQUIRE_EMAIL_VERIFICATION=false` (no SMTP locally), `OSIONOS_BRIDGE_URL`→bridge,
+`OSIONOS_BRIDGE_SHARED_SECRET`/`OSIONOS_APP_SESSION_SECRET`, `REDIS_URL=""`. (Gateway ⇄ bridge call
+each other at login time — both up by then.)
+
+**Remaining work:** `build.sh --native` to assemble the bundle — acquire **embedded-postgres** +
+the **PostgREST** release binary (per platform), extract the **gateway** Node bundle from the image,
+copy the bridge's 2 `.mjs` + the `native/` modules + `models/*.sql` — into electron-builder
+`extraResources`; `package.json` `extraResources`; `main.js` native mode (resolve `bin.*` paths,
+`supervisor.startSuite()` before `app://`, route window-close through `stop()`); then first full
+bring-up + a real `/api/pages` round-trip.
 
 ## Targets & constraints
 

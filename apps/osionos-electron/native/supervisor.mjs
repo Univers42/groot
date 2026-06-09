@@ -78,14 +78,22 @@ export async function startSuite(opts) {
     const proxy = await startRestProxy({ listenPort: ports.restProxy, postgrestUrl: `http://127.0.0.1:${ports.postgrest}` });
     children.push({ name: "rest-proxy", child: { kill: () => proxy.close() } });
 
-    // 5. auth-gateway (Go) — credentials authority over public.users.
-    //    TODO(impl): confirm the gateway's DB-DSN + JWT-secret env names from go/control-plane.
-    const gw = spawn(bin.authGateway, [], { stdio: "ignore", env: { ...process.env,
+    // 5. auth-gateway — a Node script (extracted from the prismatica image:
+    //    scripts/auth-gateway.mjs + scripts/auth/* + node_modules/@mini-baas/js, ~232K).
+    //    No gotrue service (marker only), no Redis (store.mjs falls back to a bounded
+    //    in-memory map when REDIS_URL is empty). Talks to the DB via the SDK -> restProxy.
+    //    cwd = gateway dir so its bundled node_modules resolve.
+    const gw = spawn(bin.node, [bin.gatewayScript], { cwd: bin.gatewayDir, stdio: "ignore", env: { ...process.env,
       AUTH_GATEWAY_PORT: String(ports.gateway),
-      DATABASE_URL: `postgres://postgres:${superPass}@127.0.0.1:${ports.pg}/postgres`,
-      JWT_SECRET: secrets.jwtSecret } });
+      PUBLIC_BAAS_URL: `http://127.0.0.1:${ports.restProxy}`,
+      PUBLIC_BAAS_ANON_KEY: secrets.anonKey, SERVICE_ROLE_KEY: secrets.serviceRoleKey,
+      TURNSTILE_BYPASS_LOCAL: "true", AUTH_REQUIRE_EMAIL_VERIFICATION: "false",
+      OSIONOS_BRIDGE_URL: `http://127.0.0.1:${ports.bridge}/api/auth/bridge/session`,
+      OSIONOS_BRIDGE_SHARED_SECRET: secrets.bridgeSharedSecret,
+      OSIONOS_APP_SESSION_SECRET: secrets.appSessionSecret,
+      PUBLIC_OSIONOS_APP_URL: appUrl, REDIS_URL: "" } });
     children.push({ name: "auth-gateway", child: gw });
-    await waitUntil("auth-gateway", () => httpOk(`http://127.0.0.1:${ports.gateway}/health`));
+    await waitUntil("auth-gateway", () => httpOk(`http://127.0.0.1:${ports.gateway}/`));
 
     // 6. bridge (zero-dep Node) — what the renderer talks to on :4000
     const bridge = spawn(bin.node, [bin.bridgeScript], { stdio: "ignore", env: { ...process.env,
