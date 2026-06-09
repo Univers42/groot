@@ -1,22 +1,38 @@
-//! Publisher side: gateway PUBLISH -> IRC PRIVMSG.
+//! Publisher side: gateway PUBLISH -> IRC.
+//!
+//! Events that carry a user `EventSource` (`kind = Api`) are posted through that
+//! user's own IRC session (their nick); everything else (platform events with no
+//! user, CDC, scheduler, ...) goes out on the shared service connection.
+
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use realtime_core::{
-    EventBusPublisher, EventEnvelope, PublishReceipt, RealtimeError, Result,
+    EventBusPublisher, EventEnvelope, PublishReceipt, RealtimeError, Result, SourceKind,
 };
 use tokio::sync::mpsc;
 
 use crate::mapping::topic_to_channel;
+use crate::session_manager::SessionManager;
 
-/// Publishes events onto IRC by sending raw lines to the session task.
+/// Publishes events onto IRC, choosing the per-user or service identity.
 pub struct IrcPublisher {
-    cmd_tx: mpsc::Sender<String>,
+    service_tx: mpsc::Sender<String>,
+    manager: Arc<SessionManager>,
     namespace: String,
 }
 
 impl IrcPublisher {
-    pub(crate) const fn new(cmd_tx: mpsc::Sender<String>, namespace: String) -> Self {
-        Self { cmd_tx, namespace }
+    pub(crate) const fn new(
+        service_tx: mpsc::Sender<String>,
+        manager: Arc<SessionManager>,
+        namespace: String,
+    ) -> Self {
+        Self {
+            service_tx,
+            manager,
+            namespace,
+        }
     }
 }
 
@@ -49,19 +65,32 @@ impl EventBusPublisher for IrcPublisher {
             });
         };
 
-        let mut text = payload_text(event);
-        // Service-relay attribution: prefix the originating user when known.
-        if let Some(source) = &event.source {
-            if !source.id.is_empty() {
-                text = format!("<{}> {}", source.id, text);
+        let text = payload_text(event);
+
+        match &event.source {
+            // A platform user (the gateway stamps kind = Api with the user id).
+            Some(src) if src.kind == SourceKind::Api && !src.id.is_empty() => {
+                let handle = src.metadata.get("handle").map_or("", String::as_str);
+                self.manager
+                    .publish_as_user(&src.id, handle, &channel, &text)
+                    .await;
+            }
+            // Platform event / system source: post on the shared service nick,
+            // tagged with the event type.
+            _ => {
+                let body = if event.event_type.is_empty() {
+                    text
+                } else {
+                    format!("[{}] {}", event.event_type, text)
+                };
+                self.service_tx
+                    .send(format!("PRIVMSG {channel} :{body}"))
+                    .await
+                    .map_err(|e| {
+                        RealtimeError::EventBusError(format!("IRC session unavailable: {e}"))
+                    })?;
             }
         }
-
-        let line = format!("PRIVMSG {channel} :{text}");
-        self.cmd_tx
-            .send(line)
-            .await
-            .map_err(|e| RealtimeError::EventBusError(format!("IRC session unavailable: {e}")))?;
 
         Ok(PublishReceipt {
             event_id: event.event_id.clone(),

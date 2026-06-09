@@ -27,6 +27,11 @@ pub struct SessionConfig {
     pub realname: String,
     pub channels: Vec<String>,
     pub namespace: String,
+    /// Whether inbound PRIVMSGs are forwarded to the bus as events. The shared
+    /// service connection sets this `true` (it is the single inbound source);
+    /// per-user sessions set it `false` so a channel message isn't emitted once
+    /// per joined session.
+    pub forward_inbound: bool,
 }
 
 /// Reconnecting client loop. Runs until `cmd_rx` is closed.
@@ -61,10 +66,12 @@ async fn run_session(
     let mut reader = BufReader::new(read_half);
 
     // Registration handshake.
+    let mut current_nick = cfg.nick.clone();
+    let mut nick_try: u32 = 0;
     if !cfg.password.is_empty() {
         write_line(&mut write_half, &format!("PASS {}", cfg.password)).await?;
     }
-    write_line(&mut write_half, &format!("NICK {}", cfg.nick)).await?;
+    write_line(&mut write_half, &format!("NICK {current_nick}")).await?;
     write_line(
         &mut write_half,
         &format!("USER {} 0 * :{}", cfg.user, cfg.realname),
@@ -85,6 +92,12 @@ async fn run_session(
                 }
                 let raw = line.trim_end_matches(['\r', '\n']).to_string();
                 line.clear();
+                if is_nick_error(&raw) {
+                    nick_try += 1;
+                    current_nick = retry_nick(&cfg.nick, nick_try);
+                    write_line(&mut write_half, &format!("NICK {current_nick}")).await?;
+                    continue;
+                }
                 handle_inbound(&raw, cfg, &mut write_half, inbound).await?;
             }
             cmd = cmd_rx.recv() => {
@@ -119,6 +132,9 @@ async fn handle_inbound(
     }
 
     if msg.command.eq_ignore_ascii_case("PRIVMSG") {
+        if !cfg.forward_inbound {
+            return Ok(()); // per-user sessions don't re-emit channel traffic
+        }
         let Some(channel) = msg.params.first() else {
             return Ok(());
         };
@@ -198,6 +214,20 @@ impl<'a> ParsedLine<'a> {
             nick.to_string()
         })
     }
+}
+
+/// True if the line is an `ERR_NICKNAMEINUSE` (433) or `ERR_ERRONEUSNICKNAME` (432).
+fn is_nick_error(raw: &str) -> bool {
+    let cmd = ParsedLine::parse(raw).command;
+    cmd == "433" || cmd == "432"
+}
+
+/// Build a fallback nick by appending an attempt number, capped to NICKLEN (9).
+fn retry_nick(base: &str, attempt: u32) -> String {
+    let suffix = attempt.to_string();
+    let keep = 9usize.saturating_sub(suffix.len()).max(1);
+    let head: String = base.chars().take(keep).collect();
+    format!("{head}{suffix}")
 }
 
 /// Split a string at the first space into (head, tail).

@@ -8,15 +8,20 @@
 //! and an inbound `PRIVMSG #general` becomes an `EVENT` on `chat/general`. Topics
 //! outside the namespace are ignored by this bus.
 //!
-//! v1 uses a single service-identity connection (a relay). Per-user IRC sessions
-//! (true presence) are the next iteration — see `IrcBusConfig::namespace` and the
-//! `EventSource` carried on each event, which already identifies the originating
-//! user for that work.
+//! Identity is hybrid. Events that carry a user `EventSource` (the gateway
+//! stamps `kind = Api` with the account id) are posted through that user's own
+//! IRC session — their derived nick, real presence (they JOIN the channels they
+//! speak in). Events with no user source (platform notifications, CDC, etc.) go
+//! out on a single shared service connection, which is also the sole inbound
+//! source so channel traffic isn't emitted once per joined session. Per-user
+//! sessions open lazily on first publish and are reaped after inactivity.
 
 mod bus;
 mod client;
+mod identity;
 mod mapping;
 mod publisher;
+mod session_manager;
 mod subscriber;
 
 pub use bus::IrcBus;
