@@ -19,10 +19,14 @@ ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
 WORKDIR /app
 
-COPY . .
+# Manifests first: the dependency install stays cached across source edits
+# (with COPY . . before it, every source change re-ran the full pnpm install).
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 RUN --mount=type=cache,id=osionos-pnpm,target=/pnpm/store \
     pnpm config set store-dir /pnpm/store \
  && pnpm install --frozen-lockfile --ignore-scripts
+
+COPY . .
 
 # Vite inlines VITE_* at build time. Defaults target the local pipeline
 # (bridge at :4000, website at :4322); the committed .env supplies the rest.
@@ -55,6 +59,11 @@ ARG VITE_BAAS_GRAPH_GENERATORS=
 ARG VITE_BAAS_NOTES_TABLE=
 ARG VITE_BAAS_OVERLAY_TABLE=
 ARG VITE_SECOND_BRAIN_V2=
+# Live-database mode (notion-database-sys × mini-baas): the mount catalog
+# fallback (admin listing is internal-only, browsers can't reach it) and the
+# realtime WS token minted by `make seed-live-demo`. Empty = feature dormant.
+ARG VITE_BAAS_LIVE_MOUNTS=
+ARG VITE_BAAS_REALTIME_TOKEN=
 ENV VITE_API_URL=$VITE_API_URL \
     VITE_PRISMATICA_URL=$VITE_PRISMATICA_URL \
     VITE_MAIL_APP_URL=$VITE_MAIL_APP_URL \
@@ -73,7 +82,9 @@ ENV VITE_API_URL=$VITE_API_URL \
     VITE_BAAS_GRAPH_GENERATORS=$VITE_BAAS_GRAPH_GENERATORS \
     VITE_BAAS_NOTES_TABLE=$VITE_BAAS_NOTES_TABLE \
     VITE_BAAS_OVERLAY_TABLE=$VITE_BAAS_OVERLAY_TABLE \
-    VITE_SECOND_BRAIN_V2=$VITE_SECOND_BRAIN_V2
+    VITE_SECOND_BRAIN_V2=$VITE_SECOND_BRAIN_V2 \
+    VITE_BAAS_LIVE_MOUNTS=$VITE_BAAS_LIVE_MOUNTS \
+    VITE_BAAS_REALTIME_TOKEN=$VITE_BAAS_REALTIME_TOKEN
 
 # Build, then strip source maps from the shipped image (they tripled its size
 # and leak source; keep them only in local builds) and precompress static
@@ -81,7 +92,8 @@ ENV VITE_API_URL=$VITE_API_URL \
 RUN pnpm exec vite build --base "$VITE_BASE" \
  && find build -name '*.map' -delete \
  && find build -type f \( -name '*.js' -o -name '*.css' -o -name '*.svg' \
-      -o -name '*.json' -o -name '*.wasm' \) -size +1k -exec gzip -9k {} +
+      -o -name '*.json' -o -name '*.wasm' \) -size +1k -print0 \
+    | xargs -0 -P "$(nproc)" -n 16 gzip -9k
 
 FROM public.ecr.aws/docker/library/nginx:1.27-alpine AS runtime
 LABEL org.opencontainers.image.title="osionos-app"

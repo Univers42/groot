@@ -1,0 +1,8 @@
+# The kong image (apps/baas/Dockerfile) needs exactly two config files, but
+# its build context is this whole directory — which contains mini-baas-infra
+# (~3GB of sources, SDK, wiki). Allowlist style: exclude everything, then
+# re-include only what the Dockerfile COPYs.
+*
+!Dockerfile
+!config/mini-baas-infra.conf
+!config/kong.track-binocle.yml

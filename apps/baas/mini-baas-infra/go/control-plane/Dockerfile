@@ -12,12 +12,20 @@ FROM golang:1.23-bookworm AS builder
 ARG APP
 WORKDIR /src
 
+# Module + build caches persist across builds (and across the APP variants),
+# so each binary build only compiles what changed instead of cold-compiling
+# the whole dependency graph per app.
 COPY go.mod go.sum* ./
 ENV GOFLAGS=-mod=mod
-RUN go mod download all || go mod tidy
+RUN --mount=type=cache,id=gomod,target=/go/pkg/mod,sharing=locked \
+    go mod download all || true
 
 COPY . .
-RUN go mod tidy && \
+# -mod=mod lets the build resolve anything go.sum is missing; `go mod tidy`
+# at image-build time rewrote go.mod inside the image (non-reproducible) and
+# re-resolved the graph on every build.
+RUN --mount=type=cache,id=gomod,target=/go/pkg/mod,sharing=locked \
+    --mount=type=cache,id=gobuild,target=/root/.cache/go-build,sharing=locked \
     CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" \
       -o /out/app ./cmd/${APP}
 
