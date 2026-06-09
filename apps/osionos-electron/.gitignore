@@ -8,3 +8,4 @@ package-lock.json
 .builder-home/
 native-runtime/
 dist-native/
+.native-cache/
