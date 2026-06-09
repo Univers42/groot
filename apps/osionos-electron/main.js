@@ -11,7 +11,8 @@ const path = require("node:path");
 const os = require("node:os");
 const { spawn } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
-const { existsSync, statSync } = require("node:fs");
+const { existsSync, statSync, mkdirSync, readFileSync, writeFileSync } = require("node:fs");
+const crypto = require("node:crypto");
 
 // The local mini-baas query-router speaks plain HTTP. The renderer runs from the
 // secure `app://` origin, where a direct http://localhost:8002 fetch is upgraded
@@ -80,6 +81,35 @@ function bootSuite() {
   } catch { /* ignore */ }
 }
 
+// NATIVE edition: a bundled `native-runtime/` (extraResources) means NO Docker —
+// supervise embedded postgres + postgrest + gateway + bridge as child processes.
+const NATIVE_DIR = path.join(process.resourcesPath || __dirname, "native-runtime");
+const IS_NATIVE = existsSync(path.join(NATIVE_DIR, "native", "supervisor.mjs"));
+let nativeHandle = null;
+
+// Boot the bundled backend (no Docker). Node children run under Electron's own
+// binary via ELECTRON_RUN_AS_NODE, so we ship no separate `node`. The pg superuser
+// password is generated once and persisted (postgres bakes it into PGDATA at initdb).
+async function startNative() {
+  const { pathToFileURL } = require("node:url");
+  const { startSuite, DEFAULT_PORTS } = await import(pathToFileURL(path.join(NATIVE_DIR, "native", "supervisor.mjs")).href);
+  const dataDir = path.join(app.getPath("userData"), "native");
+  mkdirSync(dataDir, { recursive: true });
+  const pwPath = path.join(dataDir, "pgsuper.key");
+  const superPass = existsSync(pwPath) ? readFileSync(pwPath, "utf8").trim()
+    : (() => { const p = crypto.randomBytes(18).toString("hex"); writeFileSync(pwPath, p, { mode: 0o600 }); return p; })();
+  const pgBin = path.join(NATIVE_DIR, "pgsql", "bin");
+  const bin = {
+    node: process.execPath, nodeEnv: { ELECTRON_RUN_AS_NODE: "1" },
+    initdb: path.join(pgBin, "initdb"), postgres: path.join(pgBin, "postgres"),
+    pg_isready: path.join(pgBin, "pg_isready"), psql: path.join(pgBin, "psql"),
+    postgrest: path.join(NATIVE_DIR, "bin", "postgrest"),
+    gatewayDir: path.join(NATIVE_DIR, "gateway"), gatewayScript: path.join(NATIVE_DIR, "gateway", "scripts", "auth-gateway.mjs"),
+    bridgeScript: path.join(NATIVE_DIR, "bridge", "bridge-api.mjs"),
+  };
+  nativeHandle = await startSuite({ bin, dataDir, ports: DEFAULT_PORTS, superPass, migrationsDir: path.join(NATIVE_DIR, "models"), appUrl: "app://osionos" });
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
@@ -138,7 +168,7 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   const rendererDir = path.join(__dirname, "renderer");
   protocol.handle("app", async (request) => {
     const url = new URL(request.url);
@@ -178,12 +208,19 @@ app.whenReady().then(() => {
     if (!filePath.startsWith(rendererDir) || !existsSync(filePath)) filePath = path.join(rendererDir, "index.html");
     return net.fetch(pathToFileURL(filePath).toString());
   });
-  bootSuite();
+  if (IS_NATIVE) {
+    try { await startNative(); } catch (e) { console.error("[native] backend failed to start:", e); }
+  } else {
+    bootSuite();
+  }
   createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
+
+// Tear down the bundled native backend (postgres/postgrest/gateway/bridge) on exit.
+app.on("before-quit", () => { if (nativeHandle) { try { nativeHandle.stop(); } catch { /* */ } nativeHandle = null; } });
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
