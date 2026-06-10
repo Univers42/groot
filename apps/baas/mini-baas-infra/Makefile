@@ -353,6 +353,17 @@ _rust-toolchain: ## (internal) cargo-in-docker image: rust + pkg-config/libssl (
 
 rust-data-plane-check: _rust-toolchain ## Rust: cargo check the data-plane workspace (in Docker)
 	@$(CARGO_DPR) cargo check --workspace
+
+# Engine conformance: run the reusable battery (crates/engine-conformance)
+# against ONE live engine over the mini-baas network. DSN is discovered from
+# the running engine container (env + in-network alias), so a wrong host env
+# can't poison it. New engines (Phase 3) only merge once `conformance-<engine>`
+# is green. `make conformance` runs the whole gate (scripts/verify/m27).
+CONFORMANCE_NET = $(shell docker inspect mini-baas-postgres --format '{{range $$k,$$v := .NetworkSettings.Networks}}{{$$k}}{{end}}' 2>/dev/null | head -1)
+conformance-%: _rust-toolchain ## Rust: run the engine-conformance battery for ONE engine (e.g. make conformance-postgresql)
+	@bash scripts/verify/m27-conformance.sh $*
+conformance: ## Rust: run the engine-conformance gate for every live engine (m27)
+	@bash scripts/verify/m27-conformance.sh
 rust-data-plane-build: _rust-toolchain ## Rust: build the data-plane release binary (in Docker)
 	@$(CARGO_DPR) cargo build --release --bin data-plane-router
 rust-realtime-check: _rust-toolchain ## Rust: cargo check the realtime workspace (in Docker)

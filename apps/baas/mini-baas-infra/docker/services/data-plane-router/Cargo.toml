@@ -4,6 +4,7 @@ members = [
     "crates/data-plane-core",
     "crates/data-plane-pool",
     "crates/data-plane-server",
+    "crates/engine-conformance",
 ]
 
 [workspace.package]
