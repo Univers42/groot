@@ -1,11 +1,15 @@
 # syntax=docker/dockerfile:1
 # File: docker/services/realtime/Dockerfile
-
-FROM dlesieur/realtime-agnostic@sha256:a96024e9c3d27cd452310ea6f4c7cfa965c6ee685a26ece58325361c924d5ecd
+#
+# Thin wrapper over the realtime-agnostic image. NOTE: compose builds the
+# `realtime` service straight from ./realtime-agnostic (this file is NOT in
+# that path) — keep this wrapper aligned with the locally-built tag, never a
+# stale registry digest. `docker compose build realtime` produces the tag.
+FROM dlesieur/realtime-agnostic:latest
 EXPOSE 4000
-USER 1001:1001
+USER nonroot:nonroot
 
-# realtime-agnostic exposes /v1/health on port 4000 (Rust HTTP server).
-# Try curl first, fall back to wget if only one tool is present in the base image.
+# The base image is distroless (no shell, no curl/wget): probe through the
+# binary itself, which checks /v1/health on the configured port.
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
-  CMD sh -c 'curl -fsS http://localhost:4000/v1/health >/dev/null 2>&1 || wget -qO- http://localhost:4000/v1/health >/dev/null 2>&1' || exit 1
+  CMD ["/app/realtime-server", "--healthcheck"]

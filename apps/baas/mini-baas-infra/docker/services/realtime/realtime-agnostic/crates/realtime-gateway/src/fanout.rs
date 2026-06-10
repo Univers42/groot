@@ -149,11 +149,12 @@ mod tests {
             .await
             .unwrap();
 
-        let received = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+        let (sub_id, received) = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
             .await
             .unwrap()
             .unwrap();
 
+        assert_eq!(sub_id, "sub-1");
         assert_eq!(received.event_type, "test");
     }
 }

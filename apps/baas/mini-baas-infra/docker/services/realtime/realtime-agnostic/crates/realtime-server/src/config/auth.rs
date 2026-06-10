@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// - `NoAuth` — accepts all tokens (development only).
 /// - `Jwt` — validates HMAC-SHA256 / RSA tokens.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum AuthConfig {
     #[serde(rename = "none")]
@@ -32,4 +32,20 @@ pub enum AuthConfig {
         #[serde(default)]
         audience: Option<String>,
     },
+}
+
+/// Manual Debug: the server logs its config at startup (`Auth: {:?}`), and the
+/// derived impl printed the JWT secret in plain text into container logs.
+impl std::fmt::Debug for AuthConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoAuth => write!(f, "NoAuth"),
+            Self::Jwt { issuer, audience, .. } => f
+                .debug_struct("Jwt")
+                .field("secret", &"<redacted>")
+                .field("issuer", issuer)
+                .field("audience", audience)
+                .finish(),
+        }
+    }
 }

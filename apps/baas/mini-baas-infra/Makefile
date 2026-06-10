@@ -299,6 +299,9 @@ migrate-status: ## Show applied migration versions
 seed-mongo: _require-compose ## Seed MongoDB demo data
 	@bash scripts/seed-mongo.sh
 
+seed-live-demo: _require-compose ## Seed the live-database demo across pg+mysql+mongo (owned by the osionos app key; RESEED=1 wipes first)
+	@bash scripts/seed-live-demo.sh
+
 # ========================================================================== #
 ##@ Secrets & Vault
 # ========================================================================== #
@@ -322,17 +325,46 @@ vault-rotate: _require-compose ## Rotate Vault secrets (GROUP=jwt|postgres|mongo
 # ========================================================================== #
 ##@ Language tiers (TypeScript / Rust / Go)
 # ========================================================================== #
-nestjs-ci: ## TS: install + typecheck + lint + test
-	@cd src && corepack enable && pnpm install && npx tsc --noEmit && npx eslint 'apps/**/*.ts' 'libs/**/*.ts' && npx jest --passWithNoTests
-nestjs-build-%: ## TS: build one app (e.g. make nestjs-build-query-router)
-	@cd src && npx nest build $*
-rust-data-plane-check: ## Rust: cargo check the data-plane workspace
-	@cd docker/services/data-plane-router && cargo check --workspace
-rust-data-plane-build: ## Rust: build the data-plane release binary
-	@cd docker/services/data-plane-router && cargo build --release --bin data-plane-router
-go-control-plane-check: ## Go: vet + test the control-plane module
-	@if command -v go >/dev/null 2>&1; then cd go/control-plane && go vet ./... && go test ./...; \
-	else docker run --rm -v "$(PWD)/go/control-plane":/src -w /src golang:1.23-bookworm sh -c 'go mod tidy && go vet ./... && go test ./...'; fi
+# Node also runs INSIDE Docker (no node/npm on the host); node_modules lives
+# in a named volume so the host tree stays clean and installs stay warm.
+NODE_IMAGE := public.ecr.aws/docker/library/node:20-alpine
+NODE_RUN    = docker run --rm -v "$(PWD)/src":/app -w /app \
+	-v mini-baas-src-node-modules:/app/node_modules \
+	-v mini-baas-npm-cache:/root/.npm \
+	$(NODE_IMAGE)
+
+nestjs-ci: ## TS: install + typecheck + lint + test (in Docker)
+	@$(NODE_RUN) sh -c 'npm ci --ignore-scripts --prefer-offline --no-audit --no-fund \
+		&& npx tsc --noEmit && npx eslint "apps/**/*.ts" "libs/**/*.ts" && npx jest --passWithNoTests'
+nestjs-build-%: ## TS: build one app in Docker (e.g. make nestjs-build-query-router)
+	@$(NODE_RUN) sh -c '[ -x node_modules/.bin/nest ] || npm ci --ignore-scripts --prefer-offline --no-audit --no-fund; npx nest build $*'
+# Cargo runs INSIDE Docker (no rustc/cargo on the host). The registry and the
+# per-workspace target dirs live in named volumes, so dependency downloads and
+# incremental build state persist across runs while the host stays clean.
+RUST_IMAGE          := public.ecr.aws/docker/library/rust:1.89-slim-bookworm
+RUST_TOOLCHAIN_IMG  := mini-baas-rust-toolchain
+CARGO_VOLS           = -v mini-baas-cargo-registry:/usr/local/cargo/registry -v mini-baas-cargo-git:/usr/local/cargo/git
+CARGO_DPR            = docker run --rm -v "$(PWD)/docker/services/data-plane-router":/work -w /work $(CARGO_VOLS) -v mini-baas-dpr-target:/work/target $(RUST_TOOLCHAIN_IMG)
+CARGO_REALTIME       = docker run --rm -v "$(PWD)/docker/services/realtime/realtime-agnostic":/work -w /work $(CARGO_VOLS) -v mini-baas-realtime-target:/work/target $(RUST_TOOLCHAIN_IMG)
+
+_rust-toolchain: ## (internal) cargo-in-docker image: rust + pkg-config/libssl (layer-cached)
+	@printf 'FROM $(RUST_IMAGE)\nRUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*\n' \
+		| docker build -q -t $(RUST_TOOLCHAIN_IMG) - >/dev/null
+
+rust-data-plane-check: _rust-toolchain ## Rust: cargo check the data-plane workspace (in Docker)
+	@$(CARGO_DPR) cargo check --workspace
+rust-data-plane-build: _rust-toolchain ## Rust: build the data-plane release binary (in Docker)
+	@$(CARGO_DPR) cargo build --release --bin data-plane-router
+rust-realtime-check: _rust-toolchain ## Rust: cargo check the realtime workspace (in Docker)
+	@$(CARGO_REALTIME) cargo check --workspace
+rust-realtime-test: _rust-toolchain ## Rust: run the realtime unit tests (in Docker)
+	@$(CARGO_REALTIME) cargo test --workspace
+rust-realtime-build: _rust-toolchain ## Rust: build the realtime-server release binary (in Docker)
+	@$(CARGO_REALTIME) cargo build --release --bin realtime-server
+go-control-plane-check: ## Go: vet + test the control-plane module (in Docker, cached modules)
+	@docker run --rm -v "$(PWD)/go/control-plane":/src -w /src \
+		-v mini-baas-gomod:/go/pkg/mod -v mini-baas-gobuild:/root/.cache/go-build \
+		golang:1.23-bookworm sh -c 'GOFLAGS=-mod=mod go vet ./... && GOFLAGS=-mod=mod go test ./...'
 go-control-plane-build: ## Go: build the control-plane images
 	@$(DC) --profile go-control-plane build
 
@@ -367,8 +399,9 @@ help: ## Show this help
 .PHONY: all all-full clean fclean re up down restart ps logs pull build health \
         bench-startup observe planes editions doctor tests test-postgres \
         verify-all parity waf-test migrate migrate-mongo migrate-mysql migrate-all \
-        migrate-status seed-mongo secrets secrets-validate secrets-rotate \
+        migrate-status seed-mongo seed-live-demo secrets secrets-validate secrets-rotate \
         check-secrets env vault-init vault-status vault-rotate nestjs-ci \
         rust-data-plane-check rust-data-plane-build go-control-plane-check \
+        rust-realtime-check rust-realtime-test rust-realtime-build _rust-toolchain \
         go-control-plane-build preflight hooks update help \
         _require-docker _require-compose _rm-stale

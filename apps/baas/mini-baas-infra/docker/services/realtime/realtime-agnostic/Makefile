@@ -36,14 +36,29 @@ help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
-build: ## Build the Rust workspace (release)
-	cargo build --release --workspace
+# Cargo runs INSIDE Docker (Docker-first: no rustc/cargo on the host). The
+# registry and target dirs are named volumes shared with the mini-baas-infra
+# Makefile targets, so build state stays warm across both entry points.
+RUST_TOOLCHAIN_IMG ?= mini-baas-rust-toolchain
+CARGO_RUN = docker run --rm -v "$(CURDIR)":/work -w /work \
+	-v mini-baas-cargo-registry:/usr/local/cargo/registry \
+	-v mini-baas-cargo-git:/usr/local/cargo/git \
+	-v mini-baas-realtime-target:/work/target $(RUST_TOOLCHAIN_IMG)
 
-test: ## Run all tests (78 unit + integration)
-	cargo test --workspace
+_toolchain:
+	@printf 'FROM public.ecr.aws/docker/library/rust:1.89-slim-bookworm\nRUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*\n' \
+		| docker build -q -t $(RUST_TOOLCHAIN_IMG) - >/dev/null
 
-check: ## Check compilation with zero warnings
-	cargo check --workspace 2>&1 | grep -v "Compiling\|Checking\|Finished"
+build: _toolchain ## Build the Rust workspace (release, in Docker)
+	$(CARGO_RUN) cargo build --release --workspace
+
+test: _toolchain ## Run all tests (78 unit + integration, in Docker)
+	$(CARGO_RUN) cargo test --workspace
+
+# --quiet prints only warnings/errors AND keeps cargo's exit code (the old
+# `| grep -v` filter exited 1 whenever a clean check produced no output).
+check: _toolchain ## Check compilation with zero warnings (in Docker)
+	$(CARGO_RUN) cargo check --workspace --quiet
 
 audit: ## Run full audit: local checks + SonarCloud report → reports/
 	@./scripts/audit.sh
