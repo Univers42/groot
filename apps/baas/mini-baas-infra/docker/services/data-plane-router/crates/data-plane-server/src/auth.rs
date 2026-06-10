@@ -59,28 +59,32 @@ pub async fn verify_key(
         .send()
         .await
         .map_err(|e| AuthError::Upstream(format!("tenant-control verify: {e}")))?;
-    if !resp.status().is_success() {
+    // A 5xx is an upstream failure (502); a 4xx OR a 200-with-`valid:false` both
+    // mean the KEY is bad (401). Parse the body either way so a structured
+    // `reason` surfaces; an unparseable 4xx is still an unauthorized key.
+    let status = resp.status();
+    if status.is_server_error() {
         return Err(AuthError::Upstream(format!(
-            "tenant-control verify status {}",
-            resp.status()
+            "tenant-control verify status {status}"
         )));
     }
-    let body: VerifyResponse = resp
-        .json()
-        .await
-        .map_err(|e| AuthError::Upstream(format!("verify decode: {e}")))?;
-    if !body.valid {
-        return Err(AuthError::Unauthorized(
+    let text = resp.text().await.unwrap_or_default();
+    match serde_json::from_str::<VerifyResponse>(&text) {
+        Ok(body) if body.valid => Ok(VerifiedIdentity {
+            tenant_id: body
+                .tenant_id
+                .ok_or_else(|| AuthError::Upstream("verify missing tenant_id".into()))?,
+            key_id: body.key_id.unwrap_or_default(),
+            scopes: body.scopes,
+        }),
+        Ok(body) => Err(AuthError::Unauthorized(
             body.reason.unwrap_or_else(|| "invalid api key".into()),
-        ));
+        )),
+        Err(_) if status.is_client_error() => {
+            Err(AuthError::Unauthorized(format!("key rejected ({status})")))
+        }
+        Err(e) => Err(AuthError::Upstream(format!("verify decode: {e}"))),
     }
-    Ok(VerifiedIdentity {
-        tenant_id: body
-            .tenant_id
-            .ok_or_else(|| AuthError::Upstream("verify missing tenant_id".into()))?,
-        key_id: body.key_id.unwrap_or_default(),
-        scopes: body.scopes,
-    })
 }
 
 #[derive(Debug, Deserialize)]
