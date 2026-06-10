@@ -260,6 +260,37 @@ impl EngineCapabilities {
         }
     }
 
+    /// Microsoft SQL Server (TDS / tiberius). Relational surface: CRUD, upsert
+    /// (MERGE), ATOMIC batch (BEGIN TRAN), aggregate, introspection
+    /// (INFORMATION_SCHEMA). No streaming. Like SQLite, `transactions:false` —
+    /// a cross-request pinned TxHandle is not exposed (a single batch is still
+    /// atomic); `schema_ddl:false` (no apply_schema_ddl). Honest descriptor.
+    #[must_use]
+    pub fn mssql() -> Self {
+        Self {
+            read: true,
+            write: true,
+            upsert: true,
+            batch: true,
+            aggregate: true,
+            introspect: true,
+            schema_ddl: false,
+            stream: false,
+            ddl: false,
+            transactions: false,
+            savepoints: false,
+            isolation_levels: vec![],
+            two_phase_commit: false,
+            native_idempotency: false,
+            max_batch_size: 1000,
+            cost: CostCapabilities {
+                latency_class: LatencyClass::Native,
+                pattern_search: PatternSearchCapability::Indexed,
+                joins: JoinCapability::Native,
+            },
+        }
+    }
+
     #[must_use]
     pub fn redis() -> Self {
         Self {

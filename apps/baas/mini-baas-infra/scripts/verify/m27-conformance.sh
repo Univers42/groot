@@ -96,6 +96,11 @@ dsn_for() {
       # Embedded — no container. A fresh file inside the ephemeral conformance
       # container (bundled SQLite, so no system libsqlite3 needed).
       echo "sqlite:///tmp/conf-sqlite.db" ;;
+    mssql)
+      container_up mini-baas-mssql || return 1
+      local p
+      p="$(env_of mini-baas-mssql MSSQL_SA_PASSWORD)"; p="${p:-Mssql_Strong!Pass1}"
+      echo "mssql://sa:${p}@mssql:1433/master" ;;
     *) return 2 ;;
   esac
 }
@@ -146,7 +151,7 @@ if [[ $# -ge 1 ]]; then
 else
   # Always-on engines + engines-extra (mariadb/cockroachdb/mssql, skipped
   # cleanly when their profile isn't up — run_engine returns 2=skip).
-  ENGINES=(postgresql mysql mariadb cockroachdb mongodb redis sqlite)
+  ENGINES=(postgresql mysql mariadb cockroachdb mongodb redis sqlite mssql)
 fi
 
 FAILED=0
