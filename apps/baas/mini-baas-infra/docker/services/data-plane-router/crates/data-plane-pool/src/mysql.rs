@@ -28,7 +28,8 @@ use crate::ident::quote_mysql_ident;
 use crate::resolver::MountResolver;
 use async_trait::async_trait;
 use data_plane_core::{
-    validate_default_expr, CmpOp, ColumnSchema, DataOperation, DataOperationKind, DataPlaneError,
+    validate_default_expr, AggFunc, Aggregate, BatchItemOutcome, BatchItemStatus, BatchSummary,
+    CmpOp, ColumnSchema, DataOperation, DataOperationKind, DataPlaneError,
     DataPlaneResult, DataResult, DatabaseMount, DdlColumnDef, EngineAdapter, EngineCapabilities,
     EngineHealth, EnginePool, Filter, Folded, ForeignKeyRef, MigrationRequest, MigrationResult,
     MigrationStatus, NormalizedType, RawStatement, RequestIdentity, SchemaDdlOp, SchemaDdlRequest,
@@ -71,7 +72,64 @@ pub(crate) const SUPPORTED_OPS: &[DataOperationKind] = &[
     DataOperationKind::Update,
     DataOperationKind::Delete,
     DataOperationKind::Upsert,
+    DataOperationKind::Aggregate,
+    DataOperationKind::Batch,
 ];
+
+/// Single (non-batch) operation dispatch shared by the auto-commit and tx
+/// paths — the arms `run_batch` loops over. Exhaustive by enumeration so the
+/// match can't silently drift from SUPPORTED_OPS.
+async fn dispatch_single(
+    q: &mut impl Queryable,
+    operation: &DataOperation,
+    identity: &RequestIdentity,
+) -> DataPlaneResult<DataResult> {
+    match operation.op {
+        DataOperationKind::List => run_list(q, operation, identity).await,
+        DataOperationKind::Get => run_get(q, operation, identity).await,
+        DataOperationKind::Insert => run_insert(q, operation, identity).await,
+        DataOperationKind::Update => run_update(q, operation, identity).await,
+        DataOperationKind::Delete => run_delete(q, operation, identity).await,
+        DataOperationKind::Upsert => run_upsert(q, operation, identity).await,
+        DataOperationKind::Aggregate => run_aggregate(q, operation, identity).await,
+        DataOperationKind::Batch => Err(DataPlaneError::InvalidRequest {
+            message: "nested batches are not allowed".to_string(),
+        }),
+    }
+}
+
+/// Atomic batch: both call sites run inside a transaction (per-request or
+/// interactive), so the first failed item propagates its error and the
+/// surrounding transaction is rolled back — nothing persists.
+async fn run_batch(
+    q: &mut impl Queryable,
+    operation: &DataOperation,
+    identity: &RequestIdentity,
+) -> DataPlaneResult<DataResult> {
+    let items = operation
+        .batch_items()
+        .map_err(|message| DataPlaneError::InvalidRequest { message })?;
+    let mut outcomes = Vec::with_capacity(items.len());
+    let mut total: u64 = 0;
+    for (idx, item) in items.iter().enumerate() {
+        let result = dispatch_single(q, item, identity).await.map_err(|e| {
+            DataPlaneError::prefix_message(&format!("batch item {idx}: "), e)
+        })?;
+        total += result.affected_rows;
+        outcomes.push(BatchItemOutcome {
+            index: idx as u32,
+            status: BatchItemStatus::Ok,
+            affected_rows: result.affected_rows,
+            error: None,
+        });
+    }
+    Ok(DataResult {
+        rows: vec![],
+        affected_rows: total,
+        next_cursor: None,
+        batch: Some(BatchSummary { atomic: true, items: outcomes }),
+    })
+}
 
 #[async_trait]
 impl EngineAdapter for MysqlEngineAdapter {
@@ -229,18 +287,11 @@ impl EnginePool for MysqlPool {
             .await
             .map_err(backend)?;
 
+        // Batch rides the same per-request transaction every other op gets,
+        // so a poisoned item rolls the whole batch back (atomic).
         let result = match operation.op {
-            DataOperationKind::List => run_list(&mut tx, &operation, &identity).await,
-            DataOperationKind::Get => run_get(&mut tx, &operation, &identity).await,
-            DataOperationKind::Insert => run_insert(&mut tx, &operation, &identity).await,
-            DataOperationKind::Update => run_update(&mut tx, &operation, &identity).await,
-            DataOperationKind::Delete => run_delete(&mut tx, &operation, &identity).await,
-            DataOperationKind::Upsert => run_upsert(&mut tx, &operation, &identity).await,
-            DataOperationKind::Batch | DataOperationKind::Aggregate => {
-                Err(DataPlaneError::NotImplemented {
-                    feature: "mysql batch/aggregate operation (not implemented)".to_string(),
-                })
-            }
+            DataOperationKind::Batch => run_batch(&mut tx, &operation, &identity).await,
+            _ => dispatch_single(&mut tx, &operation, &identity).await,
         };
 
         match result {
@@ -320,6 +371,7 @@ impl EnginePool for MysqlPool {
                 rows: data,
                 affected_rows: affected,
                 next_cursor: None,
+                batch: None,
             })
         } else {
             conn.exec_drop(statement.statement.as_str(), Params::Positional(params))
@@ -329,6 +381,7 @@ impl EnginePool for MysqlPool {
                 rows: vec![],
                 affected_rows: conn.affected_rows(),
                 next_cursor: None,
+                batch: None,
             })
         }
     }
@@ -756,18 +809,11 @@ impl TxHandle for MysqlTxHandle {
         let conn = guard.as_mut().ok_or_else(|| DataPlaneError::Backend {
             message: "mysql tx already finalised".into(),
         })?;
+        // Inside an interactive transaction a failed batch item poisons the
+        // tx like any failed statement — the caller decides commit/rollback.
         match operation.op {
-            DataOperationKind::List => run_list(conn, &operation, &identity).await,
-            DataOperationKind::Get => run_get(conn, &operation, &identity).await,
-            DataOperationKind::Insert => run_insert(conn, &operation, &identity).await,
-            DataOperationKind::Update => run_update(conn, &operation, &identity).await,
-            DataOperationKind::Delete => run_delete(conn, &operation, &identity).await,
-            DataOperationKind::Upsert => run_upsert(conn, &operation, &identity).await,
-            DataOperationKind::Batch | DataOperationKind::Aggregate => {
-                Err(DataPlaneError::NotImplemented {
-                    feature: "mysql batch/aggregate operation (not implemented)".to_string(),
-                })
-            }
+            DataOperationKind::Batch => run_batch(conn, &operation, &identity).await,
+            _ => dispatch_single(conn, &operation, &identity).await,
         }
     }
 
@@ -827,6 +873,7 @@ async fn run_list(
         rows: data,
         affected_rows: affected,
         next_cursor: None,
+        batch: None,
     })
 }
 
@@ -852,6 +899,7 @@ async fn run_get(
         rows,
         affected_rows: affected,
         next_cursor: None,
+        batch: None,
     })
 }
 
@@ -893,6 +941,7 @@ async fn run_insert(
         rows: vec![Value::Object(out)],
         affected_rows: 1,
         next_cursor: None,
+        batch: None,
     })
 }
 
@@ -936,6 +985,7 @@ async fn run_update(
         rows: vec![],
         affected_rows: affected,
         next_cursor: None,
+        batch: None,
     })
 }
 
@@ -959,6 +1009,7 @@ async fn run_delete(
         rows: vec![],
         affected_rows: affected,
         next_cursor: None,
+        batch: None,
     })
 }
 
@@ -976,10 +1027,33 @@ async fn run_upsert(
     }
 
     let frags = render_insert_columns(&columns)?;
+    // SAFETY (cross-owner hijack): `ON DUPLICATE KEY UPDATE` fires on ANY
+    // unique-key collision — including a row owned by a DIFFERENT principal
+    // (MySQL cannot scope the arbitration the way PG's ON CONFLICT target
+    // does). So when the platform owner-stamps rows we (a) never reassign
+    // `owner_id` in the update branch, and (b) guard every column with
+    // `IF(owner_id = VALUES(owner_id), new, old)`: a collision with a foreign
+    // owner's row becomes a no-op instead of overwriting (and stealing) it.
+    // `owner_id` is platform-injected by `build_owned_columns` (client copies
+    // are stripped first), so its presence == owner-scoped mount.
+    let owner_scoped = columns.iter().any(|(col, _)| col == "owner_id");
     let mut update_parts = Vec::with_capacity(columns.len());
     for (col, _) in &columns {
+        if owner_scoped && col == "owner_id" {
+            continue;
+        }
         let quoted = quote_mysql_ident(col)?;
-        update_parts.push(format!("{quoted} = VALUES({quoted})"));
+        if owner_scoped {
+            update_parts.push(format!(
+                "{quoted} = IF(`owner_id` = VALUES(`owner_id`), VALUES({quoted}), {quoted})"
+            ));
+        } else {
+            update_parts.push(format!("{quoted} = VALUES({quoted})"));
+        }
+    }
+    if update_parts.is_empty() {
+        // owner_id was the only column: make the duplicate branch a no-op.
+        update_parts.push("`owner_id` = `owner_id`".to_string());
     }
     let sql = format!(
         "INSERT INTO {table} ({col_sql}) VALUES ({placeholders}) \
@@ -1004,7 +1078,114 @@ async fn run_upsert(
         rows: vec![Value::Object(out)],
         affected_rows: affected,
         next_cursor: None,
+        batch: None,
     })
+}
+
+/// Grouped aggregation, mirroring the Postgres lowering:
+/// `SELECT <group cols>, <agg exprs> FROM t WHERE <owner ∩ filter>
+/// [GROUP BY <group cols>] [ORDER BY …] LIMIT n`.
+/// Reads are owner-scoped server-side here (MySQL has no RLS), so the owner
+/// predicate is intersected exactly like `run_list`. **Safety:** every
+/// identifier goes through `quote_mysql_ident`; the function name comes from
+/// the allowlisted [`AggFunc`] enum, never client text.
+async fn run_aggregate(
+    q: &mut impl Queryable,
+    op: &DataOperation,
+    identity: &RequestIdentity,
+) -> DataPlaneResult<DataResult> {
+    let table = quote_mysql_ident(&op.resource)?;
+    let spec = op
+        .aggregate
+        .as_ref()
+        .ok_or_else(|| DataPlaneError::InvalidRequest {
+            message: "aggregate requires an `aggregate` spec".to_string(),
+        })?;
+    if spec.aggregates.is_empty() {
+        return Err(DataPlaneError::InvalidRequest {
+            message: "aggregate requires at least one aggregate function".to_string(),
+        });
+    }
+    // Output column names must be unique or the row JSON would drop one.
+    let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for name in spec
+        .group_by
+        .iter()
+        .map(String::as_str)
+        .chain(spec.aggregates.iter().map(|a| a.alias.as_str()))
+    {
+        if !seen.insert(name) {
+            return Err(DataPlaneError::InvalidRequest {
+                message: format!("duplicate aggregate output column '{name}'"),
+            });
+        }
+    }
+
+    let mut select_cols: Vec<String> =
+        Vec::with_capacity(spec.group_by.len() + spec.aggregates.len());
+    let mut group_cols: Vec<String> = Vec::with_capacity(spec.group_by.len());
+    for col in &spec.group_by {
+        let ident = quote_mysql_ident(col)?;
+        select_cols.push(ident.clone());
+        group_cols.push(ident);
+    }
+    for agg in &spec.aggregates {
+        select_cols.push(build_mysql_aggregate_expr(agg)?);
+    }
+
+    let (where_sql, params) = build_owner_filter(op.filter.as_ref(), identity)?;
+    let group_sql = if group_cols.is_empty() {
+        String::new()
+    } else {
+        format!(" GROUP BY {}", group_cols.join(", "))
+    };
+    let order_sql = build_order_by(op.sort.as_ref())?;
+    let limit = op.limit.unwrap_or(1000).min(10_000);
+
+    let sql = format!(
+        "SELECT {cols} FROM {table}{where_sql}{group_sql}{order_sql} LIMIT {limit}",
+        cols = select_cols.join(", ")
+    );
+    let rows: Vec<Row> = q
+        .exec(sql.as_str(), Params::Positional(params))
+        .await
+        .map_err(backend)?;
+    let data: Vec<Value> = rows.into_iter().map(row_to_json).collect();
+    let affected = data.len() as u64;
+    Ok(DataResult {
+        rows: data,
+        affected_rows: affected,
+        next_cursor: None,
+        batch: None,
+    })
+}
+
+/// One `func(arg) AS alias` expression — same contract as the PG builder:
+/// `count` with no field is `COUNT(*)`; everything else requires a field;
+/// `distinct` requires a field.
+fn build_mysql_aggregate_expr(agg: &Aggregate) -> DataPlaneResult<String> {
+    let alias = quote_mysql_ident(&agg.alias)?;
+    let func = match agg.func {
+        AggFunc::Count => "COUNT",
+        AggFunc::Sum => "SUM",
+        AggFunc::Avg => "AVG",
+        AggFunc::Min => "MIN",
+        AggFunc::Max => "MAX",
+    };
+    let arg = match (&agg.field, agg.func) {
+        (Some(field), _) => quote_mysql_ident(field)?,
+        (None, AggFunc::Count) if !agg.distinct => "*".to_string(),
+        (None, _) => {
+            return Err(DataPlaneError::InvalidRequest {
+                message: format!("aggregate '{func}' requires a `field`"),
+            })
+        }
+    };
+    if agg.distinct {
+        Ok(format!("{func}(DISTINCT {arg}) AS {alias}"))
+    } else {
+        Ok(format!("{func}({arg}) AS {alias}"))
+    }
 }
 
 // ── shared helpers ──────────────────────────────────────────────────────────

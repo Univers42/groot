@@ -418,10 +418,29 @@ export class RustDataPlaneProxy {
     op: AdapterOp,
     opts: QueryOpts,
   ): Record<string, unknown> {
+    // Batch wire shape: `data` carries the JSON array of sub-operations (the
+    // planner sizes it against max_batch_size; adapters parse + validate it).
+    // Each item's `resource` defaults to the request's own resource.
+    const data =
+      op === 'batch' && opts.operations
+        ? opts.operations.map((item) => ({
+            op: item.op,
+            resource: item.resource ?? resource,
+            data: item.data ?? null,
+            filter: item.filter ?? null,
+            sort: item.sort ?? null,
+            limit: item.limit ?? null,
+            offset: item.offset ?? null,
+            idempotency_key: null,
+            expected_version: null,
+            returning: null,
+            aggregate: null,
+          }))
+        : opts.data ?? null;
     return {
       op,
       resource,
-      data: opts.data ?? null,
+      data,
       filter: opts.filter ?? null,
       sort: opts.sort ?? null,
       limit: opts.limit ?? null,
@@ -453,9 +472,15 @@ export class RustDataPlaneProxy {
     return headers;
   }
 
-  private normalizeResult(data: { rows?: unknown[]; affected_rows?: number }): QueryResult {
+  private normalizeResult(data: {
+    rows?: unknown[];
+    affected_rows?: number;
+    batch?: QueryResult['batch'];
+  }): QueryResult {
     const rows = Array.isArray(data?.rows) ? (data.rows as Record<string, unknown>[]) : [];
     const rowCount = typeof data?.affected_rows === 'number' ? data.affected_rows : rows.length;
+    // Batch summaries (op=batch only) pass through additively.
+    if (data?.batch) return { rows, rowCount, batch: data.batch };
     return { rows, rowCount };
   }
 

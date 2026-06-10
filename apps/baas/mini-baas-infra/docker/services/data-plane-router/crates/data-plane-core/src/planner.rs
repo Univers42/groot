@@ -106,11 +106,18 @@ mod tests {
 
     #[test]
     fn aggregate_gated_by_capability() {
-        // Postgres advertises aggregate; the others don't → clean 400, not 501.
-        assert!(validate_operation(&op(Aggregate, None), "postgresql", &EngineCapabilities::postgresql()).is_ok());
+        // pg/mysql/mongo serve aggregate; redis/http don't → clean 400, not 501.
         for (name, caps) in [
+            ("postgresql", EngineCapabilities::postgresql()),
             ("mysql", EngineCapabilities::mysql()),
             ("mongodb", EngineCapabilities::mongodb()),
+        ] {
+            assert!(
+                validate_operation(&op(Aggregate, None), name, &caps).is_ok(),
+                "{name} should serve aggregate"
+            );
+        }
+        for (name, caps) in [
             ("redis", EngineCapabilities::redis()),
             ("http", EngineCapabilities::http()),
         ] {
@@ -125,25 +132,27 @@ mod tests {
     }
 
     #[test]
-    fn batch_is_rejected_when_engine_lacks_batch_capability() {
-        // No adapter implements Batch today (batch:false everywhere), so the
-        // planner must reject it cleanly (400) rather than let it die as a 501
-        // inside the adapter. This is the honesty fix.
+    fn batch_gated_by_capability() {
+        // pg/mysql/mongo/redis serve batch; http does not (a remote REST
+        // passthrough cannot give batch semantics) → clean 400, not 501.
         for (name, caps) in [
             ("postgresql", EngineCapabilities::postgresql()),
             ("mongodb", EngineCapabilities::mongodb()),
             ("mysql", EngineCapabilities::mysql()),
             ("redis", EngineCapabilities::redis()),
-            ("http", EngineCapabilities::http()),
         ] {
-            assert!(!caps.batch, "{name} must not advertise batch yet");
-            let err = validate_operation(&op(Batch, None), name, &caps).unwrap_err();
-            match err {
-                DataPlaneError::UnsupportedCapability { capability, .. } => {
-                    assert_eq!(capability, "batch", "{name}");
-                }
-                other => panic!("{name}: expected UnsupportedCapability, got {other:?}"),
+            assert!(
+                validate_operation(&op(Batch, None), name, &caps).is_ok(),
+                "{name} should serve batch"
+            );
+        }
+        let err =
+            validate_operation(&op(Batch, None), "http", &EngineCapabilities::http()).unwrap_err();
+        match err {
+            DataPlaneError::UnsupportedCapability { capability, .. } => {
+                assert_eq!(capability, "batch");
             }
+            other => panic!("http: expected UnsupportedCapability, got {other:?}"),
         }
     }
 

@@ -100,4 +100,65 @@ pub struct DataResult {
     pub rows: Vec<Value>,
     pub affected_rows: u64,
     pub next_cursor: Option<String>,
+    /// Per-item outcomes — present only for `op = Batch`. Absent on every
+    /// other operation so the wire shape of existing responses is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub batch: Option<BatchSummary>,
+}
+
+/// The result envelope of a batch: whether the engine executed it atomically
+/// (SQL engines wrap the items in one transaction; document/KV engines run
+/// them *ordered*, stopping at the first error) and one outcome per item.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BatchSummary {
+    /// `true` → all-or-nothing (a failed item rolled the whole batch back);
+    /// `false` → ordered execution, items before a failure are persisted.
+    pub atomic: bool,
+    pub items: Vec<BatchItemOutcome>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BatchItemOutcome {
+    pub index: u32,
+    pub status: BatchItemStatus,
+    pub affected_rows: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BatchItemStatus {
+    Ok,
+    Error,
+    /// Not executed because an earlier item failed (non-atomic engines only).
+    Skipped,
+}
+
+impl DataOperation {
+    /// Parses and validates the batch payload: `data` must be a non-empty JSON
+    /// array of sub-operations, none of which may itself be a batch. The
+    /// per-engine size ceiling is the planner's job (`max_batch_size`); this
+    /// guards shape only, so every adapter shares one wire contract.
+    pub fn batch_items(&self) -> Result<Vec<DataOperation>, String> {
+        let Some(Value::Array(raw)) = self.data.as_ref() else {
+            return Err("batch requires `data` to be a JSON array of sub-operations".to_string());
+        };
+        if raw.is_empty() {
+            return Err("batch requires at least one sub-operation".to_string());
+        }
+        let mut items = Vec::with_capacity(raw.len());
+        for (idx, item) in raw.iter().enumerate() {
+            let sub: DataOperation = serde_json::from_value(item.clone())
+                .map_err(|e| format!("batch item {idx} is not a valid operation: {e}"))?;
+            if sub.op == DataOperationKind::Batch {
+                return Err(format!("batch item {idx}: nested batches are not allowed"));
+            }
+            if sub.resource.trim().is_empty() {
+                return Err(format!("batch item {idx}: `resource` is required"));
+            }
+            items.push(sub);
+        }
+        Ok(items)
+    }
 }

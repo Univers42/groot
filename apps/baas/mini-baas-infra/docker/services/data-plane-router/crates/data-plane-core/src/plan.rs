@@ -395,12 +395,28 @@ mod tests {
     // ── Phase 1 still rejects an impossible (engine, op) pair (422 upstream). ──
     #[test]
     fn phase1_rejects_unsupported_op() {
-        // No engine advertises batch today → Phase-1 Reject(UnsupportedCapability).
+        // http is the one engine without batch (a remote REST passthrough has
+        // no batch semantics) → Phase-1 Reject(UnsupportedCapability).
+        let d = plan(
+            &op(DataOperationKind::Batch, None),
+            "http",
+            &EngineCapabilities::http(),
+            &NO_CTX,
+            false,
+        );
+        assert!(
+            matches!(d.plan, Plan::Reject(DataPlaneError::UnsupportedCapability { .. })),
+            "http batch must Phase-1 reject"
+        );
+        // Engines that DO advertise batch pass Phase 1.
         for (name, caps) in engines() {
+            if name == "http" {
+                continue;
+            }
             let d = plan(&op(DataOperationKind::Batch, None), name, &caps, &NO_CTX, false);
             assert!(
-                matches!(d.plan, Plan::Reject(DataPlaneError::UnsupportedCapability { .. })),
-                "{name} batch must Phase-1 reject"
+                !matches!(d.plan, Plan::Reject(_)),
+                "{name} batch must pass Phase 1"
             );
         }
     }

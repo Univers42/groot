@@ -338,7 +338,7 @@ mod tests {
             _op: DataOperation,
             _id: RequestIdentity,
         ) -> DataPlaneResult<DataResult> {
-            Ok(DataResult { rows: vec![], affected_rows: 0, next_cursor: None })
+            Ok(DataResult { rows: vec![], affected_rows: 0, next_cursor: None, batch: None })
         }
         async fn begin(&self, _r: TxBeginRequest) -> DataPlaneResult<Box<dyn TxHandle>> {
             Err(DataPlaneError::NotImplemented { feature: "test".into() })

@@ -97,7 +97,62 @@ export const ADAPTER_OPS = [
   'delete',
   'upsert',
   'aggregate',
+  'batch',
 ] as const;
+
+/** Operations allowed inside a batch — everything except `batch` itself. */
+export const BATCH_ITEM_OPS = [
+  'list',
+  'get',
+  'insert',
+  'update',
+  'delete',
+  'upsert',
+  'aggregate',
+] as const;
+
+/** One batch sub-operation. `resource` defaults to the request's resource;
+ *  nested batches are rejected (`op` excludes `batch`). */
+export class BatchOperationDto {
+  @ApiProperty({ enum: BATCH_ITEM_OPS })
+  @IsEnum(BATCH_ITEM_OPS)
+  op!: (typeof BATCH_ITEM_OPS)[number];
+
+  @ApiPropertyOptional({ description: 'Target table/collection — defaults to the URL resource.' })
+  @IsOptional()
+  @IsString()
+  resource?: string;
+
+  @ApiPropertyOptional({ description: 'Row data for insert / update / upsert.' })
+  @IsOptional()
+  @IsObject()
+  data?: Record<string, unknown>;
+
+  @ApiPropertyOptional({ description: 'WHERE conditions (SQL) or query filter (MongoDB).' })
+  @IsOptional()
+  @IsObject()
+  filter?: Record<string, unknown>;
+
+  @ApiPropertyOptional({ description: 'Sort directive, e.g. `{ created_at: "desc" }`.' })
+  @IsOptional()
+  @IsObject()
+  sort?: Record<string, 'asc' | 'desc'>;
+
+  @ApiPropertyOptional({ minimum: 1, maximum: 500 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(500)
+  limit?: number;
+
+  @ApiPropertyOptional({ minimum: 0 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  offset?: number;
+}
 
 export class ExecuteQueryDto {
   @ApiPropertyOptional({
@@ -169,6 +224,19 @@ export class ExecuteQueryDto {
   @ValidateNested()
   @Type(() => AggregateDto)
   aggregate?: AggregateDto;
+
+  @ApiPropertyOptional({
+    type: [BatchOperationDto],
+    description:
+      'Sub-operations — required when `op: "batch"`. SQL engines run them in ONE transaction ' +
+      '(atomic); mongo/redis run them ordered and stop at the first error. Size is capped by ' +
+      "the engine's max_batch_size.",
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => BatchOperationDto)
+  operations?: BatchOperationDto[];
 
   /** Resolves the effective operation, preferring `op` over the legacy `action`. */
   resolveOp(): AdapterOp | undefined {

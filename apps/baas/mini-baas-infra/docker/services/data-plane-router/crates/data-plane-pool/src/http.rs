@@ -248,6 +248,7 @@ impl HttpPool {
                 rows: vec![],
                 affected_rows: 0,
                 next_cursor: None,
+                batch: None,
             });
         }
         if status.is_server_error() {
@@ -267,6 +268,7 @@ impl HttpPool {
                 rows: vec![],
                 affected_rows: 0,
                 next_cursor: None,
+                batch: None,
             });
         }
         let parsed: Value = serde_json::from_str(&text).unwrap_or(Value::String(text));
@@ -428,6 +430,7 @@ fn shape_response(parsed: Value) -> DataResult {
                 rows: arr,
                 affected_rows: count,
                 next_cursor: None,
+                batch: None,
             }
         }
         Value::Object(mut obj) => {
@@ -437,6 +440,7 @@ fn shape_response(parsed: Value) -> DataResult {
                     rows: arr,
                     affected_rows: count,
                     next_cursor: None,
+                    batch: None,
                 };
             }
             // Re-wrap (we consumed `data` if it existed).
@@ -444,12 +448,14 @@ fn shape_response(parsed: Value) -> DataResult {
                 rows: vec![Value::Object(obj)],
                 affected_rows: 1,
                 next_cursor: None,
+                batch: None,
             }
         }
         _ => DataResult {
             rows: vec![],
             affected_rows: 0,
             next_cursor: None,
+            batch: None,
         },
     }
 }
