@@ -16,6 +16,10 @@ axum = { workspace = true }
 # Phase 7 bypass: Rust-native API-key verification (tenant-control) + mount
 # resolution (adapter-registry) over HTTP. Go stays the identity authority.
 reqwest = { workspace = true }
+# Phase 7d: outbox emission to the system Postgres (realtime/webhooks/
+# projections read public.outbox_events and must keep firing post-cutover).
+deadpool-postgres = { workspace = true }
+tokio-postgres = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
