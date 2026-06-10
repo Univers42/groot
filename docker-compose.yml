@@ -807,6 +807,57 @@ services:
     entrypoint: ["/bin/bash", "/app/docker/services/browser-tests/entrypoint.sh"]
     command: ["node", "scripts/playground-simulation.mjs"]
 
+  # agency-simulation — the Binocle Intelligence Agency end-to-end Playwright
+  # run (make agency-sim): multi-context org simulation (owner + employees)
+  # over the REAL stack. Same image/harness as playground-simulation; host
+  # networking reaches the website (4322), app (3001), bridge (4000), root
+  # Kong (8000), mini-baas Kong (8002), Mailpit (8025) and LiveKit (7880).
+  # env_file supplies SERVICE_ROLE_KEY for the gotrue invite leg.
+  agency-simulation:
+    profiles:
+      - testing
+    image: ${PLAYGROUND_SIMULATION_IMAGE:-track-binocle/playground-simulation:local}
+    build:
+      context: ./apps/osionos/app
+      dockerfile: docker/services/browser-tests/Dockerfile
+    working_dir: /app
+    init: true
+    ipc: host
+    network_mode: host
+    env_file:
+      - path: ./.env.local
+        required: false
+      - path: ./apps/baas/.env.local
+        required: false
+    environment:
+      CI: "1"
+      NODE_ENV: test
+      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      AGENCY_WEBSITE_URL: https://127.0.0.1:4322
+      AGENCY_APP_URL: https://127.0.0.1:3001
+      AGENCY_BRIDGE_URL: https://127.0.0.1:4000
+      AGENCY_KONG_URL: https://127.0.0.1:8000
+      AGENCY_MAILPIT_URL: http://127.0.0.1:8025
+      AGENCY_LIVEKIT_HTTP_URL: http://127.0.0.1:7880
+      AGENCY_ARTIFACTS_DIR: /app/test-results/agency-simulation
+      AGENCY_PEOPLE_ENV: /seeds/.agency-people.env
+      AGENCY_TENANT_ENV: /seeds/.agency-tenant.env
+      AGENCY_HEADLESS: ${AGENCY_HEADLESS:-1}
+      AGENCY_SLOWMO_MS: ${AGENCY_SLOWMO_MS:-40}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecret-livekit-local-0123456789abcdef}
+      NODE_EXTRA_CA_CERTS: /certs/track-binocle-local-ca.pem
+    volumes:
+      - ./apps/osionos/app:/app
+      - ./apps/baas/certs:/certs:ro
+      - ./tools/seeds/.agency-people.env:/seeds/.agency-people.env:ro
+      - ./apps/baas/mini-baas-infra/.agency-tenant.env:/seeds/.agency-tenant.env:ro
+      - osionos-browser-test-node-modules:/app/node_modules
+      - osionos-browser-test-pnpm-store:/pnpm/store
+    entrypoint: ["/bin/bash", "/app/docker/services/browser-tests/entrypoint.sh"]
+    command: ["node", "scripts/agency-simulation.mjs"]
+
 volumes:
   track-binocle-vault-data:
   track-binocle-postgres-data:

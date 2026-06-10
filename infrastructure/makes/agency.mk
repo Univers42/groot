@@ -11,7 +11,7 @@
 AGENCY_SEEDS_DIR  := tools/seeds
 AGENCY_INFRA_DIR  := apps/baas/mini-baas-infra
 
-.PHONY: agency-people agency-seed agency-policies agency-content agency-verify agency-sim agency-all
+.PHONY: agency-people agency-seed agency-policies agency-content agency-verify agency-verify-platform agency-sim agency-all
 
 agency-people: ## Agency: create owner + 20 employees (gotrue, bridge identities, org workspace)
 	bash $(AGENCY_SEEDS_DIR)/seed_agency_people.sh
@@ -34,6 +34,9 @@ agency-content: ## Agency: seed wikis, galleries, teamspaces, channels + feed ba
 
 agency-verify: ## Agency: run the m23 foundation gate (tables, accounts, policy decisions)
 	bash $(AGENCY_INFRA_DIR)/scripts/verify/m23-agency-foundation.sh
+
+agency-verify-platform: ## Agency: run the m23 platform gate (bundle, chat+WS, DM privacy, video, feed, masks)
+	bash $(AGENCY_INFRA_DIR)/scripts/verify/m23-agency-platform.sh
 
 agency-sim: ## Agency: run the Playwright end-to-end organization simulation
 	docker compose --profile testing run --rm agency-simulation

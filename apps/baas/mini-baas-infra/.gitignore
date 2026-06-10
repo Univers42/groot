@@ -383,3 +383,4 @@ certs/*
 
 # generated tenant/key state from scripts/seed/agency-tenant.sh (live API key)
 .agency-tenant.env
+.gourmand-tenant.env

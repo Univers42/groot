@@ -82,8 +82,11 @@ n=$(RPSQL -c "SELECT count(*) FROM auth.users WHERE email LIKE '%@agency.local'"
 [[ "${n}" == "21" ]] || fail "expected 21 gotrue accounts, found ${n}"
 n=$(RPSQL -c "SELECT count(*) FROM osionos_bridge_identities i JOIN auth.users u ON u.id=i.user_id WHERE u.email LIKE '%@agency.local'")
 [[ "${n}" == "21" ]] || fail "expected 21 bridge identities, found ${n}"
-n=$(RPSQL -c "SELECT count(*) FROM osionos_workspace_members WHERE workspace_id='${ORG_WS_ID}'")
-[[ "${n}" == "21" ]] || fail "expected 21 org members, found ${n}"
+# Count the ROSTER members (joined to @agency.local accounts) — the org
+# workspace legitimately gains extra members over time (invites are a live
+# feature; the dev account may also join), so an exact total would be brittle.
+n=$(RPSQL -c "SELECT count(*) FROM osionos_workspace_members m JOIN auth.users u ON u.id=m.user_id WHERE m.workspace_id='${ORG_WS_ID}' AND u.email LIKE '%@agency.local'")
+[[ "${n}" == "21" ]] || fail "expected the 21 roster accounts as org members, found ${n}"
 # Invite-path evidence is generated fresh each run (Mailpit is an in-memory
 # sink — historical emails do not survive container restarts): invite a probe
 # user, assert the email lands, then delete the probe account.
