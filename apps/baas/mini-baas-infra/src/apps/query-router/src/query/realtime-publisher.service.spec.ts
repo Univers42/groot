@@ -11,6 +11,7 @@ import { ExecuteQueryDto } from './dto/query.dto';
 import type { TxnOpDto } from './dto/txn.dto';
 import type { OutboxService } from './outbox.service';
 import type { RustDataPlaneProxy } from '../proxy/rust-data-plane.proxy';
+import type { AutomationsService } from './automations.service';
 
 // ── shared fetch mock (the publisher's only transport) ──────────────────────
 
@@ -161,14 +162,16 @@ function buildQueryService() {
     rollbackTransaction: jest.fn(async () => undefined),
   };
   const realtime = buildPublisher();
+  const automations = { runForWrite: jest.fn(async () => undefined) };
   const service = new QueryService(
     config,
     {} as HttpService,
     outbox as unknown as OutboxService,
     rustProxy as unknown as RustDataPlaneProxy,
     realtime,
+    automations as unknown as AutomationsService,
   );
-  return { service, outbox, rustProxy, realtime };
+  return { service, outbox, rustProxy, realtime, automations };
 }
 
 function queryDto(input: Partial<ExecuteQueryDto>): ExecuteQueryDto {

@@ -99,6 +99,29 @@ export class RealtimePublisherService {
     });
   }
 
+  /**
+   * Publish an `automation_fired` event (notify action) on the table's
+   * channel — every subscribed client can toast it.
+   */
+  async publishAutomationFired(
+    dbId: string,
+    table: string,
+    ruleId: string,
+    ruleName: string,
+    message: string,
+    pk: unknown,
+  ): Promise<void> {
+    await this.post(`table:${dbId}:${table}`, 'automation_fired', undefined, {
+      dbId,
+      table,
+      ruleId,
+      ruleName,
+      message,
+      pk: this.sanitizeFilter(pk),
+      ts: new Date().toISOString(),
+    });
+  }
+
   /** POST one event envelope. Best-effort: timeout-capped, never throws. */
   private async post(
     topic: string,
