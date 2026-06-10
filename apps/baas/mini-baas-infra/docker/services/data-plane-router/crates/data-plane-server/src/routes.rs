@@ -20,7 +20,7 @@ use data_plane_core::{
 };
 use data_plane_pool::{
     DefaultPoolRegistry, EnvMountResolver, HttpEngineAdapter, MongoEngineAdapter,
-    MysqlEngineAdapter, PostgresEngineAdapter, ProviderConfig, RedisEngineAdapter,
+    MysqlEngineAdapter, PgDialect, PostgresEngineAdapter, ProviderConfig, RedisEngineAdapter,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -173,6 +173,13 @@ impl AppState {
         ));
         let postgres: Arc<dyn EngineAdapter> =
             Arc::new(PostgresEngineAdapter::new(resolver.clone()));
+        // CockroachDB rides the Postgres adapter (pgwire) under its own engine
+        // id with a serializable-only descriptor, so a `cockroachdb` mount
+        // routes here.
+        let cockroach: Arc<dyn EngineAdapter> = Arc::new(PostgresEngineAdapter::with_dialect(
+            resolver.clone(),
+            PgDialect::Cockroach,
+        ));
         let mongo: Arc<dyn EngineAdapter> =
             Arc::new(MongoEngineAdapter::new(resolver.clone()));
         let mysql: Arc<dyn EngineAdapter> =
@@ -186,7 +193,7 @@ impl AppState {
         let http: Arc<dyn EngineAdapter> =
             Arc::new(HttpEngineAdapter::new(resolver.clone()));
         let adapters: Vec<Arc<dyn EngineAdapter>> =
-            vec![postgres, mongo, mysql, mariadb, redis, http];
+            vec![postgres, cockroach, mongo, mysql, mariadb, redis, http];
         // Boot-time honesty self-check (04/S1b): fail fast if any descriptor
         // advertises an op the adapter doesn't dispatch.
         assert_capability_honesty(&adapters);
@@ -465,11 +472,13 @@ async fn execute_query(
     // Engines with a live Rust pool. MariaDB rides the MySQL adapter. Engines
     // beyond this list (jdbc, cassandra, neo4j, es, qdrant, influx) stay
     // contract-only and are rejected here.
-    let executable_engines = ["postgresql", "mongodb", "mysql", "mariadb", "redis", "http"];
+    let executable_engines = [
+        "postgresql", "cockroachdb", "mongodb", "mysql", "mariadb", "redis", "http",
+    ];
     if !executable_engines.contains(&request.mount.engine.as_str()) {
         return not_implemented(
             "engine_execution_not_enabled",
-            "engine has no Rust pool; supported engines: postgresql, mysql, mariadb, mongodb, redis, http",
+            "engine has no Rust pool; supported engines: postgresql, cockroachdb, mysql, mariadb, mongodb, redis, http",
         );
     }
 
@@ -1140,6 +1149,11 @@ fn default_engines() -> Vec<EngineDescriptor> {
             engine: "postgresql".to_string(),
             phase: "pool_v2_active".to_string(),
             capabilities: EngineCapabilities::postgresql(),
+        },
+        EngineDescriptor {
+            engine: "cockroachdb".to_string(),
+            phase: "pool_v2_active".to_string(),
+            capabilities: EngineCapabilities::cockroachdb(),
         },
         EngineDescriptor {
             engine: "mongodb".to_string(),

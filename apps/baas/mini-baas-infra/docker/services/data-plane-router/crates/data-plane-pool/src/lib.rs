@@ -31,7 +31,7 @@ mod resolver;
 pub use http::HttpEngineAdapter;
 pub use mongo::MongoEngineAdapter;
 pub use mysql::MysqlEngineAdapter;
-pub use postgres::PostgresEngineAdapter;
+pub use postgres::{PgDialect, PostgresEngineAdapter};
 pub use redis::RedisEngineAdapter;
 pub use credential::{
     AdapterRegistryProvider, CredentialProvider, ProviderConfig, ProviderRegistry, VaultProvider,

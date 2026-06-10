@@ -43,7 +43,7 @@ func (s *Service) EnsureSchema(ctx context.Context) error {
 CREATE TABLE IF NOT EXISTS public.tenant_databases (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id       TEXT NOT NULL,
-  engine          TEXT NOT NULL CHECK (engine IN ('postgresql','mongodb','mysql','mariadb','redis','sqlite','http','jdbc','cassandra','neo4j','elasticsearch','qdrant','influx')),
+  engine          TEXT NOT NULL CHECK (engine IN ('postgresql','cockroachdb','mongodb','mysql','mariadb','redis','sqlite','mssql','http','jdbc','cassandra','neo4j','elasticsearch','qdrant','influx')),
   name            TEXT NOT NULL CHECK (char_length(name) BETWEEN 1 AND 64),
   connection_enc  BYTEA NOT NULL,
   connection_iv   BYTEA NOT NULL,
@@ -61,13 +61,13 @@ ALTER TABLE public.tenant_databases ADD COLUMN IF NOT EXISTS isolation TEXT NOT 
 ALTER TABLE public.tenant_databases DROP CONSTRAINT IF EXISTS tenant_databases_isolation_check;
 ALTER TABLE public.tenant_databases ADD CONSTRAINT tenant_databases_isolation_check
   CHECK (isolation IN ('shared_rls','schema_per_tenant','db_per_tenant','tenant_owned'));
--- Idempotently widen the engine CHECK so a mariadb mount registers on
--- upgraded databases (older installs baked an engine list without it). The
--- broad set stays at the DB layer; control-plane allowedEngines is the honest
--- ACCEPT gate (only engines with a live Rust pool).
+-- Idempotently widen the engine CHECK so newer engine ids (mariadb,
+-- cockroachdb, mssql) register on upgraded databases (older installs baked a
+-- narrower engine list). The broad set stays at the DB layer; control-plane
+-- allowedEngines is the honest ACCEPT gate (only engines with a live Rust pool).
 ALTER TABLE public.tenant_databases DROP CONSTRAINT IF EXISTS tenant_databases_engine_check;
 ALTER TABLE public.tenant_databases ADD CONSTRAINT tenant_databases_engine_check
-  CHECK (engine IN ('postgresql','mongodb','mysql','mariadb','redis','sqlite','http','jdbc','cassandra','neo4j','elasticsearch','qdrant','influx'));
+  CHECK (engine IN ('postgresql','cockroachdb','mongodb','mysql','mariadb','redis','sqlite','mssql','http','jdbc','cassandra','neo4j','elasticsearch','qdrant','influx'));
 ALTER TABLE public.tenant_databases ENABLE ROW LEVEL SECURITY;
 -- Retire the pre-M12 broken policy on upgrade.
 DROP POLICY IF EXISTS tenant_isolation ON public.tenant_databases;

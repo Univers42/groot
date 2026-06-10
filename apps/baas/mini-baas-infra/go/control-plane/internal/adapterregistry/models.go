@@ -12,12 +12,13 @@ import "fmt"
 // rejected these), so existing rows are untouched; only NEW registrations of
 // an unserved engine are refused here.
 var allowedEngines = map[string]bool{
-	"postgresql": true,
-	"mysql":      true,
-	"mariadb":    true,
-	"mongodb":    true,
-	"redis":      true,
-	"http":       true,
+	"postgresql":  true,
+	"cockroachdb": true,
+	"mysql":       true,
+	"mariadb":     true,
+	"mongodb":     true,
+	"redis":       true,
+	"http":        true,
 }
 
 // allowedIsolation mirrors the tenant isolation strategies the data plane

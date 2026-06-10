@@ -238,6 +238,39 @@ services:
     mem_limit: 384m
     cpus: 0.5
 
+  # ─── CockroachDB (engines-extra — distributed-SQL agnosticism proof) ──
+  # Speaks the PostgreSQL wire protocol, so it is served by the SAME Rust
+  # Postgres adapter under the `cockroachdb` engine id (PgDialect::Cockroach):
+  # serializable-only isolation, no LISTEN/NOTIFY streaming. Single insecure
+  # node; RAM-capped via --cache/--max-sql-memory so it stays inside mem_limit.
+  # Optional `engines-extra` profile (the `engines` plane / Max package).
+  cockroach:
+    image: cockroachdb/cockroach:v24.3.5
+    container_name: mini-baas-cockroach
+    profiles: [engines-extra]
+    # --advertise-addr=cockroach (the in-network alias) lets it listen on all
+    # interfaces by default; an explicit --listen-addr=0.0.0.0 is rejected by
+    # v24's single-node guard. RAM-capped via --cache/--max-sql-memory.
+    command: >
+      start-single-node --insecure --advertise-addr=cockroach
+      --cache=256MiB --max-sql-memory=256MiB --http-addr=0.0.0.0:8080
+    ports:
+      - "${COCKROACH_PORT:-26257}:26257"
+      - "${COCKROACH_HTTP_PORT:-28080}:8080"
+    volumes:
+      - cockroach-data:/cockroach/cockroach-data
+    networks:
+      - mini-baas
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "cockroach", "sql", "--insecure", "--host=127.0.0.1:26257", "-e", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    mem_limit: 1g
+    cpus: 1.0
+
   # ─── Iceberg REST Catalog (M2 federation) ────────────────────────
   iceberg-rest:
     image: apache/iceberg-rest-fixture:1.8.1
@@ -793,7 +826,7 @@ services:
       # corresponding TypeScript engines have been removed.
       RUST_DATA_PLANE_URL: ${RUST_DATA_PLANE_URL:-http://data-plane-router-rust:4011}
       RUST_DATA_PLANE_FORWARD: ${RUST_DATA_PLANE_FORWARD:-1}
-      RUST_DATA_PLANE_FORWARD_ENGINES: ${RUST_DATA_PLANE_FORWARD_ENGINES:-postgresql,mongodb,mysql,mariadb,redis,http}
+      RUST_DATA_PLANE_FORWARD_ENGINES: ${RUST_DATA_PLANE_FORWARD_ENGINES:-postgresql,cockroachdb,mongodb,mysql,mariadb,redis,http}
       RUST_DATA_PLANE_TIMEOUT_MS: ${RUST_DATA_PLANE_TIMEOUT_MS:-5000}
     depends_on:
       adapter-registry-go:
@@ -1552,6 +1585,7 @@ volumes:
   postgres-data:
   mongo-data:
   mysql-data:
+  cockroach-data:
   mariadb-data:
   mongo-keyfile:
   redis-data:

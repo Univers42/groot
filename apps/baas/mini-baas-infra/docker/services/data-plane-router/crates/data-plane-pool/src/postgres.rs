@@ -92,25 +92,62 @@ fn rustls_connector() -> tokio_postgres_rustls::MakeRustlsConnect {
 
 /// PostgreSQL engine adapter. Opens long-lived pools keyed by mount instead of
 /// constructing a client per request (the legacy `new Client()` hot-path cost).
+/// Which PostgreSQL-wire dialect this adapter speaks. CockroachDB serves the
+/// pgwire protocol, so it rides this exact adapter (same `tokio-postgres`
+/// machinery, SQL builders, RLS GUCs, introspection) parameterized by dialect —
+/// the same "one adapter, many engine ids" pattern MariaDB uses for MySQL. The
+/// only divergences are the advertised descriptor (CRDB is serializable-only,
+/// `stream:false`) and transaction isolation handling (see `begin`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PgDialect {
+    Postgres,
+    Cockroach,
+}
+
+impl PgDialect {
+    fn engine_id(self) -> &'static str {
+        match self {
+            PgDialect::Postgres => "postgresql",
+            PgDialect::Cockroach => "cockroachdb",
+        }
+    }
+
+    fn capabilities(self) -> EngineCapabilities {
+        match self {
+            PgDialect::Postgres => EngineCapabilities::postgresql(),
+            PgDialect::Cockroach => EngineCapabilities::cockroachdb(),
+        }
+    }
+}
+
 pub struct PostgresEngineAdapter {
     resolver: Arc<dyn MountResolver>,
+    dialect: PgDialect,
 }
 
 impl PostgresEngineAdapter {
     #[must_use]
     pub fn new(resolver: Arc<dyn MountResolver>) -> Self {
-        Self { resolver }
+        Self { resolver, dialect: PgDialect::Postgres }
+    }
+
+    /// Build the adapter for a specific pgwire dialect (e.g. CockroachDB). The
+    /// registry routes a mount to this adapter by matching `engine()`, so a
+    /// `cockroachdb` mount lands on a Cockroach-dialect instance.
+    #[must_use]
+    pub fn with_dialect(resolver: Arc<dyn MountResolver>, dialect: PgDialect) -> Self {
+        Self { resolver, dialect }
     }
 }
 
 #[async_trait]
 impl EngineAdapter for PostgresEngineAdapter {
     fn engine(&self) -> &str {
-        "postgresql"
+        self.dialect.engine_id()
     }
 
     fn capabilities(&self) -> EngineCapabilities {
-        EngineCapabilities::postgresql()
+        self.dialect.capabilities()
     }
 
     fn supported_ops(&self) -> &'static [DataOperationKind] {
@@ -152,13 +189,14 @@ impl EngineAdapter for PostgresEngineAdapter {
             pool,
             isolation,
             search_path_schema,
+            dialect: self.dialect,
             mount,
         }))
     }
 
     async fn health_check(&self, pool: &dyn EnginePool) -> DataPlaneResult<EngineHealth> {
         Ok(EngineHealth {
-            engine: "postgresql".to_string(),
+            engine: self.dialect.engine_id().to_string(),
             mount_id: pool.mount_id().to_string(),
             status: "unknown".to_string(),
         })
@@ -182,6 +220,10 @@ pub struct PostgresPool {
     /// `schema_per_tenant`; `None` (shared_rls / db_per_tenant) is the parity
     /// path — no `SET LOCAL search_path`, byte-identical to before G5.
     search_path_schema: Option<String>,
+    /// The pgwire dialect this pool speaks. `Postgres` is the parity path;
+    /// `Cockroach` only changes transaction-isolation lowering in `begin`
+    /// (CRDB is serializable-only). Captured once at `open_pool`.
+    dialect: PgDialect,
     /// Retained mount for migration-time schema derivation
     /// ([`DatabaseMount::tenant_schema`] in `apply_migration`). Cheap: opened
     /// once per pool, not per request.
@@ -253,19 +295,26 @@ impl EnginePool for PostgresPool {
         // Use raw `BEGIN` rather than `client.transaction()` so we can drop
         // the conn back to the pool at COMMIT/ROLLBACK time without juggling
         // self-referential lifetimes.
-        let isolation_sql = match request.isolation {
-            Some(data_plane_core::IsolationLevel::ReadCommitted) => {
-                "BEGIN ISOLATION LEVEL READ COMMITTED"
-            }
-            Some(data_plane_core::IsolationLevel::RepeatableRead) => {
-                "BEGIN ISOLATION LEVEL REPEATABLE READ"
-            }
-            Some(data_plane_core::IsolationLevel::Serializable) => {
-                "BEGIN ISOLATION LEVEL SERIALIZABLE"
-            }
-            // PG has no "Snapshot" isolation level; fall back to RR which is
-            // the closest snapshot semantics in standard PG.
-            Some(data_plane_core::IsolationLevel::Snapshot) | None => "BEGIN",
+        // CockroachDB serves SERIALIZABLE only (its descriptor advertises just
+        // that level), and its default tx isolation already IS serializable, so
+        // a plain `BEGIN` is both correct and avoids requesting a weaker level
+        // the engine would silently upgrade. Postgres keeps the full mapping.
+        let isolation_sql = match self.dialect {
+            PgDialect::Cockroach => "BEGIN",
+            PgDialect::Postgres => match request.isolation {
+                Some(data_plane_core::IsolationLevel::ReadCommitted) => {
+                    "BEGIN ISOLATION LEVEL READ COMMITTED"
+                }
+                Some(data_plane_core::IsolationLevel::RepeatableRead) => {
+                    "BEGIN ISOLATION LEVEL REPEATABLE READ"
+                }
+                Some(data_plane_core::IsolationLevel::Serializable) => {
+                    "BEGIN ISOLATION LEVEL SERIALIZABLE"
+                }
+                // PG has no "Snapshot" isolation level; fall back to RR which is
+                // the closest snapshot semantics in standard PG.
+                Some(data_plane_core::IsolationLevel::Snapshot) | None => "BEGIN",
+            },
         };
         client
             .execute(isolation_sql, &[])

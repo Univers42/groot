@@ -17,14 +17,15 @@
 
 use data_plane_core::{DataOperationKind, EngineCapabilities};
 
-const ENGINES: [&str; 6] = ["postgresql", "mysql", "mariadb", "mongodb", "redis", "http"];
+const ENGINES: [&str; 7] =
+    ["postgresql", "cockroachdb", "mysql", "mariadb", "mongodb", "redis", "http"];
 
 /// The operation kinds each adapter's `dispatch_op` actually serves — read from
 /// the very `SUPPORTED_OPS` const the dispatch gate uses, so this is the real
 /// dispatch surface, not a mirror of it.
 fn dispatch_reality(engine: &str) -> &'static [DataOperationKind] {
     match engine {
-        "postgresql" => crate::postgres::SUPPORTED_OPS,
+        "postgresql" | "cockroachdb" => crate::postgres::SUPPORTED_OPS,
         "mysql" | "mariadb" => crate::mysql::SUPPORTED_OPS,
         "mongodb" => crate::mongo::SUPPORTED_OPS,
         "redis" => crate::redis::SUPPORTED_OPS,
@@ -37,6 +38,7 @@ fn dispatch_reality(engine: &str) -> &'static [DataOperationKind] {
 fn descriptor(engine: &str) -> EngineCapabilities {
     match engine {
         "postgresql" => EngineCapabilities::postgresql(),
+        "cockroachdb" => EngineCapabilities::cockroachdb(),
         "mysql" => EngineCapabilities::mysql(),
         "mariadb" => EngineCapabilities::mariadb(),
         "mongodb" => EngineCapabilities::mongodb(),

@@ -86,6 +86,12 @@ dsn_for() {
     redis)
       container_up mini-baas-redis || return 1
       echo "redis://redis:6379" ;;
+    cockroachdb)
+      container_up mini-baas-cockroach || return 1
+      # Insecure single-node: root, no password, sslmode=disable. The suite
+      # qualifies its probe table to public.conf_probe (CRDB shares pg's
+      # "$user", public search_path quirk).
+      echo "postgres://root@cockroach:26257/defaultdb?sslmode=disable" ;;
     *) return 2 ;;
   esac
 }
@@ -135,8 +141,8 @@ if [[ $# -ge 1 ]]; then
   ENGINES=("$1")
 else
   # Always-on engines + engines-extra (mariadb/cockroachdb/mssql, skipped
-  # cleanly when their profile isn't up).
-  ENGINES=(postgresql mysql mariadb mongodb redis)
+  # cleanly when their profile isn't up — run_engine returns 2=skip).
+  ENGINES=(postgresql mysql mariadb cockroachdb mongodb redis)
 fi
 
 FAILED=0

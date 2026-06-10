@@ -142,6 +142,20 @@ impl EngineCapabilities {
         }
     }
 
+    /// CockroachDB — served by the Postgres adapter over pgwire (same CRUD /
+    /// upsert / batch / aggregate / introspection surface), so the op flags
+    /// match Postgres. It diverges honestly in two ways: it offers only
+    /// SERIALIZABLE isolation (its sole transaction level), and it does not
+    /// expose the LISTEN/NOTIFY streaming Postgres does (`stream: false`).
+    #[must_use]
+    pub fn cockroachdb() -> Self {
+        Self {
+            stream: false,
+            isolation_levels: vec![IsolationLevel::Serializable],
+            ..Self::postgresql()
+        }
+    }
+
     #[must_use]
     pub fn mongodb() -> Self {
         Self {

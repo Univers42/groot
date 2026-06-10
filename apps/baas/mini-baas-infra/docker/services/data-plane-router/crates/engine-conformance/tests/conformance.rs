@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use data_plane_core::EngineAdapter;
 use data_plane_pool::{
-    EnvMountResolver, MongoEngineAdapter, MountResolver, MysqlEngineAdapter,
+    EnvMountResolver, MongoEngineAdapter, MountResolver, MysqlEngineAdapter, PgDialect,
     PostgresEngineAdapter, RedisEngineAdapter,
 };
 use engine_conformance::{mount_for, run_suite};
@@ -35,6 +35,9 @@ async fn engine_conformance() {
     let resolver: Arc<dyn MountResolver> = Arc::new(EnvMountResolver::default());
     let adapter: Arc<dyn EngineAdapter> = match engine.as_str() {
         "postgresql" => Arc::new(PostgresEngineAdapter::new(resolver)),
+        "cockroachdb" => {
+            Arc::new(PostgresEngineAdapter::with_dialect(resolver, PgDialect::Cockroach))
+        }
         "mysql" => Arc::new(MysqlEngineAdapter::new(resolver)),
         "mariadb" => Arc::new(MysqlEngineAdapter::with_engine_name(resolver, "mariadb")),
         "mongodb" => Arc::new(MongoEngineAdapter::new(resolver)),
