@@ -62,6 +62,11 @@ export interface RustProxyContext {
    *  schema_per_tenant | db_per_tenant). The Rust pool uses it to pin
    *  `search_path` for schema_per_tenant mounts. */
   isolation?: string;
+  /** Phase 4 tiering: the tenant's package capability mask (capability bools +
+   *  rps/burst) from adapter-registry. Stamped onto the mount so the Rust
+   *  planner narrows by it (403) and the token bucket reads rps/burst (429).
+   *  Absent → untiered (parity, no enforcement). */
+  capabilityOverrides?: Record<string, unknown>;
   /** Correlation id + W3C trace context, forwarded so the Rust data plane logs
    *  join the same distributed trace as the gateway and this service. */
   requestId?: string;
@@ -407,7 +412,9 @@ export class RustDataPlaneProxy {
         version: context.credentialVersion,
       },
       pool_policy: { min: 0, max: 10, idle_ttl_ms: 30_000, max_lifetime_ms: 1_800_000 },
-      capability_overrides: null,
+      // Phase 4 tiering: the tenant's package mask drives the Rust planner's
+      // capability gate (403) + per-tenant token bucket (429). null → untiered.
+      capability_overrides: context.capabilityOverrides ?? null,
       inline_dsn: context.connectionString,
       isolation: context.isolation ?? null,
     };

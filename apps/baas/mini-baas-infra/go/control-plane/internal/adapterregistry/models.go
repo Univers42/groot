@@ -82,4 +82,12 @@ type ConnectionResult struct {
 	// Isolation tells the data plane how to scope this mount (shared_rls |
 	// schema_per_tenant | db_per_tenant).
 	Isolation string `json:"isolation"`
+	// Package is the resolved tier name (Phase 4), e.g. "essential"/"pro"/"max".
+	// Informational for the query-router / observability.
+	Package string `json:"package,omitempty"`
+	// CapabilityOverrides is the tenant's tier mask (capability bools + rps/burst)
+	// the query-router stamps onto the mount it forwards to Rust, where the
+	// planner narrows by it (403 capability_gated) and the token bucket reads
+	// rps/burst (429). Nil when tiering is disabled (parity).
+	CapabilityOverrides map[string]any `json:"capability_overrides,omitempty"`
 }

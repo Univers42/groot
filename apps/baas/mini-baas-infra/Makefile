@@ -83,16 +83,32 @@ EDITION_full      := $(filter-out playground,$(PLANES))
 # Which edition `make up` / `make down` operate on by default.
 EDITION ?= query
 
+# A PACKAGE is the customer-facing service tier (Phase 4 — mirrors
+# config/packages/packages.json): like an EDITION but named for the product
+# catalog. ADDONS appends à-la-carte planes (realtime/analytics/engines/…).
+# `make up PACKAGE=pro ADDONS="analytics engines"` resolves to compose profiles
+# exactly like EDITION. Precedence: PROFILES > PACKAGE > EDITION.
+PACKAGES := essential pro max
+PACKAGE_essential := data go rust adapter background
+PACKAGE_pro       := $(PACKAGE_essential) storage realtime
+PACKAGE_max       := $(PACKAGE_pro) analytics observability functions engines
+ADDONS ?=
+
 # Functions: plane-list -> sorted profiles -> `--profile x --profile y`
 profiles_of = $(sort $(foreach p,$(1),$(PROFILES_$(p))))
 flags_of    = $(addprefix --profile ,$(call profiles_of,$(1)))
 
-# Active profiles for the generic edition-driven verbs. `PROFILES=` overrides
-# the edition for ad-hoc shapes:  make up PROFILES="data-plane storage"
-ifndef PROFILES
-ACTIVE_PROFILES := $(call profiles_of,$(EDITION_$(EDITION)))
-else
+# Active profiles for the generic edition-driven verbs. Precedence:
+#   PROFILES= (raw profiles) > PACKAGE= (+ADDONS, the product tier) > EDITION=.
+#   make up PROFILES="data-plane storage"     # ad-hoc raw profiles
+#   make up PACKAGE=pro ADDONS="analytics"    # a product tier + add-on
+#   make up EDITION=realtime                  # a known-good edition
+ifdef PROFILES
 ACTIVE_PROFILES := $(PROFILES)
+else ifdef PACKAGE
+ACTIVE_PROFILES := $(call profiles_of,$(PACKAGE_$(PACKAGE)) $(ADDONS))
+else
+ACTIVE_PROFILES := $(call profiles_of,$(EDITION_$(EDITION)))
 endif
 PROFILE_FLAGS := $(addprefix --profile ,$(ACTIVE_PROFILES))
 DCE           := $(DC) $(PROFILE_FLAGS)
@@ -214,6 +230,11 @@ planes: ## List planes and the profiles they activate
 editions: ## List editions and the planes they include
 	@echo -e "$(_W)$(_C)Editions$(_0)  (use: make up EDITION=<name>)"
 	@$(foreach e,$(EDITIONS),printf "  $(_G)%-10s$(_0) $(_D)%s$(_0)\n" "$(e)" "$(if $(EDITION_$(e)),$(EDITION_$(e)),core only)";)
+
+packages: ## List service-tier packages and the planes they include (Phase 4)
+	@echo -e "$(_W)$(_C)Packages$(_0)  (use: make up PACKAGE=<tier> ADDONS=\"<plane>…\")"
+	@$(foreach p,$(PACKAGES),printf "  $(_G)%-10s$(_0) $(_D)%s$(_0)\n" "$(p)" "$(PACKAGE_$(p))";)
+	@echo -e "  $(_D)source of truth: config/packages/packages.json (capability masks + limits + engines)$(_0)"
 
 doctor: ## Environment sanity check
 	@echo -e "$(_B)Doctor$(_0)"

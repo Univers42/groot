@@ -3,8 +3,11 @@ package adapterregistry
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"os"
 
+	"github.com/dlesieur/mini-baas/control-plane/internal/packages"
 	"github.com/dlesieur/mini-baas/control-plane/internal/shared"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -16,16 +19,64 @@ var ErrNotFound = errors.New("database not found")
 // ErrConflict is returned on the (tenant_id, name) unique violation.
 var ErrConflict = errors.New("database already registered")
 
+// ErrEngineNotInPackage is returned when a tenant tries to register a mount for
+// an engine its package tier does not include (Phase 4).
+var ErrEngineNotInPackage = errors.New("engine not included in tenant package")
+
+// ErrMountQuotaExceeded is returned when a tenant is already at its package's
+// max_mounts cap (Phase 4).
+var ErrMountQuotaExceeded = errors.New("tenant has reached its package mount quota")
+
 // Service implements the adapter-registry control-plane logic.
 type Service struct {
-	db  *shared.Postgres
-	enc *Encryptor
-	log *slog.Logger
+	db   *shared.Postgres
+	enc  *Encryptor
+	log  *slog.Logger
+	pkgs *packages.Manifest
+	// enforce gates package tiering (engine allowlist + mount quota +
+	// capability_overrides on /connect). Defaults OFF (opt-in via
+	// PACKAGE_ENFORCEMENT=1) so enabling tiering NEVER retroactively gates
+	// existing `free` tenants — the shadow→cutover discipline: the capability
+	// ships dormant (parity), the operator turns it on once tenant plans are
+	// set. When OFF, /connect emits no mask and registration gates nothing.
+	enforce bool
 }
 
-// NewService wires the store dependencies.
+// NewService wires the store dependencies. The package manifest is loaded once
+// (embedded, so this never touches the filesystem); a manifest-load failure is
+// logged and tiering degrades to OFF (fail-open to parity, never fail-closed on
+// a config bug — a broken manifest must not take the data path down).
 func NewService(db *shared.Postgres, enc *Encryptor, log *slog.Logger) *Service {
-	return &Service{db: db, enc: enc, log: log}
+	s := &Service{db: db, enc: enc, log: log, enforce: os.Getenv("PACKAGE_ENFORCEMENT") == "1"}
+	m, err := packages.Load()
+	if err != nil {
+		log.Warn("package manifest load failed; tiering disabled", "error", err)
+		s.enforce = false
+		return s
+	}
+	s.pkgs = m
+	return s
+}
+
+// packageForTenant resolves a tenant slug to its (name, package) via the
+// tenant's `plan` column. Returns ok=false when tiering is disabled or the
+// manifest is unavailable, so callers cleanly skip enforcement (parity).
+func (s *Service) packageForTenant(ctx context.Context, tenantSlug string) (string, packages.Package, bool) {
+	if !s.enforce || s.pkgs == nil {
+		return "", packages.Package{}, false
+	}
+	var plan string
+	rows, err := s.db.AdminQuery(ctx, `SELECT plan FROM public.tenants WHERE slug = $1`, tenantSlug)
+	if err == nil {
+		defer rows.Close()
+		if rows.Next() {
+			_ = rows.Scan(&plan)
+		}
+	} else {
+		s.log.Warn("package lookup failed; treating as default tier", "tenant", tenantSlug, "error", err)
+	}
+	name, pkg := s.pkgs.For(plan)
+	return name, pkg, true
 }
 
 // EnsureSchema creates public.tenant_databases idempotently. The live schema
@@ -95,8 +146,28 @@ func (s *Service) Register(ctx context.Context, userID string, req RegisterDatab
 		isolation = "shared_rls"
 	}
 
+	// Phase 4 tiering: the engine must be in the tenant's package, and the
+	// tenant must be under its package's max_mounts cap. A no-op when
+	// PACKAGE_ENFORCEMENT=0 / manifest unavailable.
+	_, pkg, tiered := s.packageForTenant(ctx, userID)
+	if tiered && !pkg.AllowsEngine(req.Engine) {
+		return RegisterResult{}, fmt.Errorf("%w: %q (package allows %v)", ErrEngineNotInPackage, req.Engine, pkg.Engines)
+	}
+
 	var out RegisterResult
 	err = s.db.TenantTx(ctx, userID, func(tx pgx.Tx) error {
+		// Mount-quota check INSIDE the tx so the count is consistent with the
+		// insert (no TOCTOU under concurrent registrations).
+		if tiered && pkg.PoolPolicy.MaxMounts > 0 {
+			var count int
+			if err := tx.QueryRow(ctx,
+				`SELECT count(*) FROM public.tenant_databases WHERE tenant_id = $1`, userID).Scan(&count); err != nil {
+				return err
+			}
+			if count >= pkg.PoolPolicy.MaxMounts {
+				return ErrMountQuotaExceeded
+			}
+		}
 		row := tx.QueryRow(ctx,
 			`INSERT INTO public.tenant_databases
 			   (tenant_id, engine, name, connection_enc, connection_iv, connection_tag, connection_salt, isolation)
@@ -107,6 +178,9 @@ func (s *Service) Register(ctx context.Context, userID string, req RegisterDatab
 		)
 		return row.Scan(&out.ID, &out.Engine, &out.Name, &out.CreatedAt)
 	})
+	if errors.Is(err, ErrMountQuotaExceeded) {
+		return RegisterResult{}, err
+	}
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -194,7 +268,15 @@ func (s *Service) GetConnection(ctx context.Context, userID, id string) (Connect
 	if err != nil {
 		return ConnectionResult{}, err
 	}
-	return ConnectionResult{Engine: engine, ConnectionString: conn, Isolation: isolation}, nil
+	result := ConnectionResult{Engine: engine, ConnectionString: conn, Isolation: isolation}
+	// Phase 4 tiering: stamp the tenant's package tier mask so the data plane
+	// enforces capability gating (403) + rate limiting (429). Resolved from the
+	// tenant's `plan`; a no-op when PACKAGE_ENFORCEMENT=0.
+	if name, pkg, ok := s.packageForTenant(ctx, userID); ok {
+		result.Package = name
+		result.CapabilityOverrides = pkg.CapabilityOverrides()
+	}
+	return result, nil
 }
 
 // Remove deletes a database by id (admin scope, bypasses RLS).

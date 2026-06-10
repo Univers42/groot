@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "_comment": "Source of truth for BaaS service tiers (Phase 4). The control plane embeds a byte-identical copy at go/control-plane/internal/packages/packages.json (m28 asserts they match). 'capabilities' is a NARROWING mask: a false flag removes a capability the engine otherwise has; the Rust planner (apply_capability_overrides) can never widen past the engine descriptor. 'engines' gates mount registration. 'limits' feeds the per-tenant token bucket. 'pool_policy.max_mounts' caps how many databases a tenant may register. Addons map 1:1 to compose planes.",
+  "default_package": "essential",
+  "_aliases_comment": "The live tenants.plan CHECK predates tiering and allows only free/pro/enterprise. These aliases map those existing plan values onto the tier names so NO destructive migration is needed: free→essential, enterprise→max ('pro' resolves directly to the pro package).",
+  "aliases": {
+    "free": "essential",
+    "enterprise": "max"
+  },
+  "packages": {
+    "essential": {
+      "label": "Essential",
+      "engines": ["postgresql", "sqlite"],
+      "capabilities": {
+        "read": true,
+        "write": true,
+        "upsert": true,
+        "batch": false,
+        "aggregate": false,
+        "transactions": false,
+        "schema_ddl": false,
+        "ddl": false,
+        "introspect": true
+      },
+      "limits": { "rps": 20, "burst": 40 },
+      "pool_policy": { "max_conn": 5, "max_mounts": 2 },
+      "security_mode": "baseline",
+      "addons": []
+    },
+    "pro": {
+      "label": "Pro",
+      "engines": ["postgresql", "sqlite", "mysql", "mariadb", "mongodb", "redis", "cockroachdb"],
+      "capabilities": {
+        "read": true,
+        "write": true,
+        "upsert": true,
+        "batch": true,
+        "aggregate": true,
+        "transactions": true,
+        "schema_ddl": true,
+        "ddl": true,
+        "introspect": true
+      },
+      "limits": { "rps": 200, "burst": 400 },
+      "pool_policy": { "max_conn": 10, "max_mounts": 10 },
+      "security_mode": "baseline",
+      "addons": ["realtime", "analytics"]
+    },
+    "max": {
+      "label": "Max",
+      "engines": ["postgresql", "sqlite", "mysql", "mariadb", "mongodb", "redis", "cockroachdb", "mssql", "http"],
+      "capabilities": {
+        "read": true,
+        "write": true,
+        "upsert": true,
+        "batch": true,
+        "aggregate": true,
+        "transactions": true,
+        "schema_ddl": true,
+        "ddl": true,
+        "introspect": true
+      },
+      "limits": { "rps": 2000, "burst": 4000 },
+      "pool_policy": { "max_conn": 25, "max_mounts": 50 },
+      "security_mode": "max",
+      "addons": ["realtime", "analytics", "observability", "engines", "functions", "storage"]
+    }
+  },
+  "addons": {
+    "realtime": { "plane": "realtime", "label": "Realtime event bus + IRC bridge" },
+    "analytics": { "plane": "analytics", "label": "Trino/Iceberg analytical queries" },
+    "observability": { "plane": "observability", "label": "Loki/Grafana/Prometheus dashboards" },
+    "engines": { "plane": "engines", "label": "Extra engines (MariaDB, CockroachDB, MSSQL)" },
+    "functions": { "plane": "functions", "label": "Serverless functions runtime" },
+    "storage": { "plane": "storage", "label": "Object storage (MinIO/S3)" }
+  }
+}
