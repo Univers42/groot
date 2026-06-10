@@ -20,22 +20,81 @@ use tokio_postgres::{GenericClient, NoTls};
 
 type BoxedParam = Box<dyn ToSql + Sync + Send>;
 
-/// Does the DSN opt into TLS? Matches both URI (`?sslmode=require`) and
-/// key/value (`sslmode=require`) DSN forms. `prefer`/unset keep the NoTls
-/// path: the local stack's postgres does not speak TLS and parity must hold.
-fn dsn_wants_tls(dsn: &str) -> bool {
-    ["sslmode=require", "sslmode=verify-ca", "sslmode=verify-full"]
-        .iter()
-        .any(|mode| dsn.contains(mode))
+/// The TLS verification posture a mount's DSN opts into.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum TlsMode {
+    /// `sslmode=require` — encrypt, do NOT verify the chain (libpq semantics).
+    Require,
+    /// `sslmode=verify-ca`/`verify-full` — verify the chain against the trust
+    /// store (Phase 6). We always also check the hostname (stricter than bare
+    /// verify-ca, which is a safe over-enforcement).
+    Verify,
 }
 
-/// rustls connector with libpq `sslmode=require` SEMANTICS: encrypt the
-/// channel, do not verify the chain (exactly what `require` means in libpq —
-/// Supabase's server certs chain to their project CA, not a public root, so
-/// `require` is also what their own connection strings specify). `verify-*`
-/// hardening (webpki roots + hostname) is a follow-up; the modes are accepted
-/// today so a stricter DSN still connects encrypted rather than failing.
-fn rustls_connector() -> tokio_postgres_rustls::MakeRustlsConnect {
+/// Parse the strictest TLS verification a DSN asks for. Then apply the security
+/// posture: under `SECURITY_MODE=max`, a bare `require` is UPGRADED to verify
+/// (no more accept-any-cert — closes the MITM hole), unless the operator pins a
+/// lower floor. Returns `None` for a non-TLS DSN (the local NoTls parity path).
+pub(crate) fn effective_tls_mode(dsn: &str, max_security: bool) -> Option<TlsMode> {
+    let asked = if dsn.contains("sslmode=verify-full") || dsn.contains("sslmode=verify-ca") {
+        Some(TlsMode::Verify)
+    } else if dsn.contains("sslmode=require") {
+        Some(TlsMode::Require)
+    } else {
+        None
+    };
+    match (asked, max_security) {
+        // Max mode: `require` is upgraded to real verification.
+        (Some(TlsMode::Require), true) => Some(TlsMode::Verify),
+        (other, _) => other,
+    }
+}
+
+/// Build the rustls connector for the given TLS mode.
+///
+/// * [`TlsMode::Require`] keeps libpq `require` SEMANTICS: encrypt the channel,
+///   do not verify the chain (a Supabase project cert chains to its project CA,
+///   not a public root; `require` is what their own connection strings specify).
+/// * [`TlsMode::Verify`] (Phase 6) does REAL verification: chain + hostname
+///   against the Mozilla webpki roots PLUS an optional custom CA bundle
+///   (`ca_file`, from `DATA_PLANE_TLS_CA_FILE`) for private/self-signed CAs.
+fn rustls_connector(
+    mode: TlsMode,
+    ca_file: &str,
+) -> DataPlaneResult<tokio_postgres_rustls::MakeRustlsConnect> {
+    let provider = rustls::crypto::ring::default_provider();
+    let config = match mode {
+        TlsMode::Verify => {
+            let mut roots = rustls::RootCertStore::empty();
+            roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            if !ca_file.is_empty() {
+                let pem = std::fs::read(ca_file).map_err(|e| DataPlaneError::Backend {
+                    message: format!("DATA_PLANE_TLS_CA_FILE read failed: {e}"),
+                })?;
+                let mut cursor = &pem[..];
+                for cert in rustls_pemfile::certs(&mut cursor) {
+                    let cert = cert.map_err(|e| DataPlaneError::Backend {
+                        message: format!("custom CA parse failed: {e}"),
+                    })?;
+                    roots.add(cert).map_err(|e| DataPlaneError::Backend {
+                        message: format!("custom CA add failed: {e}"),
+                    })?;
+                }
+            }
+            rustls::ClientConfig::builder_with_provider(provider.into())
+                .with_safe_default_protocol_versions()
+                .expect("ring provider supports the default TLS protocol versions")
+                .with_root_certificates(roots)
+                .with_no_client_auth()
+        }
+        TlsMode::Require => no_verify_config(provider),
+    };
+    Ok(tokio_postgres_rustls::MakeRustlsConnect::new(config))
+}
+
+/// The accept-any-cert config — encrypt only, no chain verification. ONLY used
+/// for `sslmode=require` outside max mode (libpq parity).
+fn no_verify_config(provider: rustls::crypto::CryptoProvider) -> rustls::ClientConfig {
     #[derive(Debug)]
     struct NoCertVerification(rustls::crypto::CryptoProvider);
     impl rustls::client::danger::ServerCertVerifier for NoCertVerification {
@@ -80,14 +139,12 @@ fn rustls_connector() -> tokio_postgres_rustls::MakeRustlsConnect {
         }
     }
 
-    let provider = rustls::crypto::ring::default_provider();
-    let config = rustls::ClientConfig::builder_with_provider(provider.clone().into())
+    rustls::ClientConfig::builder_with_provider(provider.clone().into())
         .with_safe_default_protocol_versions()
         .expect("ring provider supports the default TLS protocol versions")
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(NoCertVerification(provider)))
-        .with_no_client_auth();
-    tokio_postgres_rustls::MakeRustlsConnect::new(config)
+        .with_no_client_auth()
 }
 
 /// PostgreSQL engine adapter. Opens long-lived pools keyed by mount instead of
@@ -157,7 +214,13 @@ impl EngineAdapter for PostgresEngineAdapter {
     async fn open_pool(&self, mount: DatabaseMount) -> DataPlaneResult<Box<dyn EnginePool>> {
         let dsn = self.resolver.resolve_dsn(&mount).await?;
 
-        let wants_tls = dsn_wants_tls(&dsn);
+        // Phase 6: the effective TLS posture. `require` keeps libpq parity
+        // (encrypt, don't verify); `verify-*` (or `require` under
+        // SECURITY_MODE=max) verifies the chain + hostname. None → NoTls (local).
+        let max_security = std::env::var("SECURITY_MODE")
+            .map(|v| v.eq_ignore_ascii_case("max"))
+            .unwrap_or(false);
+        let tls_mode = effective_tls_mode(&dsn, max_security);
         let mut cfg = DeadpoolConfig::new();
         cfg.url = Some(dsn);
         cfg.pool = Some(PoolConfig::new(mount.pool_policy.max.max(1) as usize));
@@ -165,10 +228,13 @@ impl EngineAdapter for PostgresEngineAdapter {
         // External mounts (a client's Supabase project) REQUIRE TLS; the DSN
         // opts in via sslmode=require/verify-*. Everything else keeps the
         // NoTls path byte-identical (the local stack's postgres).
-        let pool = if wants_tls {
-            cfg.create_pool(Some(Runtime::Tokio1), rustls_connector())
-        } else {
-            cfg.create_pool(Some(Runtime::Tokio1), NoTls)
+        let pool = match tls_mode {
+            Some(mode) => {
+                let ca_file = std::env::var("DATA_PLANE_TLS_CA_FILE").unwrap_or_default();
+                let connector = rustls_connector(mode, &ca_file)?;
+                cfg.create_pool(Some(Runtime::Tokio1), connector)
+            }
+            None => cfg.create_pool(Some(Runtime::Tokio1), NoTls),
         }
         .map_err(|e| DataPlaneError::Backend {
             message: format!("pool create failed: {e}"),
@@ -2099,12 +2165,27 @@ mod tests {
     }
 
     #[test]
-    fn dsn_tls_detection_matches_sslmode() {
-        // require/verify-* engage rustls; prefer/unset keep NoTls (local parity).
-        assert!(dsn_wants_tls("postgres://u:p@db.x.supabase.co:5432/postgres?sslmode=require"));
-        assert!(dsn_wants_tls("host=db.x.supabase.co sslmode=verify-full user=u"));
-        assert!(!dsn_wants_tls("postgres://postgres:pw@postgres:5432/commerce"));
-        assert!(!dsn_wants_tls("postgres://u:p@h:5432/db?sslmode=prefer"));
+    fn tls_mode_matches_sslmode_and_max_upgrade() {
+        use super::{effective_tls_mode, TlsMode};
+        // Baseline: require encrypts but doesn't verify; verify-* verifies;
+        // prefer/unset stays NoTls (local parity).
+        assert_eq!(
+            effective_tls_mode("postgres://u:p@db.x.supabase.co:5432/db?sslmode=require", false),
+            Some(TlsMode::Require)
+        );
+        assert_eq!(
+            effective_tls_mode("host=db.x.supabase.co sslmode=verify-full user=u", false),
+            Some(TlsMode::Verify)
+        );
+        assert_eq!(effective_tls_mode("postgres://postgres:pw@postgres:5432/commerce", false), None);
+        assert_eq!(effective_tls_mode("postgres://u:p@h:5432/db?sslmode=prefer", false), None);
+        // Phase 6: SECURITY_MODE=max UPGRADES `require` to real verification
+        // (closes the accept-any-cert MITM hole) — but never weakens a NoTls DSN.
+        assert_eq!(
+            effective_tls_mode("postgres://u:p@h:5432/db?sslmode=require", true),
+            Some(TlsMode::Verify)
+        );
+        assert_eq!(effective_tls_mode("postgres://postgres:pw@postgres:5432/commerce", true), None);
     }
 
     #[test]

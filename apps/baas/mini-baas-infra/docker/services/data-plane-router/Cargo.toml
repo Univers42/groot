@@ -65,6 +65,11 @@ tokio-postgres = { version = "0.7", features = ["with-serde_json-1", "with-uuid-
 # mounts keep the NoTls path byte-identical.
 tokio-postgres-rustls = "0.13"
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+# Phase 6 (SECURITY_MODE=max): TLS verify-ca/verify-full for external engine
+# mounts. webpki-roots = the Mozilla trust anchors (compiled in, distroless-safe);
+# rustls-pemfile parses an optional custom CA bundle (DATA_PLANE_TLS_CA_FILE).
+webpki-roots = "0.26"
+rustls-pemfile = "2"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

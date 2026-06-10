@@ -15,9 +15,9 @@ use axum::response::Response;
 use crate::metrics::{escape_label, Metrics};
 use crate::ratelimit::{tier_rate, TenantRateLimiter};
 use data_plane_core::{
-    DataOperation, DataPlaneError, DatabaseMount, EngineAdapter, EngineCapabilities,
-    MigrationRequest, Plan, PoolRegistry, RawStatement, RequestIdentity, SchemaDdlRequest,
-    TxBeginRequest, TxHandle, WorkloadContext,
+    DataOperation, DataOperationKind, DataPlaneError, DatabaseMount, EngineAdapter,
+    EngineCapabilities, MigrationRequest, Plan, PoolRegistry, RawStatement, RequestIdentity,
+    SchemaDdlRequest, TxBeginRequest, TxHandle, WorkloadContext,
 };
 use data_plane_pool::{
     DefaultPoolRegistry, EnvMountResolver, HttpEngineAdapter, MongoEngineAdapter,
@@ -505,7 +505,15 @@ async fn execute_query(
     // coarse outer shell.
     if let Some((rps, burst)) = tier_rate(request.mount.capability_overrides.as_ref()) {
         if !state.ratelimiter.allow(&request.identity.tenant_id, rps, burst) {
-            tracing::info!(tenant = %request.identity.tenant_id, rps, "tenant rate-limited (429)");
+            tracing::warn!(
+                target: "audit",
+                event = "rate_limited",
+                tenant = %request.identity.tenant_id,
+                engine = %request.mount.engine,
+                op = ?request.operation.op,
+                rps,
+                "tenant exceeded package rate limit (429)"
+            );
             return too_many_requests(rps);
         }
     }
@@ -531,7 +539,14 @@ async fn execute_query(
             &descriptor.capabilities,
             request.mount.capability_overrides.as_ref(),
         ) {
-            tracing::info!(engine = %request.mount.engine, "tier gate denied operation (403)");
+            tracing::warn!(
+                target: "audit",
+                event = "capability_gated",
+                tenant = %request.identity.tenant_id,
+                engine = %request.mount.engine,
+                op = ?request.operation.op,
+                "package tier denied operation (403)"
+            );
             return map_data_plane_error(&err);
         }
         let decision = data_plane_core::plan(
@@ -559,12 +574,43 @@ async fn execute_query(
         }
     }
 
+    // Capture audit fields before the request is consumed by the pool.
+    let audit_tenant = request.identity.tenant_id.clone();
+    let audit_engine = request.mount.engine.clone();
+    let audit_op = request.operation.op.clone();
+    let audit_resource = request.operation.resource.clone();
+    let is_mutation = matches!(
+        audit_op,
+        DataOperationKind::Insert
+            | DataOperationKind::Update
+            | DataOperationKind::Delete
+            | DataOperationKind::Upsert
+            | DataOperationKind::Batch
+    );
+
     let pool = match state.registry.get_or_create(request.mount).await {
         Ok(pool) => pool,
         Err(err) => return map_data_plane_error(&err),
     };
     match pool.execute(request.operation, request.identity).await {
-        Ok(result) => (StatusCode::OK, Json(result)).into_response(),
+        Ok(result) => {
+            // Phase 6 audit trail: every successful data MUTATION is logged to
+            // the `audit` tracing target (routed to Loki by promtail). Reads are
+            // not audited (volume); denials are audited at their rejection sites.
+            if is_mutation {
+                tracing::info!(
+                    target: "audit",
+                    event = "mutation",
+                    tenant = %audit_tenant,
+                    engine = %audit_engine,
+                    op = ?audit_op,
+                    resource = %audit_resource,
+                    affected_rows = result.affected_rows,
+                    "data mutation committed"
+                );
+            }
+            (StatusCode::OK, Json(result)).into_response()
+        }
         Err(err) => map_data_plane_error(&err),
     }
 }
