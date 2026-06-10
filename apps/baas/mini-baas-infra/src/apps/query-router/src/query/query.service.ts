@@ -48,6 +48,13 @@ export interface AdapterResponse {
   // schema_per_tenant | db_per_tenant). Forwarded to the Rust data plane so a
   // schema_per_tenant mount is scoped to its tenant schema at query time.
   isolation?: string;
+  // Phase 4 tiering: the resolved package name + its capability mask
+  // (capability bools + rps/burst), derived by adapter-registry from the
+  // tenant's plan. Stamped onto the mount forwarded to Rust, where the planner
+  // narrows by it (403 capability_gated) and the token bucket reads rps/burst
+  // (429). Absent when tiering is disabled (parity).
+  package?: string;
+  capability_overrides?: Record<string, unknown>;
 }
 
 export interface EngineDescriptor {
@@ -353,7 +360,8 @@ export class QueryService implements OnModuleInit {
       );
     }
 
-    const { engine, connection_string, isolation } = await this.fetchConnection(dbId, tenantId);
+    const { engine, connection_string, isolation, capability_overrides } =
+      await this.fetchConnection(dbId, tenantId);
     const decision = await this.decidePermission(userId, engine, resource, op, context);
     if (!decision.allow) {
       throw new ForbiddenException(decision.reason);
@@ -400,6 +408,7 @@ export class QueryService implements OnModuleInit {
           credentialVersion: 'live',
           connectionString: connection_string,
           isolation,
+          capabilityOverrides: capability_overrides,
           requestId: context.requestId,
         },
         resource,
@@ -456,7 +465,8 @@ export class QueryService implements OnModuleInit {
   ): Promise<TxnResult> {
     const identity = context.identity;
     const tenantId = identity?.tenantId ?? userId;
-    const { engine, connection_string, isolation } = await this.fetchConnection(dbId, tenantId);
+    const { engine, connection_string, isolation, capability_overrides } =
+      await this.fetchConnection(dbId, tenantId);
 
     // Authorize every op BEFORE opening the transaction — fail the batch closed.
     for (const o of ops) {
@@ -477,6 +487,7 @@ export class QueryService implements OnModuleInit {
       credentialVersion: 'live',
       connectionString: connection_string,
       isolation,
+      capabilityOverrides: capability_overrides,
       requestId: context.requestId,
     };
 

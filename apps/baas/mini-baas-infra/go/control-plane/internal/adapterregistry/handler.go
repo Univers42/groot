@@ -50,6 +50,16 @@ func (rt *routes) register(w http.ResponseWriter, r *http.Request) {
 		shared.WriteError(w, http.StatusConflict, "conflict", "database \""+req.Name+"\" already registered")
 		return
 	}
+	// Phase 4 tiering: an engine outside the tenant's package, or a mount past
+	// its quota, is an authorization/quota denial (403) — upgrade the package.
+	if errors.Is(err, ErrEngineNotInPackage) {
+		shared.WriteError(w, http.StatusForbidden, "engine_not_in_package", err.Error())
+		return
+	}
+	if errors.Is(err, ErrMountQuotaExceeded) {
+		shared.WriteError(w, http.StatusForbidden, "mount_quota_exceeded", err.Error())
+		return
+	}
 	if err != nil {
 		shared.WriteError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return

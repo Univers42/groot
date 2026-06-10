@@ -906,6 +906,11 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/postgres}
       VAULT_ENC_KEY: ${VAULT_ENC_KEY:-0123456789abcdef0123456789abcdef}
       INTERNAL_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
+      # Phase 4 tiering kill switch. Default 0 (OFF) so enabling tiering never
+      # retroactively gates existing `free` tenants — flip to 1 once tenant
+      # plans are assigned to enforce engine allowlist + mount quota + the
+      # capability/rate mask the data plane reads off /connect.
+      PACKAGE_ENFORCEMENT: ${PACKAGE_ENFORCEMENT:-0}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       - "127.0.0.1:${ADAPTER_REGISTRY_GO_PORT:-3021}:3021"
