@@ -13,6 +13,9 @@ data-plane-core = { path = "../data-plane-core" }
 data-plane-pool = { path = "../data-plane-pool" }
 anyhow = { workspace = true }
 axum = { workspace = true }
+# Phase 7 bypass: Rust-native API-key verification (tenant-control) + mount
+# resolution (adapter-registry) over HTTP. Go stays the identity authority.
+reqwest = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
