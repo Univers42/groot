@@ -92,6 +92,10 @@ dsn_for() {
       # qualifies its probe table to public.conf_probe (CRDB shares pg's
       # "$user", public search_path quirk).
       echo "postgres://root@cockroach:26257/defaultdb?sslmode=disable" ;;
+    sqlite)
+      # Embedded — no container. A fresh file inside the ephemeral conformance
+      # container (bundled SQLite, so no system libsqlite3 needed).
+      echo "sqlite:///tmp/conf-sqlite.db" ;;
     *) return 2 ;;
   esac
 }
@@ -142,7 +146,7 @@ if [[ $# -ge 1 ]]; then
 else
   # Always-on engines + engines-extra (mariadb/cockroachdb/mssql, skipped
   # cleanly when their profile isn't up — run_engine returns 2=skip).
-  ENGINES=(postgresql mysql mariadb cockroachdb mongodb redis)
+  ENGINES=(postgresql mysql mariadb cockroachdb mongodb redis sqlite)
 fi
 
 FAILED=0

@@ -226,6 +226,40 @@ impl EngineCapabilities {
         Self::mysql()
     }
 
+    /// SQLite — embedded engine (rusqlite, file-per-mount). Relational surface:
+    /// CRUD, upsert (INSERT…ON CONFLICT), ATOMIC batch (one tx per request),
+    /// aggregate (GROUP BY), introspection (pragma), single-op schema DDL. No
+    /// LISTEN/NOTIFY streaming. `transactions:false` — the deadpool-sqlite
+    /// `interact` model makes a connection-pinned, cross-request multi-statement
+    /// TxHandle disproportionate; `begin()` honestly returns NotImplemented (a
+    /// single batch is still atomic). Honest descriptor: conformance skips
+    /// exactly what's false here.
+    #[must_use]
+    pub fn sqlite() -> Self {
+        Self {
+            read: true,
+            write: true,
+            upsert: true,
+            batch: true,
+            aggregate: true,
+            introspect: true,
+            schema_ddl: false,
+            stream: false,
+            ddl: false,
+            transactions: false,
+            savepoints: false,
+            isolation_levels: vec![],
+            two_phase_commit: false,
+            native_idempotency: false,
+            max_batch_size: 1000,
+            cost: CostCapabilities {
+                latency_class: LatencyClass::Native,
+                pattern_search: PatternSearchCapability::Indexed,
+                joins: JoinCapability::Native,
+            },
+        }
+    }
+
     #[must_use]
     pub fn redis() -> Self {
         Self {

@@ -22,6 +22,7 @@ use data_plane_core::{
 use data_plane_pool::{
     DefaultPoolRegistry, EnvMountResolver, HttpEngineAdapter, MongoEngineAdapter,
     MysqlEngineAdapter, PgDialect, PostgresEngineAdapter, ProviderConfig, RedisEngineAdapter,
+    SqliteEngineAdapter,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -195,10 +196,12 @@ impl AppState {
             Arc::new(MysqlEngineAdapter::with_engine_name(resolver.clone(), "mariadb"));
         let redis: Arc<dyn EngineAdapter> =
             Arc::new(RedisEngineAdapter::new(resolver.clone()));
+        let sqlite: Arc<dyn EngineAdapter> =
+            Arc::new(SqliteEngineAdapter::new(resolver.clone()));
         let http: Arc<dyn EngineAdapter> =
             Arc::new(HttpEngineAdapter::new(resolver.clone()));
         let adapters: Vec<Arc<dyn EngineAdapter>> =
-            vec![postgres, cockroach, mongo, mysql, mariadb, redis, http];
+            vec![postgres, cockroach, mongo, mysql, mariadb, redis, sqlite, http];
         // Boot-time honesty self-check (04/S1b): fail fast if any descriptor
         // advertises an op the adapter doesn't dispatch.
         assert_capability_honesty(&adapters);
@@ -483,12 +486,12 @@ async fn execute_query(
     // beyond this list (jdbc, cassandra, neo4j, es, qdrant, influx) stay
     // contract-only and are rejected here.
     let executable_engines = [
-        "postgresql", "cockroachdb", "mongodb", "mysql", "mariadb", "redis", "http",
+        "postgresql", "cockroachdb", "mongodb", "mysql", "mariadb", "redis", "sqlite", "http",
     ];
     if !executable_engines.contains(&request.mount.engine.as_str()) {
         return not_implemented(
             "engine_execution_not_enabled",
-            "engine has no Rust pool; supported engines: postgresql, cockroachdb, mysql, mariadb, mongodb, redis, http",
+            "engine has no Rust pool; supported engines: postgresql, cockroachdb, mysql, mariadb, mongodb, redis, sqlite, http",
         );
     }
 
@@ -1242,6 +1245,11 @@ fn default_engines() -> Vec<EngineDescriptor> {
             engine: "redis".to_string(),
             phase: "pool_v2_active".to_string(),
             capabilities: EngineCapabilities::redis(),
+        },
+        EngineDescriptor {
+            engine: "sqlite".to_string(),
+            phase: "pool_v2_active".to_string(),
+            capabilities: EngineCapabilities::sqlite(),
         },
         EngineDescriptor {
             engine: "http".to_string(),

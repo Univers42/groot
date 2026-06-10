@@ -29,6 +29,11 @@ axum = "0.7"
 bson = { version = "2.10", features = ["chrono-0_4"] }
 chrono = { version = "0.4", features = ["serde"] }
 deadpool-postgres = "0.14"
+# R-sqlite: embedded SQLite engine. `bundled` compiles SQLite in (no system
+# libsqlite3 — distroless-safe); deadpool-sqlite gives an async pool that runs
+# rusqlite's sync API on a blocking thread via `interact()`.
+rusqlite = { version = "0.31", features = ["bundled"] }
+deadpool-sqlite = "0.8"
 futures = "0.3"
 mongodb = { version = "2.8", features = ["tokio-runtime"] }
 # R7: MySQL adapter. `default-rustls` selects rustls (matches the tls posture

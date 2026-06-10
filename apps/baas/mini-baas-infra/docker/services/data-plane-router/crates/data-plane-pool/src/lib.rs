@@ -27,12 +27,14 @@ mod postgres;
 mod redis;
 mod registry;
 mod resolver;
+mod sqlite;
 
 pub use http::HttpEngineAdapter;
 pub use mongo::MongoEngineAdapter;
 pub use mysql::MysqlEngineAdapter;
 pub use postgres::{PgDialect, PostgresEngineAdapter};
 pub use redis::RedisEngineAdapter;
+pub use sqlite::SqliteEngineAdapter;
 pub use credential::{
     AdapterRegistryProvider, CredentialProvider, ProviderConfig, ProviderRegistry, VaultProvider,
 };

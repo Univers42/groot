@@ -17,8 +17,9 @@
 
 use data_plane_core::{DataOperationKind, EngineCapabilities};
 
-const ENGINES: [&str; 7] =
-    ["postgresql", "cockroachdb", "mysql", "mariadb", "mongodb", "redis", "http"];
+const ENGINES: [&str; 8] = [
+    "postgresql", "cockroachdb", "mysql", "mariadb", "mongodb", "redis", "sqlite", "http",
+];
 
 /// The operation kinds each adapter's `dispatch_op` actually serves — read from
 /// the very `SUPPORTED_OPS` const the dispatch gate uses, so this is the real
@@ -29,6 +30,7 @@ fn dispatch_reality(engine: &str) -> &'static [DataOperationKind] {
         "mysql" | "mariadb" => crate::mysql::SUPPORTED_OPS,
         "mongodb" => crate::mongo::SUPPORTED_OPS,
         "redis" => crate::redis::SUPPORTED_OPS,
+        "sqlite" => crate::sqlite::SUPPORTED_OPS,
         "http" => crate::http::SUPPORTED_OPS,
         _ => &[],
     }
@@ -43,6 +45,7 @@ fn descriptor(engine: &str) -> EngineCapabilities {
         "mariadb" => EngineCapabilities::mariadb(),
         "mongodb" => EngineCapabilities::mongodb(),
         "redis" => EngineCapabilities::redis(),
+        "sqlite" => EngineCapabilities::sqlite(),
         "http" => EngineCapabilities::http(),
         other => panic!("unknown engine {other}"),
     }

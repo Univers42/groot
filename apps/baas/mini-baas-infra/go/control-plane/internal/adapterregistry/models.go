@@ -18,6 +18,7 @@ var allowedEngines = map[string]bool{
 	"mariadb":     true,
 	"mongodb":     true,
 	"redis":       true,
+	"sqlite":      true,
 	"http":        true,
 }
 

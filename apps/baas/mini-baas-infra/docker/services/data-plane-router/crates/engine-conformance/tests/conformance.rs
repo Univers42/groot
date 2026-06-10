@@ -12,7 +12,7 @@ use std::sync::Arc;
 use data_plane_core::EngineAdapter;
 use data_plane_pool::{
     EnvMountResolver, MongoEngineAdapter, MountResolver, MysqlEngineAdapter, PgDialect,
-    PostgresEngineAdapter, RedisEngineAdapter,
+    PostgresEngineAdapter, RedisEngineAdapter, SqliteEngineAdapter,
 };
 use engine_conformance::{mount_for, run_suite};
 
@@ -42,6 +42,7 @@ async fn engine_conformance() {
         "mariadb" => Arc::new(MysqlEngineAdapter::with_engine_name(resolver, "mariadb")),
         "mongodb" => Arc::new(MongoEngineAdapter::new(resolver)),
         "redis" => Arc::new(RedisEngineAdapter::new(resolver)),
+        "sqlite" => Arc::new(SqliteEngineAdapter::new(resolver)),
         other => panic!("CONFORMANCE_ENGINE='{other}' is not wired in tests/conformance.rs"),
     };
 
