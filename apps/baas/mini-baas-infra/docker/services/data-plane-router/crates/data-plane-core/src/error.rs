@@ -7,6 +7,14 @@ pub enum DataPlaneError {
     #[error("engine '{engine}' does not support requested capability '{capability}'")]
     UnsupportedCapability { engine: String, capability: String },
 
+    /// The engine CAN serve this operation, but the tenant's package tier does
+    /// not include it (the per-tenant capability mask narrowed it away).
+    /// DISTINCT from `UnsupportedCapability` (the engine genuinely can't — 422):
+    /// a tier denial is an authorization decision (403 Forbidden) — lifting it
+    /// means upgrading the package, not changing the request.
+    #[error("capability '{capability}' is not included in this tenant's package tier")]
+    CapabilityGated { capability: String },
+
     #[error("mount '{mount_id}' was not found")]
     MountNotFound { mount_id: String },
 

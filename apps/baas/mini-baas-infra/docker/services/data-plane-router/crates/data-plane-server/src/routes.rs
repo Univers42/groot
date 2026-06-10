@@ -13,6 +13,7 @@ use axum::http::header;
 use axum::middleware::Next;
 use axum::response::Response;
 use crate::metrics::{escape_label, Metrics};
+use crate::ratelimit::{tier_rate, TenantRateLimiter};
 use data_plane_core::{
     DataOperation, DataPlaneError, DatabaseMount, EngineAdapter, EngineCapabilities,
     MigrationRequest, Plan, PoolRegistry, RawStatement, RequestIdentity, SchemaDdlRequest,
@@ -142,6 +143,10 @@ pub struct AppState {
     evaluator: Option<Arc<Evaluator>>,
     /// Process-wide request/uptime counters exposed at `/metrics`.
     metrics: Arc<Metrics>,
+    /// Per-tenant token-bucket rate limiter (Phase 4 tiering). Limits arrive per
+    /// request in the mount's tier mask (`capability_overrides`); a tenant with
+    /// no mask is unlimited, so this is a no-op until packages are assigned.
+    ratelimiter: Arc<TenantRateLimiter>,
 }
 
 impl AppState {
@@ -206,6 +211,7 @@ impl AppState {
             transactions: Arc::new(TransactionRegistry::default()),
             evaluator,
             metrics: Arc::new(Metrics::default()),
+            ratelimiter: Arc::new(TenantRateLimiter::new()),
         }
     }
 
@@ -250,6 +256,10 @@ impl AppState {
             let _ = handle.rollback().await;
             self.registry.unpin_tx(&pool_key).await;
         }
+        // Phase 4: drop rate-limiter buckets untouched for >5min so the map stays
+        // bounded under N-tenant fan-out (a full idle bucket re-creates on access).
+        self.ratelimiter
+            .evict_idle(std::time::Duration::from_secs(300));
     }
 }
 
@@ -482,6 +492,18 @@ async fn execute_query(
         );
     }
 
+    // Phase 4 tiering — per-tenant rate limit (token bucket). The mount's tier
+    // mask carries rps/burst; an untiered mount (no mask) is unlimited, so this
+    // is a no-op until a package is assigned. Keyed on the TRUSTED envelope
+    // tenant, so it survives the Phase-7 TS bypass; Kong's per-IP limit is the
+    // coarse outer shell.
+    if let Some((rps, burst)) = tier_rate(request.mount.capability_overrides.as_ref()) {
+        if !state.ratelimiter.allow(&request.identity.tenant_id, rps, burst) {
+            tracing::info!(tenant = %request.identity.tenant_id, rps, "tenant rate-limited (429)");
+            return too_many_requests(rps);
+        }
+    }
+
     // Capability-aware planner (G6, two-phase). Phase 1 rejects an impossible
     // (engine, op) pair (supports_op + batch ceiling); Phase 2 routes by op
     // shape over the const cost table. No-op for the engines mounted today —
@@ -493,6 +515,19 @@ async fn execute_query(
         .iter()
         .find(|e| e.engine == request.mount.engine)
     {
+        // Phase 4 tiering — capability gate. The descriptor says what the ENGINE
+        // can do; the tenant's package mask (mount.capability_overrides) may
+        // narrow it. A masked-off-but-engine-supported op is a 403 (upgrade your
+        // package), DISTINCT from the planner's 422 for an op the engine can't
+        // serve at all. No-op when there's no mask (parity).
+        if let Err(err) = data_plane_core::tier_gate(
+            &request.operation,
+            &descriptor.capabilities,
+            request.mount.capability_overrides.as_ref(),
+        ) {
+            tracing::info!(engine = %request.mount.engine, "tier gate denied operation (403)");
+            return map_data_plane_error(&err);
+        }
         let decision = data_plane_core::plan(
             &request.operation,
             &request.mount.engine,
@@ -564,6 +599,10 @@ fn map_data_plane_error(err: &DataPlaneError) -> axum::response::Response {
         DataPlaneError::UnsupportedCapability { .. } => {
             (StatusCode::UNPROCESSABLE_ENTITY, "unsupported_capability")
         }
+        // Phase 4: the engine CAN serve the op, but the tenant's package tier
+        // excludes it — an authorization decision (403), not a 422. The client
+        // must upgrade the package, not fix the request.
+        DataPlaneError::CapabilityGated { .. } => (StatusCode::FORBIDDEN, "capability_gated"),
         DataPlaneError::InvalidIdentifier { .. } => (StatusCode::BAD_REQUEST, "invalid_identifier"),
         DataPlaneError::InvalidRequest { .. } => (StatusCode::BAD_REQUEST, "invalid_request"),
         DataPlaneError::MountNotFound { .. } => (StatusCode::NOT_FOUND, "mount_not_found"),
@@ -702,6 +741,20 @@ async fn begin_transaction(
         require_capability(&state, &request.mount.engine, "transactions", |c| c.transactions)
     {
         return resp;
+    }
+    // Phase 4 tiering: the engine may support transactions but the tenant's
+    // package tier can exclude them (Essential) → 403 CapabilityGated, distinct
+    // from the 422 above (engine genuinely can't begin()).
+    if let Some(descriptor) = state.engines.iter().find(|e| e.engine == request.mount.engine) {
+        let effective = data_plane_core::apply_capability_overrides(
+            &descriptor.capabilities,
+            request.mount.capability_overrides.as_ref(),
+        );
+        if descriptor.capabilities.transactions && !effective.transactions {
+            return map_data_plane_error(&data_plane_core::DataPlaneError::CapabilityGated {
+                capability: "transactions".to_string(),
+            });
+        }
     }
 
     // Capture identity/mount info BEFORE moving `request` into pool.begin.
@@ -1138,6 +1191,21 @@ fn not_implemented(error: &str, message: &str) -> axum::response::Response {
             message: message.to_string(),
             next_step: "implement PoolRegistry, Postgres/Mongo pools, local PDP, then enable shadow routing",
             tx_id: None,
+        }),
+    )
+        .into_response()
+}
+
+/// 429 for a tenant that exceeded its package tier's request rate (Phase 4).
+/// Carries a `Retry-After: 1` hint (the bucket refills within a second at any
+/// non-trivial rps).
+fn too_many_requests(rps: u32) -> axum::response::Response {
+    (
+        StatusCode::TOO_MANY_REQUESTS,
+        [(header::RETRY_AFTER, "1")],
+        Json(ApiError {
+            error: "rate_limited".to_string(),
+            message: format!("tenant exceeded package rate limit of {rps} req/s"),
         }),
     )
         .into_response()

@@ -68,6 +68,61 @@ pub fn validate_operation(
     Ok(())
 }
 
+/// Narrow an engine descriptor by a tenant's package capability mask
+/// (`capability_overrides`, stamped on the mount from the key-verify response —
+/// Phase 4 tiering).
+///
+/// **NARROWING ONLY**: a flag explicitly set to `false` in the mask removes a
+/// capability the engine has; a missing flag, a `true`, or a non-bool value
+/// leaves the descriptor untouched — a package can never WIDEN a capability past
+/// what the engine actually serves (that would re-introduce capability
+/// dishonesty). Unknown keys are ignored. A `None` / non-object override returns
+/// the descriptor unchanged — the parity path for an untiered mount.
+#[must_use]
+pub fn apply_capability_overrides(
+    caps: &EngineCapabilities,
+    overrides: Option<&Value>,
+) -> EngineCapabilities {
+    let mut out = caps.clone();
+    let Some(Value::Object(mask)) = overrides else {
+        return out;
+    };
+    // Only an explicit `false` narrows; absent / `true` / non-bool keeps current.
+    let narrow = |cur: bool, key: &str| matches!(mask.get(key), Some(Value::Bool(false)))
+        .then_some(false)
+        .unwrap_or(cur);
+    out.read = narrow(out.read, "read");
+    out.write = narrow(out.write, "write");
+    out.upsert = narrow(out.upsert, "upsert");
+    out.batch = narrow(out.batch, "batch");
+    out.aggregate = narrow(out.aggregate, "aggregate");
+    out.transactions = narrow(out.transactions, "transactions");
+    out.schema_ddl = narrow(out.schema_ddl, "schema_ddl");
+    out.ddl = narrow(out.ddl, "ddl");
+    out.introspect = narrow(out.introspect, "introspect");
+    out
+}
+
+/// Tier gate (Phase 4): the engine descriptor says what the ENGINE can do; the
+/// tenant's package mask may narrow it. Returns
+/// [`DataPlaneError::CapabilityGated`] (→ 403) when the engine supports the op
+/// but the package tier masks it off — DISTINCT from the planner's 422 for an
+/// op the engine genuinely can't serve. A no-op when the engine doesn't support
+/// the op (that's the planner's 422 to raise) or when there is no mask (parity).
+pub fn tier_gate(
+    op: &DataOperation,
+    caps: &EngineCapabilities,
+    overrides: Option<&Value>,
+) -> DataPlaneResult<()> {
+    let effective = apply_capability_overrides(caps, overrides);
+    if caps.supports_op(&op.op) && !effective.supports_op(&op.op) {
+        return Err(DataPlaneError::CapabilityGated {
+            capability: required_capability(&op.op).to_string(),
+        });
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -221,5 +276,61 @@ mod tests {
         // An object (not an array) is not the batch wire shape; don't reject here.
         assert!(validate_operation(&op(Batch, Some(json!({ "a": 1 }))), "http", &caps).is_ok());
         assert!(validate_operation(&op(Batch, None), "http", &caps).is_ok());
+    }
+
+    // ── Phase 4 tiering: capability_overrides narrowing + tier_gate ──────────
+
+    #[test]
+    fn overrides_narrow_only_never_widen() {
+        // A mask can turn a capability OFF (aggregate true → false) ...
+        let pg = EngineCapabilities::postgresql();
+        let narrowed = apply_capability_overrides(&pg, Some(&json!({ "aggregate": false })));
+        assert!(!narrowed.aggregate, "explicit false narrows");
+        assert!(narrowed.read && narrowed.write, "untouched flags survive");
+        // ... but can NEVER turn one ON that the engine lacks (http has no batch).
+        let http = EngineCapabilities::http();
+        let widened = apply_capability_overrides(&http, Some(&json!({ "batch": true })));
+        assert!(!widened.batch, "a mask cannot widen past the engine descriptor");
+    }
+
+    #[test]
+    fn no_override_is_identity() {
+        let pg = EngineCapabilities::postgresql();
+        assert_eq!(apply_capability_overrides(&pg, None), pg);
+        // A non-object override (e.g. the limits-only payload) is also a no-op.
+        assert_eq!(apply_capability_overrides(&pg, Some(&json!(42))), pg);
+        assert_eq!(apply_capability_overrides(&pg, Some(&json!({ "rps": 20 }))), pg);
+    }
+
+    #[test]
+    fn tier_gate_403_when_package_masks_a_supported_op() {
+        // Essential tier masks aggregate off; pg serves it → 403 CapabilityGated,
+        // NOT the 422 the planner raises when the engine itself can't.
+        let pg = EngineCapabilities::postgresql();
+        let mask = json!({ "aggregate": false, "batch": false, "transactions": false });
+        let err = tier_gate(&op(Aggregate, None), &pg, Some(&mask)).unwrap_err();
+        match err {
+            DataPlaneError::CapabilityGated { capability } => assert_eq!(capability, "aggregate"),
+            other => panic!("expected CapabilityGated, got {other:?}"),
+        }
+        // batch likewise gated for this tier.
+        assert!(matches!(
+            tier_gate(&op(Batch, None), &pg, Some(&mask)).unwrap_err(),
+            DataPlaneError::CapabilityGated { .. }
+        ));
+        // CRUD stays allowed under the same mask (narrowing only touches masked keys).
+        assert!(tier_gate(&op(Insert, None), &pg, Some(&mask)).is_ok());
+        assert!(tier_gate(&op(List, None), &pg, Some(&mask)).is_ok());
+    }
+
+    #[test]
+    fn tier_gate_noop_without_mask_or_when_engine_already_cant() {
+        let pg = EngineCapabilities::postgresql();
+        // No mask → never a tier denial (parity path).
+        assert!(tier_gate(&op(Aggregate, None), &pg, None).is_ok());
+        // Engine genuinely can't (redis has no aggregate): tier_gate stays silent
+        // so the planner's 422 is the one that fires, not a misleading 403.
+        let redis = EngineCapabilities::redis();
+        assert!(tier_gate(&op(Aggregate, None), &redis, Some(&json!({ "aggregate": false }))).is_ok());
     }
 }
