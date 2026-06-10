@@ -11,19 +11,22 @@
 /* ************************************************************************** */
 
 // @ts-check
-const eslint = require('@eslint/js');
-const tseslint = require('@typescript-eslint/eslint-plugin');
-const tsparser = require('@typescript-eslint/parser');
+// ESM (.mjs): eslint 9 loads this as a module — `require`/`module.exports`
+// crash with "require is not defined in ES module scope".
+import tseslint from '@typescript-eslint/eslint-plugin';
+import tsparser from '@typescript-eslint/parser';
+
+const dirname = new URL('.', import.meta.url).pathname;
 
 /** @type {import('eslint').Linter.Config[]} */
-module.exports = [
+export default [
   {
     files: ['**/*.ts'],
     languageOptions: {
       parser: tsparser,
       parserOptions: {
         project: 'tsconfig.json',
-        tsconfigRootDir: __dirname,
+        tsconfigRootDir: dirname,
         sourceType: 'module',
       },
     },
@@ -31,7 +34,11 @@ module.exports = [
       '@typescript-eslint': tseslint,
     },
     rules: {
-      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-unused-vars': ['error', {
+        argsIgnorePattern: '^_',
+        // destructure-to-strip pattern (`const { _id: _, ...clean } = doc`)
+        varsIgnorePattern: '^_',
+      }],
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/explicit-function-return-type': 'off',
       '@typescript-eslint/explicit-module-boundary-types': 'off',

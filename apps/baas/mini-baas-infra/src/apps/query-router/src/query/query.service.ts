@@ -34,6 +34,7 @@ import type { EngineCaps, IDatabaseAdapter, QueryResult } from '@mini-baas/datab
 import { ExecuteQueryDto } from './dto/query.dto';
 import { TxnOpDto } from './dto/txn.dto';
 import { OutboxService } from './outbox.service';
+import { AutomationsService, type AutomationWriteEvent } from './automations.service';
 import { RealtimePublisherService, RealtimeWriteOp } from './realtime-publisher.service';
 import { RustDataPlaneProxy, RustProxyContext } from '../proxy/rust-data-plane.proxy';
 
@@ -65,6 +66,8 @@ export interface EngineDescriptor {
 interface QueryRequestContext {
   requestId?: string;
   identity?: VerifiedRequestIdentity;
+  /** >0 on automation follow-up writes — they never re-trigger (loop safety). */
+  automationDepth?: number;
 }
 
 interface FieldMask {
@@ -204,6 +207,7 @@ export class QueryService implements OnModuleInit {
     private readonly outbox: OutboxService,
     private readonly rustProxy: RustDataPlaneProxy,
     private readonly realtime: RealtimePublisherService,
+    private readonly automations: AutomationsService,
   ) {
     this.registryUrl = this.config.getOrThrow<string>('ADAPTER_REGISTRY_URL');
     this.permissionUrl = this.config.get<string>('PERMISSION_ENGINE_URL', 'http://permission-engine:3050');
@@ -439,11 +443,22 @@ export class QueryService implements OnModuleInit {
     // Best-effort realtime fan-out — fire-and-forget so the write response is
     // never delayed; the publisher swallows every failure internally.
     if (REALTIME_WRITE_OPS.has(op)) {
+      const pk = result.rows[0]?.['id'] ?? dto.data?.['id'] ?? dto.filter?.['id'];
       void this.realtime.publishRowChanged(dbId, resource, op as RealtimeWriteOp, {
         filter: dto.filter,
         idempotencyKey: dto.idempotencyKey,
-        pk: result.rows[0]?.['id'] ?? dto.data?.['id'] ?? dto.filter?.['id'],
+        pk,
       });
+      this.fireAutomations({
+        dbId,
+        tenantId,
+        userId,
+        table: resource,
+        op: op as RealtimeWriteOp,
+        row: (result.rows[0] as Record<string, unknown> | undefined)
+          ?? { ...(dto.filter ?? {}), ...(dto.data ?? {}) },
+        pk,
+      }, context);
     }
 
     return this.applyFieldMask(result, decision.mask);
@@ -497,13 +512,48 @@ export class QueryService implements OnModuleInit {
     // the committed batch (TXN_OPS are all writes). Fire-and-forget — the
     // publisher never rejects.
     for (const o of ops) {
+      const pk = o.data?.['id'] ?? o.filter?.['id'];
       void this.realtime.publishRowChanged(dbId, o.resource, o.op as RealtimeWriteOp, {
         filter: o.filter,
         idempotencyKey: o.idempotencyKey,
-        pk: o.data?.['id'] ?? o.filter?.['id'],
+        pk,
       });
+      this.fireAutomations({
+        dbId,
+        tenantId,
+        userId,
+        table: o.resource,
+        op: o.op as RealtimeWriteOp,
+        row: { ...(o.filter ?? {}), ...(o.data ?? {}) },
+        pk,
+      }, context);
     }
     return { guarantee: 'atomic', mount: dbId, results };
+  }
+
+  /**
+   * Server-backed automations: fire-and-forget evaluation of the stored
+   * rules after a SUCCESSFUL write — for EVERY client, not only the session
+   * that defined the rules. Loop safety: follow-up `set_property` writes
+   * carry automationDepth=1 and writes at depth ≥ 1 never re-enter here.
+   */
+  private fireAutomations(event: AutomationWriteEvent, context: QueryRequestContext): void {
+    if ((context.automationDepth ?? 0) > 0) return;
+    void this.automations
+      .runForWrite(
+        event,
+        (table, data, filter) => {
+          const followUp = Object.assign(new ExecuteQueryDto(), { op: 'update', data, filter });
+          return this.executeQuery(event.dbId, table, event.userId, followUp, {
+            requestId: context.requestId,
+            identity: context.identity,
+            automationDepth: (context.automationDepth ?? 0) + 1,
+          });
+        },
+        (rule, message, pk) =>
+          this.realtime.publishAutomationFired(event.dbId, event.table, rule.id, rule.name, message, pk),
+      )
+      .catch((error: Error) => this.logger.warn(`automation run failed: ${error.message}`));
   }
 
   /** begin → execute each op → commit; rollback (best-effort) on any failure. */
