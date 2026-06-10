@@ -13,6 +13,10 @@ bson = { workspace = true }
 deadpool-postgres = { workspace = true }
 deadpool-sqlite = { workspace = true }
 rusqlite = { workspace = true }
+tiberius = { workspace = true }
+bb8 = { workspace = true }
+bb8-tiberius = { workspace = true }
+tokio-util = { workspace = true }
 futures = { workspace = true }
 uuid = { workspace = true }
 mongodb = { workspace = true }

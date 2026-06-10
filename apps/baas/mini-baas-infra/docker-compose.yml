@@ -271,6 +271,34 @@ services:
     mem_limit: 1g
     cpus: 1.0
 
+  # ─── Microsoft SQL Server (engines-extra — proves TDS agnosticism) ──
+  # Served by the Rust tiberius adapter under the `mssql` engine id. SQL Server
+  # needs ~2 GB; lives in the optional `engines-extra` profile (the `engines`
+  # plane / Max package), NEVER in default editions. Developer edition (free).
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: mini-baas-mssql
+    profiles: [engines-extra]
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-Mssql_Strong!Pass1}
+      MSSQL_PID: Developer
+    ports:
+      - "${MSSQL_PORT:-1433}:1433"
+    volumes:
+      - mssql-data:/var/opt/mssql
+    networks:
+      - mini-baas
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -No -Q 'SELECT 1' -b -o /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 45s
+    mem_limit: 2g
+    cpus: 1.0
+
   # ─── Iceberg REST Catalog (M2 federation) ────────────────────────
   iceberg-rest:
     image: apache/iceberg-rest-fixture:1.8.1
@@ -832,7 +860,7 @@ services:
       # corresponding TypeScript engines have been removed.
       RUST_DATA_PLANE_URL: ${RUST_DATA_PLANE_URL:-http://data-plane-router-rust:4011}
       RUST_DATA_PLANE_FORWARD: ${RUST_DATA_PLANE_FORWARD:-1}
-      RUST_DATA_PLANE_FORWARD_ENGINES: ${RUST_DATA_PLANE_FORWARD_ENGINES:-postgresql,cockroachdb,mongodb,mysql,mariadb,redis,http}
+      RUST_DATA_PLANE_FORWARD_ENGINES: ${RUST_DATA_PLANE_FORWARD_ENGINES:-postgresql,cockroachdb,mongodb,mysql,mariadb,redis,sqlite,mssql,http}
       RUST_DATA_PLANE_TIMEOUT_MS: ${RUST_DATA_PLANE_TIMEOUT_MS:-5000}
     depends_on:
       adapter-registry-go:
@@ -1602,6 +1630,7 @@ volumes:
   mongo-data:
   mysql-data:
   cockroach-data:
+  mssql-data:
   mariadb-data:
   mongo-keyfile:
   redis-data:

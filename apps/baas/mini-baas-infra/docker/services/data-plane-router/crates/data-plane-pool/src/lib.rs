@@ -22,6 +22,7 @@ mod credential;
 mod http;
 mod ident;
 mod mongo;
+mod mssql;
 mod mysql;
 mod postgres;
 mod redis;
@@ -31,6 +32,7 @@ mod sqlite;
 
 pub use http::HttpEngineAdapter;
 pub use mongo::MongoEngineAdapter;
+pub use mssql::MssqlEngineAdapter;
 pub use mysql::MysqlEngineAdapter;
 pub use postgres::{PgDialect, PostgresEngineAdapter};
 pub use redis::RedisEngineAdapter;
