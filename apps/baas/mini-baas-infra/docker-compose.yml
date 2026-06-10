@@ -915,6 +915,10 @@ services:
       DATA_PLANE_BYPASS_ENABLED: ${DATA_PLANE_BYPASS_ENABLED:-0}
       TENANT_CONTROL_URL: ${TENANT_CONTROL_URL:-http://tenant-control:3022}
       INTERNAL_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
+      # Phase 7d: system Postgres holding public.outbox_events. On the bypass
+      # write path the data plane emits the row-change event itself (the
+      # query-router is out of the path), so realtime/webhooks keep firing.
+      DATA_PLANE_OUTBOX_DSN: ${DATA_PLANE_OUTBOX_DSN:-postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}}
       RUST_LOG: ${RUST_LOG:-info}
     ports:
       - "127.0.0.1:${DATA_PLANE_RUST_PORT:-4011}:4011"

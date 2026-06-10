@@ -152,6 +152,10 @@ pub struct AppState {
     /// tenant-control `/v1/keys/verify` + adapter-registry `/connect`. Cheap to
     /// clone (Arc inside); only used when the bypass is enabled.
     http_client: reqwest::Client,
+    /// Phase 7d outbox emitter (row-change events on the bypass write path).
+    /// `None` unless `DATA_PLANE_OUTBOX_DSN` is set — the bypass works without
+    /// it, but realtime/webhooks only fire post-cutover once it's wired.
+    outbox: Option<Arc<crate::outbox::OutboxEmitter>>,
 }
 
 impl AppState {
@@ -225,6 +229,7 @@ impl AppState {
                 .timeout(Duration::from_secs(10))
                 .build()
                 .unwrap_or_default(),
+            outbox: crate::outbox::OutboxEmitter::from_env().map(Arc::new),
         }
     }
 
@@ -495,15 +500,22 @@ async fn execute_query(
     State(state): State<AppState>,
     Json(request): Json<QueryRequest>,
 ) -> impl IntoResponse {
-    run_query(state, request).await
+    // The internal `/v1/query` is called by the query-router, which emits the
+    // outbox event itself — so the data plane must NOT (would double-emit).
+    run_query(state, request, false).await
 }
 
 /// Core query execution, shared by the internal `/v1/query` (envelope already
-/// trusted — the query-router authenticated) and the Phase-7 `/data/v1/query`
-/// (Rust authenticated the API key itself) front doors. Owns the identity/mount
-/// validation, tier rate-limit + capability gate, the planner, and pool
-/// dispatch, so both doors enforce IDENTICALLY.
-async fn run_query(state: AppState, request: QueryRequest) -> axum::response::Response {
+/// trusted — the query-router authenticated; `emit_outbox=false`) and the
+/// Phase-7 `/data/v1/query` (Rust authenticated; `emit_outbox=true` — the
+/// query-router is out of the path, so the data plane emits the row-change
+/// event). Owns identity/mount validation, tier rate-limit + capability gate,
+/// the planner, and pool dispatch, so both doors enforce IDENTICALLY.
+async fn run_query(
+    state: AppState,
+    request: QueryRequest,
+    emit_outbox: bool,
+) -> axum::response::Response {
     if let Err(message) = validate_identity_mount(&state, &request.identity, &request.mount) {
         return bad_request(message);
     }
@@ -601,7 +613,7 @@ async fn run_query(state: AppState, request: QueryRequest) -> axum::response::Re
         }
     }
 
-    // Capture audit fields before the request is consumed by the pool.
+    // Capture audit + outbox fields before the request is consumed by the pool.
     let audit_tenant = request.identity.tenant_id.clone();
     let audit_engine = request.mount.engine.clone();
     let audit_op = request.operation.op.clone();
@@ -614,6 +626,10 @@ async fn run_query(state: AppState, request: QueryRequest) -> axum::response::Re
             | DataOperationKind::Upsert
             | DataOperationKind::Batch
     );
+    let outbox_identity = request.identity.clone();
+    let outbox_data = request.operation.data.clone();
+    let outbox_filter = request.operation.filter.clone();
+    let outbox_idem = request.operation.idempotency_key.clone();
 
     let pool = match state.registry.get_or_create(request.mount).await {
         Ok(pool) => pool,
@@ -635,6 +651,29 @@ async fn run_query(state: AppState, request: QueryRequest) -> axum::response::Re
                     affected_rows = result.affected_rows,
                     "data mutation committed"
                 );
+            }
+            // Phase 7d: on the bypass write path, emit the row-change event the
+            // query-router would have — best-effort, never fails the (committed)
+            // write. No-op for reads, for the internal path (emit_outbox=false),
+            // and when the outbox DSN is unset.
+            if emit_outbox && is_mutation {
+                if let Some(ob) = state.outbox.as_ref() {
+                    if let Err(e) = ob
+                        .emit_mutation(
+                            &audit_engine,
+                            &outbox_identity,
+                            audit_op,
+                            &audit_resource,
+                            outbox_data.as_ref(),
+                            outbox_filter.as_ref(),
+                            &result,
+                            outbox_idem.as_deref(),
+                        )
+                        .await
+                    {
+                        tracing::warn!(resource = %audit_resource, "outbox emit failed (write already committed): {e}");
+                    }
+                }
             }
             (StatusCode::OK, Json(result)).into_response()
         }
@@ -741,8 +780,9 @@ async fn data_query(
         },
         operation: req.operation,
     };
-    // 4. Identical execution path.
-    run_query(state, request).await
+    // 4. Identical execution path — but Rust emits the outbox event here (the
+    // query-router is out of the bypass path), so row-change fan-out keeps firing.
+    run_query(state, request, true).await
 }
 
 fn auth_error_response(err: crate::auth::AuthError) -> axum::response::Response {
