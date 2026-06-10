@@ -70,6 +70,13 @@ dsn_for() {
       p="$(env_of mini-baas-mysql MYSQL_PASSWORD)"; p="${p:-mini_baas_pw}"
       d="$(env_of mini-baas-mysql MYSQL_DATABASE)"; d="${d:-mini_baas}"
       echo "mysql://${u}:${p}@mysql:3306/${d}" ;;
+    mariadb)
+      container_up mini-baas-mariadb || return 1
+      local u p d
+      u="$(env_of mini-baas-mariadb MARIADB_USER)"; u="${u:-mini_baas}"
+      p="$(env_of mini-baas-mariadb MARIADB_PASSWORD)"; p="${p:-mini_baas_pw}"
+      d="$(env_of mini-baas-mariadb MARIADB_DATABASE)"; d="${d:-mini_baas}"
+      echo "mysql://${u}:${p}@mariadb:3306/${d}" ;;
     mongodb)
       container_up mini-baas-mongo || return 1
       local u p
@@ -127,7 +134,9 @@ ensure_toolchain
 if [[ $# -ge 1 ]]; then
   ENGINES=("$1")
 else
-  ENGINES=(postgresql mysql mongodb redis)
+  # Always-on engines + engines-extra (mariadb/cockroachdb/mssql, skipped
+  # cleanly when their profile isn't up).
+  ENGINES=(postgresql mysql mariadb mongodb redis)
 fi
 
 FAILED=0

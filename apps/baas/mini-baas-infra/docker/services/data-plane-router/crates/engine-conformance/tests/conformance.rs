@@ -36,6 +36,7 @@ async fn engine_conformance() {
     let adapter: Arc<dyn EngineAdapter> = match engine.as_str() {
         "postgresql" => Arc::new(PostgresEngineAdapter::new(resolver)),
         "mysql" => Arc::new(MysqlEngineAdapter::new(resolver)),
+        "mariadb" => Arc::new(MysqlEngineAdapter::with_engine_name(resolver, "mariadb")),
         "mongodb" => Arc::new(MongoEngineAdapter::new(resolver)),
         "redis" => Arc::new(RedisEngineAdapter::new(resolver)),
         other => panic!("CONFORMANCE_ENGINE='{other}' is not wired in tests/conformance.rs"),

@@ -43,7 +43,7 @@ func (s *Service) EnsureSchema(ctx context.Context) error {
 CREATE TABLE IF NOT EXISTS public.tenant_databases (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id       TEXT NOT NULL,
-  engine          TEXT NOT NULL CHECK (engine IN ('postgresql','mongodb','mysql','redis','sqlite','http','jdbc','cassandra','neo4j','elasticsearch','qdrant','influx')),
+  engine          TEXT NOT NULL CHECK (engine IN ('postgresql','mongodb','mysql','mariadb','redis','sqlite','http','jdbc','cassandra','neo4j','elasticsearch','qdrant','influx')),
   name            TEXT NOT NULL CHECK (char_length(name) BETWEEN 1 AND 64),
   connection_enc  BYTEA NOT NULL,
   connection_iv   BYTEA NOT NULL,
@@ -61,6 +61,13 @@ ALTER TABLE public.tenant_databases ADD COLUMN IF NOT EXISTS isolation TEXT NOT 
 ALTER TABLE public.tenant_databases DROP CONSTRAINT IF EXISTS tenant_databases_isolation_check;
 ALTER TABLE public.tenant_databases ADD CONSTRAINT tenant_databases_isolation_check
   CHECK (isolation IN ('shared_rls','schema_per_tenant','db_per_tenant','tenant_owned'));
+-- Idempotently widen the engine CHECK so a mariadb mount registers on
+-- upgraded databases (older installs baked an engine list without it). The
+-- broad set stays at the DB layer; control-plane allowedEngines is the honest
+-- ACCEPT gate (only engines with a live Rust pool).
+ALTER TABLE public.tenant_databases DROP CONSTRAINT IF EXISTS tenant_databases_engine_check;
+ALTER TABLE public.tenant_databases ADD CONSTRAINT tenant_databases_engine_check
+  CHECK (engine IN ('postgresql','mongodb','mysql','mariadb','redis','sqlite','http','jdbc','cassandra','neo4j','elasticsearch','qdrant','influx'));
 ALTER TABLE public.tenant_databases ENABLE ROW LEVEL SECURITY;
 -- Retire the pre-M12 broken policy on upgrade.
 DROP POLICY IF EXISTS tenant_isolation ON public.tenant_databases;
@@ -158,9 +165,16 @@ func (s *Service) GetConnection(ctx context.Context, userID, id string) (Connect
 		payload   EncryptedPayload
 	)
 	err := s.db.TenantTx(ctx, userID, func(tx pgx.Tx) error {
+		// EXPLICIT tenant scope (not just the RLS policy): the control-plane DB
+		// role owns/bypasses RLS on tenant_databases, so without `AND
+		// tenant_id = $2` a mount's UUID would be a bearer capability — ANY
+		// valid tenant key + the dbId would resolve (and read) ANOTHER
+		// tenant's mount. The whole tenant_owned safety model rests on this
+		// caller==owner check at resolve time. `userID` is the caller tenant
+		// the query-router forwards as X-Tenant-Id.
 		row := tx.QueryRow(ctx,
 			`SELECT engine, isolation, connection_enc, connection_iv, connection_tag, connection_salt
-			   FROM public.tenant_databases WHERE id = $1`, id)
+			   FROM public.tenant_databases WHERE id = $1 AND tenant_id = $2`, id, userID)
 		err := row.Scan(&engine, &isolation, &payload.Encrypted, &payload.IV, &payload.Tag, &payload.Salt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
@@ -169,7 +183,7 @@ func (s *Service) GetConnection(ctx context.Context, userID, id string) (Connect
 			return err
 		}
 		// fire-and-forget health timestamp, same intent as the Node service
-		_, _ = tx.Exec(ctx, `UPDATE public.tenant_databases SET last_healthy_at = now() WHERE id = $1`, id)
+		_, _ = tx.Exec(ctx, `UPDATE public.tenant_databases SET last_healthy_at = now() WHERE id = $1 AND tenant_id = $2`, id, userID)
 		return nil
 	})
 	if err != nil {

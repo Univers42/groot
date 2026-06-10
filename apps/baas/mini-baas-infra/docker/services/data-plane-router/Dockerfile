@@ -12,11 +12,15 @@ COPY Cargo.toml ./
 COPY crates/data-plane-core/Cargo.toml crates/data-plane-core/Cargo.toml
 COPY crates/data-plane-pool/Cargo.toml crates/data-plane-pool/Cargo.toml
 COPY crates/data-plane-server/Cargo.toml crates/data-plane-server/Cargo.toml
+# engine-conformance is a workspace member (test-only). Its manifest must be
+# present for cargo to parse the workspace, but default-members keeps it out of
+# the bin build, so a stub lib is enough — its deps are never compiled here.
+COPY crates/engine-conformance/Cargo.toml crates/engine-conformance/Cargo.toml
 
 RUN --mount=type=cache,id=cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=cargo-git,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=dpr-target,target=/build/target,sharing=locked \
-    for dir in crates/data-plane-core crates/data-plane-pool crates/data-plane-server; do \
+    for dir in crates/data-plane-core crates/data-plane-pool crates/data-plane-server crates/engine-conformance; do \
       mkdir -p "$dir/src"; \
       echo "pub fn placeholder() {}" > "$dir/src/lib.rs"; \
     done && \

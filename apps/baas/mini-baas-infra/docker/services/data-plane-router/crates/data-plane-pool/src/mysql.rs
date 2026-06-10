@@ -51,14 +51,29 @@ const RESERVED_COLUMNS: [&str; 1] = ["owner_id"];
 
 /// Adapter that knows how to construct [`MysqlPool`] instances from a
 /// [`DatabaseMount`]. Held as `Arc<dyn EngineAdapter>` inside the registry.
+///
+/// MariaDB speaks the same wire protocol and is served by the SAME dispatch
+/// (mysql_async connects to either) — so the adapter is parameterized by
+/// `engine_name`. The registry routes a mount to this adapter by matching
+/// `mount.engine == self.engine()`, so one code path serves both engines while
+/// each keeps its own engine id + capability descriptor (honesty preserved).
 pub struct MysqlEngineAdapter {
     resolver: Arc<dyn MountResolver>,
+    engine_name: &'static str,
 }
 
 impl MysqlEngineAdapter {
     #[must_use]
     pub fn new(resolver: Arc<dyn MountResolver>) -> Self {
-        Self { resolver }
+        Self { resolver, engine_name: "mysql" }
+    }
+
+    /// Build the adapter under a specific engine id (`"mysql"` or `"mariadb"`).
+    /// The dispatch and pool are identical; only `engine()` + `capabilities()`
+    /// differ.
+    #[must_use]
+    pub fn with_engine_name(resolver: Arc<dyn MountResolver>, engine_name: &'static str) -> Self {
+        Self { resolver, engine_name }
     }
 }
 
@@ -134,11 +149,15 @@ async fn run_batch(
 #[async_trait]
 impl EngineAdapter for MysqlEngineAdapter {
     fn engine(&self) -> &str {
-        "mysql"
+        self.engine_name
     }
 
     fn capabilities(&self) -> EngineCapabilities {
-        EngineCapabilities::mysql()
+        if self.engine_name == "mariadb" {
+            EngineCapabilities::mariadb()
+        } else {
+            EngineCapabilities::mysql()
+        }
     }
 
     fn supported_ops(&self) -> &'static [DataOperationKind] {

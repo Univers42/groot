@@ -177,12 +177,16 @@ impl AppState {
             Arc::new(MongoEngineAdapter::new(resolver.clone()));
         let mysql: Arc<dyn EngineAdapter> =
             Arc::new(MysqlEngineAdapter::new(resolver.clone()));
+        // MariaDB rides the MySQL adapter (same wire protocol + dispatch) under
+        // its own engine id, so a `mariadb` mount routes here.
+        let mariadb: Arc<dyn EngineAdapter> =
+            Arc::new(MysqlEngineAdapter::with_engine_name(resolver.clone(), "mariadb"));
         let redis: Arc<dyn EngineAdapter> =
             Arc::new(RedisEngineAdapter::new(resolver.clone()));
         let http: Arc<dyn EngineAdapter> =
             Arc::new(HttpEngineAdapter::new(resolver.clone()));
         let adapters: Vec<Arc<dyn EngineAdapter>> =
-            vec![postgres, mongo, mysql, redis, http];
+            vec![postgres, mongo, mysql, mariadb, redis, http];
         // Boot-time honesty self-check (04/S1b): fail fast if any descriptor
         // advertises an op the adapter doesn't dispatch.
         assert_capability_honesty(&adapters);
@@ -458,14 +462,14 @@ async fn execute_query(
         return bad_request("operation.resource is required".to_string());
     }
 
-    // R2 + R3 + R7 + R8: Postgres, Mongo, MySQL, Redis, HTTP execute through
-    // the Rust pool registry. Engines beyond this list (jdbc, cassandra,
-    // neo4j, es, qdrant, influx) stay contract-only.
-    let executable_engines = ["postgresql", "mongodb", "mysql", "redis", "http"];
+    // Engines with a live Rust pool. MariaDB rides the MySQL adapter. Engines
+    // beyond this list (jdbc, cassandra, neo4j, es, qdrant, influx) stay
+    // contract-only and are rejected here.
+    let executable_engines = ["postgresql", "mongodb", "mysql", "mariadb", "redis", "http"];
     if !executable_engines.contains(&request.mount.engine.as_str()) {
         return not_implemented(
             "engine_execution_not_enabled",
-            "engine has no Rust pool yet; only postgresql + mongodb execute in the Rust data plane today",
+            "engine has no Rust pool; supported engines: postgresql, mysql, mariadb, mongodb, redis, http",
         );
     }
 
@@ -1146,6 +1150,11 @@ fn default_engines() -> Vec<EngineDescriptor> {
             engine: "mysql".to_string(),
             phase: "pool_v2_active".to_string(),
             capabilities: EngineCapabilities::mysql(),
+        },
+        EngineDescriptor {
+            engine: "mariadb".to_string(),
+            phase: "pool_v2_active".to_string(),
+            capabilities: EngineCapabilities::mariadb(),
         },
         EngineDescriptor {
             engine: "redis".to_string(),

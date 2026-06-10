@@ -203,6 +203,15 @@ impl EngineCapabilities {
         }
     }
 
+    /// MariaDB — wire-compatible with MySQL and served by the same adapter,
+    /// so the capability surface is identical. Kept as a distinct constructor
+    /// (not an alias) so a future MariaDB-only divergence has a home and the
+    /// descriptor reads honestly at `/v1/capabilities`.
+    #[must_use]
+    pub fn mariadb() -> Self {
+        Self::mysql()
+    }
+
     #[must_use]
     pub fn redis() -> Self {
         Self {

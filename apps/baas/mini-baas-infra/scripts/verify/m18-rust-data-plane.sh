@@ -55,9 +55,13 @@ grep -qE "DATA_PLANE_ROUTER_PRODUCT_MODE:.*(enabled|shadow)" "${COMPOSE_FILE}" \
   || fail "Rust data-plane-router must declare a PRODUCT_MODE (enabled|shadow)"
 grep -qE "RUST_DATA_PLANE_FORWARD:.*1" "${COMPOSE_FILE}" \
   || fail "compose default must enable Rust forwarding (RUST_DATA_PLANE_FORWARD=1)"
-grep -qE "RUST_DATA_PLANE_FORWARD_ENGINES:.*postgresql,mongodb,mysql,redis,http" "${COMPOSE_FILE}" \
-  || fail "compose default must forward all 5 R2/R3/R7/R8 engines"
-pass "compose forwards all 5 R2/R3/R7/R8 engines to the Rust router by default"
+# All engines with a live Rust pool must be forwarded (mariadb rides the mysql
+# adapter — Phase 3). Assert each is present rather than pinning the exact list.
+for _eng in postgresql mongodb mysql mariadb redis http; do
+  grep -qE "RUST_DATA_PLANE_FORWARD_ENGINES:.*${_eng}" "${COMPOSE_FILE}" \
+    || fail "compose default must forward the ${_eng} engine to the Rust router"
+done
+pass "compose forwards every Rust-served engine (pg/mongo/mysql/mariadb/redis/http) by default"
 
 step "checking Rust router contracts statically"
 grep -q "pub trait EngineAdapter" "${ROUTER_DIR}/crates/data-plane-core/src/ports.rs" \
@@ -125,9 +129,13 @@ grep -q "HttpEngineAdapter" "${ROUTES}" \
   || fail "AppState::new does not build HttpEngineAdapter (R8 not wired)"
 grep -qE "DefaultPoolRegistry::(new|with_max_pools)" "${ROUTES}" \
   || fail "AppState::new does not build DefaultPoolRegistry"
-grep -qE '"postgresql"\s*,\s*"mongodb"\s*,\s*"mysql"\s*,\s*"redis"\s*,\s*"http"' "${ROUTES}" \
-  || fail "executable_engines list does not include all 5 R2/R3/R7/R8 engines"
-pass "R2+R3+R7+R8 wired: PoolRegistry dispatches all 5 engines through Rust pools"
+# executable_engines must include every Rust-served engine (mariadb rides the
+# mysql adapter — Phase 3). Check each token rather than pinning the order.
+for _eng in postgresql mongodb mysql mariadb redis http; do
+  grep -qE "\"${_eng}\"" "${ROUTES}" \
+    || fail "executable_engines list does not include the ${_eng} engine"
+done
+pass "PoolRegistry dispatches every Rust-served engine (pg/mongo/mysql/mariadb/redis/http)"
 
 # ── R3 specific: Mongo adapter implementation surface ────────────────────────
 step "checking Rust Mongo adapter (R3)"
