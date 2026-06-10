@@ -46,3 +46,30 @@ pub enum DataPlaneError {
     #[error("{feature} is not implemented in the Rust shadow data plane yet")]
     NotImplemented { feature: String },
 }
+
+impl DataPlaneError {
+    /// Re-wraps an error's text with a context prefix (e.g. `batch item 3: `)
+    /// while preserving the variant — and therefore the HTTP status the server
+    /// maps it to. Variants whose payload is not free text pass through as-is.
+    #[must_use]
+    pub fn prefix_message(prefix: &str, err: DataPlaneError) -> DataPlaneError {
+        match err {
+            Self::Backend { message } => Self::Backend {
+                message: format!("{prefix}{message}"),
+            },
+            Self::Conflict { message } => Self::Conflict {
+                message: format!("{prefix}{message}"),
+            },
+            Self::InvalidRequest { message } => Self::InvalidRequest {
+                message: format!("{prefix}{message}"),
+            },
+            Self::InvalidIdentifier { value } => Self::InvalidIdentifier {
+                value: format!("{prefix}{value}"),
+            },
+            Self::NotImplemented { feature } => Self::NotImplemented {
+                feature: format!("{prefix}{feature}"),
+            },
+            other => other,
+        }
+    }
+}

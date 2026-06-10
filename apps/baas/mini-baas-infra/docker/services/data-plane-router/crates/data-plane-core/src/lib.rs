@@ -21,7 +21,8 @@ pub use identity::{IdentitySource, RequestIdentity};
 pub use isolation::{safe_schema, Isolation, ScopeDirective};
 pub use mount::{CredentialRef, DatabaseMount, PoolPolicy};
 pub use operation::{
-    AggFunc, Aggregate, AggregateSpec, DataOperation, DataOperationKind, DataResult, ReturningMode,
+    AggFunc, Aggregate, AggregateSpec, BatchItemOutcome, BatchItemStatus, BatchSummary,
+    DataOperation, DataOperationKind, DataResult, ReturningMode,
 };
 pub use ports::{
     EngineAdapter, EngineHealth, EnginePool, MigrationRequest, MigrationResult, MigrationStatus,

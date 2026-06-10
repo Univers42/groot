@@ -1191,7 +1191,7 @@ mod tests {
             _op: DataOperation,
             _id: RequestIdentity,
         ) -> Result<DataResult, DataPlaneError> {
-            Ok(DataResult { rows: vec![], affected_rows: 0, next_cursor: None })
+            Ok(DataResult { rows: vec![], affected_rows: 0, next_cursor: None, batch: None })
         }
         async fn commit(&self) -> Result<(), DataPlaneError> {
             Ok(())

@@ -2,7 +2,8 @@ use crate::ident::quote_ident;
 use crate::resolver::MountResolver;
 use async_trait::async_trait;
 use data_plane_core::{
-    validate_default_expr, AggFunc, Aggregate, CmpOp, ColumnSchema, DataOperation,
+    validate_default_expr, AggFunc, Aggregate, BatchItemOutcome, BatchItemStatus, BatchSummary,
+    CmpOp, ColumnSchema, DataOperation,
     DataOperationKind, DataPlaneError, DataPlaneResult, DataResult, DatabaseMount, DdlColumnDef,
     EngineAdapter, EngineCapabilities, EngineHealth, EnginePool, Filter, ForeignKeyRef, Isolation,
     MigrationRequest, MigrationResult, MigrationStatus, NormalizedType, RawStatement,
@@ -409,6 +410,7 @@ impl EnginePool for PostgresPool {
                 rows: data,
                 affected_rows: affected,
                 next_cursor: None,
+                batch: None,
             })
         } else {
             let affected = client
@@ -419,6 +421,7 @@ impl EnginePool for PostgresPool {
                 rows: vec![],
                 affected_rows: affected,
                 next_cursor: None,
+                batch: None,
             })
         }
     }
@@ -1010,6 +1013,7 @@ pub(crate) const SUPPORTED_OPS: &[DataOperationKind] = &[
     DataOperationKind::Delete,
     DataOperationKind::Upsert,
     DataOperationKind::Aggregate,
+    DataOperationKind::Batch,
 ];
 
 async fn dispatch_op<C: GenericClient + Sync>(
@@ -1024,6 +1028,21 @@ async fn dispatch_op<C: GenericClient + Sync>(
         });
     }
     match &operation.op {
+        DataOperationKind::Batch => run_batch(client, operation, identity, owner_scoped).await,
+        _ => dispatch_single(client, operation, identity, owner_scoped).await,
+    }
+}
+
+/// Single (non-batch) operation dispatch — the arms `run_batch` loops over.
+/// Exhaustive by enumeration (no wildcard): deleting a CRUD arm is a compile
+/// error, so the match can't silently drift from SUPPORTED_OPS.
+async fn dispatch_single<C: GenericClient + Sync>(
+    client: &C,
+    operation: &DataOperation,
+    identity: &RequestIdentity,
+    owner_scoped: bool,
+) -> DataPlaneResult<DataResult> {
+    match &operation.op {
         DataOperationKind::List => run_list(client, operation).await,
         DataOperationKind::Get => run_get(client, operation).await,
         DataOperationKind::Insert => run_insert(client, operation, identity, owner_scoped).await,
@@ -1031,13 +1050,48 @@ async fn dispatch_op<C: GenericClient + Sync>(
         DataOperationKind::Delete => run_delete(client, operation, identity, owner_scoped).await,
         DataOperationKind::Upsert => run_upsert(client, operation, identity, owner_scoped).await,
         DataOperationKind::Aggregate => run_aggregate(client, operation).await,
-        // Exhaustive by enumeration (no wildcard): deleting a CRUD arm above is a
-        // compile error, so the match can't silently drift from SUPPORTED_OPS.
-        DataOperationKind::Batch => Err(DataPlaneError::NotImplemented {
-            feature: "postgres batch operation (not implemented)".to_string(),
+        DataOperationKind::Batch => Err(DataPlaneError::InvalidRequest {
+            message: "nested batches are not allowed".to_string(),
         }),
     }
 }
+
+/// Atomic batch: the caller already wraps every `execute()` in a transaction
+/// (and the tx path runs inside the caller's interactive transaction), so a
+/// failed item simply propagates its error — the surrounding transaction is
+/// never committed and nothing persists. Item errors carry the item index so
+/// the 4xx envelope tells the caller exactly which sub-operation failed.
+async fn run_batch<C: GenericClient + Sync>(
+    client: &C,
+    operation: &DataOperation,
+    identity: &RequestIdentity,
+    owner_scoped: bool,
+) -> DataPlaneResult<DataResult> {
+    let items = operation
+        .batch_items()
+        .map_err(|message| DataPlaneError::InvalidRequest { message })?;
+    let mut outcomes = Vec::with_capacity(items.len());
+    let mut total: u64 = 0;
+    for (idx, item) in items.iter().enumerate() {
+        let result = dispatch_single(client, item, identity, owner_scoped)
+            .await
+            .map_err(|e| DataPlaneError::prefix_message(&format!("batch item {idx}: "), e))?;
+        total += result.affected_rows;
+        outcomes.push(BatchItemOutcome {
+            index: idx as u32,
+            status: BatchItemStatus::Ok,
+            affected_rows: result.affected_rows,
+            error: None,
+        });
+    }
+    Ok(DataResult {
+        rows: vec![],
+        affected_rows: total,
+        next_cursor: None,
+        batch: Some(BatchSummary { atomic: true, items: outcomes }),
+    })
+}
+
 
 /// Grouped aggregation:
 /// `SELECT to_jsonb(g) FROM (SELECT <group cols>, <agg exprs> FROM t WHERE <filter>
@@ -1118,6 +1172,7 @@ async fn run_aggregate<C: GenericClient + Sync>(
         rows: data,
         affected_rows: affected,
         next_cursor: None,
+        batch: None,
     })
 }
 
@@ -1160,6 +1215,22 @@ fn backend(e: &tokio_postgres::Error) -> DataPlaneError {
         if code.starts_with("23") || code.starts_with("22") {
             return DataPlaneError::Conflict {
                 message: db.message().to_string(),
+            };
+        }
+        // 42P10 "no unique or exclusion constraint matching the ON CONFLICT
+        // specification": the table's schema can't arbitrate this upsert
+        // (shared_rls upserts key on (owner_id, <filter cols>) — the table
+        // needs that composite UNIQUE). The caller's request/schema mismatch,
+        // not an engine failure — 400 with the platform contract spelled out,
+        // never a 502.
+        if code == "42P10" {
+            return DataPlaneError::InvalidRequest {
+                message: format!(
+                    "{} — upserts on owner-scoped (shared_rls) mounts arbitrate on \
+                     (owner_id, <filter key columns>); the table needs a matching \
+                     composite UNIQUE constraint",
+                    db.message()
+                ),
             };
         }
     }
@@ -1573,6 +1644,7 @@ async fn run_list<C: GenericClient + Sync>(
         rows: data,
         affected_rows: affected,
         next_cursor: None,
+        batch: None,
     })
 }
 
@@ -1598,6 +1670,7 @@ async fn run_get<C: GenericClient + Sync>(
         rows: data,
         affected_rows: affected,
         next_cursor: None,
+        batch: None,
     })
 }
 
@@ -1663,6 +1736,7 @@ async fn run_insert<C: GenericClient + Sync>(
         rows: vec![row.get::<_, Value>("row")],
         affected_rows: 1,
         next_cursor: None,
+        batch: None,
     })
 }
 
@@ -1863,6 +1937,7 @@ async fn execute_mutation<C: GenericClient + Sync>(
             rows: data,
             affected_rows: affected,
             next_cursor: None,
+            batch: None,
         })
     } else {
         let affected = client
@@ -1873,6 +1948,7 @@ async fn execute_mutation<C: GenericClient + Sync>(
             rows: vec![],
             affected_rows: affected,
             next_cursor: None,
+            batch: None,
         })
     }
 }

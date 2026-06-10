@@ -63,13 +63,14 @@ fn descriptor_advertises_exactly_what_dispatch_implements() {
 }
 
 #[test]
-fn no_engine_advertises_unimplemented_batch() {
-    for engine in ENGINES {
-        assert!(
-            !descriptor(engine).batch,
-            "{engine} advertises batch but no adapter implements DataOperationKind::Batch",
-        );
+fn batch_is_advertised_exactly_where_implemented() {
+    // pg/mysql: atomic (per-request tx); mongo/redis: ordered, non-atomic.
+    // http stays false: a remote REST passthrough cannot give batch
+    // semantics — honesty over uniformity.
+    for engine in ["postgresql", "mysql", "mongodb", "redis"] {
+        assert!(descriptor(engine).batch, "{engine} implements run_batch");
     }
+    assert!(!descriptor("http").batch, "http has no batch semantics");
 }
 
 #[test]

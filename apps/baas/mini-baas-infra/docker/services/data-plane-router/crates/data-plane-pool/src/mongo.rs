@@ -21,9 +21,10 @@
 //!     across all read/write code paths.
 
 use async_trait::async_trait;
-use bson::{Bson, Document};
+use bson::{doc, Bson, Document};
 use data_plane_core::{
-    ColumnSchema, DataOperation, DataOperationKind, DataPlaneError, DataPlaneResult, DataResult,
+    AggFunc, Aggregate, BatchItemOutcome, BatchItemStatus, BatchSummary, ColumnSchema,
+    DataOperation, DataOperationKind, DataPlaneError, DataPlaneResult, DataResult,
     DatabaseMount, DdlColumnDef, EngineAdapter, EngineCapabilities, EngineHealth, EnginePool,
     NormalizedType, RequestIdentity, SchemaDdlOp, SchemaDdlRequest, SchemaDdlResult,
     SchemaDdlStatus, SchemaDescriptor, ScopeDirective, TableSchema, TxBeginRequest, TxHandle,
@@ -136,6 +137,8 @@ pub(crate) const SUPPORTED_OPS: &[DataOperationKind] = &[
     DataOperationKind::Update,
     DataOperationKind::Delete,
     DataOperationKind::Upsert,
+    DataOperationKind::Aggregate,
+    DataOperationKind::Batch,
 ];
 
 #[async_trait]
@@ -260,19 +263,13 @@ impl EnginePool for MongoPool {
                 feature: format!("mongo operation {:?}", operation.op),
             });
         }
-        let col = self.collection(&operation.resource)?;
         match operation.op {
-            DataOperationKind::List => self.run_list(&col, &operation, &identity).await,
-            DataOperationKind::Get => self.run_get(&col, &operation, &identity).await,
-            DataOperationKind::Insert => self.run_insert(&col, &operation, &identity).await,
-            DataOperationKind::Update => self.run_update(&col, &operation, &identity).await,
-            DataOperationKind::Delete => self.run_delete(&col, &operation, &identity).await,
-            DataOperationKind::Upsert => self.run_upsert(&col, &operation, &identity).await,
-            DataOperationKind::Batch | DataOperationKind::Aggregate => {
-                Err(DataPlaneError::NotImplemented {
-                    feature: "mongo batch/aggregate operation (not implemented)".to_string(),
-                })
-            }
+            // Ordered, NON-atomic: mongo multi-document transactions need
+            // session threading (deferred, like `begin()`), so batch items
+            // run in order and execution stops at the first failure —
+            // earlier items stay persisted, the summary says exactly which.
+            DataOperationKind::Batch => self.run_batch(&operation, &identity).await,
+            _ => self.dispatch_single(&operation, &identity).await,
         }
     }
 
@@ -614,6 +611,177 @@ impl MongoPool {
             .unwrap_or_else(|| bson::doc! { "bsonType": "object", "properties": {} }))
     }
 
+    /// Single (non-batch) operation dispatch — resolves the collection from
+    /// the operation's own `resource`, so batch items can span collections.
+    /// Exhaustive by enumeration so the match can't drift from SUPPORTED_OPS.
+    async fn dispatch_single(
+        &self,
+        op: &DataOperation,
+        identity: &RequestIdentity,
+    ) -> DataPlaneResult<DataResult> {
+        let col = self.collection(&op.resource)?;
+        match op.op {
+            DataOperationKind::List => self.run_list(&col, op, identity).await,
+            DataOperationKind::Get => self.run_get(&col, op, identity).await,
+            DataOperationKind::Insert => self.run_insert(&col, op, identity).await,
+            DataOperationKind::Update => self.run_update(&col, op, identity).await,
+            DataOperationKind::Delete => self.run_delete(&col, op, identity).await,
+            DataOperationKind::Upsert => self.run_upsert(&col, op, identity).await,
+            DataOperationKind::Aggregate => self.run_aggregate(&col, op, identity).await,
+            DataOperationKind::Batch => Err(DataPlaneError::InvalidRequest {
+                message: "nested batches are not allowed".to_string(),
+            }),
+        }
+    }
+
+    /// Ordered, non-atomic batch: items execute in order; the first failure
+    /// stops execution. Items already executed STAY PERSISTED (mongo has no
+    /// cross-document rollback here) — the summary reports ok / error /
+    /// skipped per item so the caller can reconcile.
+    async fn run_batch(
+        &self,
+        operation: &DataOperation,
+        identity: &RequestIdentity,
+    ) -> DataPlaneResult<DataResult> {
+        let items = operation
+            .batch_items()
+            .map_err(|message| DataPlaneError::InvalidRequest { message })?;
+        let mut outcomes = Vec::with_capacity(items.len());
+        let mut total: u64 = 0;
+        let mut failed = false;
+        for (idx, item) in items.iter().enumerate() {
+            if failed {
+                outcomes.push(BatchItemOutcome {
+                    index: idx as u32,
+                    status: BatchItemStatus::Skipped,
+                    affected_rows: 0,
+                    error: None,
+                });
+                continue;
+            }
+            match self.dispatch_single(item, identity).await {
+                Ok(result) => {
+                    total += result.affected_rows;
+                    outcomes.push(BatchItemOutcome {
+                        index: idx as u32,
+                        status: BatchItemStatus::Ok,
+                        affected_rows: result.affected_rows,
+                        error: None,
+                    });
+                }
+                Err(e) => {
+                    failed = true;
+                    outcomes.push(BatchItemOutcome {
+                        index: idx as u32,
+                        status: BatchItemStatus::Error,
+                        affected_rows: 0,
+                        error: Some(e.to_string()),
+                    });
+                }
+            }
+        }
+        Ok(DataResult {
+            rows: vec![],
+            affected_rows: total,
+            next_cursor: None,
+            batch: Some(BatchSummary { atomic: false, items: outcomes }),
+        })
+    }
+
+    /// Grouped aggregation lowered to a `$match → $group → $project` pipeline.
+    /// The `$match` stage is the SAME tenant/owner-intersected filter every
+    /// read uses, so aggregation cannot see rows a `list` could not. Output
+    /// keys (group columns, aliases) are validated by [`safe_agg_key`] so no
+    /// client text can smuggle a `$`-operator or a dotted path into the
+    /// pipeline. `distinct` is not supported on mongo (clean 400, the SQL
+    /// engines serve it).
+    async fn run_aggregate(
+        &self,
+        col: &Collection<Document>,
+        op: &DataOperation,
+        identity: &RequestIdentity,
+    ) -> DataPlaneResult<DataResult> {
+        let spec = op
+            .aggregate
+            .as_ref()
+            .ok_or_else(|| DataPlaneError::InvalidRequest {
+                message: "aggregate requires an `aggregate` spec".to_string(),
+            })?;
+        if spec.aggregates.is_empty() {
+            return Err(DataPlaneError::InvalidRequest {
+                message: "aggregate requires at least one aggregate function".to_string(),
+            });
+        }
+        if spec.aggregates.iter().any(|a| a.distinct) {
+            return Err(DataPlaneError::InvalidRequest {
+                message: "distinct aggregates are not supported on mongodb".to_string(),
+            });
+        }
+        let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        for name in spec
+            .group_by
+            .iter()
+            .map(String::as_str)
+            .chain(spec.aggregates.iter().map(|a| a.alias.as_str()))
+        {
+            safe_agg_key(name)?;
+            if !seen.insert(name) {
+                return Err(DataPlaneError::InvalidRequest {
+                    message: format!("duplicate aggregate output column '{name}'"),
+                });
+            }
+        }
+
+        let match_doc = build_tenant_filter(op.filter.as_ref(), identity, &self.tenant_id)?;
+
+        // `_id` carries the group key (null = single global group).
+        let mut group = Document::new();
+        if spec.group_by.is_empty() {
+            group.insert("_id", Bson::Null);
+        } else {
+            let mut id_doc = Document::new();
+            for col_name in &spec.group_by {
+                id_doc.insert(col_name.clone(), format!("${col_name}"));
+            }
+            group.insert("_id", id_doc);
+        }
+        for agg in &spec.aggregates {
+            let expr = build_mongo_aggregate_expr(agg)?;
+            group.insert(agg.alias.clone(), expr);
+        }
+
+        // Flatten the group key back into named columns; drop `_id`.
+        let mut project = doc! { "_id": 0 };
+        for col_name in &spec.group_by {
+            project.insert(col_name.clone(), format!("$_id.{col_name}"));
+        }
+        for agg in &spec.aggregates {
+            project.insert(agg.alias.clone(), 1);
+        }
+
+        let limit = i64::from(op.limit.unwrap_or(1000).min(10_000));
+        let mut pipeline = vec![
+            doc! { "$match": match_doc },
+            doc! { "$group": group },
+            doc! { "$project": project },
+        ];
+        if let Some(sort_doc) = build_sort(op.sort.as_ref()) {
+            pipeline.push(doc! { "$sort": sort_doc });
+        }
+        pipeline.push(doc! { "$limit": limit });
+
+        let cursor = col.aggregate(pipeline, None).await.map_err(mongo_err)?;
+        let docs: Vec<Document> = cursor.try_collect().await.map_err(mongo_err)?;
+        let rows: Vec<Value> = docs.into_iter().map(normalize_doc).collect();
+        let affected = rows.len() as u64;
+        Ok(DataResult {
+            rows,
+            affected_rows: affected,
+            next_cursor: None,
+            batch: None,
+        })
+    }
+
     async fn run_list(
         &self,
         col: &Collection<Document>,
@@ -637,6 +805,7 @@ impl MongoPool {
             rows,
             affected_rows: affected,
             next_cursor: None,
+            batch: None,
         })
     }
 
@@ -653,11 +822,13 @@ impl MongoPool {
                 rows: vec![normalize_doc(d)],
                 affected_rows: 1,
                 next_cursor: None,
+                batch: None,
             }),
             None => Ok(DataResult {
                 rows: vec![],
                 affected_rows: 0,
                 next_cursor: None,
+                batch: None,
             }),
         }
     }
@@ -679,6 +850,7 @@ impl MongoPool {
             rows: vec![normalize_doc(out)],
             affected_rows: 1,
             next_cursor: None,
+            batch: None,
         })
     }
 
@@ -701,6 +873,7 @@ impl MongoPool {
             rows: vec![],
             affected_rows: result.modified_count,
             next_cursor: None,
+            batch: None,
         })
     }
 
@@ -717,6 +890,7 @@ impl MongoPool {
             rows: vec![],
             affected_rows: result.deleted_count,
             next_cursor: None,
+            batch: None,
         })
     }
 
@@ -762,6 +936,7 @@ impl MongoPool {
             rows: vec![],
             affected_rows: result.modified_count + u64::from(result.upserted_id.is_some()),
             next_cursor: None,
+            batch: None,
         })
     }
 }
@@ -1057,6 +1232,49 @@ fn require_row_filter(filter: Option<&Value>, op_name: &str) -> DataPlaneResult<
 
 /// Take the client filter (if any) and intersect it with the server-side
 /// tenant scope so an attacker cannot drop the predicate.
+/// Validates a client-supplied aggregate key (group column, field, alias)
+/// before it becomes a BSON document KEY or a `$`-path: no `$` prefix (would
+/// be parsed as an operator), no dots (would address a nested path), no NUL.
+fn safe_agg_key(name: &str) -> DataPlaneResult<()> {
+    let ok = !name.is_empty()
+        && !name.starts_with('$')
+        && !name.contains('.')
+        && !name.contains('\0');
+    if ok {
+        Ok(())
+    } else {
+        Err(DataPlaneError::InvalidRequest {
+            message: format!("invalid aggregate column name '{name}'"),
+        })
+    }
+}
+
+/// One `$group` accumulator from the allowlisted [`AggFunc`] enum.
+/// `count` with no field is `{$sum: 1}`; `count(field)` counts documents
+/// where the field is present and non-null (SQL `COUNT(col)` semantics).
+fn build_mongo_aggregate_expr(agg: &Aggregate) -> DataPlaneResult<Bson> {
+    if let Some(field) = agg.field.as_deref() {
+        safe_agg_key(field)?;
+    }
+    let field_ref = |f: &str| Bson::String(format!("${f}"));
+    let expr = match (agg.func, agg.field.as_deref()) {
+        (AggFunc::Count, None) => doc! { "$sum": 1 },
+        (AggFunc::Count, Some(f)) => doc! {
+            "$sum": { "$cond": [ { "$gt": [ { "$ifNull": [ field_ref(f), Bson::Null ] }, Bson::Null ] }, 1, 0 ] }
+        },
+        (AggFunc::Sum, Some(f)) => doc! { "$sum": field_ref(f) },
+        (AggFunc::Avg, Some(f)) => doc! { "$avg": field_ref(f) },
+        (AggFunc::Min, Some(f)) => doc! { "$min": field_ref(f) },
+        (AggFunc::Max, Some(f)) => doc! { "$max": field_ref(f) },
+        (func, None) => {
+            return Err(DataPlaneError::InvalidRequest {
+                message: format!("aggregate '{func:?}' requires a `field`"),
+            })
+        }
+    };
+    Ok(Bson::Document(expr))
+}
+
 fn build_tenant_filter(
     filter: Option<&Value>,
     identity: &RequestIdentity,

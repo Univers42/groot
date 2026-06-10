@@ -77,6 +77,23 @@ export interface QueryOpts {
   idempotencyKey?: string;
   /** Aggregation request — required when `op = 'aggregate'`, ignored otherwise. */
   aggregate?: AggregateSpec;
+  /** Sub-operations — required when `op = 'batch'`, ignored otherwise.
+   *  Items may not themselves be batches; `resource` defaults to the
+   *  request's resource. SQL engines run the batch atomically (one
+   *  transaction); document/KV engines run it ordered, stop-on-first-error. */
+  operations?: BatchOperation[];
+}
+
+/** One batch sub-operation (mirrors the data-plane wire shape). */
+export interface BatchOperation {
+  op: Exclude<AdapterOp, 'batch'>;
+  /** Defaults to the batch request's own resource when omitted. */
+  resource?: string;
+  data?: Record<string, unknown>;
+  filter?: Record<string, unknown>;
+  sort?: Record<string, 'asc' | 'desc'>;
+  limit?: number;
+  offset?: number;
 }
 
 /** An allowlisted SQL aggregate function (mirrors data-plane `AggFunc`). */
@@ -102,10 +119,32 @@ export interface AggregateSpec {
 export interface QueryResult {
   rows: Record<string, unknown>[];
   rowCount: number;
+  /** Per-item outcomes — present only for `op = 'batch'` (additive). */
+  batch?: BatchResultSummary;
+}
+
+/** Batch result envelope (mirrors the data-plane `BatchSummary`). */
+export interface BatchResultSummary {
+  /** `true` → all-or-nothing; `false` → ordered, earlier items persisted. */
+  atomic: boolean;
+  items: Array<{
+    index: number;
+    status: 'ok' | 'error' | 'skipped';
+    affected_rows: number;
+    error?: string;
+  }>;
 }
 
 /** Canonical operation set the router dispatches across engines. */
-export type AdapterOp = 'list' | 'get' | 'insert' | 'update' | 'delete' | 'upsert' | 'aggregate';
+export type AdapterOp =
+  | 'list'
+  | 'get'
+  | 'insert'
+  | 'update'
+  | 'delete'
+  | 'upsert'
+  | 'aggregate'
+  | 'batch';
 
 /**
  * Contract every database engine must satisfy to plug into the query-router.

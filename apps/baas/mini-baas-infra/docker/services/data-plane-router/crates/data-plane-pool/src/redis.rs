@@ -15,7 +15,8 @@
 use crate::resolver::MountResolver;
 use async_trait::async_trait;
 use data_plane_core::{
-    DataOperation, DataOperationKind, DataPlaneError, DataPlaneResult, DataResult, DatabaseMount,
+    BatchItemOutcome, BatchItemStatus, BatchSummary, DataOperation, DataOperationKind,
+    DataPlaneError, DataPlaneResult, DataResult, DatabaseMount,
     EngineAdapter, EngineCapabilities, EngineHealth, EnginePool, RequestIdentity, ScopeDirective,
     TxBeginRequest, TxHandle,
 };
@@ -82,6 +83,7 @@ pub(crate) const SUPPORTED_OPS: &[DataOperationKind] = &[
     DataOperationKind::Update,
     DataOperationKind::Delete,
     DataOperationKind::Upsert,
+    DataOperationKind::Batch,
 ];
 
 #[async_trait]
@@ -178,6 +180,87 @@ impl RedisPool {
             }),
         }
     }
+
+    /// Single (non-batch) operation dispatch — derives the key prefix from
+    /// the operation's own `resource`, so batch items can span resources.
+    /// Exhaustive by enumeration so the match can't drift from SUPPORTED_OPS.
+    async fn dispatch_single(
+        &self,
+        operation: &DataOperation,
+        identity: &RequestIdentity,
+    ) -> DataPlaneResult<DataResult> {
+        validate_resource(&operation.resource)?;
+        let mut conn = self.manager.clone();
+        let prefix = self.key_prefix(&operation.resource, identity);
+        match operation.op {
+            DataOperationKind::List => run_list(&mut conn, &prefix, operation).await,
+            DataOperationKind::Get => run_get(&mut conn, &prefix, operation).await,
+            DataOperationKind::Insert => run_insert(&mut conn, &prefix, operation).await,
+            DataOperationKind::Update => run_update(&mut conn, &prefix, operation).await,
+            DataOperationKind::Delete => run_delete(&mut conn, &prefix, operation).await,
+            DataOperationKind::Upsert => run_upsert(&mut conn, &prefix, operation).await,
+            DataOperationKind::Batch => Err(DataPlaneError::InvalidRequest {
+                message: "nested batches are not allowed".to_string(),
+            }),
+            DataOperationKind::Aggregate => Err(DataPlaneError::NotImplemented {
+                feature: "redis aggregate operation (not implemented)".to_string(),
+            }),
+        }
+    }
+
+    /// Ordered, non-atomic batch: redis has no rollback (MULTI/EXEC queues
+    /// commands but cannot undo executed ones), so items run in order and the
+    /// first failure stops execution — earlier items stay applied, and the
+    /// summary reports ok / error / skipped per item.
+    async fn run_batch(
+        &self,
+        operation: &DataOperation,
+        identity: &RequestIdentity,
+    ) -> DataPlaneResult<DataResult> {
+        let items = operation
+            .batch_items()
+            .map_err(|message| DataPlaneError::InvalidRequest { message })?;
+        let mut outcomes = Vec::with_capacity(items.len());
+        let mut total: u64 = 0;
+        let mut failed = false;
+        for (idx, item) in items.iter().enumerate() {
+            if failed {
+                outcomes.push(BatchItemOutcome {
+                    index: idx as u32,
+                    status: BatchItemStatus::Skipped,
+                    affected_rows: 0,
+                    error: None,
+                });
+                continue;
+            }
+            match self.dispatch_single(item, identity).await {
+                Ok(result) => {
+                    total += result.affected_rows;
+                    outcomes.push(BatchItemOutcome {
+                        index: idx as u32,
+                        status: BatchItemStatus::Ok,
+                        affected_rows: result.affected_rows,
+                        error: None,
+                    });
+                }
+                Err(e) => {
+                    failed = true;
+                    outcomes.push(BatchItemOutcome {
+                        index: idx as u32,
+                        status: BatchItemStatus::Error,
+                        affected_rows: 0,
+                        error: Some(e.to_string()),
+                    });
+                }
+            }
+        }
+        Ok(DataResult {
+            rows: vec![],
+            affected_rows: total,
+            next_cursor: None,
+            batch: Some(BatchSummary { atomic: false, items: outcomes }),
+        })
+    }
 }
 
 #[async_trait]
@@ -203,21 +286,11 @@ impl EnginePool for RedisPool {
                 feature: format!("redis operation {:?}", operation.op),
             });
         }
-        let mut conn = self.manager.clone();
-        let prefix = self.key_prefix(&operation.resource, &identity);
-
         match operation.op {
-            DataOperationKind::List => run_list(&mut conn, &prefix, &operation).await,
-            DataOperationKind::Get => run_get(&mut conn, &prefix, &operation).await,
-            DataOperationKind::Insert => run_insert(&mut conn, &prefix, &operation).await,
-            DataOperationKind::Update => run_update(&mut conn, &prefix, &operation).await,
-            DataOperationKind::Delete => run_delete(&mut conn, &prefix, &operation).await,
-            DataOperationKind::Upsert => run_upsert(&mut conn, &prefix, &operation).await,
-            DataOperationKind::Batch | DataOperationKind::Aggregate => {
-                Err(DataPlaneError::NotImplemented {
-                    feature: "redis batch/aggregate operation (not implemented)".to_string(),
-                })
-            }
+            // Ordered, NON-atomic (no rollback in redis — MULTI/EXEC queues
+            // but cannot undo): items run in order, first failure stops.
+            DataOperationKind::Batch => self.run_batch(&operation, &identity).await,
+            _ => self.dispatch_single(&operation, &identity).await,
         }
     }
 
@@ -265,6 +338,7 @@ async fn run_list(
             rows: vec![],
             affected_rows: 0,
             next_cursor: None,
+            batch: None,
         });
     }
 
@@ -284,6 +358,7 @@ async fn run_list(
         rows,
         affected_rows: affected,
         next_cursor: None,
+        batch: None,
     })
 }
 
@@ -302,12 +377,14 @@ async fn run_get(
             rows: vec![],
             affected_rows: 0,
             next_cursor: None,
+            batch: None,
         });
     }
     Ok(DataResult {
         rows: vec![hash_to_row(id, hash)],
         affected_rows: 1,
         next_cursor: None,
+        batch: None,
     })
 }
 
@@ -330,6 +407,7 @@ async fn run_insert(
         rows: vec![Value::Object(data)],
         affected_rows: 1,
         next_cursor: None,
+        batch: None,
     })
 }
 
@@ -346,6 +424,7 @@ async fn run_update(
             rows: vec![],
             affected_rows: 0,
             next_cursor: None,
+            batch: None,
         });
     }
     write_hash(conn, &key, &data).await?;
@@ -354,6 +433,7 @@ async fn run_update(
         rows: vec![Value::Object(data)],
         affected_rows: 1,
         next_cursor: None,
+        batch: None,
     })
 }
 
@@ -370,6 +450,7 @@ async fn run_delete(
         rows: vec![],
         affected_rows: removed,
         next_cursor: None,
+        batch: None,
     })
 }
 
@@ -386,6 +467,7 @@ async fn run_upsert(
         rows: vec![Value::Object(data)],
         affected_rows: 1,
         next_cursor: None,
+        batch: None,
     })
 }
 

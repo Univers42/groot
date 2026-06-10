@@ -151,7 +151,10 @@ m25_cleanup() {
     "${MY_DB:-mini_baas}" -e 'DROP TABLE IF EXISTS m25_probe;' >/dev/null 2>&1 || true
   live_tenant_cleanup
 }
-live_tenant_provision "m25-matrix" || fail "scratch tenant provisioning failed"
+# Unique slug per run: the shared lib mints a fixed key name and tenant/key
+# deletes are soft, so a fixed slug would collide on re-run (key-name unique
+# constraint). Scratch tenants are cleaned up on EXIT regardless.
+live_tenant_provision "m25-matrix-$(date +%s)" || fail "scratch tenant provisioning failed"
 
 # extra mounts: mysql / mongodb / redis (DSNs from the live containers,
 # in-network aliases — the same trust path lib-live-tenant uses for pg).
@@ -202,13 +205,17 @@ pass "scratch tables ready"
 # one probe through the WHOLE path; canonicalize the outcome
 probe() { # $1 dbId, $2 body -> echoes served|unsupported|error:<code>
   local code attempt
-  for attempt in 1 2 3; do
+  for attempt in 1 2 3 4 5 6; do
     code=$(curl -s -o /tmp/m25-probe.json -w '%{http_code}' -X POST \
       "${LIVE_KONG_URL}/query/v1/$1/tables/m25_probe" \
       -H "apikey: ${LIVE_ANON_APIKEY}" -H "X-Baas-Api-Key: ${LIVE_TENANT_API_KEY}" \
       -H 'Content-Type: application/json' -d "$2")
-    if [[ "${code}" == "429" ]] || grep -q 'auth_verify_unavailable' /tmp/m25-probe.json 2>/dev/null; then
-      sleep $((attempt * 2)); continue
+    # Ride out a query-router→tenant-control circuit-breaker window (~60s)
+    # the same way the m26 gate does — these are availability blips, not the
+    # capability signal the matrix is measuring.
+    if [[ "${code}" == "429" ]] \
+       || grep -q 'auth_verify_unavailable\|tenant-control unreachable' /tmp/m25-probe.json 2>/dev/null; then
+      [[ "${attempt}" -lt 6 ]] && { sleep $((attempt * 3)); continue; }
     fi
     break
   done

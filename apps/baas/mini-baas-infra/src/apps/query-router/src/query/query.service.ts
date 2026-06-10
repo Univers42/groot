@@ -15,6 +15,7 @@ import {
   ForbiddenException,
   Injectable,
   Logger,
+  NotFoundException,
   OnModuleInit,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -302,15 +303,27 @@ export class QueryService implements OnModuleInit {
 
   private async fetchConnectionFromRegistry(dbId: string, userId: string): Promise<AdapterResponse> {
     const url = `${this.registryUrl}/databases/${dbId}/connect`;
-    const { data } = await firstValueFrom(
-      this.http.get<AdapterResponse>(url, {
-        headers: {
-          'X-Service-Token': this.serviceToken,
-          'X-Tenant-Id': userId,
-        },
-      }),
-    );
-    return data;
+    try {
+      const { data } = await firstValueFrom(
+        this.http.get<AdapterResponse>(url, {
+          headers: {
+            'X-Service-Token': this.serviceToken,
+            'X-Tenant-Id': userId,
+          },
+        }),
+      );
+      return data;
+    } catch (error) {
+      // adapter-registry scopes /connect to the caller's tenant (mount.tenant_id
+      // == X-Tenant-Id); an unknown OR cross-tenant dbId is a 404 there. Surface
+      // it as a clean 404, not the opaque 500 an unhandled axios reject becomes
+      // — the dbId is either wrong or not this tenant's.
+      const status = (error as { response?: { status?: number } })?.response?.status;
+      if (status === 404) {
+        throw new NotFoundException(`Database mount '${dbId}' was not found for this tenant.`);
+      }
+      throw error;
+    }
   }
 
   private resolveAdapter(engine: string): IDatabaseAdapter {
@@ -369,6 +382,7 @@ export class QueryService implements OnModuleInit {
       appId: identity?.appId,
       idempotencyKey: dto.idempotencyKey,
       aggregate: dto.aggregate,
+      operations: dto.operations,
     };
 
     let result: QueryResult;

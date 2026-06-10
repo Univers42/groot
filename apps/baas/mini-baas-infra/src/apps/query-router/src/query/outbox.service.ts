@@ -42,7 +42,7 @@ interface QueryOutboxInput {
   idempotencyKey?: string;
 }
 
-const MUTATING_OPS = new Set<AdapterOp>(['insert', 'update', 'delete', 'upsert']);
+const MUTATING_OPS = new Set<AdapterOp>(['insert', 'update', 'delete', 'upsert', 'batch']);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 @Injectable()
