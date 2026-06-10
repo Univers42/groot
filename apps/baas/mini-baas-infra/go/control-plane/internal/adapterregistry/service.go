@@ -51,11 +51,16 @@ CREATE TABLE IF NOT EXISTS public.tenant_databases (
   connection_salt BYTEA,
   created_at      TIMESTAMPTZ DEFAULT now(),
   last_healthy_at TIMESTAMPTZ,
-  isolation       TEXT NOT NULL DEFAULT 'shared_rls' CHECK (isolation IN ('shared_rls','schema_per_tenant','db_per_tenant')),
+  isolation       TEXT NOT NULL DEFAULT 'shared_rls' CHECK (isolation IN ('shared_rls','schema_per_tenant','db_per_tenant','tenant_owned')),
   UNIQUE (tenant_id, name)
 );
 -- Additive for pre-existing tables (the CHECK above only applies to fresh installs).
 ALTER TABLE public.tenant_databases ADD COLUMN IF NOT EXISTS isolation TEXT NOT NULL DEFAULT 'shared_rls';
+-- Idempotently widen the fresh-install CHECK on upgraded databases so
+-- tenant_owned mounts register (older installs baked the 3-value list).
+ALTER TABLE public.tenant_databases DROP CONSTRAINT IF EXISTS tenant_databases_isolation_check;
+ALTER TABLE public.tenant_databases ADD CONSTRAINT tenant_databases_isolation_check
+  CHECK (isolation IN ('shared_rls','schema_per_tenant','db_per_tenant','tenant_owned'));
 ALTER TABLE public.tenant_databases ENABLE ROW LEVEL SECURITY;
 -- Retire the pre-M12 broken policy on upgrade.
 DROP POLICY IF EXISTS tenant_isolation ON public.tenant_databases;

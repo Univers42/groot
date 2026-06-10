@@ -153,6 +153,16 @@ impl EngineAdapter for MongoEngineAdapter {
     }
 
     async fn open_pool(&self, mount: DatabaseMount) -> DataPlaneResult<Box<dyn EnginePool>> {
+        // tenant_owned (no per-row owner scoping) is implemented for
+        // PostgreSQL only so far — fail CLOSED here rather than silently
+        // owner-scoping a mount that promised not to (wrong rows beat
+        // surprising rows, but a clear error beats both).
+        if !mount.isolation().owner_scoped() {
+            return Err(DataPlaneError::NotImplemented {
+                feature: "tenant_owned isolation on this engine (PostgreSQL only for now)"
+                    .to_string(),
+            });
+        }
         let dsn = self.resolver.resolve_dsn(&mount).await?;
         let mut options = ClientOptions::parse(&dsn).await.map_err(|e| {
             DataPlaneError::Backend {

@@ -42,6 +42,16 @@ pub enum Isolation {
     /// A distinct database/DSN per tenant; the resolver must supply a tenant
     /// DSN (no fall back to a shared one).
     DbPerTenant,
+    /// The mount IS one tenant's database (an external client DB the platform
+    /// dashboards, e.g. a customer's Supabase project): no per-row
+    /// `owner_id` scoping on writes and no `owner_id` DDL synthesis — the
+    /// tables belong to the tenant wholesale and predate the platform.
+    ///
+    /// SAFETY: dropping row-level owner scoping cannot cross tenants by
+    /// construction — tenant gating already happened upstream at key→mount
+    /// resolution (`mount.tenant_id == caller tenant`); a foreign tenant's
+    /// key never resolves this mount at all.
+    TenantOwned,
 }
 
 impl Isolation {
@@ -54,9 +64,19 @@ impl Isolation {
         match isolation.map(str::trim) {
             Some("schema_per_tenant") => Self::SchemaPerTenant,
             Some("db_per_tenant") => Self::DbPerTenant,
+            Some("tenant_owned") => Self::TenantOwned,
             // "shared_rls", "", unknown, None → the safe default.
             _ => Self::SharedRls,
         }
+    }
+
+    /// Whether the platform owner-scopes rows on this mount (insert injects
+    /// `owner_id`; update/delete filter on it; DDL synthesizes the column).
+    /// Everything except [`Isolation::TenantOwned`] — pools gate every
+    /// owner-touching site on this single predicate.
+    #[must_use]
+    pub fn owner_scoped(&self) -> bool {
+        !matches!(self, Self::TenantOwned)
     }
 
     /// The engine-neutral per-request scoping instruction for this strategy,
@@ -80,7 +100,7 @@ impl Isolation {
     #[must_use]
     pub fn scope(&self, mount: &DatabaseMount, _identity: &RequestIdentity) -> ScopeDirective {
         match self {
-            Self::SharedRls | Self::DbPerTenant => ScopeDirective::None,
+            Self::SharedRls | Self::DbPerTenant | Self::TenantOwned => ScopeDirective::None,
             Self::SchemaPerTenant => match EngineClass::of(&mount.engine) {
                 EngineClass::SearchPath => match safe_schema(&mount.tenant_id) {
                     Some(schema) => ScopeDirective::SetSearchPath { schema },
@@ -252,6 +272,20 @@ mod tests {
         assert_eq!(Isolation::from_mount(Some("   ")), Isolation::SharedRls);
         assert_eq!(Isolation::from_mount(Some("nonsense")), Isolation::SharedRls);
         assert_eq!(Isolation::from_mount(Some("SCHEMA_PER_TENANT")), Isolation::SharedRls);
+    }
+
+    #[test]
+    fn tenant_owned_parses_scopes_none_and_disables_owner_scoping() {
+        // The 4th mode: an external client DB wholly owned by one tenant.
+        assert_eq!(Isolation::from_mount(Some("tenant_owned")), Isolation::TenantOwned);
+        assert_eq!(Isolation::from_mount(Some(" tenant_owned ")), Isolation::TenantOwned);
+        let m = mount("postgresql", "gourmand", Some("tenant_owned"));
+        assert_eq!(Isolation::TenantOwned.scope(&m, &identity()), ScopeDirective::None);
+        assert!(!Isolation::TenantOwned.owner_scoped());
+        // Every pre-existing mode keeps owner scoping (parity invariant).
+        for scoped in [Isolation::SharedRls, Isolation::SchemaPerTenant, Isolation::DbPerTenant] {
+            assert!(scoped.owner_scoped(), "{scoped:?}");
+        }
     }
 
     #[test]

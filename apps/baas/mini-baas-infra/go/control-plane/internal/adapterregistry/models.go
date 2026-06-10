@@ -11,8 +11,12 @@ var allowedEngines = map[string]bool{
 
 // allowedIsolation mirrors the tenant isolation strategies the data plane
 // understands (see data-plane-core DatabaseMount.isolation).
+// tenant_owned: an external client DB wholly owned by one tenant — the data
+// plane skips per-row owner_id scoping (tenant gating still happens at
+// key→mount resolution, so a foreign tenant's key never resolves the mount).
 var allowedIsolation = map[string]bool{
 	"shared_rls": true, "schema_per_tenant": true, "db_per_tenant": true,
+	"tenant_owned": true,
 }
 
 // RegisterDatabaseRequest is the JSON body for POST /databases.

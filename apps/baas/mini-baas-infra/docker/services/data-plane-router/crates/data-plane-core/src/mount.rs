@@ -89,7 +89,7 @@ impl DatabaseMount {
     pub fn tenant_schema(&self) -> Option<String> {
         match self.isolation() {
             Isolation::SchemaPerTenant => safe_schema(&self.tenant_id),
-            Isolation::SharedRls | Isolation::DbPerTenant => None,
+            Isolation::SharedRls | Isolation::DbPerTenant | Isolation::TenantOwned => None,
         }
     }
 }

@@ -19,6 +19,76 @@ use tokio_postgres::{GenericClient, NoTls};
 
 type BoxedParam = Box<dyn ToSql + Sync + Send>;
 
+/// Does the DSN opt into TLS? Matches both URI (`?sslmode=require`) and
+/// key/value (`sslmode=require`) DSN forms. `prefer`/unset keep the NoTls
+/// path: the local stack's postgres does not speak TLS and parity must hold.
+fn dsn_wants_tls(dsn: &str) -> bool {
+    ["sslmode=require", "sslmode=verify-ca", "sslmode=verify-full"]
+        .iter()
+        .any(|mode| dsn.contains(mode))
+}
+
+/// rustls connector with libpq `sslmode=require` SEMANTICS: encrypt the
+/// channel, do not verify the chain (exactly what `require` means in libpq —
+/// Supabase's server certs chain to their project CA, not a public root, so
+/// `require` is also what their own connection strings specify). `verify-*`
+/// hardening (webpki roots + hostname) is a follow-up; the modes are accepted
+/// today so a stricter DSN still connects encrypted rather than failing.
+fn rustls_connector() -> tokio_postgres_rustls::MakeRustlsConnect {
+    #[derive(Debug)]
+    struct NoCertVerification(rustls::crypto::CryptoProvider);
+    impl rustls::client::danger::ServerCertVerifier for NoCertVerification {
+        fn verify_server_cert(
+            &self,
+            _end_entity: &rustls::pki_types::CertificateDer<'_>,
+            _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+            _server_name: &rustls::pki_types::ServerName<'_>,
+            _ocsp_response: &[u8],
+            _now: rustls::pki_types::UnixTime,
+        ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+            Ok(rustls::client::danger::ServerCertVerified::assertion())
+        }
+        fn verify_tls12_signature(
+            &self,
+            message: &[u8],
+            cert: &rustls::pki_types::CertificateDer<'_>,
+            dss: &rustls::DigitallySignedStruct,
+        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+            rustls::crypto::verify_tls12_signature(
+                message,
+                cert,
+                dss,
+                &self.0.signature_verification_algorithms,
+            )
+        }
+        fn verify_tls13_signature(
+            &self,
+            message: &[u8],
+            cert: &rustls::pki_types::CertificateDer<'_>,
+            dss: &rustls::DigitallySignedStruct,
+        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+            rustls::crypto::verify_tls13_signature(
+                message,
+                cert,
+                dss,
+                &self.0.signature_verification_algorithms,
+            )
+        }
+        fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+            self.0.signature_verification_algorithms.supported_schemes()
+        }
+    }
+
+    let provider = rustls::crypto::ring::default_provider();
+    let config = rustls::ClientConfig::builder_with_provider(provider.clone().into())
+        .with_safe_default_protocol_versions()
+        .expect("ring provider supports the default TLS protocol versions")
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(NoCertVerification(provider)))
+        .with_no_client_auth();
+    tokio_postgres_rustls::MakeRustlsConnect::new(config)
+}
+
 /// PostgreSQL engine adapter. Opens long-lived pools keyed by mount instead of
 /// constructing a client per request (the legacy `new Client()` hot-path cost).
 pub struct PostgresEngineAdapter {
@@ -49,15 +119,22 @@ impl EngineAdapter for PostgresEngineAdapter {
     async fn open_pool(&self, mount: DatabaseMount) -> DataPlaneResult<Box<dyn EnginePool>> {
         let dsn = self.resolver.resolve_dsn(&mount).await?;
 
+        let wants_tls = dsn_wants_tls(&dsn);
         let mut cfg = DeadpoolConfig::new();
         cfg.url = Some(dsn);
         cfg.pool = Some(PoolConfig::new(mount.pool_policy.max.max(1) as usize));
 
-        let pool =
+        // External mounts (a client's Supabase project) REQUIRE TLS; the DSN
+        // opts in via sslmode=require/verify-*. Everything else keeps the
+        // NoTls path byte-identical (the local stack's postgres).
+        let pool = if wants_tls {
+            cfg.create_pool(Some(Runtime::Tokio1), rustls_connector())
+        } else {
             cfg.create_pool(Some(Runtime::Tokio1), NoTls)
-                .map_err(|e| DataPlaneError::Backend {
-                    message: format!("pool create failed: {e}"),
-                })?;
+        }
+        .map_err(|e| DataPlaneError::Backend {
+            message: format!("pool create failed: {e}"),
+        })?;
 
         // Resolve the isolation strategy ONCE here (parse-once contract). For a
         // `schema_per_tenant` mount we also derive the `search_path` schema once
@@ -156,7 +233,7 @@ impl EnginePool for PostgresPool {
         apply_rls_context(&*tx, &identity).await?;
         apply_search_path(&*tx, self.search_path_schema.as_deref()).await?;
 
-        let result = dispatch_op(&*tx, &operation, &identity).await?;
+        let result = dispatch_op(&*tx, &operation, &identity, self.isolation.owner_scoped()).await?;
 
         tx.commit().await.map_err(|e| backend(&e))?;
         Ok(result)
@@ -205,6 +282,7 @@ impl EnginePool for PostgresPool {
         Ok(Box::new(PgTxHandle {
             tx_id,
             mount_id: self.mount_id.clone(),
+            owner_scoped: self.isolation.owner_scoped(),
             client: Mutex::new(client),
         }))
     }
@@ -511,7 +589,7 @@ impl EnginePool for PostgresPool {
             .search_path_schema
             .clone()
             .unwrap_or_else(|| "public".to_string());
-        let plan = build_pg_ddl(&schema, &ddl)?;
+        let plan = build_pg_ddl(&schema, &ddl, self.isolation.owner_scoped())?;
 
         let mut client = self.pool.get().await.map_err(|e| DataPlaneError::Backend {
             message: format!("pool checkout failed: {e}"),
@@ -688,7 +766,11 @@ fn pg_column_clause(
 
 /// Lowers a [`SchemaDdlRequest`] to its PostgreSQL statement plan, targeting
 /// `schema` explicitly (`"schema"."table"` on every statement).
-pub(crate) fn build_pg_ddl(schema: &str, ddl: &SchemaDdlRequest) -> DataPlaneResult<PgDdlPlan> {
+pub(crate) fn build_pg_ddl(
+    schema: &str,
+    ddl: &SchemaDdlRequest,
+    owner_scoped: bool,
+) -> DataPlaneResult<PgDdlPlan> {
     let table = quote_ident(&format!("{schema}.{}", ddl.table))?;
     let mut plan = PgDdlPlan {
         ensure_enum_types: Vec::new(),
@@ -752,13 +834,14 @@ pub(crate) fn build_pg_ddl(schema: &str, ddl: &SchemaDdlRequest) -> DataPlaneRes
                 }
                 clauses.push(pg_column_clause(schema, &ddl.table, def, &mut plan)?);
             }
-            if !has_owner {
+            if owner_scoped && !has_owner {
                 // The platform's write path owner-scopes every row (insert
                 // injects owner_id; update/delete filter on it) — a table
                 // without the column would 500 on its first write. The
                 // principal is NOT always a uuid: API-key callers get the
                 // synthetic `api-key:<uuid>` string and the insert path binds
-                // it as text, so the column must be text.
+                // it as text, so the column must be text. `tenant_owned`
+                // mounts skip this: the schema is the tenant's own.
                 clauses.push(format!("{} text", quote_ident("owner_id")?));
             }
             let pk: Vec<String> = primary_key
@@ -817,6 +900,9 @@ fn is_duplicate_object(e: &tokio_postgres::Error) -> bool {
 pub struct PgTxHandle {
     tx_id: String,
     mount_id: String,
+    /// Snapshot of the mount's `Isolation::owner_scoped()` at begin time —
+    /// txn writes must scope exactly like single-op writes on this mount.
+    owner_scoped: bool,
     client: Mutex<Object>,
 }
 
@@ -837,7 +923,7 @@ impl TxHandle for PgTxHandle {
     ) -> DataPlaneResult<DataResult> {
         let client = self.client.lock().await;
         // MutexGuard → Object → ClientWrapper → Client. Three derefs.
-        dispatch_op(&***client, &operation, &identity).await
+        dispatch_op(&***client, &operation, &identity, self.owner_scoped).await
     }
 
     async fn commit(&self) -> DataPlaneResult<()> {
@@ -930,6 +1016,7 @@ async fn dispatch_op<C: GenericClient + Sync>(
     client: &C,
     operation: &DataOperation,
     identity: &RequestIdentity,
+    owner_scoped: bool,
 ) -> DataPlaneResult<DataResult> {
     if !SUPPORTED_OPS.contains(&operation.op) {
         return Err(DataPlaneError::NotImplemented {
@@ -939,10 +1026,10 @@ async fn dispatch_op<C: GenericClient + Sync>(
     match &operation.op {
         DataOperationKind::List => run_list(client, operation).await,
         DataOperationKind::Get => run_get(client, operation).await,
-        DataOperationKind::Insert => run_insert(client, operation, identity).await,
-        DataOperationKind::Update => run_update(client, operation, identity).await,
-        DataOperationKind::Delete => run_delete(client, operation, identity).await,
-        DataOperationKind::Upsert => run_upsert(client, operation, identity).await,
+        DataOperationKind::Insert => run_insert(client, operation, identity, owner_scoped).await,
+        DataOperationKind::Update => run_update(client, operation, identity, owner_scoped).await,
+        DataOperationKind::Delete => run_delete(client, operation, identity, owner_scoped).await,
+        DataOperationKind::Upsert => run_upsert(client, operation, identity, owner_scoped).await,
         DataOperationKind::Aggregate => run_aggregate(client, operation).await,
         // Exhaustive by enumeration (no wildcard): deleting a CRUD arm above is a
         // compile error, so the match can't silently drift from SUPPORTED_OPS.
@@ -1518,6 +1605,7 @@ async fn run_insert<C: GenericClient + Sync>(
     client: &C,
     op: &DataOperation,
     identity: &RequestIdentity,
+    owner_scoped: bool,
 ) -> DataPlaneResult<DataResult> {
     let table = quote_ident(&op.resource)?;
     let Some(Value::Object(map)) = op.data.as_ref() else {
@@ -1536,13 +1624,15 @@ async fn run_insert<C: GenericClient + Sync>(
     // defensive posture of the Mongo + MySQL adapters. Required because
     // tenant tables typically declare `owner_id NOT NULL` and the per-row
     // RLS policy compares it against `auth.current_user_id()`.
-    let owner = PostgresPool::principal(identity).to_string();
+    // On a `tenant_owned` mount the data passes through untouched: the
+    // tables are the tenant's own pre-existing schema (no owner_id column)
+    // and tenant gating already happened at key→mount resolution.
     let mut columns = Vec::with_capacity(map.len() + 1);
     let mut placeholders = Vec::with_capacity(map.len() + 1);
     let mut params: Vec<BoxedParam> = Vec::with_capacity(map.len() + 1);
     let mut saw_owner_id = false;
     for (col, val) in map {
-        if col == "owner_id" {
+        if owner_scoped && col == "owner_id" {
             // drop client override; trusted value injected below
             saw_owner_id = true;
             continue;
@@ -1552,9 +1642,12 @@ async fn run_insert<C: GenericClient + Sync>(
         placeholders.push(format!("${}", params.len()));
     }
     let _ = saw_owner_id; // reserved for future audit logging
-    columns.push(quote_ident("owner_id")?);
-    params.push(Box::new(owner));
-    placeholders.push(format!("${}", params.len()));
+    if owner_scoped {
+        let owner = PostgresPool::principal(identity).to_string();
+        columns.push(quote_ident("owner_id")?);
+        params.push(Box::new(owner));
+        placeholders.push(format!("${}", params.len()));
+    }
 
     let sql = format!(
         "INSERT INTO {table} AS t ({}) VALUES ({}) RETURNING to_jsonb(t) AS row",
@@ -1600,11 +1693,26 @@ fn writable_columns(data: &serde_json::Map<String, Value>) -> Vec<(&str, &Value)
     cols
 }
 
+/// ` AND owner_id = $n` for owner-scoped mounts; empty for `tenant_owned`
+/// (`owner: None`) — the tables are the tenant's own schema, no such column.
+fn owner_predicate(
+    owner: Option<&str>,
+    params: &mut Vec<BoxedParam>,
+) -> DataPlaneResult<String> {
+    match owner {
+        Some(principal) => {
+            params.push(Box::new(principal.to_string()));
+            Ok(format!(" AND {} = ${}", quote_ident("owner_id")?, params.len()))
+        }
+        None => Ok(String::new()),
+    }
+}
+
 fn build_update_sql(
     table: &str,
     data: &serde_json::Map<String, Value>,
     filter: Option<&Value>,
-    owner: &str,
+    owner: Option<&str>,
     returning: bool,
 ) -> DataPlaneResult<(String, Vec<BoxedParam>)> {
     let mut params: Vec<BoxedParam> = Vec::with_capacity(data.len() + 2);
@@ -1625,8 +1733,7 @@ fn build_update_sql(
             message: "update requires a non-empty `filter` (refusing full-table update)".to_string(),
         });
     }
-    params.push(Box::new(owner.to_string()));
-    let owner_pred = format!(" AND {} = ${}", quote_ident("owner_id")?, params.len());
+    let owner_pred = owner_predicate(owner, &mut params)?;
     let ret = if returning { " RETURNING to_jsonb(t) AS row" } else { "" };
     let sql = format!(
         "UPDATE {table} AS t SET {}{where_sql}{owner_pred}{ret}",
@@ -1638,7 +1745,7 @@ fn build_update_sql(
 fn build_delete_sql(
     table: &str,
     filter: Option<&Value>,
-    owner: &str,
+    owner: Option<&str>,
     returning: bool,
 ) -> DataPlaneResult<(String, Vec<BoxedParam>)> {
     let mut params: Vec<BoxedParam> = Vec::with_capacity(4);
@@ -1648,8 +1755,7 @@ fn build_delete_sql(
             message: "delete requires a non-empty `filter` (refusing full-table delete)".to_string(),
         });
     }
-    params.push(Box::new(owner.to_string()));
-    let owner_pred = format!(" AND {} = ${}", quote_ident("owner_id")?, params.len());
+    let owner_pred = owner_predicate(owner, &mut params)?;
     let ret = if returning { " RETURNING to_jsonb(t) AS row" } else { "" };
     let sql = format!("DELETE FROM {table} AS t{where_sql}{owner_pred}{ret}");
     Ok((sql, params))
@@ -1659,7 +1765,7 @@ fn build_upsert_sql(
     table: &str,
     data: &serde_json::Map<String, Value>,
     filter: &serde_json::Map<String, Value>,
-    owner: &str,
+    owner: Option<&str>,
     returning: bool,
 ) -> DataPlaneResult<(String, Vec<BoxedParam>)> {
     let cap = data.len() + filter.len() + 1;
@@ -1669,7 +1775,12 @@ fn build_upsert_sql(
     // owner_id is part of the conflict target so ON CONFLICT arbitration (done
     // at the unique index, below RLS) is tenant-local — a tenant cannot collide
     // with another tenant's row. Requires a UNIQUE index on (owner_id, key…).
-    let mut conflict_cols: Vec<String> = vec![quote_ident("owner_id")?];
+    // `tenant_owned` mounts (owner: None) arbitrate on the caller's keys only:
+    // the whole database is one tenant's, so there is no cross-tenant index.
+    let mut conflict_cols: Vec<String> = match owner {
+        Some(_) => vec![quote_ident("owner_id")?],
+        None => Vec::new(),
+    };
     let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
     seen.insert("owner_id");
 
@@ -1679,6 +1790,7 @@ fn build_upsert_sql(
         .map(|(k, v)| (k.as_str(), v))
         .collect();
     keys.sort_by(|a, b| a.0.cmp(b.0));
+    let first_key_ident = keys.first().map(|(col, _)| quote_ident(col)).transpose()?;
     for (col, val) in keys {
         let ident = quote_ident(col)?;
         conflict_cols.push(ident.clone());
@@ -1687,11 +1799,11 @@ fn build_upsert_sql(
         placeholders.push(format!("${}", params.len()));
         seen.insert(col);
     }
-    if conflict_cols.len() == 1 {
+    let Some(first_key_ident) = first_key_ident else {
         return Err(DataPlaneError::InvalidRequest {
             message: "upsert `filter` (conflict key) must not be empty".to_string(),
         });
-    }
+    };
 
     let mut assignments: Vec<String> = Vec::new();
     for (col, val) in writable_columns(data) {
@@ -1707,17 +1819,16 @@ fn build_upsert_sql(
     }
 
     // owner_id value, server-injected (immutable on conflict → not in SET).
-    columns.push(quote_ident("owner_id")?);
-    params.push(Box::new(owner.to_string()));
-    placeholders.push(format!("${}", params.len()));
+    if let Some(principal) = owner {
+        columns.push(quote_ident("owner_id")?);
+        params.push(Box::new(principal.to_string()));
+        placeholders.push(format!("${}", params.len()));
+    }
 
     if assignments.is_empty() {
         // Only key columns supplied → re-assert a conflict key (no-op SET) so
         // DO UPDATE fires and RETURNING still yields the row.
-        let first = conflict_cols
-            .get(1)
-            .expect("a non-owner conflict column exists (checked above)");
-        assignments.push(format!("{first} = EXCLUDED.{first}"));
+        assignments.push(format!("{first_key_ident} = EXCLUDED.{first_key_ident}"));
     }
 
     let ret = if returning { " RETURNING to_jsonb(t) AS row" } else { "" };
@@ -1772,6 +1883,7 @@ async fn run_update<C: GenericClient + Sync>(
     client: &C,
     op: &DataOperation,
     identity: &RequestIdentity,
+    owner_scoped: bool,
 ) -> DataPlaneResult<DataResult> {
     let table = quote_ident(&op.resource)?;
     let Some(Value::Object(data)) = op.data.as_ref() else {
@@ -1779,9 +1891,11 @@ async fn run_update<C: GenericClient + Sync>(
             message: "update requires a JSON object in `data`".to_string(),
         });
     };
-    let owner = PostgresPool::principal(identity).to_string();
+    // `tenant_owned` mounts pass None → no owner predicate/injection.
+    let principal = PostgresPool::principal(identity).to_string();
+    let owner = owner_scoped.then_some(principal.as_str());
     let want_rows = !matches!(op.returning, Some(ReturningMode::None));
-    let (sql, params) = build_update_sql(&table, data, op.filter.as_ref(), &owner, want_rows)?;
+    let (sql, params) = build_update_sql(&table, data, op.filter.as_ref(), owner, want_rows)?;
     execute_mutation(client, &sql, &params, want_rows).await
 }
 
@@ -1791,11 +1905,14 @@ async fn run_delete<C: GenericClient + Sync>(
     client: &C,
     op: &DataOperation,
     identity: &RequestIdentity,
+    owner_scoped: bool,
 ) -> DataPlaneResult<DataResult> {
     let table = quote_ident(&op.resource)?;
-    let owner = PostgresPool::principal(identity).to_string();
+    // `tenant_owned` mounts pass None → no owner predicate/injection.
+    let principal = PostgresPool::principal(identity).to_string();
+    let owner = owner_scoped.then_some(principal.as_str());
     let want_rows = !matches!(op.returning, Some(ReturningMode::None));
-    let (sql, params) = build_delete_sql(&table, op.filter.as_ref(), &owner, want_rows)?;
+    let (sql, params) = build_delete_sql(&table, op.filter.as_ref(), owner, want_rows)?;
     execute_mutation(client, &sql, &params, want_rows).await
 }
 
@@ -1809,6 +1926,7 @@ async fn run_upsert<C: GenericClient + Sync>(
     client: &C,
     op: &DataOperation,
     identity: &RequestIdentity,
+    owner_scoped: bool,
 ) -> DataPlaneResult<DataResult> {
     let table = quote_ident(&op.resource)?;
     let Some(Value::Object(data)) = op.data.as_ref() else {
@@ -1821,9 +1939,11 @@ async fn run_upsert<C: GenericClient + Sync>(
             message: "upsert requires `filter` naming the conflict key column(s)".to_string(),
         });
     };
-    let owner = PostgresPool::principal(identity).to_string();
+    // `tenant_owned` mounts pass None → no owner predicate/injection.
+    let principal = PostgresPool::principal(identity).to_string();
+    let owner = owner_scoped.then_some(principal.as_str());
     let want_rows = !matches!(op.returning, Some(ReturningMode::None));
-    let (sql, params) = build_upsert_sql(&table, data, filter, &owner, want_rows)?;
+    let (sql, params) = build_upsert_sql(&table, data, filter, owner, want_rows)?;
     execute_mutation(client, &sql, &params, want_rows).await
 }
 
@@ -1844,7 +1964,7 @@ mod tests {
         let data = obj(json!({ "owner_id": "attacker", "name": "ok" }));
         let filter = json!({ "id": 1 });
         let (sql, params) =
-            build_update_sql("\"t\"", &data, Some(&filter), "u-trusted", true).unwrap();
+            build_update_sql("\"t\"", &data, Some(&filter), Some("u-trusted"), true).unwrap();
         assert!(sql.starts_with("UPDATE \"t\" AS t SET "), "{sql}");
         assert!(sql.contains("\"name\" = $1"), "{sql}");
         assert!(!sql.contains("SET \"owner_id\""), "owner_id must not be settable: {sql}");
@@ -1854,19 +1974,73 @@ mod tests {
     }
 
     #[test]
+    fn dsn_tls_detection_matches_sslmode() {
+        // require/verify-* engage rustls; prefer/unset keep NoTls (local parity).
+        assert!(dsn_wants_tls("postgres://u:p@db.x.supabase.co:5432/postgres?sslmode=require"));
+        assert!(dsn_wants_tls("host=db.x.supabase.co sslmode=verify-full user=u"));
+        assert!(!dsn_wants_tls("postgres://postgres:pw@postgres:5432/commerce"));
+        assert!(!dsn_wants_tls("postgres://u:p@h:5432/db?sslmode=prefer"));
+    }
+
+    #[test]
+    fn tenant_owned_writes_have_no_owner_sql() {
+        // `owner: None` (Isolation::TenantOwned): the tenant's own pre-existing
+        // tables have no owner_id column — any owner SQL would 42703.
+        let data = obj(json!({ "name": "ok" }));
+        let filter = json!({ "id": 1 });
+        let (sql, params) =
+            build_update_sql("\"t\"", &data, Some(&filter), None, true).unwrap();
+        assert!(!sql.contains("owner_id"), "{sql}");
+        assert_eq!(params.len(), 2); // name + filter id only
+        // The full-table refusals are isolation-independent.
+        assert!(build_update_sql("\"t\"", &data, None, None, true).is_err());
+
+        let (sql, params) = build_delete_sql("\"t\"", Some(&filter), None, true).unwrap();
+        assert!(!sql.contains("owner_id"), "{sql}");
+        assert_eq!(params.len(), 1);
+        assert!(build_delete_sql("\"t\"", None, None, true).is_err());
+
+        let (sql, _) = build_upsert_sql(
+            "\"t\"",
+            &obj(json!({ "name": "ok" })),
+            &obj(json!({ "email": "a@b.c" })),
+            None,
+            true,
+        )
+        .unwrap();
+        assert!(sql.contains("ON CONFLICT (\"email\")"), "caller keys only: {sql}");
+        assert!(!sql.contains("owner_id"), "{sql}");
+
+        // CreateTable DDL: no owner_id synthesis on tenant_owned mounts.
+        let mut req = ddl(SchemaDdlOp::CreateTable, "t");
+        req.columns = Some(vec![DdlColumnDef {
+            name: "id".into(),
+            normalized_type: NormalizedType::Integer,
+            nullable: false,
+            default: None,
+            enum_values: None,
+        }]);
+        req.primary_key = Some(vec!["id".into()]);
+        let plan = build_pg_ddl("public", &req, false).unwrap();
+        assert!(!plan.statements[0].contains("owner_id"), "{}", plan.statements[0]);
+        let scoped = build_pg_ddl("public", &req, true).unwrap();
+        assert!(scoped.statements[0].contains("owner_id"), "{}", scoped.statements[0]);
+    }
+
+    #[test]
     fn update_refuses_empty_filter() {
         let data = obj(json!({ "name": "x" }));
         // A refused mutation is a client error (400), never a 5xx backend error.
-        let err = build_update_sql("\"t\"", &data, None, "u", true).unwrap_err();
+        let err = build_update_sql("\"t\"", &data, None, Some("u"), true).unwrap_err();
         assert!(matches!(err, DataPlaneError::InvalidRequest { .. }), "{err:?}");
-        assert!(build_update_sql("\"t\"", &data, Some(&json!({})), "u", true).is_err());
+        assert!(build_update_sql("\"t\"", &data, Some(&json!({})), Some("u"), true).is_err());
     }
 
     #[test]
     fn update_rejects_injection_in_column_name() {
         let data = obj(json!({ "evil;--": 1 }));
         let err =
-            build_update_sql("\"t\"", &data, Some(&json!({ "id": 1 })), "u", true).unwrap_err();
+            build_update_sql("\"t\"", &data, Some(&json!({ "id": 1 })), Some("u"), true).unwrap_err();
         assert!(matches!(err, DataPlaneError::InvalidIdentifier { .. }), "{err:?}");
     }
 
@@ -1874,7 +2048,7 @@ mod tests {
     fn columns_sorted_for_statement_cache() {
         let data = obj(json!({ "b": 1, "a": 2 }));
         let (sql, _) =
-            build_update_sql("\"t\"", &data, Some(&json!({ "id": 1 })), "u", true).unwrap();
+            build_update_sql("\"t\"", &data, Some(&json!({ "id": 1 })), Some("u"), true).unwrap();
         assert!(sql.find("\"a\"").unwrap() < sql.find("\"b\"").unwrap(), "{sql}");
     }
 
@@ -1882,15 +2056,15 @@ mod tests {
     fn returning_false_omits_returning_clause() {
         let data = obj(json!({ "name": "x" }));
         let (sql, _) =
-            build_update_sql("\"t\"", &data, Some(&json!({ "id": 1 })), "u", false).unwrap();
+            build_update_sql("\"t\"", &data, Some(&json!({ "id": 1 })), Some("u"), false).unwrap();
         assert!(!sql.contains("RETURNING"), "{sql}");
     }
 
     #[test]
     fn delete_scopes_owner_and_refuses_empty_filter() {
-        let err = build_delete_sql("\"t\"", None, "u", true).unwrap_err();
+        let err = build_delete_sql("\"t\"", None, Some("u"), true).unwrap_err();
         assert!(matches!(err, DataPlaneError::InvalidRequest { .. }), "{err:?}");
-        let (sql, params) = build_delete_sql("\"t\"", Some(&json!({ "id": 1 })), "u-t", true).unwrap();
+        let (sql, params) = build_delete_sql("\"t\"", Some(&json!({ "id": 1 })), Some("u-t"), true).unwrap();
         assert!(sql.starts_with("DELETE FROM \"t\" AS t"), "{sql}");
         assert!(sql.contains(" AND \"owner_id\" = $2"), "{sql}");
         assert_eq!(params.len(), 2);
@@ -1900,7 +2074,7 @@ mod tests {
     fn upsert_forces_owner_into_conflict_target() {
         let data = obj(json!({ "name": "x" }));
         let filter = obj(json!({ "email": "a@b.c" }));
-        let (sql, _) = build_upsert_sql("\"t\"", &data, &filter, "u", true).unwrap();
+        let (sql, _) = build_upsert_sql("\"t\"", &data, &filter, Some("u"), true).unwrap();
         assert!(sql.contains("ON CONFLICT (\"owner_id\", \"email\")"), "{sql}");
         assert!(sql.contains("\"name\" = EXCLUDED.\"name\""), "{sql}");
         assert!(!sql.contains("\"owner_id\" = EXCLUDED"), "owner must be immutable on conflict: {sql}");
@@ -1910,15 +2084,15 @@ mod tests {
     #[test]
     fn upsert_requires_a_real_conflict_key() {
         let data = obj(json!({ "name": "x" }));
-        assert!(build_upsert_sql("\"t\"", &data, &obj(json!({})), "u", true).is_err());
-        assert!(build_upsert_sql("\"t\"", &data, &obj(json!({ "owner_id": "x" })), "u", true).is_err());
+        assert!(build_upsert_sql("\"t\"", &data, &obj(json!({})), Some("u"), true).is_err());
+        assert!(build_upsert_sql("\"t\"", &data, &obj(json!({ "owner_id": "x" })), Some("u"), true).is_err());
     }
 
     #[test]
     fn upsert_key_only_data_uses_noop_set() {
         let data = obj(json!({}));
         let filter = obj(json!({ "id": 1 }));
-        let (sql, _) = build_upsert_sql("\"t\"", &data, &filter, "u", true).unwrap();
+        let (sql, _) = build_upsert_sql("\"t\"", &data, &filter, Some("u"), true).unwrap();
         assert!(sql.contains("DO UPDATE SET \"id\" = EXCLUDED.\"id\""), "{sql}");
     }
 
@@ -2039,9 +2213,9 @@ mod tests {
         // and the guard actually refuses it on a real mutation:
         let data = obj(json!({ "name": "x" }));
         for taut in [json!({ "$not": { "$or": [] } }), json!({ "$or": [{ "a": 1 }, { "$not": { "$or": [] } }] })] {
-            let e = build_update_sql("\"t\"", &data, Some(&taut), "u", true).unwrap_err();
+            let e = build_update_sql("\"t\"", &data, Some(&taut), Some("u"), true).unwrap_err();
             assert!(matches!(e, DataPlaneError::InvalidRequest { .. }), "update {taut}: {e:?}");
-            let e = build_delete_sql("\"t\"", Some(&taut), "u", true).unwrap_err();
+            let e = build_delete_sql("\"t\"", Some(&taut), Some("u"), true).unwrap_err();
             assert!(matches!(e, DataPlaneError::InvalidRequest { .. }), "delete {taut}: {e:?}");
         }
         // an explicit match-nothing is NOT a tautology — it's a safe predicate.
@@ -2327,7 +2501,7 @@ mod tests {
             default: Some("0".into()),
             enum_values: None,
         });
-        let plan = build_pg_ddl("public", &req).unwrap();
+        let plan = build_pg_ddl("public", &req, true).unwrap();
         assert!(plan.ensure_enum_types.is_empty());
         assert_eq!(
             plan.statements,
@@ -2348,7 +2522,7 @@ mod tests {
             default: None,
             enum_values: Some(vec!["pending".into(), "it's".into()]),
         });
-        let plan = build_pg_ddl("public", &req).unwrap();
+        let plan = build_pg_ddl("public", &req, true).unwrap();
         // `''` escaping locks the literal quoting (injection cannot escape).
         assert_eq!(
             plan.ensure_enum_types,
@@ -2368,7 +2542,7 @@ mod tests {
         let mut bad = ddl(SchemaDdlOp::AddColumn, "orders");
         bad.column = Some(col("status", NormalizedType::Enum));
         assert!(matches!(
-            build_pg_ddl("public", &bad).unwrap_err(),
+            build_pg_ddl("public", &bad, true).unwrap_err(),
             DataPlaneError::InvalidRequest { .. }
         ));
     }
@@ -2385,7 +2559,7 @@ mod tests {
             default: Some("0".into()),
             enum_values: None,
         });
-        let plan = build_pg_ddl("public", &req).unwrap();
+        let plan = build_pg_ddl("public", &req, true).unwrap();
         assert_eq!(
             plan.statements,
             vec![
@@ -2399,7 +2573,7 @@ mod tests {
         // nullable + no default → DROP NOT NULL, and no SET DEFAULT step.
         let mut relaxed = ddl(SchemaDdlOp::AlterColumnType, "orders");
         relaxed.column = Some(col("qty", NormalizedType::Text));
-        let plan = build_pg_ddl("public", &relaxed).unwrap();
+        let plan = build_pg_ddl("public", &relaxed, true).unwrap();
         assert!(plan.statements[2].ends_with("DROP NOT NULL"), "{:?}", plan.statements);
         assert_eq!(plan.statements.len(), 3, "no default → no SET DEFAULT");
     }
@@ -2463,7 +2637,7 @@ mod tests {
             default: None,
             enum_values: Some(vec!["a".into(), "b".into()]),
         });
-        let plan = build_pg_ddl("public", &req).unwrap();
+        let plan = build_pg_ddl("public", &req, true).unwrap();
         assert_eq!(plan.ensure_enum_types.len(), 1, "enum type ensured first");
         assert!(
             plan.statements[1].contains(
@@ -2488,7 +2662,7 @@ mod tests {
             col("note", NormalizedType::Text),
         ]);
         req.primary_key = Some(vec!["id".into()]);
-        let plan = build_pg_ddl("public", &req).unwrap();
+        let plan = build_pg_ddl("public", &req, true).unwrap();
         assert_eq!(
             plan.statements,
             vec![
@@ -2510,7 +2684,7 @@ mod tests {
             col("owner_id", NormalizedType::Uuid),
         ]);
         explicit.primary_key = Some(vec!["id".into()]);
-        let plan = build_pg_ddl("public", &explicit).unwrap();
+        let plan = build_pg_ddl("public", &explicit, true).unwrap();
         assert_eq!(plan.statements[0].matches("owner_id").count(), 1, "{:?}", plan.statements);
     }
 
@@ -2519,12 +2693,12 @@ mod tests {
         let mut drop_col = ddl(SchemaDdlOp::DropColumn, "orders");
         drop_col.column_name = Some("note".into());
         // schema_per_tenant: every statement targets the tenant schema.
-        let plan = build_pg_ddl("tenant_acme_12345678", &drop_col).unwrap();
+        let plan = build_pg_ddl("tenant_acme_12345678", &drop_col, true).unwrap();
         assert_eq!(
             plan.statements,
             vec!["ALTER TABLE \"tenant_acme_12345678\".\"orders\" DROP COLUMN \"note\"".to_string()]
         );
-        let plan = build_pg_ddl("public", &ddl(SchemaDdlOp::DropTable, "orders")).unwrap();
+        let plan = build_pg_ddl("public", &ddl(SchemaDdlOp::DropTable, "orders"), true).unwrap();
         assert_eq!(plan.statements, vec!["DROP TABLE \"public\".\"orders\"".to_string()]);
     }
 
@@ -2532,14 +2706,14 @@ mod tests {
     fn pg_ddl_rejects_injection_and_unsafe_defaults() {
         // table name injection
         assert!(matches!(
-            build_pg_ddl("public", &ddl(SchemaDdlOp::DropTable, "orders; DROP TABLE x")).unwrap_err(),
+            build_pg_ddl("public", &ddl(SchemaDdlOp::DropTable, "orders; DROP TABLE x"), true).unwrap_err(),
             DataPlaneError::InvalidIdentifier { .. }
         ));
         // column name injection
         let mut bad_col = ddl(SchemaDdlOp::AddColumn, "orders");
         bad_col.column = Some(col("evil\"; --", NormalizedType::Text));
         assert!(matches!(
-            build_pg_ddl("public", &bad_col).unwrap_err(),
+            build_pg_ddl("public", &bad_col, true).unwrap_err(),
             DataPlaneError::InvalidIdentifier { .. }
         ));
         // unsafe default expression
@@ -2552,12 +2726,12 @@ mod tests {
             enum_values: None,
         });
         assert!(matches!(
-            build_pg_ddl("public", &bad_default).unwrap_err(),
+            build_pg_ddl("public", &bad_default, true).unwrap_err(),
             DataPlaneError::InvalidRequest { .. }
         ));
         // missing op-specific field surfaces the shared require_* error.
         assert!(matches!(
-            build_pg_ddl("public", &ddl(SchemaDdlOp::AddColumn, "orders")).unwrap_err(),
+            build_pg_ddl("public", &ddl(SchemaDdlOp::AddColumn, "orders"), true).unwrap_err(),
             DataPlaneError::InvalidRequest { .. }
         ));
     }
