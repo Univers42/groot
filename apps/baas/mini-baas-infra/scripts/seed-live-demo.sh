@@ -324,6 +324,18 @@ if [[ "${SEED_PAGES:-1}" == "1" ]]; then
       "${WS}" "${DYLAN}" "${PG_DB_ID}" "${MY_DB_ID}" "${MG_DB_ID}" \
       | "${ROOT_DC[@]}" exec -T postgres psql -U postgres -d postgres -q -v ON_ERROR_STOP=1 >/dev/null \
       || fail "workspace page seed failed"
+    # Dylan must also SEE the shared agency wiki (26 pages, visibility=shared,
+    # seeded by tools/seeds/seed_agency_wiki.py into the org workspace): grant
+    # editor membership so the workspace shows up in his switcher.
+    AGENCY_WS="b1a0c1e5-0000-4000-a000-000000000001"
+    if "${ROOT_DC[@]}" exec -T postgres psql -U postgres -d postgres -tAc \
+      "SELECT 1 FROM public.osionos_workspaces WHERE id='${AGENCY_WS}'" 2>/dev/null | grep -q 1; then
+      "${ROOT_DC[@]}" exec -T postgres psql -U postgres -d postgres -q -c \
+        "INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role, permissions)
+         VALUES ('${AGENCY_WS}','${DYLAN}','editor', ARRAY['read','write'])
+         ON CONFLICT (workspace_id, user_id) DO NOTHING" \
+        && pass "dylan is an editor of the agency org workspace (shared wiki visible)"
+    fi
     if "${ROOT_DC[@]}" exec -T postgres psql -U postgres -d postgres -tAc \
       "SELECT 1 FROM auth.users WHERE email='dylan@gmail.com'" 2>/dev/null | grep -q 1; then
       pass "pages seeded in workspace ${WS}; dylan@gmail.com exists in gotrue"
