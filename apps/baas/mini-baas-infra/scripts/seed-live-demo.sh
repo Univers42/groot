@@ -324,6 +324,11 @@ if [[ "${SEED_PAGES:-1}" == "1" ]]; then
       "${WS}" "${DYLAN}" "${PG_DB_ID}" "${MY_DB_ID}" "${MG_DB_ID}" \
       | "${ROOT_DC[@]}" exec -T postgres psql -U postgres -d postgres -q -v ON_ERROR_STOP=1 >/dev/null \
       || fail "workspace page seed failed"
+    step "seeding the 'Analytics' dashboard pages (curated chart/dashboard views)"
+    python3 "${SCRIPT_DIR}/seed/analytics-dashboards.py" \
+      "${WS}" "${DYLAN}" "${PG_DB_ID}" "${MY_DB_ID}" "${MG_DB_ID}" \
+      | "${ROOT_DC[@]}" exec -T postgres psql -U postgres -d postgres -q -v ON_ERROR_STOP=1 >/dev/null \
+      || fail "analytics page seed failed"
     # Dylan must also SEE the shared agency wiki (26 pages, visibility=shared,
     # seeded by tools/seeds/seed_agency_wiki.py into the org workspace): grant
     # editor membership so the workspace shows up in his switcher.
