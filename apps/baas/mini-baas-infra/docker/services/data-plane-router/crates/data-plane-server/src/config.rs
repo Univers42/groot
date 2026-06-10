@@ -57,6 +57,20 @@ pub struct ServerConfig {
     /// under verify-ca/verify-full. From `DATA_PLANE_TLS_CA_FILE`. Empty → the
     /// system/webpki roots only.
     pub tls_ca_file: String,
+
+    // ---- Phase 7: direct front door (/data/v1), shadow — DISABLED by default ---
+    /// tenant-control origin for Rust-native API-key verification. Go remains
+    /// the sole identity authority — Rust only CALLS `/v1/keys/verify`. From
+    /// `TENANT_CONTROL_URL`.
+    pub tenant_control_url: String,
+    /// Shared internal service token presented to tenant-control + adapter-
+    /// registry on the bypass path (never logged). From `INTERNAL_SERVICE_TOKEN`.
+    pub internal_service_token: String,
+    /// Mounts the additive `/data/v1` front door (Kong → Rust directly). Default
+    /// OFF — the bypass ships dormant; the existing `/query/v1` (→ query-router)
+    /// path is untouched, so this is pure shadow until explicitly enabled and
+    /// parity-proven. From `DATA_PLANE_BYPASS_ENABLED` (`1`/`true`/`on`).
+    pub bypass_enabled: bool,
 }
 
 impl ServerConfig {
@@ -106,6 +120,12 @@ impl ServerConfig {
                 .unwrap_or(0),
             security_mode: read_env("SECURITY_MODE", "baseline"),
             tls_ca_file: read_env("DATA_PLANE_TLS_CA_FILE", ""),
+            tenant_control_url: read_env("TENANT_CONTROL_URL", "http://tenant-control:3022"),
+            internal_service_token: read_env("INTERNAL_SERVICE_TOKEN", ""),
+            bypass_enabled: matches!(
+                read_env("DATA_PLANE_BYPASS_ENABLED", "false").to_lowercase().as_str(),
+                "1" | "true" | "on"
+            ),
         }
     }
 }
@@ -136,6 +156,9 @@ impl std::fmt::Debug for ServerConfig {
             .field("credential_cache_ttl_ms", &self.credential_cache_ttl_ms)
             .field("security_mode", &self.security_mode)
             .field("tls_ca_file", &self.tls_ca_file)
+            .field("tenant_control_url", &self.tenant_control_url)
+            .field("internal_service_token", &redact(&self.internal_service_token))
+            .field("bypass_enabled", &self.bypass_enabled)
             .finish()
     }
 }

@@ -907,6 +907,14 @@ services:
       # credentials; baseline keeps libpq `require` semantics. See config.rs.
       SECURITY_MODE: ${SECURITY_MODE:-baseline}
       DATA_PLANE_TLS_CA_FILE: ${DATA_PLANE_TLS_CA_FILE:-}
+      # Phase 7 direct front door (Kong→Rust /data/v1). Default OFF (shadow): the
+      # route only mounts when =1, and there is no Kong route to it yet, so it is
+      # pure shadow until parity-proven + cut over. Rust verifies the API key via
+      # tenant-control (Go stays the identity authority) + resolves mounts via
+      # adapter-registry, both with INTERNAL_SERVICE_TOKEN.
+      DATA_PLANE_BYPASS_ENABLED: ${DATA_PLANE_BYPASS_ENABLED:-0}
+      TENANT_CONTROL_URL: ${TENANT_CONTROL_URL:-http://tenant-control:3022}
+      INTERNAL_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
       RUST_LOG: ${RUST_LOG:-info}
     ports:
       - "127.0.0.1:${DATA_PLANE_RUST_PORT:-4011}:4011"

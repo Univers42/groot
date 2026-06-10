@@ -15,9 +15,9 @@ use axum::response::Response;
 use crate::metrics::{escape_label, Metrics};
 use crate::ratelimit::{tier_rate, TenantRateLimiter};
 use data_plane_core::{
-    DataOperation, DataOperationKind, DataPlaneError, DatabaseMount, EngineAdapter,
-    EngineCapabilities, MigrationRequest, Plan, PoolRegistry, RawStatement, RequestIdentity,
-    SchemaDdlRequest, TxBeginRequest, TxHandle, WorkloadContext,
+    CredentialRef, DataOperation, DataOperationKind, DataPlaneError, DatabaseMount, EngineAdapter,
+    EngineCapabilities, IdentitySource, MigrationRequest, Plan, PoolPolicy, PoolRegistry,
+    RawStatement, RequestIdentity, SchemaDdlRequest, TxBeginRequest, TxHandle, WorkloadContext,
 };
 use data_plane_pool::{
     DefaultPoolRegistry, EnvMountResolver, HttpEngineAdapter, MongoEngineAdapter,
@@ -148,6 +148,10 @@ pub struct AppState {
     /// request in the mount's tier mask (`capability_overrides`); a tenant with
     /// no mask is unlimited, so this is a no-op until packages are assigned.
     ratelimiter: Arc<TenantRateLimiter>,
+    /// Shared HTTP client for the Phase-7 bypass front door (`/data/v1`): calls
+    /// tenant-control `/v1/keys/verify` + adapter-registry `/connect`. Cheap to
+    /// clone (Arc inside); only used when the bypass is enabled.
+    http_client: reqwest::Client,
 }
 
 impl AppState {
@@ -217,6 +221,10 @@ impl AppState {
             evaluator,
             metrics: Arc::new(Metrics::default()),
             ratelimiter: Arc::new(TenantRateLimiter::new()),
+            http_client: reqwest::Client::builder()
+                .timeout(Duration::from_secs(10))
+                .build()
+                .unwrap_or_default(),
         }
     }
 
@@ -313,11 +321,21 @@ fn build_evaluator(config: &ServerConfig) -> Option<Arc<Evaluator>> {
 
 pub fn router(state: AppState) -> Router {
     let metrics_state = state.clone();
+    // Phase 7: the direct front door is additive AND opt-in. It only exists when
+    // DATA_PLANE_BYPASS_ENABLED=1; the internal /v1/query (query-router path) is
+    // always present, so this is pure shadow until parity is proven + cut over.
+    let bypass = if state.config.bypass_enabled {
+        tracing::info!("Phase 7 bypass ENABLED: POST /data/v1/query (Rust-native API-key auth)");
+        Router::new().route("/data/v1/query", post(data_query))
+    } else {
+        Router::new()
+    };
     Router::new()
         .route("/v1/health", get(health))
         .route("/metrics", get(metrics_handler))
         .route("/v1/capabilities", get(capabilities))
         .route("/v1/query", post(execute_query))
+        .merge(bypass)
         .route("/v1/schema", post(describe_schema))
         .route("/v1/schema/ddl", post(apply_schema_ddl))
         .route("/v1/transactions", post(begin_transaction))
@@ -477,6 +495,15 @@ async fn execute_query(
     State(state): State<AppState>,
     Json(request): Json<QueryRequest>,
 ) -> impl IntoResponse {
+    run_query(state, request).await
+}
+
+/// Core query execution, shared by the internal `/v1/query` (envelope already
+/// trusted — the query-router authenticated) and the Phase-7 `/data/v1/query`
+/// (Rust authenticated the API key itself) front doors. Owns the identity/mount
+/// validation, tier rate-limit + capability gate, the planner, and pool
+/// dispatch, so both doors enforce IDENTICALLY.
+async fn run_query(state: AppState, request: QueryRequest) -> axum::response::Response {
     if let Err(message) = validate_identity_mount(&state, &request.identity, &request.mount) {
         return bad_request(message);
     }
@@ -613,6 +640,126 @@ async fn execute_query(
         }
         Err(err) => map_data_plane_error(&err),
     }
+}
+
+/// Phase 7 bypass front door (`POST /data/v1/query`). Kong routes a client's
+/// `X-Baas-Api-Key` here directly; Rust authenticates it itself (Go stays the
+/// identity authority via tenant-control), resolves the mount, then runs the
+/// SAME `run_query` as the internal `/v1/query` — so enforcement (tier gate,
+/// rate limit, owner scoping) is identical on both paths. Only mounted when
+/// `DATA_PLANE_BYPASS_ENABLED=1`; otherwise this code is never reachable.
+#[derive(Debug, Clone, Deserialize)]
+struct DataQueryRequest {
+    #[serde(alias = "databaseId", alias = "dbId")]
+    db_id: String,
+    operation: DataOperation,
+}
+
+async fn data_query(
+    State(state): State<AppState>,
+    headers: header::HeaderMap,
+    Json(req): Json<DataQueryRequest>,
+) -> axum::response::Response {
+    let key = match headers.get("x-baas-api-key").and_then(|v| v.to_str().ok()) {
+        Some(k) if !k.trim().is_empty() => k.to_string(),
+        _ => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(ApiError {
+                    error: "unauthorized".to_string(),
+                    message: "X-Baas-Api-Key header is required".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    };
+    let cfg = state.config.clone();
+    if cfg.internal_service_token.is_empty() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ApiError {
+                error: "bypass_misconfigured".to_string(),
+                message: "INTERNAL_SERVICE_TOKEN not set on the data plane".to_string(),
+            }),
+        )
+            .into_response();
+    }
+
+    // 1. Verify the key — Go performs the Argon2id compare; Rust trusts the result.
+    let id = match crate::auth::verify_key(
+        &state.http_client,
+        &cfg.tenant_control_url,
+        &cfg.internal_service_token,
+        &key,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => return auth_error_response(e),
+    };
+    // 2. Resolve the mount (engine + DSN + tier mask), tenant-scoped.
+    let mount_info = match crate::auth::resolve_mount(
+        &state.http_client,
+        &cfg.adapter_registry_url,
+        &cfg.internal_service_token,
+        &id.tenant_id,
+        &req.db_id,
+    )
+    .await
+    {
+        Ok(m) => m,
+        Err(e) => return auth_error_response(e),
+    };
+
+    // 3. Assemble the SAME internal envelope the query-router builds — including
+    // the `api-key:<id>` principal so bypass writes are owner-stamped identically.
+    let request = QueryRequest {
+        identity: RequestIdentity {
+            tenant_id: id.tenant_id.clone(),
+            project_id: None,
+            app_id: None,
+            user_id: Some(format!("api-key:{}", id.key_id)),
+            roles: vec![],
+            scopes: id.scopes,
+            source: IdentitySource::ServiceToken,
+        },
+        mount: DatabaseMount {
+            id: req.db_id.clone(),
+            tenant_id: id.tenant_id,
+            project_id: None,
+            engine: mount_info.engine,
+            name: "bypass".to_string(),
+            credential_ref: CredentialRef {
+                provider: "adapter-registry".to_string(),
+                reference: req.db_id,
+                version: "live".to_string(),
+            },
+            pool_policy: PoolPolicy::default(),
+            capability_overrides: mount_info.capability_overrides,
+            inline_dsn: Some(mount_info.connection_string),
+            isolation: mount_info.isolation,
+        },
+        operation: req.operation,
+    };
+    // 4. Identical execution path.
+    run_query(state, request).await
+}
+
+fn auth_error_response(err: crate::auth::AuthError) -> axum::response::Response {
+    use crate::auth::AuthError;
+    let (status, code, message) = match err {
+        AuthError::Unauthorized(m) => (StatusCode::UNAUTHORIZED, "unauthorized", m),
+        AuthError::NotFound(m) => (StatusCode::NOT_FOUND, "mount_not_found", m),
+        AuthError::Upstream(m) => (StatusCode::BAD_GATEWAY, "upstream_unavailable", m),
+    };
+    (
+        status,
+        Json(ApiError {
+            error: code.to_string(),
+            message,
+        }),
+    )
+        .into_response()
 }
 
 /// Reject a request whose engine advertises a required capability as `false`

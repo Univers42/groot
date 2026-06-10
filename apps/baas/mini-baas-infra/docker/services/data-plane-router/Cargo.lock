@@ -689,6 +689,7 @@ dependencies = [
  "chrono",
  "data-plane-core",
  "data-plane-pool",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",
