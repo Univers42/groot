@@ -475,6 +475,42 @@ services:
               minute: 300
               hour: 8000
 
+  # Phase 7 cutover: the DIRECT data path. Kong → Rust data plane, bypassing the
+  # TS query-router. ADDITIVE — /query/v1 above is untouched, so a client cuts
+  # over by switching base path /query/v1 → /data/v1 (and the {db_id,operation}
+  # body shape). Rust verifies X-Baas-Api-Key itself (tenant-control) and emits
+  # the outbox event, so realtime/webhooks keep firing. strip_path:false so the
+  # router receives the full /data/v1/query path it serves. Same key-auth +
+  # jwt-anon + rate-limit posture as /query/v1.
+  - name: data-plane-direct
+    url: http://data-plane-router-rust:4011
+    routes:
+      - name: data-direct-routes
+        paths: [/data/v1]
+        strip_path: false
+        plugins:
+          - name: key-auth
+            config:
+              key_names: [apikey]
+              hide_credentials: false
+          - name: jwt
+            config:
+              header_names: [authorization]
+              key_claim_name: iss
+              claims_to_verify: [exp]
+              run_on_preflight: false
+              anonymous: __KONG_ANON_UUID__
+          - name: request-size-limiting
+            config:
+              allowed_payload_size: 1
+              size_unit: megabytes
+          - name: rate-limiting
+            config:
+              policy: local
+              limit_by: ip
+              minute: 300
+              hour: 8000
+
   - name: trino
     url: http://trino:8080
     routes:
