@@ -46,7 +46,7 @@ _0 := \033[0m
 # adding a plane or an edition is a one-line change — never a new recipe.
 
 PLANES := data control go rust adapter background analytics storage realtime \
-          functions observability ops studio playground
+          functions observability ops studio playground engines
 
 # plane -> compose profile(s)
 PROFILES_data          := data-plane
@@ -63,6 +63,9 @@ PROFILES_observability := observability
 PROFILES_ops           := ops backups
 PROFILES_studio        := studio
 PROFILES_playground    := playground
+# Extra database engines (mariadb/cockroachdb/mssql) — the à-la-carte "extra
+# engines" add-on / Max package. Optional; never in default editions.
+PROFILES_engines       := engines-extra
 
 EDITIONS := lean query realtime analytics prod full
 

@@ -2,11 +2,22 @@ package adapterregistry
 
 import "fmt"
 
-// allowedEngines mirrors the CHECK constraint on public.tenant_databases.
+// allowedEngines is the set of engines the control plane will ACCEPT a mount
+// for. Honesty rule (Phase 3): this must be exactly the engines the Rust data
+// plane can actually SERVE — registering a mount for an engine with no Rust
+// pool would create a row that 501s on every query. The previously-accepted
+// stubs (jdbc, cassandra, neo4j, elasticsearch, qdrant, influx) are quarantined
+// out: they were never served, so accepting them was a lie. sqlite is added
+// when its adapter lands. The DB CHECK constraint stays broader (it never
+// rejected these), so existing rows are untouched; only NEW registrations of
+// an unserved engine are refused here.
 var allowedEngines = map[string]bool{
-	"postgresql": true, "mongodb": true, "mysql": true, "redis": true,
-	"sqlite": true, "http": true, "jdbc": true, "cassandra": true,
-	"neo4j": true, "elasticsearch": true, "qdrant": true, "influx": true,
+	"postgresql": true,
+	"mysql":      true,
+	"mariadb":    true,
+	"mongodb":    true,
+	"redis":      true,
+	"http":       true,
 }
 
 // allowedIsolation mirrors the tenant isolation strategies the data plane

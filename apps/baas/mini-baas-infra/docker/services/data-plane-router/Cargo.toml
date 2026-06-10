@@ -6,6 +6,16 @@ members = [
     "crates/data-plane-server",
     "crates/engine-conformance",
 ]
+# engine-conformance is a test-only battery (run via `make conformance-*`); it
+# is NOT part of the production router binary's dependency graph, so it is
+# excluded from default builds (`cargo build`) — the Docker image build only
+# compiles the bin's graph. `cargo test -p engine-conformance` still works
+# because it remains a workspace member.
+default-members = [
+    "crates/data-plane-core",
+    "crates/data-plane-pool",
+    "crates/data-plane-server",
+]
 
 [workspace.package]
 version = "0.1.0"
