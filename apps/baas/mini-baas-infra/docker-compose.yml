@@ -803,6 +803,7 @@ services:
       DATA_PLANE_ROUTER_PRODUCT_MODE: ${DATA_PLANE_ROUTER_PRODUCT_MODE:-enabled}
       DATA_PLANE_ADAPTER_REGISTRY_URL: ${DATA_PLANE_ADAPTER_REGISTRY_URL:-http://adapter-registry-go:3021}
       DATA_PLANE_PERMISSION_BUNDLE_URL: http://permission-engine:3050/permissions/bundles/latest
+      DATA_PLANE_PERMISSION_MODE: ${DATA_PLANE_PERMISSION_MODE:-abac}
       DATA_PLANE_MOUNTS: ${DATA_PLANE_MOUNTS:-}
       RUST_LOG: ${RUST_LOG:-info}
     ports:

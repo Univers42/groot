@@ -66,7 +66,11 @@ healthcheck: certs
 	fi
 	$(CURL_HEALTH) -o /dev/null -w 'auth-gateway-https-%{http_code}\n' $(AUTH_URL)/availability
 	$(CURL_HEALTH) $(MAILPIT_URL) >/dev/null
-	docker compose exec -T auth-gateway node scripts/verify-newsletter-delivery.mjs
+	@if docker compose exec -T auth-gateway test -f scripts/verify-newsletter-delivery.mjs 2>/dev/null; then \
+		docker compose exec -T auth-gateway node scripts/verify-newsletter-delivery.mjs; \
+	else \
+		echo '[healthcheck] newsletter-delivery verifier not in this auth-gateway image (script moved with the prismatica split) — skipped'; \
+	fi
 	$(CURL_HEALTH) $(MAIL_BRIDGE_URL)/health >/dev/null
 	$(CURL_HEALTH) $(MAIL_URL) >/dev/null
 	$(CURL_HEALTH) $(CALENDAR_BRIDGE_URL)/health >/dev/null

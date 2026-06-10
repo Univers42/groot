@@ -14,8 +14,12 @@ FROM public.ecr.aws/docker/library/node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 
-# The bridge server + its sibling graph module (only runtime files it needs).
-COPY scripts/bridge-api.mjs scripts/bridge-graph.mjs ./scripts/
+# The bridge server + its standalone route modules (only runtime files it
+# needs): graph projection, LiveKit tokens (rtc), permission UX proxy (perms),
+# and the social plane (chat/profile/feed + their shared core).
+COPY scripts/bridge-api.mjs scripts/bridge-graph.mjs scripts/bridge-rtc.mjs \
+	scripts/bridge-perms.mjs scripts/bridge-chat.mjs scripts/bridge-profile.mjs \
+	scripts/bridge-feed.mjs scripts/bridge-social-core.mjs ./scripts/
 
 USER node
 EXPOSE 4000

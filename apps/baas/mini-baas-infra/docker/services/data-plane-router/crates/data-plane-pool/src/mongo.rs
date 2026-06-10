@@ -45,6 +45,12 @@ use crate::resolver::MountResolver;
 /// shape (the equivalent of SQL injection for document stores).
 const RESERVED_FIELDS: [&str; 3] = ["_id", "owner_id", "tenant_id"];
 
+/// Trust fields enforced on FILTERS. `_id` is deliberately NOT here: it is the
+/// row selector, not a trust field — stripping it turned every by-pk
+/// get/update/delete into an all-owned-documents `update_many`/`delete_many`
+/// (a single cell edit in the live UI would overwrite the whole collection).
+const FILTER_TRUST_FIELDS: [&str; 2] = ["owner_id", "tenant_id"];
+
 /// MongoDB query operators that are safe to accept from an untrusted client
 /// filter — comparison, logical, element and array operators only. This is a
 /// **default-deny allowlist**: any `$`-prefixed key not in this set is rejected,
@@ -672,6 +678,7 @@ impl MongoPool {
         op: &DataOperation,
         identity: &RequestIdentity,
     ) -> DataPlaneResult<DataResult> {
+        require_row_filter(op.filter.as_ref(), "update")?;
         let filter = build_tenant_filter(op.filter.as_ref(), identity, &self.tenant_id)?;
         let data = op.data.as_ref().ok_or_else(|| DataPlaneError::InvalidRequest {
             message: "update requires operation.data".to_string(),
@@ -693,6 +700,7 @@ impl MongoPool {
         op: &DataOperation,
         identity: &RequestIdentity,
     ) -> DataPlaneResult<DataResult> {
+        require_row_filter(op.filter.as_ref(), "delete")?;
         let filter = build_tenant_filter(op.filter.as_ref(), identity, &self.tenant_id)?;
         let result = col.delete_many(filter, None).await.map_err(mongo_err)?;
         Ok(DataResult {
@@ -749,9 +757,24 @@ impl MongoPool {
 }
 
 fn mongo_err(e: mongodb::error::Error) -> DataPlaneError {
-    DataPlaneError::Backend {
-        message: format!("mongo backend: {e}"),
+    classify_mongo_message(format!("mongo backend: {e}"))
+}
+
+/// Pure classifier behind [`mongo_err`] (testable without a driver error).
+/// `$jsonSchema` validator rejections (server code 121 DocumentValidation-
+/// Failure, "Document failed validation") and duplicate `_id` inserts (E11000
+/// duplicate key) are the CALLER's fault — their values don't fit the
+/// declared contract — so they map to 409 Conflict, not an engine 5xx (which
+/// would make outbox clients retry a write that can never succeed).
+fn classify_mongo_message(message: String) -> DataPlaneError {
+    let lower = message.to_lowercase();
+    if lower.contains("document failed validation")
+        || lower.contains("documentvalidationfailure")
+        || lower.contains("duplicate key error")
+    {
+        return DataPlaneError::Conflict { message };
     }
+    DataPlaneError::Backend { message }
 }
 
 /// DDL-path error classifier (additive — the query path keeps [`mongo_err`]):
@@ -1002,6 +1025,26 @@ fn build_owned_doc(
     Ok(doc)
 }
 
+/// No-full-collection guard for update/delete — parity with the relational
+/// pools' "refusing full-table update" rule. The injected owner/tenant scope
+/// is NOT row selectivity: without it, `filter: {}` rewrites every owned
+/// document in one call. The filter must constrain on at least one field the
+/// CLIENT chose (trust fields are stripped before querying, so they don't
+/// count).
+fn require_row_filter(filter: Option<&Value>, op_name: &str) -> DataPlaneResult<()> {
+    let selective = filter
+        .and_then(Value::as_object)
+        .is_some_and(|map| map.keys().any(|key| !FILTER_TRUST_FIELDS.contains(&key.as_str())));
+    if selective {
+        return Ok(());
+    }
+    Err(DataPlaneError::InvalidRequest {
+        message: format!(
+            "{op_name} requires a non-empty `filter` (refusing full-collection {op_name})"
+        ),
+    })
+}
+
 /// Take the client filter (if any) and intersect it with the server-side
 /// tenant scope so an attacker cannot drop the predicate.
 fn build_tenant_filter(
@@ -1023,13 +1066,42 @@ fn build_tenant_filter(
         }
         None => Document::new(),
     };
-    // Strip any client-provided override of the trust fields.
-    for field in RESERVED_FIELDS {
+    // Mongo only understands $and/$or/$nor at the TOP level; any other
+    // $-operator there (e.g. `$not`) is a driver error that would surface as
+    // an opaque 502 — fail it closed as the 400 it really is.
+    for key in doc.keys() {
+        if key.starts_with('$') && !matches!(key.as_str(), "$and" | "$or" | "$nor") {
+            return Err(DataPlaneError::InvalidRequest {
+                message: format!("filter operator '{key}' is not valid at the top level (use $and/$or/$nor)"),
+            });
+        }
+    }
+    // Strip any client-provided override of the trust fields. `_id` passes
+    // through — it is how get/update/delete target one row (still ANDed with
+    // the server-trusted owner/tenant scope below).
+    for field in FILTER_TRUST_FIELDS {
         doc.remove(field);
+    }
+    if let Some(id) = doc.remove("_id") {
+        doc.insert("_id", coerce_id_filter(id));
     }
     doc.insert("owner_id", MongoPool::owner(identity));
     doc.insert("tenant_id", tenant_id.to_string());
     Ok(doc)
+}
+
+/// `_id` values round-trip as strings on the wire (`normalize_doc` hex-encodes
+/// `ObjectId`s), so a client filtering on a 24-hex string may mean EITHER the
+/// literal string `_id` (seeded data) or the ObjectId it encodes (driver-
+/// assigned ids). Match both; everything else passes through unchanged.
+fn coerce_id_filter(id: Bson) -> Bson {
+    match id {
+        Bson::String(s) => match bson::oid::ObjectId::parse_str(&s) {
+            Ok(oid) => bson::bson!({ "$in": [oid, s] }),
+            Err(_) => Bson::String(s),
+        },
+        other => other,
+    }
 }
 
 fn build_sort(sort: Option<&std::collections::BTreeMap<String, String>>) -> Option<Document> {
@@ -1070,6 +1142,88 @@ fn normalize_doc(mut doc: Document) -> Value {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn probe_identity() -> RequestIdentity {
+        RequestIdentity {
+            tenant_id: "t1".to_string(),
+            project_id: None,
+            app_id: None,
+            user_id: Some("api-key:k1".to_string()),
+            roles: vec![],
+            scopes: vec![],
+            source: data_plane_core::IdentitySource::ServiceToken,
+        }
+    }
+
+    #[test]
+    fn tenant_filter_preserves_id_and_enforces_trust_fields() {
+        // `_id` is the row selector and MUST survive: stripping it widened a
+        // by-pk update/delete to every owned document. Client attempts to spoof
+        // owner_id/tenant_id are still overridden by the verified identity.
+        let client = json!({ "_id": "evt-000001", "owner_id": "spoof", "tenant_id": "spoof" });
+        let doc = build_tenant_filter(Some(&client), &probe_identity(), "t1").unwrap();
+        assert_eq!(doc.get_str("_id").unwrap(), "evt-000001");
+        assert_eq!(doc.get_str("owner_id").unwrap(), "api-key:k1");
+        assert_eq!(doc.get_str("tenant_id").unwrap(), "t1");
+    }
+
+    #[test]
+    fn validator_rejections_classify_as_conflict() {
+        // `$jsonSchema` says no → the caller's values don't fit the declared
+        // contract: 409, never an opaque 502 (verified live before the fix).
+        let validation = classify_mongo_message(
+            "mongo backend: WriteError { code: 121, message: \"Document failed validation\" }".into());
+        assert!(matches!(validation, DataPlaneError::Conflict { .. }), "{validation:?}");
+        let dup = classify_mongo_message(
+            "mongo backend: E11000 duplicate key error collection: activity.notes".into());
+        assert!(matches!(dup, DataPlaneError::Conflict { .. }), "{dup:?}");
+        let other = classify_mongo_message("mongo backend: connection reset".into());
+        assert!(matches!(other, DataPlaneError::Backend { .. }), "{other:?}");
+    }
+
+    #[test]
+    fn update_delete_require_a_selective_filter() {
+        // Parity with the relational no-full-table guard: `{}` (or trust-field
+        //-only filters, which are stripped anyway) must not mass-write every
+        // owned document. Verified live before the fix: filter {} modified 39
+        // docs in one call.
+        for bad in [None, Some(json!({})), Some(json!({ "owner_id": "spoof" }))] {
+            let err = require_row_filter(bad.as_ref(), "update").unwrap_err();
+            assert!(matches!(err, DataPlaneError::InvalidRequest { .. }), "{bad:?} → {err:?}");
+        }
+        assert!(require_row_filter(Some(&json!({ "_id": "n-1" })), "update").is_ok());
+        assert!(require_row_filter(Some(&json!({ "kind": "login" })), "delete").is_ok());
+    }
+
+    #[test]
+    fn tenant_filter_rejects_unknown_top_level_operators() {
+        // `$not` is operator-position-only in Mongo; at the top level the
+        // driver errors out (opaque 502) — fail closed as a 400 instead.
+        let bad = json!({ "$not": { "kind": { "$in": ["login"] } } });
+        let err = build_tenant_filter(Some(&bad), &probe_identity(), "t1").unwrap_err();
+        assert!(matches!(err, DataPlaneError::InvalidRequest { .. }), "{err:?}");
+        // The real top-level combinators still pass.
+        let ok = json!({ "$or": [{ "kind": "login" }, { "kind": "search" }] });
+        assert!(build_tenant_filter(Some(&ok), &probe_identity(), "t1").is_ok());
+    }
+
+    #[test]
+    fn tenant_filter_coerces_objectid_hex_to_dual_match() {
+        // Wire `_id`s are strings (normalize_doc hex-encodes ObjectIds), so a
+        // 24-hex value must match both the ObjectId and the literal string.
+        let hex = "665f1e2a9b3c4d5e6f708192";
+        let client = json!({ "_id": hex });
+        let doc = build_tenant_filter(Some(&client), &probe_identity(), "t1").unwrap();
+        let id = doc.get_document("_id").unwrap();
+        let candidates = id.get_array("$in").unwrap();
+        let oid = bson::oid::ObjectId::parse_str(hex).unwrap();
+        assert!(candidates.contains(&Bson::ObjectId(oid)));
+        assert!(candidates.contains(&Bson::String(hex.to_string())));
+        // Non-hex pk strings stay literal (seeded ids like `evt-000001`).
+        let plain = build_tenant_filter(Some(&json!({ "_id": "evt-1" })), &probe_identity(), "t1")
+            .unwrap();
+        assert_eq!(plain.get_str("_id").unwrap(), "evt-1");
+    }
 
     #[test]
     fn rejects_javascript_and_expression_operators() {

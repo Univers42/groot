@@ -255,6 +255,10 @@ if [[ "${LIVE}" == "1" ]]; then
   command -v curl >/dev/null 2>&1 || fail "curl required for live mode"
 
   step "live: starting postgres + the Rust data-plane-router"
+  # resolve-ports first: without it compose falls back to the DEFAULT host
+  # ports, sees drift on a running stack, and RECREATES postgres — straight
+  # into a port clash when the root track-binocle stack holds 5432.
+  eval "$(bash "${BAAS_DIR}/scripts/resolve-ports.sh" 2>/dev/null || true)"
   docker compose -f "${COMPOSE_FILE}" up -d --wait postgres >/dev/null
   docker compose -f "${COMPOSE_FILE}" --profile rust-data-plane up -d --wait data-plane-router-rust >/dev/null
 

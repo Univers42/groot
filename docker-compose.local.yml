@@ -21,6 +21,12 @@ services:
       # The desktop renderer runs from the app:// origin.
       OSIONOS_APP_URL: app://osionos
       OSIONOS_ALLOWED_ORIGIN: app://osionos
+    # The lean local edition runs WITHOUT the mini-baas stack: detach from the
+    # external mini-baas network (chat/feed realtime publishes + the perms
+    # proxy degrade gracefully — chat/profile/feed persistence only needs the
+    # local kong).
+    networks: !override
+      - default
 
   # Park the TLS proxy on an inactive profile: not started under `--profile local`
   # (the bridge is reached over plain HTTP instead). pg-meta stays because kong

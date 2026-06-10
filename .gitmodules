@@ -28,3 +28,6 @@
 [submodule "apps/vite-gourmand"]
 	path = apps/vite-gourmand
 	url = git@github.com:LESdylan/vite-gourmand.git
+[submodule "apps/opposite-osiris"]
+	path = apps/opposite-osiris
+	url = git@github.com:Univers42/prismatica.git

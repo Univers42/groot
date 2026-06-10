@@ -18,6 +18,7 @@ import { PostgresModule } from '@mini-baas/database';
 import { PermissionsModule } from './permissions/permissions.module';
 import { PoliciesModule } from './policies/policies.module';
 import { DecisionsModule } from './decisions/decisions.module';
+import { BundlesModule } from './bundles/bundles.module';
 import { HealthController } from './health.controller';
 import { AuditModule, ObservabilityModule, createPinoHttpOptions } from '@mini-baas/common';
 
@@ -31,6 +32,7 @@ import { AuditModule, ObservabilityModule, createPinoHttpOptions } from '@mini-b
     PermissionsModule,
     PoliciesModule,
     DecisionsModule,
+    BundlesModule,
     AuditModule,
   ],
   controllers: [HealthController],

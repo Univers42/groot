@@ -38,9 +38,12 @@ plugins:
         - http://127.0.0.1:3001
       methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
       headers:
+        # X-Baas-Tenant-Id: the in-browser mount catalog (osionos
+        # liveMountCatalog → GET /admin/v1/databases) scopes by tenant header;
+        # without it in the preflight allow-list that path can never work.
         [Authorization, Content-Type, Content-Profile, apikey, X-Baas-Api-Key,
-         x-client-info, X-Request-ID, Prefer, Range, Accept, Accept-Profile,
-         x-supabase-api-version]
+         X-Baas-Tenant-Id, x-client-info, X-Request-ID, Prefer, Range, Accept,
+         Accept-Profile, x-supabase-api-version]
       exposed_headers:
         [X-Kong-Upstream-Latency, X-Kong-Proxy-Latency, X-Request-ID]
       credentials: true

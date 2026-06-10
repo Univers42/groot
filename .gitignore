@@ -42,3 +42,6 @@ apps/osionos-desktop/src-tauri/target/
 
 # Vault root-token retrieval runbook — operational, keep out of the repo
 wiki/security/retrieve_fly_seed_admin_right.md
+
+# generated seeder state (uuids/emails from seed_agency_people.sh)
+tools/seeds/.agency-people.env

@@ -1,0 +1,810 @@
+"""Company Wiki content pack 1: Handbook, Engineering, Security, Product (26 articles).
+Specs are rendered by seed_wiki.py (see its DSL: p/b/n/c/t/code/mm/eq/todo/tg/cols/q/view/live/img/d)."""
+
+SECTIONS = [
+    ("handbook", "Company Handbook", "🧭",
+     "Mission, principles, org, communication, decisions, rituals, vocabulary.",
+     "https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=1600&q=80"),
+    ("engineering", "Engineering", "🛠️",
+     "Architecture, dev environment, review/release/testing standards, migrations, on-call.",
+     "https://images.unsplash.com/photo-1555066931-4365d14bab8c?auto=format&fit=crop&w=1600&q=80"),
+    ("security", "Security & Compliance", "🔐",
+     "Security model, secrets, access control, incidents, privacy, backup/DR.",
+     "https://images.unsplash.com/photo-1563013544-824ae1b704d3?auto=format&fit=crop&w=1600&q=80"),
+    ("product", "Product & Design", "📦",
+     "Product principles, editor & database specs, design system, research.",
+     "https://images.unsplash.com/photo-1581291518857-4e27b48ff24e?auto=format&fit=crop&w=1600&q=80"),
+]
+
+ARTICLES = [
+# ============================ COMPANY HANDBOOK ================================
+dict(slug="mission-principles", sec="handbook", icon="🧭",
+     title="Mission & operating principles", owner="Dylan Lesieur", domain="Company",
+     related=("decision-framework", "communication-charter", "product-principles", "metrics-reviews"),
+     tldr="We build the collaborative workspace where a company's knowledge, data and work live in one place — and we run the company on our own product. Seven principles govern every decision.",
+     kpis=[("🎯", "Mission age", "Founded 2024"), ("🧪", "Dogfooding", "100% — this wiki IS the product"),
+           ("🧭", "Principles", "7"), ("🔁", "Revisited", "Yearly offsite")],
+     ctx=("Every company says it has principles; few can point to where a principle changed a decision. "
+          "This page lists ours together with the decisions they have already settled, so new people can "
+          "calibrate fast and veterans can cite them in reviews instead of re-arguing first principles.",
+          "The mission: **make a company's working memory live in one governed place** — documents, "
+          "databases, dashboards and decisions — instead of being scattered across ten tools that don't "
+          "talk to each other. We compete by being the tool we ourselves cannot live without."),
+     secs=[
+        ("🏔️", "The seven principles", [
+            ("n", "**Dogfood or die.** We run the entire company on osionos — this wiki, our dashboards, our CRM views. If a workflow hurts, we feel it before customers do.",
+                  "**The wiki wins.** Written, verified knowledge beats memory and meetings. If it matters, it gets a page and an owner.",
+                  "**Live data over screenshots.** Numbers embedded in documents come from live views, never pasted images that rot.",
+                  "**Small files, sharp edges.** Code stays under hard size caps; systems stay decomposable. Constraints are features.",
+                  "**Shadow before cutover.** New systems run in parallel and prove parity before old ones die. Deletion is the last step, never the first.",
+                  "**One owner per thing.** Every article, service, metric and decision names exactly one accountable human.",
+                  "**Spend error budget deliberately.** Reliability targets are explicit; we ship aggressively while the budget lasts and freeze when it's gone."),
+            ("c", "💡", "Principles are tested at the yearly offsite against the decision log: a principle that settled zero decisions gets rewritten or deleted."),
+        ]),
+        ("⚖️", "Decisions these principles already settled", [
+            ("t", ["Decision", "Principle applied", "Outcome"],
+                 [["Rust data plane rollout", "Shadow before cutover", "6 weeks of parity gates before any TS deletion"],
+                  ["Company KPIs in the wiki", "Live data over screenshots", "Exec dashboard embeds live views (see Data section)"],
+                  ["200-line file cap in the editor", "Small files, sharp edges", "Enforced in review; refactors split files first"],
+                  ["Support runbook ownership", "One owner per thing", "Marco owns it; escalations stopped bouncing"],
+                  ["Q1 feature freeze", "Spend error budget deliberately", "Two-week freeze after SLO burn, then resumed"]]),
+        ]),
+        ("🧬", "How the mission cascades", [
+            ("mm", "flowchart TD\n  M[Mission: one governed working memory] --> P1[Product: blocks + databases + views]\n  M --> P2[Company: run on our own product]\n  P1 --> E1[Editor & live mounts]\n  P1 --> E2[Wiki governance surfaces]\n  P2 --> O1[This wiki]\n  P2 --> O2[Live dashboards in Data section]\n  O1 --> F[Feedback loop: what hurts us first]\n  O2 --> F\n  F --> P1"),
+            ("p", "The loop at the bottom is the moat: because the company runs on the product, every internal "
+                  "pain is a roadmap signal that arrives months before a customer churn signal would."),
+        ]),
+        ("🗣️", "Using principles in arguments", [
+            ("b", "Cite the principle by name in the review or RFC — \"this violates *Shadow before cutover*\" ends debates faster than taste does.",
+                  "If two principles conflict, escalate to the decision framework (DACI) rather than picking silently.",
+                  "Proposing a principle change requires: the principle, three decisions it would have changed, and the offsite slot."),
+            ("q", "A principle that never costs you anything is a slogan, not a principle."),
+        ]),
+     ],
+     faq=[("Do principles apply to contractors and vendors?", "Yes — anyone shipping changes follows them; vendor contracts reference the security and review principles explicitly."),
+          ("Who can change the mission?", "Only the yearly offsite, with board sign-off. Principles can change quarterly via DACI with Dylan as approver."),
+          ("What if a principle blocks an urgent fix?", "Incident response (Security section) overrides everything for the duration of a declared incident — then the postmortem reconciles."),
+          ("Where do I see principles in tooling?", "Review checklists, the RFC template, and the wiki contract banner on every article all cite them.")],
+     check=[("Read the seven principles and the settled-decisions table", False),
+            ("Find one current debate and identify which principle applies", False),
+            ("Read the decision framework article next", False),
+            ("Bookmark the wiki root — it is the company home page", False),
+            ("Challenge one stale practice citing a principle this quarter", False)],
+     decisions=[["2026-01-12", "Adopted 'Spend error budget deliberately' as principle #7", "Two outages traced to silent budget burn", "Dylan Lesieur"],
+                ["2025-09-02", "Rewrote principle #3 to mandate live views in docs", "Stale screenshots caused a mispriced renewal", "Dylan Lesieur"]],
+     changelog=[["2026-06-02", "Verified; added Q1 freeze to settled decisions", "Dylan Lesieur"],
+                ["2026-03-15", "Added cascade diagram", "Dylan Lesieur"]]),
+
+dict(slug="org-teams", sec="handbook", icon="🏢",
+     title="Org & teams: who owns what", owner="Dylan Lesieur", domain="Company",
+     related=("mission-principles", "communication-charter", "oncall-escalation", "hiring-process"),
+     tldr="Eight leads, five teams, one rule: every system, metric and customer touchpoint has exactly one named owner. This page is the routing table for 'who do I ask?'.",
+     kpis=[("👥", "Headcount", "34"), ("🧑‍✈️", "Leads", "8"), ("🏟️", "Teams", "5"), ("🧭", "Re-orgs", "≤1/year, announced 30d ahead")],
+     ctx=("Org charts usually rot because they live in slides. This one is wiki-governed: when ownership "
+          "moves, this page moves first and the change is announced from here — the chart is the act, "
+          "not the record of it.",
+          "Teams are sized to own their systems end-to-end (build, operate, on-call). Nobody throws "
+          "code over a wall; the team that ships a service answers its pages."),
+     secs=[
+        ("🗺️", "The org at a glance", [
+            ("mm", "flowchart TD\n  CEO[Dylan Lesieur - CEO] --> ENG[Amara Okonkwo - VP Engineering]\n  CEO --> FIN[Tom Nguyen - Finance Lead]\n  CEO --> PPL[Priya Sharma - People Ops Lead]\n  ENG --> PLAT[Yuki Tanaka - Platform Lead]\n  ENG --> SEC[Lena Fischer - Security Lead]\n  ENG --> DATA[David Okafor - Data Lead]\n  CEO --> GTM[Marco Ruiz - Support & GTM Lead]\n  CEO --> DES[Sofia Marchetti - Design Lead]\n  PLAT --> T1[Editor team - 6]\n  PLAT --> T2[BaaS team - 7]\n  DATA --> T3[Analytics team - 4]\n  GTM --> T4[Support team - 5]\n  DES --> T5[Product design - 3]"),
+        ]),
+        ("🧑‍✈️", "Lead routing table", [
+            ("t", ["Area", "Lead", "Escalation path", "Wiki section owned"],
+                 [["Company direction, principles", "Dylan Lesieur", "Board", "Company Handbook"],
+                  ["Engineering org & standards", "Amara Okonkwo", "Dylan", "Engineering"],
+                  ["Platform, infra, releases", "Yuki Tanaka", "Amara", "Engineering (infra pages)"],
+                  ["Security, privacy, compliance", "Lena Fischer", "Amara → Dylan", "Security & Compliance"],
+                  ["Data, KPIs, dashboards", "David Okafor", "Amara", "Data & Analytics"],
+                  ["Support, CRM, GTM", "Marco Ruiz", "Dylan", "Sales & Support"],
+                  ["People, hiring, onboarding", "Priya Sharma", "Dylan", "People Ops"],
+                  ["Finance, vendors, budget", "Tom Nguyen", "Dylan", "Finance & Ops"],
+                  ["Design system, research", "Sofia Marchetti", "Dylan", "Product & Design (design pages)"]]),
+            ("c", "📌", "If you cannot find an owner in this table, the question goes to #ask-anything — and the answer becomes a wiki edit so the next person finds it here."),
+        ]),
+        ("🏟️", "Team charters", [
+            ("cols", [(1, [("c", "⚡", "**Editor team** — owns the block editor, canvas model, slash commands, rendering performance. On-call for the app."),
+                           ("c", "🧱", "**BaaS team** — owns the mini-baas gateway, engines, live mounts, realtime plane. On-call for the data path.")]),
+                      (1, [("c", "📈", "**Analytics team** — owns KPI definitions, the exec dashboard, experiment tooling and the live demo datasets."),
+                           ("c", "🎧", "**Support team** — owns ticket triage, the CRM, SLAs and the support runbook.")])]),
+            ("p", "Product design pairs with all four; designers embed with a team per quarter rather than reviewing from outside."),
+        ]),
+        ("🔁", "How ownership changes", [
+            ("n", "Propose the move in a decision record (DACI) naming old and new owner.",
+                  "Update this page and the owned wiki articles' Owner property in the same change.",
+                  "Announce in #announcements with a link HERE — the wiki page is the announcement source.",
+                  "New owner re-verifies inherited articles within 30 days."),
+        ]),
+     ],
+     faq=[("Who is on-call right now?", "The on-call article in Engineering embeds the live rotation — this page only routes ownership, not shifts."),
+          ("Can a system have two owners?", "No. It can have many maintainers, but exactly one accountable owner — principle #6."),
+          ("Where are team OKRs?", "Metrics reviews article in Finance & Ops; team goals live as project rows in the live projects table."),
+          ("How do re-orgs happen?", "At most one structural change per year, announced 30 days ahead with a migration plan for owned pages.")],
+     check=[("Find your team's charter above", False),
+            ("Check the routing table for the three areas you touch most", False),
+            ("Verify your own wiki pages list you as Owner", False),
+            ("Meet your escalation contact once this quarter", False)],
+     decisions=[["2026-04-20", "Design embeds with product teams quarterly", "Review-from-outside caused late redesigns", "Dylan Lesieur"],
+                ["2026-02-10", "Support moved under GTM with Marco as single lead", "Ticket escalations had two competing paths", "Dylan Lesieur"]],
+     changelog=[["2026-06-02", "Verified; headcount updated to 34", "Dylan Lesieur"]]),
+
+dict(slug="communication-charter", sec="handbook", icon="📨",
+     title="Communication charter: async-first", owner="Priya Sharma", domain="Company",
+     related=("rituals-calendar", "decision-framework", "org-teams", "remote-policy"),
+     tldr="Async and written by default; meetings are the escalation path, not the default. Channels have contracts, response-time expectations are explicit, and anything decided out-of-band gets written back into the wiki.",
+     kpis=[("✍️", "Default", "Written, async"), ("⏱️", "Non-urgent SLA", "24h replies"),
+           ("🚨", "Urgent path", "Page, not ping"), ("📵", "Focus blocks", "Protected 4h/day")],
+     ctx=("A remote-friendly company runs on its written layer. This charter defines where each kind of "
+          "message belongs, how fast a reply is owed, and the one unbreakable rule: decisions made in "
+          "calls or DMs do not exist until they are written into the wiki or a decision record.",
+          "The goal is not fewer conversations — it is that no conversation needs to be repeated because "
+          "its outcome was captured."),
+     secs=[
+        ("📮", "Channel contracts", [
+            ("t", ["Medium", "Use for", "Reply expectation", "Never use for"],
+                 [["Wiki article", "Anything durable: policy, spec, runbook", "n/a — it IS the answer", "Quick questions"],
+                  ["Decision record", "Cross-team choices (DACI)", "Approver: 5 working days", "Status updates"],
+                  ["#team channels", "Coordination, blockers, FYIs", "Same working day", "Decisions"],
+                  ["#ask-anything", "Questions with no obvious owner", "24h; answer becomes a wiki edit", "Urgent incidents"],
+                  ["DMs", "Personal, sensitive, scheduling", "24h", "Anything others will need later"],
+                  ["Pager", "SEV1/SEV2 incidents only", "5 min ack", "Anything that can wait a day"],
+                  ["Meetings", "Conflict, ambiguity, bonding", "n/a", "Information transfer"]]),
+            ("c", "🚨", "**The unbreakable rule:** a decision that is not written down within 24 hours did not happen. The writer of the summary owns its accuracy."),
+        ]),
+        ("⏱️", "Response-time expectations", [
+            ("b", "Non-urgent written messages: 24 hours, working days. Silence past that is a process bug — escalate politely.",
+                  "Mentions in a decision record: 5 working days (the DACI clock).",
+                  "Incident pages: 5-minute acknowledgement for on-call, see the incident response runbook.",
+                  "Nobody is expected to read anything outside their working hours — urgency is the pager's job, not the inbox's."),
+            ("tg", "Why we protect 4-hour focus blocks", [
+                ("p", "Maker schedules collapse under random pings. Every engineer and designer keeps a "
+                      "protected half-day daily; channels carry an explicit 'slow until 14:00' status. "
+                      "Throughput went up, not down, when we introduced this — see the decision log."),
+            ]),
+        ]),
+        ("🌍", "Timezone etiquette", [
+            ("b", "Default writing style: full context, links, no 'quick question' bait — assume the reader wakes up 8 timezones away.",
+                  "Recordings + written summaries for any meeting with an absent timezone.",
+                  "Handoffs (support, on-call) follow the sun and are written in the shift log, not spoken."),
+            ("mm", "sequenceDiagram\n  participant EU as EU morning\n  participant US as US morning\n  EU->>US: Written brief with full context (end of EU day)\n  US->>US: Executes during US day\n  US->>EU: Written status + blockers (end of US day)\n  EU->>EU: Unblocks during EU morning\n  Note over EU,US: 24h cycle, zero meetings required"),
+        ]),
+        ("✍️", "Writing standards", [
+            ("n", "Lead with the ask or the answer; context after.",
+                  "One topic per message or page; split threads that fork.",
+                  "Link the wiki instead of re-explaining — and if the wiki is wrong, fix it or flag the owner.",
+                  "Use the article templates (TL;DR, owner, status) for anything that outlives the week."),
+        ]),
+     ],
+     faq=[("Are cameras required on calls?", "No. Audio and a written summary are required; the summary is what counts."),
+          ("What about urgent product questions from customers?", "Support escalation path in Sales & Support — it has its own SLA table, not this charter's."),
+          ("Can teams add their own channel rules?", "Yes, stricter but not looser, and they document them in the team charter."),
+          ("Do execs get faster reply SLAs?", "No. Urgency comes from the issue, not the sender."),
+          ("Where do watercooler chats live?", "#random and optional coffee pairings — explicitly exempt from all rules above.")],
+     check=[("Set your working hours in your profile and calendar", False),
+            ("Adopt the 'answer becomes a wiki edit' habit in #ask-anything", False),
+            ("Schedule your daily focus block", False),
+            ("Re-read the unbreakable rule before your next sync call", False),
+            ("Audit one of your recent DM threads: should it have been a channel post?", False)],
+     decisions=[["2026-03-08", "Protected 4h daily focus blocks org-wide", "Ping-driven days crushed maker output", "Priya Sharma"],
+                ["2025-11-19", "Decisions must be written within 24h to be valid", "Two conflicting 'verbal decisions' shipped twice", "Dylan Lesieur"]],
+     changelog=[["2026-06-01", "Verified; added timezone handoff diagram", "Priya Sharma"]]),
+
+dict(slug="decision-framework", sec="handbook", icon="⚖️",
+     title="How we decide: DACI + decision records", owner="Dylan Lesieur", domain="Company",
+     related=("mission-principles", "communication-charter", "migration-discipline", "metrics-reviews"),
+     tldr="Every cross-team decision gets a record: one Driver, one Approver, named Contributors, Informed list. Five working days max from proposal to verdict; reversals require a new record, not a hallway chat.",
+     kpis=[("📄", "Records to date", "61"), ("⏱️", "Median time-to-verdict", "3.2 days"),
+           ("🔁", "Reversed", "4 (all via new records)"), ("🧊", "Expired unanswered", "0 tolerated")],
+     ctx=("Slow decisions are usually undecided owners, not missing information. DACI fixes the owner "
+          "problem: the Driver pushes, exactly one Approver decides, everyone else is explicitly a "
+          "Contributor (consulted) or Informed (told). The record makes the verdict citable forever.",
+          "Records live as pages under this handbook; their decision tables are mirrored into the "
+          "articles they affect — that is why every wiki article carries a Decision log section."),
+     secs=[
+        ("🧩", "The DACI roles", [
+            ("t", ["Role", "Count", "Does", "Does NOT"],
+                 [["Driver", "exactly 1", "Writes the record, gathers input, pushes to verdict", "Decide"],
+                  ["Approver", "exactly 1", "Says yes/no/counter within 5 working days", "Delegate silently"],
+                  ["Contributors", "2–6", "Give input they can defend", "Block by silence"],
+                  ["Informed", "any", "Read the verdict", "Re-litigate it"]]),
+            ("c", "⚠️", "If you cannot name the single Approver, you have found the real problem — fix ownership first (see Org & teams)."),
+        ]),
+        ("📄", "Anatomy of a decision record", [
+            ("n", "**Context** — what forces the choice now (one paragraph).",
+                  "**Options** — 2–4, each with the strongest honest case for it.",
+                  "**Recommendation** — the Driver's pick and the principle it leans on.",
+                  "**Verdict** — Approver's call, date, and conditions.",
+                  "**Expiry/Review** — when this decision should be re-examined."),
+            ("code", "markdown", "# DR-061: Adopt wiki surface for governed knowledge\nDriver: Amara · Approver: Dylan · Contributors: Yuki, Lena, Sofia\nContext: docs scattered; no verification trail; folders can't open as pages.\nOptions: (A) folder convention (B) new 'wiki' surface (C) external tool\nRecommendation: B — keeps knowledge in-product (principle #1, #3)\nVerdict: B approved 2026-06-02, ship behind additive DB migration\nReview: 2026-09-01 with adoption metrics", "decision-record-template.md"),
+        ]),
+        ("🚦", "The five-day clock", [
+            ("mm", "stateDiagram-v2\n  [*] --> Proposed: Driver publishes record\n  Proposed --> InReview: Approver acknowledges (24h)\n  InReview --> Approved: verdict\n  InReview --> Countered: approver proposes option D\n  Countered --> InReview: driver updates record\n  InReview --> Escalated: clock exceeds 5 working days\n  Escalated --> Approved: next-level approver decides in 48h\n  Approved --> [*]"),
+            ("b", "The clock starts at publication, not at the meeting where it is mentioned.",
+                  "Escalation is automatic and blameless — a busy approver is a routing fact, not an offense.",
+                  "Verdicts are copied into affected wiki articles' Decision logs by the Driver."),
+        ]),
+        ("🔁", "Reversals and expiry", [
+            ("p", "Decisions are not sacred — but reversals must pay the same toll: a new record citing the "
+                  "old one, what changed, and the same five-day clock. This kills relitigating-by-attrition "
+                  "while keeping the org honest when facts change."),
+            ("b", "Records carry an expiry/review date; expired records show up in the quarterly wiki sweep.",
+                  "Four reversals to date; each cost one page and zero meetings."),
+        ]),
+     ],
+     faq=[("What needs a record vs a team call?", "Crosses team boundaries, costs >1 engineer-week, touches security/money/customers, or changes a principle → record. Otherwise the team lead just decides."),
+          ("Can the Driver and Approver be the same person?", "No — the separation is the point. Single-team decisions don't need DACI at all."),
+          ("What about emergencies?", "Incident command (Security section) decides during incidents; a retroactive record captures anything durable."),
+          ("Who can read records?", "Everyone. Records are private to the company, never to a subset of it.")],
+     check=[("Read one approved and one countered record end-to-end", False),
+            ("Identify the Approver for your current biggest open question", False),
+            ("Add a Review date to your team's last big decision", False),
+            ("Mirror your latest verdict into the affected wiki articles", False)],
+     decisions=[["2026-06-02", "DR-061: adopt the wiki surface for governed knowledge", "Folders can't open as governed indexes", "Dylan Lesieur"],
+                ["2026-01-30", "Escalation auto-triggers at day 5", "Records were rotting in inboxes", "Dylan Lesieur"]],
+     changelog=[["2026-06-02", "Verified; linked DR-061", "Dylan Lesieur"]]),
+
+dict(slug="rituals-calendar", sec="handbook", icon="🗓️",
+     title="Rituals & company calendar", owner="Priya Sharma", domain="Company",
+     related=("communication-charter", "metrics-reviews", "onboarding-first-two-weeks", "remote-policy"),
+     tldr="Five recurring rituals carry the company: weekly written pulse, biweekly demo, monthly metrics review, quarterly wiki sweep, yearly offsite. Everything else is optional or async.",
+     kpis=[("🔁", "Recurring rituals", "5"), ("🕐", "Weekly synchronous", "≤2h total"),
+           ("🧹", "Wiki sweep", "Quarterly"), ("🏔️", "Offsite", "Yearly, principles reviewed")],
+     ctx=("Rituals are the heartbeat that lets everything else be async. Each one has an owner, an "
+          "artifact (what it produces in the wiki), and a strict time-box — a ritual that stops "
+          "producing its artifact gets deleted at the next quarterly review.",
+          "The calendar is deliberately sparse: two synchronous hours a week company-wide. Teams add "
+          "their own standups if they want them; none are mandated."),
+     secs=[
+        ("💓", "The five rituals", [
+            ("t", ["Ritual", "Cadence", "Owner", "Artifact (in wiki)", "Time-box"],
+                 [["Written pulse", "Weekly, Mon", "Every lead", "Pulse page per team (async)", "0 min sync"],
+                  ["Demo day", "Biweekly, Thu", "Amara", "Demo notes + recordings", "45 min"],
+                  ["Metrics review", "Monthly, 1st Wed", "David", "Annotated exec dashboard", "60 min"],
+                  ["Wiki sweep", "Quarterly", "Priya", "Re-verified articles, pruned drafts", "async week"],
+                  ["Offsite", "Yearly, Oct", "Dylan", "Principles review + next-year bets", "3 days"]]),
+            ("c", "📌", "The artifact column is the contract: no artifact, no ritual. Demo day without notes in the wiki counts as not having happened."),
+        ]),
+        ("📝", "Written pulse format", [
+            ("code", "markdown", "## Pulse — Editor team — 2026-W23\n**Shipped:** wiki surface end-to-end (DB→bridge→sidebar)\n**Slipped:** mermaid lazy-load perf fix → W24\n**Blocked:** none\n**Risk:** seed volume may slow first hydrate; measuring\n**Mood:** 🟢 — first dogfood week of wiki governance", "pulse-template.md"),
+            ("b", "Five lines max; links carry the detail.",
+                  "Pulses roll up into the monthly metrics review automatically.",
+                  "Red mood two weeks running triggers a lead 1:1 — that is the alerting path for humans."),
+        ]),
+        ("🧹", "The quarterly wiki sweep", [
+            ("n", "Every owner gets their article list with verification dates two weeks before quarter end.",
+                  "Re-verify (re-read, re-run embedded views, bump date) or demote to 🔍 In review honestly.",
+                  "Drafts older than two quarters are archived — the sweep is allowed to delete.",
+                  "Sweep results (verified %, demoted, archived) land in the metrics review."),
+            ("mm", "gantt\n  title Quarterly sweep (Q3 2026)\n  dateFormat YYYY-MM-DD\n  section Sweep\n  Owner lists sent      :a1, 2026-08-18, 3d\n  Re-verification week  :a2, 2026-08-24, 7d\n  Archive & report      :a3, 2026-09-01, 2d"),
+        ]),
+        ("🏖️", "Calendar hygiene", [
+            ("b", "Company holidays + focus blocks are pre-seeded on everyone's calendar; meetings cannot be booked over them.",
+                  "Any new recurring meeting needs an owner, artifact, and end date — same contract as rituals.",
+                  "October offsite week is meeting-free except the offsite itself."),
+        ]),
+     ],
+     faq=[("Are team standups required?", "No. Teams choose; the written pulse is the only mandatory cadence."),
+          ("What happens to demo recordings?", "Linked from demo notes pages; pruned after a year."),
+          ("Can I skip the metrics review?", "Leads cannot; everyone else is Informed and reads the annotated dashboard async."),
+          ("Who schedules the offsite?", "Priya logistics, Dylan content. Families invited to day 3.")],
+     check=[("Subscribe to the company calendar layer", False),
+            ("Write your first pulse using the template", False),
+            ("Block your focus hours before someone books them", False),
+            ("Check when your articles are due in the next sweep", False)],
+     decisions=[["2026-02-14", "Killed the weekly all-hands", "Pulse + demo day covered it in 0 sync minutes", "Priya Sharma"],
+                ["2025-10-12", "Wiki sweep became a ritual with archive powers", "Dead drafts were eroding trust in search", "Dylan Lesieur"]],
+     changelog=[["2026-06-01", "Verified; Q3 sweep dates added", "Priya Sharma"]]),
+
+dict(slug="glossary", sec="handbook", icon="📖",
+     title="Glossary: the words we use precisely", owner="Amara Okonkwo", domain="Company",
+     related=("architecture-overview", "kpi-dictionary", "database-views-spec", "mission-principles"),
+     tldr="Shared vocabulary, alphabetized. If two people use one of these words differently, this page settles it — edit it via the owner, not in place.",
+     kpis=[("🔤", "Terms", "38"), ("🧭", "Rule", "One meaning per word"),
+           ("🔁", "Updated", "On every naming decision"), ("⚠️", "Conflicts settled", "12")],
+     ctx=("Most cross-team confusion is two teams using one word for two things (or two words for one "
+          "thing). This glossary is the tiebreaker. Terms get added when a naming confusion costs an "
+          "hour — the entry is cheaper than the second hour.",),
+     secs=[
+        ("🔤", "A–E", [
+            ("t", ["Term", "Means here", "Not to be confused with"],
+                 [["ABAC", "Attribute-based access control in the permission engine", "Simple role checks (RBAC)"],
+                  ["Article", "A governed wiki page with owner/status/verified properties", "Any random page"],
+                  ["BaaS", "Our mini-baas: gateway + engines + control/data planes", "Third-party Firebase-likes"],
+                  ["Block", "One editor content unit (paragraph, table, view, …)", "A database row"],
+                  ["Bridge", "The workspace persistence API between editor and BaaS", "The auth gateway"],
+                  ["Cutover", "Final traffic switch after parity gates pass", "Any deploy"],
+                  ["DACI", "Driver/Approver/Contributors/Informed decision protocol", "Consensus"],
+                  ["Edition", "A named, known-good compose shape of the BaaS stack", "An environment"],
+                  ["Error budget", "1 − SLO: the unreliability we may spend", "Bug backlog"]]),
+        ]),
+        ("🔤", "F–O", [
+            ("t", ["Term", "Means here", "Not to be confused with"],
+                 [["Folder", "Sidebar container that groups and never opens", "Wiki (which opens)"],
+                  ["Gate", "A pass/fail check that blocks promotion (CI, parity, SLO)", "A dashboard"],
+                  ["Known database", "The in-app seeded demo databases (db-tasks, …)", "Live mounts"],
+                  ["Live mount", "A real engine table mounted via baas:<dbId>:<table>", "Known databases"],
+                  ["Mount", "Registered external database in the BaaS catalog", "A Docker volume"],
+                  ["On-call", "The person whose pager answers for a system this week", "The owner"],
+                  ["Outbox", "Client-side pending-writes ledger for offline-safe sync", "A message queue"],
+                  ["Owner", "The single accountable human for a thing", "The on-call"]]),
+        ]),
+        ("🔤", "P–Z", [
+            ("t", ["Term", "Means here", "Not to be confused with"],
+                 [["Parity", "Shadow and legacy paths returning identical results", "Feature parity with competitors"],
+                  ["Plane", "TS app / Go control / Rust data split of the BaaS", "A deployment tier"],
+                  ["Pulse", "The weekly written team status (5 lines)", "A standup"],
+                  ["Shadow", "Running new code in parallel, comparing, not serving", "A canary"],
+                  ["SLI/SLO/SLA", "Signal / internal target / external contract", "Each other"],
+                  ["Surface", "A page's behavioral class: page/agent/home/folder/wiki", "Visual theme"],
+                  ["Sweep", "The quarterly wiki re-verification", "A migration"],
+                  ["View", "A saved lens over a database (board, calendar, chart…)", "A SQL view"],
+                  ["Wiki", "Governed knowledge root: opens AND groups (surface=wiki)", "Folder"]]),
+            ("c", "💡", "The folder-vs-wiki distinction is new (DR-061): a folder organizes and never opens; a wiki opens onto its governed index *and* organizes its children."),
+        ]),
+        ("➕", "Adding a term", [
+            ("n", "Confirm the confusion actually cost time (cite the thread).",
+                  "Propose the one-line meaning + the 'not to be confused with' column.",
+                  "Amara merges it; conflicting usage elsewhere gets fixed in the same PR/edit."),
+        ]),
+     ],
+     faq=[("Why one meaning per word instead of context?", "Context disambiguation works for readers and fails in grep, search, and onboarding. One meaning wins."),
+          ("Can teams keep private jargon?", "Inside the team, sure. The moment it crosses a team boundary it belongs here."),
+          ("Why is 'owner ≠ on-call' called out?", "Because conflating them caused two escalation loops — the pager answers, the owner decides.")],
+     check=[("Skim all three tables once", False),
+            ("Fix one doc of yours that misuses a glossary term", False),
+            ("Propose the term that confused you most when you joined", False)],
+     decisions=[["2026-06-02", "Added 'wiki' and 'surface' entries", "DR-061 introduced the new surface", "Amara Okonkwo"],
+                ["2026-03-22", "Settled 'mount' vs 'volume'", "Infra and BaaS teams collided weekly on it", "Amara Okonkwo"]],
+     changelog=[["2026-06-02", "Verified; 38 terms", "Amara Okonkwo"]]),
+
+# ============================== ENGINEERING ==================================
+dict(slug="architecture-overview", sec="engineering", icon="🏗️",
+     title="Platform architecture overview", owner="Amara Okonkwo", domain="Engineering",
+     related=("three-plane-pattern", "dev-environment", "live-mounts-spec", "security-model"),
+     tldr="One product (the editor), one gateway (the bridge), one BaaS (three language planes), many engines. Requests flow frontend → bridge/Kong → control plane → data plane → engines; everything ships as containers.",
+     kpis=[("📦", "Services in compose", "~40"), ("🗄️", "Engines", "Postgres, MySQL, MongoDB, Redis"),
+           ("🌐", "Public surfaces", "app, website, gateway"), ("🔁", "Deploy unit", "Image, never host")],
+     ctx=("This is the map you need before touching anything: which box you are in, who you may call, "
+          "and where the trust boundaries sit. Detail lives in per-system articles; this page is the "
+          "wiring diagram and the contracts between boxes.",
+          "Two iron rules shape everything: containers are the only runtime (no host installs), and "
+          "planes call downward only — the data plane never calls the control plane, engines never "
+          "call anyone."),
+     secs=[
+        ("🗺️", "The big picture", [
+            ("mm", "flowchart LR\n  subgraph Client\n    APP[osionos editor SPA]\n    WEB[website]\n  end\n  subgraph Edge\n    BR[bridge :4000]\n    KONG[Kong gateway :8000]\n    AUTH[auth-gateway Go]\n  end\n  subgraph BaaS\n    CP[Control plane Go]\n    QR[Query router TS]\n    DP[Data plane Rust]\n  end\n  subgraph Engines\n    PG[(PostgreSQL)]\n    MY[(MySQL)]\n    MG[(MongoDB)]\n    RD[(Redis)]\n  end\n  APP --> BR\n  WEB --> AUTH\n  APP --> KONG\n  KONG --> QR\n  QR --> DP\n  AUTH --> CP\n  CP --> DP\n  DP --> PG\n  DP --> MY\n  DP --> MG\n  DP --> RD\n  BR --> PG"),
+            ("p", "The bridge owns workspace persistence (pages, workspaces) directly in Postgres; the BaaS "
+                  "owns everything behind a mount id. The editor talks to both, never to engines."),
+        ]),
+        ("📦", "Box contracts", [
+            ("t", ["Box", "Owns", "May call", "Never"],
+                 [["Editor SPA", "Rendering, canvas model, outbox", "bridge, Kong", "Engines, planes directly"],
+                  ["Bridge", "Pages/workspaces persistence, sessions", "Postgres, gotrue", "Other engines"],
+                  ["Kong", "Routing, keys, rate limits", "Query router", "Engines"],
+                  ["Control plane (Go)", "Tenancy, secrets, provisioning", "Data plane, Vault", "Serving queries"],
+                  ["Query router (TS)", "Validation, capability checks", "Data plane", "Engines directly (post-cutover)"],
+                  ["Data plane (Rust)", "Query execution, pools, transactions", "Engines", "Upward calls"],
+                  ["Engines", "Storage", "—", "Calling anything"]]),
+            ("c", "⚠️", "A PR that makes an arrow point upward is wrong by construction — cite this page in review and reject."),
+        ]),
+        ("🔌", "The request path, concretely", [
+            ("n", "Editor issues a query against `baas:<dbId>:<table>` with the workspace API key.",
+                  "Kong authenticates the key, applies rate limits, forwards to the query router.",
+                  "Router validates shape + capabilities (can this engine UPDATE? does owner-scope apply?).",
+                  "Rust data plane executes on the right engine pool, stamps owner scoping.",
+                  "Result flows back; realtime plane publishes change events to subscribers."),
+            ("code", "bash", "# trace one hop yourself (inside the compose network)\ncurl -s http://kong:8000/query/v1/472138fd/orders \\\n  -H \"apikey: $VITE_BAAS_API_KEY\" \\\n  -H 'content-type: application/json' \\\n  -d '{\"op\":\"select\",\"limit\":3}' | jq '.rows | length'", "trace-a-query.sh"),
+        ]),
+        ("🧱", "Why three planes (the short version)", [
+            ("b", "TypeScript plane: product velocity — where shapes change weekly.",
+                  "Go plane: control logic — tenancy, secrets, the things that must be boring.",
+                  "Rust plane: the hot path — pooling, transactions, per-row scoping at speed.",
+                  "Full rationale + the cutover story: see *Three-plane pattern* and *Migration discipline*."),
+        ]),
+        ("🔭", "Where to look when it breaks", [
+            ("t", ["Symptom", "First look", "Owning article"],
+                 [["Editor loads, pages missing", "bridge logs, osionos_pages", "Dev environment"],
+                  ["Live view empty", "Kong key, mount catalog env", "Live mounts spec"],
+                  ["Writes 409 then snap back", "outbox conflict path (expected)", "Block editor spec"],
+                  ["Query slow only on MySQL", "data plane pool metrics", "On-call & escalation"],
+                  ["Auth loops", "gotrue + auth-gateway", "Security model"]]),
+        ]),
+     ],
+     faq=[("Why does the bridge bypass the BaaS for pages?", "Pages predate the BaaS and need transactional semantics with sessions; migrating them behind a mount is a parked decision record."),
+          ("Can a new service talk to an engine directly?", "Only via the data plane. The single chokepoint is what makes owner-scoping and pooling enforceable."),
+          ("Where are the TLS boundaries?", "Local HTTPS proxy terminates for the web surfaces; intra-compose traffic is plain HTTP inside the network namespace — see Security model."),
+          ("Is Redis an engine or a cache?", "Both: engine behind a mount for demo data, cache for sessions. The glossary entry disambiguates per context.")],
+     check=[("Find your service in the big-picture diagram", False),
+            ("Run the trace-a-query snippet against pg-commerce", False),
+            ("Read the box contract for every box you call", False),
+            ("Bookmark the symptom table for your next incident", False)],
+     decisions=[["2026-04-11", "All engine access funnels through the Rust data plane", "Owner-scoping had three implementations", "Amara Okonkwo"],
+                ["2025-12-03", "Bridge keeps direct Postgres for pages", "Transactional session semantics", "Yuki Tanaka"]],
+     changelog=[["2026-06-02", "Verified; symptom table extended", "Amara Okonkwo"]]),
+
+dict(slug="three-plane-pattern", sec="engineering", icon="🛰️",
+     title="The three-plane pattern (TS / Go / Rust)", owner="Yuki Tanaka", domain="Engineering",
+     related=("architecture-overview", "migration-discipline", "testing-quality-gates", "glossary"),
+     tldr="Application plane in TypeScript for product velocity, control plane in Go for boring-by-design tenancy/secrets, data plane in Rust for the hot query path. Planes call downward only; each is independently testable, shadowable, replaceable.",
+     kpis=[("🗼", "Planes", "3 languages, 3 jobs"), ("⬇️", "Call direction", "Down only"),
+           ("🧪", "Parity gates", "Required for replacement"), ("🚀", "Hot-path p99", "Rust-owned")],
+     ctx=("Polyglot by accident is a mess; polyglot by contract is leverage. Each plane uses the "
+          "language whose failure modes match the job: TS where iteration speed dominates, Go where "
+          "predictability dominates, Rust where the CPU and the connection pool dominate.",
+          "The pattern is enforced socially (review) and mechanically (network policies + the parity "
+          "harness). The boundaries are the API schemas in the repo, not tribal knowledge."),
+     secs=[
+        ("📜", "Plane contracts", [
+            ("t", ["Plane", "Language", "Owns", "Failure budget"],
+                 [["Application", "TypeScript", "Routing, validation, product shapes, orchestration", "Fails loud, retried by client"],
+                  ["Control", "Go", "Tenancy, provisioning, secrets, webhooks", "Must not fail: idempotent + audited"],
+                  ["Data", "Rust", "Query execution, pools, transactions, owner-scoping", "Fails fast, never corrupts"]]),
+            ("c", "📌", "If a feature needs a new capability, decide which plane owns it BEFORE writing code — the decision record template has a plane checkbox for this."),
+        ]),
+        ("🔁", "A write, across all three", [
+            ("mm", "sequenceDiagram\n  participant E as Editor (TS client)\n  participant Q as Query router (TS)\n  participant C as Control plane (Go)\n  participant D as Data plane (Rust)\n  participant P as PostgreSQL\n  E->>Q: PATCH baas:db:orders row 42\n  Q->>Q: validate shape + capability\n  Q->>D: execute(update, scope=owner)\n  D->>P: UPDATE ... WHERE id=42 AND owner=$1\n  P-->>D: 1 row\n  D-->>Q: ok + new version\n  Q-->>E: 200 (outbox clears)\n  Note over C: not on the write path —\n  Note over C: provisioning/secrets only"),
+            ("p", "Note what is absent: the control plane. Keeping Go off the hot path is why its "
+                  "simplicity budget holds — it changes monthly, not daily."),
+        ]),
+        ("🧠", "Why these languages, honestly", [
+            ("cols", [(1, [("c", "🟦", "**TypeScript** — the product changes shape weekly; structural typing and the shared types with the editor make schema drift a compile error, not a runtime surprise.")]),
+                      (1, [("c", "🟩", "**Go** — provisioning and secrets must be readable by everyone and deadlock-free; goroutines + context cancellation + boring stdlib fit exactly.")]),
+                      (1, [("c", "🟧", "**Rust** — per-request allocation and pool contention showed up directly in p99; ownership semantics also make 'never corrupt a transaction' a type-level property.")])]),
+            ("q", "Pick the language whose worst day matches the component's worst day."),
+        ]),
+        ("🧪", "Testing seams", [
+            ("b", "Each plane has a standalone harness: TS contract tests, Go golden-file tests, Rust proptests on the executor.",
+                  "Cross-plane: the parity harness replays recorded traffic through old and new paths and diffs results (see Migration discipline).",
+                  "A plane may be swapped wholesale if its replacement passes the same harness — that is how the Rust data plane replaced the TS executor."),
+            ("code", "rust", "#[tokio::test]\nasync fn owner_scope_is_always_applied() {\n    let plan = plan_update(\"orders\", row(42), Scope::Owner(\"api-key:abc\"));\n    assert!(plan.sql.contains(\"owner_id = $\"));\n    // property: no plan without a scope predicate may compile-time exist\n}", "data-plane/tests/scope.rs"),
+        ]),
+     ],
+     faq=[("Can the control plane ever serve a query?", "No. If a 'just this once' appears, it becomes a data-plane capability instead."),
+          ("Why not one language with three modules?", "We had that; pool tuning and product velocity fought in the same runtime. The split made both budgets explicit."),
+          ("What about a fourth plane?", "The realtime router is arguably it (Rust, eventing) — its article lives with the BaaS docs; same downward-only rule."),
+          ("How do shared types cross planes?", "Schemas are the contract (JSON schema / SQL), generated types per language; no runtime coupling.")],
+     check=[("Name which plane owns your current change", False),
+            ("Run one plane's harness locally via its compose profile", False),
+            ("Read the parity harness README before touching the data plane", False),
+            ("Check your PR doesn't add an upward call", False)],
+     decisions=[["2026-03-29", "Realtime eventing stays a Rust workspace beside the data plane", "Same failure budget as the hot path", "Yuki Tanaka"],
+                ["2025-11-08", "TS query executor frozen; Rust shadows it", "p99 and pool exhaustion under load", "Amara Okonkwo"]],
+     changelog=[["2026-06-01", "Verified; added write sequence diagram", "Yuki Tanaka"]]),
+
+dict(slug="dev-environment", sec="engineering", icon="🐳",
+     title="Dev environment: Docker-first, no exceptions", owner="Yuki Tanaka", domain="Engineering",
+     related=("architecture-overview", "git-release-flow", "testing-quality-gates", "secrets-vault"),
+     tldr="The entire stack runs in containers; the host needs Docker, make, git and nothing else. `make all` is the authority; editions give you smaller known-good shapes. Host node_modules are forbidden because they break container volumes.",
+     kpis=[("🐳", "Host deps", "Docker + make + git only"), ("🚀", "Bootstrap", "make all"),
+           ("📦", "Lean edition", "~12 containers"), ("🔁", "Reset", "compose down -v && make all")],
+     ctx=("Every 'works on my machine' is a host dependency that escaped. The rule is absolute: no "
+          "local Node, no local package managers, no host installs — containers are the only runtime, "
+          "and the Makefile is the only lifecycle entry point.",
+          "This page is the happy path plus the five failure modes that cover 95% of broken setups. "
+          "Anything deeper goes to #platform with the doctor output attached."),
+     secs=[
+        ("🚀", "Bootstrap, exactly", [
+            ("code", "bash", "git clone <repo> && cd ft_transcendence\nmake pulls          # submodules with upstream tracking\nmake all            # certs, secrets, build, start, healthcheck\n# variants:\nmake all-local      # offline path, locally generated secrets\nmake local          # lean ~12-container HTTP edition (desktop backend)\nmake healthcheck    # re-validate anytime", "bootstrap.sh"),
+            ("b", "First run may prompt sudo once — that is the local CA being trusted, nothing else.",
+                  "`make all` fetches shared secrets from Vault when a credential exists and falls back to generated ones when it doesn't.",
+                  "URLs print at the end; nothing is 'started by hand'."),
+        ]),
+        ("⚖️", "The laws", [
+            ("n", "**No host installs.** Scripts detect host execution and proxy into containers; don't fight them.",
+                  "**No host node_modules.** They shadow container volumes and produce unreproducible builds — delete them on sight.",
+                  "**Makefile only.** Raw `docker compose` is fine for logs/exec; lifecycle (up/build/seed) goes through make targets.",
+                  "**Frozen lockfiles.** Installs use `--frozen-lockfile` / `npm ci --ignore-scripts`; adding install-time hooks is a security review, not a convenience."),
+            ("c", "⚠️", "The supply-chain rules are not style: pnpm runs with a minimum release age and an allowlist for build scripts. A red install gate means wait or allowlist via security review."),
+        ]),
+        ("🧭", "Working on one service", [
+            ("code", "bash", "docker compose up -d --build osionos-app   # rebuild one service\ndocker compose logs -f osionos-bridge      # follow logs\ndocker compose exec osionos-app sh         # shell inside\nmake -C apps/baas/mini-baas-infra up EDITION=query  # BaaS shape\nmake osionos-app-live                      # rebuild app with live BaaS env baked", "daily-driver.sh"),
+            ("p", "Editions are named, known-good shapes of the BaaS stack (query, realtime, prod, full). "
+                  "Start the smallest one that exercises your change; CI runs the full one."),
+        ]),
+        ("🚑", "The five classic breakages", [
+            ("t", ["Symptom", "Cause", "Fix"],
+                 [["Port already in use", "Stale container or host process", "lsof -i :PORT, then compose down"],
+                  ["Browser distrusts localhost", "CA not trusted / rotated", "make certs-trust-local"],
+                  ["DB auth failures after pull", "Password drift vs .env.local", "make db-password-check && make db-password-apply"],
+                  ["Submodule at wrong SHA", "Detached or unfetched submodule", "make pulls && git submodule update --init --recursive"],
+                  ["Vite env not taking effect", "VITE_* inlined at build time", "rebuild image (make osionos-app-live), not restart"]]),
+            ("tg", "Nuclear option (loses local data)", [
+                ("code", "bash", "docker compose down -v   # deletes volumes!\nmake all                 # full re-bootstrap\n# live-demo data: make seed-live-demo ; wiki: make wiki-seed", "reset.sh"),
+                ("c", "🚨", "down -v deletes seeded demo databases and local workspace state. Re-seed afterwards; never run it to fix a port conflict."),
+            ]),
+        ]),
+        ("🔍", "Self-diagnosis before asking", [
+            ("code", "bash", "make doctor        # env sanity: versions, ports, certs, vault\nmake healthcheck   # service-by-service probes\ndocker compose ps  # who is actually up\n# attach all three outputs to any #platform question", "doctor.sh"),
+        ]),
+     ],
+     faq=[("Can I use my IDE's debugger?", "Yes — services expose debug ports in the dev compose profile; attach to the container, not a host process."),
+          ("Why does first build take so long?", "Cold pnpm store + image layers. Subsequent builds hit the cache mounts; the weekly docker cleanup keeps the cache under control without nuking it."),
+          ("Is M1/ARM supported?", "Yes via multi-arch base images; report arch-specific failures with `make doctor` output."),
+          ("Where do I put a new service?", "docker-compose.yml + an infrastructure/docker/ Dockerfile + a make fragment — copy the pattern of an existing sibling and read the architecture box contracts first.")],
+     check=[("Run make doctor and read every line once", False),
+            ("Bootstrap the lean edition (make local)", False),
+            ("Break and fix the cert trust on purpose (make certs-trust-local)", False),
+            ("Delete any host node_modules you find", True),
+            ("Learn the five classic breakages table by heart", False)],
+     decisions=[["2026-05-05", "Weekly automated docker cleanup with 7-day filters", "Build caches ate the disk repeatedly", "Yuki Tanaka"],
+                ["2025-10-20", "Banned host package managers entirely", "Volume shadowing caused phantom bugs", "Amara Okonkwo"]],
+     changelog=[["2026-06-02", "Verified; added live-env rebuild note", "Yuki Tanaka"]]),
+
+dict(slug="code-review-standard", sec="engineering", icon="🔍",
+     title="Code review standard", owner="Amara Okonkwo", domain="Engineering",
+     related=("testing-quality-gates", "git-release-flow", "dev-environment", "decision-framework"),
+     tldr="Reviews exist to catch correctness bugs and keep the codebase shaped (small files, clear ownership). One approving reviewer who actually ran the code; comments cite principles or contracts, not taste; 24h first-response SLA.",
+     kpis=[("👀", "Approvals required", "1 who ran it"), ("⏱️", "First response", "≤24h"),
+           ("📏", "Editor file cap", "200 lines / 5 functions"), ("🚫", "Taste debates", "Cite a rule or let go")],
+     ctx=("A review is a second pair of eyes on correctness and a guardrail on shape — it is not a "
+          "style tribunal. Anything a linter can say, a linter says; humans spend their attention on "
+          "logic, contracts, and the question 'will the next reader understand this?'.",
+          "The reviewer contract: you ran the change (or its tests) before approving. Rubber stamps "
+          "are worse than no review because they transfer false confidence."),
+     secs=[
+        ("📐", "What reviewers check, in order", [
+            ("n", "**Correctness** — does it do what the description says? Edge cases? Failure paths?",
+                  "**Contracts** — box contracts (architecture), plane direction, API schemas, the file caps.",
+                  "**Blast radius** — what breaks if this is wrong? Is it shadowed/gated/reversible?",
+                  "**Tests** — do the gates cover the risky part, not just the happy line?",
+                  "**Readability** — will the next person (not the author) follow it cold?"),
+            ("c", "💡", "Style is the linter's job. If you are about to write a comment the linter could have written, configure the linter instead."),
+        ]),
+        ("🧱", "The editor's hard caps", [
+            ("p", "The osionos app enforces ≤200 lines and ≤5 functions per file — not aspirationally, "
+                  "in review. A file at the cap gets split BEFORE the feature lands, as its own commit."),
+            ("b", "Caps force decomposition while changes are cheap.",
+                  "Submodule rules apply: work on the designated branch, commit message discipline, no auto-push.",
+                  "Caps do not apply to generated files or vendored code — they apply to everything we author."),
+        ]),
+        ("✍️", "Comment etiquette", [
+            ("t", ["Prefix", "Means", "Author must"],
+                 [["blocking:", "Correctness/contract violation", "Fix or refute with evidence"],
+                  ["question:", "Reviewer needs context", "Answer; consider a code comment"],
+                  ["nit:", "Take it or leave it", "Nothing"],
+                  ["followup:", "Real but out of scope", "File it before merge"]]),
+            ("b", "Every blocking comment cites the rule it enforces (article, contract, principle).",
+                  "Unresolved disagreement after one round-trip → 15-minute call → outcome written on the PR.",
+                  "Reviewers praise good moves explicitly; review tone is a hiring asset."),
+        ]),
+        ("🔁", "The flow", [
+            ("mm", "flowchart LR\n  A[PR opened with description + test evidence] --> B{CI green?}\n  B -- no --> A\n  B -- yes --> C[Reviewer runs it]\n  C --> D{blocking comments?}\n  D -- yes --> E[Author fixes / refutes]\n  E --> C\n  D -- no --> F[Approve]\n  F --> G[Author merges - author owns prod]"),
+            ("p", "The author merges, not the reviewer: whoever shipped it watches it land and owns the "
+                  "first hour in production (see on-call article for the handoff after that)."),
+        ]),
+        ("📦", "PR hygiene", [
+            ("b", "One concern per PR; refactors separate from behavior changes.",
+                  "Description states what changed, why now, how verified — reviewers should not reverse-engineer intent.",
+                  "Draft PRs early for direction checks; review effort scales with risk, not line count.",
+                  "Large mechanical diffs (rename, codemod) get a 'generated by' note and a spot-check protocol."),
+        ]),
+     ],
+     faq=[("Who reviews cross-team changes?", "One reviewer from each affected owner team; the box contract table tells you whose contract you touched."),
+          ("Can I self-merge a one-liner?", "Only revert/rollback commits during incidents; everything else waits for its one real review."),
+          ("What about AI-generated code?", "Same standard, stricter scrutiny on tests: the author certifies they understand every line they submit."),
+          ("Reviewer is on holiday?", "Each area lists a backup in the org routing table; 24h SLA falls to the backup automatically.")],
+     check=[("Run the change before your next approval", False),
+            ("Use the comment prefixes in your next review", False),
+            ("Split any file you own that is over the cap", False),
+            ("Write test evidence into your next PR description", False)],
+     decisions=[["2026-02-27", "Author merges; reviewer never merges", "Ownership of the prod hour was ambiguous", "Amara Okonkwo"],
+                ["2025-09-30", "Blocking comments must cite a rule", "Taste wars were burning days", "Amara Okonkwo"]],
+     changelog=[["2026-06-01", "Verified; AI-code note added", "Amara Okonkwo"]]),
+
+dict(slug="git-release-flow", sec="engineering", icon="🔀",
+     title="Git & release flow", owner="Yuki Tanaka", domain="Engineering",
+     related=("code-review-standard", "testing-quality-gates", "migration-discipline", "dev-environment"),
+     tldr="Trunk-based with short-lived branches; the monorepo pins submodule SHAs; releases are images tagged from green main. Rollback is re-tagging the previous image — under five minutes, no git surgery.",
+     kpis=[("🌳", "Model", "Trunk + short branches"), ("📦", "Release unit", "Container image"),
+           ("⏪", "Rollback", "<5 min, re-tag"), ("🧷", "Submodules", "SHA-pinned by root")],
+     ctx=("The repo is a monorepo with submodules for the apps that ship independently. The root pins "
+          "exact SHAs: 'what was running' is always answerable from one commit. Branches live days, "
+          "not weeks — anything bigger hides behind a flag or a shadow path instead of a long branch.",),
+     secs=[
+        ("🌳", "Branch discipline", [
+            ("b", "main is releasable at every commit — gates enforce it (see Testing & quality gates).",
+                  "Feature branches: branch from main, merge within days; rebase before merge for linear history.",
+                  "Submodules first: commit inside the submodule, then bump the SHA in root — never the reverse.",
+                  "The editor submodule has special rules (designated branch + commit message discipline); they're in its README and they are not optional."),
+            ("mm", "gitGraph\n  commit id: \"main\"\n  branch wiki-surface\n  commit id: \"bridge whitelist\"\n  commit id: \"sidebar + menu\"\n  checkout main\n  merge wiki-surface tag: \"v2026.06.02\"\n  commit id: \"hotfix: csp\" tag: \"v2026.06.02-1\""),
+        ]),
+        ("🏷️", "Releases are images", [
+            ("n", "Green main → CI builds images → tagged with calendar version + git SHA.",
+                  "Deploy = pointing an environment at a tag (compose env var), never building on the target.",
+                  "Rollback = pointing back at the previous tag; data migrations are forward-only and additive, which is what makes this safe.",
+                  "Local 'release' equivalents: make osionos-app-live bakes env and restarts — same image-first idea."),
+            ("code", "bash", "# what was running last Tuesday?\ngit log --until='last tuesday' -1 --format=%H  # root SHA\ngit show <sha>:.gitmodules                      # submodule pins\n# images carry the SHA as a label:\ndocker inspect dlesieur/osionos-app:latest | jq '.[0].Config.Labels'", "archaeology.sh"),
+        ]),
+        ("🧷", "Migrations & releases", [
+            ("b", "Schema changes are additive (widen, add, backfill) and ship BEFORE the code that needs them — see the wiki surface migration as the canonical example.",
+                  "Destructive cleanup ships at least one release after nothing references the old shape.",
+                  "Every migration is a file in models/ with a header explaining reversal."),
+            ("c", "📌", "Additive-first is why rollback is a re-tag: old code must always run against the new schema."),
+        ]),
+        ("🚑", "Hotfix path", [
+            ("n", "Branch from the deployed tag, not main, if main has drifted.",
+                  "Fix + test + the one-real-review rule still applies (revert commits excepted).",
+                  "Tag with a -N suffix; cherry-pick back to main the same day.",
+                  "Postmortem if a hotfix recurs in the same area twice a quarter."),
+        ]),
+     ],
+     faq=[("Why calendar versions?", "Nothing here has marketing-driven semver semantics; 'when' beats 'how big' for archaeology."),
+          ("Squash or merge commits?", "Rebase + merge for linear history; submodule bumps are their own commits with the submodule's short log in the message."),
+          ("Who may push tags?", "CI only. Humans pushing tags was the root cause of release confusion twice — see decision log."),
+          ("Long-running feature?", "Flag it or shadow it (Migration discipline). A three-week branch is a process smell we treat as an incident.")],
+     check=[("Confirm your local main is releasable (run the gates)", False),
+            ("Practice the rollback: re-tag a local image and restart", False),
+            ("Find last week's deployed SHA via the archaeology snippet", False),
+            ("Check your migration is additive before review", False)],
+     decisions=[["2026-04-02", "CI is the only tag pusher", "Manual tags shipped an unreviewed build", "Yuki Tanaka"],
+                ["2026-01-21", "Forward-only additive migrations", "A down-migration ate seeded data", "Amara Okonkwo"]],
+     changelog=[["2026-06-02", "Verified; wiki migration cited as example", "Yuki Tanaka"]]),
+
+dict(slug="testing-quality-gates", sec="engineering", icon="🧪",
+     title="Testing strategy & quality gates", owner="Amara Okonkwo", domain="Engineering",
+     related=("code-review-standard", "git-release-flow", "migration-discipline", "block-editor-spec"),
+     tldr="Five gate layers — unit/canvas, e2e, bridge, quality (lint/a11y/perf/CSP), parity — and a PR merges only when the layers it touches are green. Gates are blocking by definition; a flaky gate is an incident, not an annoyance.",
+     kpis=[("🚦", "Gate layers", "5"), ("🎭", "E2E runner", "Playwright"),
+           ("♿", "A11y floor", "pa11y/WCAG enforced"), ("⚡", "Perf floor", "Lighthouse thresholds")],
+     ctx=("Tests are graded by the decision they protect: unit tests protect logic, e2e protects user "
+          "flows, bridge tests protect the auth handoff, quality gates protect the experience floor, "
+          "parity gates protect migrations. Coverage percent is not a goal; gate greenness is.",
+          "Everything runs in containers, same as dev — a test that needs host state is a bug by "
+          "definition."),
+     secs=[
+        ("🚦", "The five layers", [
+            ("t", ["Layer", "Protects", "Runs", "Blocking for"],
+                 [["Canvas/unit (Vitest)", "Block model, serialization, transactions", "every PR", "all merges"],
+                  ["E2E (Playwright)", "Signup→login→edit→persist flows", "every PR + nightly", "all merges"],
+                  ["Bridge tests", "Website→editor token handoff, sessions", "every PR touching auth/bridge", "those PRs"],
+                  ["Quality (eslint, stylelint, Lighthouse, pa11y, CSP)", "The experience floor", "every PR + nightly", "all merges"],
+                  ["Parity harness", "Old vs new path identity", "continuously while shadowing", "cutover decisions"]]),
+            ("code", "bash", "docker compose exec osionos-app npm run test:canvas\ndocker compose exec osionos-app npm run test:e2e\ndocker compose exec osionos-app npm run test:bridge\ndocker compose exec osionos-app npm run test:quality\nmake baas-verify VERIFY_EDITION=query   # parity gates", "run-the-gates.sh"),
+        ]),
+        ("🎭", "What e2e actually covers", [
+            ("b", "The playground flow: create account, login, open editor, type, reload, assert persistence.",
+                  "Database surfaces: open a known view, edit a cell, assert optimistic update + server truth.",
+                  "Live mounts: mount catalog loads, a live table renders rows, a write lands in the engine.",
+                  "Wiki governance (new): wiki root opens with index, articles show properties, sidebar nests."),
+            ("c", "💡", "E2E tests assert user-visible truth, not implementation: 'the row shows the new value after reload' — never 'the store contains X'."),
+        ]),
+        ("♿", "The experience floor", [
+            ("b", "Lighthouse: performance and best-practice scores have hard thresholds per surface; the warm-path budget is tracked per route.",
+                  "pa11y: WCAG violations are build failures — accessibility regressions do not merge.",
+                  "CSP audit: strict policy, hashed inline, no unsafe-inline anywhere; the audit diffs the actual headers.",
+                  "Style/lint: zero-warning policy; warnings rot into noise that hides errors."),
+        ]),
+        ("🧯", "Flake policy", [
+            ("n", "A flaky test is quarantined the day it flakes (skipped with a ticket, never deleted).",
+                  "Quarantine has a 2-week TTL: fix it or the owning team's merge rights to that area pause.",
+                  "Flake rate is reviewed monthly in the metrics review — it is an SLO on the gates themselves."),
+            ("q", "A gate you sometimes ignore is not a gate; it is decoration."),
+        ]),
+        ("🌱", "Seeded data as fixtures", [
+            ("p", "The live-demo seeders (commerce/ops/activity) and this wiki's seeder are deterministic — "
+                  "PRNG seeds and stable uuid5 ids — so e2e tests assert against known rows. Re-running a "
+                  "seeder converges instead of duplicating; tests may depend on that."),
+        ]),
+     ],
+     faq=[("Do I need all five layers locally?", "Run the layers your change touches; CI runs everything. The table's 'blocking for' column is the contract."),
+          ("Why is a11y blocking?", "Retrofits cost 10x and the floor only stays a floor if it cannot regress silently."),
+          ("Can I merge with a quarantined test in my area?", "Within the 2-week TTL yes; after that the area freezes until it's fixed."),
+          ("Where do load tests live?", "Data-plane benches in the Rust workspace; they gate cutovers, not PRs.")],
+     check=[("Run the full gate set once end-to-end", False),
+            ("Find which layers your current change touches", False),
+            ("Check the quarantine list for your team's area", False),
+            ("Add one e2e assertion for your last shipped feature", False)],
+     decisions=[["2026-03-17", "Quarantine TTL with merge-rights pause", "Quarantine had become a graveyard", "Amara Okonkwo"],
+                ["2025-12-10", "pa11y violations became hard failures", "A11y debt was compounding", "Sofia Marchetti"]],
+     changelog=[["2026-06-02", "Verified; wiki flows added to e2e scope", "Amara Okonkwo"]]),
+
+dict(slug="migration-discipline", sec="engineering", icon="🦺",
+     title="Migration discipline: shadow → parity → cutover", owner="Yuki Tanaka", domain="Engineering",
+     related=("three-plane-pattern", "testing-quality-gates", "git-release-flow", "decision-framework"),
+     tldr="Replacements run in parallel (shadow), must prove identical results (parity), then take traffic (cutover) — and deletion of the old path is a separate, gated, final step. If gates are UNKNOWN, you keep shadowing; you never delete on faith.",
+     kpis=[("👥", "Paths during shadow", "2, compared per request"), ("✅", "Gates to delete", "3, all PASS"),
+           ("🗑️", "Deletes on faith", "0 ever"), ("🏆", "Proven on", "TS→Rust data plane")],
+     ctx=("Big-bang rewrites fail at the edges nobody documented. This discipline turns a rewrite into "
+          "evidence collection: the new path watches real traffic, differences surface as diffs (not "
+          "outages), and the old path stays warm until three explicit gates pass.",
+          "It is slower per step and dramatically faster to 'actually done' — the Rust data plane "
+          "cutover shipped with zero user-facing incidents."),
+     secs=[
+        ("🪜", "The ladder", [
+            ("mm", "stateDiagram-v2\n  [*] --> Shadow: new path deployed, 0% serving\n  Shadow --> Shadow: diffs found → fix → keep shadowing\n  Shadow --> Parity: replay + live diffs clean over window\n  Parity --> Cutover: gates reviewed, traffic switched\n  Cutover --> Soak: old path warm, instant revert\n  Soak --> Deletion: 3 gates PASS\n  Deletion --> [*]\n  Cutover --> Shadow: regression → revert + diagnose"),
+            ("p", "Each promotion is a decision-record entry with the evidence attached — the ladder "
+                  "leaves an audit trail, not a vibe."),
+        ]),
+        ("🚧", "The three deletion gates", [
+            ("n", "**Live traffic**: the new path serves real production traffic in its final mode.",
+                  "**Shadow parity**: identical requests return identical results through both paths across the comparison window.",
+                  "**CI green with forward routing**: the full gate set passes with the new path as default."),
+            ("c", "🚨", "All three must be explicitly PASS. UNKNOWN is not PASS. The person deleting cites the evidence in the PR — 'it's been fine' is not evidence."),
+        ]),
+        ("🔬", "What the parity harness does", [
+            ("b", "Duplicates requests to old and new paths; normalizes (timestamps, ids) and diffs results.",
+                  "Diffs are triaged: new-path bug (fix), old-path bug (document — the rewrite found treasure), or acceptable divergence (recorded with rationale).",
+                  "Divergence budget is zero for writes, explicit-and-listed for reads.",
+                  "Artifacts persist (the .parity/ trail) so the cutover record can point at them."),
+            ("code", "bash", "make baas-verify VERIFY_EDITION=query   # run parity gates\n# inspect the trail:\nls apps/baas/mini-baas-infra/.parity/   # diffs, windows, verdicts", "parity.sh"),
+        ]),
+        ("🧯", "When shadow finds a difference", [
+            ("n", "Reproduce as a recorded request in the harness (it becomes a permanent regression test).",
+                  "Classify: which path is wrong, against what spec?",
+                  "Fix forward in the new path OR document the old path's bug in the spec article.",
+                  "Re-run the window. The clock restarts; that is the price and the point."),
+        ]),
+        ("📦", "What qualifies for the ladder", [
+            ("b", "Plane replacements, storage engine changes, auth/session flows, anything where 'subtle difference' = corruption.",
+                  "NOT every refactor: in-plane changes with full gate coverage ship normally.",
+                  "Rule of thumb: if rollback is harder than re-tag, you need the ladder."),
+        ]),
+     ],
+     faq=[("How long is a parity window?", "Long enough to cover periodics (cron, weekly jobs) — minimum one week, typically two, per the cutover record."),
+          ("Costs of running both paths?", "Real (compute, latency on shadow). Budgeted in the decision record; far cheaper than one corruption incident."),
+          ("Can shadow mode mutate?", "Never. Shadow writes go to a sink or a shadow store; only the serving path mutates truth."),
+          ("Who approves cutover?", "The owning lead via DACI; deletion needs the same approver again, with gates attached.")],
+     check=[("Read the Rust cutover decision record end-to-end", False),
+            ("Run parity gates against the query edition", False),
+            ("Classify your next big change: ladder or normal ship?", False),
+            ("Find one 'old path bug' the harness documented", False)],
+     decisions=[["2026-04-11", "Data plane cutover approved; TS executor frozen", "Three gates PASS with attached evidence", "Amara Okonkwo"],
+                ["2026-05-19", "TS executor deletion deferred", "Forward-routing CI gate was UNKNOWN", "Yuki Tanaka"]],
+     changelog=[["2026-06-01", "Verified; deletion still gated (correctly)", "Yuki Tanaka"]]),
+
+dict(slug="oncall-escalation", sec="engineering", icon="📟",
+     title="On-call & escalation", owner="Amara Okonkwo", domain="Engineering",
+     related=("incident-response", "org-teams", "support-runbook", "testing-quality-gates"),
+     tldr="Weekly rotations per team, 5-minute ack SLA for pages, mitigate-first doctrine, and a hard rule: the pager escalates to humans by policy, never by guilt. Support tickets and pages are different pipes that meet only at SEV declaration.",
+     kpis=[("📟", "Rotations", "2 (editor, data path)"), ("⏱️", "Ack SLA", "5 min"),
+           ("🛌", "Quiet hours pages", "SEV1/2 only"), ("🔁", "Handoff", "Written, Mondays")],
+     ctx=("On-call answers 'who acts right now'; ownership answers 'who decides' — keep them separate "
+          "(glossary: owner ≠ on-call). This article covers rotations, the escalation tree, and the "
+          "handoff ritual; what to actually DO during an incident lives in the incident response "
+          "runbook in Security.",
+          "The support team's live ticket queue is embedded below because most 'is this an incident?' "
+          "questions start as tickets — the bridge between the two pipes is explicit."),
+     secs=[
+        ("🗓️", "Rotations & expectations", [
+            ("t", ["Rotation", "Covers", "Pageable for", "Backup"],
+                 [["Editor", "app, bridge, sessions", "SEV1-3 user-facing", "Yuki Tanaka"],
+                  ["Data path", "BaaS, engines, realtime", "SEV1-3 data/queries", "David Okafor"]]),
+            ("b", "Shifts are Monday-to-Monday; trades are fine if the schedule page is updated first.",
+                  "On-call weeks have no feature commitments — interrupt capacity IS the commitment.",
+                  "Comp: a recovery day after any week with a night page (People Ops policy, automatic)."),
+        ]),
+        ("🌲", "The escalation tree", [
+            ("mm", "flowchart TD\n  P[Page fires] --> A{Ack in 5 min?}\n  A -- no --> B[Backup paged automatically]\n  A -- yes --> C{Mitigable alone in 30 min?}\n  C -- yes --> M[Mitigate, then diagnose]\n  C -- no --> D[Declare SEV - incident response takes over]\n  D --> IC[Incident commander assigned]\n  B --> C\n  M --> R[Write handoff note + ticket]"),
+            ("c", "📌", "Escalating early is always right: paging the backup or declaring a SEV costs minutes; hero-debugging alone at 3am costs hours and trust."),
+        ]),
+        ("🎫", "Tickets vs pages", [
+            ("p", "Support tickets (below, LIVE) and pages are different pipes: tickets carry customer "
+                  "impact reports on support SLAs; pages carry system signals on the 5-minute SLA. A "
+                  "ticket becomes a page only when support invokes the severity matrix — see the SLA "
+                  "article in Sales & Support."),
+            ("live", "mysql-ops", "tickets",
+             "the real support queue — severity + status straight from MySQL; this is the bridge view on-call checks when a page mentions customer reports"),
+        ]),
+        ("📝", "The Monday handoff", [
+            ("n", "Outgoing writes the handoff note: open mitigations, fragile areas, quarantined tests, anything 'watch this'.",
+                  "Incoming reads it BEFORE taking the pager and asks questions in-thread.",
+                  "Unacknowledged handoff = rotation has not transferred; the schedule page enforces this.",
+                  "Notes accumulate into the monthly reliability review (metrics review input)."),
+            ("code", "markdown", "## Handoff — data path — 2026-W23\n**Open:** mongo-activity events index rebuild running (ETA Tue)\n**Fragile:** kong rate limits at 80% on exec dashboard refresh spikes\n**Watch:** parity harness re-window after Friday's diff fix\n**Pages last week:** 1 (SEV3, pool exhaustion, mitigated by restart + PR #1247)", "handoff-template.md"),
+        ]),
+     ],
+     faq=[("Can on-call deploy a fix directly?", "Mitigation-by-rollback (re-tag) yes, immediately. Forward fixes still need the one real review — find a reviewer, or mitigate and wait."),
+          ("What pages during quiet hours?", "SEV1/SEV2 only; SEV3 waits for morning. The severity matrix in incident response defines them."),
+          ("Do leads take rotation?", "Yes, same as everyone — leads exempt from the pager lose touch with what it costs."),
+          ("Who fixes alert noise?", "On-call files alert-quality tickets with the same priority as code bugs; a page with no action twice is deleted or rewritten.")],
+     check=[("Find your next rotation week on the schedule page", False),
+            ("Read last week's handoff note for your rotation", False),
+            ("Walk the escalation tree once from memory", False),
+            ("Verify your pager actually fires (test page)", False),
+            ("Read the severity matrix before your first shift", False)],
+     decisions=[["2026-05-12", "Automatic backup-page at 5 min", "A missed 2am page extended SEV2 by an hour", "Amara Okonkwo"],
+                ["2026-02-08", "Recovery day after night-page weeks", "Burnout signals in pulse moods", "Priya Sharma"]],
+     changelog=[["2026-06-02", "Verified; live ticket queue embedded", "Amara Okonkwo"]]),
+
+# __MORE_PACK1__
+]

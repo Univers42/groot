@@ -62,8 +62,11 @@ ARG VITE_SECOND_BRAIN_V2=
 # Live-database mode (notion-database-sys × mini-baas): the mount catalog
 # fallback (admin listing is internal-only, browsers can't reach it) and the
 # realtime WS token minted by `make seed-live-demo`. Empty = feature dormant.
+# VITE_BAAS_TENANT_ID scopes registry discovery (`X-Baas-Tenant-Id` header —
+# /admin/v1/databases 401s without it and returns every tenant's mounts).
 ARG VITE_BAAS_LIVE_MOUNTS=
 ARG VITE_BAAS_REALTIME_TOKEN=
+ARG VITE_BAAS_TENANT_ID=
 ENV VITE_API_URL=$VITE_API_URL \
     VITE_PRISMATICA_URL=$VITE_PRISMATICA_URL \
     VITE_MAIL_APP_URL=$VITE_MAIL_APP_URL \
@@ -84,7 +87,8 @@ ENV VITE_API_URL=$VITE_API_URL \
     VITE_BAAS_OVERLAY_TABLE=$VITE_BAAS_OVERLAY_TABLE \
     VITE_SECOND_BRAIN_V2=$VITE_SECOND_BRAIN_V2 \
     VITE_BAAS_LIVE_MOUNTS=$VITE_BAAS_LIVE_MOUNTS \
-    VITE_BAAS_REALTIME_TOKEN=$VITE_BAAS_REALTIME_TOKEN
+    VITE_BAAS_REALTIME_TOKEN=$VITE_BAAS_REALTIME_TOKEN \
+    VITE_BAAS_TENANT_ID=$VITE_BAAS_TENANT_ID
 
 # Build, then strip source maps from the shipped image (they tripled its size
 # and leak source; keep them only in local builds) and precompress static

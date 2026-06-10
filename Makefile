@@ -43,5 +43,6 @@ include $(MAKE_DIR)/playground.mk
 include $(MAKE_DIR)/mail.mk
 include $(MAKE_DIR)/calendar.mk
 include $(MAKE_DIR)/baas.mk
+include $(MAKE_DIR)/agency.mk
 include $(MAKE_DIR)/baas-release.mk
 include $(MAKE_DIR)/baas-verify.mk

@@ -175,6 +175,7 @@ services:
       - ./models/calendar-migration.sql:/project-init/05-calendar.sql:ro
       - ./models/seeds.sql:/project-init/06-seeds.sql:ro
       - ./models/rls-hardening-migration.sql:/project-init/07-rls-hardening.sql:ro
+      - ./models/osionos-chat-migration.sql:/project-init/08-osionos-chat.sql:ro
     depends_on:
       db-bootstrap:
         condition: service_completed_successfully
@@ -211,6 +212,7 @@ services:
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: 9999
+      GOTRUE_LOG_LEVEL: ${GOTRUE_LOG_LEVEL:-info}
       API_EXTERNAL_URL: ${API_EXTERNAL_URL:-https://localhost:8000/auth/v1}
       GOTRUE_DB_DRIVER: postgres
       GOTRUE_DB_MIGRATIONS_PATH: ${GOTRUE_DB_MIGRATIONS_PATH:-/usr/local/etc/auth/migrations}
@@ -377,15 +379,44 @@ services:
       OSIONOS_BRIDGE_PORT: 4000
       OSIONOS_APP_URL: ${OSIONOS_APP_URL:-https://localhost:3001}
       OSIONOS_ALLOWED_ORIGIN: ${OSIONOS_ALLOWED_ORIGIN:-https://localhost:3001}
-      OSIONOS_BAAS_URL: http://kong:8000
+      # NOTE: this service sits on BOTH the default and mini-baas networks and
+      # both stacks expose a "kong" DNS alias — use the unambiguous root
+      # container name here so BaaS reads/writes always hit track-binocle.
+      OSIONOS_BAAS_URL: http://track-binocle-kong-1:8000
       AUTH_GATEWAY_URL: ${AUTH_GATEWAY_URL:-http://auth-gateway:8787}
       OSIONOS_BRIDGE_PERSISTENCE: ${OSIONOS_BRIDGE_PERSISTENCE:-auto}
       OSIONOS_BRIDGE_REQUIRE_BAAS: ${OSIONOS_BRIDGE_REQUIRE_BAAS:-false}
       CLAUDE_BIN: ${CLAUDE_BIN:-claude}
+      # LiveKit video tokens (scripts/bridge-rtc.mjs): same key pair as the
+      # livekit service below; LIVEKIT_URL is the in-network admin/twirp base,
+      # LIVEKIT_CLIENT_URL is what browsers get back to connect the room.
+      LIVEKIT_URL: ${LIVEKIT_URL:-http://livekit:7880}
+      LIVEKIT_CLIENT_URL: ${LIVEKIT_CLIENT_URL:-ws://127.0.0.1:7880}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecret-livekit-local-0123456789abcdef}
+      # Permission UX proxy (scripts/bridge-perms.mjs) → mini-baas Kong over
+      # the external mini-baas network (container-name DNS; the bare "kong"
+      # alias is ambiguous from here because this service sits on BOTH
+      # networks). PERMS_SERVICE_APIKEY / PERMS_SERVICE_TOKEN come from
+      # ./.env.local via env_file (secrets stay out of compose).
+      PERMS_KONG_URL: ${PERMS_KONG_URL:-http://mini-baas-kong:8000}
+      PERMS_TENANT_ID: ${PERMS_TENANT_ID:-agency}
+      PERMS_PEOPLE_ENV: /seeds/.agency-people.env
+      PERMS_RULES_FILE: /tmp/perms-rules.json
+      # Chat/feed realtime publishes (scripts/bridge-chat.mjs, bridge-feed.mjs)
+      # go server-side to the Rust realtime gateway: POST /v1/publish.
+      REALTIME_PUBLISH_URL: ${REALTIME_PUBLISH_URL:-http://mini-baas-realtime:4000}
+      # Agency org workspace: scopes /api/people + default feed topic.
+      OSIONOS_ORG_WORKSPACE_ID: ${OSIONOS_ORG_WORKSPACE_ID:-b1a0c1e5-0000-4000-a000-000000000001}
       HOME: ${OSIONOS_BRIDGE_HOME:-/tmp}
       PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     expose:
       - "4000"
+    volumes:
+      - ./tools/seeds/.agency-people.env:/seeds/.agency-people.env:ro
+    networks:
+      - default
+      - mini-baas
     depends_on:
       local-runtime-secrets:
         condition: service_completed_successfully
@@ -399,6 +430,30 @@ services:
       timeout: 3s
       start_period: 45s
       retries: 24
+    restart: unless-stopped
+    mem_limit: 512m
+
+  # livekit — self-hosted WebRTC SFU for osionos video rooms. Signalling/HTTP
+  # (and the twirp admin API) on 7880, TCP ICE fallback on 7881, media over a
+  # modest UDP range 50000-50060 published 1:1 (config advertises 127.0.0.1).
+  # API keys flow from LIVEKIT_API_KEY/LIVEKIT_API_SECRET (dev defaults below,
+  # registered in .env.example like the other optional secrets); the
+  # osionos-bridge mints HS256 access tokens for the SAME pair via
+  # apps/osionos/app/scripts/bridge-rtc.mjs (POST /api/rtc/token).
+  livekit:
+    image: ${LIVEKIT_IMAGE:-livekit/livekit-server:v1.11.0}
+    profiles:
+      - dev
+      - local
+    command: --config /etc/livekit.yaml
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-devsecret-livekit-local-0123456789abcdef}"
+    volumes:
+      - ./infrastructure/livekit/livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${LIVEKIT_HOST_PORT:-7880}:7880"
+      - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${LIVEKIT_TCP_HOST_PORT:-7881}:7881"
+      - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:50000-50060:50000-50060/udp"
     restart: unless-stopped
     mem_limit: 512m
 
@@ -421,6 +476,22 @@ services:
         VITE_REQUIRE_BRIDGE_SESSION: "true"
         VITE_ALLOW_OFFLINE_MODE: "false"
         VITE_PAGE_ACTION_SYNC_ENABLED: "true"
+        # mini-baas live-database + graph wiring (Vite inlines at build).
+        # Empty defaults keep those surfaces dormant; `make seed-live-demo`
+        # at the repo root rebuilds this image with the values from the app
+        # .env (see infrastructure/makes/baas.mk).
+        VITE_BAAS_URL: ${VITE_BAAS_URL:-}
+        VITE_BAAS_API_KEY: ${VITE_BAAS_API_KEY:-}
+        VITE_BAAS_KONG_KEY: ${VITE_BAAS_KONG_KEY:-}
+        VITE_BAAS_LIVE_MOUNTS: ${VITE_BAAS_LIVE_MOUNTS:-}
+        VITE_BAAS_REALTIME_TOKEN: ${VITE_BAAS_REALTIME_TOKEN:-}
+        VITE_BAAS_TENANT_ID: ${VITE_BAAS_TENANT_ID:-}
+        VITE_BAAS_EDGES_DB_ID: ${VITE_BAAS_EDGES_DB_ID:-}
+        VITE_BAAS_EDGES_TABLE: ${VITE_BAAS_EDGES_TABLE:-}
+        VITE_BAAS_GRAPH_RESOURCES: ${VITE_BAAS_GRAPH_RESOURCES:-}
+        VITE_BAAS_GRAPH_GENERATORS: ${VITE_BAAS_GRAPH_GENERATORS:-}
+        VITE_BAAS_NOTES_TABLE: ${VITE_BAAS_NOTES_TABLE:-}
+        VITE_BAAS_OVERLAY_TABLE: ${VITE_BAAS_OVERLAY_TABLE:-}
     expose:
       - "80"
     depends_on:
@@ -748,3 +819,12 @@ volumes:
   osionos-browser-test-pnpm-store:
   mini-baas-sdk-node-modules:
   opposite-osiris-node-modules:
+
+networks:
+  # The mini-baas stack's network (started by apps/baas/mini-baas-infra),
+  # declared external so osionos-bridge can reach the permission-engine and
+  # the Rust realtime gateway by container-name DNS (mini-baas-kong,
+  # mini-baas-realtime). Only osionos-bridge attaches to it.
+  mini-baas:
+    name: mini-baas_mini-baas
+    external: true

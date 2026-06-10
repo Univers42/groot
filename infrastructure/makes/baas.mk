@@ -43,3 +43,24 @@ baas-update:
 baas-smoke:
 # Smoke-test the currently running BaaS gateway through the frontend verifier.
 	cd $(FRONTEND_DIR) && node scripts/verify-connection.mjs
+
+OSIONOS_APP_ENV := apps/osionos/app/.env
+
+seed-live-demo:
+## Seed the live-database demo (pg-commerce + mysql-ops + mongo-activity through
+## the mini-baas control plane), then rebuild osionos-app with the BaaS env
+## baked in and restart it. Needs the mini-baas stack up (make -C apps/baas/mini-baas-infra up).
+	@$(MAKE) -C apps/baas/mini-baas-infra seed-live-demo
+	@$(MAKE) osionos-app-live
+
+osionos-app-live:
+## Rebuild + restart osionos-app with the VITE_BAAS_* values from the app .env
+## (vite inlines env at build time; the seeder writes the live-demo keys there).
+## Two --env-file flags: the root .env keeps its port interpolations, the app
+## .env supplies the VITE_BAAS_* build args (later files win).
+	@test -f $(OSIONOS_APP_ENV) || { echo "missing $(OSIONOS_APP_ENV) — run make seed-live-demo first"; exit 1; }
+	@touch .env
+	docker compose --env-file .env --env-file $(OSIONOS_APP_ENV) build osionos-app
+	docker compose --env-file .env --env-file $(OSIONOS_APP_ENV) up -d osionos-app
+
+.PHONY: seed-live-demo osionos-app-live

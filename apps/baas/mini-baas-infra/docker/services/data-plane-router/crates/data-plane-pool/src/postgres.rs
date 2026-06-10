@@ -14,7 +14,7 @@ use deadpool_postgres::{Config as DeadpoolConfig, Object, PoolConfig, Runtime};
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tokio_postgres::types::{to_sql_checked, IsNull, ToSql, Type};
+use tokio_postgres::types::{to_sql_checked, IsNull, Kind, ToSql, Type};
 use tokio_postgres::{GenericClient, NoTls};
 
 type BoxedParam = Box<dyn ToSql + Sync + Send>;
@@ -780,14 +780,22 @@ pub(crate) fn build_pg_ddl(schema: &str, ddl: &SchemaDdlRequest) -> DataPlaneRes
 /// representation, numeric out of range, …) and 42804 datatype_mismatch
 /// during `ALTER … USING` mean the EXISTING DATA is incompatible with the
 /// requested type — the caller's conflict (409), not an engine failure (502).
-/// Scoped to the DDL path only (additive): `/v1/query` keeps the existing
-/// [`backend`] mapping, which this falls back to (23xxx → Conflict, rest →
-/// Backend).
+/// Schema-shape mistakes are deterministic client errors too: a 5xx here
+/// makes outbox-style clients retry a request that can never succeed —
+/// 42701/42P07 (already exists) → 409, 42703/42P01 (no such column/table) →
+/// 400. Scoped to the DDL path only (additive): `/v1/query` keeps the
+/// existing [`backend`] mapping, which this falls back to (23xxx →
+/// Conflict, rest → Backend).
 fn ddl_backend(e: &tokio_postgres::Error) -> DataPlaneError {
     if let Some(db) = e.as_db_error() {
         let code = db.code().code();
-        if code.starts_with("22") || code == "42804" {
+        if code.starts_with("22") || code == "42804" || code == "42701" || code == "42P07" {
             return DataPlaneError::Conflict {
+                message: db.message().to_string(),
+            };
+        }
+        if code == "42703" || code == "42P01" {
+            return DataPlaneError::InvalidRequest {
                 message: db.message().to_string(),
             };
         }
@@ -1054,19 +1062,34 @@ fn build_aggregate_expr(agg: &Aggregate) -> DataPlaneResult<String> {
 
 fn backend(e: &tokio_postgres::Error) -> DataPlaneError {
     // SQLSTATE class 23 = integrity constraint violation (unique/PK, foreign key,
-    // not-null, check). That's the caller's fault (409 Conflict), not an engine
-    // failure (5xx). Use the DB error's own message (the top-level Display is
-    // just "db error") so the client learns *what* conflicted.
+    // not-null, check) and class 22 = data exception (invalid enum/date text,
+    // numeric overflow, …). Both are the caller's fault — their VALUES don't
+    // fit the schema — so they map to 409 Conflict, not an engine 5xx (a 5xx
+    // makes outbox clients retry a write that can never succeed). Use the DB
+    // error's own message (the top-level Display is just "db error") so the
+    // client learns *what* conflicted.
     if let Some(db) = e.as_db_error() {
-        if db.code().code().starts_with("23") {
+        let code = db.code().code();
+        if code.starts_with("23") || code.starts_with("22") {
             return DataPlaneError::Conflict {
                 message: db.message().to_string(),
             };
         }
     }
-    DataPlaneError::Backend {
-        message: e.to_string(),
+    // CLIENT-side bind failures (JsonParam: "not a date" into timestamptz,
+    // a malformed uuid, a string into int4) never reach the server, so there
+    // is no SQLSTATE — but they are exactly as much the caller's fault as
+    // their server-side 22xxx twins. Same envelope: 409, with the cause.
+    let text = e.to_string();
+    if text.contains("error serializing parameter") {
+        let detail = std::error::Error::source(e)
+            .map(|source| format!(": {source}"))
+            .unwrap_or_default();
+        return DataPlaneError::Conflict {
+            message: format!("{text}{detail} (value does not fit the column type)"),
+        };
     }
+    DataPlaneError::Backend { message: text }
 }
 
 /// Boxes a JSON value as a Postgres parameter whose wire encoding adapts to the
@@ -1121,7 +1144,16 @@ impl ToSql for JsonParam {
                     (n.as_f64().ok_or("number is not representable as f64")? as f32).to_sql(ty, out)
                 }
                 Type::FLOAT8 => n.as_f64().ok_or("number is not representable as f64")?.to_sql(ty, out),
-                // json/jsonb → number document; numeric/anything else → checked
+                // numeric/decimal columns (money-like: totals, prices,
+                // salaries) — serde's Value only serializes into json/jsonb,
+                // so without this arm EVERY filter or update touching a
+                // numeric column was a 502. serde prints JSON numbers as
+                // plain decimal strings, which encode directly.
+                Type::NUMERIC => {
+                    write_pg_numeric(&n.to_string(), out)?;
+                    Ok(IsNull::No)
+                }
+                // json/jsonb → number document; anything else → checked
                 // delegate, which rejects a true mismatch rather than corrupt it.
                 _ => self.0.to_sql_checked(ty, out),
             },
@@ -1131,6 +1163,17 @@ impl ToSql for JsonParam {
                 Type::TIMESTAMP => s.parse::<chrono::NaiveDateTime>()?.to_sql(ty, out),
                 Type::DATE => s.parse::<chrono::NaiveDate>()?.to_sql(ty, out),
                 Type::JSON | Type::JSONB => self.0.to_sql(ty, out),
+                // Enum slots (filters/updates against enum columns — the live
+                // UI's board groupings depend on them): the binary wire format
+                // of an enum value IS its label text, but this postgres-types
+                // version's `&str` does not `accepts` enum kinds, which made
+                // every enum-column filter a 502. Write the label and let the
+                // SERVER validate it — an invalid label raises 22P02, which
+                // classifies as a clean 409 Conflict.
+                _ if matches!(ty.kind(), Kind::Enum(_)) => {
+                    out.extend_from_slice(s.as_bytes());
+                    Ok(IsNull::No)
+                }
                 // text/varchar/bpchar/name accept the string; a non-text column
                 // (int4, bytea, …) is rejected by the inner `accepts`.
                 _ => s.to_sql_checked(ty, out),
@@ -1146,6 +1189,62 @@ impl ToSql for JsonParam {
     }
 
     to_sql_checked!();
+}
+
+/// PostgreSQL `numeric` binary wire encoding for a plain decimal string
+/// (`[-]digits[.digits]` — exactly what serde_json prints for ordinary
+/// numbers; exponent forms are rejected with a clear error). Layout: i16
+/// ndigits, i16 weight (position of the most significant base-10000 group
+/// relative to the decimal point), u16 sign (0x0000 +, 0x4000 −), u16 dscale
+/// (decimal digits after the point), then ndigits × i16 base-10000 groups.
+fn write_pg_numeric(
+    text: &str,
+    out: &mut BytesMut,
+) -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
+    let (negative, unsigned) = match text.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, text),
+    };
+    let (int_part, frac_part) = unsigned.split_once('.').unwrap_or((unsigned, ""));
+    if int_part.is_empty() && frac_part.is_empty()
+        || !int_part.bytes().all(|byte| byte.is_ascii_digit())
+        || !frac_part.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return Err(format!("`{text}` is not a plain decimal numeric literal").into());
+    }
+    let dscale = u16::try_from(frac_part.len())?;
+    // Base-10000 groups: int digits left-padded, frac digits right-padded.
+    let int_trimmed = int_part.trim_start_matches('0');
+    let mut padded = "0".repeat((4 - int_trimmed.len() % 4) % 4) + int_trimmed;
+    let int_groups = padded.len() / 4;
+    padded += frac_part;
+    padded += &"0".repeat((4 - padded.len() % 4) % 4);
+    let mut digits: Vec<i16> = padded
+        .as_bytes()
+        .chunks(4)
+        .map(|chunk| std::str::from_utf8(chunk).unwrap().parse::<i16>().unwrap())
+        .collect();
+    // weight counts from the first group; leading zero groups (a fraction
+    // like 0.00001) shift it further down, trailing zero groups just shrink.
+    let mut weight = int_groups as i16 - 1;
+    while digits.first() == Some(&0) {
+        digits.remove(0);
+        weight -= 1;
+    }
+    while digits.last() == Some(&0) {
+        digits.pop();
+    }
+    if digits.is_empty() {
+        weight = 0;
+    }
+    out.extend_from_slice(&(i16::try_from(digits.len())?).to_be_bytes());
+    out.extend_from_slice(&weight.to_be_bytes());
+    out.extend_from_slice(&(if negative && !digits.is_empty() { 0x4000u16 } else { 0 }).to_be_bytes());
+    out.extend_from_slice(&dscale.to_be_bytes());
+    for digit in digits {
+        out.extend_from_slice(&digit.to_be_bytes());
+    }
+    Ok(())
 }
 
 /// Coerces a JSON number to `i64` for integer columns, accepting an
@@ -2102,7 +2201,10 @@ mod tests {
         assert!(encode(json!("42"), &Type::INT4).is_err(), "string→int4 must reject");
         assert!(encode(json!(true), &Type::INT4).is_err(), "bool→int4 must reject");
         assert!(encode(json!({ "a": 1 }), &Type::INT4).is_err(), "object→int4 must reject");
-        assert!(encode(json!(5), &Type::NUMERIC).is_err(), "number→numeric not yet supported, must reject not corrupt");
+        // numeric is now a real arm (write_pg_numeric): 5 → ndigits 1,
+        // weight 0, sign +, dscale 0, one base-10000 group [5].
+        let (_, buf) = encode(json!(5), &Type::NUMERIC).expect("number→numeric binds");
+        assert_eq!(&buf[..], &[0, 1, 0, 0, 0, 0, 0, 0, 0, 5]);
     }
 
     #[test]
@@ -2300,6 +2402,55 @@ mod tests {
         let plan = build_pg_ddl("public", &relaxed).unwrap();
         assert!(plan.statements[2].ends_with("DROP NOT NULL"), "{:?}", plan.statements);
         assert_eq!(plan.statements.len(), 3, "no default → no SET DEFAULT");
+    }
+
+    #[test]
+    fn json_param_binds_strings_into_enum_slots() {
+        // Enum binary wire format = the label text. postgres-types' `&str`
+        // does not accept enum kinds, which made every enum-column filter
+        // (the live UI's board groupings) a 502 — the adaptive binder must
+        // write the label itself. Invalid labels stay the SERVER's call
+        // (22P02 → 409), so any label serializes here.
+        let enum_type = Type::new(
+            "order_status_t".to_string(),
+            999_999,
+            Kind::Enum(vec!["pending".to_string(), "delivered".to_string()]),
+            "public".to_string(),
+        );
+        let mut buf = bytes::BytesMut::new();
+        let result = JsonParam(serde_json::json!("delivered")).to_sql(&enum_type, &mut buf);
+        assert!(matches!(result, Ok(IsNull::No)));
+        assert_eq!(&buf[..], b"delivered");
+    }
+
+    #[test]
+    fn pg_numeric_binary_encoding_golden_vectors() {
+        // (input, ndigits, weight, sign, dscale, base-10000 groups)
+        let cases: [(&str, i16, i16, u16, u16, &[i16]); 7] = [
+            ("0", 0, 0, 0, 0, &[]),
+            ("1", 1, 0, 0, 0, &[1]),
+            ("12.34", 2, 0, 0, 2, &[12, 3400]),
+            ("10000", 1, 1, 0, 0, &[1]),
+            ("0.0001", 1, -1, 0, 4, &[1]),
+            ("0.00001", 1, -2, 0, 5, &[1000]),
+            ("-987654321.12", 4, 2, 0x4000, 2, &[9, 8765, 4321, 1200]),
+        ];
+        for (input, ndigits, weight, sign, dscale, groups) in cases {
+            let mut buf = BytesMut::new();
+            write_pg_numeric(input, &mut buf).unwrap_or_else(|e| panic!("{input}: {e}"));
+            let mut expected = Vec::new();
+            expected.extend_from_slice(&ndigits.to_be_bytes());
+            expected.extend_from_slice(&weight.to_be_bytes());
+            expected.extend_from_slice(&sign.to_be_bytes());
+            expected.extend_from_slice(&dscale.to_be_bytes());
+            for group in groups {
+                expected.extend_from_slice(&group.to_be_bytes());
+            }
+            assert_eq!(&buf[..], &expected[..], "{input}");
+        }
+        // Exponent forms (serde only prints them for extreme f64s) fail closed.
+        let mut buf = BytesMut::new();
+        assert!(write_pg_numeric("1e21", &mut buf).is_err());
     }
 
     #[test]

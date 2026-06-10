@@ -69,6 +69,10 @@ SQL
 $psql_base -f /project-init/07-rls-hardening.sql
 $psql_base -c "INSERT INTO track_binocle_runtime_migrations (marker) VALUES ('${marker}_rls_hardening') ON CONFLICT DO NOTHING"
 
+# Chat / DMs / profiles / feed interactions (idempotent, additive).
+$psql_base -f /project-init/08-osionos-chat.sql
+$psql_base -c "INSERT INTO track_binocle_runtime_migrations (marker) VALUES ('${marker}_osionos_chat') ON CONFLICT DO NOTHING"
+
 seeds_applied=$($psql_base -Atc "SELECT 1 FROM track_binocle_runtime_migrations WHERE marker = '${marker}_seeds' LIMIT 1")
 if [ "$seeds_applied" != "1" ]; then
   seeded_user_count=$($psql_base -Atc "SELECT COUNT(*) FROM users WHERE email IN ('john.doe@example.com', 'jane.doe@example.com')")

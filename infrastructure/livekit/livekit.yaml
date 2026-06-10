@@ -1,0 +1,39 @@
+# **************************************************************************** #
+# livekit.yaml — self-hosted LiveKit SFU config for the local Docker stack.
+#
+# Dev-friendly shape:
+#   - 7880  ws/http signalling + admin twirp API (published on the loopback
+#     bind address like every other service: TRACK_BINOCLE_BIND_ADDR).
+#   - 7881  TCP ICE fallback (works when UDP is blocked).
+#   - 50000-50060/udp  modest media port range, published 1:1 so the
+#     advertised candidates (node_ip 127.0.0.1) match the host mapping.
+#
+# API keys are NOT stored here: they flow from the LIVEKIT_KEYS env var set in
+# docker-compose.yml (${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-...}),
+# the same pattern other compose secrets use. The osionos-bridge mints HS256
+# access tokens against the same pair (apps/osionos/app/scripts/bridge-rtc.mjs).
+# **************************************************************************** #
+
+port: 7880
+bind_addresses:
+  - "0.0.0.0"
+
+rtc:
+  # TCP fallback so calls still connect when UDP is unavailable.
+  tcp_port: 7881
+  # Modest UDP media range for local dev; mirrored 1:1 in docker-compose.yml.
+  port_range_start: 50000
+  port_range_end: 50060
+  # Local-only deployment: advertise the loopback the host publishes the
+  # ports on instead of resolving a public/external IP.
+  use_external_ip: false
+  node_ip: "127.0.0.1"
+
+room:
+  # Rooms are created on first join (the bridge token grants roomJoin).
+  auto_create: true
+  empty_timeout: 300
+
+logging:
+  level: info
+  json: false

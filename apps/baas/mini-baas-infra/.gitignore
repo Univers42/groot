@@ -380,3 +380,6 @@ certs/*
 
 # Parity gate (G10) run artifacts — verdicts are per-run; route-sets + goldens stay tracked.
 .parity/
+
+# generated tenant/key state from scripts/seed/agency-tenant.sh (live API key)
+.agency-tenant.env

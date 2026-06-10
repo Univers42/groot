@@ -221,6 +221,9 @@ updates = {
     "VITE_BAAS_URL": "http://127.0.0.1:${KONG_PORT}",
     "VITE_BAAS_LIVE_MOUNTS": '${LIVE_MOUNTS_JSON}',
     "VITE_BAAS_REALTIME_TOKEN": "${RT_TOKEN}",
+    # Enables the dynamic in-browser mount catalog (X-Baas-Tenant-Id header);
+    # the LIVE_MOUNTS JSON above stays as the offline fallback.
+    "VITE_BAAS_TENANT_ID": "${TENANT}",
 }
 seen = set()
 out = []

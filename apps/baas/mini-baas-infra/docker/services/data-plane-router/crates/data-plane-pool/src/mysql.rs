@@ -1015,19 +1015,39 @@ fn ddl_backend<E: std::fmt::Display>(e: E) -> DataPlaneError {
 /// Best-effort integrity-violation detection from the server message (the
 /// generic helper only has the Display text): 1062 "Duplicate entry", 1452
 /// foreign-key failure → a client error (409 Conflict), not an engine 5xx.
-/// With `ddl` set, truncation/cast errors (1265/1292/1366) also classify as
-/// Conflict — they mean the table's data conflicts with the requested type.
+/// Truncation/cast errors (1265/1292/1366 — bad enum value, unparseable
+/// date) and 1264 "Out of range" classify as Conflict on BOTH paths: on DDL
+/// they mean the table's data conflicts with the requested type, on writes
+/// they mean the caller's VALUE doesn't fit the column — either way the
+/// caller's fault, and a 5xx would make outbox clients retry a write that
+/// can never succeed.
 fn classify_mysql_error(message: String, ddl: bool) -> DataPlaneError {
     let lower = message.to_lowercase();
     if lower.contains("duplicate entry") || lower.contains("foreign key constraint fails") {
         return DataPlaneError::Conflict { message };
     }
-    if ddl
-        && (lower.contains("data truncated")
-            || lower.contains("truncated incorrect")
-            || (lower.contains("incorrect") && lower.contains("value")))
+    if lower.contains("data truncated")
+        || lower.contains("truncated incorrect")
+        || lower.contains("out of range value")
+        || (lower.contains("incorrect") && lower.contains("value"))
     {
         return DataPlaneError::Conflict { message };
+    }
+    if ddl {
+        // Schema-shape mistakes are deterministic client errors — a 5xx makes
+        // outbox-style clients retry a request that can never succeed.
+        // 1060 "Duplicate column name" / 1050 "Table … already exists" → 409;
+        // 1054 "Unknown column" / 1091 "Can't DROP …; check that column/key
+        // exists" / 1146 "Table … doesn't exist" → 400.
+        if lower.contains("duplicate column name") || lower.contains("already exists") {
+            return DataPlaneError::Conflict { message };
+        }
+        if lower.contains("unknown column")
+            || lower.contains("check that column/key exists")
+            || lower.contains("doesn't exist")
+        {
+            return DataPlaneError::InvalidRequest { message };
+        }
     }
     DataPlaneError::Backend { message }
 }
@@ -1381,6 +1401,22 @@ mod tests {
             scopes: vec![],
             source: IdentitySource::Test,
         }
+    }
+
+    #[test]
+    fn ddl_errors_classify_schema_shape_mistakes_as_client_errors() {
+        // Deterministic user errors must be 4xx — a 5xx makes outbox clients
+        // retry a doomed request forever (poison-pill).
+        let dup = classify_mysql_error("Duplicate column name 'status'".into(), true);
+        assert!(matches!(dup, DataPlaneError::Conflict { .. }), "{dup:?}");
+        let missing = classify_mysql_error(
+            "Can't DROP 'ghost'; check that column/key exists".into(), true);
+        assert!(matches!(missing, DataPlaneError::InvalidRequest { .. }), "{missing:?}");
+        let no_table = classify_mysql_error("Table 'ops.ghost' doesn't exist".into(), true);
+        assert!(matches!(no_table, DataPlaneError::InvalidRequest { .. }), "{no_table:?}");
+        // The query (non-DDL) path keeps its existing Backend mapping.
+        let query_path = classify_mysql_error("Unknown column 'x' in 'field list'".into(), false);
+        assert!(matches!(query_path, DataPlaneError::Backend { .. }), "{query_path:?}");
     }
 
     #[test]
@@ -1803,20 +1839,22 @@ mod tests {
 
     #[test]
     fn mysql_error_classifier_maps_ddl_cast_errors_to_conflict() {
-        // DDL path: truncation / incorrect-value (1265/1292/1366) → Conflict.
+        // Truncation / incorrect-value (1264/1265/1292/1366: bad enum value,
+        // unparseable date, overflow) → Conflict on BOTH paths now: on writes
+        // they mean the caller's VALUE doesn't fit the column — a 5xx made
+        // the live UI outbox retry a doomed write forever (M23 battery pin).
         for msg in [
             "Server error: `ERROR 1265 (01000): Data truncated for column 'n' at row 1'",
             "Server error: `ERROR 1292 (22007): Truncated incorrect DOUBLE value: 'abc'",
             "Server error: `ERROR 1366 (HY000): Incorrect integer value: 'abc' for column 'n' at row 1",
+            "Server error: `ERROR 1264 (22003): Out of range value for column 'total' at row 1",
         ] {
             assert!(
                 matches!(ddl_backend(msg), DataPlaneError::Conflict { .. }),
                 "{msg}"
             );
-            // …and the SAME message on the query path keeps its existing
-            // (Backend) classification — the DDL mapping is additive.
             assert!(
-                matches!(backend(msg), DataPlaneError::Backend { .. }),
+                matches!(backend(msg), DataPlaneError::Conflict { .. }),
                 "{msg}"
             );
         }

@@ -97,7 +97,7 @@ const managedFiles = [
     dropKeys: baasOnlyKeys,
     required: ['OSIONOS_BRIDGE_SHARED_SECRET', 'OSIONOS_APP_SESSION_SECRET', 'OSIONOS_BRIDGE_EMAIL_HASH_SALT', 'OSIONOS_APP_URL', 'OSIONOS_ALLOWED_ORIGIN'],
     recommended: ['PUBLIC_OSIONOS_APP_URL'],
-    optional: ['DOCKER_PAT', 'DOCKER_USER', 'EMAIL_RECUP_ADMIN_VAULT', 'FLY_API_TOKEN', 'SONAR_TOK'],
+    optional: ['DOCKER_PAT', 'DOCKER_USER', 'EMAIL_RECUP_ADMIN_VAULT', 'FLY_API_TOKEN', 'LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET', 'LIVEKIT_CLIENT_URL', 'LIVEKIT_URL', 'SONAR_TOK'],
   },
   // NOTE: opposite-osiris (website + api-gateway) was externalized to its own
   // repo + Docker Hub images (2026-06-06). Its build-time PUBLIC_* config is now
@@ -167,7 +167,7 @@ const managedFiles = [
 ];
 
 const optionalPatterns = [
-  /^SMTP_/, /^GOTRUE_SMTP_/, /^TURNSTILE_/, /^PUBLIC_TURNSTILE_/, /^GOOGLE_/, /^GITHUB_/, /^FORTYTWO_/, /^GMAIL_/, /^MAIL_/, /^CALENDAR_/, /^LLM_/, /^SONAR/, /^UNSPLASH_/, /^DOCKER_/, /^FLY_/, /^MINIO_/, /^MONGO_/, /^AI_/, /^ANALYTICS_/, /^GDPR_/, /^NEWSLETTER_/, /^LOG_/, /^RUST_LOG$/, /^WAF_/, /^STUDIO_/, /^SUPABASE_/, /^SESSION_/, /^CSV_/, /^JSON_/, /^REDIS_/, /^PLAYGROUND_/, /^SRC_/, /^SYNC_/, /^CONTRACT_/, /^ADAPTER_REGISTRY_/, /^QUERY_/, /^STORAGE_/, /^PERMISSION_/, /^SCHEMA_/, /^VITE_BAAS_/, /^VITE_ALLOW_OFFLINE_MODE$/,
+  /^SMTP_/, /^GOTRUE_SMTP_/, /^TURNSTILE_/, /^PUBLIC_TURNSTILE_/, /^GOOGLE_/, /^GITHUB_/, /^FORTYTWO_/, /^GMAIL_/, /^MAIL_/, /^CALENDAR_/, /^LIVEKIT_/, /^LLM_/, /^SONAR/, /^UNSPLASH_/, /^DOCKER_/, /^FLY_/, /^MINIO_/, /^MONGO_/, /^AI_/, /^ANALYTICS_/, /^GDPR_/, /^NEWSLETTER_/, /^LOG_/, /^RUST_LOG$/, /^WAF_/, /^STUDIO_/, /^SUPABASE_/, /^SESSION_/, /^CSV_/, /^JSON_/, /^REDIS_/, /^PLAYGROUND_/, /^SRC_/, /^SYNC_/, /^CONTRACT_/, /^ADAPTER_REGISTRY_/, /^QUERY_/, /^STORAGE_/, /^PERMISSION_/, /^SCHEMA_/, /^VITE_BAAS_/, /^VITE_ALLOW_OFFLINE_MODE$/,
 ];
 
 const secretPatterns = [/SECRET/, /TOKEN/, /PASSWORD/, /PASS$/, /_KEY$/, /PAT$/, /JWT/];
@@ -247,6 +247,10 @@ const examples = {
   KONG_CORS_ORIGIN_FRONTEND: 'https://localhost:4322',
   KONG_CORS_ORIGIN_PLAYGROUND: 'https://localhost:3100',
   KONG_CORS_ORIGIN_STUDIO: 'https://localhost:3001',
+  LIVEKIT_API_KEY: '',
+  LIVEKIT_API_SECRET: '',
+  LIVEKIT_CLIENT_URL: 'ws://127.0.0.1:7880',
+  LIVEKIT_URL: 'http://livekit:7880',
   MAIL_APP_ORIGIN: 'https://localhost:3002',
   MAIL_BRIDGE_PORT: '4100',
   MAIL_BRIDGE_PUBLIC_ORIGIN: 'https://localhost:4100',
@@ -316,6 +320,10 @@ const descriptions = {
   AUTH_TEST_EMAIL_DOMAIN: 'Email domain used by local verification scripts when generating disposable test accounts.',
   KONG_PUBLIC_API_KEY: 'Public API key injected into Kong routing configuration.',
   KONG_SERVICE_API_KEY: 'Privileged service key injected into Kong routing configuration.',
+  LIVEKIT_API_KEY: 'LiveKit API key shared by the livekit SFU container and the osionos bridge video-token endpoint (Docker default: devkey).',
+  LIVEKIT_API_SECRET: 'LiveKit API secret used to sign HS256 video access tokens, 32+ chars (Docker default is a dev-only value).',
+  LIVEKIT_CLIENT_URL: 'Browser-facing LiveKit WebSocket URL returned by the bridge token endpoint.',
+  LIVEKIT_URL: 'In-network LiveKit server URL used by the bridge for admin (twirp) API calls.',
   MAIL_BRIDGE_VAULT_ENABLED: 'Enable Mail bridge OAuth credential loading from Vault.',
   CALENDAR_BRIDGE_VAULT_ENABLED: 'Enable Calendar bridge OAuth credential loading from Vault.',
   OSIONOS_BRIDGE_SHARED_SECRET: 'Shared secret used by the website auth gateway to request osionos bridge tokens.',
