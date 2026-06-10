@@ -111,7 +111,24 @@ fn build_event_bus(config: &ServerConfig) -> Arc<dyn EventBus> {
 
 fn build_auth_provider(config: &ServerConfig) -> anyhow::Result<Arc<dyn AuthProvider>> {
     match &config.auth {
-        AuthConfig::NoAuth => Ok(Arc::new(NoAuthProvider::new())),
+        AuthConfig::NoAuth => {
+            // Phase 5: NoAuth accepts ANY token with all-access claims. Refuse it
+            // under SECURITY_MODE=max (use JWT) unless explicitly overridden;
+            // baseline keeps working but logs a loud warning.
+            let max = std::env::var("SECURITY_MODE").ok().as_deref() == Some("max");
+            let allow = std::env::var("REALTIME_ALLOW_NOAUTH").ok().as_deref() == Some("1");
+            if max && !allow {
+                anyhow::bail!(
+                    "NoAuth realtime provider refused under SECURITY_MODE=max — configure JWT, \
+                     or set REALTIME_ALLOW_NOAUTH=1 to override"
+                );
+            }
+            tracing::warn!(
+                "realtime auth=NoAuth: ALL tokens accepted with all-access claims — not for \
+                 production (use JWT; SECURITY_MODE=max refuses NoAuth)"
+            );
+            Ok(Arc::new(NoAuthProvider::new()))
+        }
         AuthConfig::Jwt {
             secret,
             issuer,

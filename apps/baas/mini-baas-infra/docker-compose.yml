@@ -705,6 +705,12 @@ services:
       REALTIME_PORT: 4000
       REALTIME_JWT_SECRET: ${JWT_SECRET}
       REALTIME_JWT_AUDIENCE: ""
+      # Phase 5/6 security mode. `baseline` keeps the one-release PERMISSIVE
+      # namespace fallback (a namespace-less JWT → all-access, logged as
+      # deprecated); `max` denies it AND refuses the NoAuth provider. Override
+      # the fallback directly with REALTIME_NAMESPACE_FALLBACK=permissive|deny.
+      SECURITY_MODE: ${SECURITY_MODE:-baseline}
+      REALTIME_NAMESPACE_FALLBACK: ${REALTIME_NAMESPACE_FALLBACK:-permissive}
       REALTIME_PG_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}
       REALTIME_PG_CHANNEL: realtime_events
       # Mongo change-streams producer (M10.b — close the realtime fan-out gap).
@@ -868,6 +874,11 @@ services:
       DATA_PLANE_PERMISSION_BUNDLE_URL: http://permission-engine:3050/permissions/bundles/latest
       DATA_PLANE_PERMISSION_MODE: ${DATA_PLANE_PERMISSION_MODE:-abac}
       DATA_PLANE_MOUNTS: ${DATA_PLANE_MOUNTS:-}
+      # Phase 5/6 security mode (baseline|max). `max` enables strict TLS for
+      # external engine mounts (verify-ca/verify-full enforced) + Vault-backed
+      # credentials; baseline keeps libpq `require` semantics. See config.rs.
+      SECURITY_MODE: ${SECURITY_MODE:-baseline}
+      DATA_PLANE_TLS_CA_FILE: ${DATA_PLANE_TLS_CA_FILE:-}
       RUST_LOG: ${RUST_LOG:-info}
     ports:
       - "127.0.0.1:${DATA_PLANE_RUST_PORT:-4011}:4011"

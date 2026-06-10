@@ -99,3 +99,33 @@ fn auth_claims_subscribe() {
     assert!(claims.can_subscribe_to(&allowed));
     assert!(!claims.can_subscribe_to(&denied));
 }
+
+#[test]
+fn auth_claims_empty_namespaces_deny_by_default() {
+    // Phase 5 security baseline: a namespace-less claim grants NO access.
+    let empty = AuthClaims {
+        sub: "u".to_string(),
+        namespaces: vec![],
+        can_publish: true,
+        can_subscribe: true,
+        metadata: HashMap::new(),
+    };
+    assert!(
+        !empty.can_subscribe_to(&TopicPattern::Exact(TopicPath::new("orders/created"))),
+        "empty namespaces must deny subscribe"
+    );
+    assert!(
+        !empty.can_publish_to(&TopicPath::new("orders/created")),
+        "empty namespaces must deny publish"
+    );
+    // All-access remains expressible — but only EXPLICITLY, via "*".
+    let wild = AuthClaims {
+        sub: "u".to_string(),
+        namespaces: vec!["*".to_string()],
+        can_publish: true,
+        can_subscribe: true,
+        metadata: HashMap::new(),
+    };
+    assert!(wild.can_subscribe_to(&TopicPattern::Exact(TopicPath::new("anything/x"))));
+    assert!(wild.can_publish_to(&TopicPath::new("anything/x")));
+}

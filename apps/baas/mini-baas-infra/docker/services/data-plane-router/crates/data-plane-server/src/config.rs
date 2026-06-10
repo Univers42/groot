@@ -46,6 +46,25 @@ pub struct ServerConfig {
     /// Resolved-DSN cache TTL in ms. `0` (default) → cache DISABLED. From
     /// `DATA_PLANE_CREDENTIAL_CACHE_TTL_MS`.
     pub credential_cache_ttl_ms: u64,
+
+    /// Security posture (Phase 5/6): `baseline` (default) or `max`. From
+    /// `SECURITY_MODE`. In `max`, external engine mounts must present a
+    /// verifiable TLS chain (a `require` DSN is upgraded to verify-full instead
+    /// of accepting any cert), and credentials are expected to be Vault-backed.
+    /// `baseline` keeps libpq `require` semantics (encrypt, don't verify).
+    pub security_mode: String,
+    /// Optional custom CA bundle (PEM) used to verify external-mount TLS chains
+    /// under verify-ca/verify-full. From `DATA_PLANE_TLS_CA_FILE`. Empty → the
+    /// system/webpki roots only.
+    pub tls_ca_file: String,
+}
+
+impl ServerConfig {
+    /// Whether the router is running in the max-hardening security posture.
+    #[must_use]
+    pub fn is_max_security(&self) -> bool {
+        self.security_mode.eq_ignore_ascii_case("max")
+    }
 }
 
 impl ServerConfig {
@@ -85,6 +104,8 @@ impl ServerConfig {
             credential_cache_ttl_ms: read_env("DATA_PLANE_CREDENTIAL_CACHE_TTL_MS", "0")
                 .parse()
                 .unwrap_or(0),
+            security_mode: read_env("SECURITY_MODE", "baseline"),
+            tls_ca_file: read_env("DATA_PLANE_TLS_CA_FILE", ""),
         }
     }
 }
@@ -113,6 +134,8 @@ impl std::fmt::Debug for ServerConfig {
             .field("vault_dsn_prefix", &self.vault_dsn_prefix)
             .field("vault_dsn_field", &self.vault_dsn_field)
             .field("credential_cache_ttl_ms", &self.credential_cache_ttl_ms)
+            .field("security_mode", &self.security_mode)
+            .field("tls_ca_file", &self.tls_ca_file)
             .finish()
     }
 }

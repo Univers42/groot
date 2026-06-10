@@ -45,7 +45,11 @@ pub struct ConnectionMeta {
 pub struct AuthClaims {
     /// Subject (user identifier).
     pub sub: String,
-    /// Allowed namespaces (empty = all allowed).
+    /// Allowed namespaces. DENY-BY-DEFAULT: an EMPTY list grants NO access
+    /// (Phase 5 security baseline). All-access is expressed EXPLICITLY as
+    /// `["*"]` (the NoAuth provider, or the JWT provider's one-release
+    /// permissive fallback). This closes the hole where a namespace-less token
+    /// could subscribe/publish to every tenant's channels.
     pub namespaces: Vec<String>,
     /// Whether the client can publish events.
     pub can_publish: bool,
@@ -72,8 +76,10 @@ impl AuthClaims {
         if !self.can_subscribe {
             return false;
         }
+        // Deny-by-default: an empty namespace list grants nothing. All-access is
+        // explicit (`["*"]`), never implied by absence.
         if self.namespaces.is_empty() {
-            return true;
+            return false;
         }
         let topic_ns = extract_pattern_namespace(topic);
         self.namespaces.iter().any(|ns| ns == "*" || ns == topic_ns)
@@ -94,8 +100,9 @@ impl AuthClaims {
         if !self.can_publish {
             return false;
         }
+        // Deny-by-default (see can_subscribe_to): empty namespaces grant nothing.
         if self.namespaces.is_empty() {
-            return true;
+            return false;
         }
         let ns = topic.namespace();
         self.namespaces.iter().any(|n| n == "*" || n == ns)
