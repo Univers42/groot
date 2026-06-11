@@ -18,7 +18,7 @@ derived from [Fly.io's published pricing](https://fly.io/docs/about/pricing/) (J
 
 | Tier | Running RAM | Images | Services | Node svcs | Heavy engines |
 |---|---|---|---|---|---|
-| **nano** | **~15–25 MiB** (1 binary) | ~15–20 MB | **1** | **0** | SQLite in-process; *optional* external Postgres — projected, see [`nano-edition.md`](./nano-edition.md) |
+| **nano** | **2.0 MiB** (1 static binary, MEASURED) | **5.11 MB** | **1** | **0** | SQLite in-process; CRUD+schema+graph+scoped keys+SSE — gated by `m37`, see [`nano-edition.md`](./nano-edition.md) |
 | **basic** | **463 MiB** | 0.9 GB | 11 | **0** | SQLite (in-process), PostgreSQL |
 | **essential** | **949 MiB** | 2.9 GB | 19 | 8 | pg only (mongo runs optional/off) |
 | **pro** | **1361 MiB** | 5.3 GB | 28 | 9 | + MySQL, Mongo, Redis, MinIO, realtime |

@@ -125,26 +125,30 @@ impl KeyStore {
     }
 
     /// Verify a presented key → `(name, scopes)`. Keys in the `nbk_<id>.<secret>`
-    /// format look up by embedded id (one row, no scan); anything else falls back
-    /// to the `env-admin` row so an operator-chosen `NANO_ADMIN_KEY` works too.
+    /// format look up by embedded id (one row, no scan); any miss then tries the
+    /// `env-admin` row so an operator-chosen `NANO_ADMIN_KEY` works regardless of
+    /// its shape — the digest of the FULL key string must match either way, so
+    /// the fallback can only ever match the one key it stores.
     fn verify(&self, key: &str) -> Option<(String, Vec<String>)> {
-        let id = key
+        let embedded_id = key
             .strip_prefix("nbk_")
             .and_then(|rest| rest.split_once('.'))
-            .map(|(id, _)| id.to_string())
-            .unwrap_or_else(|| "env-admin".to_string());
+            .map(|(id, _)| id.to_string());
+        let digest = sha256_hex(key);
         let conn = self.conn.lock().expect("key store poisoned");
-        let row: Option<(String, String, String)> = conn
-            .query_row(
+        let lookup = |id: &str| -> Option<(String, String, String)> {
+            conn.query_row(
                 "SELECT name, digest, scopes FROM nano_keys WHERE id = ?1 AND revoked = 0",
-                [&id],
+                [id],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
-            .ok();
-        let (name, digest, scopes_json) = row?;
-        if !ct_eq(&sha256_hex(key), &digest) {
-            return None;
-        }
+            .ok()
+        };
+        let verified = embedded_id
+            .and_then(|id| lookup(&id))
+            .filter(|(_, d, _)| ct_eq(&digest, d))
+            .or_else(|| lookup("env-admin").filter(|(_, d, _)| ct_eq(&digest, d)))?;
+        let (name, _, scopes_json) = verified;
         let scopes: Vec<String> = serde_json::from_str(&scopes_json).unwrap_or_default();
         Some((name, scopes))
     }

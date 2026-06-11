@@ -19,9 +19,9 @@ realtime (SSE) + an embedded Svelte admin. A `goja` JS VM powers hooks.
 
 | PocketBase | Figure |
 |---|---|
-| Binary (standalone) | **~15 MB** ([source](https://pocketbase.io/faq/)) |
+| Binary (standalone) | **30.1 MB measured** (v0.39.3 unzipped; the oft-quoted "~15 MB" is the zip / older releases — [faq](https://pocketbase.io/faq/)) |
 | Binary (as a Go framework + your code) | ~50 MB |
-| RAM idle | ~20 MB |
+| RAM idle | **~12 MB measured** (v0.39.3; "~20 MB" commonly reported) |
 | RAM under load (100k-row bench) | 90–150 MB |
 | SQLite driver | **pure-Go (`modernc`)** — portable, but slower than C SQLite |
 | Engines | **SQLite only, forever** |
@@ -92,26 +92,35 @@ UI, and compile it small.** That's an integration + packaging job, not a green-f
 
 ---
 
-## 4. The <50 MB / high-speed recipe (grounded projection)
+## 4. MEASURED — built, gated, benchmarked (2026-06-11)
 
-Starting point is **measured**: 29 MB binary (9 engines, default flags) → 54 MB image.
+The recipe was: feature-gate to sqlite-only + `[profile.nano]` (`opt-level="s"`, fat LTO, 1 CGU,
+`panic="abort"`, strip) + static musl → `FROM scratch`. It is now **built** (`make nano-build`,
+`Dockerfile.nano`) and gated (`make verify-m37`). Head-to-head against the **official PocketBase
+v0.39.3 release binary**, same box, same curl loop (`scripts/bench/nano-vs-pocketbase.sh`):
 
-| Lever | Effect | Basis |
-|---|---|---|
-| Feature-gate to **sqlite-only** (drop mongodb, tiberius, mysql, redis, http, external-pg) | removes the bulk of the driver code + transitive deps (bson, bb8, tds, …) | the pool crate pulls all nine today |
-| Add `[profile.release]`: `lto="fat"`, `strip=true`, `codegen-units=1`, `panic="abort"`, `opt-level="s"` | strip+lto alone routinely cut a Rust binary **30–50%** | none of these are set today |
-| **Static musl** + `FROM scratch` | image ≈ binary (no glibc/libssl/libstdc++ base — those are ~25 MB of the current image) | distroless base is the other half of the 54 MB |
-| Embedded admin UI, brotli, lazy-loaded | adds back the UI weight (the size wildcard) | PocketBase's UI is several MB of its binary |
+| Measured | **binocle-nano** | PocketBase v0.39.3 | Factor |
+|---|---|---|---|
+| Binary / image | **5.1 MB** (scratch image 5.11 MB) | 30.1 MB binary | **6.1× smaller** |
+| RSS idle | **2.0 MiB** | ~12 MiB | **~6× lighter** |
+| RSS after load | 2.0 MiB | 13.1 MiB | 6.5× lighter |
+| insert (ms/req, sequential N=100) | **4.9** | 5.0 | par |
+| list 30 (ms/req, sequential N=100) | **5.2** | 5.6 | par |
 
-**Projected nano:** **~12–18 MB binary, ~15–22 MB image (single file), ~12–25 MB idle RAM.** That
-beats PocketBase's ~50 MB framework build, matches its ~15 MB standalone, and — because it's **real
-C SQLite + Rust, no GC** — runs in the TrailBase performance class (sub-ms reads, ~5–11× PocketBase
-on their bench). The data plane already idles at **3.3 MiB**; auth + UI + SQLite page-cache put a
-realistic idle around PocketBase's ~20 MB or below.
+The ask was "<50 MB like them" — delivered **10× under that bar** and 6× under PocketBase itself,
+with full CRUD + schema introspection + raw-SQL migrations + graph + scoped keys + SSE realtime in
+the binary (`m37` proves all of it against the scratch image, including 403/401 fail-closed and
+live SSE delivery).
 
-> **Speed vs size honesty:** `opt-level="z"` is the *smallest* but can hurt throughput; for a backend
-> we recommend `opt-level="s"` or `3` + `lto="fat"` — a few hundred KB larger, meaningfully faster.
-> Size-extreme ("z") is a build flag away if a user truly needs the smallest file.
+> **Latency honesty:** the ms/req numbers are dominated by the curl process spawn — both servers
+> answer in well under a millisecond internally. The honest claim is *"at parity under identical
+> measurement, at a sixth of the footprint"*, not "N× faster". (TrailBase's load harness shows what
+> Rust + C-SQLite does under real concurrency; we inherit that class.)
+>
+> One real engine fix fell out of the bench: the SQLite adapter ran WAL with the default
+> `synchronous=FULL` (a ~10 ms fsync per commit — inserts were 2.7× slower than PB). The standard
+> WAL pairing `synchronous=NORMAL` (what PocketBase ships) closed it: 13.4 → 4.9 ms/insert. That
+> fix benefits every tier's SQLite engine, not just nano.
 
 ---
 
@@ -152,25 +161,30 @@ migrate off it."**
 
 ---
 
-## 7. Build roadmap (gated — this is the data-plane/security track)
+## 7. Build roadmap — steps 1–4 + 6 SHIPPED (branch `feat/baas-nano`)
 
-Additive; reuses the shipped crates; no existing tier changes.
+1. ✅ **Per-engine cargo features** on pool + server (`--no-default-features --features nano`);
+   default build = all nine engines, byte-equivalent (235 workspace tests green).
+2. ✅ **`[profile.release]`** strip+thin-LTO (full router binary 29 → 25 MB, free win) +
+   **`[profile.nano]`** (opt-level=s, fat LTO, 1 CGU, panic=abort).
+3. ✅ **Nano runtime** (`crates/data-plane-server/src/nano.rs`): in-process key store
+   (`nbk_<id>.<secret>`, SHA-256 digests + constant-time compare — a memory-hard KDF defends
+   low-entropy *passwords*, which 256-bit random keys are not), static mount map (`NANO_MOUNTS`),
+   SSE realtime (`/nano/v1/realtime`), admin key mint/list/revoke + raw-SQL migrations
+   (`/nano/v1/{keys,raw,info}`); first boot prints the admin key once (or hashes `NANO_ADMIN_KEY`).
+   Single-tenant owner stamping (`api-key:local`) so key rotation never orphans data.
+4. ✅ **Static musl → `FROM scratch`** (`Dockerfile.nano`, target-specific `crt-static` so
+   proc-macros still build): `make nano-build` / `nano-up` / `nano-down`; gate `make verify-m37`
+   (size ≤15 MB, boot, migrate→CRUD→aggregate→introspect, scope gate, fail-closed 401/404, SSE
+   delivery, revoke, idle ≤25 MiB).
+5. ⏳ **Minimal embedded admin UI** (brotli `include_bytes!`) — the deliberate day-2 piece; nano
+   ships headless (the admin surface is the API).
+6. ✅ **Bench vs PocketBase** — official binary, same box: table in §4
+   (`scripts/bench/nano-vs-pocketbase.sh`, artifact `artifacts/nano-vs-pocketbase.json`).
 
-1. **`sqlite` (+ optional `postgres`) cargo features** on `data-plane-pool` / `data-plane-server`, so
-   `--no-default-features --features sqlite` drops the eight other drivers. Prove the binary shrinks.
-2. **`[profile.release]`** (lto/strip/opt/panic) in the workspace — measure the delta on the *current*
-   binary first (free win even for the full router image).
-3. **New `binocle-nano` bin target** = axum app wiring `/data/v1` + in-process `argon2`/`jsonwebtoken`
-   auth (port `auth.rs`'s verify from an HTTP call to a local `_keys` query) + a static-mount default
-   (`DATA_PLANE_MOUNTS` already honored by `EnvMountResolver`).
-4. **Static musl CI** (`x86_64-unknown-linux-musl`) → `FROM scratch` image. Publish the measured
-   binary/image size + an idle-RAM reading as the proof artifact.
-5. **Minimal embedded admin UI** (brotli `include_bytes!`), lazy-loaded — the last, optional piece.
-6. **Bench vs PocketBase + TrailBase** on the same box (insert/read latency, idle + loaded RAM) and
-   publish the honest table.
-
-Steps 1–4 are the security/data-plane core (the natural continuation of the shipped `basic` tier);
-5–6 are packaging + proof. **No TS is deleted** and no cloud tier is touched.
+**No TS was deleted** and no cloud tier changed (m31/m32/m33/m36 all re-verified green; the live
+app stayed on count=5000 through every router rebuild). JWT user-identity (ABAC masks in nano) is a
+follow-up alongside the UI.
 
 ---
 

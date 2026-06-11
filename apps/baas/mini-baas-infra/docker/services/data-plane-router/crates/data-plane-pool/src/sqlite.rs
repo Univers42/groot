@@ -89,6 +89,12 @@ impl EngineAdapter for SqliteEngineAdapter {
         })?;
         obj.interact(|conn| {
             conn.pragma_update(None, "journal_mode", "WAL")?;
+            // The standard WAL pairing (and what PocketBase ships): NORMAL
+            // skips the per-commit fsync that FULL forces — the database can
+            // never corrupt, at worst the last commits roll back on an OS
+            // crash. Default FULL made every insert pay a ~10 ms fsync,
+            // 2-3x slower than PocketBase on the same disk.
+            conn.pragma_update(None, "synchronous", "NORMAL")?;
             conn.pragma_update(None, "busy_timeout", 5000)?;
             conn.pragma_update(None, "foreign_keys", "ON")
         })

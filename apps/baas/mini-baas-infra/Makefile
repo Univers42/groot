@@ -404,6 +404,24 @@ conformance: ## Rust: run the engine-conformance gate for every live engine (m27
 	@bash scripts/verify/m27-conformance.sh
 rust-data-plane-build: _rust-toolchain ## Rust: build the data-plane release binary (in Docker)
 	@$(CARGO_DPR) cargo build --release --bin data-plane-router
+
+# ── binocle-nano: the single-binary PocketBase-class edition ────────────────
+# One static musl binary (embedded SQLite, in-process auth, SSE realtime) in
+# a FROM scratch image — measured ~5 MB image / ~2 MiB idle RSS. Gate: m37.
+nano-build: ## Nano: build the binocle-nano scratch image (static musl, ~5 MB)
+	@DOCKER_BUILDKIT=1 docker build -f docker/services/data-plane-router/Dockerfile.nano \
+		-t binocle-nano docker/services/data-plane-router
+	@docker images binocle-nano --format '$(_G)✓ binocle-nano built — {{.Size}}$(_0)'
+
+nano-up: nano-build ## Nano: run binocle-nano on :8090 (named volume nano-data)
+	@docker rm -f binocle-nano >/dev/null 2>&1 || true
+	@docker run -d --name binocle-nano -p 8090:8090 -v nano-data:/data binocle-nano >/dev/null
+	@sleep 1; docker logs binocle-nano 2>&1 | head -5
+	@echo -e "$(_G)✓ binocle-nano on http://localhost:8090 (admin key above on FIRST boot only)$(_0)"
+
+nano-down: ## Nano: stop binocle-nano (data volume persists)
+	@docker rm -f binocle-nano >/dev/null 2>&1 || true
+	@echo -e "$(_G)✓ binocle-nano stopped (volume nano-data kept)$(_0)"
 rust-realtime-check: _rust-toolchain ## Rust: cargo check the realtime workspace (in Docker)
 	@$(CARGO_REALTIME) cargo check --workspace
 rust-realtime-test: _rust-toolchain ## Rust: run the realtime unit tests (in Docker)
