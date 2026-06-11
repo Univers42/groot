@@ -57,7 +57,7 @@ Ran `cargo audit` (Rust) + `govulncheck` (Go, reachability-based) on 2026-06-11.
 |---|---|---|---|
 | O1 | Internal service token is a **static shared secret** (plaintext header, no rotation-without-restart) | MED | mTLS between planes, or per-request HMAC (caller+timestamp+body digest). Decouple from `JWT_SECRET`. |
 | O2 | JWT is **HS256 symmetric**, `GOTRUE_JWT_SECRET` shared for user auth + service-token derivation | MED | RS256/JWKS with `kid` rotation; verify-only public keys at the edges (6c) |
-| O3 | `CorsLayer::permissive()` on the data plane | MED | The data plane must never be browser-reachable except via Kong; restrict CORS to configured origins. Low CSRF risk today (API-key, no cookies) |
+| ~~O3~~ | ~~`CorsLayer::permissive()` on the data plane~~ → **restrictive default** | ✅ FIXED | Now denies browser cross-origin by default (the data plane is behind Kong / server-to-server); `DATA_PLANE_CORS_ALLOW_ORIGINS` allow-lists origins if ever exposed |
 | O4 | Postgres `sslmode=require` is accept-any **outside** max | MED | Recommend `SECURITY_MODE=max` for multi-tenant (upgrades `require`→verify); consider verify-default for non-loopback DSNs |
 | O5 | **Vault not enforced** — DSNs may be inline-encrypted or in plaintext `DATA_PLANE_MOUNTS` | MED | Under max, require `credential_ref{provider:vault}`; forbid plaintext mounts in prod (6b) |
 | O6 | adapter-registry **trusts `X-Baas-*` identity headers** on the private net | LOW | HMAC-sign the identity headers (the TS gateway used to) |

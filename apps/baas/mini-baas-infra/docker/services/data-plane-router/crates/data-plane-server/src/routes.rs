@@ -329,6 +329,30 @@ fn build_evaluator(config: &ServerConfig) -> Option<Arc<Evaluator>> {
     Some(Arc::new(Evaluator::new(bundle, mode)))
 }
 
+/// CORS for the data plane. It sits BEHIND Kong (server-to-server requests carry
+/// no `Origin`), so browser cross-origin access is DENIED by default — replacing
+/// the previous `permissive()` (any origin), audit item O3. Set
+/// `DATA_PLANE_CORS_ALLOW_ORIGINS` (comma-separated) to allow specific origins
+/// if the router is ever exposed to a browser directly.
+fn cors_layer() -> CorsLayer {
+    match std::env::var("DATA_PLANE_CORS_ALLOW_ORIGINS")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+    {
+        Some(spec) => {
+            let origins: Vec<axum::http::HeaderValue> = spec
+                .split(',')
+                .filter_map(|o| o.trim().parse().ok())
+                .collect();
+            CorsLayer::new()
+                .allow_origin(tower_http::cors::AllowOrigin::list(origins))
+                .allow_methods(tower_http::cors::Any)
+                .allow_headers(tower_http::cors::Any)
+        }
+        None => CorsLayer::new(),
+    }
+}
+
 pub fn router(state: AppState) -> Router {
     let metrics_state = state.clone();
     // Phase 7: the direct front door is additive AND opt-in. It only exists when
@@ -364,7 +388,7 @@ pub fn router(state: AppState) -> Router {
         .fallback(not_found)
         .layer(axum::middleware::from_fn_with_state(metrics_state, track_metrics))
         .layer(TraceLayer::new_for_http())
-        .layer(CorsLayer::permissive())
+        .layer(cors_layer())
         .with_state(state)
 }
 
