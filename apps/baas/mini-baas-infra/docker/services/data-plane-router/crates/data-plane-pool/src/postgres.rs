@@ -249,9 +249,17 @@ impl EngineAdapter for PostgresEngineAdapter {
         // allocation-free and byte-identical to before G5.
         let isolation = mount.isolation();
         let search_path_schema = mount.tenant_schema();
+        // B4-pools: a shared_rls pool under DATA_PLANE_SHARE_POOLS serves EVERY
+        // tenant on this physical DB from one connection set, so it must NOT
+        // assert a single owner tenant — isolation is re-applied per request
+        // (`app.current_tenant_id` GUC + the owner_id predicate, both from the
+        // request identity). Computed once here (open_pool is per-pool, not per-
+        // request); env is immutable at runtime and parsed exactly as config.rs.
+        let shared_pool = matches!(isolation, Isolation::SharedRls) && share_pools_enabled();
         Ok(Box::new(PostgresPool {
             mount_id: mount.id.clone(),
             tenant_id: mount.tenant_id.clone(),
+            shared_pool,
             pool,
             isolation,
             search_path_schema,
@@ -275,6 +283,10 @@ pub struct PostgresPool {
     /// The mount's tenant, captured at `open_pool`, for the defense-in-depth
     /// cross-check on every `execute`/`begin` (matching mysql/mongo/redis/http).
     tenant_id: String,
+    /// True when this is a SHARE_POOLS shared_rls pool serving many tenants:
+    /// the single-tenant `check_tenant` assertion is then bypassed (per-request
+    /// RLS + owner_id predicate carry isolation). See `open_pool`.
+    shared_pool: bool,
     pool: deadpool_postgres::Pool,
     /// The resolved isolation strategy for this mount, parsed once at
     /// `open_pool`. `SharedRls` (the default) means every request runs exactly
@@ -296,6 +308,19 @@ pub struct PostgresPool {
     mount: DatabaseMount,
 }
 
+/// Whether pool-sharing is enabled, parsed identically to
+/// `data-plane-server` config (`DATA_PLANE_SHARE_POOLS` ∈ {1,true,on}). Read at
+/// `open_pool` (per-pool, not per-request); the env is fixed at process start.
+fn share_pools_enabled() -> bool {
+    matches!(
+        std::env::var("DATA_PLANE_SHARE_POOLS")
+            .unwrap_or_default()
+            .to_lowercase()
+            .as_str(),
+        "1" | "true" | "on"
+    )
+}
+
 impl PostgresPool {
     /// The RLS principal applied via `app.current_user_id`.
     fn principal(identity: &RequestIdentity) -> &str {
@@ -310,6 +335,17 @@ impl PostgresPool {
     /// mismatch, but the pool re-asserts it so a mis-keyed pool can never serve
     /// a request for the wrong tenant. Matches mysql/mongo/redis/http.
     fn check_tenant(&self, identity: &RequestIdentity) -> DataPlaneResult<()> {
+        // A SHARE_POOLS shared_rls pool is multi-tenant BY DESIGN — it has no
+        // single owner to assert. Isolation is still enforced per request, by
+        // `apply_rls_context` (`app.current_tenant_id`/`current_user_id` GUCs)
+        // and the owner_id predicate, both derived from THIS request's identity.
+        // The single-tenant assertion below is the correct guard only for a
+        // per-tenant pool; here it would reject every tenant but the one that
+        // happened to open the pool. (Verified: cross-tenant read isolation
+        // holds with SHARE_POOLS=1 — m39 isolation probe.)
+        if self.shared_pool {
+            return Ok(());
+        }
         if identity.tenant_id != self.tenant_id {
             return Err(DataPlaneError::Backend {
                 message: "identity tenant does not match pool tenant".into(),
