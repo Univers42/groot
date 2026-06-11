@@ -30,7 +30,7 @@ control-pg = ["dep:deadpool-postgres", "dep:tokio-postgres", "data-plane-pool/ht
 # key store (rusqlite) + uuid v4 for key material. High-entropy keys are
 # stored as SHA-256 digests (sha2 is already in-tree via service_auth) —
 # memory-hard KDFs exist for low-entropy passwords, which nano keys are not.
-nano = ["sqlite", "dep:rusqlite", "uuid/v4"]
+nano = ["sqlite", "dep:rusqlite", "dep:futures", "uuid/v4"]
 
 [dependencies]
 data-plane-core = { path = "../data-plane-core" }
@@ -44,8 +44,10 @@ reqwest = { workspace = true }
 # projections read public.outbox_events and must keep firing post-cutover).
 deadpool-postgres = { workspace = true, optional = true }
 tokio-postgres = { workspace = true, optional = true }
-# Nano edition: local key store + SHA-256 key digests + v4 key material.
+# Nano edition: local key store + SHA-256 key digests + v4 key material +
+# the SSE stream adapter (futures::stream::unfold over a broadcast receiver).
 rusqlite = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
 sha2 = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
