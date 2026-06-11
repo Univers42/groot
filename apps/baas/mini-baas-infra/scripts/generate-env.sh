@@ -68,6 +68,11 @@ POSTGRES_DB="postgres"
 JWT_SECRET="$(openssl rand -hex 32)"
 VAULT_ENC_KEY="$(openssl rand -hex 16)"
 MINIO_ROOT_PASSWORD="$(openssl rand -hex 16)"
+# Inter-plane service-to-service token — DISTINCT from JWT_SECRET (audit O1/O2):
+# a leak of the user-auth JWT secret must not also compromise service auth. The
+# compose chain (INTERNAL_SERVICE_TOKEN <- ADAPTER_REGISTRY_SERVICE_TOKEN <-
+# JWT_SECRET) prefers this, so emitting it decouples the two.
+ADAPTER_REGISTRY_SERVICE_TOKEN="$(openssl rand -hex 32)"
 
 ANON_KEY="$(jwt_hs256 "$JWT_SECRET" "anon")"
 SERVICE_ROLE_KEY="$(jwt_hs256 "$JWT_SECRET" "service_role")"
@@ -101,6 +106,11 @@ API_EXTERNAL_URL=https://localhost:8443/auth/v1
 GOTRUE_SITE_URL=https://localhost:5173
 GOTRUE_URI_ALLOW_LIST=https://localhost:5173/**
 JWT_SECRET=${JWT_SECRET}
+
+# Inter-plane service-to-service auth token — distinct from JWT_SECRET (audit
+# O1/O2). The compose default chain resolves INTERNAL_SERVICE_TOKEN to THIS,
+# not the JWT secret, so a leak of one doesn't compromise the other.
+ADAPTER_REGISTRY_SERVICE_TOKEN=${ADAPTER_REGISTRY_SERVICE_TOKEN}
 
 # PostgREST
 PGRST_DB_SCHEMA=public

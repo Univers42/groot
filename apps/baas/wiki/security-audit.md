@@ -56,7 +56,7 @@ Ran `cargo audit` (Rust) + `govulncheck` (Go, reachability-based) on 2026-06-11.
 | # | Finding | Sev | Recommendation |
 |---|---|---|---|
 | O1 | Internal service token is a **static shared secret** (plaintext header, no rotation-without-restart) | MED | mTLS between planes, or per-request HMAC (caller+timestamp+body digest). Decouple from `JWT_SECRET`. |
-| O2 | JWT is **HS256 symmetric**, `GOTRUE_JWT_SECRET` shared for user auth + service-token derivation | MED | RS256/JWKS with `kid` rotation; verify-only public keys at the edges (6c) |
+| O2 | JWT is **HS256 symmetric**; `JWT_SECRET` was **also reused as the inter-plane service token** | MED (partly FIXED) | **Coupling FIXED:** `generate-env.sh` now emits a distinct `ADAPTER_REGISTRY_SERVICE_TOKEN` (the compose chain prefers it over `JWT_SECRET`) — a leak of one no longer compromises the other. *Existing deployments rotate on the next `make env`/`make all`.* Still open: RS256/JWKS with `kid` rotation (6c) |
 | ~~O3~~ | ~~`CorsLayer::permissive()` on the data plane~~ → **restrictive default** | ✅ FIXED | Now denies browser cross-origin by default (the data plane is behind Kong / server-to-server); `DATA_PLANE_CORS_ALLOW_ORIGINS` allow-lists origins if ever exposed |
 | O4 | Postgres `sslmode=require` is accept-any **outside** max | MED | Recommend `SECURITY_MODE=max` for multi-tenant (upgrades `require`→verify); consider verify-default for non-loopback DSNs |
 | O5 | **Vault not enforced** — DSNs may be inline-encrypted or in plaintext `DATA_PLANE_MOUNTS` | MED | Under max, require `credential_ref{provider:vault}`; forbid plaintext mounts in prod (6b) |
