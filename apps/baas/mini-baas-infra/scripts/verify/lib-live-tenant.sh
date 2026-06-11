@@ -96,6 +96,16 @@ live_tenant_provision() { # $1 slug (must match ^[a-z0-9][a-z0-9_-]{1,62}$)
     || { echo "tenant create failed (${code}): $(cat /tmp/lt-tenant.json)" >&2; return 1; }
   LIVE_TENANT_SLUG="${slug}"
 
+  # 1b) Put the probe on the `enterprise` (→ max) tier so gates can register any
+  # engine + use any op under PACKAGE_ENFORCEMENT=1 (the live config). The gates
+  # test functionality/parity, not tiering — m28 covers tiering on its own
+  # tenants. Best-effort: a non-200 (older tenant-control without PATCH) leaves
+  # the default tier, which is fine for pg-only gates.
+  local pbody='{"plan":"enterprise"}'
+  svc_auth PATCH "/v1/tenants/${slug}" "${pbody}"
+  curl -s -o /dev/null -X PATCH "${LIVE_TENANT_CONTROL_URL}/v1/tenants/${slug}" \
+    "${SVC_AUTH[@]}" -H 'Content-Type: application/json' -d "${pbody}" || true
+
   # 2) API key — read+write scopes (what an app key carries; admin not needed).
   local kbody='{"name":"verify-probe","scopes":["read","write"]}'
   svc_auth POST "/v1/tenants/${slug}/keys" "${kbody}"
