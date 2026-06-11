@@ -1,6 +1,7 @@
 pub mod abac;
 pub mod auth;
 pub mod config;
+pub mod graph;
 pub mod metrics;
 pub mod outbox;
 pub mod ratelimit;

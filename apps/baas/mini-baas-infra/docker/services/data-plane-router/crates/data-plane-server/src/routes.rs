@@ -335,6 +335,8 @@ pub fn router(state: AppState) -> Router {
             .route("/data/v1/query", post(data_query))
             .route("/data/v1/schema", post(data_describe_schema))
             .route("/data/v1/schema/ddl", post(data_apply_schema_ddl))
+            .route("/data/v1/graph", post(crate::graph::data_graph))
+            .route("/data/v1/graph/overview", post(crate::graph::data_graph_overview))
     } else {
         Router::new()
     };
@@ -717,7 +719,7 @@ fn api_key_scope_gate(
 /// A scope check: `admin` satisfies anything; otherwise the exact scope is
 /// required. Shared by the op gate (read/write) and the schema/ddl bypass
 /// handlers (read for introspect, write for DDL).
-fn require_scope(scopes: &[String], needed: &'static str) -> Result<(), &'static str> {
+pub(crate) fn require_scope(scopes: &[String], needed: &'static str) -> Result<(), &'static str> {
     if scopes.iter().any(|s| s == "admin" || s == needed) {
         Ok(())
     } else {
@@ -725,8 +727,40 @@ fn require_scope(scopes: &[String], needed: &'static str) -> Result<(), &'static
     }
 }
 
+impl AppState {
+    /// Resolve a mount (engine + DSN + tier mask) for a bypass caller,
+    /// tenant-scoped via adapter-registry. Used by the single-mount handlers and
+    /// by the multi-mount graph builder.
+    pub(crate) async fn resolve_bypass_mount(
+        &self,
+        tenant: &str,
+        db_id: &str,
+    ) -> Result<crate::auth::ResolvedMount, crate::auth::AuthError> {
+        crate::auth::resolve_mount(
+            &self.http_client,
+            &self.config.adapter_registry_url,
+            &self.config.internal_service_token,
+            tenant,
+            db_id,
+        )
+        .await
+    }
+
+    /// Owner-scoped read execution (no audit/outbox — reads never emit). The
+    /// graph builder calls this for each `list`; errors map to "unreadable → omit".
+    pub(crate) async fn execute_read(
+        &self,
+        identity: RequestIdentity,
+        mount: DatabaseMount,
+        operation: DataOperation,
+    ) -> data_plane_core::DataPlaneResult<data_plane_core::DataResult> {
+        let pool = self.registry.get_or_create(mount).await?;
+        pool.execute(operation, identity).await
+    }
+}
+
 /// A JSON `ApiError` response with the given status.
-fn api_err(status: StatusCode, error: &str, message: &str) -> axum::response::Response {
+pub(crate) fn api_err(status: StatusCode, error: &str, message: &str) -> axum::response::Response {
     (
         status,
         Json(ApiError {
@@ -737,16 +771,14 @@ fn api_err(status: StatusCode, error: &str, message: &str) -> axum::response::Re
         .into_response()
 }
 
-/// Shared `/data/v1` authentication: validate the `X-Baas-Api-Key` (Go performs
-/// the Argon2id compare via tenant-control) and resolve the mount (engine + DSN
-/// + tier mask), tenant-scoped via adapter-registry. Returns the verified caller
-/// + resolved mount, or a ready error response. Every bypass handler (query,
-/// schema, ddl) routes through here so authentication is byte-identical.
-async fn bypass_auth(
+/// Validate the `X-Baas-Api-Key` (Go performs the Argon2id compare via
+/// tenant-control) → a verified caller identity, or a ready error response. The
+/// key-verification half of `bypass_auth`, split out so a multi-mount handler
+/// (graph) can verify ONCE and resolve per dbId.
+pub(crate) async fn bypass_verify(
     state: &AppState,
     headers: &header::HeaderMap,
-    db_id: &str,
-) -> Result<(crate::auth::VerifiedIdentity, crate::auth::ResolvedMount), axum::response::Response> {
+) -> Result<crate::auth::VerifiedIdentity, axum::response::Response> {
     let key = match headers.get("x-baas-api-key").and_then(|v| v.to_str().ok()) {
         Some(k) if !k.trim().is_empty() => k.to_string(),
         _ => {
@@ -765,23 +797,29 @@ async fn bypass_auth(
         ));
     }
     // Go performs the Argon2id compare; Rust trusts the verified result.
-    let id = crate::auth::verify_key(
+    crate::auth::verify_key(
         &state.http_client,
         &state.config.tenant_control_url,
         &state.config.internal_service_token,
         &key,
     )
     .await
-    .map_err(auth_error_response)?;
-    let mount_info = crate::auth::resolve_mount(
-        &state.http_client,
-        &state.config.adapter_registry_url,
-        &state.config.internal_service_token,
-        &id.tenant_id,
-        db_id,
-    )
-    .await
-    .map_err(auth_error_response)?;
+    .map_err(auth_error_response)
+}
+
+/// Shared `/data/v1` authentication: verify the key + resolve the (single) mount,
+/// tenant-scoped. Every single-mount bypass handler (query, schema, ddl) routes
+/// through here so authentication is byte-identical.
+async fn bypass_auth(
+    state: &AppState,
+    headers: &header::HeaderMap,
+    db_id: &str,
+) -> Result<(crate::auth::VerifiedIdentity, crate::auth::ResolvedMount), axum::response::Response> {
+    let id = bypass_verify(state, headers).await?;
+    let mount_info = state
+        .resolve_bypass_mount(&id.tenant_id, db_id)
+        .await
+        .map_err(auth_error_response)?;
     Ok((id, mount_info))
 }
 
@@ -823,7 +861,7 @@ fn bypass_envelope(
 }
 
 /// Audited 403 for a bypass caller lacking a scope.
-fn scope_denied(
+pub(crate) fn scope_denied(
     id: &crate::auth::VerifiedIdentity,
     surface: &str,
     missing: &str,
