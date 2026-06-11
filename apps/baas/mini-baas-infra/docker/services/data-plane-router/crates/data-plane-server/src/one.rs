@@ -442,6 +442,59 @@ impl UserStore {
         Ok(())
     }
 
+    // ── admin surface (dashboard) ────────────────────────────────────────────
+
+    pub(crate) fn list_users(&self, limit: u32) -> Vec<UserPublic> {
+        let conn = self.conn.lock().expect("user store poisoned");
+        let mut stmt = match conn.prepare(
+            "SELECT id, email, verified, created_at FROM one_users ORDER BY created_at LIMIT ?1",
+        ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        stmt.query_map([limit], |r| {
+            Ok(UserPublic {
+                id: r.get(0)?,
+                email: r.get(1)?,
+                verified: r.get::<_, i64>(2)? != 0,
+                created_at: r.get(3)?,
+            })
+        })
+        .map(|rows| rows.flatten().collect())
+        .unwrap_or_default()
+    }
+
+    /// Remove an account and everything hanging off it (identities, refresh
+    /// tokens, TOTP, recovery codes). File rows stay — bytes are data, not
+    /// identity — still admin-readable/deletable via the files API.
+    pub(crate) fn delete_user(&self, user_id: &str) -> bool {
+        let conn = self.conn.lock().expect("user store poisoned");
+        let n = conn.execute("DELETE FROM one_users WHERE id = ?1", [user_id]).unwrap_or(0);
+        for sql in [
+            "DELETE FROM one_user_identities WHERE user_id = ?1",
+            "DELETE FROM one_refresh WHERE user_id = ?1",
+            "DELETE FROM one_totp WHERE user_id = ?1",
+            "DELETE FROM one_recovery WHERE user_id = ?1",
+        ] {
+            let _ = conn.execute(sql, [user_id]);
+        }
+        n > 0
+    }
+
+    pub(crate) fn files_all(&self, limit: u32) -> Vec<FileMeta> {
+        let conn = self.conn.lock().expect("user store poisoned");
+        let mut stmt = match conn.prepare(
+            "SELECT id, table_name, record_id, field, owner, filename, stored, content_type, size, created_at
+             FROM one_files ORDER BY created_at DESC LIMIT ?1",
+        ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        stmt.query_map([limit], FileMeta::from_row)
+            .map(|rows| rows.flatten().collect())
+            .unwrap_or_default()
+    }
+
     // ── file metadata (binary payloads live under {data_dir}/storage) ───────
 
     pub(crate) fn file_insert(&self, f: &FileMeta) -> anyhow::Result<()> {
@@ -972,6 +1025,7 @@ pub fn router(state: AppState) -> Router {
         .merge(crate::one_email::routes())
         .merge(crate::one_totp::routes())
         .merge(crate::one_files::routes())
+        .merge(crate::one_admin::routes())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
