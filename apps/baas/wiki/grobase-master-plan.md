@@ -264,6 +264,48 @@ Artifacts: `artifacts/bench/multitenant-10000.json` (cold, default cache),
 `multitenant-10000-coldcache.json` (same, preserved), `multitenant-10000-warmcache.json` (10-min TTL),
 `artifacts/scale/tenants-10000.jsonl` (+`.raw` pre-dedup).
 
+### 7.3 The fix — key-verify is no longer Argon2id (2026-06-12). Cold path 5.8× faster, the 502 flood gone.
+
+§7.2 located the wall: the data plane calls tenant-control `/v1/keys/verify`, which ran **Argon2id**
+(32 MiB/hash, capped at `ARGON2_MAX_CONCURRENT=2`) on *every* verify-cache miss → under sparse 10K
+fan-out it floods and 502s. The root cause is a **category error**: Argon2id is a *password* hash — it
+exists to make a *low-entropy human secret* expensive to brute-force offline. Our API-key payload is
+**20 bytes from `crypto/rand` = 160 bits of uniform entropy**. Recovering one key from its hash is ~2^159
+work at *any* hash speed; the 32 MiB / ~50 ms argon2 cost buys **zero** security here. (GitHub/Stripe/
+Supabase store high-entropy tokens as SHA-256 for exactly this reason.) tenant-control's own verify-cache
+comment already says argon2 "has no security value on the repeat verify of a presented high-entropy key" —
+the fix simply **extends that truth to the *stored* hash**, so cold misses are cheap too, not just cache hits.
+
+**Change** (`internal/tenants/keys.go`, `service.go`): new fast scheme `sha256$v=1$…` = `SHA-256(salt‖payload)`,
+or `HMAC-SHA256(pepper; …)` when `KEY_HASH_PEPPER` is set (defense-in-depth: a stolen DB alone can't verify).
+Verify **detects the scheme per stored hash** → a fleet mid-migration verifies *both*, so **no existing key
+breaks**. New keys mint fast by default (`KEY_HASH_LEGACY_ARGON2=1` reverts); a successful legacy verify
+**lazy-upgrades** the row to the fast hash (`KEY_HASH_UPGRADE=0` disables), so a live fleet drains off argon2
+without re-provisioning. 6 new unit tests (dual-scheme, salt, pepper, legacy-flag); `go vet`/`build`/`test` green.
+
+**Measured (10,000 fresh `sha256` tenants, same box):**
+
+| Metric | Before (argon2id) | After (sha256) | Δ |
+|---|---|---|---|
+| Cold single-request (isolated, verify+resolve+pool) | **263 ms** | **45 ms** | **5.8× faster** — the ~50 ms argon2 verify is now µs |
+| Warm request | 2 ms | 2 ms | unchanged (already fast) |
+| Cold fan-out 5xx (RATE 20 × 60 s) | **51** | **5** | **10× fewer** — the verify-flood 502s are gone |
+| Cold fan-out error % | 8.41 % | 4.4 % | ~½ |
+| **Bulk-seed under load** | conc-16 **collapsed past ~4 k → 60 % errors** (argon2 CPU-saturation) | **9,775/10,000, 2.25 % errors, no collapse** | the seed wall is gone too |
+| data-plane RSS / pools | 30 MiB / 0 evicted | 22 MiB / 0 evicted | still idle-cheap |
+
+The residual cold-fan-out p50 (~4 s) is **not** the data plane: `docker stats` during the run showed the
+BaaS stack <8 % CPU each while **Chrome held ~280 % CPU** on the 20-core dev box — the k6 load and the plane
+were starved by the browser, not by each other. The isolated 45 ms cold / 2 ms warm probe is the true plane latency.
+
+**The next 100K lever (not the verify path):** with verify cheap, the remaining cold-fan-out cost is the
+**45 ms cold pool-open** per first-seen tenant (TCP + auth + RLS). At 100 k sparse tenants that is the wall —
+addressed by collapsing `shared_rls` tenants onto one shared pool (the `SHARE_POOLS` lever), which needs the
+per-checkout RLS **re-stamp** fixed (the §7.1 caveat). That is the next change; the verify fix above is its
+prerequisite (a shared pool is pointless if every request still pays a 32 MiB argon2 verify).
+
+Artifacts: `multitenant-10000-sha256.json` (after), vs `multitenant-10000-coldcache.json` (before).
+
 ---
 
 ## 8. Reproduce everything

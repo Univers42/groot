@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -362,6 +363,12 @@ func (s *Service) VerifyKey(ctx context.Context, full string) (VerifyKeyResponse
 			continue
 		}
 		go s.touchLastUsed(keyID)
+		// Lazy hash migration: the first verify of a legacy argon2id key rewrites
+		// it to the fast scheme, so a live fleet drains off argon2 without re-
+		// provisioning (best-effort, async; KEY_HASH_UPGRADE=0 disables).
+		if !isFastHash(storedHash) && os.Getenv("KEY_HASH_UPGRADE") != "0" {
+			go s.upgradeKeyHash(keyID, payload, prefix)
+		}
 		resp := VerifyKeyResponse{
 			Valid:    true,
 			TenantID: tenantSlug,
@@ -381,6 +388,18 @@ func (s *Service) touchLastUsed(keyID string) {
 	defer cancel()
 	_ = s.db.AdminExec(ctx,
 		`UPDATE public.tenant_api_keys SET last_used_at = now() WHERE id = $1::uuid`, keyID)
+}
+
+// upgradeKeyHash rewrites a legacy argon2id key_hash to the fast scheme after a
+// successful verify. The `LIKE 'argon2id$%'` guard makes it idempotent and
+// race-safe (a concurrent rotation or a prior upgrade is never clobbered).
+func (s *Service) upgradeKeyHash(keyID, payload, prefix string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = s.db.AdminExec(ctx,
+		`UPDATE public.tenant_api_keys SET key_hash = $2
+		   WHERE id = $1::uuid AND key_hash LIKE 'argon2id$%'`,
+		keyID, hashPayloadFast(payload, prefix))
 }
 
 // Bootstrap creates a tenant + default ABAC role + first API key in one shot.
