@@ -872,9 +872,9 @@ fn backend<E: std::fmt::Display>(e: E) -> DataPlaneError {
     }
 }
 
-/// Build a tiberius `Config` from a `mssql://user:pass@host:port/db` DSN. Local
-/// dev SQL Server uses a self-signed cert, so `trust_cert()` is enabled (the
-/// max-security TLS posture is a Phase-6 concern, gated on SECURITY_MODE).
+/// Build a tiberius `Config` from a `mssql://user:pass@host:port/db` DSN. The
+/// TLS posture is decided by [`apply_mssql_tls`] — tiberius verifies the server
+/// cert by default; we only relax that deliberately (never silently).
 fn mssql_config(dsn: &str) -> DataPlaneResult<Config> {
     let rest = dsn
         .strip_prefix("mssql://")
@@ -896,8 +896,34 @@ fn mssql_config(dsn: &str) -> DataPlaneResult<Config> {
     config.port(port);
     config.database(if db.is_empty() { "master" } else { db });
     config.authentication(AuthMethod::sql_server(user, pass));
-    config.trust_cert();
+    apply_mssql_tls(&mut config);
     Ok(config)
+}
+
+/// Phase B — the MSSQL TLS posture (closes the unconditional `trust_cert()`
+/// hole, which accepted ANY server certificate even under `SECURITY_MODE=max`).
+/// tiberius encrypts the connection and, by DEFAULT, verifies the certificate
+/// against the native root store. We only override that explicitly:
+///
+///   * `SECURITY_MODE=max` → never blind-trust. Pin a custom CA when
+///     `DATA_PLANE_TLS_CA_FILE` is set, otherwise verify against the native
+///     roots. The insecure dev escape is ignored (a self-signed mount fails).
+///   * baseline/dev        → a self-signed local SQL Server is accepted ONLY via
+///     the explicit `DATA_PLANE_TLS_INSECURE=1` escape (or a pinned CA); without
+///     it the chain is still verified.
+fn apply_mssql_tls(config: &mut Config) {
+    let max_security = std::env::var("SECURITY_MODE")
+        .map(|v| v.eq_ignore_ascii_case("max"))
+        .unwrap_or(false);
+    let ca_file = std::env::var("DATA_PLANE_TLS_CA_FILE").unwrap_or_default();
+    let insecure = !max_security
+        && std::env::var("DATA_PLANE_TLS_INSECURE").ok().as_deref() == Some("1");
+    if insecure {
+        config.trust_cert();
+    } else if !ca_file.is_empty() {
+        config.trust_cert_ca(&ca_file);
+    }
+    // else: default tiberius behaviour — verify against the native root store.
 }
 
 #[cfg(test)]

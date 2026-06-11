@@ -694,6 +694,31 @@ struct DataQueryRequest {
     operation: DataOperation,
 }
 
+/// Phase C — API-key scope gate for the `/data/v1` bypass (ports the
+/// query-router's `decideByApiKeyScope`): `admin` ⇒ any op; `read` ⇒
+/// list/get/aggregate; `write` ⇒ insert/update/delete/upsert/batch. Returns the
+/// missing scope name on denial. This is what lets a Node-free basic tier serve
+/// api-key callers with the same authorization the query-router enforced.
+fn api_key_scope_gate(
+    scopes: &[String],
+    op: &data_plane_core::DataOperationKind,
+) -> Result<(), &'static str> {
+    use data_plane_core::DataOperationKind::*;
+    let has = |s: &str| scopes.iter().any(|x| x == s);
+    if has("admin") {
+        return Ok(());
+    }
+    let needed = match op {
+        List | Get | Aggregate => "read",
+        Insert | Update | Delete | Upsert | Batch => "write",
+    };
+    if has(needed) {
+        Ok(())
+    } else {
+        Err(needed)
+    }
+}
+
 async fn data_query(
     State(state): State<AppState>,
     headers: header::HeaderMap,
@@ -736,6 +761,25 @@ async fn data_query(
         Ok(v) => v,
         Err(e) => return auth_error_response(e),
     };
+    // 1b. API-key scope gate (Phase C) — admin/read/write, mirrors the
+    // query-router. Fail fast before resolving the mount.
+    if let Err(missing) = api_key_scope_gate(&id.scopes, &req.operation.op) {
+        tracing::warn!(
+            target: "audit",
+            event = "scope_denied",
+            tenant = %id.tenant_id,
+            op = ?req.operation.op,
+            "api key lacks '{missing}' scope (403)"
+        );
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiError {
+                error: "forbidden".to_string(),
+                message: format!("api key lacks '{missing}' scope for this operation"),
+            }),
+        )
+            .into_response();
+    }
     // 2. Resolve the mount (engine + DSN + tier mask), tenant-scoped.
     let mount_info = match crate::auth::resolve_mount(
         &state.http_client,

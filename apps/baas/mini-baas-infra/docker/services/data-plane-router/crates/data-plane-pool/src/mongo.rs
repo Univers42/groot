@@ -167,6 +167,17 @@ impl EngineAdapter for MongoEngineAdapter {
             });
         }
         let dsn = self.resolver.resolve_dsn(&mount).await?;
+        // Phase B: under SECURITY_MODE=max, refuse a DSN that disables TLS
+        // verification (the mongodb driver verifies by default otherwise).
+        crate::tls::reject_insecure_tls(
+            &dsn,
+            crate::tls::max_security(),
+            &[
+                "tlsinsecure=true",
+                "tlsallowinvalidcertificates=true",
+                "tlsallowinvalidhostnames=true",
+            ],
+        )?;
         let mut options = ClientOptions::parse(&dsn).await.map_err(|e| {
             DataPlaneError::Backend {
                 message: format!("invalid mongo URI: {e}"),

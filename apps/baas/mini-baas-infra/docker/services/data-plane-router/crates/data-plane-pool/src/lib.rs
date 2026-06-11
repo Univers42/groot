@@ -29,6 +29,7 @@ mod redis;
 mod registry;
 mod resolver;
 mod sqlite;
+mod tls;
 
 pub use http::HttpEngineAdapter;
 pub use mongo::MongoEngineAdapter;

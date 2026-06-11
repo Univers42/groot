@@ -43,7 +43,7 @@ func Handle(ctx context.Context, w http.ResponseWriter, body json.RawMessage, rc
 // mux (and is exercised by the handler tests).
 func Mount(mux *http.ServeMux, rc *Reconciler, serviceToken string) {
 	mux.HandleFunc("POST /v1/provision", func(w http.ResponseWriter, r *http.Request) {
-		if serviceToken == "" || r.Header.Get("X-Service-Token") != serviceToken {
+		if !shared.SecureCompare(r.Header.Get("X-Service-Token"), serviceToken) {
 			shared.WriteError(w, http.StatusUnauthorized, "unauthorized", "service token required")
 			return
 		}

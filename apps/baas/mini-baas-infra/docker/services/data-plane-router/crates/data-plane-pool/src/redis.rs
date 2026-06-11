@@ -102,6 +102,8 @@ impl EngineAdapter for RedisEngineAdapter {
 
     async fn open_pool(&self, mount: DatabaseMount) -> DataPlaneResult<Box<dyn EnginePool>> {
         let dsn = self.resolver.resolve_dsn(&mount).await?;
+        // Phase B: refuse the redis `rediss://…#insecure` cert-skip under max.
+        crate::tls::reject_insecure_tls(&dsn, crate::tls::max_security(), &["#insecure"])?;
         let client = Client::open(dsn.as_str()).map_err(|e| DataPlaneError::Backend {
             message: format!("invalid redis URL: {e}"),
         })?;
