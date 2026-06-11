@@ -207,6 +207,9 @@ bench-footprint: _require-compose ## Measure RAM/CPU/disk of the active PACKAGE/
 		LABEL="$(if $(PROFILES),custom,$(if $(PACKAGE),$(PACKAGE),$(EDITION)))" \
 		BAR_MB="$(BAR_MB)" bash scripts/bench/footprint.sh
 
+audit-deps: ## Supply-chain CVE scan — cargo-audit (Rust) + govulncheck (Go)
+	@bash scripts/security/audit-deps.sh
+
 # ========================================================================== #
 ##@ Planes (change layers live — up-<plane> / down-<plane> / logs-<plane>)
 # ========================================================================== #

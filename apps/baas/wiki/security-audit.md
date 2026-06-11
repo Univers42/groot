@@ -16,6 +16,28 @@ realistic multi-tenant cloud), **MED** (hardening / depends on mode), **LOW**.
 | 5 | **`/data/v1/{schema,ddl,graph}` skipped the per-tenant rate limiter** (only `/query` had it) — unthrottled DDL/graph DoS | MED | `bypass_ratelimit` wired into all three | `5416359` |
 | 6 | **Graph BFS had no total-node cap** (depth×fanout unbounded) | MED | `MAX_GRAPH_NODES = 5000` DoS bound | `5416359` |
 
+## Supply-chain scan (dependency CVEs) — `make audit-deps`
+
+Ran `cargo audit` (Rust) + `govulncheck` (Go, reachability-based) on 2026-06-11.
+
+**Go control plane — FIXED, now `0 vulnerabilities` (`b7339b4`):**
+- ~10 Go **stdlib** CVEs (`crypto/x509`, `crypto/tls`, `net/http`, `net/url`, `os`)
+  at go1.23 → fixed by bumping the build toolchain **golang:1.23 → 1.25.11**
+  (stdlib-only, no code change).
+- `go-redis v9.7.0` → **v9.20.0** (last module advisory).
+
+**Rust data plane — 4 transitive advisories, accepted-with-remediation:**
+- `rustls-webpki 0.101.7` ×3 (name-constraint bypass + CRL panic) and `idna 0.2.3`
+  (Punycode) come from **`mongodb 2.8.2`** (old `rustls 0.21` + `trust-dns`) and
+  **`tiberius 0.12.3`**. My own TLS path uses the patched `rustls 0.23.40 /
+  webpki 0.103.13`. These are **only reachable for EXTERNAL TLS/SRV mongo|mssql
+  mounts** — the stack's own mongo is plaintext on the docker net. **Remediation:**
+  bump mongodb → 3.x + tiberius (a driver-adapter change; not rushed onto the
+  live adapters). Tracked + `--ignore`d in `audit-deps.sh` so a *new* vuln still
+  fails the gate.
+- Warnings (unsound/unmaintained, not active vulns): `lru` (via `mysql_async`),
+  `rand 0.7.3`, `derivative`, `rustls-pemfile` — clear on the same driver bumps.
+
 ## Verified safe (checked, no change needed)
 
 - **SQL/NoSQL injection** — every table/column identifier flows through
