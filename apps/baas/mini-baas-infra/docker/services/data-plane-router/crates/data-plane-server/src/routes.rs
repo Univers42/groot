@@ -880,6 +880,33 @@ pub(crate) fn scope_denied(
     )
 }
 
+/// Apply the per-tenant token-bucket rate limit for a bypass request using the
+/// mount's tier mask. `/data/v1/query` does this inside `run_query`; the schema
+/// / ddl / graph handlers must call it explicitly since they bypass `run_query`.
+/// A no-op when the mount carries no tier mask (parity), so untiered tenants are
+/// unaffected.
+pub(crate) fn bypass_ratelimit(
+    state: &AppState,
+    tenant: &str,
+    overrides: Option<&serde_json::Value>,
+    surface: &str,
+) -> Result<(), axum::response::Response> {
+    if let Some((rps, burst)) = tier_rate(overrides) {
+        if !state.ratelimiter.allow(tenant, rps, burst) {
+            tracing::warn!(
+                target: "audit",
+                event = "rate_limited",
+                tenant = %tenant,
+                surface = %surface,
+                rps,
+                "tenant exceeded package rate limit (429)"
+            );
+            return Err(too_many_requests(rps));
+        }
+    }
+    Ok(())
+}
+
 async fn data_query(
     State(state): State<AppState>,
     headers: header::HeaderMap,
@@ -933,6 +960,11 @@ async fn data_describe_schema(
     if let Err(missing) = require_scope(&id.scopes, "read") {
         return scope_denied(&id, "schema", missing);
     }
+    if let Err(resp) =
+        bypass_ratelimit(&state, &id.tenant_id, mount_info.capability_overrides.as_ref(), "schema")
+    {
+        return resp;
+    }
     let (identity, mount) = bypass_envelope(&id, &req.db_id, mount_info);
     run_describe_schema(state, identity, mount).await
 }
@@ -956,6 +988,14 @@ async fn data_apply_schema_ddl(
     // DDL mutates the schema — requires write (or admin).
     if let Err(missing) = require_scope(&id.scopes, "write") {
         return scope_denied(&id, "schema_ddl", missing);
+    }
+    if let Err(resp) = bypass_ratelimit(
+        &state,
+        &id.tenant_id,
+        mount_info.capability_overrides.as_ref(),
+        "schema_ddl",
+    ) {
+        return resp;
     }
     let (identity, mount) = bypass_envelope(&id, &req.db_id, mount_info);
     run_apply_schema_ddl(state, identity, mount, req.ddl).await

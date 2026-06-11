@@ -37,25 +37,29 @@ RUST_PORT="$(docker port mini-baas-data-plane-router-rust 4011/tcp 2>/dev/null |
 RUST="http://127.0.0.1:${RUST_PORT:-4011}"
 
 live_tenant_provision "graph-$(date +%s)" || fail "provision failed"
-trap live_tenant_cleanup EXIT
 DBID="${LIVE_TENANT_DB_ID}"; KEY="${LIVE_TENANT_API_KEY}"
+# Unique fixture table names per run (the probe mount points at the shared
+# platform postgres, so fixed names would collide across runs).
+GN="gnode_$(date +%s)_$$"; GE="gedge_$(date +%s)_$$"
 
 bypass() { curl -s -X POST "${RUST}/data/v1/$1" -H "X-Baas-Api-Key: ${KEY}" -H 'Content-Type: application/json' -d "$2"; }
 ddl_ok() { echo "$1" | grep -q '"status"' || fail "DDL failed: $1"; }
+drop_t() { bypass schema/ddl "{\"db_id\":\"${DBID}\",\"ddl\":{\"op\":\"drop_table\",\"table\":\"$1\"}}" >/dev/null 2>&1 || true; }
+trap 'drop_t "${GN}"; drop_t "${GE}"; live_tenant_cleanup' EXIT
 
-# ── fixture: gnode(id,name) + gedge(id,"from","to","type") — reserved cols quoted ──
-step "create gnode + gedge tables via /data/v1/schema/ddl (reserved from/to/type)"
-ddl_ok "$(bypass schema/ddl "{\"db_id\":\"${DBID}\",\"ddl\":{\"op\":\"create_table\",\"table\":\"gnode\",\"columns\":[{\"name\":\"id\",\"normalized_type\":\"text\",\"nullable\":false},{\"name\":\"name\",\"normalized_type\":\"text\",\"nullable\":true}],\"primary_key\":[\"id\"]}}")"
-ddl_ok "$(bypass schema/ddl "{\"db_id\":\"${DBID}\",\"ddl\":{\"op\":\"create_table\",\"table\":\"gedge\",\"columns\":[{\"name\":\"id\",\"normalized_type\":\"text\",\"nullable\":false},{\"name\":\"from\",\"normalized_type\":\"text\",\"nullable\":false},{\"name\":\"to\",\"normalized_type\":\"text\",\"nullable\":false},{\"name\":\"type\",\"normalized_type\":\"text\",\"nullable\":true}],\"primary_key\":[\"id\"]}}")"
+# ── fixture: GN(id,name) + GE(id,"from","to","type") — reserved cols quoted ──
+step "create node + edge tables via /data/v1/schema/ddl (reserved from/to/type)"
+ddl_ok "$(bypass schema/ddl "{\"db_id\":\"${DBID}\",\"ddl\":{\"op\":\"create_table\",\"table\":\"${GN}\",\"columns\":[{\"name\":\"id\",\"normalized_type\":\"text\",\"nullable\":false},{\"name\":\"name\",\"normalized_type\":\"text\",\"nullable\":true}],\"primary_key\":[\"id\"]}}")"
+ddl_ok "$(bypass schema/ddl "{\"db_id\":\"${DBID}\",\"ddl\":{\"op\":\"create_table\",\"table\":\"${GE}\",\"columns\":[{\"name\":\"id\",\"normalized_type\":\"text\",\"nullable\":false},{\"name\":\"from\",\"normalized_type\":\"text\",\"nullable\":false},{\"name\":\"to\",\"normalized_type\":\"text\",\"nullable\":false},{\"name\":\"type\",\"normalized_type\":\"text\",\"nullable\":true}],\"primary_key\":[\"id\"]}}")"
 
 ins() { bypass query "{\"db_id\":\"${DBID}\",\"operation\":{\"op\":\"insert\",\"resource\":\"$1\",\"data\":$2}}" >/dev/null; }
 step "seed a 3-node / 2-edge chain n1→n2→n3"
-for n in n1 n2 n3; do ins gnode "{\"id\":\"${n}\",\"name\":\"node ${n}\"}"; done
-ins gedge "{\"id\":\"e1\",\"from\":\"${DBID}:gnode:n1\",\"to\":\"${DBID}:gnode:n2\",\"type\":\"link\"}"
-ins gedge "{\"id\":\"e2\",\"from\":\"${DBID}:gnode:n2\",\"to\":\"${DBID}:gnode:n3\",\"type\":\"link\"}"
+for n in n1 n2 n3; do ins "${GN}" "{\"id\":\"${n}\",\"name\":\"node ${n}\"}"; done
+ins "${GE}" "{\"id\":\"e1\",\"from\":\"${DBID}:${GN}:n1\",\"to\":\"${DBID}:${GN}:n2\",\"type\":\"link\"}"
+ins "${GE}" "{\"id\":\"e2\",\"from\":\"${DBID}:${GN}:n2\",\"to\":\"${DBID}:${GN}:n3\",\"type\":\"link\"}"
 
-FOCUS="${DBID}:gnode:n1"
-BODY="{\"focus\":\"${FOCUS}\",\"depth\":2,\"edgesDbId\":\"${DBID}\",\"edgesTable\":\"gedge\"}"
+FOCUS="${DBID}:${GN}:n1"
+BODY="{\"focus\":\"${FOCUS}\",\"depth\":2,\"edgesDbId\":\"${DBID}\",\"edgesTable\":\"${GE}\"}"
 
 step "assemble the subgraph through BOTH front doors (depth 2)"
 LEG="$(curl -s -X POST "${LIVE_KONG_URL}/query/v1/graph" -H "apikey: ${LIVE_ANON_APIKEY}" -H "X-Baas-Api-Key: ${KEY}" -H 'Content-Type: application/json' -d "${BODY}")"

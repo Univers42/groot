@@ -29,6 +29,9 @@ const MAX_DEPTH: u32 = 3;
 const EDGE_FANOUT: u32 = 1000;
 const DEFAULT_OVERVIEW_LIMIT: u32 = 500;
 const MAX_OVERVIEW_LIMIT: u32 = 2000;
+/// DoS bound: the most distinct nodes one graph request may materialise across
+/// all hops. Beyond this the BFS stops — a safety cap well above any real graph.
+const MAX_GRAPH_NODES: usize = 5000;
 
 // ── Contract (in lockstep with the query-router graph.types.ts) ─────────────
 
@@ -413,7 +416,7 @@ impl<'a> GraphEngine<'a> {
         let mut visited: HashSet<String> = HashSet::new();
         let mut frontier = vec![req.focus.clone()];
 
-        for d in 0..=depth {
+        'bfs: for d in 0..=depth {
             let expand = d < depth;
             let mut next: Vec<String> = Vec::new();
             for node_id in std::mem::take(&mut frontier) {
@@ -424,6 +427,9 @@ impl<'a> GraphEngine<'a> {
                     continue; // unreadable / missing → omit
                 };
                 nodes.insert(node_id.clone(), node.clone());
+                if nodes.len() >= MAX_GRAPH_NODES {
+                    break 'bfs; // DoS bound
+                }
                 if expand {
                     let mut neigh = self.fetch_edges(&node_id, &req.edges_db_id, &edges_table).await;
                     neigh.extend(generated_edges(&node, req.generators.as_ref()));
@@ -463,10 +469,13 @@ impl<'a> GraphEngine<'a> {
             .clamp(1, MAX_OVERVIEW_LIMIT);
         let edges_table = req.edges_table.clone().unwrap_or_else(|| "edges".to_string());
         let mut nodes: BTreeMap<String, GraphNode> = BTreeMap::new();
-        for rf in &req.resources {
+        'ov: for rf in &req.resources {
             for row in self.read(&rf.db_id, &rf.table, None, limit).await {
                 if let Some(n) = row_to_node(&rf.db_id, &rf.table, &row) {
                     nodes.insert(n.id.clone(), n);
+                    if nodes.len() >= MAX_GRAPH_NODES {
+                        break 'ov; // DoS bound
+                    }
                 }
             }
         }
@@ -511,6 +520,21 @@ pub async fn data_graph(
     if req.focus.trim().is_empty() {
         return api_err(StatusCode::BAD_REQUEST, "bad_request", "focus is required");
     }
+    // Rate-limit the (multi-read) graph as ONE request on the focus mount's tier
+    // mask — the graph bypass path doesn't go through run_query's limiter.
+    let primary = parse_node_id(&req.focus)
+        .map(|(db, _, _)| db)
+        .unwrap_or_else(|| req.edges_db_id.clone());
+    let overrides = state
+        .resolve_bypass_mount(&id.tenant_id, &primary)
+        .await
+        .ok()
+        .and_then(|m| m.capability_overrides);
+    if let Err(resp) =
+        crate::routes::bypass_ratelimit(&state, &id.tenant_id, overrides.as_ref(), "graph")
+    {
+        return resp;
+    }
     let graph = GraphEngine::new(&state, &id).derive(req).await;
     (StatusCode::OK, Json(graph)).into_response()
 }
@@ -526,6 +550,16 @@ pub async fn data_graph_overview(
     };
     if let Err(missing) = require_scope(&id.scopes, "read") {
         return scope_denied(&id, "graph", missing);
+    }
+    let overrides = state
+        .resolve_bypass_mount(&id.tenant_id, &req.edges_db_id)
+        .await
+        .ok()
+        .and_then(|m| m.capability_overrides);
+    if let Err(resp) =
+        crate::routes::bypass_ratelimit(&state, &id.tenant_id, overrides.as_ref(), "graph")
+    {
+        return resp;
     }
     let graph = GraphEngine::new(&state, &id).overview(req).await;
     (StatusCode::OK, Json(graph)).into_response()
