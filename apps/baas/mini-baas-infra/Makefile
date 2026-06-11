@@ -88,7 +88,10 @@ EDITION ?= query
 # catalog. ADDONS appends à-la-carte planes (realtime/analytics/engines/…).
 # `make up PACKAGE=pro ADDONS="analytics engines"` resolves to compose profiles
 # exactly like EDITION. Precedence: PROFILES > PACKAGE > EDITION.
-PACKAGES := essential pro max
+PACKAGES := basic essential pro max
+# basic = the Pi-class lean tier: SQLite-first, served Node-free via the Rust
+# /data/v1 bypass — only the always-on core + Go control + Rust data plane.
+PACKAGE_basic     := go rust
 PACKAGE_essential := data go rust adapter background
 PACKAGE_pro       := $(PACKAGE_essential) storage realtime
 PACKAGE_max       := $(PACKAGE_pro) analytics observability functions engines

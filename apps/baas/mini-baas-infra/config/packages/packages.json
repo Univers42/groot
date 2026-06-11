@@ -8,6 +8,26 @@
     "enterprise": "max"
   },
   "packages": {
+    "basic": {
+      "label": "Basic",
+      "_comment": "Pi-class lean tier (≤512MB): SQLite-first, served Node-free through the Rust /data/v1 bypass (Makefile PACKAGE_basic := go rust). For prototyping / a private single-app BaaS — scale up to essential+ for the Node orchestration features (graph, masks, automations).",
+      "engines": ["sqlite", "postgresql"],
+      "capabilities": {
+        "read": true,
+        "write": true,
+        "upsert": true,
+        "batch": false,
+        "aggregate": false,
+        "transactions": false,
+        "schema_ddl": false,
+        "ddl": false,
+        "introspect": true
+      },
+      "limits": { "rps": 10, "burst": 20 },
+      "pool_policy": { "max_conn": 3, "max_mounts": 1 },
+      "security_mode": "baseline",
+      "addons": []
+    },
     "essential": {
       "label": "Essential",
       "engines": ["postgresql", "sqlite"],
