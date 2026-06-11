@@ -1013,6 +1013,12 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/postgres}
       INTERNAL_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
       SERVICE_TOKEN_MODE: ${SERVICE_TOKEN_MODE:-hmac}
+      # User-JWT verification (audit O2). Default HS256 with JWT_SECRET. Set
+      # JWT_ALG=RS256 + JWKS_URL (e.g. GoTrue's .well-known/jwks.json once it
+      # issues RS256) to verify asymmetric tokens against rotating public keys —
+      # verify-only, pinned to one alg (no algorithm-confusion). Unit: jwks_test.go.
+      JWT_ALG: ${JWT_ALG:-HS256}
+      JWKS_URL: ${JWKS_URL:-}
       # Enables POST /v1/provision to register a tenant's data mounts in one call,
       # and to create the per-tenant schema for schema_per_tenant mounts.
       ADAPTER_REGISTRY_URL: ${ADAPTER_REGISTRY_URL:-http://adapter-registry-go:3021}
