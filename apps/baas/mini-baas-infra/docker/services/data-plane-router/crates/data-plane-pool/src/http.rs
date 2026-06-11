@@ -34,6 +34,7 @@ use reqwest::{header, Client, Method, StatusCode};
 use serde::Deserialize;
 use serde_json::{Map as JsonMap, Value};
 use std::collections::BTreeMap;
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -89,13 +90,22 @@ impl EngineAdapter for HttpEngineAdapter {
     async fn open_pool(&self, mount: DatabaseMount) -> DataPlaneResult<Box<dyn EnginePool>> {
         let dsn = self.resolver.resolve_dsn(&mount).await?;
         let conn = parse_connection(&dsn)?;
-        let client = Client::builder()
+        // SSRF guard: resolve + validate the base-URL host, reject internal /
+        // link-local / cloud-metadata targets, and PIN the client to the
+        // validated public IP(s) so a later DNS rebind can't redirect requests
+        // inward. `DATA_PLANE_HTTP_ALLOW_INTERNAL=1` skips it (trusted dev mocks).
+        let pinned = guard_and_resolve(&conn.base_url).await?;
+        let mut builder = Client::builder()
             .timeout(REQUEST_TIMEOUT)
-            .user_agent("mini-baas-data-plane-router/0.1")
-            .build()
-            .map_err(|e| DataPlaneError::Backend {
-                message: format!("reqwest client init failed: {e}"),
-            })?;
+            .user_agent("mini-baas-data-plane-router/0.1");
+        if let Some((host, addrs)) = pinned {
+            for addr in addrs {
+                builder = builder.resolve(&host, addr);
+            }
+        }
+        let client = builder.build().map_err(|e| DataPlaneError::Backend {
+            message: format!("reqwest client init failed: {e}"),
+        })?;
         Ok(Box::new(HttpPool {
             mount_id: mount.id,
             tenant_id: mount.tenant_id,
@@ -323,6 +333,99 @@ fn is_http_url(s: &str) -> bool {
     lower.starts_with("http://") || lower.starts_with("https://")
 }
 
+/// SSRF classifier: `true` for any address an outbound HTTP mount must NOT reach
+/// — loopback, RFC-1918 private, link-local (incl. 169.254.169.254 cloud
+/// metadata), CGNAT, unspecified/broadcast/documentation, IPv6 ULA + link-local,
+/// and IPv4-mapped forms of all the above.
+fn is_blocked_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_broadcast()
+                || v4.is_unspecified()
+                || v4.is_documentation()
+                || v4.octets()[0] == 0
+                || (v4.octets()[0] == 100 && (v4.octets()[1] & 0xc0) == 64) // 100.64/10 CGNAT
+        }
+        IpAddr::V6(v6) => {
+            if let Some(mapped) = v6.to_ipv4_mapped() {
+                return is_blocked_ip(IpAddr::V4(mapped));
+            }
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+                || (v6.segments()[0] & 0xfe00) == 0xfc00 // fc00::/7 unique-local
+                || (v6.segments()[0] & 0xffc0) == 0xfe80 // fe80::/10 link-local
+        }
+    }
+}
+
+fn ssrf_blocked(host: &str) -> DataPlaneError {
+    DataPlaneError::Backend {
+        message: format!(
+            "http mount blocked: '{host}' resolves to an internal/reserved address (SSRF guard). \
+             Set DATA_PLANE_HTTP_ALLOW_INTERNAL=1 only for trusted dev mocks."
+        ),
+    }
+}
+
+/// Validate an http mount's base URL against the SSRF guard and return the host
+/// + its validated socket addresses to PIN (so a later DNS rebind cannot point
+/// the client inward). `Ok(None)` when the dev escape is set (no check, no pin).
+async fn guard_and_resolve(base_url: &str) -> DataPlaneResult<Option<(String, Vec<SocketAddr>)>> {
+    if std::env::var("DATA_PLANE_HTTP_ALLOW_INTERNAL").ok().as_deref() == Some("1") {
+        return Ok(None);
+    }
+    let url = reqwest::Url::parse(base_url)
+        .map_err(|e| DataPlaneError::Backend { message: format!("http baseUrl parse: {e}") })?;
+    let host = url
+        .host_str()
+        .ok_or_else(|| DataPlaneError::Backend {
+            message: "http baseUrl has no host".to_string(),
+        })?
+        .to_string();
+    let lower = host.to_ascii_lowercase();
+    if lower == "localhost"
+        || lower == "metadata"
+        || lower == "instance-data"
+        || lower.ends_with(".local")
+        || lower.ends_with(".internal")
+    {
+        return Err(ssrf_blocked(&host));
+    }
+    let port = url.port_or_known_default().unwrap_or(80);
+    // Literal IP host → classify directly (no DNS).
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_blocked_ip(ip) {
+            return Err(ssrf_blocked(&host));
+        }
+        return Ok(Some((host, vec![SocketAddr::new(ip, port)])));
+    }
+    // Hostname → resolve off the async runtime, validate EVERY A/AAAA record.
+    let h = host.clone();
+    let addrs: Vec<SocketAddr> = tokio::task::spawn_blocking(move || {
+        (h.as_str(), port).to_socket_addrs().map(|it| it.collect::<Vec<_>>())
+    })
+    .await
+    .map_err(|e| DataPlaneError::Backend { message: format!("ssrf resolve join: {e}") })?
+    .map_err(|e| DataPlaneError::Backend {
+        message: format!("http host '{host}' did not resolve: {e}"),
+    })?;
+    if addrs.is_empty() {
+        return Err(DataPlaneError::Backend {
+            message: format!("http host '{host}' did not resolve"),
+        });
+    }
+    for sa in &addrs {
+        if is_blocked_ip(sa.ip()) {
+            return Err(ssrf_blocked(&host));
+        }
+    }
+    Ok(Some((host, addrs)))
+}
+
 fn join_url(base: &str, path: &str) -> DataPlaneResult<String> {
     let clean_base = base.trim_end_matches('/');
     let clean_path = if path.starts_with('/') {
@@ -472,6 +575,28 @@ fn _json_map_assertion() -> JsonMap<String, Value> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn ssrf_blocks_internal_and_metadata_ips() {
+        for bad in [
+            "127.0.0.1",
+            "169.254.169.254", // cloud metadata
+            "10.0.0.5",
+            "192.168.1.1",
+            "172.16.0.1",
+            "100.64.0.1", // CGNAT
+            "0.0.0.0",
+            "::1",
+            "fd00::1",  // IPv6 ULA
+            "fe80::1",  // IPv6 link-local
+            "::ffff:127.0.0.1", // IPv4-mapped loopback
+        ] {
+            assert!(is_blocked_ip(bad.parse().unwrap()), "{bad} must be blocked");
+        }
+        for ok in ["1.1.1.1", "8.8.8.8", "93.184.216.34"] {
+            assert!(!is_blocked_ip(ok.parse().unwrap()), "{ok} must be allowed");
+        }
+    }
 
     #[test]
     fn parse_connection_accepts_json_object() {
