@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use axum::extract::ws::{Message, WebSocket};
 use futures::stream::SplitSink;
 use futures::SinkExt;
-use realtime_core::{ConnectionId, EventEnvelope, EventPayload, ServerMessage};
+use realtime_core::{ConnectionId, EventEnvelope};
 use tokio::sync::mpsc;
 use tracing::{debug, error, warn};
 
@@ -26,13 +26,20 @@ enum SendStatus {
     Failed,
 }
 
+/// Render a `ServerMessage::Event` frame for one subscriber.
+///
+/// D2-realtime H1: the heavy `event` payload is serialized exactly ONCE per
+/// event (cached on the shared `Arc<EventEnvelope>` — see
+/// [`EventEnvelope::rendered_payload_json`]); here we only escape the small
+/// per-connection `sub_id` and concatenate. The output is byte-identical to
+/// `serde_json::to_string(&ServerMessage::Event { sub_id, event })` — the
+/// internally-tagged enum emits `type` then `sub_id` then `event` in that order.
 fn serialize_event(sub_id: &str, event: &EventEnvelope) -> Option<String> {
-    let payload = EventPayload::from_envelope(event);
-    let msg = ServerMessage::Event {
-        sub_id: sub_id.to_owned(),
-        event: payload,
-    };
-    serde_json::to_string(&msg).ok()
+    let fragment = event.rendered_payload_json();
+    let sub = serde_json::to_string(sub_id).ok()?; // quoted + JSON-escaped
+    Some(format!(
+        r#"{{"type":"EVENT","sub_id":{sub},"event":{fragment}}}"#
+    ))
 }
 
 fn check_slow_client(elapsed: Duration, slow_count: &mut u32, conn_id: ConnectionId) -> SendStatus {
@@ -93,5 +100,62 @@ pub(super) async fn writer_loop(
             SendStatus::Ok => {}
             SendStatus::SlowClient | SendStatus::Failed => return,
         }
+    }
+}
+
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use realtime_core::{EventPayload, ServerMessage, TopicPath};
+
+    fn envelope(payload: &str) -> EventEnvelope {
+        EventEnvelope::new(TopicPath::new("orders"), "inserted", bytes::Bytes::from(payload.to_owned()))
+    }
+
+    /// The serialize-once frame must be byte-identical to the previous
+    /// full-struct serde output, for every sub_id (including ones needing JSON
+    /// escaping) — otherwise the wire protocol silently changes.
+    #[test]
+    fn serialize_once_is_byte_identical_to_serde() {
+        let cases = [
+            ("sub-1", r#"{"id":1,"status":"pending"}"#),
+            ("sub/with\"quote", r#"{"nested":{"a":[1,2,3]},"t":"x"}"#),
+            ("s", "null"),
+            ("unicode-\u{00e9}", r#"{"v":"café"}"#),
+        ];
+        for (sub_id, payload) in cases {
+            let ev = envelope(payload);
+            let want = serde_json::to_string(&ServerMessage::Event {
+                sub_id: sub_id.to_owned(),
+                event: EventPayload::from_envelope(&ev),
+            })
+            .unwrap();
+            let got = serialize_event(sub_id, &ev).unwrap();
+            assert_eq!(got, want, "sub_id={sub_id:?} payload={payload}");
+        }
+    }
+
+    /// The payload fragment is computed once and cached: a second render of the
+    /// SAME envelope returns the exact same backing string (pointer-identical).
+    #[test]
+    fn payload_fragment_is_cached_once() {
+        let ev = envelope(r#"{"a":1}"#);
+        let first = ev.rendered_payload_json();
+        let second = ev.rendered_payload_json();
+        assert!(std::ptr::eq(first, second), "fragment must be memoized, not re-serialized");
+    }
+
+    /// Cloning the envelope's Arc shares the cache, so two subscribers holding
+    /// clones reuse one serialization (the cross-connection serialize-once).
+    #[test]
+    fn cache_is_shared_across_arc_clones() {
+        let ev = std::sync::Arc::new(envelope(r#"{"a":1}"#));
+        let a = std::sync::Arc::clone(&ev);
+        let b = std::sync::Arc::clone(&ev);
+        // Prime via one clone, then the other must return the same backing str.
+        let pa = a.rendered_payload_json();
+        let pb = b.rendered_payload_json();
+        assert!(std::ptr::eq(pa, pb), "Arc clones must share the rendered cache");
     }
 }
