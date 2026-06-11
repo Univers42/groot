@@ -42,6 +42,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# v1 HMAC service auth (audit O1) — signs the tenant-control call under hmac mode.
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../lib/service-auth.sh"
 INFRA_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 REPO_ROOT="$(cd "${INFRA_ROOT}/../../.." && pwd)"
 STATE_ENV="${INFRA_ROOT}/.gourmand-tenant.env"
@@ -69,9 +72,11 @@ SERVICE_KEY="$(_lt_env mini-baas-kong KONG_SERVICE_API_KEY)"
 
 APP_KEY="${BAAS_API_KEY:-$(sed -n 's/^VITE_BAAS_API_KEY=//p' "${APP_ENV_FILE}" 2>/dev/null | head -1)}"
 [[ "${APP_KEY}" == mbk_* ]] || fail "no tenant API key (set BAAS_API_KEY or VITE_BAAS_API_KEY in ${APP_ENV_FILE})"
+vbody="{\"key\":\"${APP_KEY}\"}"
+svc_auth POST /v1/keys/verify "${vbody}"
 verify=$(curl -fsS -X POST "${TC_URL}/v1/keys/verify" \
-  -H "X-Service-Token: ${SERVICE_TOKEN}" -H 'Content-Type: application/json' \
-  -d "{\"key\":\"${APP_KEY}\"}") || fail "tenant-control unreachable"
+  "${SVC_AUTH[@]}" -H 'Content-Type: application/json' \
+  -d "${vbody}") || fail "tenant-control unreachable"
 echo "${verify}" | grep -q '"valid":true' || fail "app key invalid: ${verify}"
 TENANT="$(echo "${verify}" | _lt_json_field tenant_id)"
 cyan "app key → tenant '${TENANT}'"

@@ -87,10 +87,13 @@ M26_EXTRA_MOUNTS=()
 m26_cleanup() {
   local id
   for id in "${M26_EXTRA_MOUNTS[@]:-}"; do
-    [[ -n "${id}" ]] && curl -s -o /dev/null -X DELETE \
-      "${LIVE_KONG_URL}/admin/v1/databases/${id}" \
-      -H "apikey: ${LIVE_SERVICE_APIKEY}" -H "X-Service-Token: ${LIVE_SERVICE_TOKEN}" \
-      -H "X-Tenant-Id: ${LIVE_TENANT_SLUG}" || true
+    if [[ -n "${id}" ]]; then
+      svc_auth DELETE "/databases/${id}" ""
+      curl -s -o /dev/null -X DELETE \
+        "${LIVE_KONG_URL}/admin/v1/databases/${id}" \
+        -H "apikey: ${LIVE_SERVICE_APIKEY}" "${SVC_AUTH[@]}" \
+        -H "X-Tenant-Id: ${LIVE_TENANT_SLUG}" || true
+    fi
   done
   docker exec mini-baas-postgres psql -U "${PG_USER:-postgres}" -d "${PG_DB:-postgres}" -q \
     -c 'DROP TABLE IF EXISTS m26_probe; DROP TABLE IF EXISTS m26_nouniq;' >/dev/null 2>&1 || true
@@ -109,10 +112,12 @@ live_tenant_provision "m26-oltp-$(date +%s)" || fail "tenant provisioning failed
 
 # A SECOND api key = a second owner principal (api-key:<uuid>) in the SAME
 # tenant — the attacker role for the hijack regression test.
+m26kb='{"name":"m26-second-principal","scopes":["read","write"]}'
+svc_auth POST "/v1/tenants/${LIVE_TENANT_SLUG}/keys" "${m26kb}"
 code=$(curl -s -o /tmp/m26-key2.json -w '%{http_code}' -X POST \
   "${LIVE_TENANT_CONTROL_URL}/v1/tenants/${LIVE_TENANT_SLUG}/keys" \
-  -H "X-Service-Token: ${LIVE_SERVICE_TOKEN}" -H 'Content-Type: application/json' \
-  -d '{"name":"m26-second-principal","scopes":["read","write"]}')
+  "${SVC_AUTH[@]}" -H 'Content-Type: application/json' \
+  -d "${m26kb}")
 [[ "${code}" == "201" ]] || fail "second key mint failed (${code})"
 KEY_B="$(_lt_json_field key < /tmp/m26-key2.json)"
 [[ "${KEY_B}" == mbk_* ]] || fail "second key has unexpected shape"

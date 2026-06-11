@@ -140,10 +140,13 @@ M25_EXTRA_MOUNTS=()
 m25_cleanup() {
   local id
   for id in "${M25_EXTRA_MOUNTS[@]:-}"; do
-    [[ -n "${id}" ]] && curl -s -o /dev/null -X DELETE \
-      "${LIVE_KONG_URL}/admin/v1/databases/${id}" \
-      -H "apikey: ${LIVE_SERVICE_APIKEY}" -H "X-Service-Token: ${LIVE_SERVICE_TOKEN}" \
-      -H "X-Tenant-Id: ${LIVE_TENANT_SLUG}" || true
+    if [[ -n "${id}" ]]; then
+      svc_auth DELETE "/databases/${id}" ""
+      curl -s -o /dev/null -X DELETE \
+        "${LIVE_KONG_URL}/admin/v1/databases/${id}" \
+        -H "apikey: ${LIVE_SERVICE_APIKEY}" "${SVC_AUTH[@]}" \
+        -H "X-Tenant-Id: ${LIVE_TENANT_SLUG}" || true
+    fi
   done
   docker exec mini-baas-postgres psql -U "${PG_USER:-postgres}" -d "${PG_DB:-postgres}" \
     -c 'DROP TABLE IF EXISTS m25_probe;' >/dev/null 2>&1 || true

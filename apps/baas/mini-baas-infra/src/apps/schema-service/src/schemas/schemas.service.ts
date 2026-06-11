@@ -15,6 +15,7 @@ import { createHash } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
+import { serviceAuthHeaders } from '@mini-baas/common';
 import { PostgresSchemaEngine } from '../engines/postgres-schema.engine';
 import { MongoSchemaEngine } from '../engines/mongo-schema.engine';
 import { MysqlSchemaEngine } from '../engines/mysql-schema.engine';
@@ -65,11 +66,13 @@ export class SchemasService {
   }
 
   private async fetchConnection(dbId: string, userId: string): Promise<AdapterResponse> {
-    const url = `${this.registryUrl}/databases/${dbId}/connect`;
+    const path = `/databases/${dbId}/connect`;
+    const url = `${this.registryUrl}${path}`;
     const { data } = await firstValueFrom(
       this.http.get<AdapterResponse>(url, {
         headers: {
-          'X-Service-Token': this.serviceToken,
+          // hmac mode signs per-request; static mode sends the raw token (O1).
+          ...serviceAuthHeaders(this.serviceToken, 'GET', path, ''),
           'X-Tenant-Id': userId,
         },
       }),
