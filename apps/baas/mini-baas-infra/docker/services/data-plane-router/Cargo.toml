@@ -52,6 +52,9 @@ jsonwebtoken = { version = "9", default-features = false, features = ["use_pem"]
 # + RFC 6238 TOTP (authenticator apps mandate HMAC-SHA1; hmac is in-tree).
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1", "tokio1-rustls-tls", "builder"] }
 sha1 = "0.10"
+# binocle-one D: ?thumb=WxH image thumbnails. jpeg+png only — every extra
+# decoder is binary weight inside the ≤12 MB budget.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 async-trait = "0.1"
 axum = "0.7"
 bson = { version = "2.10", features = ["chrono-0_4"] }

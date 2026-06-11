@@ -35,7 +35,8 @@ nano = ["sqlite", "dep:rusqlite", "dep:futures", "uuid/v4"]
 # argon2id (passwords ARE low-entropy) + HS256 JWTs minted/verified in-process,
 # the OAuth2/OIDC provider matrix, SMTP mail codes (verification/reset/OTP)
 # and RFC 6238 TOTP MFA (hmac+sha1 — authenticator apps mandate SHA1).
-one = ["nano", "dep:argon2", "dep:jsonwebtoken", "dep:lettre", "dep:hmac", "dep:sha1"]
+# File storage rides the same feature: multipart upload + jpeg/png thumbnails.
+one = ["nano", "dep:argon2", "dep:jsonwebtoken", "dep:lettre", "dep:hmac", "dep:sha1", "dep:image", "axum/multipart"]
 
 [dependencies]
 data-plane-core = { path = "../data-plane-core" }
@@ -59,6 +60,7 @@ jsonwebtoken = { workspace = true, optional = true }
 lettre = { workspace = true, optional = true }
 hmac = { workspace = true, optional = true }
 sha1 = { workspace = true, optional = true }
+image = { workspace = true, optional = true }
 sha2 = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
