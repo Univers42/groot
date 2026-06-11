@@ -199,6 +199,11 @@ bench-startup: _require-compose _rm-stale ## Time the stack until health checks 
 	t1=$$(date +%s); el=$$((t1-t0)); \
 	[ "$$el" -le 90 ] && echo -e "$(_G)$(_W)✓ healthy in $${el}s$(_0)" || echo -e "$(_R)$(_W)✗ $${el}s (>90s)$(_0)"
 
+bench-footprint: _require-compose ## Measure RAM/CPU/disk of the active PACKAGE/EDITION/PROFILES (BAR_MB= asserts a budget)
+	@PROFILES="$(ACTIVE_PROFILES)" \
+		LABEL="$(if $(PROFILES),custom,$(if $(PACKAGE),$(PACKAGE),$(EDITION)))" \
+		BAR_MB="$(BAR_MB)" bash scripts/bench/footprint.sh
+
 # ========================================================================== #
 ##@ Planes (change layers live — up-<plane> / down-<plane> / logs-<plane>)
 # ========================================================================== #
