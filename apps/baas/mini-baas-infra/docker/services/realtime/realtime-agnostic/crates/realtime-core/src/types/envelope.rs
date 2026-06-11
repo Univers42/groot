@@ -10,6 +10,8 @@
 /*                                                                            */
 /* ************************************************************************** */
 
+use std::sync::{Arc, OnceLock};
+
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -52,6 +54,15 @@ pub struct EventEnvelope {
     /// TTL in milliseconds for ephemeral events.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ttl_ms: Option<u32>,
+    /// Lazily-cached serialized `EventPayload` JSON — the per-event-identical
+    /// `event` fragment of a `ServerMessage::Event`. Filled exactly once on the
+    /// first fan-out render and then shared across EVERY subscriber that holds a
+    /// clone of this envelope's `Arc` (the D2-realtime H1 serialize-once
+    /// optimization: previously every connection re-serialized the same payload,
+    /// ~617 ns/client). Never serialized on the wire; a deserialized envelope
+    /// starts with an empty cache. See [`EventEnvelope::rendered_payload_json`].
+    #[serde(skip)]
+    rendered_payload: Arc<OnceLock<String>>,
 }
 
 impl EventEnvelope {
@@ -80,7 +91,23 @@ impl EventEnvelope {
             source: None,
             trace_id: None,
             ttl_ms: None,
+            rendered_payload: Arc::new(OnceLock::new()),
         }
+    }
+
+    /// Return the cached serialized `EventPayload` JSON for this event — the
+    /// `event` fragment a writer wraps with its per-connection `sub_id`.
+    ///
+    /// Computed exactly once and shared across all subscribers holding a clone
+    /// of this envelope's `Arc` (D2-realtime H1). The fan-out path clones the
+    /// SAME `Arc<EventEnvelope>` to every target connection, so only the first
+    /// writer pays the serialization cost; the rest reuse the cached string.
+    #[must_use]
+    pub fn rendered_payload_json(&self) -> &str {
+        self.rendered_payload.get_or_init(|| {
+            let payload = crate::EventPayload::from_envelope(self);
+            serde_json::to_string(&payload).unwrap_or_else(|_| "null".to_owned())
+        })
     }
 
     /// Return payload size in bytes.

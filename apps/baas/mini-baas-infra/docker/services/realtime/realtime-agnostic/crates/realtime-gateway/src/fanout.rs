@@ -139,7 +139,7 @@ fn handle_dispatch(worker_id: usize, dispatch: LocalDispatch, conn_manager: &Con
     }
 }
 
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 #[cfg(test)]
 mod tests {
     use super::*;
