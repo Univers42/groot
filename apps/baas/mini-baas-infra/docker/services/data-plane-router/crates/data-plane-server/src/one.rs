@@ -105,6 +105,39 @@ pub(crate) struct UserPublic {
     pub(crate) created_at: String,
 }
 
+/// A stored file's metadata row (the bytes live on disk under
+/// `{data_dir}/storage/{table}/{record}/{field}/{stored}`).
+#[derive(Serialize, Clone)]
+pub(crate) struct FileMeta {
+    pub(crate) id: String,
+    pub(crate) table_name: String,
+    pub(crate) record_id: String,
+    pub(crate) field: String,
+    pub(crate) owner: String,
+    pub(crate) filename: String,
+    pub(crate) stored: String,
+    pub(crate) content_type: String,
+    pub(crate) size: i64,
+    pub(crate) created_at: String,
+}
+
+impl FileMeta {
+    fn from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: r.get(0)?,
+            table_name: r.get(1)?,
+            record_id: r.get(2)?,
+            field: r.get(3)?,
+            owner: r.get(4)?,
+            filename: r.get(5)?,
+            stored: r.get(6)?,
+            content_type: r.get(7)?,
+            size: r.get(8)?,
+            created_at: r.get(9)?,
+        })
+    }
+}
+
 /// SQLite-backed account store, sharing the nano meta DB file. All calls are
 /// sub-millisecond except argon2 (which callers wrap in `spawn_blocking`).
 pub(crate) struct UserStore {
@@ -161,7 +194,21 @@ impl UserStore {
                 user_id TEXT NOT NULL,
                 digest  TEXT NOT NULL,
                 PRIMARY KEY (user_id, digest)
-            );",
+            );
+            CREATE TABLE IF NOT EXISTS one_files (
+                id           TEXT PRIMARY KEY,
+                table_name   TEXT NOT NULL,
+                record_id    TEXT NOT NULL,
+                field        TEXT NOT NULL,
+                owner        TEXT NOT NULL,
+                filename     TEXT NOT NULL,
+                stored       TEXT NOT NULL,
+                content_type TEXT NOT NULL,
+                size         INTEGER NOT NULL,
+                created_at   TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS one_files_record
+                ON one_files (table_name, record_id);",
         )?;
         Ok(Self {
             conn: std::sync::Mutex::new(conn),
@@ -395,6 +442,53 @@ impl UserStore {
         Ok(())
     }
 
+    // ── file metadata (binary payloads live under {data_dir}/storage) ───────
+
+    pub(crate) fn file_insert(&self, f: &FileMeta) -> anyhow::Result<()> {
+        let conn = self.conn.lock().expect("user store poisoned");
+        conn.execute(
+            "INSERT INTO one_files (id, table_name, record_id, field, owner, filename, stored, content_type, size, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            rusqlite::params![
+                f.id, f.table_name, f.record_id, f.field, f.owner, f.filename, f.stored,
+                f.content_type, f.size, f.created_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn file_get(&self, id: &str) -> Option<FileMeta> {
+        let conn = self.conn.lock().expect("user store poisoned");
+        conn.query_row(
+            "SELECT id, table_name, record_id, field, owner, filename, stored, content_type, size, created_at
+             FROM one_files WHERE id = ?1",
+            [id],
+            FileMeta::from_row,
+        )
+        .ok()
+    }
+
+    pub(crate) fn file_list(&self, table: &str, record: &str) -> Vec<FileMeta> {
+        let conn = self.conn.lock().expect("user store poisoned");
+        let mut stmt = match conn.prepare(
+            "SELECT id, table_name, record_id, field, owner, filename, stored, content_type, size, created_at
+             FROM one_files WHERE table_name = ?1 AND record_id = ?2 ORDER BY created_at",
+        ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        stmt.query_map([table, record], FileMeta::from_row)
+            .map(|rows| rows.flatten().collect())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn file_delete(&self, id: &str) -> bool {
+        let conn = self.conn.lock().expect("user store poisoned");
+        conn.execute("DELETE FROM one_files WHERE id = ?1", [id])
+            .map(|n| n > 0)
+            .unwrap_or(false)
+    }
+
     /// Single-use: a matching recovery code is deleted as it is accepted.
     pub(crate) fn recovery_consume(&self, user_id: &str, code: &str) -> bool {
         let digest = sha256_hex(code);
@@ -467,6 +561,8 @@ pub struct OneState {
     pub(crate) oauth: crate::one_oauth::OAuthRuntime,
     /// SMTP sender — None when ONE_SMTP_HOST is unset (email endpoints 503).
     pub(crate) mailer: Option<crate::one_email::Mailer>,
+    /// Root of this deployment's data (file storage lives under `storage/`).
+    pub(crate) data_dir: std::path::PathBuf,
 }
 
 impl OneState {
@@ -505,7 +601,26 @@ impl OneState {
             allow_signup,
             oauth: crate::one_oauth::OAuthRuntime::default(),
             mailer: crate::one_email::Mailer::from_env(),
+            data_dir: data_dir.to_path_buf(),
         })
+    }
+
+    /// Short-lived (5 min) signed grant for ONE file — PocketBase-style
+    /// protected-file access for `<img src>` and download links.
+    pub(crate) fn mint_file_token(&self, file_id: &str) -> Result<String, String> {
+        self.mint_typed(file_id, "", "file", 300)
+    }
+
+    pub(crate) fn verify_file_token(&self, token: &str) -> Option<String> {
+        let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
+        validation.validate_exp = true;
+        let data = jsonwebtoken::decode::<Claims>(
+            token,
+            &jsonwebtoken::DecodingKey::from_secret(&self.jwt_secret),
+            &validation,
+        )
+        .ok()?;
+        (data.claims.typ == "file").then_some(data.claims.sub)
     }
 
     /// Password (or email-OTP) factor passed — either finish with a session
@@ -856,6 +971,7 @@ pub fn router(state: AppState) -> Router {
         .merge(crate::one_oauth::routes())
         .merge(crate::one_email::routes())
         .merge(crate::one_totp::routes())
+        .merge(crate::one_files::routes())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

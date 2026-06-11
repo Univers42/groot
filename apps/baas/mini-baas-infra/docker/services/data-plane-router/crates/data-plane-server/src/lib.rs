@@ -12,6 +12,8 @@ pub mod one;
 #[cfg(feature = "one")]
 pub mod one_email;
 #[cfg(feature = "one")]
+pub mod one_files;
+#[cfg(feature = "one")]
 pub mod one_oauth;
 #[cfg(feature = "one")]
 pub mod one_totp;
