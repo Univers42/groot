@@ -10,11 +10,11 @@ regression gate `make verify-m32` keeps each tier inside its budget.
 | Tier | RAM (running) | Images | Services | Engines | Security | Best for |
 |---|---|---|---|---|---|---|
 | **basic** | **~380 MiB** | ~0.9 GB | 11 (0 Node) | SQLite, PostgreSQL | baseline | A private app on your machine / prototyping — Pi or $5 VPS |
-| **essential** | ~1.19 GB | ~5.4 GB | 27 | + the Node orchestration (graph, masks, automations) | baseline | A single small product with the full feature set |
-| **pro** | ~1.45 GB | ~5.8 GB | 30 | + MySQL/MariaDB/Mongo/Redis/CockroachDB, realtime, storage | baseline | A multi-engine SaaS with realtime + object storage |
-| **max** | ~3.0 GB | ~11 GB | 41 | + MSSQL/HTTP, analytics (Trino/Iceberg), functions, observability | **max** (TLS verify-full, audit, Vault-eligible) | A multi-tenant cloud platform |
+| **essential** | **~0.96 GB** | ~3.2 GB | 19 | pg/SQLite OLTP + the Node orchestration (graph, masks, automations) — **no mongo/mysql containers** (outbox-relay runs mongo-optional) | baseline | A single small product with the full feature set, under 1 GB |
+| **pro** | ~1.38 GB | ~5.6 GB | 28 | + MySQL/MariaDB/Mongo/Redis/CockroachDB, realtime, storage | baseline | A multi-engine SaaS with realtime + object storage |
+| **max** | ~2.9 GB | ~11 GB | 41 | + MSSQL/HTTP, analytics (Trino/Iceberg), AI, functions, observability | **max** (TLS verify-full, audit, Vault-eligible) | A multi-tenant cloud platform |
 
-Budgets enforced by `m32`: basic ≤512, essential ≤1300, pro ≤1500, max ≤3200 MiB.
+Budgets enforced by `m32`: basic ≤512, essential ≤1024, pro ≤1500, max ≤3200 MiB.
 
 ### Why basic is so much smaller
 

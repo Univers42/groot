@@ -79,6 +79,16 @@ export class SagaCoordinatorService implements OnModuleDestroy {
   }
 
   private async dispatchMongo(event: SagaEvent): Promise<void> {
+    if (!this.mongo.isAvailable) {
+      // Deployment has no mongo (lean tier): the canonical pg write is already
+      // committed and there is no projection target to fulfil. Skip loudly —
+      // throwing would mark the event failed and eventually COMPENSATE a
+      // perfectly good write.
+      this.logger.warn(
+        `mongo projection skipped for outbox event ${event.id} (${event.target_resource ?? event.aggregate}): MongoDB unavailable`,
+      );
+      return;
+    }
     const payload = this.objectPayload(event.payload);
     if (!payload) return;
     const data = this.objectPayload(payload['data']) ?? payload;

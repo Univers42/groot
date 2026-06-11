@@ -92,8 +92,11 @@ PACKAGES := basic essential pro max
 # basic = the Pi-class lean tier: SQLite-first, served Node-free via the Rust
 # /data/v1 bypass — only the always-on core + Go control + Rust data plane.
 PACKAGE_basic     := go rust
-PACKAGE_essential := data go rust adapter background
-PACKAGE_pro       := $(PACKAGE_essential) storage realtime
+# essential = pg/sqlite OLTP + Node orchestration, NO mongo/mysql containers:
+# the `data` plane joins at pro. outbox-relay tolerates the missing mongo
+# (MONGO_OPTIONAL) and the tier's capability mask already forbids mongo mounts.
+PACKAGE_essential := go rust adapter background
+PACKAGE_pro       := $(PACKAGE_essential) data storage realtime
 PACKAGE_max       := $(PACKAGE_pro) analytics observability functions engines
 ADDONS ?=
 

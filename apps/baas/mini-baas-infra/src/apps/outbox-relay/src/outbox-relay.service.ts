@@ -94,7 +94,12 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       maxRetriesPerRequest: 1,
     });
     await this.redis.connect();
-    await this.mongo.getDb().collection<OrderProjection>('orders_view').createIndex({ aggregate_id: 1 });
+    // Mongo is a soft dependency (lean tiers run without the container): the
+    // relay's core job — pg outbox → Redis streams + realtime fan-out — must
+    // not depend on the projection sink existing.
+    if (this.mongo.isAvailable) {
+      await this.mongo.getDb().collection<OrderProjection>('orders_view').createIndex({ aggregate_id: 1 });
+    }
     this.timer = setInterval(() => void this.tick(), this.pollIntervalMs);
     this.timer.unref?.();
     await this.tick();

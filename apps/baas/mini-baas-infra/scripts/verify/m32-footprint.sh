@@ -32,7 +32,7 @@ ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 # tier -> RAM bar (MiB). basic = the Pi-class promise; others guard regression.
 TIERS=(basic essential pro max)
-declare -A BAR=( [basic]=512 [essential]=1300 [pro]=1500 [max]=3200 )
+declare -A BAR=( [basic]=512 [essential]=1024 [pro]=1500 [max]=3200 )
 
 rc=0
 for tier in "${TIERS[@]}"; do

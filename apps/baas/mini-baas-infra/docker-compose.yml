@@ -341,6 +341,9 @@ services:
       OUTBOX_MONGO_URL: ${OUTBOX_MONGO_URL:-mongodb://${MONGO_INITDB_ROOT_USERNAME:-mongo}:${MONGO_INITDB_ROOT_PASSWORD:-mongo}@mongo:27017/mini_baas?authSource=admin}
       MONGO_URI: ${OUTBOX_MONGO_URL:-mongodb://${MONGO_INITDB_ROOT_USERNAME:-mongo}:${MONGO_INITDB_ROOT_PASSWORD:-mongo}@mongo:27017/mini_baas?authSource=admin}
       MONGO_DB_NAME: ${OUTBOX_MONGO_DB_NAME:-mini_baas}
+      # Mongo is a SOFT dependency of the relay: when no mongo container exists
+      # (lean tiers), it boots degraded and skips projections with a warning.
+      MONGO_OPTIONAL: "1"
       REALTIME_PUBLISH_URL: ${REALTIME_PUBLISH_URL:-http://realtime:4000/v1/publish}
       REALTIME_PUBLISH_TIMEOUT_MS: ${REALTIME_PUBLISH_TIMEOUT_MS:-1000}
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -351,6 +354,7 @@ services:
         condition: service_healthy
       mongo:
         condition: service_healthy
+        required: false
       realtime:
         condition: service_healthy
         required: false
@@ -1219,7 +1223,9 @@ services:
       dockerfile: Dockerfile
       args:
         APP: analytics-service
-    profiles: [analytics, background]
+    # analytics add-on (max tier) — NOT `background`: it hard-requires mongo,
+    # and `background` is part of the lean essential set.
+    profiles: [analytics]
     container_name: mini-baas-analytics-service
     env_file: [.env]
     environment:
@@ -1318,7 +1324,9 @@ services:
       dockerfile: Dockerfile
       args:
         APP: ai-service
-    profiles: [background]
+    # AI add-on rides the analytics profile (max tier) — NOT `background`: it
+    # hard-requires mongo, and `background` is part of the lean essential set.
+    profiles: [analytics]
     container_name: mini-baas-ai-service
     env_file: [.env]
     environment:
