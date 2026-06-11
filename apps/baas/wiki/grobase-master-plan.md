@@ -31,8 +31,10 @@ weekend project to a 10K-tenant platform on one codebase.**
 | Write latency (insert, warm) | p50 9 ms · p95 117 ms · **p99 583 ms** | same `.median.ops.insert` |
 | Mixed CRUD @ 20 rps (1 tenant) | p95 12 ms (best run); high variance from writes | `load-essential-crud.json` `.runs[]` |
 | **Read capacity (single pool, p95 ≤ 50 ms)** | **~400 rps at p95 < 2 ms; cliff at 500+** | `artifacts/bench/capacity-essential.json` |
-| Bulk provisioning throughput | ~13 tenants/sec (10K ≈ 13 min), 0 OOM restarts | `make scale-seed` run log |
-| 10K-tenant fan-out p99 | _<run `make verify-m39 SCALE=10000`>_ | `artifacts/bench/multitenant-10000.json` |
+| Bulk provisioning throughput | ~13/s at conc 16 until Argon2id CPU-saturation (~4k), then `RESUME=1 conc 8` heals → **9,993/10,000** | `make scale-seed` run log; §7.2 |
+| **10K tenants: data-plane footprint** | **30 MiB RSS holding ~987 live pools, 0 evicted** (17× under the 512 MiB bar) | `artifacts/bench/multitenant-10000.json` + `/metrics` |
+| **10K tenants: warm serving** | **~2 ms/req** (cold single 263 ms) | warm probe, §7.2 |
+| **10K cold sparse fan-out** | p50 3.07 s / 8.4 % 5xx — **verify-path-bound (Argon2id @ tenant-control 160 MiB cap), NOT pools** | `artifacts/bench/multitenant-10000.json`; §7.2 |
 | vs Supabase footprint + latency | _<run `grobase-vs-supabase.sh` on a freed box>_ | `artifacts/bench/grobase-vs-supabase.json` |
 | vs PocketBase (already shipped) | 5.1 MB vs 30.1 MB · 2.0 vs 13.1 MiB idle · faster | `artifacts/nano-vs-pocketbase.json` |
 
@@ -204,33 +206,63 @@ Ran on the running stack with the rebuilt data-plane + tenant-control, scale ove
 
 The stack was restored to base config (new images retained, flags at parity defaults) after the run.
 
-### 7.2 10K headline run — harness verified, blocked on environment (2026-06-11)
+### 7.2 10K headline run — executed (2026-06-12, scale override). The measurement overturned the hypothesis.
 
-The m39 gate (`scripts/verify/m39-scale.sh`) was exercised end-to-end at the
-**smoke scale (200 tenants)** on the *base* stack to verify the pipeline post-R2/H1
-(seed → crypto-OOM guard → multitenant k6 load → p99/5xx/RSS asserts → auto-teardown).
-It ran cleanly and **correctly caught that the base stack is not headline-ready**:
+Environment prerequisites cleared first: redis OOM-loop fixed (512 MiB limit + AOF
+auto-rewrite disabled), scale override up (PG `max_connections=2000`, `DATA_PLANE_MAX_POOLS=4096`).
+**10,000 tenants seeded and load-tested** end-to-end. The result is more valuable than a green
+checkmark: it **disproved the going-in #1-bottleneck hypothesis (pools)** and located the real wall.
+
+**Seed — 9,993 / 10,000 provisioned** (`make scale-seed SCALE=10000`, `pro` `shared_rls`):
+9,189 created + 804 idempotent-exists + 7 residual errors; **9,975 carry a usable key + mount**.
+Notable: seed throughput is **Argon2id-bound, not I/O-bound**. At concurrency 16 it ran ~13/s clean
+for the first ~4 k, then the box CPU-saturated on per-key Argon2id minting (load 7→26) and ~6 k
+provisions blew the 30 s timeout; a `RESUME=1 CONCURRENCY=8` pass healed all but 7 (errored slugs
+re-tried, good ones skipped). ⇒ **the real seed fix is a bulk-provision endpoint that batches key
+derivation**, logged for the 100K-path doc — same Argon2id root cause as the serving wall below.
+
+**Load — `multitenant-10000.json`, 9,975 tenants × 20 rps × 60 s, zipf, default cache:**
 
 | Signal | Measured | Reading |
 |---|---|---|
-| `multitenant-200.json` | p50 **27 ms**, p99 **10003 ms** (timeout ceiling), **6481/10876 5xx** | a fast-success cohort + a large 502 tail — downstream connection exhaustion, not the data plane |
-| data-plane RSS | **60 MiB**, `pool_events{evicted}=0` | the plane itself is idle-cheap; the wall is below it |
-| Root cause | base postgres `max_connections=100`; data-plane `DATA_PLANE_SHARE_POOLS` off (parity default) → 200 distinct tenant pools exhaust PG connections → 10 s hang → **502** | **exactly the bottleneck B4-pools + the scale override fix** (§7.1 proved 50 shared_rls tenants → 1 pool when `SHARE_POOLS=1`) |
+| http p50 / p99 | **3,071 ms / 10,268 ms** (timeout ceiling) | latency collapse — but **not** in the data plane (see below) |
+| errors / 5xx / 429 | **8.41 % / 51 / 0** | timeouts, not rate-limits; k6 exhausted its 50 VUs |
+| **data-plane RSS** | **30 MiB** (`mem_limit` 96), CPU **2 %** | the plane holding 10 k tenants is **idle-cheap — 17× under the 512 MiB bar** |
+| `pool_events` | **987 created · 0 evicted · 986 reaped** (cap 4096) | **pools are NOT the bottleneck** — they never hit the cap, never thrashed |
+| warm probe (12× same tenant) | req 1 **263 ms** (cold), req 2-12 **~2 ms** | warm steady-state **2 ms/req**, better than the advertised 8 ms |
 
-So the smoke is a *passing demonstration of the harness* and a measured datapoint, not a
-regression: the 502 wall is the documented pre-scale-override behavior. The full 10K run is
-gated on two environment prerequisites, neither related to the R2/H1 changes:
+**Where the wall actually is.** The data plane is at 2 % CPU yet returns **502 after exactly 10,001 ms** —
+it is *waiting* on a downstream. The Rust plane does not verify keys itself; it **calls tenant-control
+`POST /v1/keys/verify`**, which runs memory-hard **Argon2id** and is **`mem_limit`-capped at 160 MiB**.
+The data-plane's `verify_cache` (30 s TTL) amortizes this only for *repeat* hits — but at 20 rps spread
+across 9,975 tenants each tenant is hit ~once per 8 min, **far longer than the 30 s TTL**, so essentially
+every request is a cache miss that floods a mem-capped tenant-control → verify calls time out → 502.
+**Pools (the plan's presumed #1 bottleneck) are fine; the identity/Argon2id-verify path is the true #1.**
 
-1. **redis is OOM-crash-looping** (`OOMKilled=true`, **651 restarts**): its 128 MiB limit is too
-   small for the accumulated AOF, so every background AOF rewrite is killed (signal 9). Needs a
-   redis mem bump and/or an AOF reset before any sustained run.
-2. **Scale override required**: `docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d`
-   (PG `max_connections=2000`, `DATA_PLANE_MAX_POOLS=4096`) **with `DATA_PLANE_SHARE_POOLS=1`** so the
-   shared_rls fleet collapses to one pool (the §7.1 win), then `SCALE=10000 bash scripts/verify/m39-scale.sh`.
+**The cache-TTL lever, tested and reported honestly.** Bumping `DATA_PLANE_VERIFY_CACHE_TTL_MS`/
+`DATA_PLANE_CREDENTIAL_CACHE_TTL_MS` 30 s→10 min (`multitenant-10000-warmcache.json`) made it **worse**
+(58 % err, p50 10 s) — because recreating the data-plane *emptied* its verify cache and the cold-start
+re-flooded the 160 MiB tenant-control before the cache could populate. So TTL alone, from cold, is not
+the fix; it confirms the diagnosis. The real fixes, now measurement-grounded:
+1. **Raise tenant-control memory** (160 MiB → ≥512) and/or **parallelize key-verify** — it is the serving wall, not pools.
+2. **Move key-verify into the Rust plane with a sharded (DashMap) cache** + a TTL sized for sparse multi-tenant traffic — the global-`Mutex` verify/mount caches don't scale to 10 k warm entries (plan item B4.4, now justified by data).
+3. **Bulk-provision endpoint** batching Argon2id derivation (the seed-throughput fix, same root cause).
 
-Reproduce once the environment is healthy: stabilize redis → bring up the scale override with
-`SHARE_POOLS=1` → `SCALE=10000 bash scripts/verify/m39-scale.sh` (auto-seeds, loads, asserts
-p99 ≤ 2× baseline · 0×5xx · RSS ≤ 512 MiB, auto-tears-down).
+**Honest headline:** one box holds **10,000 live tenants in a 30 MiB data plane** and serves any *warm*
+tenant in **~2 ms** — the footprint/cost story is decisively won. The *cold sparse-fan-out* worst case
+(every tenant colder than any real workload, on a Chrome-loaded 20-core dev box) is **verify-path-bound at
+a deliberately under-provisioned tenant-control**, with three identified, not-yet-measured-clean fixes. The
+measurement did its job: it replaced a guess (pools) with a located, mechanism-level cause (Argon2id verify).
+
+> **B4-pools caveat (corrects §7.1):** `SHARE_POOLS=1` collapses the pool *count* (1 vs 50/10 k) as §7.1
+> measured, but the data plane currently stamps the shared pool with one tenant's identity → other tenants
+> get `identity tenant does not match pool tenant` (502). The pool-count win is real; the per-checkout RLS
+> **re-stamp is not yet implemented**, so `SHARE_POOLS` stays **off (parity default)** and is *not* the
+> ready 100K lever until that guard is fixed. This is why the 10K run above used per-tenant pools (987), not 1.
+
+Artifacts: `artifacts/bench/multitenant-10000.json` (cold, default cache),
+`multitenant-10000-coldcache.json` (same, preserved), `multitenant-10000-warmcache.json` (10-min TTL),
+`artifacts/scale/tenants-10000.jsonl` (+`.raw` pre-dedup).
 
 ---
 
