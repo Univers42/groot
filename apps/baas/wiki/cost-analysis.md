@@ -18,7 +18,8 @@ derived from [Fly.io's published pricing](https://fly.io/docs/about/pricing/) (J
 
 | Tier | Running RAM | Images | Services | Node svcs | Heavy engines |
 |---|---|---|---|---|---|
-| **nano** | **2.0 MiB** (1 static binary, MEASURED) | **5.11 MB** | **1** | **0** | SQLite in-process; CRUD+schema+graph+scoped keys+SSE — gated by `m37`, see [`nano-edition.md`](./nano-edition.md) |
+| **nano** | **2.1 MiB** (1 static binary, MEASURED) | **5.16 MB** | **1** | **0** | SQLite in-process; CRUD+schema+graph+scoped keys+SSE — gated by `m37`, see [`nano-edition.md`](./nano-edition.md) |
+| **one** | **2.2 MiB** (1 static binary, MEASURED) | **6.41 MB** | **1** | **0** | nano + accounts (password/OAuth2 matrix/OTP/TOTP MFA) + files + filtered realtime + admin dashboard — gated by `m40`–`m45`, see [`nano-vs-pocketbase.md`](./nano-vs-pocketbase.md) |
 | **basic** | **463 MiB** | 0.9 GB | 11 | **0** | SQLite (in-process), PostgreSQL |
 | **essential** | **949 MiB** | 2.9 GB | 19 | 8 | pg only (mongo runs optional/off) |
 | **pro** | **1361 MiB** | 5.3 GB | 28 | 9 | + MySQL, Mongo, Redis, MinIO, realtime |
@@ -75,6 +76,7 @@ Volume/egress are conservative working assumptions (a small app's data + modest 
 | Tier | Provision | Compute | + Volume | + Egress | **All-in / tenant / mo** |
 |---|---|---|---|---|---|
 | **nano** | 1 vCPU · 256 MB | $2.02 | ~$0.30 (2 GB) | ~$0.20 | **≈ $2–3**  (< $1 idle, scale-to-zero) |
+| **one** | 1 vCPU · 256 MB | $2.02 | ~$0.30 (2 GB) | ~$0.20 | **≈ $2–3**  (< $1 idle) — same VM class as nano; the app-backend features are binary weight, not RAM |
 | **basic** | 1 vCPU · 1 GB | $5.77 | ~$0.45 (3 GB) | ~$0.50 | **≈ $6–7**  (< $2 idle) |
 | **essential** | 2 vCPU · 2 GB | $11.54 | ~$0.75 (5 GB) | ~$1 | **≈ $12–14** |
 | **pro** | 4 vCPU · 3 GB | $18.08 | ~$1.50 (10 GB) | ~$1.50 | **≈ $20–23** |
@@ -98,7 +100,8 @@ amortized-multi-tenant economics for the upper tiers:
 
 | Tier | Infra cost | Suggested retail | Why |
 |---|---|---|---|
-| **nano** | ~$2 (or < $1 idle) | **Free / $5** | PocketBase-class single binary; landing pages, prototypes, one tiny app |
+| **nano** | ~$2 (or < $1 idle) | **Free / $5** | headless single binary; landing pages, prototypes, machine-to-machine |
+| **one** | ~$2 (or < $1 idle) | **$5–9** | *our PocketBase*: accounts + OAuth + MFA + files + admin UI on the same $2 VM — PB-class product, 26× lighter under load (see nano-vs-pocketbase.md) |
 | **basic** | ~$6 (or < $2 idle) | **Free / $9** | lean microservice stack; SQLite-first, room to scale out |
 | **essential** | ~$13 | **$25–39** | one full-feature product; ~3× markup |
 | **pro** | ~$21 dedicated / < $1 amortized | **$59–99** | multi-engine SaaS; fat margin when multi-tenant |
