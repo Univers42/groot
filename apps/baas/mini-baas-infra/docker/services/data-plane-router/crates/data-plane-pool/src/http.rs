@@ -659,6 +659,7 @@ mod tests {
             expected_version: None,
             returning: None,
             aggregate: None,
+            fields: None,
         };
         let path = append_query("/users", &op);
         assert!(path.starts_with("/users?"));
