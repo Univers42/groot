@@ -42,6 +42,12 @@
 #   LIVE_SERVICE_TOKEN    control-plane service token (X-Service-Token)
 #   LIVE_TENANT_CONTROL_URL  http://127.0.0.1:<resolved tenant-control port>
 
+# v1 HMAC service auth (audit O1): when SERVICE_TOKEN_MODE=hmac the direct
+# tenant-control / adapter-registry calls below sign per-request instead of
+# sending the raw token. Sourced relative to this lib.
+# shellcheck source=/dev/null
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/service-auth.sh"
+
 # Container env var (works for distroless images — no `sh` needed).
 _lt_env() { # $1 container, $2 var
   docker inspect "$1" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
@@ -79,20 +85,24 @@ live_tenant_provision() { # $1 slug (must match ^[a-z0-9][a-z0-9_-]{1,62}$)
     || { echo "Kong consumer keys not found on mini-baas-kong" >&2; return 1; }
 
   # 1) tenant — idempotent: 201 created or 409 already exists are both fine.
-  local code
+  local code tbody
+  tbody="{\"id\":\"${slug}\",\"name\":\"${slug}\"}"
+  svc_auth POST /v1/tenants "${tbody}"
   code=$(curl -s -o /tmp/lt-tenant.json -w '%{http_code}' -X POST \
     "${LIVE_TENANT_CONTROL_URL}/v1/tenants" \
-    -H "X-Service-Token: ${LIVE_SERVICE_TOKEN}" -H 'Content-Type: application/json' \
-    -d "{\"id\":\"${slug}\",\"name\":\"${slug}\"}")
+    "${SVC_AUTH[@]}" -H 'Content-Type: application/json' \
+    -d "${tbody}")
   [[ "${code}" == "201" || "${code}" == "409" ]] \
     || { echo "tenant create failed (${code}): $(cat /tmp/lt-tenant.json)" >&2; return 1; }
   LIVE_TENANT_SLUG="${slug}"
 
   # 2) API key — read+write scopes (what an app key carries; admin not needed).
+  local kbody='{"name":"verify-probe","scopes":["read","write"]}'
+  svc_auth POST "/v1/tenants/${slug}/keys" "${kbody}"
   code=$(curl -s -o /tmp/lt-key.json -w '%{http_code}' -X POST \
     "${LIVE_TENANT_CONTROL_URL}/v1/tenants/${slug}/keys" \
-    -H "X-Service-Token: ${LIVE_SERVICE_TOKEN}" -H 'Content-Type: application/json' \
-    -d '{"name":"verify-probe","scopes":["read","write"]}')
+    "${SVC_AUTH[@]}" -H 'Content-Type: application/json' \
+    -d "${kbody}")
   [[ "${code}" == "201" ]] || { echo "key mint failed (${code}): $(cat /tmp/lt-key.json)" >&2; return 1; }
   LIVE_TENANT_API_KEY="$(_lt_json_field key < /tmp/lt-key.json)"
   LIVE_TENANT_KEY_ID="$(_lt_json_field id < /tmp/lt-key.json)"
@@ -125,15 +135,26 @@ live_tenant_provision() { # $1 slug (must match ^[a-z0-9][a-z0-9_-]{1,62}$)
 # Best-effort teardown (safe to call from an EXIT trap, never fails the gate):
 # deregister the mount, revoke the key, soft-delete the tenant.
 live_tenant_cleanup() {
-  [[ -n "${LIVE_TENANT_DB_ID:-}" ]] && curl -s -o /dev/null -X DELETE \
-    "${LIVE_KONG_URL}/admin/v1/databases/${LIVE_TENANT_DB_ID}" \
-    -H "apikey: ${LIVE_SERVICE_APIKEY}" -H "X-Service-Token: ${LIVE_SERVICE_TOKEN}" \
-    -H "X-Tenant-Id: ${LIVE_TENANT_SLUG}" || true
-  [[ -n "${LIVE_TENANT_KEY_ID:-}" ]] && curl -s -o /dev/null -X DELETE \
-    "${LIVE_TENANT_CONTROL_URL}/v1/tenants/${LIVE_TENANT_SLUG}/keys/${LIVE_TENANT_KEY_ID}" \
-    -H "X-Service-Token: ${LIVE_SERVICE_TOKEN}" || true
-  [[ -n "${LIVE_TENANT_SLUG:-}" ]] && curl -s -o /dev/null -X DELETE \
-    "${LIVE_TENANT_CONTROL_URL}/v1/tenants/${LIVE_TENANT_SLUG}" \
-    -H "X-Service-Token: ${LIVE_SERVICE_TOKEN}" || true
+  # Kong /admin/v1/databases has strip_path:true → adapter-registry sees the
+  # bare /databases/<id>; that is the path the HMAC signature must bind.
+  if [[ -n "${LIVE_TENANT_DB_ID:-}" ]]; then
+    svc_auth DELETE "/databases/${LIVE_TENANT_DB_ID}" ""
+    curl -s -o /dev/null -X DELETE \
+      "${LIVE_KONG_URL}/admin/v1/databases/${LIVE_TENANT_DB_ID}" \
+      -H "apikey: ${LIVE_SERVICE_APIKEY}" "${SVC_AUTH[@]}" \
+      -H "X-Tenant-Id: ${LIVE_TENANT_SLUG}" || true
+  fi
+  if [[ -n "${LIVE_TENANT_KEY_ID:-}" ]]; then
+    svc_auth DELETE "/v1/tenants/${LIVE_TENANT_SLUG}/keys/${LIVE_TENANT_KEY_ID}" ""
+    curl -s -o /dev/null -X DELETE \
+      "${LIVE_TENANT_CONTROL_URL}/v1/tenants/${LIVE_TENANT_SLUG}/keys/${LIVE_TENANT_KEY_ID}" \
+      "${SVC_AUTH[@]}" || true
+  fi
+  if [[ -n "${LIVE_TENANT_SLUG:-}" ]]; then
+    svc_auth DELETE "/v1/tenants/${LIVE_TENANT_SLUG}" ""
+    curl -s -o /dev/null -X DELETE \
+      "${LIVE_TENANT_CONTROL_URL}/v1/tenants/${LIVE_TENANT_SLUG}" \
+      "${SVC_AUTH[@]}" || true
+  fi
   return 0
 }

@@ -77,10 +77,12 @@ pass "full create→introspect→insert→read lifecycle clean through the Node-
 
 # ── 3. scope gate: read-only key denied write AND ddl, allowed read ─────────
 step "scope gate: read-only key → write 403, ddl 403, read 200"
+m33kb='{"name":"m33-readonly","scopes":["read"]}'
+svc_auth POST "/v1/tenants/${LIVE_TENANT_SLUG}/keys" "${m33kb}"
 code=$(curl -s -o /tmp/m33-rk.json -w '%{http_code}' -X POST \
   "${LIVE_TENANT_CONTROL_URL}/v1/tenants/${LIVE_TENANT_SLUG}/keys" \
-  -H "X-Service-Token: ${LIVE_SERVICE_TOKEN}" -H 'Content-Type: application/json' \
-  -d '{"name":"m33-readonly","scopes":["read"]}')
+  "${SVC_AUTH[@]}" -H 'Content-Type: application/json' \
+  -d "${m33kb}")
 [[ "${code}" == "201" ]] || fail "read-only key mint failed (${code})"
 RKEY="$(sed -n 's/.*"key":"\([^"]*\)".*/\1/p' /tmp/m33-rk.json | head -1)"
 [[ "${RKEY}" == mbk_* ]] || fail "read-only key has unexpected shape"

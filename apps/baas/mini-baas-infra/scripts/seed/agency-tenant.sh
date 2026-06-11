@@ -20,6 +20,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# v1 HMAC service auth (audit O1) — signs tenant-control calls under hmac mode.
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../lib/service-auth.sh"
 INFRA_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 STATE_ENV="${INFRA_ROOT}/.agency-tenant.env"
 PG_CTN="mini-baas-postgres"
@@ -54,9 +57,11 @@ docker exec "${PG_CTN}" psql -U "${PG_USER}" -d postgres -tc \
 
 # ── 2) tenant ─────────────────────────────────────────────────────────────────
 cyan "ensuring tenant '${TENANT_SLUG}'"
+atbody="{\"id\":\"${TENANT_SLUG}\",\"name\":\"Binocle Intelligence Agency\"}"
+svc_auth POST /v1/tenants "${atbody}"
 code=$(curl -s -o /tmp/agency-tenant.json -w '%{http_code}' -X POST "${TC_URL}/v1/tenants" \
-  -H "X-Service-Token: ${SERVICE_TOKEN}" -H 'Content-Type: application/json' \
-  -d "{\"id\":\"${TENANT_SLUG}\",\"name\":\"Binocle Intelligence Agency\"}")
+  "${SVC_AUTH[@]}" -H 'Content-Type: application/json' \
+  -d "${atbody}")
 [[ "${code}" == "201" || "${code}" == "409" ]] || fail "tenant create (${code}): $(cat /tmp/agency-tenant.json)"
 
 # ── 3) API key — reuse a still-valid key from a previous run ─────────────────
@@ -76,10 +81,12 @@ if [[ "${key_ok}" == "1" ]]; then
   cyan "reusing existing key + mount (${DB_ID})"
 else
   cyan "minting API key"
+  akbody='{"name":"agency-app","scopes":["read","write"]}'
+  svc_auth POST "/v1/tenants/${TENANT_SLUG}/keys" "${akbody}"
   code=$(curl -s -o /tmp/agency-key.json -w '%{http_code}' -X POST \
     "${TC_URL}/v1/tenants/${TENANT_SLUG}/keys" \
-    -H "X-Service-Token: ${SERVICE_TOKEN}" -H 'Content-Type: application/json' \
-    -d '{"name":"agency-app","scopes":["read","write"]}')
+    "${SVC_AUTH[@]}" -H 'Content-Type: application/json' \
+    -d "${akbody}")
   [[ "${code}" == "201" ]] || fail "key mint (${code}): $(cat /tmp/agency-key.json)"
   API_KEY="$(_lt_json_field key < /tmp/agency-key.json)"
   KEY_ID="$(_lt_json_field id < /tmp/agency-key.json)"
