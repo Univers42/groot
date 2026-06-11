@@ -307,6 +307,8 @@ impl NanoState {
                     // Stable owner principal — see module docs.
                     key_id: NANO_KEY_PRINCIPAL.to_string(),
                     scopes,
+                    principal: format!("api-key:{NANO_KEY_PRINCIPAL}"),
+                    source: data_plane_core::IdentitySource::ServiceToken,
                 })
             }
             None => Err(api_err(
@@ -533,10 +535,16 @@ async fn raw(
 struct RealtimeQuery {
     #[serde(default)]
     key: Option<String>,
+    /// binocle-one: a user JWT via query param (EventSource cannot set the
+    /// Authorization header).
+    #[cfg(feature = "one")]
+    #[serde(default)]
+    token: Option<String>,
 }
 
 /// SSE stream of committed mutations. Auth: `X-Baas-Api-Key` header or `?key=`
-/// (EventSource cannot set headers); requires the `read` scope.
+/// for machine keys; Bearer / `?token=` for binocle-one user JWTs (EventSource
+/// cannot set headers); requires the `read` scope.
 async fn realtime(
     State(state): State<AppState>,
     headers: header::HeaderMap,
@@ -546,16 +554,36 @@ async fn realtime(
         Ok(n) => n,
         Err(r) => return r,
     };
-    let id = match headers.get("x-baas-api-key").and_then(|v| v.to_str().ok()) {
-        Some(k) if !k.trim().is_empty() => nano.verify_key_str(k),
-        _ => match q.key.as_deref() {
-            Some(k) if !k.trim().is_empty() => nano.verify_key_str(k),
-            _ => Err(api_err(
+    let key = headers
+        .get("x-baas-api-key")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string)
+        .or_else(|| q.key.clone())
+        .filter(|k| !k.trim().is_empty());
+    let id = match key {
+        Some(k) => nano.verify_key_str(&k),
+        None => {
+            #[cfg(feature = "one")]
+            {
+                let token = crate::one::bearer_token(&headers)
+                    .or_else(|| q.token.clone())
+                    .filter(|t| !t.trim().is_empty());
+                match (state.one.as_ref(), token) {
+                    (Some(one), Some(t)) => one.verify_jwt(&t),
+                    _ => Err(api_err(
+                        StatusCode::UNAUTHORIZED,
+                        "unauthorized",
+                        "X-Baas-Api-Key / ?key= or Bearer / ?token= is required",
+                    )),
+                }
+            }
+            #[cfg(not(feature = "one"))]
+            Err(api_err(
                 StatusCode::UNAUTHORIZED,
                 "unauthorized",
                 "X-Baas-Api-Key header or ?key= is required",
-            )),
-        },
+            ))
+        }
     };
     let id = match id {
         Ok(id) => id,
@@ -586,10 +614,12 @@ async fn realtime(
 
 // ─── runtime ─────────────────────────────────────────────────────────────────
 
-/// The nano router: the `/data/v1` plane (always on — nano IS the bypass) +
-/// the in-process control surface. The trusted-envelope `/v1/query` family is
-/// deliberately NOT mounted: there is no query-router in front to be trusted.
-pub fn router(state: AppState) -> Router {
+/// The nano route set, unfinished (no state/layers) so binocle-one can merge
+/// its own routes on top: the `/data/v1` plane (always on — nano IS the
+/// bypass) + the in-process control surface. The trusted-envelope `/v1/query`
+/// family is deliberately NOT mounted: there is no query-router in front to
+/// be trusted.
+pub(crate) fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/health", get(crate::routes::health))
         .route("/v1/capabilities", get(crate::routes::capabilities))
@@ -603,8 +633,10 @@ pub fn router(state: AppState) -> Router {
         .route("/nano/v1/keys/:id", axum::routing::delete(revoke_key))
         .route("/nano/v1/raw", post(raw))
         .route("/nano/v1/realtime", get(realtime))
-        .layer(TraceLayer::new_for_http())
-        .with_state(state)
+}
+
+pub fn router(state: AppState) -> Router {
+    routes().layer(TraceLayer::new_for_http()).with_state(state)
 }
 
 /// Boot the nano runtime: open the key store + mounts, attach them to the

@@ -44,6 +44,10 @@ panic = "abort"
 
 [workspace.dependencies]
 anyhow = "1"
+# binocle-one: password hashing (argon2id — passwords are low-entropy, unlike
+# API keys) + HS256 JWT mint/verify. pem support off: no PEM keys in one.
+argon2 = "0.5"
+jsonwebtoken = { version = "9", default-features = false }
 async-trait = "0.1"
 axum = "0.7"
 bson = { version = "2.10", features = ["chrono-0_4"] }

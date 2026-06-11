@@ -16,8 +16,8 @@ use crate::metrics::{escape_label, Metrics};
 use crate::ratelimit::{tier_rate, TenantRateLimiter};
 use data_plane_core::{
     CredentialRef, DataOperation, DataOperationKind, DataPlaneError, DatabaseMount, EngineAdapter,
-    EngineCapabilities, IdentitySource, MigrationRequest, Plan, PoolPolicy, PoolRegistry,
-    RawStatement, RequestIdentity, SchemaDdlRequest, TxBeginRequest, TxHandle, WorkloadContext,
+    EngineCapabilities, MigrationRequest, Plan, PoolPolicy, PoolRegistry, RawStatement,
+    RequestIdentity, SchemaDdlRequest, TxBeginRequest, TxHandle, WorkloadContext,
 };
 use data_plane_pool::{DefaultPoolRegistry, EnvMountResolver, ProviderConfig};
 #[cfg(feature = "http")]
@@ -177,6 +177,9 @@ pub struct AppState {
     /// never sets it, so every nano branch is dead code there.
     #[cfg(feature = "nano")]
     pub(crate) nano: Option<Arc<crate::nano::NanoState>>,
+    /// binocle-one: user accounts + JWT sessions on top of nano.
+    #[cfg(feature = "one")]
+    pub(crate) one: Option<Arc<crate::one::OneState>>,
     /// Short-TTL cache of `api-key → VerifiedIdentity` for the bypass front door,
     /// mirroring the query-router's `ApiKeyMiddleware` 30 s cache. Without it the
     /// bypass re-runs the Argon2id key-verify (a tenant-control round-trip) on
@@ -274,6 +277,8 @@ impl AppState {
             automations: crate::automations::AutomationEngine::from_env().map(Arc::new),
             #[cfg(feature = "nano")]
             nano: None,
+            #[cfg(feature = "one")]
+            one: None,
             verify_cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
             mount_cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
@@ -496,6 +501,45 @@ async fn metrics_handler(State(state): State<AppState>) -> Response {
             "baas_http_requests_total{{service=\"data-plane-router\",status=\"{class}\"}} {n}\n"
         ));
     }
+    // Scale counters (B3): pool lifecycle, cache effectiveness, limiter map —
+    // the signals the 10K-tenant experiments watch. evicted_total climbing at
+    // steady state == the mount working set exceeds DATA_PLANE_MAX_POOLS.
+    let (pools_created, pools_evicted, pools_reaped, pools_open) = state.registry.scale_counters();
+    out.push_str("# HELP baas_data_plane_pools_open Engine pools currently cached\n");
+    out.push_str("# TYPE baas_data_plane_pools_open gauge\n");
+    out.push_str(&format!(
+        "baas_data_plane_pools_open{{service=\"data-plane-router\"}} {pools_open}\n"
+    ));
+    out.push_str("# HELP baas_data_plane_pool_events_total Pool lifecycle events since start\n");
+    out.push_str("# TYPE baas_data_plane_pool_events_total counter\n");
+    for (event, n) in [
+        ("created", pools_created),
+        ("evicted", pools_evicted),
+        ("reaped", pools_reaped),
+    ] {
+        out.push_str(&format!(
+            "baas_data_plane_pool_events_total{{service=\"data-plane-router\",event=\"{event}\"}} {n}\n"
+        ));
+    }
+    let (verify_hit, verify_miss, mount_hit, mount_miss) = state.metrics.cache_snapshot();
+    out.push_str("# HELP baas_data_plane_cache_events_total Verify/mount cache lookups by result\n");
+    out.push_str("# TYPE baas_data_plane_cache_events_total counter\n");
+    for (cache, result, n) in [
+        ("verify", "hit", verify_hit),
+        ("verify", "miss", verify_miss),
+        ("mount", "hit", mount_hit),
+        ("mount", "miss", mount_miss),
+    ] {
+        out.push_str(&format!(
+            "baas_data_plane_cache_events_total{{service=\"data-plane-router\",cache=\"{cache}\",result=\"{result}\"}} {n}\n"
+        ));
+    }
+    out.push_str("# HELP baas_data_plane_ratelimit_tracked Tenant token buckets currently tracked\n");
+    out.push_str("# TYPE baas_data_plane_ratelimit_tracked gauge\n");
+    out.push_str(&format!(
+        "baas_data_plane_ratelimit_tracked{{service=\"data-plane-router\"}} {}\n",
+        state.ratelimiter.tracked()
+    ));
     out.push_str("# HELP baas_data_plane_pool_connections Pool connections per mount and state\n");
     out.push_str("# TYPE baas_data_plane_pool_connections gauge\n");
     if let Ok(stats) = state.registry.stats().await {
@@ -966,11 +1010,13 @@ impl AppState {
             if let Ok(cache) = self.mount_cache.lock() {
                 if let Some((at, m)) = cache.get(&ckey) {
                     if at.elapsed() < ttl {
+                        self.metrics.record_mount_cache(true);
                         return Ok(m.clone());
                     }
                 }
             }
         }
+        self.metrics.record_mount_cache(false);
         let mount = crate::auth::resolve_mount(
             &self.http_client,
             &self.config.adapter_registry_url,
@@ -1028,6 +1074,17 @@ pub(crate) async fn bypass_verify(
     // HTTP path below.
     #[cfg(feature = "nano")]
     if let Some(nano) = state.nano.as_ref() {
+        // binocle-one: a Bearer JWT is a first-class identity on the SAME
+        // door — user requests get per-user owner-scoping + ABAC masks. An
+        // explicit API key still wins (machine callers may send both).
+        #[cfg(feature = "one")]
+        if !headers.contains_key("x-baas-api-key") {
+            if let (Some(one), Some(token)) =
+                (state.one.as_ref(), crate::one::bearer_token(headers))
+            {
+                return one.verify_jwt(&token);
+            }
+        }
         return nano.verify_headers(headers);
     }
     let key = match headers.get("x-baas-api-key").and_then(|v| v.to_str().ok()) {
@@ -1056,11 +1113,13 @@ pub(crate) async fn bypass_verify(
         if let Ok(cache) = state.verify_cache.lock() {
             if let Some((at, id)) = cache.get(&key) {
                 if at.elapsed() < ttl {
+                    state.metrics.record_verify_cache(true);
                     return Ok(id.clone());
                 }
             }
         }
     }
+    state.metrics.record_verify_cache(false);
     // Go performs the Argon2id compare; Rust trusts the verified result.
     let identity = crate::auth::verify_key(
         &state.http_client,
@@ -1099,8 +1158,10 @@ async fn bypass_auth(
 }
 
 /// Build the internal (identity, mount) envelope for a verified bypass caller —
-/// the SAME shape the query-router constructs, including the `api-key:<id>`
-/// principal so bypass writes are owner-stamped identically.
+/// the SAME shape the query-router constructs. The verified principal flows
+/// through verbatim: `api-key:<id>` for machine keys (byte-parity with the
+/// query-router), `user:<id>` for binocle-one account holders (which is what
+/// makes per-user owner-scoping + ABAC masks light up on the same path).
 pub(crate) fn bypass_envelope(
     id: &crate::auth::VerifiedIdentity,
     db_id: &str,
@@ -1111,10 +1172,10 @@ pub(crate) fn bypass_envelope(
             tenant_id: id.tenant_id.clone(),
             project_id: None,
             app_id: None,
-            user_id: Some(format!("api-key:{}", id.key_id)),
+            user_id: Some(id.principal.clone()),
             roles: vec![],
             scopes: id.scopes.clone(),
-            source: IdentitySource::ServiceToken,
+            source: id.source.clone(),
         },
         DatabaseMount {
             id: db_id.to_string(),

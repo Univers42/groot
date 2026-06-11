@@ -210,6 +210,49 @@ bench-footprint: _require-compose ## Measure RAM/CPU/disk of the active PACKAGE/
 		LABEL="$(if $(PROFILES),custom,$(if $(PACKAGE),$(PACKAGE),$(EDITION)))" \
 		BAR_MB="$(BAR_MB)" bash scripts/bench/footprint.sh
 
+bench-load: _require-compose ## Sustained-load bench, Kong→/data/v1 (PACKAGE= WORKLOAD=crud|aggregate|batch MODE=short|full RATE=)
+	@PACKAGE="$(if $(PACKAGE),$(PACKAGE),essential)" WORKLOAD="$(if $(WORKLOAD),$(WORKLOAD),crud)" \
+		MODE="$(if $(MODE),$(MODE),short)" RATE="$(RATE)" bash scripts/bench/load.sh
+
+bench-capacity: _require-compose ## Ramp to the latency/error wall — true plane capacity (PACKAGE=)
+	@PACKAGE="$(if $(PACKAGE),$(PACKAGE),essential)" bash scripts/bench/capacity.sh
+
+bench-mem: _require-compose ## RSS under sustained load: peak + drift slope (PACKAGE= DURATION=30m RATE=)
+	@PACKAGE="$(if $(PACKAGE),$(PACKAGE),essential)" DURATION="$(if $(DURATION),$(DURATION),30m)" \
+		RATE="$(RATE)" bash scripts/bench/mem-under-load.sh
+
+scale-seed: _require-compose ## Provision SCALE= bench tenants (+keys+mounts) → artifacts/scale/tenants-<N>.jsonl (MOUNTS= ISOLATION= CONCURRENCY=)
+	@SCALE="$(if $(SCALE),$(SCALE),1000)"; \
+	TC_PORT="$$(docker port mini-baas-tenant-control 3022/tcp 2>/dev/null | head -1 | sed 's/.*://')"; \
+	[ -n "$$TC_PORT" ] || { echo "tenant-control not up (make up PACKAGE=… first)"; exit 1; }; \
+	TOKEN="$$(docker inspect mini-baas-tenant-control --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^INTERNAL_SERVICE_TOKEN=//p' | head -1)"; \
+	TMODE="$$(docker inspect mini-baas-tenant-control --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^SERVICE_TOKEN_MODE=//p' | head -1)"; \
+	PG_USER="$$(docker inspect mini-baas-postgres --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^POSTGRES_USER=//p' | head -1)"; \
+	PG_PASS="$$(docker inspect mini-baas-postgres --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^POSTGRES_PASSWORD=//p' | head -1)"; \
+	PG_DB="$$(docker inspect mini-baas-postgres --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^POSTGRES_DB=//p' | head -1)"; \
+	mkdir -p artifacts/scale; \
+	docker run --rm --network host -v "$(PWD)/go/control-plane":/src -v "$(PWD)/artifacts":/artifacts -w /src \
+		-v mini-baas-gomod:/go/pkg/mod -v mini-baas-gobuild:/root/.cache/go-build \
+		-e SERVICE_TOKEN_MODE="$$TMODE" golang:1.25-bookworm \
+		go run ./cmd/scale-seed -n "$$SCALE" -base "http://127.0.0.1:$$TC_PORT" -token "$$TOKEN" \
+		-dsn "postgres://$${PG_USER:-postgres}:$${PG_PASS:-postgres}@postgres:5432/$${PG_DB:-postgres}" \
+		-mounts "$(if $(MOUNTS),$(MOUNTS),1)" -isolation "$(if $(ISOLATION),$(ISOLATION),shared_rls)" \
+		-prefix "$(if $(PREFIX),$(PREFIX),scale)" \
+		-concurrency "$(if $(CONCURRENCY),$(CONCURRENCY),16)" $(if $(RESUME),-resume,) \
+		-out "/artifacts/scale/tenants-$$SCALE.jsonl"; \
+	docker run --rm -v "$(PWD)/artifacts":/a alpine:3.21 chown -R $(shell id -u):$(shell id -g) /a/scale
+
+scale-teardown: _require-compose ## Soft-delete every tenant in artifacts/scale/tenants-<SCALE>.jsonl
+	@SCALE="$(if $(SCALE),$(SCALE),1000)"; \
+	TC_PORT="$$(docker port mini-baas-tenant-control 3022/tcp 2>/dev/null | head -1 | sed 's/.*://')"; \
+	TOKEN="$$(docker inspect mini-baas-tenant-control --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^INTERNAL_SERVICE_TOKEN=//p' | head -1)"; \
+	TMODE="$$(docker inspect mini-baas-tenant-control --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^SERVICE_TOKEN_MODE=//p' | head -1)"; \
+	docker run --rm --network host -v "$(PWD)/go/control-plane":/src -v "$(PWD)/artifacts":/artifacts -w /src \
+		-v mini-baas-gomod:/go/pkg/mod -v mini-baas-gobuild:/root/.cache/go-build \
+		-e SERVICE_TOKEN_MODE="$$TMODE" golang:1.25-bookworm \
+		go run ./cmd/scale-seed -teardown -base "http://127.0.0.1:$$TC_PORT" -token "$$TOKEN" \
+		-out "/artifacts/scale/tenants-$$SCALE.jsonl"
+
 audit-deps: ## Supply-chain CVE scan — cargo-audit (Rust) + govulncheck (Go)
 	@bash scripts/security/audit-deps.sh
 
@@ -422,6 +465,23 @@ nano-up: nano-build ## Nano: run binocle-nano on :8090 (named volume nano-data)
 nano-down: ## Nano: stop binocle-nano (data volume persists)
 	@docker rm -f binocle-nano >/dev/null 2>&1 || true
 	@echo -e "$(_G)✓ binocle-nano stopped (volume nano-data kept)$(_0)"
+
+# ── binocle-one: "our PocketBase" — nano + user accounts (JWT). Gate: m40. ──
+one-build: ## One: build the binocle-one scratch image (nano + accounts)
+	@DOCKER_BUILDKIT=1 docker build -f docker/services/data-plane-router/Dockerfile.one \
+		-t binocle-one docker/services/data-plane-router
+	@docker images binocle-one --format '$(_G)✓ binocle-one built — {{.Size}}$(_0)'
+
+one-up: one-build ## One: run binocle-one on :8091 (named volume one-data)
+	@docker rm -f binocle-one >/dev/null 2>&1 || true
+	@docker run -d --name binocle-one -p 8091:8090 -v one-data:/data binocle-one >/dev/null
+	@sleep 1; docker logs binocle-one 2>&1 | head -5
+	@echo -e "$(_G)✓ binocle-one on http://localhost:8091 (admin key above on FIRST boot only)$(_0)"
+
+one-down: ## One: stop binocle-one (data volume persists)
+	@docker rm -f binocle-one >/dev/null 2>&1 || true
+	@echo -e "$(_G)✓ binocle-one stopped (volume one-data kept)$(_0)"
+
 rust-realtime-check: _rust-toolchain ## Rust: cargo check the realtime workspace (in Docker)
 	@$(CARGO_REALTIME) cargo check --workspace
 rust-realtime-test: _rust-toolchain ## Rust: run the realtime unit tests (in Docker)
@@ -464,7 +524,7 @@ help: ## Show this help
 	@echo ""
 
 .PHONY: all all-full clean fclean re up down restart ps logs pull build health \
-        bench-startup observe planes editions doctor tests test-postgres \
+        bench-startup bench-load bench-capacity bench-mem scale-seed scale-teardown observe planes editions doctor tests test-postgres \
         verify-all parity waf-test migrate migrate-mongo migrate-mysql migrate-all \
         migrate-status seed-mongo seed-live-demo secrets secrets-validate secrets-rotate \
         check-secrets env vault-init vault-status vault-rotate nestjs-ci \

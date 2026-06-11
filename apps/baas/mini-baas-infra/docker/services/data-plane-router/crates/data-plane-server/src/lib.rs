@@ -7,6 +7,8 @@ pub mod graph;
 pub mod metrics;
 #[cfg(feature = "nano")]
 pub mod nano;
+#[cfg(feature = "one")]
+pub mod one;
 #[cfg(feature = "control-pg")]
 pub mod outbox;
 pub mod ratelimit;

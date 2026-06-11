@@ -36,12 +36,21 @@ struct VerifyResponse {
     reason: Option<String>,
 }
 
-/// A verified caller identity (the trusted output of tenant-control).
+/// A verified caller identity (the trusted output of tenant-control — or, in
+/// the nano/one editions, of the in-process key store / JWT verifier).
 #[derive(Clone)]
 pub struct VerifiedIdentity {
     pub tenant_id: String,
     pub key_id: String,
     pub scopes: Vec<String>,
+    /// The EXACT principal stamped as `user_id` on the request envelope (and
+    /// therefore as the row owner): `api-key:<key id>` for machine keys,
+    /// `user:<user id>` for binocle-one account holders. Keeping it here (not
+    /// re-derived at envelope time) is what lets user JWTs flow through the
+    /// same bypass with per-user owner-scoping + ABAC masks.
+    pub principal: String,
+    /// Envelope identity source: `ServiceToken` for keys, `Jwt` for users.
+    pub source: data_plane_core::IdentitySource,
 }
 
 /// Exchange an API key for a tenant identity via tenant-control. Go performs the
@@ -84,13 +93,19 @@ pub async fn verify_key(
     }
     let text = resp.text().await.unwrap_or_default();
     match serde_json::from_str::<VerifyResponse>(&text) {
-        Ok(body) if body.valid => Ok(VerifiedIdentity {
-            tenant_id: body
-                .tenant_id
-                .ok_or_else(|| AuthError::Upstream("verify missing tenant_id".into()))?,
-            key_id: body.key_id.unwrap_or_default(),
-            scopes: body.scopes,
-        }),
+        Ok(body) if body.valid => {
+            let key_id = body.key_id.unwrap_or_default();
+            Ok(VerifiedIdentity {
+                tenant_id: body
+                    .tenant_id
+                    .ok_or_else(|| AuthError::Upstream("verify missing tenant_id".into()))?,
+                // Same principal string the query-router stamps — parity.
+                principal: format!("api-key:{key_id}"),
+                key_id,
+                scopes: body.scopes,
+                source: data_plane_core::IdentitySource::ServiceToken,
+            })
+        }
         Ok(body) => Err(AuthError::Unauthorized(
             body.reason.unwrap_or_else(|| "invalid api key".into()),
         )),

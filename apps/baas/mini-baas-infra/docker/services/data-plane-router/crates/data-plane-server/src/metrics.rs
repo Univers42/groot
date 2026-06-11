@@ -15,6 +15,13 @@ pub struct Metrics {
     c2xx: AtomicU64,
     c4xx: AtomicU64,
     c5xx: AtomicU64,
+    // Scale counters (B3): verify/mount cache effectiveness. At 10K tenants
+    // the hit rate is what stands between every request and a tenant-control
+    // Argon2id round-trip — the scale experiments read these from /metrics.
+    verify_hit: AtomicU64,
+    verify_miss: AtomicU64,
+    mount_hit: AtomicU64,
+    mount_miss: AtomicU64,
 }
 
 impl Default for Metrics {
@@ -25,6 +32,10 @@ impl Default for Metrics {
             c2xx: AtomicU64::new(0),
             c4xx: AtomicU64::new(0),
             c5xx: AtomicU64::new(0),
+            verify_hit: AtomicU64::new(0),
+            verify_miss: AtomicU64::new(0),
+            mount_hit: AtomicU64::new(0),
+            mount_miss: AtomicU64::new(0),
         }
     }
 }
@@ -55,6 +66,29 @@ impl Metrics {
             self.c2xx.load(Ordering::Relaxed),
             self.c4xx.load(Ordering::Relaxed),
             self.c5xx.load(Ordering::Relaxed),
+        )
+    }
+
+    /// Record a verify-cache lookup outcome.
+    pub fn record_verify_cache(&self, hit: bool) {
+        let counter = if hit { &self.verify_hit } else { &self.verify_miss };
+        counter.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record a mount-cache lookup outcome.
+    pub fn record_mount_cache(&self, hit: bool) {
+        let counter = if hit { &self.mount_hit } else { &self.mount_miss };
+        counter.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// (verify_hit, verify_miss, mount_hit, mount_miss)
+    #[must_use]
+    pub fn cache_snapshot(&self) -> (u64, u64, u64, u64) {
+        (
+            self.verify_hit.load(Ordering::Relaxed),
+            self.verify_miss.load(Ordering::Relaxed),
+            self.mount_hit.load(Ordering::Relaxed),
+            self.mount_miss.load(Ordering::Relaxed),
         )
     }
 }
@@ -88,5 +122,16 @@ mod tests {
     fn escape_label_handles_specials() {
         assert_eq!(escape_label(r#"a"b\c"#), r#"a\"b\\c"#);
         assert_eq!(escape_label("tenant/proj/db/pg/1"), "tenant/proj/db/pg/1");
+    }
+
+    #[test]
+    fn cache_counters_split_hit_miss() {
+        let m = Metrics::default();
+        m.record_verify_cache(true);
+        m.record_verify_cache(true);
+        m.record_verify_cache(false);
+        m.record_mount_cache(false);
+        let (vh, vm, mh, mm) = m.cache_snapshot();
+        assert_eq!((vh, vm, mh, mm), (2, 1, 0, 1));
     }
 }

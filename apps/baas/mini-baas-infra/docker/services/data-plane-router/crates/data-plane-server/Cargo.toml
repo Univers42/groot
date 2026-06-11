@@ -31,6 +31,9 @@ control-pg = ["dep:deadpool-postgres", "dep:tokio-postgres", "data-plane-pool/ht
 # stored as SHA-256 digests (sha2 is already in-tree via service_auth) —
 # memory-hard KDFs exist for low-entropy passwords, which nano keys are not.
 nano = ["sqlite", "dep:rusqlite", "dep:futures", "uuid/v4"]
+# binocle-one — "our PocketBase": nano + user accounts. Email/password with
+# argon2id (passwords ARE low-entropy) + HS256 JWTs minted/verified in-process.
+one = ["nano", "dep:argon2", "dep:jsonwebtoken"]
 
 [dependencies]
 data-plane-core = { path = "../data-plane-core" }
@@ -48,6 +51,9 @@ tokio-postgres = { workspace = true, optional = true }
 # the SSE stream adapter (futures::stream::unfold over a broadcast receiver).
 rusqlite = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
+# binocle-one: password hashing + JWT sessions.
+argon2 = { workspace = true, optional = true }
+jsonwebtoken = { workspace = true, optional = true }
 sha2 = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
