@@ -384,7 +384,7 @@ fn nano_of(state: &AppState) -> Result<Arc<NanoState>, axum::response::Response>
 }
 
 /// Verify + require a scope, in one step (admin satisfies everything).
-fn authorize(
+pub(crate) fn authorize(
     state: &AppState,
     headers: &header::HeaderMap,
     needed: &'static str,

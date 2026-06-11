@@ -10,6 +10,8 @@ pub mod nano;
 #[cfg(feature = "one")]
 pub mod one;
 #[cfg(feature = "one")]
+pub mod one_admin;
+#[cfg(feature = "one")]
 pub mod one_email;
 #[cfg(feature = "one")]
 pub mod one_files;
