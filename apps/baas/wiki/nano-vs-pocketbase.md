@@ -1,76 +1,81 @@
 # binocle vs PocketBase — the honest comparison
 
-> **Status: GAP-CLOSING IN PROGRESS.** This is a living document: every row carries evidence
-> (a gate, a bench artifact, or a PB docs link), and rows flip from GAP → ✅ only when a verify
-> gate proves them. Sources: [PocketBase v0.39 docs](https://pocketbase.io/docs/), our
-> `make verify-m37` / `verify-m38` gates, `scripts/bench/nano-vs-pocketbase*.sh` artifacts.
+> **Status: FEATURE PARITY REACHED (2026-06-12).** Every row carries evidence — a verify
+> gate (m37, m40–m45), a bench artifact, or a PB docs link. The build program (phases
+> A→G) is complete; the three remaining GAPs at the bottom are deliberate roadmap, not
+> debt. Sources: [PocketBase v0.39 docs](https://pocketbase.io/docs/), `make verify-m4x`,
+> `scripts/bench/nano-one-pb-load.sh` artifacts.
 
 ## The two offers
 
 | Offer | What it is | Size / idle RAM | Status |
 |---|---|---|---|
-| **binocle-nano** | The ultra-minimal data-plane binary: CRUD + filters + aggregates + graph + scoped keys + SSE, headless | **5.1 MB / 2.0 MiB** (measured, m37) | ✅ shipped |
-| **binocle-one** | *Our PocketBase*: nano + user auth (email/password, OAuth2 matrix, OTP/MFA) + typed collections + files + realtime filtering + embedded admin UI | budget **≤12 MB / ≤15 MiB** | 🔨 building (this plan) |
+| **binocle-nano** | The ultra-minimal headless data plane: CRUD + filters + aggregates + graph + scoped keys + SSE | **5.16 MB / 2.1 MiB** (m37) | ✅ shipped |
+| **binocle-one** | *Our PocketBase*: nano + accounts (password, OAuth2 matrix, OTP, TOTP MFA) + typed collections + files + filtered realtime + embedded admin dashboard | **6.41 MB / 2.2 MiB** (m45) | ✅ shipped |
 | PocketBase v0.39.3 | The reference competitor | 30.1 MB / ~12 MiB (measured) | — |
 
-## Where binocle WINS today (evidence-backed)
+One binary each, FROM scratch images, same engine underneath (group-commit SQLite writer).
+binocle-one is **4.7× smaller** than PocketBase with the dashboard embedded.
 
-| Capability | binocle | PocketBase | Evidence |
+## Feature matrix (every row gate-proven)
+
+| Capability | binocle-one | PocketBase | Evidence |
 |---|---|---|---|
-| Footprint | **5.1 MB / 2.0 MiB idle** | 30.1 MB binary / ~12 MiB idle | `artifacts/nano-vs-pocketbase.json`, m37 |
-| **Server-side aggregation** — count/sum/avg/min/max + `group_by` | ✅ `op=aggregate` | **❌ none** | [PB records API](https://pocketbase.io/docs/api-records/) documents no aggregation |
-| **Filter DSL** | full injection-safe AST: `$eq $ne $lt $lte $gt $gte $like $ilike $in $between $null` + `$and/$or/$not` | `= != > >= < <= ~ !~ && \|\|` (no `$in/$between/$null` equivalents beyond sugar) | `data-plane-core/src/filter.rs` (validated once, lowered per engine) |
-| Graph / relationship subgraph queries | ✅ `/data/v1/graph` (BFS ≤3, multi-mount) | ❌ | m34 parity gate |
-| Scoped machine API keys (mint/revoke, read/write/admin) | ✅ `/nano/v1/keys` | superuser tokens + impersonation only | m37 §3/§6 |
-| **Engine graduation** — same API onto Postgres/MySQL/Mongo/… (cloud tiers), no rewrite | ✅ 9 engines, conformance-gated | ❌ SQLite forever ([their FAQ](https://pocketbase.io/faq/)) | m27 conformance, `service-tiers.md` |
-| Atomic batch | ✅ | ✅ | par |
-| Security primitives | constant-time compares, fail-closed 401/404, SSRF-guarded egress, audit tracing | good but less explicit | `security-audit.md`, m37 §4 |
-| Insert/list latency (sequential, same box) | 4.9 / 5.2 ms | 5.0 / 5.6 ms | par — `artifacts/nano-vs-pocketbase.json` |
+| Email/password auth + JWT + rotating refresh | ✅ argon2id, single-use refresh | ✅ | m40 |
+| **OAuth2 providers** | ✅ ONE PKCE flow + presets (Google, GitHub, GitLab, Discord, Microsoft, Facebook, Twitch, Spotify, LinkedIn, Notion, Apple/ES256) + **any OIDC issuer** via discovery | ✅ 30+ presets | m41 (mock-OIDC e2e, S256 verified by the issuer) |
+| OTP (email code) login | ✅ | ✅ | m42 |
+| **TOTP MFA + recovery codes** | ✅ RFC 6238, challenge-token flow, factor-gated disable | ✅ | m42 |
+| Email verification + password reset (SMTP) | ✅ lettre/rustls; reset revokes sessions; no-enumeration | ✅ | m42 (Mailpit) |
+| Typed collections (create via API/UI) | ✅ `/data/v1/schema/ddl` — same contract as the cloud tiers | ✅ | m37 §typed, m45 |
+| **Per-user data isolation** | ✅ owner-scoping on the same `/data/v1` door + ABAC masks | ✅ rules | m40 §4, m41 §5 |
+| File storage (multipart, thumbnails, protected links) | ✅ `?thumb=WxH`, signed 5-min tokens, type allowlist (html/svg out) | ✅ | m43 |
+| Realtime filtering | ✅ `?topics=table:/db:` + **owner-filtered delivery** for user JWTs | ✅ rules | m44 |
+| `fields` projection | ✅ engine-neutral, on all 9 engines | ✅ | m44 (live on PostgreSQL too) |
+| **Admin dashboard** | ✅ embedded at `/_/` (27 KB hand-rolled; collections, grid, users, keys, files, SSE tail) | ✅ Svelte | m45 |
+| **Server-side aggregation** (count/sum/avg/min/max + group_by) | ✅ `op=aggregate` | **❌ none** | [PB records API](https://pocketbase.io/docs/api-records/) |
+| Filter DSL | ✅ injection-safe AST incl. `$in/$between/$null` | comparable sugar | `data-plane-core/src/filter.rs` |
+| Graph / relationship subgraphs | ✅ `/data/v1/graph` (BFS ≤3, multi-mount) | ❌ (`expand` ≤6 levels is their shape) | m34 |
+| Scoped machine keys | ✅ mint/revoke read/write/admin | superuser tokens only | m37, m45 |
+| **Engine graduation** — same API onto Postgres/MySQL/Mongo/… cloud tiers | ✅ 9 engines, conformance-gated | ❌ SQLite forever | m27, `service-tiers.md` |
 
-## Where PocketBase WINS today — the gaps `binocle-one` closes
+## Concurrent load — MEASURED, three columns (oha, same box, official PB binary, 8 s/run)
 
-| # | Capability | PocketBase | binocle today | Plan |
+| | **nano** | **one** | PocketBase | one vs PB |
 |---|---|---|---|---|
-| G1 | **User auth** — email/password, OAuth2 (30+ providers), OTP, MFA, verification, reset, refresh | ✅ | **email/password + JWT ✅** (m40) · **OAuth2 matrix ✅** (m41: one OIDC+PKCE flow, 10 presets + any-OIDC via discovery, verified-email linking) | **B3** closes the rest: OTP/TOTP/SMTP |
-| G2 | **Typed collections API** (field types, validation, create via API/UI) | ✅ | raw SQL escape hatch (`/nano/v1/raw`) | **C** structured DDL for the sqlite adapter → `/data/v1/schema/ddl` works everywhere |
-| G3 | **Per-record authorization** (`@request.auth` rules) | ✅ | key scopes + owner-scoping; ABAC engine compiled-in but keyless | **B1** wires user identity → owner-scoping per user + ABAC field masks live |
-| G4 | **File storage** (upload/serve, thumbnails, protected files; S3) | ✅ | ❌ | **D** (S3 stays cloud-tier MinIO; documented) |
-| G5 | **Realtime filtering** (per collection/record, rule-checked) | ✅ | global SSE mutation feed | **E** `?topics=` + owner-filtered events |
-| G6 | Relation `expand` (≤6 levels) + `fields` projection | ✅ | graph endpoint (different shape); no projection | **E** projection; expand-by-relation stays a documented difference (graph is our answer) |
-| G7 | **Admin dashboard UI** | ✅ polished Svelte | headless | **F** embedded brotli SPA at `/_/` (≤1.5 MB compressed) |
-| G8 | Hooks/extending (JS VM, Go framework, cron) | ✅ | ❌ in nano/one (cloud tiers have server automations) | post-F roadmap (declarative automations first, WASM later) — honest GAP |
-| G9 | Email/SMTP | ✅ | ❌ | **B3** (`lettre`) |
-| G10 | Migration files/versioning | ✅ | raw endpoint | post-F roadmap — honest GAP |
-| G11 | Backups API | ✅ | volume copy (no API) | post-F roadmap — honest GAP |
+| insert @ c=1 (RPS / p99 ms) | 4,961 / 0.3 | 3,209 / 0.3 | 2,357 / 0.8 | **1.4× / 2.7×** |
+| insert @ c=16 | 11,705 / 3.2 | 5,473 / 4.3 | 2,497 / 90.9 | **2.2× / 21×** |
+| insert @ c=64 | 11,435 / 69.7 | **9,283 / 71.9** | 2,463 / 208.1 | **3.8× / 2.9×** |
+| **100k-row insert @ c=64** | 11,803 | **9,461** | 2,578 | **3.7×** |
+| list 30 @ c=64 (RPS / p99 ms) | 14,495 / 8.0 | 13,790 / 8.3 | **17,490** / 29.5 | PB 1.27× RPS (honest loss) / **we 3.6× tail** |
+| **RSS under c=64 load** | 11.2 MiB | **15.4 MiB** | 406.3 MiB | **26×** |
+| disk after 100k rows | 13.7 MB | **11.7 MB** | 261.9 MB | **22×** |
+| boot → first 200 | 6 ms | **5 ms** | 120 ms | **24×** |
 
-## Concurrent load — MEASURED (oha, same box, official PB binary, 8 s/run)
+The full app backend (accounts, OAuth, MFA, files, dashboard) costs binocle-one **~19% of
+nano's peak insert throughput and ~4 MiB of RSS** — the engine (single-writer group commit:
+≤128 queued writes per transaction, savepoint-per-job) is shared. **Honest loss kept on the
+board:** PocketBase serves ~1.3× more list RPS at high concurrency; our list p99 is 3.6×
+better. Artifacts: `mini-baas-infra/artifacts/nano-one-pb-load.json` (+ the original
+two-column `nano-vs-pocketbase-load.json`).
 
-| | **binocle-nano** | PocketBase v0.39.3 | Factor |
-|---|---|---|---|
-| insert @ c=1 (RPS) | **3529** | 2364 | 1.5× |
-| insert @ c=16 | **6437** | 2513 | 2.6× |
-| insert @ c=64 | **9402** | 2560 | **3.7×** |
-| **100k-row insert @ c=64** | **11,159 RPS** (~9 s total) | 2025 | **5.5×** |
-| insert p99 @ c=64 | **74 ms** | 260 ms | 3.5× |
-| list 30 @ c=64 (RPS) | 14,307 | **18,061** | PB 1.3× (honest loss) |
-| list 30 p99 @ c=64 | **8.1 ms** | 30.0 ms | 3.7× |
-| **RSS under c=64 load** | **12.7 MiB** | 477.8 MiB | **37×** |
-| disk after 100k rows | **11.9 MB** | 264 MB | 22× |
-| boot → first 200 | **6 ms** | 566 ms | 94× |
+## Remaining gaps — deliberate roadmap, not debt
 
-Write throughput comes from the **single-writer + group-commit** engine (a dedicated writer
-thread coalesces up to 128 queued writes into one transaction, savepoint-per-job; replies only
-after COMMIT). This was earned, not assumed: the FIRST run of this bench measured our naive
-pooled writes collapsing to 48 RPS @ c=64 — the table above is the third run, after the fix.
-**Honest loss kept on the board:** PB serves ~1.3× more list RPS at high concurrency (we win the
-tail). Artifacts: `mini-baas-infra/artifacts/nano-vs-pocketbase-load.json`.
+| # | Capability | PocketBase | binocle | Plan |
+|---|---|---|---|---|
+| G8 | Hooks/extending (JS VM, Go framework, cron) | ✅ | ❌ in nano/one (cloud tiers have server automations) | declarative automations first, WASM later |
+| G10 | Migration files/versioning | ✅ | `/data/v1/schema/ddl` + raw | post-launch |
+| G11 | Backups API | ✅ | volume copy (no API) | post-launch |
+
+Also: S3 file backends stay a **cloud-tier** concern (MinIO) — documented, deliberately not
+in the single binary. Relation `expand` remains a shape difference: our graph endpoint is
+the answer, documented as such.
 
 ## Benchmark method (kept honest)
 
-- Same box, both/all systems in containers, official PB release binary, identical driver
-  (`oha` for concurrency; sequential curl numbers are labelled as curl-dominated).
-- Reported: RPS + p50/p95/p99 at c=1/16/64, RSS idle + under load, 100k-row insert (disk after),
-  boot-to-first-200. Artifacts: `mini-baas-infra/artifacts/nano-vs-pocketbase*.json`.
-- We do not claim "N× faster" from curl loops; the concurrency table above is the load-tested one.
+- Same box, all three systems in containers, official PB release binary, identical driver
+  (`oha`), identical 8 s windows, c=1/16/64 + a 100k-row run.
+- Reported: RPS + p50/p95/p99, RSS sampled mid-load, disk-after, boot-to-first-200.
+- The FIRST run of this bench (Phase A) measured our naive pooled writes collapsing to
+  48 RPS @ c=64 — the engine work was earned, not assumed.
 
-*Last updated: 2026-06-12 (Phase A + the group-commit engine fix).*
+*Last updated: 2026-06-12 (Phase G — program complete).*
