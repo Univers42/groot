@@ -101,6 +101,29 @@ impl FieldMask {
     }
 }
 
+/// Apply a field mask to query rows IN PLACE — mirrors the query-router's
+/// `applyFieldMask`: `hide` removes the key entirely; `redact` replaces an
+/// EXISTING field's value with the mask string. Only JSON objects are touched;
+/// scalar/array rows pass through unchanged.
+pub fn apply_field_mask(rows: &mut [Value], mask: &FieldMask) {
+    if mask.is_empty() {
+        return;
+    }
+    for row in rows.iter_mut() {
+        let Some(obj) = row.as_object_mut() else {
+            continue;
+        };
+        for field in &mask.hide {
+            obj.remove(field);
+        }
+        for (field, replacement) in &mask.redact {
+            if let Some(v) = obj.get_mut(field) {
+                *v = Value::String(replacement.clone());
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Decision {
     pub allow: bool,
@@ -321,6 +344,26 @@ mod tests {
                 },
             ],
         }
+    }
+
+    #[test]
+    fn field_mask_hides_and_redacts_only_existing() {
+        let mask = FieldMask {
+            hide: vec!["secret".into()],
+            redact: BTreeMap::from([("email".to_string(), "***".to_string())]),
+        };
+        let mut rows = vec![
+            json!({ "id": 1, "secret": "x", "email": "a@b.com", "name": "n" }),
+            json!({ "id": 2, "name": "no-email-or-secret" }),
+        ];
+        apply_field_mask(&mut rows, &mask);
+        assert!(rows[0].get("secret").is_none(), "hide removes the key");
+        assert_eq!(rows[0]["email"], "***", "redact replaces the value");
+        assert_eq!(rows[0]["name"], "n", "untouched field survives");
+        assert_eq!(rows[0]["id"], 1);
+        // redact only touches fields that exist; row 2 keeps its shape
+        assert!(rows[1].get("email").is_none());
+        assert_eq!(rows[1]["name"], "no-email-or-secret");
     }
 
     #[test]

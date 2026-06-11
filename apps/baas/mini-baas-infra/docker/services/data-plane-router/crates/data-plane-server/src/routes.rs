@@ -516,6 +516,22 @@ async fn execute_query(
 /// query-router is out of the path, so the data plane emits the row-change
 /// event). Owns identity/mount validation, tier rate-limit + capability gate,
 /// the planner, and pool dispatch, so both doors enforce IDENTICALLY.
+/// Map an operation kind to the ABAC action the policy bundle matches on —
+/// mirrors `action_for_op(&str)` (the `/v1/permissions/decide` mapping) so the
+/// in-line mask decision is identical to the canonical PDP: list/get→select,
+/// upsert→update, the rest pass through.
+fn mask_action_for(op: &DataOperationKind) -> &'static str {
+    use DataOperationKind::*;
+    match op {
+        List | Get => "select",
+        Upsert | Update => "update",
+        Insert => "insert",
+        Delete => "delete",
+        Batch => "batch",
+        Aggregate => "aggregate",
+    }
+}
+
 async fn run_query(
     state: AppState,
     request: QueryRequest,
@@ -623,6 +639,7 @@ async fn run_query(
     let audit_engine = request.mount.engine.clone();
     let audit_op = request.operation.op.clone();
     let audit_resource = request.operation.resource.clone();
+    let mask_action = mask_action_for(&audit_op);
     let is_mutation = matches!(
         audit_op,
         DataOperationKind::Insert
@@ -641,7 +658,7 @@ async fn run_query(
         Err(err) => return map_data_plane_error(&err),
     };
     match pool.execute(request.operation, request.identity).await {
-        Ok(result) => {
+        Ok(mut result) => {
             // Phase 6 audit trail: every successful data MUTATION is logged to
             // the `audit` tracing target (routed to Loki by promtail). Reads are
             // not audited (volume); denials are audited at their rejection sites.
@@ -677,6 +694,36 @@ async fn run_query(
                         .await
                     {
                         tracing::warn!(resource = %audit_resource, "outbox emit failed (write already committed): {e}");
+                    }
+                }
+            }
+            // Phase D — apply ABAC field masks in Rust (cutover prep). Flag-gated;
+            // user identities only (api-key callers are scope-based → no mask,
+            // matching the query-router). Applied AFTER the outbox emit so the
+            // server-side event keeps the FULL row — only the per-user RESPONSE
+            // is masked. OFF by default (`DATA_PLANE_APPLY_MASKS`) → byte-parity.
+            if state.config.apply_masks {
+                if let (Some(ev), Some(user)) = (
+                    state.evaluator.as_ref(),
+                    outbox_identity
+                        .user_id
+                        .as_deref()
+                        .filter(|u| !u.starts_with("api-key:")),
+                ) {
+                    let decision = ev.decide(user, &audit_engine, &audit_resource, mask_action);
+                    if !decision.allow {
+                        tracing::warn!(
+                            target: "audit",
+                            event = "abac_denied",
+                            tenant = %audit_tenant,
+                            engine = %audit_engine,
+                            resource = %audit_resource,
+                            "ABAC denied a user request (403)"
+                        );
+                        return api_err(StatusCode::FORBIDDEN, "forbidden", &decision.reason);
+                    }
+                    if let Some(mask) = decision.mask {
+                        crate::abac::apply_field_mask(&mut result.rows, &mask);
                     }
                 }
             }

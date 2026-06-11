@@ -71,6 +71,10 @@ pub struct ServerConfig {
     /// path is untouched, so this is pure shadow until explicitly enabled and
     /// parity-proven. From `DATA_PLANE_BYPASS_ENABLED` (`1`/`true`/`on`).
     pub bypass_enabled: bool,
+    /// Phase D — apply ABAC field masks in the Rust data path (cutover prep).
+    /// OFF by default (the query-router still masks → byte-parity); flip ON
+    /// (`DATA_PLANE_APPLY_MASKS=1`) once the query-router's mask is removed.
+    pub apply_masks: bool,
 }
 
 impl ServerConfig {
@@ -124,6 +128,10 @@ impl ServerConfig {
             internal_service_token: read_env("INTERNAL_SERVICE_TOKEN", ""),
             bypass_enabled: matches!(
                 read_env("DATA_PLANE_BYPASS_ENABLED", "false").to_lowercase().as_str(),
+                "1" | "true" | "on"
+            ),
+            apply_masks: matches!(
+                read_env("DATA_PLANE_APPLY_MASKS", "false").to_lowercase().as_str(),
                 "1" | "true" | "on"
             ),
         }
