@@ -16,12 +16,13 @@
 # non-zero on a NEW vulnerability so it can gate CI.
 #
 # The Rust transitive advisories listed in RUST_IGNORE are ACCEPTED-WITH-
-# REMEDIATION: they live in old driver deps (mongodb 2.8 → rustls 0.21 +
-# trust-dns; tiberius 0.12 → rustls 0.21) and are only reachable for EXTERNAL
-# TLS/SRV mongo|mssql mounts (the stack's own mongo is plaintext on the docker
-# net). Remediation = bump mongodb to 3.x + tiberius (a driver-adapter change,
-# tracked in wiki/security-audit.md). Ignoring them keeps the gate meaningful
-# (a *new* vuln still fails) without a noisy permanent red.
+# REMEDIATION: rustls-webpki 0.101 comes solely from tiberius 0.12 (its rustls
+# 0.21 chain; 0.12.3 IS the latest release — no upstream fix exists yet) and is
+# only reachable for EXTERNAL TLS mssql mounts. The mongodb 2.8 share (idna +
+# its webpki path) was CLEARED by the mongodb 3.x bump. Remediation = bump
+# tiberius when a rustls-0.2x release lands (tracked in wiki/security-audit.md).
+# Ignoring keeps the gate meaningful (a *new* vuln still fails) without a noisy
+# permanent red.
 set -uo pipefail
 
 cyan(){ printf '\033[0;36m%s\033[0m\n' "$*"; }
@@ -35,8 +36,8 @@ GO_DIR="${ROOT}/go/control-plane"
 RUST_IMG="mini-baas-rust-toolchain"
 GO_IMG="golang:1.25-bookworm"
 
-# rustls-webpki x3 (cert name-constraint / CRL) + idna (Punycode) — transitive.
-RUST_IGNORE="--ignore RUSTSEC-2026-0098 --ignore RUSTSEC-2026-0099 --ignore RUSTSEC-2026-0104 --ignore RUSTSEC-2024-0421"
+# rustls-webpki x3 (cert name-constraint / CRL) — transitive via tiberius only.
+RUST_IGNORE="--ignore RUSTSEC-2026-0098 --ignore RUSTSEC-2026-0099 --ignore RUSTSEC-2026-0104"
 
 rc=0
 

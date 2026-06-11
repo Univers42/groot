@@ -322,7 +322,7 @@ impl EnginePool for MongoPool {
         }
         let db = self.client.database(&self.db_name);
         let mut specs: Vec<CollectionSpecification> = db
-            .list_collections(None, None)
+            .list_collections()
             .await
             .map_err(mongo_err)?
             .try_collect()
@@ -354,10 +354,7 @@ impl EnginePool for MongoPool {
                     // legitimate dotted names).
                     let col: Collection<Document> = db.collection(&spec.name);
                     let cursor = col
-                        .aggregate(
-                            vec![bson::doc! { "$sample": { "size": SCHEMA_SAMPLE_SIZE } }],
-                            None,
-                        )
+                        .aggregate(vec![bson::doc! { "$sample": { "size": SCHEMA_SAMPLE_SIZE } }])
                         .await
                         .map_err(mongo_err)?;
                     let docs: Vec<Document> = cursor.try_collect().await.map_err(mongo_err)?;
@@ -404,13 +401,13 @@ impl EnginePool for MongoPool {
                 let options = CreateCollectionOptions::builder()
                     .validator(bson::doc! { "$jsonSchema": schema })
                     .build();
-                db.create_collection(&ddl.table, options)
+                db.create_collection(&ddl.table).with_options(options)
                     .await
                     .map_err(mongo_ddl_err)?;
             }
             SchemaDdlOp::DropTable => {
                 db.collection::<Document>(&ddl.table)
-                    .drop(None)
+                    .drop()
                     .await
                     .map_err(mongo_ddl_err)?;
             }
@@ -432,7 +429,6 @@ impl EnginePool for MongoPool {
                 };
                 db.run_command(
                     bson::doc! { "collMod": &ddl.table, "validator": { "$jsonSchema": next } },
-                    None,
                 )
                 .await
                 .map_err(mongo_ddl_err)?;
@@ -602,7 +598,7 @@ impl MongoPool {
         name: &str,
     ) -> DataPlaneResult<Document> {
         let mut specs: Vec<CollectionSpecification> = db
-            .list_collections(bson::doc! { "name": name }, None)
+            .list_collections().filter(bson::doc! { "name": name })
             .await
             .map_err(mongo_err)?
             .try_collect()
@@ -781,7 +777,7 @@ impl MongoPool {
         }
         pipeline.push(doc! { "$limit": limit });
 
-        let cursor = col.aggregate(pipeline, None).await.map_err(mongo_err)?;
+        let cursor = col.aggregate(pipeline).await.map_err(mongo_err)?;
         let docs: Vec<Document> = cursor.try_collect().await.map_err(mongo_err)?;
         let rows: Vec<Value> = docs.into_iter().map(normalize_doc).collect();
         let affected = rows.len() as u64;
@@ -808,7 +804,7 @@ impl MongoPool {
             .sort(build_sort(op.sort.as_ref()))
             .build();
 
-        let cursor = col.find(filter, find_opts).await.map_err(mongo_err)?;
+        let cursor = col.find(filter).with_options(find_opts).await.map_err(mongo_err)?;
         let docs: Vec<Document> = cursor.try_collect().await.map_err(mongo_err)?;
         let rows: Vec<Value> = docs.into_iter().map(normalize_doc).collect();
         let affected = rows.len() as u64;
@@ -827,7 +823,7 @@ impl MongoPool {
         identity: &RequestIdentity,
     ) -> DataPlaneResult<DataResult> {
         let filter = build_tenant_filter(op.filter.as_ref(), identity, &self.tenant_id)?;
-        let doc = col.find_one(filter, None).await.map_err(mongo_err)?;
+        let doc = col.find_one(filter).await.map_err(mongo_err)?;
         match doc {
             Some(d) => Ok(DataResult {
                 rows: vec![normalize_doc(d)],
@@ -854,7 +850,7 @@ impl MongoPool {
             message: "insert requires operation.data".to_string(),
         })?;
         let doc = build_owned_doc(data, identity, &self.tenant_id)?;
-        let result = col.insert_one(doc.clone(), None).await.map_err(mongo_err)?;
+        let result = col.insert_one(doc.clone()).await.map_err(mongo_err)?;
         let mut out = doc;
         out.insert("_id", result.inserted_id);
         Ok(DataResult {
@@ -879,7 +875,7 @@ impl MongoPool {
         reject_top_level_operators(data)?;
         let set_doc = json_to_doc(data)?;
         let update = bson::doc! { "$set": set_doc };
-        let result = col.update_many(filter, update, None).await.map_err(mongo_err)?;
+        let result = col.update_many(filter, update).await.map_err(mongo_err)?;
         Ok(DataResult {
             rows: vec![],
             affected_rows: result.modified_count,
@@ -896,7 +892,7 @@ impl MongoPool {
     ) -> DataPlaneResult<DataResult> {
         require_row_filter(op.filter.as_ref(), "delete")?;
         let filter = build_tenant_filter(op.filter.as_ref(), identity, &self.tenant_id)?;
-        let result = col.delete_many(filter, None).await.map_err(mongo_err)?;
+        let result = col.delete_many(filter).await.map_err(mongo_err)?;
         Ok(DataResult {
             rows: vec![],
             affected_rows: result.deleted_count,
@@ -940,7 +936,7 @@ impl MongoPool {
         let update = bson::doc! { "$set": set_doc };
         let update_opts = UpdateOptions::builder().upsert(true).build();
         let result = col
-            .update_one(filter, update, update_opts)
+            .update_one(filter, update).with_options(update_opts)
             .await
             .map_err(mongo_err)?;
         Ok(DataResult {

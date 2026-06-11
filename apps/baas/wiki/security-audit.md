@@ -26,17 +26,20 @@ Ran `cargo audit` (Rust) + `govulncheck` (Go, reachability-based) on 2026-06-11.
   (stdlib-only, no code change).
 - `go-redis v9.7.0` → **v9.20.0** (last module advisory).
 
-**Rust data plane — 4 transitive advisories, accepted-with-remediation:**
-- `rustls-webpki 0.101.7` ×3 (name-constraint bypass + CRL panic) and `idna 0.2.3`
-  (Punycode) come from **`mongodb 2.8.2`** (old `rustls 0.21` + `trust-dns`) and
-  **`tiberius 0.12.3`**. My own TLS path uses the patched `rustls 0.23.40 /
-  webpki 0.103.13`. These are **only reachable for EXTERNAL TLS/SRV mongo|mssql
-  mounts** — the stack's own mongo is plaintext on the docker net. **Remediation:**
-  bump mongodb → 3.x + tiberius (a driver-adapter change; not rushed onto the
-  live adapters). Tracked + `--ignore`d in `audit-deps.sh` so a *new* vuln still
-  fails the gate.
+**Rust data plane — mongodb 2.8 → 3.x bump DONE; 3 advisories remain (tiberius-only):**
+- **`mongodb` bumped 2.8.2 → 3.7** (the 3.x fluent action API; 13 call sites in
+  `mongo.rs`). This **cleared `idna 0.2.3`** (RUSTSEC-2024-0421, via the removed
+  `trust-dns`) and mongodb's `rustls 0.21/webpki 0.101` chain, plus the
+  `derivative` unmaintained warning. Live-verified against the running mongo:
+  describe/list/get/insert/update/upsert/delete/aggregate/DDL-create-with-
+  validator (bad-type insert → 409)/drop, app `count=5000` intact.
+- `rustls-webpki 0.101.7` ×3 (name-constraint bypass + CRL panic) remain via
+  **`tiberius 0.12.3` only** — and 0.12.3 IS the latest tiberius; no fixed
+  release exists upstream yet. Only reachable for **EXTERNAL TLS mssql mounts**.
+  **Remediation:** bump tiberius when a rustls-0.2x release lands. Tracked +
+  `--ignore`d in `audit-deps.sh` so a *new* vuln still fails the gate.
 - Warnings (unsound/unmaintained, not active vulns): `lru` (via `mysql_async`),
-  `rand 0.7.3`, `derivative`, `rustls-pemfile` — clear on the same driver bumps.
+  `rand 0.7.3`, `rustls-pemfile` (via tiberius) — clear on future driver bumps.
 
 ## Verified safe (checked, no change needed)
 
