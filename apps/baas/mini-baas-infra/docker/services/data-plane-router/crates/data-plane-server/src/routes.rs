@@ -156,6 +156,10 @@ pub struct AppState {
     /// `None` unless `DATA_PLANE_OUTBOX_DSN` is set — the bypass works without
     /// it, but realtime/webhooks only fire post-cutover once it's wired.
     outbox: Option<Arc<crate::outbox::OutboxEmitter>>,
+    /// Phase D — server-backed automations on the bypass write path. `None`
+    /// unless `DATA_PLANE_OUTBOX_DSN` is set (the control Postgres holding the
+    /// `automation_rules`); fires `set_property` follow-ups after bypass writes.
+    automations: Option<Arc<crate::automations::AutomationEngine>>,
 }
 
 impl AppState {
@@ -230,6 +234,7 @@ impl AppState {
                 .build()
                 .unwrap_or_default(),
             outbox: crate::outbox::OutboxEmitter::from_env().map(Arc::new),
+            automations: crate::automations::AutomationEngine::from_env().map(Arc::new),
         }
     }
 
@@ -637,9 +642,11 @@ async fn run_query(
     // Capture audit + outbox fields before the request is consumed by the pool.
     let audit_tenant = request.identity.tenant_id.clone();
     let audit_engine = request.mount.engine.clone();
+    let automation_db_id = request.mount.id.clone();
     let audit_op = request.operation.op.clone();
     let audit_resource = request.operation.resource.clone();
     let mask_action = mask_action_for(&audit_op);
+    let op_wire = crate::automations::op_wire_str(&audit_op);
     let is_mutation = matches!(
         audit_op,
         DataOperationKind::Insert
@@ -695,6 +702,42 @@ async fn run_query(
                     {
                         tracing::warn!(resource = %audit_resource, "outbox emit failed (write already committed): {e}");
                     }
+                }
+            }
+            // Phase D — fire set_property automations on the bypass write path
+            // (best-effort; never fails the committed write). Gated to the bypass
+            // so /query/v1 (where the query-router fires them inline) never doubles.
+            if emit_outbox && is_mutation {
+                if let Some(au) = state.automations.as_ref() {
+                    let row = result.rows.first().cloned().unwrap_or_else(|| {
+                        let mut m = serde_json::Map::new();
+                        if let Some(serde_json::Value::Object(d)) = outbox_data.as_ref() {
+                            for (k, v) in d {
+                                m.insert(k.clone(), v.clone());
+                            }
+                        }
+                        if let Some(serde_json::Value::Object(f)) = outbox_filter.as_ref() {
+                            for (k, v) in f {
+                                m.insert(k.clone(), v.clone());
+                            }
+                        }
+                        serde_json::Value::Object(m)
+                    });
+                    let pk = row
+                        .get("id")
+                        .cloned()
+                        .or_else(|| outbox_data.as_ref().and_then(|d| d.get("id")).cloned())
+                        .or_else(|| outbox_filter.as_ref().and_then(|f| f.get("id")).cloned());
+                    au.run_for_write(
+                        &*pool,
+                        &outbox_identity,
+                        &automation_db_id,
+                        &audit_resource,
+                        op_wire,
+                        &row,
+                        pk.as_ref(),
+                    )
+                    .await;
                 }
             }
             // Phase D — apply ABAC field masks in Rust (cutover prep). Flag-gated;
