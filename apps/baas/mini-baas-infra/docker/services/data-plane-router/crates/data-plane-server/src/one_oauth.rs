@@ -129,6 +129,16 @@ pub(crate) const PRESETS: &[Preset] = &[
         extra_auth: "",
     },
     Preset {
+        name: "apple",
+        auth_url: "https://appleid.apple.com/auth/authorize",
+        token_url: "https://appleid.apple.com/auth/token",
+        userinfo_url: "",
+        scopes: "name email",
+        // Apple mandates form_post whenever scopes are requested — the
+        // callback route also accepts POST for this.
+        extra_auth: "&response_mode=form_post",
+    },
+    Preset {
         name: "notion",
         auth_url: "https://api.notion.com/v1/oauth/authorize",
         token_url: "https://api.notion.com/v1/oauth/token",
@@ -149,13 +159,44 @@ fn provider_env(provider: &str, suffix: &str) -> Option<String> {
     .filter(|v| !v.trim().is_empty())
 }
 
-/// A provider is enabled iff its client id is configured (custom `oidc`
-/// additionally needs the issuer URL).
+/// A provider is enabled iff its client id is configured. Custom `oidc`
+/// additionally needs the issuer URL; `apple` needs the ES256 signing
+/// material for its self-minted client secret.
 fn provider_enabled(provider: &str) -> bool {
     if provider_env(provider, "CLIENT_ID").is_none() {
         return false;
     }
-    provider != "oidc" || provider_env("oidc", "ISSUER").is_some()
+    match provider {
+        "oidc" => provider_env("oidc", "ISSUER").is_some(),
+        "apple" => {
+            provider_env("apple", "TEAM_ID").is_some()
+                && provider_env("apple", "KEY_ID").is_some()
+                && provider_env("apple", "PRIVATE_KEY").is_some()
+        }
+        _ => true,
+    }
+}
+
+/// Apple has no static client secret: it is an ES256 JWT signed with the
+/// developer's .p8 key, minted fresh per token exchange (5-minute TTL).
+fn apple_client_secret() -> Result<String, String> {
+    let team_id = provider_env("apple", "TEAM_ID").ok_or("ONE_OAUTH_APPLE_TEAM_ID not set")?;
+    let key_id = provider_env("apple", "KEY_ID").ok_or("ONE_OAUTH_APPLE_KEY_ID not set")?;
+    let pem = provider_env("apple", "PRIVATE_KEY").ok_or("ONE_OAUTH_APPLE_PRIVATE_KEY not set")?;
+    let client_id = provider_env("apple", "CLIENT_ID").ok_or("ONE_OAUTH_APPLE_CLIENT_ID not set")?;
+    let now = chrono::Utc::now().timestamp();
+    let claims = serde_json::json!({
+        "iss": team_id,
+        "iat": now,
+        "exp": now + 300,
+        "aud": "https://appleid.apple.com",
+        "sub": client_id,
+    });
+    let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::ES256);
+    header.kid = Some(key_id);
+    let key = jsonwebtoken::EncodingKey::from_ec_pem(pem.replace("\\n", "\n").as_bytes())
+        .map_err(|e| format!("apple private key unreadable: {e}"))?;
+    jsonwebtoken::encode(&header, &claims, &key).map_err(|e| format!("apple secret mint failed: {e}"))
 }
 
 // ─── tiny codecs (no new deps) ───────────────────────────────────────────────
@@ -470,6 +511,24 @@ async fn callback(
     Path(provider): Path<String>,
     Query(q): Query<CallbackQuery>,
 ) -> axum::response::Response {
+    callback_inner(state, provider, q).await
+}
+
+/// Apple's `response_mode=form_post` delivers the callback as a POST with an
+/// urlencoded body — identical handling.
+async fn callback_post(
+    State(state): State<AppState>,
+    Path(provider): Path<String>,
+    axum::extract::Form(q): axum::extract::Form<CallbackQuery>,
+) -> axum::response::Response {
+    callback_inner(state, provider, q).await
+}
+
+async fn callback_inner(
+    state: AppState,
+    provider: String,
+    q: CallbackQuery,
+) -> axum::response::Response {
     let one = match one_of(&state) {
         Ok(o) => o,
         Err(r) => return r,
@@ -556,6 +615,14 @@ async fn exchange_code(
     verifier: &str,
 ) -> Result<Value, String> {
     let redirect_uri = callback_url(provider);
+    // Apple substitutes its self-minted ES256 JWT for the client secret.
+    let minted_secret;
+    let client_secret = if provider == "apple" {
+        minted_secret = apple_client_secret()?;
+        minted_secret.as_str()
+    } else {
+        client_secret
+    };
     let resp = if provider == "notion" {
         rt.http
             .post(&endpoints.token_url)
@@ -601,6 +668,45 @@ async fn resolve_remote_user(
     endpoints: &Endpoints,
     token_body: &Value,
 ) -> Result<RemoteUser, String> {
+    if provider == "apple" {
+        // Apple has no userinfo endpoint; the claims live in the id_token.
+        // The token came straight from Apple over TLS in the code exchange,
+        // so the channel — not the signature — is the trust anchor here
+        // (OIDC Core §3.1.3.7 sanctions this for the code flow).
+        let id_token = token_body
+            .get("id_token")
+            .and_then(Value::as_str)
+            .ok_or("apple token response missing id_token")?;
+        let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::RS256);
+        validation.insecure_disable_signature_validation();
+        validation.validate_aud = false;
+        let data = jsonwebtoken::decode::<Value>(
+            id_token,
+            &jsonwebtoken::DecodingKey::from_secret(&[]),
+            &validation,
+        )
+        .map_err(|e| format!("apple id_token decode failed: {e}"))?;
+        let claims = data.claims;
+        let sub = claims
+            .get("sub")
+            .and_then(Value::as_str)
+            .ok_or("apple id_token has no sub")?;
+        // Apple serialises email_verified as bool OR the string "true".
+        let verified = match claims.get("email_verified") {
+            Some(Value::Bool(b)) => *b,
+            Some(Value::String(s)) => s == "true",
+            _ => true,
+        };
+        return Ok(RemoteUser {
+            subject: format!("apple:{sub}"),
+            email: claims
+                .get("email")
+                .and_then(Value::as_str)
+                .filter(|e| e.contains('@'))
+                .map(|e| e.trim().to_lowercase()),
+            email_verified: verified,
+        });
+    }
     if provider == "notion" {
         let u = token_body
             .get("owner")
@@ -665,7 +771,10 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/one/v1/auth/oauth/providers", get(providers))
         .route("/one/v1/auth/oauth/:provider/start", get(start))
-        .route("/one/v1/auth/oauth/:provider/callback", get(callback))
+        .route(
+            "/one/v1/auth/oauth/:provider/callback",
+            get(callback).post(callback_post),
+        )
 }
 
 #[cfg(test)]
@@ -739,7 +848,16 @@ mod tests {
             assert!(p.auth_url.starts_with("https://"), "{}", p.name);
             assert!(p.token_url.starts_with("https://"), "{}", p.name);
         }
-        assert_eq!(PRESETS.len(), 10);
+        assert_eq!(PRESETS.len(), 11);
+    }
+
+    #[test]
+    fn apple_needs_full_signing_material() {
+        // CLIENT_ID alone must not enable apple (the ES256 secret needs
+        // TEAM_ID + KEY_ID + PRIVATE_KEY too). Env is process-global, so this
+        // only asserts the unset case.
+        assert!(!provider_enabled("apple"));
+        assert!(apple_client_secret().is_err());
     }
 
     #[test]

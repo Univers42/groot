@@ -10,7 +10,11 @@ pub mod nano;
 #[cfg(feature = "one")]
 pub mod one;
 #[cfg(feature = "one")]
+pub mod one_email;
+#[cfg(feature = "one")]
 pub mod one_oauth;
+#[cfg(feature = "one")]
+pub mod one_totp;
 #[cfg(feature = "control-pg")]
 pub mod outbox;
 pub mod ratelimit;

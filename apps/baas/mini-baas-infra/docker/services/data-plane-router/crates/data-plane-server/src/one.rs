@@ -53,7 +53,7 @@ pub(crate) fn bearer_token(headers: &header::HeaderMap) -> Option<String> {
         .filter(|t| !t.is_empty())
 }
 
-fn sha256_hex(input: &str) -> String {
+pub(crate) fn sha256_hex(input: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(input.as_bytes());
     let out = hasher.finalize();
@@ -72,7 +72,7 @@ fn ct_eq(a: &str, b: &str) -> bool {
     a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-fn hash_password(password: &str) -> Result<String, String> {
+pub(crate) fn hash_password(password: &str) -> Result<String, String> {
     use argon2::password_hash::{PasswordHasher, SaltString};
     // 16 random bytes from the OS CSPRNG via uuid v4 (getrandom-backed) — no
     // extra rand_core dependency for one salt.
@@ -84,7 +84,7 @@ fn hash_password(password: &str) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
-fn verify_password(password: &str, stored: &str) -> bool {
+pub(crate) fn verify_password(password: &str, stored: &str) -> bool {
     use argon2::password_hash::{PasswordHash, PasswordVerifier};
     PasswordHash::new(stored)
         .map(|parsed| {
@@ -98,16 +98,16 @@ fn verify_password(password: &str, stored: &str) -> bool {
 // ─── user store ──────────────────────────────────────────────────────────────
 
 #[derive(Serialize, Clone)]
-struct UserPublic {
-    id: String,
-    email: String,
-    verified: bool,
-    created_at: String,
+pub(crate) struct UserPublic {
+    pub(crate) id: String,
+    pub(crate) email: String,
+    pub(crate) verified: bool,
+    pub(crate) created_at: String,
 }
 
 /// SQLite-backed account store, sharing the nano meta DB file. All calls are
 /// sub-millisecond except argon2 (which callers wrap in `spawn_blocking`).
-struct UserStore {
+pub(crate) struct UserStore {
     conn: std::sync::Mutex<rusqlite::Connection>,
 }
 
@@ -141,6 +141,26 @@ impl UserStore {
                 email      TEXT,
                 created_at TEXT NOT NULL,
                 PRIMARY KEY (provider, subject)
+            );
+            CREATE TABLE IF NOT EXISTS one_codes (
+                purpose    TEXT NOT NULL,
+                email      TEXT NOT NULL,
+                digest     TEXT NOT NULL,
+                expires_at INTEGER NOT NULL,
+                attempts   INTEGER NOT NULL DEFAULT 0,
+                issued_at  INTEGER NOT NULL,
+                PRIMARY KEY (purpose, email)
+            );
+            CREATE TABLE IF NOT EXISTS one_totp (
+                user_id    TEXT PRIMARY KEY,
+                secret     TEXT NOT NULL,
+                enabled    INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS one_recovery (
+                user_id TEXT NOT NULL,
+                digest  TEXT NOT NULL,
+                PRIMARY KEY (user_id, digest)
             );",
         )?;
         Ok(Self {
@@ -184,7 +204,7 @@ impl UserStore {
         .ok()
     }
 
-    fn get_user(&self, id: &str) -> Option<UserPublic> {
+    pub(crate) fn get_user(&self, id: &str) -> Option<UserPublic> {
         let conn = self.conn.lock().expect("user store poisoned");
         conn.query_row(
             "SELECT id, email, verified, created_at FROM one_users WHERE id = ?1",
@@ -201,7 +221,7 @@ impl UserStore {
         .ok()
     }
 
-    fn find_user_id_by_email(&self, email: &str) -> Option<String> {
+    pub(crate) fn find_user_id_by_email(&self, email: &str) -> Option<String> {
         let conn = self.conn.lock().expect("user store poisoned");
         conn.query_row("SELECT id FROM one_users WHERE email = ?1", [email], |r| r.get(0))
             .ok()
@@ -235,9 +255,156 @@ impl UserStore {
         Ok(())
     }
 
-    fn mark_verified(&self, user_id: &str) {
+    pub(crate) fn mark_verified(&self, user_id: &str) {
         let conn = self.conn.lock().expect("user store poisoned");
         let _ = conn.execute("UPDATE one_users SET verified = 1 WHERE id = ?1", [user_id]);
+    }
+
+    pub(crate) fn set_password(&self, user_id: &str, pass_hash: &str) -> anyhow::Result<()> {
+        let conn = self.conn.lock().expect("user store poisoned");
+        conn.execute(
+            "UPDATE one_users SET pass_hash = ?2 WHERE id = ?1",
+            [user_id, pass_hash],
+        )?;
+        Ok(())
+    }
+
+    /// Revoke every outstanding refresh token (used after a password reset).
+    pub(crate) fn revoke_user_refresh(&self, user_id: &str) {
+        let conn = self.conn.lock().expect("user store poisoned");
+        let _ = conn.execute("DELETE FROM one_refresh WHERE user_id = ?1", [user_id]);
+    }
+
+    // ── short-lived email codes (verification / reset / OTP) ────────────────
+
+    /// Issue an 8-digit code for `(purpose, email)` — replaces any previous
+    /// one, 10-minute TTL, 30-second resend floor (anti mail-bomb).
+    pub(crate) fn issue_code(&self, purpose: &str, email: &str) -> Result<String, &'static str> {
+        let now = chrono::Utc::now().timestamp();
+        let conn = self.conn.lock().expect("user store poisoned");
+        let last: Option<i64> = conn
+            .query_row(
+                "SELECT issued_at FROM one_codes WHERE purpose = ?1 AND email = ?2",
+                [purpose, email],
+                |r| r.get(0),
+            )
+            .ok();
+        if let Some(last) = last {
+            if now - last < 30 {
+                return Err("a code was just sent; wait before requesting another");
+            }
+        }
+        let code = format!("{:08}", uuid::Uuid::new_v4().as_u128() % 100_000_000);
+        conn.execute(
+            "INSERT INTO one_codes (purpose, email, digest, expires_at, attempts, issued_at)
+             VALUES (?1, ?2, ?3, ?4, 0, ?5)
+             ON CONFLICT(purpose, email) DO UPDATE SET
+               digest = excluded.digest, expires_at = excluded.expires_at,
+               attempts = 0, issued_at = excluded.issued_at",
+            rusqlite::params![purpose, email, sha256_hex(&code), now + 600, now],
+        )
+        .map_err(|_| "code store write failed")?;
+        Ok(code)
+    }
+
+    /// Verify-and-consume: success burns the row; 5 failed attempts burn it
+    /// too (no offline brute-force of an 8-digit space).
+    pub(crate) fn consume_code(&self, purpose: &str, email: &str, code: &str) -> bool {
+        let now = chrono::Utc::now().timestamp();
+        let conn = self.conn.lock().expect("user store poisoned");
+        let row: Option<(String, i64, i64)> = conn
+            .query_row(
+                "SELECT digest, expires_at, attempts FROM one_codes WHERE purpose = ?1 AND email = ?2",
+                [purpose, email],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .ok();
+        let Some((digest, expires_at, attempts)) = row else {
+            return false;
+        };
+        if now >= expires_at || attempts >= 5 {
+            let _ = conn.execute(
+                "DELETE FROM one_codes WHERE purpose = ?1 AND email = ?2",
+                [purpose, email],
+            );
+            return false;
+        }
+        if ct_eq(&sha256_hex(code), &digest) {
+            let _ = conn.execute(
+                "DELETE FROM one_codes WHERE purpose = ?1 AND email = ?2",
+                [purpose, email],
+            );
+            true
+        } else {
+            let _ = conn.execute(
+                "UPDATE one_codes SET attempts = attempts + 1 WHERE purpose = ?1 AND email = ?2",
+                [purpose, email],
+            );
+            false
+        }
+    }
+
+    // ── TOTP + recovery codes ────────────────────────────────────────────────
+
+    /// Store a freshly generated secret, pending until the user confirms a
+    /// valid code (so a lost QR can't lock anyone out).
+    pub(crate) fn totp_set_pending(&self, user_id: &str, secret_b32: &str) -> anyhow::Result<()> {
+        let conn = self.conn.lock().expect("user store poisoned");
+        conn.execute(
+            "INSERT INTO one_totp (user_id, secret, enabled, created_at) VALUES (?1, ?2, 0, ?3)
+             ON CONFLICT(user_id) DO UPDATE SET secret = excluded.secret, enabled = 0",
+            rusqlite::params![user_id, secret_b32, chrono::Utc::now().to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn totp_secret(&self, user_id: &str) -> Option<(String, bool)> {
+        let conn = self.conn.lock().expect("user store poisoned");
+        conn.query_row(
+            "SELECT secret, enabled FROM one_totp WHERE user_id = ?1",
+            [user_id],
+            |r| Ok((r.get(0)?, r.get::<_, i64>(1)? != 0)),
+        )
+        .ok()
+    }
+
+    pub(crate) fn totp_enable(&self, user_id: &str) {
+        let conn = self.conn.lock().expect("user store poisoned");
+        let _ = conn.execute("UPDATE one_totp SET enabled = 1 WHERE user_id = ?1", [user_id]);
+    }
+
+    pub(crate) fn totp_enabled(&self, user_id: &str) -> bool {
+        self.totp_secret(user_id).map(|(_, on)| on).unwrap_or(false)
+    }
+
+    pub(crate) fn totp_remove(&self, user_id: &str) {
+        let conn = self.conn.lock().expect("user store poisoned");
+        let _ = conn.execute("DELETE FROM one_totp WHERE user_id = ?1", [user_id]);
+        let _ = conn.execute("DELETE FROM one_recovery WHERE user_id = ?1", [user_id]);
+    }
+
+    pub(crate) fn recovery_store(&self, user_id: &str, digests: &[String]) -> anyhow::Result<()> {
+        let conn = self.conn.lock().expect("user store poisoned");
+        conn.execute("DELETE FROM one_recovery WHERE user_id = ?1", [user_id])?;
+        for d in digests {
+            conn.execute(
+                "INSERT INTO one_recovery (user_id, digest) VALUES (?1, ?2)",
+                [user_id, d],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Single-use: a matching recovery code is deleted as it is accepted.
+    pub(crate) fn recovery_consume(&self, user_id: &str, code: &str) -> bool {
+        let digest = sha256_hex(code);
+        let conn = self.conn.lock().expect("user store poisoned");
+        conn.execute(
+            "DELETE FROM one_recovery WHERE user_id = ?1 AND digest = ?2",
+            [user_id, &digest],
+        )
+        .map(|n| n > 0)
+        .unwrap_or(false)
     }
 
     /// Mint a refresh token: `nrt_<rowid>.<secret>`, digest-stored, 30-day TTL.
@@ -292,12 +459,14 @@ struct Claims {
 }
 
 pub struct OneState {
-    users: UserStore,
+    pub(crate) users: UserStore,
     jwt_secret: Vec<u8>,
     jwt_ttl: u64,
     allow_signup: bool,
     /// OAuth2/OIDC flow state (PKCE pending store + provider endpoints).
     pub(crate) oauth: crate::one_oauth::OAuthRuntime,
+    /// SMTP sender — None when ONE_SMTP_HOST is unset (email endpoints 503).
+    pub(crate) mailer: Option<crate::one_email::Mailer>,
 }
 
 impl OneState {
@@ -335,7 +504,40 @@ impl OneState {
             jwt_ttl,
             allow_signup,
             oauth: crate::one_oauth::OAuthRuntime::default(),
+            mailer: crate::one_email::Mailer::from_env(),
         })
+    }
+
+    /// Password (or email-OTP) factor passed — either finish with a session
+    /// or, when the account has TOTP enabled, hand back a 5-minute MFA
+    /// challenge token that `/one/v1/auth/totp/verify` upgrades.
+    pub(crate) fn finish_login(
+        &self,
+        user_id: &str,
+    ) -> Result<serde_json::Value, axum::response::Response> {
+        if !self.users.totp_enabled(user_id) {
+            return self.issue_session(user_id);
+        }
+        let user = self.users.get_user(user_id).ok_or_else(|| {
+            api_err(StatusCode::UNAUTHORIZED, "unauthorized", "account no longer exists")
+        })?;
+        let token = self
+            .mint_typed(&user.id, &user.email, "mfa", 300)
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, "jwt_failed", &e))?;
+        Ok(json!({ "mfa_required": true, "mfa_token": token, "expires_in": 300 }))
+    }
+
+    /// Decode an MFA challenge token → the user id it vouches for.
+    pub(crate) fn verify_mfa_token(&self, token: &str) -> Option<String> {
+        let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
+        validation.validate_exp = true;
+        let data = jsonwebtoken::decode::<Claims>(
+            token,
+            &jsonwebtoken::DecodingKey::from_secret(&self.jwt_secret),
+            &validation,
+        )
+        .ok()?;
+        (data.claims.typ == "mfa").then_some(data.claims.sub)
     }
 
     /// Mint the full session bundle (JWT + rotating refresh) for a known user.
@@ -415,22 +617,26 @@ impl OneState {
         Ok(uid)
     }
 
-    fn mint_jwt(&self, user_id: &str, email: &str) -> Result<(String, u64), String> {
+    fn mint_typed(&self, user_id: &str, email: &str, typ: &str, ttl: u64) -> Result<String, String> {
         let now = chrono::Utc::now().timestamp() as usize;
         let claims = Claims {
             sub: user_id.to_string(),
             email: email.to_string(),
             iat: now,
-            exp: now + self.jwt_ttl as usize,
-            typ: "auth".to_string(),
+            exp: now + ttl as usize,
+            typ: typ.to_string(),
         };
         jsonwebtoken::encode(
             &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256),
             &claims,
             &jsonwebtoken::EncodingKey::from_secret(&self.jwt_secret),
         )
-        .map(|t| (t, self.jwt_ttl))
         .map_err(|e| e.to_string())
+    }
+
+    fn mint_jwt(&self, user_id: &str, email: &str) -> Result<(String, u64), String> {
+        self.mint_typed(user_id, email, "auth", self.jwt_ttl)
+            .map(|t| (t, self.jwt_ttl))
     }
 
     /// Verify a user JWT → the identity that flows through `/data/v1`:
@@ -463,7 +669,7 @@ impl OneState {
 
 // ─── handlers ────────────────────────────────────────────────────────────────
 
-fn one_of(state: &AppState) -> Result<Arc<OneState>, axum::response::Response> {
+pub(crate) fn one_of(state: &AppState) -> Result<Arc<OneState>, axum::response::Response> {
     state.one.clone().ok_or_else(|| {
         api_err(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -564,16 +770,11 @@ async fn login(
     if !ok {
         return api_err(StatusCode::UNAUTHORIZED, "unauthorized", "invalid email or password");
     }
-    let (token, ttl) = match one.mint_jwt(&user_id, &email) {
-        Ok(t) => t,
-        Err(e) => return api_err(StatusCode::INTERNAL_SERVER_ERROR, "jwt_failed", &e),
-    };
-    let refresh = match one.users.mint_refresh(&user_id) {
-        Ok(r) => r,
-        Err(e) => return api_err(StatusCode::INTERNAL_SERVER_ERROR, "refresh_failed", &e.to_string()),
-    };
-    let user = one.users.get_user(&user_id);
-    (StatusCode::OK, Json(session_json(user.as_ref(), token, ttl, refresh))).into_response()
+    // TOTP-enabled accounts get a challenge instead of a session.
+    match one.finish_login(&user_id) {
+        Ok(body) => (StatusCode::OK, Json(body)).into_response(),
+        Err(r) => r,
+    }
 }
 
 #[derive(Deserialize)]
@@ -648,11 +849,13 @@ fn auth_routes() -> Router<AppState> {
         .route("/one/v1/auth/me", get(me))
 }
 
-/// nano's full route set + the account surface + the OAuth matrix, one router.
+/// nano's full route set + accounts + OAuth + email codes + TOTP, one router.
 pub fn router(state: AppState) -> Router {
     crate::nano::routes()
         .merge(auth_routes())
         .merge(crate::one_oauth::routes())
+        .merge(crate::one_email::routes())
+        .merge(crate::one_totp::routes())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
