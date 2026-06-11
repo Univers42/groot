@@ -35,7 +35,8 @@ PB_PORT=18942
 WORK="$(mktemp -d)"
 
 cleanup(){
-  docker rm -f bench-nano bench-pb >/dev/null 2>&1 || true
+  # -v: binocle-nano declares VOLUME /data — drop its anonymous volume too.
+  docker rm -fv bench-nano bench-pb >/dev/null 2>&1 || true
   # pb_data is written by root inside the PB container — remove it the same way.
   docker run --rm -v "${WORK}:/w" public.ecr.aws/docker/library/alpine:3.20 \
     sh -c 'rm -rf /w/pb_data /w/pb_migrations' >/dev/null 2>&1 || true

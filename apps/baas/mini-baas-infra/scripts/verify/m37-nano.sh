@@ -40,7 +40,9 @@ PORT="${NANO_PORT:-18937}"
 KEY="nbk_m37gate.$(date +%s)deterministic-admin-key-for-ci"
 BASE="http://127.0.0.1:${PORT}"
 
-cleanup(){ docker rm -f "${NAME}" >/dev/null 2>&1 || true; }
+# -v: the image declares VOLUME /data, so a plain rm -f would leak one
+# anonymous volume per gate run.
+cleanup(){ docker rm -fv "${NAME}" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
 req(){ # method path key [body] → status<TAB>body
@@ -69,7 +71,17 @@ for i in $(seq 1 20); do
 done
 ok "healthy on :${PORT}"
 
-step "2/7 raw-SQL migration + CRUD + aggregate + schema through /data/v1"
+step "2/7 STRUCTURED DDL (typed collections) + raw SQL + CRUD + aggregate + schema"
+# PB-style typed collection creation through the SAME /data/v1/schema/ddl
+# contract the cloud tiers use (sqlite adapter structured DDL, Phase C).
+R=$(req POST /data/v1/schema/ddl "${KEY}" '{"db_id":"main","ddl":{"op":"create_table","table":"typed","columns":[{"name":"id","normalized_type":"text","nullable":false},{"name":"status","normalized_type":"enum","nullable":false,"default":"'"'"'new'"'"'","enum_values":["new","done"]},{"name":"views","normalized_type":"integer","nullable":true}],"primary_key":["id"]}}')
+[[ "$(status_of "$R")" == "200" ]] || fail "structured create_table: $R"
+R=$(req POST /data/v1/query "${KEY}" '{"db_id":"main","operation":{"op":"insert","resource":"typed","data":{"id":"t1","status":"new","views":1}}}')
+[[ "$(status_of "$R")" == "200" ]] || fail "insert into typed table: $R"
+R=$(req POST /data/v1/query "${KEY}" '{"db_id":"main","operation":{"op":"insert","resource":"typed","data":{"id":"t2","status":"bogus"}}}')
+[[ "$(status_of "$R")" == "409" ]] || fail "enum CHECK must reject bad value (409): $R"
+R=$(req POST /data/v1/schema/ddl "${KEY}" '{"db_id":"main","ddl":{"op":"add_column","table":"typed","column":{"name":"note","normalized_type":"text","nullable":true}}}')
+[[ "$(status_of "$R")" == "200" ]] || fail "structured add_column: $R"
 R=$(req POST /nano/v1/raw "${KEY}" '{"db_id":"main","statement":"CREATE TABLE IF NOT EXISTS notes (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, title TEXT)"}')
 [[ "$(status_of "$R")" == "200" ]] || fail "raw DDL: $R"
 R=$(req POST /data/v1/query "${KEY}" '{"db_id":"main","operation":{"op":"insert","resource":"notes","data":{"id":"m37","title":"gate"}}}')

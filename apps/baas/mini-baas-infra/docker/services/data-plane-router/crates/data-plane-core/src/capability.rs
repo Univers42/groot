@@ -228,8 +228,10 @@ impl EngineCapabilities {
 
     /// SQLite — embedded engine (rusqlite, file-per-mount). Relational surface:
     /// CRUD, upsert (INSERT…ON CONFLICT), ATOMIC batch (one tx per request),
-    /// aggregate (GROUP BY), introspection (pragma), single-op schema DDL. No
-    /// LISTEN/NOTIFY streaming. `transactions:false` — the deadpool-sqlite
+    /// aggregate (GROUP BY), introspection (pragma), structured single-op
+    /// schema DDL (`build_sqlite_ddl`: create/drop table, add/drop column;
+    /// `alter_column_type` is honestly rejected — SQLite has no ALTER COLUMN).
+    /// No LISTEN/NOTIFY streaming. `transactions:false` — the deadpool-sqlite
     /// `interact` model makes a connection-pinned, cross-request multi-statement
     /// TxHandle disproportionate; `begin()` honestly returns NotImplemented (a
     /// single batch is still atomic). Honest descriptor: conformance skips
@@ -243,7 +245,7 @@ impl EngineCapabilities {
             batch: true,
             aggregate: true,
             introspect: true,
-            schema_ddl: false,
+            schema_ddl: true,
             stream: false,
             ddl: false,
             transactions: false,
