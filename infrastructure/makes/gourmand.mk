@@ -24,7 +24,7 @@ gourmand-people: ## Gourmand: mirror their real staff (User⋈Role) into the org
 gourmand-content: ## Gourmand: seed the workspace (live pages, wikis, chat channels)
 	@set -e; \
 	. $(GOURMAND_INFRA_DIR)/.gourmand-tenant.env; \
-	. $(GOURMAND_SEEDS_DIR)/.gourmand-people.env; \
+	eval "$$(grep -E '^GOURMAND_(ORG_WORKSPACE_ID|OWNER_UUID)=' $(GOURMAND_SEEDS_DIR)/.gourmand-people.env)"; \
 	python3 $(GOURMAND_SEEDS_DIR)/seed_gourmand_content.py \
 	  "$$GOURMAND_ORG_WORKSPACE_ID" "$$GOURMAND_OWNER_UUID" "$$GOURMAND_DB_ID" \
 	  "$(GOURMAND_SEEDS_DIR)/.gourmand-people.env" \
@@ -40,7 +40,6 @@ gourmand-verify: ## Gourmand: run the m24 gates (tenant_owned + live mount + wor
 
 gourmand-sim: ## Gourmand: Playwright staff e2e (mirrored owner signs in, works the live data)
 	@set -e; \
-	. $(GOURMAND_SEEDS_DIR)/.gourmand-people.env; \
 	CRED="$$(grep -m1 '|owner|' $(GOURMAND_SEEDS_DIR)/.gourmand-people.env | cut -d= -f2-)"; \
 	docker compose --profile testing run --rm \
 	  -e GOURMAND_E2E_EMAIL="$$(echo "$$CRED" | cut -d'|' -f1)" \

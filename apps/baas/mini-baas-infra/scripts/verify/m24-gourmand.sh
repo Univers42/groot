@@ -41,8 +41,9 @@ bash "${SCRIPT_DIR}/m24-gourmand-mount.sh" || fail "mount gate failed"
 step "3/3 org workspace (people, pages, wiki, chat)"
 PEOPLE_ENV="${REPO_ROOT}/tools/seeds/.gourmand-people.env"
 [[ -f "${PEOPLE_ENV}" ]] || fail "no .gourmand-people.env — run make gourmand-people"
-# shellcheck disable=SC1090
-source "${PEOPLE_ENV}"
+# Source ONLY the scalar header vars: the GOURMAND_CRED_* lines carry
+# pipe-delimited values (a@b|uuid|Name|role|pw) that bash would run as pipes.
+eval "$(grep -E '^GOURMAND_(ORG_WORKSPACE_ID|OWNER_UUID|OWNER_EMAIL|STAFF_COUNT)=' "${PEOPLE_ENV}")"
 WS="${GOURMAND_ORG_WORKSPACE_ID:?}"
 PSQL() { docker exec -i track-binocle-postgres-1 psql -U postgres -d postgres -tAc "$1"; }
 members=$(PSQL "SELECT count(*) FROM public.osionos_workspace_members WHERE workspace_id='${WS}'")

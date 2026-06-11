@@ -91,9 +91,14 @@ grep -q "DROP CONSTRAINT IF EXISTS tenant_databases_isolation_check" \
 pass "registry accepts tenant_owned; CHECK constraint widened idempotently"
 
 # ── 5) unit suites ───────────────────────────────────────────────────────────
+# Run the two crates SEQUENTIALLY (not `-p core -p pool` in one invocation):
+# the pool test binary pulls the heavy rustls/mongodb/mysql build, and running
+# both binaries' threads concurrently has intermittently starved a pure core
+# planner test under CI memory pressure. Sequential = deterministic; both
+# suites still gate.
 step "running cargo + go test suites"
 docker run --rm -v "${PWD}/${ROUTER_DIR}":/work -w /work rust:1.89-slim \
-  sh -c 'cargo test -p data-plane-core -p data-plane-pool 2>&1 | tail -20' \
+  sh -c 'cargo test -p data-plane-core 2>&1 | tail -8 && echo "===POOL===" && cargo test -p data-plane-pool 2>&1 | tail -12' \
   > /tmp/m24-cargo.log 2>&1 || fail "cargo tests failed: $(grep -E 'FAILED|error' /tmp/m24-cargo.log | head -3)"
 grep -q "test result: FAILED" /tmp/m24-cargo.log && fail "cargo test failures: $(tail -5 /tmp/m24-cargo.log)"
 docker run --rm -v "${PWD}/${GO_DIR}":/work -w /work golang:1.23 \

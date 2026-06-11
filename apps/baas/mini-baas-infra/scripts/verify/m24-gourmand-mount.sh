@@ -65,7 +65,10 @@ gw() { # $1 expected, $2 path, $3 body|- → /tmp/m24g.json
         -H "apikey: ${ANON}" -H "X-Baas-Api-Key: ${APP_KEY}" \
         -H 'Content-Type: application/json' -d "${body}")
     fi
-    if [[ "${code}" == "429" ]]; then sleep $((attempt * 3)); continue; fi
+    if [[ "${code}" == "429" || "${code}" == "503" ]] \
+      || grep -q 'auth_verify_unavailable' /tmp/m24g.json 2>/dev/null; then
+      [[ "${attempt}" -lt 3 ]] && { sleep $((attempt * 3)); continue; }
+    fi
     break
   done
   [[ "${code}" == "${expected}" || ( "${expected}" == "2xx" && "${code}" =~ ^2 ) ]] \

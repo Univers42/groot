@@ -163,7 +163,7 @@ for name, topic in CHANNELS:
 general_id = str(uuid.uuid5(NS, "gourmand:chan:general"))
 welcome_id = str(uuid.uuid5(NS, "gourmand:msg:welcome"))
 statements.append(
-    "INSERT INTO public.osionos_messages (id, channel_id, user_id, body)"
+    "INSERT INTO public.osionos_messages (id, channel_id, author_id, content)"
     f" VALUES ({q(welcome_id)}, {q(general_id)}, {q(OWNER)},"
     f" {q('Bienvenue dans l’espace de travail Vite & Gourmand — les tableaux Operations sont branchés sur les vraies données du site.')})"
     " ON CONFLICT (id) DO NOTHING;"
