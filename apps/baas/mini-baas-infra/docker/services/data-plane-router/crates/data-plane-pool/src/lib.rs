@@ -32,7 +32,7 @@ mod resolver;
 mod sqlite;
 mod tls;
 
-pub use http::HttpEngineAdapter;
+pub use http::{guard_and_resolve, HttpEngineAdapter};
 pub use mongo::MongoEngineAdapter;
 pub use mssql::MssqlEngineAdapter;
 pub use mysql::MysqlEngineAdapter;
