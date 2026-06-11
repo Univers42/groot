@@ -204,6 +204,34 @@ Ran on the running stack with the rebuilt data-plane + tenant-control, scale ove
 
 The stack was restored to base config (new images retained, flags at parity defaults) after the run.
 
+### 7.2 10K headline run — harness verified, blocked on environment (2026-06-11)
+
+The m39 gate (`scripts/verify/m39-scale.sh`) was exercised end-to-end at the
+**smoke scale (200 tenants)** on the *base* stack to verify the pipeline post-R2/H1
+(seed → crypto-OOM guard → multitenant k6 load → p99/5xx/RSS asserts → auto-teardown).
+It ran cleanly and **correctly caught that the base stack is not headline-ready**:
+
+| Signal | Measured | Reading |
+|---|---|---|
+| `multitenant-200.json` | p50 **27 ms**, p99 **10003 ms** (timeout ceiling), **6481/10876 5xx** | a fast-success cohort + a large 502 tail — downstream connection exhaustion, not the data plane |
+| data-plane RSS | **60 MiB**, `pool_events{evicted}=0` | the plane itself is idle-cheap; the wall is below it |
+| Root cause | base postgres `max_connections=100`; data-plane `DATA_PLANE_SHARE_POOLS` off (parity default) → 200 distinct tenant pools exhaust PG connections → 10 s hang → **502** | **exactly the bottleneck B4-pools + the scale override fix** (§7.1 proved 50 shared_rls tenants → 1 pool when `SHARE_POOLS=1`) |
+
+So the smoke is a *passing demonstration of the harness* and a measured datapoint, not a
+regression: the 502 wall is the documented pre-scale-override behavior. The full 10K run is
+gated on two environment prerequisites, neither related to the R2/H1 changes:
+
+1. **redis is OOM-crash-looping** (`OOMKilled=true`, **651 restarts**): its 128 MiB limit is too
+   small for the accumulated AOF, so every background AOF rewrite is killed (signal 9). Needs a
+   redis mem bump and/or an AOF reset before any sustained run.
+2. **Scale override required**: `docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d`
+   (PG `max_connections=2000`, `DATA_PLANE_MAX_POOLS=4096`) **with `DATA_PLANE_SHARE_POOLS=1`** so the
+   shared_rls fleet collapses to one pool (the §7.1 win), then `SCALE=10000 bash scripts/verify/m39-scale.sh`.
+
+Reproduce once the environment is healthy: stabilize redis → bring up the scale override with
+`SHARE_POOLS=1` → `SCALE=10000 bash scripts/verify/m39-scale.sh` (auto-seeds, loads, asserts
+p99 ≤ 2× baseline · 0×5xx · RSS ≤ 512 MiB, auto-tears-down).
+
 ---
 
 ## 8. Reproduce everything
