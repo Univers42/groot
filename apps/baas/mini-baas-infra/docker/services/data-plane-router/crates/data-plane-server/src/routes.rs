@@ -330,8 +330,11 @@ pub fn router(state: AppState) -> Router {
     // DATA_PLANE_BYPASS_ENABLED=1; the internal /v1/query (query-router path) is
     // always present, so this is pure shadow until parity is proven + cut over.
     let bypass = if state.config.bypass_enabled {
-        tracing::info!("Phase 7 bypass ENABLED: POST /data/v1/query (Rust-native API-key auth)");
-        Router::new().route("/data/v1/query", post(data_query))
+        tracing::info!("Phase 7 bypass ENABLED: POST /data/v1/{{query,schema,schema/ddl}} (Rust-native API-key auth)");
+        Router::new()
+            .route("/data/v1/query", post(data_query))
+            .route("/data/v1/schema", post(data_describe_schema))
+            .route("/data/v1/schema/ddl", post(data_apply_schema_ddl))
     } else {
         Router::new()
     };
@@ -704,117 +707,111 @@ fn api_key_scope_gate(
     op: &data_plane_core::DataOperationKind,
 ) -> Result<(), &'static str> {
     use data_plane_core::DataOperationKind::*;
-    let has = |s: &str| scopes.iter().any(|x| x == s);
-    if has("admin") {
-        return Ok(());
-    }
     let needed = match op {
         List | Get | Aggregate => "read",
         Insert | Update | Delete | Upsert | Batch => "write",
     };
-    if has(needed) {
+    require_scope(scopes, needed)
+}
+
+/// A scope check: `admin` satisfies anything; otherwise the exact scope is
+/// required. Shared by the op gate (read/write) and the schema/ddl bypass
+/// handlers (read for introspect, write for DDL).
+fn require_scope(scopes: &[String], needed: &'static str) -> Result<(), &'static str> {
+    if scopes.iter().any(|s| s == "admin" || s == needed) {
         Ok(())
     } else {
         Err(needed)
     }
 }
 
-async fn data_query(
-    State(state): State<AppState>,
-    headers: header::HeaderMap,
-    Json(req): Json<DataQueryRequest>,
-) -> axum::response::Response {
+/// A JSON `ApiError` response with the given status.
+fn api_err(status: StatusCode, error: &str, message: &str) -> axum::response::Response {
+    (
+        status,
+        Json(ApiError {
+            error: error.to_string(),
+            message: message.to_string(),
+        }),
+    )
+        .into_response()
+}
+
+/// Shared `/data/v1` authentication: validate the `X-Baas-Api-Key` (Go performs
+/// the Argon2id compare via tenant-control) and resolve the mount (engine + DSN
+/// + tier mask), tenant-scoped via adapter-registry. Returns the verified caller
+/// + resolved mount, or a ready error response. Every bypass handler (query,
+/// schema, ddl) routes through here so authentication is byte-identical.
+async fn bypass_auth(
+    state: &AppState,
+    headers: &header::HeaderMap,
+    db_id: &str,
+) -> Result<(crate::auth::VerifiedIdentity, crate::auth::ResolvedMount), axum::response::Response> {
     let key = match headers.get("x-baas-api-key").and_then(|v| v.to_str().ok()) {
         Some(k) if !k.trim().is_empty() => k.to_string(),
         _ => {
-            return (
+            return Err(api_err(
                 StatusCode::UNAUTHORIZED,
-                Json(ApiError {
-                    error: "unauthorized".to_string(),
-                    message: "X-Baas-Api-Key header is required".to_string(),
-                }),
-            )
-                .into_response()
+                "unauthorized",
+                "X-Baas-Api-Key header is required",
+            ))
         }
     };
-    let cfg = state.config.clone();
-    if cfg.internal_service_token.is_empty() {
-        return (
+    if state.config.internal_service_token.is_empty() {
+        return Err(api_err(
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(ApiError {
-                error: "bypass_misconfigured".to_string(),
-                message: "INTERNAL_SERVICE_TOKEN not set on the data plane".to_string(),
-            }),
-        )
-            .into_response();
+            "bypass_misconfigured",
+            "INTERNAL_SERVICE_TOKEN not set on the data plane",
+        ));
     }
-
-    // 1. Verify the key — Go performs the Argon2id compare; Rust trusts the result.
-    let id = match crate::auth::verify_key(
+    // Go performs the Argon2id compare; Rust trusts the verified result.
+    let id = crate::auth::verify_key(
         &state.http_client,
-        &cfg.tenant_control_url,
-        &cfg.internal_service_token,
+        &state.config.tenant_control_url,
+        &state.config.internal_service_token,
         &key,
     )
     .await
-    {
-        Ok(v) => v,
-        Err(e) => return auth_error_response(e),
-    };
-    // 1b. API-key scope gate (Phase C) — admin/read/write, mirrors the
-    // query-router. Fail fast before resolving the mount.
-    if let Err(missing) = api_key_scope_gate(&id.scopes, &req.operation.op) {
-        tracing::warn!(
-            target: "audit",
-            event = "scope_denied",
-            tenant = %id.tenant_id,
-            op = ?req.operation.op,
-            "api key lacks '{missing}' scope (403)"
-        );
-        return (
-            StatusCode::FORBIDDEN,
-            Json(ApiError {
-                error: "forbidden".to_string(),
-                message: format!("api key lacks '{missing}' scope for this operation"),
-            }),
-        )
-            .into_response();
-    }
-    // 2. Resolve the mount (engine + DSN + tier mask), tenant-scoped.
-    let mount_info = match crate::auth::resolve_mount(
+    .map_err(auth_error_response)?;
+    let mount_info = crate::auth::resolve_mount(
         &state.http_client,
-        &cfg.adapter_registry_url,
-        &cfg.internal_service_token,
+        &state.config.adapter_registry_url,
+        &state.config.internal_service_token,
         &id.tenant_id,
-        &req.db_id,
+        db_id,
     )
     .await
-    {
-        Ok(m) => m,
-        Err(e) => return auth_error_response(e),
-    };
+    .map_err(auth_error_response)?;
+    Ok((id, mount_info))
+}
 
-    // 3. Assemble the SAME internal envelope the query-router builds — including
-    // the `api-key:<id>` principal so bypass writes are owner-stamped identically.
-    let request = QueryRequest {
-        identity: RequestIdentity {
+/// Build the internal (identity, mount) envelope for a verified bypass caller —
+/// the SAME shape the query-router constructs, including the `api-key:<id>`
+/// principal so bypass writes are owner-stamped identically.
+fn bypass_envelope(
+    id: &crate::auth::VerifiedIdentity,
+    db_id: &str,
+    mount_info: crate::auth::ResolvedMount,
+) -> (RequestIdentity, DatabaseMount) {
+    (
+        RequestIdentity {
             tenant_id: id.tenant_id.clone(),
             project_id: None,
             app_id: None,
             user_id: Some(format!("api-key:{}", id.key_id)),
             roles: vec![],
-            scopes: id.scopes,
+            scopes: id.scopes.clone(),
             source: IdentitySource::ServiceToken,
         },
-        mount: DatabaseMount {
-            id: req.db_id.clone(),
-            tenant_id: id.tenant_id,
+        DatabaseMount {
+            id: db_id.to_string(),
+            tenant_id: id.tenant_id.clone(),
             project_id: None,
             engine: mount_info.engine,
             name: "bypass".to_string(),
             credential_ref: CredentialRef {
                 provider: "adapter-registry".to_string(),
-                reference: req.db_id,
+                reference: db_id.to_string(),
                 version: "live".to_string(),
             },
             pool_policy: PoolPolicy::default(),
@@ -822,11 +819,108 @@ async fn data_query(
             inline_dsn: Some(mount_info.connection_string),
             isolation: mount_info.isolation,
         },
-        operation: req.operation,
+    )
+}
+
+/// Audited 403 for a bypass caller lacking a scope.
+fn scope_denied(
+    id: &crate::auth::VerifiedIdentity,
+    surface: &str,
+    missing: &str,
+) -> axum::response::Response {
+    tracing::warn!(
+        target: "audit",
+        event = "scope_denied",
+        tenant = %id.tenant_id,
+        surface = %surface,
+        "api key lacks '{missing}' scope (403)"
+    );
+    api_err(
+        StatusCode::FORBIDDEN,
+        "forbidden",
+        &format!("api key lacks '{missing}' scope for this operation"),
+    )
+}
+
+async fn data_query(
+    State(state): State<AppState>,
+    headers: header::HeaderMap,
+    Json(req): Json<DataQueryRequest>,
+) -> axum::response::Response {
+    let (id, mount_info) = match bypass_auth(&state, &headers, &req.db_id).await {
+        Ok(v) => v,
+        Err(resp) => return resp,
     };
-    // 4. Identical execution path — but Rust emits the outbox event here (the
+    // API-key scope gate (admin/read/write) — mirrors the query-router.
+    if let Err(missing) = api_key_scope_gate(&id.scopes, &req.operation.op) {
+        return scope_denied(&id, "query", missing);
+    }
+    let (identity, mount) = bypass_envelope(&id, &req.db_id, mount_info);
+    // Identical execution path — Rust emits the outbox event here (the
     // query-router is out of the bypass path), so row-change fan-out keeps firing.
-    run_query(state, request, true).await
+    run_query(
+        state,
+        QueryRequest {
+            identity,
+            mount,
+            operation: req.operation,
+        },
+        true,
+    )
+    .await
+}
+
+// ── /data/v1/schema + /data/v1/schema/ddl (Phase D) ─────────────────────────
+// The api-key-authed twins of /v1/schema[/ddl]: SAME Rust core, but Rust does
+// the auth (verify_key + resolve_mount + scope gate) so a Node-free tier can
+// introspect + create tables through the bypass. Introspect = read scope; DDL =
+// write scope (it mutates the schema). Additive + bypass-gated (shadow); the
+// engine capability gates (introspect / schema_ddl) still apply inside the core.
+
+#[derive(Debug, Clone, Deserialize)]
+struct DataSchemaRequest {
+    #[serde(alias = "databaseId", alias = "dbId")]
+    db_id: String,
+}
+
+async fn data_describe_schema(
+    State(state): State<AppState>,
+    headers: header::HeaderMap,
+    Json(req): Json<DataSchemaRequest>,
+) -> axum::response::Response {
+    let (id, mount_info) = match bypass_auth(&state, &headers, &req.db_id).await {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if let Err(missing) = require_scope(&id.scopes, "read") {
+        return scope_denied(&id, "schema", missing);
+    }
+    let (identity, mount) = bypass_envelope(&id, &req.db_id, mount_info);
+    run_describe_schema(state, identity, mount).await
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct DataSchemaDdlRequest {
+    #[serde(alias = "databaseId", alias = "dbId")]
+    db_id: String,
+    ddl: SchemaDdlRequest,
+}
+
+async fn data_apply_schema_ddl(
+    State(state): State<AppState>,
+    headers: header::HeaderMap,
+    Json(req): Json<DataSchemaDdlRequest>,
+) -> axum::response::Response {
+    let (id, mount_info) = match bypass_auth(&state, &headers, &req.db_id).await {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    // DDL mutates the schema — requires write (or admin).
+    if let Err(missing) = require_scope(&id.scopes, "write") {
+        return scope_denied(&id, "schema_ddl", missing);
+    }
+    let (identity, mount) = bypass_envelope(&id, &req.db_id, mount_info);
+    run_apply_schema_ddl(state, identity, mount, req.ddl).await
 }
 
 fn auth_error_response(err: crate::auth::AuthError) -> axum::response::Response {
@@ -933,22 +1027,30 @@ struct DescribeSchemaRequest {
 async fn describe_schema(
     State(state): State<AppState>,
     Json(request): Json<DescribeSchemaRequest>,
-) -> impl IntoResponse {
-    if let Err(message) = validate_identity_mount(&state, &request.identity, &request.mount) {
+) -> axum::response::Response {
+    run_describe_schema(state, request.identity, request.mount).await
+}
+
+/// Shared schema-introspection core (the envelope `/v1/schema` path and the
+/// api-key `/data/v1/schema` bypass both call this).
+async fn run_describe_schema(
+    state: AppState,
+    identity: RequestIdentity,
+    mount: DatabaseMount,
+) -> axum::response::Response {
+    if let Err(message) = validate_identity_mount(&state, &identity, &mount) {
         return bad_request(message);
     }
     // Honesty gate: only engines advertising `introspect` serve the schema
     // surface (a route capability like `ddl`, not an operation kind).
-    if let Err(resp) =
-        require_capability(&state, &request.mount.engine, "introspect", |c| c.introspect)
-    {
+    if let Err(resp) = require_capability(&state, &mount.engine, "introspect", |c| c.introspect) {
         return resp;
     }
-    let pool = match state.registry.get_or_create(request.mount).await {
+    let pool = match state.registry.get_or_create(mount).await {
         Ok(pool) => pool,
         Err(err) => return map_data_plane_error(&err),
     };
-    match pool.describe_schema(request.identity).await {
+    match pool.describe_schema(identity).await {
         Ok(result) => (StatusCode::OK, Json(result)).into_response(),
         Err(err) => map_data_plane_error(&err),
     }
@@ -975,24 +1077,33 @@ struct SchemaDdlEnvelope {
 async fn apply_schema_ddl(
     State(state): State<AppState>,
     Json(request): Json<SchemaDdlEnvelope>,
-) -> impl IntoResponse {
-    if let Err(message) = validate_identity_mount(&state, &request.identity, &request.mount) {
+) -> axum::response::Response {
+    run_apply_schema_ddl(state, request.identity, request.mount, request.ddl).await
+}
+
+/// Shared schema-DDL core (the envelope `/v1/schema/ddl` path and the api-key
+/// `/data/v1/schema/ddl` bypass both call this).
+async fn run_apply_schema_ddl(
+    state: AppState,
+    identity: RequestIdentity,
+    mount: DatabaseMount,
+    ddl: SchemaDdlRequest,
+) -> axum::response::Response {
+    if let Err(message) = validate_identity_mount(&state, &identity, &mount) {
         return bad_request(message);
     }
-    if request.ddl.table.trim().is_empty() {
+    if ddl.table.trim().is_empty() {
         return bad_request("ddl.table is required".to_string());
     }
     // Honesty gate: only engines advertising `schema_ddl` serve this surface.
-    if let Err(resp) =
-        require_capability(&state, &request.mount.engine, "schema_ddl", |c| c.schema_ddl)
-    {
+    if let Err(resp) = require_capability(&state, &mount.engine, "schema_ddl", |c| c.schema_ddl) {
         return resp;
     }
-    let pool = match state.registry.get_or_create(request.mount).await {
+    let pool = match state.registry.get_or_create(mount).await {
         Ok(pool) => pool,
         Err(err) => return map_data_plane_error(&err),
     };
-    match pool.apply_schema_ddl(request.ddl, request.identity).await {
+    match pool.apply_schema_ddl(ddl, identity).await {
         Ok(result) => (StatusCode::OK, Json(result)).into_response(),
         Err(err) => map_data_plane_error(&err),
     }

@@ -11,17 +11,16 @@
 #                                                                              #
 # **************************************************************************** #
 #
-# Gate for the LEAN BASIC tier (Phase C) — the Pi-class, Node-free shape.
+# Gate for the LEAN BASIC tier (Phase C) + the schema/DDL bypass (Phase D).
 #
 #   1. Footprint: PACKAGE=basic fits ≤512 MiB (the $5-VPS / Pi bar).
-#   2. Node-free CRUD: an insert + read round-trip through the Rust `/data/v1`
-#      bypass — Kong→Rust→engine + Go tenant-control/adapter-registry, with NO
-#      query-router / permission-engine in the path (the Node services basic
-#      omits). Engine = postgresql (a basic-tier engine); the table is created
-#      out-of-band (DDL is a migration concern, not a request-path one — the
-#      bypass intentionally exposes only data ops).
-#   3. Scope gate: a read-only key is DENIED a write (403) but allowed a read —
-#      the api-key authorization a Node-free tier depends on (Phase C1).
+#   2. FULLY Node-free lifecycle through the Rust `/data/v1` front door — create
+#      table → introspect → insert → read — with NO query-router / permission-
+#      engine in the path (the Node services basic omits). The schema + DDL are
+#      the Phase-D additions (`/data/v1/schema`, `/data/v1/schema/ddl`); there is
+#      no psql/out-of-band step — the whole lifecycle is the public API.
+#   3. Scope gate: a read-only key is DENIED a write AND a DDL (403), allowed a
+#      read — the api-key authorization a Node-free tier depends on.
 #
 set -euo pipefail
 
@@ -38,7 +37,12 @@ source "${SCRIPT_DIR}/lib-live-tenant.sh"
 
 RUST_PORT="$(docker port mini-baas-data-plane-router-rust 4011/tcp 2>/dev/null | head -1 | sed 's/.*://')"
 RUST="http://127.0.0.1:${RUST_PORT:-4011}"
-DATA="${RUST}/data/v1/query"
+TBL="lean_$(date +%s)"
+
+bypass() { # $1 path  $2 key  $3 body  → echoes "<body> HTTP<code>"
+  curl -s -w ' HTTP%{http_code}' -X POST "${RUST}/data/v1/$1" \
+    -H "X-Baas-Api-Key: $2" -H 'Content-Type: application/json' -d "$3"
+}
 
 # ── 1. footprint ──────────────────────────────────────────────────────────
 step "footprint: PACKAGE=basic must fit ≤512 MiB"
@@ -48,37 +52,31 @@ PROFILES="go-control-plane rust-data-plane" LABEL="basic" BAR_MB=512 \
 grep -E 'TOTAL|budget' /tmp/m33-fp.txt
 pass "basic tier within the Pi-class budget"
 
-# ── provision a probe tenant + read+write key + pg mount (Go control plane) ─
+# ── provision a probe tenant + read+write key + pg mount (Node-free Go) ─────
 step "provisioning a probe tenant + key + mount (Node-free Go control plane)"
 live_tenant_provision "basic-$(date +%s)" || fail "provision failed"
-trap live_tenant_cleanup EXIT
+trap 'bypass schema/ddl "${LIVE_TENANT_API_KEY}" "{\"db_id\":\"${LIVE_TENANT_DB_ID}\",\"ddl\":{\"op\":\"drop_table\",\"table\":\"${TBL}\"}}" >/dev/null 2>&1 || true; live_tenant_cleanup' EXIT
 DBID="${LIVE_TENANT_DB_ID}"
 WKEY="${LIVE_TENANT_API_KEY}"   # read+write
 
-# scratch table in the probe's postgres (operator/migration step, out-of-band).
-PGUSER="$(_lt_env mini-baas-postgres POSTGRES_USER)"; PGUSER="${PGUSER:-postgres}"
-PGPASS="$(_lt_env mini-baas-postgres POSTGRES_PASSWORD)"; PGPASS="${PGPASS:-postgres}"
-PGDB="$(_lt_env mini-baas-postgres POSTGRES_DB)"; PGDB="${PGDB:-postgres}"
-docker exec -e PGPASSWORD="${PGPASS}" mini-baas-postgres \
-  psql -U "${PGUSER}" -d "${PGDB}" -v ON_ERROR_STOP=1 -c \
-  'CREATE TABLE IF NOT EXISTS lean_probe (id text PRIMARY KEY, owner_id text, name text)' >/dev/null \
-  || fail "could not create the scratch table"
+# ── 2. Node-free lifecycle: create table → introspect → insert → read ───────
+step "create table via /data/v1/schema/ddl (write scope, Node-free DDL)"
+DDL="$(bypass schema/ddl "${WKEY}" "{\"db_id\":\"${DBID}\",\"ddl\":{\"op\":\"create_table\",\"table\":\"${TBL}\",\"columns\":[{\"name\":\"id\",\"normalized_type\":\"text\",\"nullable\":false},{\"name\":\"name\",\"normalized_type\":\"text\",\"nullable\":true}],\"primary_key\":[\"id\"]}}")"
+echo "${DDL}" | grep -q 'HTTP20[0-1]' || fail "create_table via /data/v1/schema/ddl failed: ${DDL}"
 
-post_data() { # $1 key  $2 json-body  → echoes "HTTP <code> <body>"
-  curl -s -w ' HTTP%{http_code}' -X POST "${DATA}" \
-    -H "X-Baas-Api-Key: $1" -H 'Content-Type: application/json' -d "$2"
-}
+step "introspect via /data/v1/schema (read scope) — the new table is visible"
+SCH="$(bypass schema "${WKEY}" "{\"db_id\":\"${DBID}\"}")"
+echo "${SCH}" | grep -q "${TBL}" || fail "introspect did not list the new table ${TBL}: ${SCH:0:200}"
 
-# ── 2. Node-free CRUD through /data/v1 with the read+write key ──────────────
-step "write+read through /data/v1 (no query-router in the path)"
-INS="$(post_data "${WKEY}" "{\"db_id\":\"${DBID}\",\"operation\":{\"op\":\"insert\",\"resource\":\"lean_probe\",\"data\":{\"id\":\"p1\",\"name\":\"lean-hello\"}}}")"
-echo "${INS}" | grep -q 'HTTP20[01]' || fail "insert via /data/v1 did not succeed: ${INS}"
-LST="$(post_data "${WKEY}" "{\"db_id\":\"${DBID}\",\"operation\":{\"op\":\"list\",\"resource\":\"lean_probe\",\"limit\":10}}")"
+step "insert + read via /data/v1/query (no query-router in the path)"
+INS="$(bypass query "${WKEY}" "{\"db_id\":\"${DBID}\",\"operation\":{\"op\":\"insert\",\"resource\":\"${TBL}\",\"data\":{\"id\":\"p1\",\"name\":\"lean-hello\"}}}")"
+echo "${INS}" | grep -q 'HTTP20[01]' || fail "insert via /data/v1 failed: ${INS}"
+LST="$(bypass query "${WKEY}" "{\"db_id\":\"${DBID}\",\"operation\":{\"op\":\"list\",\"resource\":\"${TBL}\",\"limit\":10}}")"
 echo "${LST}" | grep -q 'lean-hello' || fail "read-back via /data/v1 missing the row: ${LST}"
-pass "insert + read round-trip clean through the Node-free bypass"
+pass "full create→introspect→insert→read lifecycle clean through the Node-free bypass"
 
-# ── 3. scope gate: a read-only key is denied the write, allowed the read ────
-step "scope gate: read-only key → write 403, read 200 (Phase C1)"
+# ── 3. scope gate: read-only key denied write AND ddl, allowed read ─────────
+step "scope gate: read-only key → write 403, ddl 403, read 200"
 code=$(curl -s -o /tmp/m33-rk.json -w '%{http_code}' -X POST \
   "${LIVE_TENANT_CONTROL_URL}/v1/tenants/${LIVE_TENANT_SLUG}/keys" \
   -H "X-Service-Token: ${LIVE_SERVICE_TOKEN}" -H 'Content-Type: application/json' \
@@ -87,10 +85,12 @@ code=$(curl -s -o /tmp/m33-rk.json -w '%{http_code}' -X POST \
 RKEY="$(sed -n 's/.*"key":"\([^"]*\)".*/\1/p' /tmp/m33-rk.json | head -1)"
 [[ "${RKEY}" == mbk_* ]] || fail "read-only key has unexpected shape"
 
-WROTE="$(post_data "${RKEY}" "{\"db_id\":\"${DBID}\",\"operation\":{\"op\":\"insert\",\"resource\":\"lean_probe\",\"data\":{\"id\":\"p2\",\"name\":\"should-fail\"}}}")"
-echo "${WROTE}" | grep -q 'HTTP403' || fail "read-only key was NOT denied the write: ${WROTE}"
-READ="$(post_data "${RKEY}" "{\"db_id\":\"${DBID}\",\"operation\":{\"op\":\"list\",\"resource\":\"lean_probe\",\"limit\":1}}")"
-echo "${READ}" | grep -q 'HTTP200' || fail "read-only key was denied a READ: ${READ}"
-pass "scope gate enforced — write denied (403), read allowed (200)"
+W="$(bypass query "${RKEY}" "{\"db_id\":\"${DBID}\",\"operation\":{\"op\":\"insert\",\"resource\":\"${TBL}\",\"data\":{\"id\":\"p2\",\"name\":\"nope\"}}}")"
+echo "${W}" | grep -q 'HTTP403' || fail "read-only key was NOT denied the write: ${W}"
+D="$(bypass schema/ddl "${RKEY}" "{\"db_id\":\"${DBID}\",\"ddl\":{\"op\":\"drop_table\",\"table\":\"${TBL}\"}}")"
+echo "${D}" | grep -q 'HTTP403' || fail "read-only key was NOT denied the DDL: ${D}"
+R="$(bypass query "${RKEY}" "{\"db_id\":\"${DBID}\",\"operation\":{\"op\":\"list\",\"resource\":\"${TBL}\",\"limit\":1}}")"
+echo "${R}" | grep -q 'HTTP200' || fail "read-only key was denied a READ: ${R}"
+pass "scope gate enforced — write 403, ddl 403, read 200"
 
-green "[M33] ALL GATES GREEN — basic tier is Pi-class (≤512 MiB), Node-free, and scope-enforced"
+green "[M33] ALL GATES GREEN — basic tier is Pi-class (≤512 MiB), Node-free end-to-end (DDL+schema+CRUD), scope-enforced"
