@@ -23,7 +23,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dlesieur/mini-baas/control-plane/internal/orchestrator/emailsvc"
+	"github.com/dlesieur/mini-baas/control-plane/internal/orchestrator/gdprsvc"
 	"github.com/dlesieur/mini-baas/control-plane/internal/orchestrator/logsvc"
+	"github.com/dlesieur/mini-baas/control-plane/internal/orchestrator/newslettersvc"
+	"github.com/dlesieur/mini-baas/control-plane/internal/orchestrator/outboxrelay"
+	"github.com/dlesieur/mini-baas/control-plane/internal/orchestrator/sessionsvc"
 	"github.com/dlesieur/mini-baas/control-plane/internal/shared"
 )
 
@@ -34,6 +39,12 @@ type SubService interface {
 	Name() string
 	Mount(mux *http.ServeMux)
 	Run(ctx context.Context)
+}
+
+// initializer is an optional SubService capability: a one-time bootstrap (e.g.
+// schema migration) run before the service is mounted, mirroring onModuleInit.
+type initializer interface {
+	Init(ctx context.Context) error
 }
 
 func main() {
@@ -61,7 +72,12 @@ func main() {
 	// The registry of ported sub-services. Adding one is a single line here
 	// plus its package — no new binary, no new container.
 	available := map[string]SubService{
-		"log": logsvc.New(log),
+		"log":        logsvc.New(log),
+		"email":      emailsvc.New(log),
+		"session":    sessionsvc.New(log, db),
+		"newsletter":   newslettersvc.New(log, db),
+		"gdpr":         gdprsvc.New(log, db),
+		"outbox-relay": outboxrelay.New(log, db),
 	}
 	enabled := selectServices(available, os.Getenv("ORCHESTRATOR_SERVICES"))
 	if len(enabled) == 0 {
@@ -71,6 +87,14 @@ func main() {
 
 	mux := shared.NewRouter("orchestrator", db)
 	for _, svc := range enabled {
+		// A sub-service may bootstrap state before serving (parity with the
+		// Nest onModuleInit) — a failed Init is fatal, it cannot serve.
+		if init, ok := svc.(initializer); ok {
+			if err := init.Init(ctx); err != nil {
+				log.Error("sub-service init failed", "service", svc.Name(), "err", err)
+				os.Exit(1)
+			}
+		}
 		svc.Mount(mux)
 		go svc.Run(ctx)
 		log.Info("sub-service mounted", "service", svc.Name())

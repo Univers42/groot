@@ -1134,6 +1134,31 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/postgres}
       INTERNAL_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
       LOG_SERVICE_LOKI_URL: ${LOG_SERVICE_LOKI_URL:-http://loki:3100/loki/api/v1/push}
+      # email sub-service SMTP (parity with email-service defaults → Mailpit)
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      EMAIL_FROM: ${EMAIL_FROM:-noreply@mini-baas.local}
+      # session sub-service TTL
+      SESSION_TTL_DAYS: ${SESSION_TTL_DAYS:-7}
+      # newsletter sub-service (outbound mail + confirm links)
+      EMAIL_SERVICE_URL: ${EMAIL_SERVICE_URL:-http://email-service:3030}
+      NEWSLETTER_BASE_URL: ${NEWSLETTER_BASE_URL:-http://localhost:8000/newsletter/v1}
+      NEWSLETTER_BATCH_SIZE: ${NEWSLETTER_BATCH_SIZE:-5}
+      # gdpr sub-service (schema-agnostic export/erasure webhooks)
+      GDPR_EXPORT_WEBHOOK_URL: ${GDPR_EXPORT_WEBHOOK_URL:-}
+      GDPR_DELETION_WEBHOOK_URL: ${GDPR_DELETION_WEBHOOK_URL:-}
+      # outbox-relay sub-service (pg outbox → redis streams + realtime fan-out).
+      # Mongo projection is a soft dependency (no-op when no projector wired).
+      OUTBOX_REDIS_URL: ${OUTBOX_REDIS_URL:-redis://redis:6379}
+      OUTBOX_RELAY_POLL_MS: ${OUTBOX_RELAY_POLL_MS:-500}
+      OUTBOX_RELAY_BATCH_SIZE: ${OUTBOX_RELAY_BATCH_SIZE:-25}
+      OUTBOX_RELAY_MAX_ATTEMPTS: ${OUTBOX_RELAY_MAX_ATTEMPTS:-5}
+      OUTBOX_RELAY_DEDUPE_TTL_SECONDS: ${OUTBOX_RELAY_DEDUPE_TTL_SECONDS:-86400}
+      REALTIME_PUBLISH_URL: ${REALTIME_PUBLISH_URL:-http://realtime:4000/v1/publish}
+      REALTIME_PUBLISH_TIMEOUT_MS: ${REALTIME_PUBLISH_TIMEOUT_MS:-1000}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       - "127.0.0.1:${ORCHESTRATOR_PORT:-3026}:3026"
