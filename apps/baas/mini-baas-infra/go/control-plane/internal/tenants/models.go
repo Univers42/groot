@@ -124,6 +124,7 @@ type BootstrapResponse struct {
 type ProvisionRequest struct {
 	Tenant          string      `json:"tenant"` // slug
 	Name            string      `json:"name"`   // display name (defaults to slug)
+	Plan            string      `json:"plan"`   // billing plan (default free via StackSpec.Normalize)
 	OwnerUserID     string      `json:"owner_user_id"`
 	DefaultRoleName string      `json:"default_role_name"`
 	DefaultKeyName  string      `json:"default_key_name"`
@@ -187,6 +188,7 @@ func (r ProvisionRequest) Compile() provision.StackSpec {
 	spec := provision.StackSpec{
 		Tenant:      r.Tenant,
 		Name:        r.Name,
+		Plan:        r.Plan, // "" → StackSpec.Normalize stamps Defaults().Plan (free)
 		OwnerUserID: r.OwnerUserID,
 	}
 	if r.DefaultKeyName != "" {

@@ -183,12 +183,26 @@ Legend: **✅ landed** (code + unit tests in-tree, flag-gated where it changes b
 | **B4-limiter** | Redis Lua token-bucket backend (authoritative across replicas) | in-process buckets desync across N replicas (each admits the full rate) | **✅ landed** (feature `ratelimit-redis`, off=in-process fast path) — `RateLimiter` enum, shared `refill_and_take` math, fail-open. Gate: multi-instance 429 correctness |
 | **Plan-wiring** | Thread the provision `plan` field → `CreateTenant` | provision silently dropped `plan` → every tenant defaulted to free; the scale run had to disable enforcement | **✅ landed** — `reconcile.go`→`findOrCreateBySlug`; the `PACKAGE_ENFORCEMENT=0` scale workaround is removed (scale now runs WITH tiering, the prod shape) |
 | **D2-realtime** | Fan-out Mutex→per-worker channels (C1), drop counters (C2), Arc-shared event (C3), payload serialize-once (H1) | router 1.8K routes/s @10K subs; held-across-await mutex; 617 ns/client serialize | **◐ partial** — C1 **✅** (gateway dispatcher → per-worker queues, no shared mutex; `fanout.rs`), C2/C3 already in `router.rs` (batch `Arc` dispatch + `dispatch_failures`). H1 (writer serialize-once) ○ next |
-| **R2** | Fold 6 Node orchestrators → Go | −359 MiB; essential $13 → $6.5/mo | **○ next** — footprint + m32 |
+| **R2** | Fold 6 Node orchestrators → Go (one binary, not six runtimes) | −359 MiB; essential $13 → $6.5/mo | **◐ started** — consolidated `cmd/orchestrator` host + `SubService` seam + first port (`logsvc`, parity with the Node log-service, unit-tested) shipped as a 32 MiB shadow service (`profiles: background`). Remaining 5 services port into the same binary one at a time (shadow→parity→retire). Gate: footprint + m32 |
 | **Wedge** | Cost-routed OLAP/OLTP plane (product-plan/05) + SaaS quotas/metering (product-plan/06) | the differentiator nobody ships cleanly | **○ next** — per those plans' gates |
 
 Every behavior-changing lever (B4-pools, B4-limiter) ships **off by default** so the live baseline is
 byte-parity; flip the flag to measure the win. R2 changes the benchmark numbers, so it runs **after**
 the baseline freeze — the improvement is itself a measured deliverable.
+
+### 7.1 Live re-bench (2026-06-11, rebuilt images, 50 `pro` `shared_rls` tenants on one DSN)
+
+Ran on the running stack with the rebuilt data-plane + tenant-control, scale override applied,
+`make scale-seed SCALE=50` then list+insert across every tenant. Measured from the new `/metrics`:
+
+| Lever | Evidence | Result |
+|---|---|---|
+| **B4-pools** | `baas_data_plane_pools_open` with `DATA_PLANE_SHARE_POOLS=1` vs `=0` | **1 vs 50** — 50 shared_rls tenants on one DSN collapse to a single pool (at 10K: 1 vs 10K). `pool_events_total{evicted}=0` (no churn). **Gate PASS.** |
+| **B4-verify** | `cache_events_total{cache=verify}` | 52 hit / 51 miss — the fast path populates; each tenant's first verify misses (one-time Argon2), repeats hit, skipping DB + Argon2. |
+| **D-write-tail** | `outbox_events_total{stage}` | enqueued→written off the request path, `dropped=0 failed=0` — the background worker commits the event asynchronously (handler no longer pays the INSERT round-trip). |
+| **Plan-wiring** | adapter-registry `/databases` status | 50× **201** (was 50× **403**) — `pro` tenants register postgresql mounts under `PACKAGE_ENFORCEMENT=1`, no workaround. The re-bench also surfaced + fixed a *second* drop site: the `plan` field was lost at the HTTP boundary (`ProvisionRequest` had no `Plan`; `Compile()` didn't map it) — now wired end-to-end. |
+
+The stack was restored to base config (new images retained, flags at parity defaults) after the run.
 
 ---
 

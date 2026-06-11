@@ -63,6 +63,7 @@ func TestProvisionRequestCompileMapping(t *testing.T) {
 	req := ProvisionRequest{
 		Tenant:          "acme",
 		Name:            "Acme Inc",
+		Plan:            "pro",
 		OwnerUserID:     "00000000-0000-4000-8000-000000000001",
 		DefaultRoleName: "editor",
 		DefaultKeyName:  "primary",
@@ -76,6 +77,11 @@ func TestProvisionRequestCompileMapping(t *testing.T) {
 
 	if spec.Tenant != "acme" || spec.Name != "Acme Inc" || spec.OwnerUserID != req.OwnerUserID {
 		t.Errorf("scalar mapping off: %+v", spec)
+	}
+	// Plan must survive the request→StackSpec boundary (else every tenant
+	// silently defaults to free — the bug the live re-bench surfaced).
+	if spec.Plan != "pro" {
+		t.Errorf("Plan = %q, want pro (dropped at the request boundary)", spec.Plan)
 	}
 	// DefaultKeyName → one KeySpec.
 	if len(spec.Keys) != 1 || spec.Keys[0].Name != "primary" {

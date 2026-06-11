@@ -1110,6 +1110,48 @@ services:
     mem_limit: 96m
     cpus: 0.25
 
+  # ─── Orchestrator (R2 — consolidated Go orchestrators) ─────────────
+  # Folds the small Node orchestrators into ONE Go binary (one runtime, not
+  # six). Runs in SHADOW alongside the Node services it ports (today: log) so
+  # parity is checked before any Node container is retired. ~32 MiB mem_limit
+  # vs ~55 MiB PER Node service is the −359 MiB / essential $13→$6.5 win.
+  orchestrator:
+    build:
+      context: ./go/control-plane
+      dockerfile: Dockerfile
+      args:
+        APP: orchestrator
+        PORT: 3026
+    profiles: [control-plane, background, go-control-plane]
+    container_name: mini-baas-orchestrator
+    env_file: [.env]
+    environment:
+      ORCHESTRATOR_HOST: 0.0.0.0
+      ORCHESTRATOR_PORT: 3026
+      ORCHESTRATOR_PRODUCT_MODE: ${ORCHESTRATOR_PRODUCT_MODE:-shadow}
+      # Comma list of ported sub-services (empty = all). Start with log only.
+      ORCHESTRATOR_SERVICES: ${ORCHESTRATOR_SERVICES:-log}
+      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/postgres}
+      INTERNAL_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
+      LOG_SERVICE_LOKI_URL: ${LOG_SERVICE_LOKI_URL:-http://loki:3100/loki/api/v1/push}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "127.0.0.1:${ORCHESTRATOR_PORT:-3026}:3026"
+    depends_on:
+      db-bootstrap:
+        condition: service_completed_successfully
+    networks:
+      - mini-baas
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/app/app", "--healthcheck"]
+      interval: 5s
+      timeout: 3s
+      start_period: 30s
+      retries: 5
+    mem_limit: 32m
+    cpus: 0.25
+
   # ─── Email Service (background plane) ─────────────────────────────
   email-service:
     build:
