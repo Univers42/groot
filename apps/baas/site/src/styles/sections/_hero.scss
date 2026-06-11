@@ -1,0 +1,37 @@
+.gb-hero {
+	min-height: calc(100dvh - 4rem);
+	display: grid;
+	align-content: center;
+	gap: var(--gb-space-6);
+	padding-block: var(--gb-space-16);
+}
+
+.gb-hero h1 {
+	max-width: 13ch;
+}
+
+.gb-hero h1 em {
+	font-style: normal;
+	color: var(--gb-primary);
+}
+
+.gb-hero__ctas {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--gb-space-4);
+	margin-top: var(--gb-space-2);
+}
+
+.gb-hero__stats {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--gb-space-3);
+	margin-top: var(--gb-space-8);
+}
+
+.gb-hero__hint {
+	margin-top: var(--gb-space-6);
+	color: var(--gb-text-faint);
+	font-size: var(--gb-text-xs);
+	font-family: var(--gb-font-mono);
+}

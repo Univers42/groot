@@ -60,7 +60,7 @@ if docker image inspect golang:1.24-bookworm >/dev/null 2>&1 || docker pull -q g
     -v mini-baas-go-build-cache:/root/.cache/go-build -v mini-baas-go-mod-cache:/go/pkg/mod \
     golang:1.24-bookworm go test ./internal/packages/ >/dev/null 2>&1 \
     || fail "go test ./internal/packages failed (engine gating / aliases / overrides)"
-  pass "manifest resolves tiers (free→essential, enterprise→max), gates engines + mount quota"
+  pass "manifest resolves tiers (free→nano, enterprise→max), gates engines + mount quota"
 else
   red "[M28] WARN: golang image unavailable — skipping go-test leg"
 fi
@@ -82,27 +82,29 @@ docker exec mini-baas-postgres psql -U "${PGUSER}" -d "${PGDB}" -q -c \
 cleanup() { docker exec mini-baas-postgres psql -U "${PGUSER}" -d "${PGDB}" -q -c "DROP TABLE IF EXISTS public.m28_tier_probe;" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
-ESS='{"aggregate":false,"batch":false,"transactions":false,"rps":20,"burst":40}'
+# v2: a CRUD-only mask (basic tier — aggregate:false). Hand-built so the test
+# exercises the GATING MECHANISM, not a specific packages.json row.
+BASIC_MASK='{"aggregate":false,"batch":false,"transactions":false,"rps":100,"burst":200}'
 payload() { # $1=op $2=overrides $3=tenant
   printf '{"identity":{"tenant_id":"%s","user_id":"%s","roles":["service_role"],"scopes":["admin"],"source":"test"},"mount":{"id":"m28","tenant_id":"%s","engine":"postgresql","name":"probe","credential_ref":{"provider":"inline","reference":"-","version":"1"},"capability_overrides":%s,"inline_dsn":"%s","isolation":"shared_rls"},"operation":{"op":"%s","resource":"m28_tier_probe"}}' \
     "$3" "$3" "$3" "$2" "${DSN}" "$1"
 }
 code() { curl -s -o /tmp/m28_body -w "%{http_code}" -X POST "${RUST}/v1/query" -H 'Content-Type: application/json' -d "$1"; }
 
-step "data plane: Essential tier 403s a capability the engine HAS (aggregate)"
-c="$(code "$(payload aggregate "${ESS}" m28-tenant)")"
-[[ "${c}" == "403" ]] || fail "expected 403 for aggregate under essential mask, got ${c} ($(cat /tmp/m28_body))"
+step "data plane: a CRUD-only mask (basic) 403s a capability the engine HAS (aggregate)"
+c="$(code "$(payload aggregate "${BASIC_MASK}" m28-tenant)")"
+[[ "${c}" == "403" ]] || fail "expected 403 for aggregate under the CRUD-only mask, got ${c} ($(cat /tmp/m28_body))"
 grep -q 'capability_gated' /tmp/m28_body || fail "403 body is not capability_gated: $(cat /tmp/m28_body)"
-pass "Essential aggregate → 403 capability_gated (distinct from 422 engine-can't)"
+pass "CRUD-only mask: aggregate → 403 capability_gated (distinct from 422 engine-can't)"
 
 step "data plane: SAME op WITHOUT a mask is not tier-gated (mask-driven, not engine)"
 c="$(code "$(payload aggregate null m28-tenant)")"
 [[ "${c}" != "403" ]] || fail "aggregate without a tier mask must NOT be 403 (got 403 — gate is not mask-driven)"
 pass "no mask → no tier denial (parity); engine still serves aggregate"
 
-step "data plane: reads succeed on Essential (owner-scoped row returned)"
-c="$(code "$(payload list "${ESS}" m28-tenant)")"
-[[ "${c}" == "200" ]] || fail "expected 200 for list under essential mask, got ${c} ($(cat /tmp/m28_body))"
+step "data plane: reads succeed under the CRUD-only mask (owner-scoped row returned)"
+c="$(code "$(payload list "${BASIC_MASK}" m28-tenant)")"
+[[ "${c}" == "200" ]] || fail "expected 200 for list under the CRUD-only mask, got ${c} ($(cat /tmp/m28_body))"
 grep -q '"n":5' /tmp/m28_body || fail "list did not return the owner-scoped probe row: $(cat /tmp/m28_body)"
 pass "Essential read → 200 with owner-scoped row (CRUD unaffected by tiering)"
 

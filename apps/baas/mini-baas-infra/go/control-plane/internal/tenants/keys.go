@@ -5,6 +5,8 @@ import (
 	"crypto/subtle"
 	"encoding/base32"
 	"errors"
+	"os"
+	"strconv"
 	"strings"
 
 	"golang.org/x/crypto/argon2"
@@ -63,6 +65,23 @@ func parseKey(full string) (prefix, payload string, err error) {
 	return parts[0], parts[1], nil
 }
 
+// argon2Slots bounds CONCURRENT Argon2id computations. Each one allocates
+// memoryCost (32 MiB), so unbounded parallelism under cold-key fan-out OOM-
+// kills the container — measured 2026-06-11: a 16-way bulk provision crash-
+// looped tenant-control (8 restarts) under its 64 MiB limit, and every
+// in-flight request died as a connection EOF. Requests beyond the bound queue
+// here (a verify is ~50 ms) instead of killing the identity authority.
+// Sized by ARGON2_MAX_CONCURRENT (default 2 → 64 MiB peak hash memory; pair
+// with a mem_limit of baseline + slots × 32 MiB).
+var argon2Slots = make(chan struct{}, argon2MaxConcurrent())
+
+func argon2MaxConcurrent() int {
+	if v, err := strconv.Atoi(os.Getenv("ARGON2_MAX_CONCURRENT")); err == nil && v > 0 {
+		return v
+	}
+	return 2
+}
+
 // hashPayload runs argon2id over (payload || prefix). The prefix doubles as
 // the salt so the same payload string yields different hashes per key, but
 // we don't need to store a separate salt column.
@@ -73,6 +92,8 @@ func hashPayload(payload, prefix string) string {
 		threads    = 2
 		outputLen  = 32
 	)
+	argon2Slots <- struct{}{}
+	defer func() { <-argon2Slots }()
 	salt := []byte("mbk-v1-" + prefix)
 	sum := argon2.IDKey([]byte(payload), salt, timeCost, memoryCost, threads, outputLen)
 	return "argon2id$v=1$m=32768,t=1,p=2$" + b32.EncodeToString(salt) + "$" + b32.EncodeToString(sum)

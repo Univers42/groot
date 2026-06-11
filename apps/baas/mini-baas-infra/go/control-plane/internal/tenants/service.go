@@ -38,13 +38,14 @@ type Service struct {
 	adapter   *AdapterRegistry           // optional; enables mount reconciliation in Provision
 	dataPlane *DataPlane                 // optional; enables schema_per_tenant schema creation
 	perm      provision.PermissionEngine // optional; the single ABAC role/policy seam
+	verifyC   *verifyCache               // B4-verify: Argon2-only-on-first-seen fast path
 }
 
 // NewService wires the DB pool. The PermissionEngine seam defaults to the
 // SQL backend over the same admin pool (no HTTP decide), so seedDefaultRole has
 // exactly one role implementation. SetPermissionEngine can override it.
 func NewService(db *shared.Postgres, log *slog.Logger) *Service {
-	return &Service{db: db, log: log, perm: provision.NewSQLBackend(db, "", "")}
+	return &Service{db: db, log: log, perm: provision.NewSQLBackend(db, "", ""), verifyC: newVerifyCache()}
 }
 
 // SetPermissionEngine overrides the ABAC seam (e.g. to enable HTTP self-verify).
@@ -311,6 +312,9 @@ func (s *Service) RevokeKey(ctx context.Context, slug, keyID string) error {
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
+	// Drop the verify fast-path cache so the revoked key stops authenticating
+	// immediately instead of lingering until its TTL expires.
+	s.verifyC.flush()
 	return nil
 }
 
@@ -320,6 +324,17 @@ func (s *Service) VerifyKey(ctx context.Context, full string) (VerifyKeyResponse
 	prefix, payload, err := parseKey(full)
 	if err != nil {
 		return VerifyKeyResponse{Valid: false, Reason: "invalid_format"}, nil
+	}
+	// B4-verify: fast path. A repeat verify of an already-seen key skips both
+	// the DB round-trip AND the Argon2id recompute — the measured 40 verify/s
+	// wall only applies to first-seen keys now. (last_used_at granularity
+	// coarsens to the cache TTL on the hot path; acceptable for a usage stamp.)
+	var hash string
+	if s.verifyC.enabled() {
+		hash = keyHash(full)
+		if resp, ok := s.verifyC.get(hash); ok {
+			return resp, nil
+		}
 	}
 	rows, err := s.db.AdminQuery(ctx, `
 		SELECT k.id::text, t.slug, k.key_hash, k.scopes,
@@ -347,12 +362,16 @@ func (s *Service) VerifyKey(ctx context.Context, full string) (VerifyKeyResponse
 			continue
 		}
 		go s.touchLastUsed(keyID)
-		return VerifyKeyResponse{
+		resp := VerifyKeyResponse{
 			Valid:    true,
 			TenantID: tenantSlug,
 			KeyID:    keyID,
 			Scopes:   scopes,
-		}, nil
+		}
+		if s.verifyC.enabled() {
+			s.verifyC.put(hash, resp)
+		}
+		return resp, nil
 	}
 	return VerifyKeyResponse{Valid: false, Reason: "no_match"}, nil
 }
@@ -371,7 +390,8 @@ func (s *Service) touchLastUsed(keyID string) {
 // transactional gymnastics. If you swap permission-engine to an external
 // store, swap this for an HTTP call to it.
 func (s *Service) Bootstrap(ctx context.Context, id, name string, req BootstrapRequest) (BootstrapResponse, error) {
-	tenant, created, err := s.findOrCreateBySlug(ctx, id, name, req.OwnerUserID)
+	// Self-serve bootstrap has no plan selection — defaults to free ("").
+	tenant, created, err := s.findOrCreateBySlug(ctx, id, name, req.OwnerUserID, "")
 	if err != nil {
 		return BootstrapResponse{}, err
 	}
@@ -412,8 +432,8 @@ func (s *Service) Bootstrap(ctx context.Context, id, name string, req BootstrapR
 // findOrCreateBySlug creates the tenant or returns the existing one. The second
 // return reports whether it was created this call. Idempotent — relies on
 // Create mapping a 23505 to ErrConflict (see isUniqueViolation).
-func (s *Service) findOrCreateBySlug(ctx context.Context, id, name, ownerUserID string) (Tenant, bool, error) {
-	t, err := s.Create(ctx, CreateTenantRequest{ID: id, Name: name, OwnerUserID: ownerUserID})
+func (s *Service) findOrCreateBySlug(ctx context.Context, id, name, ownerUserID, plan string) (Tenant, bool, error) {
+	t, err := s.Create(ctx, CreateTenantRequest{ID: id, Name: name, OwnerUserID: ownerUserID, Plan: plan})
 	if err == nil {
 		return t, true, nil
 	}

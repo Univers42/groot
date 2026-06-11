@@ -22,6 +22,14 @@ pub struct Metrics {
     verify_miss: AtomicU64,
     mount_hit: AtomicU64,
     mount_miss: AtomicU64,
+    // D-write-tail: background outbox emission. The write path used to `.await`
+    // the outbox INSERT inline (insert p99 583 ms vs read 3.4 ms); these track
+    // the async queue so the latency win is observable and queue saturation
+    // (`dropped`) is never silent.
+    outbox_enqueued: AtomicU64,
+    outbox_written: AtomicU64,
+    outbox_dropped: AtomicU64,
+    outbox_failed: AtomicU64,
 }
 
 impl Default for Metrics {
@@ -36,6 +44,10 @@ impl Default for Metrics {
             verify_miss: AtomicU64::new(0),
             mount_hit: AtomicU64::new(0),
             mount_miss: AtomicU64::new(0),
+            outbox_enqueued: AtomicU64::new(0),
+            outbox_written: AtomicU64::new(0),
+            outbox_dropped: AtomicU64::new(0),
+            outbox_failed: AtomicU64::new(0),
         }
     }
 }
@@ -91,6 +103,39 @@ impl Metrics {
             self.mount_miss.load(Ordering::Relaxed),
         )
     }
+
+    /// One mutation accepted onto the background outbox queue.
+    pub fn record_outbox_enqueued(&self) {
+        self.outbox_enqueued.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// `n` events durably written to `outbox_events` by the background worker.
+    pub fn record_outbox_written(&self, n: u64) {
+        self.outbox_written.fetch_add(n, Ordering::Relaxed);
+    }
+
+    /// One mutation dropped because the queue was full (back-pressure shed). A
+    /// non-zero value means the worker can't keep up — scale it or widen the queue.
+    pub fn record_outbox_dropped(&self) {
+        self.outbox_dropped.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// One background outbox INSERT failed (the write it describes already
+    /// committed — parity with the query-router's `.catch(warn)` posture).
+    pub fn record_outbox_failed(&self) {
+        self.outbox_failed.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// (enqueued, written, dropped, failed)
+    #[must_use]
+    pub fn outbox_snapshot(&self) -> (u64, u64, u64, u64) {
+        (
+            self.outbox_enqueued.load(Ordering::Relaxed),
+            self.outbox_written.load(Ordering::Relaxed),
+            self.outbox_dropped.load(Ordering::Relaxed),
+            self.outbox_failed.load(Ordering::Relaxed),
+        )
+    }
 }
 
 /// Escape a Prometheus label value (`\`, `"`, newline).
@@ -133,5 +178,17 @@ mod tests {
         m.record_mount_cache(false);
         let (vh, vm, mh, mm) = m.cache_snapshot();
         assert_eq!((vh, vm, mh, mm), (2, 1, 0, 1));
+    }
+
+    #[test]
+    fn outbox_counters_track_queue_lifecycle() {
+        let m = Metrics::default();
+        m.record_outbox_enqueued();
+        m.record_outbox_enqueued();
+        m.record_outbox_written(2);
+        m.record_outbox_dropped();
+        m.record_outbox_failed();
+        let (enq, wr, drop, fail) = m.outbox_snapshot();
+        assert_eq!((enq, wr, drop, fail), (2, 2, 1, 1));
     }
 }

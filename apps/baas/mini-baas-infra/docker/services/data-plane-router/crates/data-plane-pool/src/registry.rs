@@ -34,6 +34,11 @@ pub struct DefaultPoolRegistry {
     adapters: HashMap<String, Arc<dyn EngineAdapter>>,
     pools: Mutex<HashMap<String, PoolEntry>>,
     max_pools: usize,
+    // B4-pools: when true, shared_rls mounts on the same connection target share
+    // one pool (keyed by DSN/credential, not tenant). Off by default → per-
+    // tenant pools (byte-parity). Every pool_key derivation in the server flows
+    // through `pool_key_for`, so the tx-pin/rotation keys always match.
+    share_pools: bool,
     // Scale counters (B3): cumulative pool lifecycle events. evicted climbing
     // at steady state means the mount working set exceeds max_pools (LRU
     // churn) — the primary signal the 10K-tenant experiments watch.
@@ -53,6 +58,17 @@ impl DefaultPoolRegistry {
     /// able to hold at least the pool we just created).
     #[must_use]
     pub fn with_max_pools(adapters: Vec<Arc<dyn EngineAdapter>>, max_pools: usize) -> Self {
+        // Default: per-tenant pools (sharing off) — byte-parity with pre-B4.
+        Self::with_config(adapters, max_pools, false)
+    }
+
+    /// Build with an explicit pool cap AND the B4-pools sharing policy.
+    #[must_use]
+    pub fn with_config(
+        adapters: Vec<Arc<dyn EngineAdapter>>,
+        max_pools: usize,
+        share_pools: bool,
+    ) -> Self {
         let map = adapters
             .into_iter()
             .map(|a| (a.engine().to_string(), a))
@@ -61,10 +77,19 @@ impl DefaultPoolRegistry {
             adapters: map,
             pools: Mutex::new(HashMap::new()),
             max_pools: max_pools.max(1),
+            share_pools,
             created: AtomicU64::new(0),
             evicted: AtomicU64::new(0),
             reaped: AtomicU64::new(0),
         }
+    }
+
+    /// The pool key for a mount under THIS registry's sharing policy. The single
+    /// derivation point: the server reconstructs tx-pin / rotation keys through
+    /// this, so they always match the key `get_or_create` used.
+    #[must_use]
+    pub fn pool_key_for(&self, mount: &DatabaseMount) -> String {
+        mount.effective_pool_key(self.share_pools)
     }
 
     /// Scale-counter snapshot for `/metrics` (B3):
@@ -126,7 +151,7 @@ impl DefaultPoolRegistry {
 #[async_trait]
 impl PoolRegistry for DefaultPoolRegistry {
     async fn get_or_create(&self, mount: DatabaseMount) -> DataPlaneResult<Box<dyn EnginePool>> {
-        let key = mount.pool_key();
+        let key = mount.effective_pool_key(self.share_pools);
         if let Some(pool) = self.touch(&key) {
             return Ok(Box::new(SharedPool(pool)));
         }

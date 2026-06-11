@@ -51,10 +51,10 @@ func (a *tenantSvcAdapter) GetTenant(ctx context.Context, slug string) (provisio
 	return toTenantInfo(t), true, nil
 }
 
-func (a *tenantSvcAdapter) CreateTenant(ctx context.Context, slug, name, ownerUserID string) (provision.TenantInfo, error) {
+func (a *tenantSvcAdapter) CreateTenant(ctx context.Context, slug, name, ownerUserID, plan string) (provision.TenantInfo, error) {
 	// findOrCreateBySlug already maps the create/conflict race to a clean fetch,
 	// keeping CreateTenant idempotent under concurrency.
-	t, _, err := a.svc.findOrCreateBySlug(ctx, slug, name, ownerUserID)
+	t, _, err := a.svc.findOrCreateBySlug(ctx, slug, name, ownerUserID, plan)
 	if err != nil {
 		return provision.TenantInfo{}, err
 	}

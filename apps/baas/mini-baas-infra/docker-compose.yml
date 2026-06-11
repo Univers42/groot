@@ -973,6 +973,11 @@ services:
       # plans are assigned to enforce engine allowlist + mount quota + the
       # capability/rate mask the data plane reads off /connect.
       PACKAGE_ENFORCEMENT: ${PACKAGE_ENFORCEMENT:-0}
+      # scrypt concurrency bound (crypto.go scryptSlots). Each DSN encryption
+      # derives a key at ~16 MiB; the mem_limit below budgets baseline + slots
+      # × 16 MiB. Before this bound a 16-way bulk mount registration OOM-crash-
+      # looped this service (measured 2026-06-11, 17 restarts).
+      SCRYPT_MAX_CONCURRENT: ${SCRYPT_MAX_CONCURRENT:-2}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       - "127.0.0.1:${ADAPTER_REGISTRY_GO_PORT:-3021}:3021"
@@ -985,8 +990,9 @@ services:
       timeout: 3s
       start_period: 30s
       retries: 5
-    mem_limit: 48m
-    cpus: 0.25
+    # baseline (~12 MiB) + SCRYPT_MAX_CONCURRENT × 16 MiB + headroom.
+    mem_limit: 96m
+    cpus: 0.5
 
   # ─── Go Control Plane: tenant-control ─────────────────────────────
   # Owns the top-level tenants registry + tenant_api_keys CRUD. Exposes
@@ -1030,6 +1036,18 @@ services:
       GOTRUE_JWT_SECRET: ${JWT_SECRET}
       GOTRUE_JWT_ISSUER: ${GOTRUE_JWT_ISSUER:-${API_EXTERNAL_URL:-http://localhost:8000/auth/v1}}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Argon2id concurrency bound (keys.go argon2Slots). Each hash allocates
+      # 32 MiB; the mem_limit below budgets baseline + slots × 32 MiB. Before
+      # this bound, a 16-way bulk provision OOM-crashlooped this container
+      # (measured 2026-06-11, 8 restarts) and every in-flight verify died.
+      ARGON2_MAX_CONCURRENT: ${ARGON2_MAX_CONCURRENT:-2}
+      # B4-verify: Argon2-only-on-first-seen fast path. The measured 1K-tenant
+      # ceiling was ~40 verify/s (cold keys × Argon2 @ 2-concurrent). This cache
+      # makes a repeat verify of an already-seen key a hash-map lookup, so the
+      # Argon2 cost is a one-time warmup, not a per-request tax. TTL bounds
+      # revocation/expiry staleness (revoke also flushes); 0 disables (parity).
+      TENANT_CONTROL_VERIFY_CACHE_TTL_MS: ${TENANT_CONTROL_VERIFY_CACHE_TTL_MS:-60000}
+      TENANT_CONTROL_VERIFY_CACHE_MAX: ${TENANT_CONTROL_VERIFY_CACHE_MAX:-16384}
     ports:
       - "127.0.0.1:${TENANT_CONTROL_PORT:-3022}:3022"
     depends_on:
@@ -1046,8 +1064,9 @@ services:
       timeout: 3s
       start_period: 30s
       retries: 5
-    mem_limit: 64m
-    cpus: 0.25
+    # baseline (~20 MiB) + ARGON2_MAX_CONCURRENT × 32 MiB + headroom.
+    mem_limit: 160m
+    cpus: 0.5
 
   # ─── Go Control Plane: webhook-dispatcher ─────────────────────────
   # Owns webhook_subscriptions CRUD + consumes outbox.<aggregate> Redis

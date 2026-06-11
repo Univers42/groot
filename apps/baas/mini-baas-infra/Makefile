@@ -237,6 +237,7 @@ scale-seed: _require-compose ## Provision SCALE= bench tenants (+keys+mounts) â†
 		go run ./cmd/scale-seed -n "$$SCALE" -base "http://127.0.0.1:$$TC_PORT" -token "$$TOKEN" \
 		-dsn "postgres://$${PG_USER:-postgres}:$${PG_PASS:-postgres}@postgres:5432/$${PG_DB:-postgres}" \
 		-mounts "$(if $(MOUNTS),$(MOUNTS),1)" -isolation "$(if $(ISOLATION),$(ISOLATION),shared_rls)" \
+		-plan "$(if $(PLAN),$(PLAN),pro)" \
 		-prefix "$(if $(PREFIX),$(PREFIX),scale)" \
 		-concurrency "$(if $(CONCURRENCY),$(CONCURRENCY),16)" $(if $(RESUME),-resume,) \
 		-out "/artifacts/scale/tenants-$$SCALE.jsonl"; \

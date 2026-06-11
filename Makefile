@@ -45,5 +45,6 @@ include $(MAKE_DIR)/calendar.mk
 include $(MAKE_DIR)/baas.mk
 include $(MAKE_DIR)/agency.mk
 include $(MAKE_DIR)/gourmand.mk
+include $(MAKE_DIR)/grobase.mk
 include $(MAKE_DIR)/baas-release.mk
 include $(MAKE_DIR)/baas-verify.mk

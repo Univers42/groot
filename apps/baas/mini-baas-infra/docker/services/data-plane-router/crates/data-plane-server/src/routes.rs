@@ -13,7 +13,7 @@ use axum::http::header;
 use axum::middleware::Next;
 use axum::response::Response;
 use crate::metrics::{escape_label, Metrics};
-use crate::ratelimit::{tier_rate, TenantRateLimiter};
+use crate::ratelimit::{tier_rate, RateLimiter};
 use data_plane_core::{
     CredentialRef, DataOperation, DataOperationKind, DataPlaneError, DatabaseMount, EngineAdapter,
     EngineCapabilities, MigrationRequest, Plan, PoolPolicy, PoolRegistry, RawStatement,
@@ -157,16 +157,18 @@ pub struct AppState {
     /// Per-tenant token-bucket rate limiter (Phase 4 tiering). Limits arrive per
     /// request in the mount's tier mask (`capability_overrides`); a tenant with
     /// no mask is unlimited, so this is a no-op until packages are assigned.
-    ratelimiter: Arc<TenantRateLimiter>,
+    ratelimiter: Arc<RateLimiter>,
     /// Shared HTTP client for the Phase-7 bypass front door (`/data/v1`): calls
     /// tenant-control `/v1/keys/verify` + adapter-registry `/connect`. Cheap to
     /// clone (Arc inside); only used when the bypass is enabled.
     http_client: reqwest::Client,
-    /// Phase 7d outbox emitter (row-change events on the bypass write path).
-    /// `None` unless `DATA_PLANE_OUTBOX_DSN` is set — the bypass works without
-    /// it, but realtime/webhooks only fire post-cutover once it's wired.
+    /// Phase 7d / D-write-tail: background outbox emitter (row-change events on
+    /// the bypass write path). `None` unless `DATA_PLANE_OUTBOX_DSN` is set — the
+    /// bypass works without it, but realtime/webhooks only fire post-cutover once
+    /// it's wired. The INSERT runs on a spawned worker (batched), OFF the request
+    /// path, so the write tail no longer pays a second DB round-trip.
     #[cfg(feature = "control-pg")]
-    outbox: Option<Arc<crate::outbox::OutboxEmitter>>,
+    outbox: Option<Arc<crate::outbox::BackgroundOutbox>>,
     /// Phase D — server-backed automations on the bypass write path. `None`
     /// unless `DATA_PLANE_OUTBOX_DSN` is set (the control Postgres holding the
     /// `automation_rules`); fires `set_property` follow-ups after bypass writes.
@@ -257,7 +259,14 @@ impl AppState {
         // Boot-time honesty self-check (04/S1b): fail fast if any descriptor
         // advertises an op the adapter doesn't dispatch.
         assert_capability_honesty(&adapters);
-        let registry = Arc::new(DefaultPoolRegistry::with_max_pools(adapters, config.max_pools));
+        let registry = Arc::new(DefaultPoolRegistry::with_config(
+            adapters,
+            config.max_pools,
+            config.share_pools,
+        ));
+        // metrics is built first: the background outbox worker (D-write-tail)
+        // records enqueue/write/drop counters onto it.
+        let metrics = Arc::new(Metrics::default());
         Self {
             config: Arc::new(config),
             engines: Arc::new(default_engines()),
@@ -265,14 +274,17 @@ impl AppState {
             resolver,
             transactions: Arc::new(TransactionRegistry::default()),
             evaluator,
-            metrics: Arc::new(Metrics::default()),
-            ratelimiter: Arc::new(TenantRateLimiter::new()),
+            // clone (not move): the background-outbox initializer below borrows
+            // `metrics` again, and that field is only present under control-pg.
+            metrics: metrics.clone(),
+            ratelimiter: Arc::new(RateLimiter::from_env()),
             http_client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(10))
                 .build()
                 .unwrap_or_default(),
             #[cfg(feature = "control-pg")]
-            outbox: crate::outbox::OutboxEmitter::from_env().map(Arc::new),
+            outbox: crate::outbox::OutboxEmitter::from_env()
+                .map(|e| Arc::new(e.into_background(metrics.clone()))),
             #[cfg(feature = "control-pg")]
             automations: crate::automations::AutomationEngine::from_env().map(Arc::new),
             #[cfg(feature = "nano")]
@@ -540,6 +552,22 @@ async fn metrics_handler(State(state): State<AppState>) -> Response {
         "baas_data_plane_ratelimit_tracked{{service=\"data-plane-router\"}} {}\n",
         state.ratelimiter.tracked()
     ));
+    // D-write-tail: background outbox queue health. `dropped` > 0 means the
+    // worker can't keep up (widen DATA_PLANE_OUTBOX_QUEUE or add capacity);
+    // enqueued − written − dropped ≈ queue depth in flight.
+    let (ob_enq, ob_wr, ob_drop, ob_fail) = state.metrics.outbox_snapshot();
+    out.push_str("# HELP baas_data_plane_outbox_events_total Background outbox emission by stage\n");
+    out.push_str("# TYPE baas_data_plane_outbox_events_total counter\n");
+    for (stage, n) in [
+        ("enqueued", ob_enq),
+        ("written", ob_wr),
+        ("dropped", ob_drop),
+        ("failed", ob_fail),
+    ] {
+        out.push_str(&format!(
+            "baas_data_plane_outbox_events_total{{service=\"data-plane-router\",stage=\"{stage}\"}} {n}\n"
+        ));
+    }
     out.push_str("# HELP baas_data_plane_pool_connections Pool connections per mount and state\n");
     out.push_str("# TYPE baas_data_plane_pool_connections gauge\n");
     if let Ok(stats) = state.registry.stats().await {
@@ -705,7 +733,7 @@ async fn run_query(
     // tenant, so it survives the Phase-7 TS bypass; Kong's per-IP limit is the
     // coarse outer shell.
     if let Some((rps, burst)) = tier_rate(request.mount.capability_overrides.as_ref()) {
-        if !state.ratelimiter.allow(&request.identity.tenant_id, rps, burst) {
+        if !state.ratelimiter.allow(&request.identity.tenant_id, rps, burst).await {
             tracing::warn!(
                 target: "audit",
                 event = "rate_limited",
@@ -832,21 +860,20 @@ async fn run_query(
             #[cfg(feature = "control-pg")]
             if emit_outbox && is_mutation {
                 if let Some(ob) = state.outbox.as_ref() {
-                    if let Err(e) = ob
-                        .emit_mutation(
-                            &audit_engine,
-                            &outbox_identity,
-                            audit_op,
-                            &audit_resource,
-                            outbox_data.as_ref(),
-                            outbox_filter.as_ref(),
-                            &result,
-                            outbox_idem.as_deref(),
-                        )
-                        .await
-                    {
-                        tracing::warn!(resource = %audit_resource, "outbox emit failed (write already committed): {e}");
-                    }
+                    // D-write-tail: non-blocking enqueue — the INSERT runs on the
+                    // background worker, OFF this request's latency path. The
+                    // write already committed; a dropped event (full queue) is
+                    // counted, never an error to the (already-served) caller.
+                    ob.enqueue(
+                        &audit_engine,
+                        &outbox_identity,
+                        audit_op,
+                        &audit_resource,
+                        outbox_data.as_ref(),
+                        outbox_filter.as_ref(),
+                        &result,
+                        outbox_idem.as_deref(),
+                    );
                 }
             }
             // Phase D — fire set_property automations on the bypass write path
@@ -1221,14 +1248,14 @@ pub(crate) fn scope_denied(
 /// / ddl / graph handlers must call it explicitly since they bypass `run_query`.
 /// A no-op when the mount carries no tier mask (parity), so untiered tenants are
 /// unaffected.
-pub(crate) fn bypass_ratelimit(
+pub(crate) async fn bypass_ratelimit(
     state: &AppState,
     tenant: &str,
     overrides: Option<&serde_json::Value>,
     surface: &str,
 ) -> Result<(), axum::response::Response> {
     if let Some((rps, burst)) = tier_rate(overrides) {
-        if !state.ratelimiter.allow(tenant, rps, burst) {
+        if !state.ratelimiter.allow(tenant, rps, burst).await {
             tracing::warn!(
                 target: "audit",
                 event = "rate_limited",
@@ -1298,6 +1325,7 @@ pub(crate) async fn data_describe_schema(
     }
     if let Err(resp) =
         bypass_ratelimit(&state, &id.tenant_id, mount_info.capability_overrides.as_ref(), "schema")
+            .await
     {
         return resp;
     }
@@ -1330,7 +1358,9 @@ pub(crate) async fn data_apply_schema_ddl(
         &id.tenant_id,
         mount_info.capability_overrides.as_ref(),
         "schema_ddl",
-    ) {
+    )
+    .await
+    {
         return resp;
     }
     let (identity, mount) = bypass_envelope(&id, &req.db_id, mount_info);
@@ -1569,8 +1599,10 @@ async fn begin_transaction(
     let tenant_id = request.identity.tenant_id.clone();
     let mount = request.mount.clone();
     // `pool_key` identifies the pool the tx's connection comes from, so we can
-    // pin it against eviction/reaping for the life of the transaction.
-    let pool_key = mount.pool_key();
+    // pin it against eviction/reaping for the life of the transaction. Derived
+    // through the registry so it honors the pool-sharing policy (B4-pools) — a
+    // shared_rls tx must pin the SAME shared pool `get_or_create` handed out.
+    let pool_key = state.registry.pool_key_for(&mount);
 
     let pool = match state.registry.get_or_create(mount).await {
         Ok(pool) => pool,
@@ -1928,9 +1960,10 @@ async fn rotate_credential_admin(
         )
             .into_response();
     }
-    // Reconstruct the pool_key with the same formatter the hot path uses, so the
-    // drained key is byte-identical to the one `get_or_create` cached under.
-    let pool_key = request.mount.pool_key();
+    // Reconstruct the pool_key with the same derivation the hot path uses (via
+    // the registry's sharing policy), so the drained key is byte-identical to
+    // the one `get_or_create` cached under — including B4-pools shared keys.
+    let pool_key = state.registry.pool_key_for(&request.mount);
     let pools_drained = state.rotate(&pool_key).await;
     (
         StatusCode::OK,

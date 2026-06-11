@@ -1,0 +1,37 @@
+---
+// The tenant galaxy: a fixed full-viewport Canvas2D backdrop. Content scrolls
+// above it (.gb-shell, z-index 1). The canvas is decorative (aria-hidden);
+// the accessible path is the tenant-explorer buttons JS injects into
+// #galaxy-explorer (see Hero.astro) plus the role="status" line.
+// No JS → <noscript> swaps in a static SVG starfield; the page loses nothing.
+
+// Deterministic build-time starfield for the no-JS fallback.
+const seeded = (n: number) => {
+	let s = n * 2654435761;
+	return () => {
+		s ^= s << 13;
+		s ^= s >>> 17;
+		s ^= s << 5;
+		return ((s >>> 0) % 1000) / 1000;
+	};
+};
+const rand = seeded(42);
+const stars = Array.from({ length: 70 }, () => ({
+	cx: Math.round(rand() * 1200),
+	cy: Math.round(rand() * 800),
+	r: (0.8 + rand() * 2.2).toFixed(1),
+	o: (0.25 + rand() * 0.55).toFixed(2),
+}));
+const palette = ['#34d399', '#7dd3fc', '#a78bfa', '#fbbf24', '#f472b6'];
+---
+
+<div class="gb-galaxy" aria-hidden="true">
+	<canvas id="galaxy-canvas"></canvas>
+</div>
+<div class="gb-galaxy-card" id="galaxy-card" hidden></div>
+<noscript>
+	<svg class="gb-galaxy__fallback" viewBox="0 0 1200 800" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+		{stars.map((s, i) => <circle cx={s.cx} cy={s.cy} r={s.r} opacity={s.o} fill={palette[i % palette.length]} />)}
+	</svg>
+</noscript>
+<script src="../../scripts/galaxy/index.ts"></script>

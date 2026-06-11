@@ -1,0 +1,42 @@
+.gb-footer {
+	border-top: 1px solid var(--gb-line);
+	background: var(--gb-bg-raised);
+	padding-block: var(--gb-space-12);
+	margin-top: var(--gb-section-gap);
+}
+
+.gb-footer__inner {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--gb-space-8);
+	justify-content: space-between;
+	align-items: flex-start;
+}
+
+.gb-footer__tag {
+	color: var(--gb-text-faint);
+	font-size: var(--gb-text-sm);
+	max-width: 34ch;
+}
+
+.gb-footer nav {
+	display: flex;
+	gap: var(--gb-space-6);
+}
+
+.gb-footer a {
+	color: var(--gb-text-muted);
+	font-size: var(--gb-text-sm);
+	text-decoration: none;
+}
+
+.gb-footer a:hover {
+	color: var(--gb-text);
+	text-decoration: underline;
+}
+
+.gb-footer__note {
+	margin-top: var(--gb-space-8);
+	color: var(--gb-text-faint);
+	font-size: var(--gb-text-xs);
+}

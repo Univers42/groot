@@ -1,0 +1,103 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Header from '../components/layout/Header.astro';
+import Footer from '../components/layout/Footer.astro';
+import SectionHeading from '../components/ui/SectionHeading.astro';
+import CompetitorSection from '../components/compare/CompetitorSection.astro';
+import Faq from '../components/pricing/Faq.astro';
+import { SITE } from '../data/site';
+import { COMPETITORS, SUMMARY_AXES } from '../data/competitors';
+import { COMPARE_FAQ } from '../data/faq';
+
+const title = `Grobase vs Supabase, PocketBase & Firebase — honest comparison`;
+const description =
+	'An honest, axis-by-axis comparison of Grobase against Supabase, PocketBase and Firebase — including where each of them genuinely beats us, and when you should choose them instead.';
+
+const jsonLd = [
+	{
+		'@type': 'FAQPage',
+		mainEntity: COMPARE_FAQ.map((f) => ({
+			'@type': 'Question',
+			name: f.q,
+			acceptedAnswer: { '@type': 'Answer', text: f.a },
+		})),
+	},
+];
+---
+
+<Layout title={title} description={description} image="/og/compare.png" jsonLd={jsonLd}>
+	<div class="gb-shell">
+		<Header />
+		<main id="main-content">
+			<section class="gb-section" aria-labelledby="compare-title">
+				<div class="gb-container">
+					<SectionHeading
+						kicker="Choose with open eyes"
+						title="Compared honestly."
+						lede="Every comparison below includes a 'when to choose them instead' box — because a comparison page you can't trust is worth nothing. Where a competitor is ahead, we say so."
+						id="compare-title"
+					/>
+					<nav class="gb-compare-nav" aria-label="Competitors">
+						{COMPETITORS.map((c) => <a href={`#vs-${c.id}`}>vs {c.name}</a>)}
+						<a href="#summary">summary</a>
+					</nav>
+				</div>
+			</section>
+
+			{COMPETITORS.map((c) => <CompetitorSection competitor={c} />)}
+
+			<section class="gb-section" id="summary" aria-labelledby="summary-title">
+				<div class="gb-container">
+					<SectionHeading
+						kicker="The whole field"
+						title="Side by side."
+						id="summary-title"
+					/>
+					<div class="gb-table-wrap" data-rise>
+						<table class="gb-table">
+							<caption>Cross-cutting summary across all four products.</caption>
+							<thead>
+								<tr>
+									<th scope="col">Axis</th>
+									<th scope="col">Grobase</th>
+									<th scope="col">Supabase</th>
+									<th scope="col">PocketBase</th>
+									<th scope="col">Firebase</th>
+								</tr>
+							</thead>
+							<tbody>
+								{SUMMARY_AXES.map((row) => (
+									<tr>
+										<th scope="row">{row.axis}</th>
+										<td class="is-yes">{row.grobase}</td>
+										<td>{row.supabase}</td>
+										<td>{row.pocketbase}</td>
+										<td>{row.firebase}</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</section>
+
+			<section class="gb-section" aria-labelledby="cfaq-title">
+				<div class="gb-container">
+					<SectionHeading kicker="Questions" title="Comparison FAQ" id="cfaq-title" />
+					<Faq items={COMPARE_FAQ} />
+				</div>
+			</section>
+
+			<section class="gb-section">
+				<div class="gb-container gb-cta-final">
+					<h2>Still here? Run the numbers yourself.</h2>
+					<div class="gb-hero__ctas">
+						<a class="gb-btn gb-btn--primary" href="/pricing/">See the transparent pricing</a>
+						<a class="gb-btn gb-btn--ghost" href={SITE.repoUrl} rel="noopener">Read the source</a>
+					</div>
+				</div>
+			</section>
+		</main>
+		<Footer />
+	</div>
+</Layout>

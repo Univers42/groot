@@ -1,0 +1,69 @@
+.gb-table-wrap {
+	overflow-x: auto;
+	border: 1px solid var(--gb-line);
+	border-radius: var(--gb-radius-lg);
+	background: rgb(10 15 26 / 80%);
+}
+
+.gb-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: var(--gb-text-sm);
+	min-width: 40rem;
+}
+
+.gb-table caption {
+	text-align: left;
+	padding: var(--gb-space-4) var(--gb-space-6);
+	color: var(--gb-text-faint);
+	font-size: var(--gb-text-xs);
+}
+
+.gb-table th,
+.gb-table td {
+	padding: 0.7rem var(--gb-space-4);
+	text-align: left;
+	border-bottom: 1px solid var(--gb-line);
+}
+
+.gb-table thead th {
+	font-family: var(--gb-font-mono);
+	font-weight: 400;
+	font-size: var(--gb-text-xs);
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--gb-text-faint);
+	background: rgb(18 27 48 / 60%);
+}
+
+.gb-table tbody th {
+	font-weight: 600;
+	color: var(--gb-text);
+}
+
+.gb-table td {
+	color: var(--gb-text-muted);
+}
+
+.gb-table tbody tr:last-child th,
+.gb-table tbody tr:last-child td {
+	border-bottom: 0;
+}
+
+.gb-table .is-num {
+	font-family: var(--gb-font-mono);
+	font-size: 0.85rem;
+	white-space: nowrap;
+}
+
+.gb-table .is-yes {
+	color: var(--gb-primary);
+}
+
+.gb-table .is-no {
+	color: var(--gb-text-faint);
+}
+
+.gb-table .is-warn {
+	color: var(--gb-accent);
+}

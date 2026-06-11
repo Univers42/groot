@@ -1,0 +1,39 @@
+---
+// Capability masks per package (source: config/packages/packages.json,
+// mirrored into the Go control plane). NARROWING only — a tier can never
+// exceed its mask; the planner answers 403 capability_gated / 429 honestly.
+const CAPS = ['read', 'write', 'upsert', 'batch', 'aggregate', 'transactions', 'DDL'] as const;
+const rows = [
+	{ tier: 'Basic', caps: [true, true, true, false, false, false, false], engines: 'sqlite · postgresql', limit: '10 rps / 20 burst · 1 mount' },
+	{ tier: 'Essential', caps: [true, true, true, false, false, false, false], engines: 'postgresql · sqlite', limit: '20 rps / 40 burst · 2 mounts' },
+	{ tier: 'Pro', caps: [true, true, true, true, true, true, false], engines: '+ mysql · mariadb · mongodb · redis · cockroachdb', limit: '200 rps / 400 burst · 10 mounts' },
+	{ tier: 'Max', caps: [true, true, true, true, true, true, true], engines: '+ mssql · http (all engines)', limit: '2000 rps / 4000 burst · 50 mounts' },
+];
+---
+
+<div class="gb-table-wrap" data-rise>
+	<table class="gb-table">
+		<caption>
+			Capability masks are enforced in the Rust planner: an operation outside your tier returns 403
+			capability_gated; bursts beyond your token bucket return 429. No silent degradation.
+		</caption>
+		<thead>
+			<tr>
+				<th scope="col">Tier</th>
+				{CAPS.map((c) => <th scope="col">{c}</th>)}
+				<th scope="col">Engines</th>
+				<th scope="col">Limits</th>
+			</tr>
+		</thead>
+		<tbody>
+			{rows.map((r) => (
+				<tr>
+					<th scope="row">{r.tier}</th>
+					{r.caps.map((on) => <td class={on ? 'is-yes' : 'is-no'}>{on ? 'yes' : '—'}</td>)}
+					<td>{r.engines}</td>
+					<td class="is-num">{r.limit}</td>
+				</tr>
+			))}
+		</tbody>
+	</table>
+</div>

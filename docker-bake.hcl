@@ -90,3 +90,13 @@ target "playground-simulation" {
   dockerfile = "docker/services/browser-tests/Dockerfile"
   tags       = ["track-binocle/playground-simulation:local"]
 }
+group "grobase" {
+  targets = ["grobase-site"]
+}
+
+target "grobase-site" {
+  context    = "./apps/baas/site"
+  dockerfile = "Dockerfile"
+  target     = "dev"
+  tags       = ["track-binocle/grobase-site:local"]
+}

@@ -1,0 +1,26 @@
+---
+import type { Tier } from '../../data/tiers';
+
+type Props = { tier: Tier };
+const { tier } = Astro.props;
+const engineLabel = tier.engines.length > 2 ? `${tier.engines.length} engine families` : tier.engines.join(' + ');
+---
+
+<article class={`gb-price-card tier--${tier.id} ${tier.flag ? 'gb-price-card--flag' : ''}`} id={`tier-${tier.id}`}>
+	<h3 class="gb-price-card__name">{tier.name}</h3>
+	{tier.flag && <p class="gb-badge gb-badge--dot">{tier.flag}</p>}
+	<p class="gb-price-card__price">
+		{tier.retail}
+		<small>{tier.retailNote}</small>
+	</p>
+	<p class="gb-price-card__cost">
+		runs on {tier.ram} · costs us {tier.allIn}
+		{tier.idleNote && <br />}{tier.idleNote}
+	</p>
+	<ul class="gb-price-card__features" role="list">
+		<li>{tier.services} · {engineLabel}</li>
+		{tier.rateLimit && <li>{tier.rateLimit} · {tier.maxMounts}</li>}
+		{tier.features.map((f) => <li>{f}</li>)}
+	</ul>
+	<p class="gb-price-card__audience">{tier.audience}</p>
+</article>

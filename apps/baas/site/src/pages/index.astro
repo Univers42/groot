@@ -1,0 +1,48 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Header from '../components/layout/Header.astro';
+import Footer from '../components/layout/Footer.astro';
+import GalaxyCanvas from '../components/galaxy/GalaxyCanvas.astro';
+import Hero from '../components/sections/Hero.astro';
+import EngineStrip from '../components/sections/EngineStrip.astro';
+import EngineAgnostic from '../components/sections/EngineAgnostic.astro';
+import Architecture from '../components/sections/Architecture.astro';
+import Editions from '../components/sections/Editions.astro';
+import Isolation from '../components/sections/Isolation.astro';
+import FeatureGrid from '../components/sections/FeatureGrid.astro';
+import GrowPath from '../components/sections/GrowPath.astro';
+import HonestRoadmap from '../components/sections/HonestRoadmap.astro';
+import FinalCta from '../components/sections/FinalCta.astro';
+import { SITE } from '../data/site';
+
+const jsonLd = [
+	{
+		'@type': 'SoftwareApplication',
+		name: SITE.name,
+		applicationCategory: 'DeveloperApplication',
+		operatingSystem: 'Linux, Docker',
+		description: SITE.description,
+		offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+	},
+];
+---
+
+<Layout jsonLd={jsonLd}>
+	<GalaxyCanvas />
+	<div class="gb-shell">
+		<Header />
+		<main id="main-content">
+			<Hero />
+			<EngineStrip />
+			<EngineAgnostic />
+			<Architecture />
+			<Editions />
+			<Isolation />
+			<FeatureGrid />
+			<GrowPath />
+			<HonestRoadmap />
+			<FinalCta />
+		</main>
+		<Footer />
+	</div>
+</Layout>

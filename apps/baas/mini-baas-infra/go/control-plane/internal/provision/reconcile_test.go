@@ -9,13 +9,14 @@ import (
 // ── Fakes (counting calls so we can assert ZERO downstream writes on re-run) ──
 
 type fakeTenants struct {
-	exists     bool
-	created    int
-	failGet    bool
-	failCreate bool
-	keyExists  bool
-	issued     int
-	failIssue  bool
+	exists      bool
+	created     int
+	createdPlan string
+	failGet     bool
+	failCreate  bool
+	keyExists   bool
+	issued      int
+	failIssue   bool
 }
 
 func (f *fakeTenants) GetTenant(_ context.Context, slug string) (TenantInfo, bool, error) {
@@ -28,13 +29,14 @@ func (f *fakeTenants) GetTenant(_ context.Context, slug string) (TenantInfo, boo
 	return TenantInfo{}, false, nil
 }
 
-func (f *fakeTenants) CreateTenant(_ context.Context, slug, name, _ string) (TenantInfo, error) {
+func (f *fakeTenants) CreateTenant(_ context.Context, slug, name, _, plan string) (TenantInfo, error) {
 	if f.failCreate {
 		return TenantInfo{}, errors.New("create failed")
 	}
 	f.created++
+	f.createdPlan = plan
 	f.exists = true
-	return TenantInfo{Slug: slug, Name: name}, nil
+	return TenantInfo{Slug: slug, Name: name, Plan: plan}, nil
 }
 
 func (f *fakeTenants) ActiveKeyExists(_ context.Context, _, _ string) (bool, error) {
@@ -155,6 +157,20 @@ func TestReconcileFreshCreatesEverything(t *testing.T) {
 	}
 	if HTTPStatus(res.Outcome, res.APIKey != nil) != 201 {
 		t.Error("fresh complete + fresh key should map to 201")
+	}
+}
+
+func TestReconcileThreadsPlanIntoCreateTenant(t *testing.T) {
+	ft, fp, fm, fs := &fakeTenants{}, &fakePerm{roleCreated: true, polCreated: true}, &fakeMounts{}, &fakeSchemas{}
+	rc := &Reconciler{Tenants: ft, Perm: fp, Mounts: fm, Schemas: fs}
+
+	spec := baseSpec()
+	spec.Plan = "pro" // the requested billing plan must reach CreateTenant
+	if _, err := rc.Reconcile(context.Background(), spec); err != nil {
+		t.Fatalf("Reconcile error: %v", err)
+	}
+	if ft.createdPlan != "pro" {
+		t.Fatalf("CreateTenant got plan %q, want \"pro\" (plan was silently dropped)", ft.createdPlan)
 	}
 }
 

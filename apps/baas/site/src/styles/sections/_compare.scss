@@ -1,0 +1,42 @@
+.gb-compare-nav {
+	position: sticky;
+	top: 3.6rem;
+	z-index: 10;
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--gb-space-2);
+	padding-block: var(--gb-space-3);
+	background: rgb(5 7 13 / 85%);
+	backdrop-filter: blur(10px);
+}
+
+.gb-compare-nav a {
+	border: 1px solid var(--gb-line);
+	border-radius: 999px;
+	padding: 0.32rem 0.95rem;
+	font-size: var(--gb-text-sm);
+	color: var(--gb-text-muted);
+	text-decoration: none;
+	font-family: var(--gb-font-mono);
+}
+
+.gb-compare-nav a:hover {
+	border-color: var(--gb-primary);
+	color: var(--gb-text);
+}
+
+.gb-verdict {
+	border: 1px solid var(--gb-line-strong);
+	border-left: 3px solid var(--gb-primary);
+	border-radius: 0 var(--gb-radius-lg) var(--gb-radius-lg) 0;
+	background: rgb(52 211 153 / 6%);
+	padding: var(--gb-space-6);
+	margin-block: var(--gb-space-6);
+}
+
+.gb-verdict p {
+	font-size: var(--gb-text-lg);
+	font-family: var(--gb-font-display);
+	color: var(--gb-text);
+	max-width: 40ch;
+}

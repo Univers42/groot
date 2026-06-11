@@ -22,7 +22,7 @@ var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[
 // concrete impl is an adapter over internal/tenants.Service.
 type TenantService interface {
 	GetTenant(ctx context.Context, slug string) (TenantInfo, bool, error)
-	CreateTenant(ctx context.Context, slug, name, ownerUserID string) (TenantInfo, error)
+	CreateTenant(ctx context.Context, slug, name, ownerUserID, plan string) (TenantInfo, error)
 	ActiveKeyExists(ctx context.Context, slug, keyName string) (bool, error)
 	IssueAPIKey(ctx context.Context, slug string, k KeySpec) (KeyInfo, error)
 }
@@ -231,7 +231,12 @@ func (rc *Reconciler) reconcileTenant(ctx context.Context, res *ReconcileResult,
 		out.Action, out.Status, out.ID = string(ActionNoOp), StatusExists, info.Slug
 		return out
 	}
-	created, err := rc.Tenants.CreateTenant(ctx, d.Slug, d.Name, d.OwnerUser)
+	// Thread the requested billing plan (default "free") so a provision that
+	// asks for e.g. `pro` actually lands a pro tenant — without this the plan
+	// field was silently dropped and every tenant defaulted to free, which is
+	// why the scale experiment had to disable PACKAGE_ENFORCEMENT to register
+	// non-sqlite mounts.
+	created, err := rc.Tenants.CreateTenant(ctx, d.Slug, d.Name, d.OwnerUser, d.Plan)
 	if err != nil {
 		out.Status, out.Error = StatusError, err.Error()
 		return out

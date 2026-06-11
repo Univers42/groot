@@ -13,8 +13,9 @@
 //! Fan-out worker pool — bridges the router's dispatch channel to
 //! per-connection send queues.
 //!
-//! The pool spawns N worker tasks that compete to read from a shared
-//! `mpsc` channel. Each [`LocalDispatch`] is forwarded to the target
+//! A single dispatcher owns the router's dispatch channel and round-robins
+//! messages to N worker tasks, each with its OWN queue (no shared mutex —
+//! D2-realtime C1). Each [`LocalDispatch`] is forwarded to the target
 //! connection via [`ConnectionManager::try_send()`].
 
 use std::sync::Arc;
@@ -50,26 +51,55 @@ impl FanOutWorkerPool {
             self.worker_count
         };
         let (tx, rx) = mpsc::channel::<DispatchMessage>(65536);
-        let shared_rx = Arc::new(tokio::sync::Mutex::new(rx));
+        // D2-realtime (C1): previously the N workers shared ONE
+        // `Arc<Mutex<Receiver>>` and each held the mutex ACROSS `recv().await`
+        // — a tokio anti-pattern that serialized every worker on a single lock
+        // even while idle. Instead a single dispatcher owns the receiver (the
+        // channel is single-consumer anyway) and round-robins each message to a
+        // per-worker channel, so workers pull from their OWN queue with zero
+        // cross-worker locking and process fully in parallel.
+        let mut worker_txs = Vec::with_capacity(count);
         for worker_id in 0..count {
+            let (wtx, wrx) = mpsc::channel::<DispatchMessage>(8192);
+            worker_txs.push(wtx);
             let cm = Arc::clone(&self.conn_manager);
-            let rx = Arc::clone(&shared_rx);
-            tokio::spawn(run_worker(worker_id, rx, cm));
+            tokio::spawn(run_worker(worker_id, wrx, cm));
         }
+        tokio::spawn(dispatch_loop(rx, worker_txs));
         tx
+    }
+}
+
+/// Single-consumer dispatcher: owns the router's receiver and round-robins each
+/// message to a per-worker channel. A `send().await` applies natural back-
+/// pressure to the router when a worker is saturated, without ever blocking the
+/// OTHER workers (each has its own queue).
+async fn dispatch_loop(
+    mut rx: mpsc::Receiver<DispatchMessage>,
+    worker_txs: Vec<mpsc::Sender<DispatchMessage>>,
+) {
+    let n = worker_txs.len();
+    if n == 0 {
+        return;
+    }
+    let mut next = 0usize;
+    while let Some(message) = rx.recv().await {
+        let idx = next % n;
+        next = next.wrapping_add(1);
+        if worker_txs[idx].send(message).await.is_err() {
+            debug!(worker = idx, "Fan-out worker channel closed; dropping dispatch");
+        }
     }
 }
 
 async fn run_worker(
     worker_id: usize,
-    rx: Arc<tokio::sync::Mutex<mpsc::Receiver<DispatchMessage>>>,
+    mut rx: mpsc::Receiver<DispatchMessage>,
     conn_manager: Arc<ConnectionManager>,
 ) {
     loop {
-        let message = {
-            let mut guard = rx.lock().await;
-            guard.recv().await
-        };
+        // Each worker owns its receiver (D2-realtime C1) — no shared mutex.
+        let message = rx.recv().await;
         match message {
             Some(DispatchMessage::Single(d)) => {
                 handle_dispatch(worker_id, d, &conn_manager);
@@ -156,5 +186,49 @@ mod tests {
 
         assert_eq!(sub_id, "sub-1");
         assert_eq!(received.event_type, "test");
+    }
+
+    #[tokio::test]
+    async fn test_batch_fanout_reaches_all_connections() {
+        // D2-realtime C1: a Batch must reach EVERY target connection even though
+        // the dispatcher round-robins across independent worker queues.
+        let conn_manager = Arc::new(ConnectionManager::new(256));
+        let pool = FanOutWorkerPool::new(Arc::clone(&conn_manager), 4);
+        let dispatch_tx = pool.start();
+
+        let mut rxs = Vec::new();
+        let mut targets = Vec::new();
+        for _ in 0..16 {
+            let conn_id = conn_manager.next_connection_id();
+            let meta = ConnectionMeta {
+                conn_id,
+                peer_addr: "127.0.0.1:12345".parse().unwrap(),
+                connected_at: Utc::now(),
+                user_id: None,
+                claims: None,
+            };
+            let (_, rx) = conn_manager.register(meta, OverflowPolicy::DropNewest);
+            rxs.push(rx);
+            targets.push((conn_id, SubscriptionId(SmolStr::new("sub-1"))));
+        }
+
+        let event = Arc::new(EventEnvelope::new(
+            TopicPath::new("test"),
+            "broadcast",
+            Bytes::from("{}"),
+        ));
+        dispatch_tx
+            .send(DispatchMessage::Batch { event, targets })
+            .await
+            .unwrap();
+
+        for mut rx in rxs {
+            let (_sub, received) =
+                tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+                    .await
+                    .expect("delivery within 1s")
+                    .expect("event received");
+            assert_eq!(received.event_type, "broadcast");
+        }
     }
 }

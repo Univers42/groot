@@ -1,0 +1,40 @@
+.gb-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.5rem;
+	padding: 0.78rem 1.5rem;
+	border-radius: 999px;
+	border: 1px solid transparent;
+	font-weight: 600;
+	font-size: var(--gb-text-base);
+	text-decoration: none;
+	cursor: pointer;
+	transition: transform var(--gb-dur-fast) var(--gb-ease-out), box-shadow var(--gb-dur-fast) var(--gb-ease-out);
+}
+
+.gb-btn:hover {
+	transform: translateY(-2px);
+}
+
+.gb-btn--primary {
+	background: var(--gb-primary);
+	color: var(--gb-primary-ink);
+	box-shadow: var(--gb-glow-primary);
+}
+
+.gb-btn--primary:hover {
+	background: #4ae2ab;
+	color: var(--gb-primary-ink);
+}
+
+.gb-btn--ghost {
+	border-color: var(--gb-line-strong);
+	color: var(--gb-text);
+	background: rgb(13 20 36 / 55%);
+}
+
+.gb-btn--ghost:hover {
+	border-color: var(--gb-primary);
+	color: var(--gb-text);
+}
