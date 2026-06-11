@@ -16,28 +16,53 @@
 //! - HTTP (R8): `reqwest` passthrough adapter that treats arbitrary REST
 //!   backends as a "database"; forwards `X-Owner-Id` for upstream authz.
 
-#[cfg(test)]
+// The boot-time honesty battery iterates every adapter, so it only compiles
+// when every engine feature is on (the default — `cargo test` runs it).
+#[cfg(all(
+    test,
+    feature = "postgres",
+    feature = "mongodb",
+    feature = "mysql",
+    feature = "redis",
+    feature = "sqlite",
+    feature = "mssql",
+    feature = "http"
+))]
 mod capability_honesty;
 mod credential;
 pub mod service_auth;
+#[cfg(feature = "http")]
 mod http;
 mod ident;
+#[cfg(feature = "mongodb")]
 mod mongo;
+#[cfg(feature = "mssql")]
 mod mssql;
+#[cfg(feature = "mysql")]
 mod mysql;
+#[cfg(feature = "postgres")]
 mod postgres;
+#[cfg(feature = "redis")]
 mod redis;
 mod registry;
 mod resolver;
+#[cfg(feature = "sqlite")]
 mod sqlite;
 mod tls;
 
+#[cfg(feature = "http")]
 pub use http::{guard_and_resolve, HttpEngineAdapter};
+#[cfg(feature = "mongodb")]
 pub use mongo::MongoEngineAdapter;
+#[cfg(feature = "mssql")]
 pub use mssql::MssqlEngineAdapter;
+#[cfg(feature = "mysql")]
 pub use mysql::MysqlEngineAdapter;
+#[cfg(feature = "postgres")]
 pub use postgres::{PgDialect, PostgresEngineAdapter};
+#[cfg(feature = "redis")]
 pub use redis::RedisEngineAdapter;
+#[cfg(feature = "sqlite")]
 pub use sqlite::SqliteEngineAdapter;
 pub use credential::{
     AdapterRegistryProvider, CredentialProvider, ProviderConfig, ProviderRegistry, VaultProvider,
