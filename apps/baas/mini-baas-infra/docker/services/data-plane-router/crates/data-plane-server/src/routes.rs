@@ -160,6 +160,17 @@ pub struct AppState {
     /// unless `DATA_PLANE_OUTBOX_DSN` is set (the control Postgres holding the
     /// `automation_rules`); fires `set_property` follow-ups after bypass writes.
     automations: Option<Arc<crate::automations::AutomationEngine>>,
+    /// Short-TTL cache of `api-key → VerifiedIdentity` for the bypass front door,
+    /// mirroring the query-router's `ApiKeyMiddleware` 30 s cache. Without it the
+    /// bypass re-runs the Argon2id key-verify (a tenant-control round-trip) on
+    /// EVERY request, making it slower than the path it replaces; with it the
+    /// verify is amortized and the bypass is the faster door. TTL from
+    /// `DATA_PLANE_VERIFY_CACHE_TTL_MS` (default 30 000; 0 disables).
+    verify_cache: Arc<std::sync::Mutex<HashMap<String, (std::time::Instant, crate::auth::VerifiedIdentity)>>>,
+    /// Companion cache for the bypass mount resolution (`(tenant,db_id) → DSN/
+    /// engine/tier`), same TTL as `verify_cache` — mirrors the query-router DSN
+    /// cache so the cutover door doesn't re-hit adapter-registry per request.
+    mount_cache: Arc<std::sync::Mutex<HashMap<String, (std::time::Instant, crate::auth::ResolvedMount)>>>,
 }
 
 impl AppState {
@@ -235,6 +246,8 @@ impl AppState {
                 .unwrap_or_default(),
             outbox: crate::outbox::OutboxEmitter::from_env().map(Arc::new),
             automations: crate::automations::AutomationEngine::from_env().map(Arc::new),
+            verify_cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            mount_cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -250,6 +263,13 @@ impl AppState {
     /// version's pool is never touched. No secret is logged or returned.
     pub async fn rotate(&self, pool_key: &str) -> usize {
         self.resolver.evict_cached(pool_key);
+        // The bypass mount cache is keyed by (tenant,db_id), a different key
+        // space than pool_key — clear it wholesale so a rotated DSN can't be
+        // re-served from here (cheap: re-resolution is one registry round-trip,
+        // and rotation is a rare admin op). Preserves the gap-G8/S2 guarantee.
+        if let Ok(mut c) = self.mount_cache.lock() {
+            c.clear();
+        }
         let before = self.registry.stats().await.map(|s| s.len()).unwrap_or(0);
         // drain_pool_key is a no-op for an unknown/pinned key; comparing the pool
         // count before/after tells the caller whether a pool was actually closed.
@@ -850,14 +870,38 @@ impl AppState {
         tenant: &str,
         db_id: &str,
     ) -> Result<crate::auth::ResolvedMount, crate::auth::AuthError> {
-        crate::auth::resolve_mount(
+        // Cache the DSN/engine/tier resolution per (tenant, db_id), like the
+        // query-router's 30 s DSN cache — without it the bypass re-hits
+        // adapter-registry on every request. Rotation evicts via /v1/admin/rotate
+        // (the registry pool drain); the short TTL bounds staleness either way.
+        let ttl = std::time::Duration::from_millis(self.config.verify_cache_ttl_ms);
+        let ckey = format!("{tenant}\u{0}{db_id}");
+        if !ttl.is_zero() {
+            if let Ok(cache) = self.mount_cache.lock() {
+                if let Some((at, m)) = cache.get(&ckey) {
+                    if at.elapsed() < ttl {
+                        return Ok(m.clone());
+                    }
+                }
+            }
+        }
+        let mount = crate::auth::resolve_mount(
             &self.http_client,
             &self.config.adapter_registry_url,
             &self.config.internal_service_token,
             tenant,
             db_id,
         )
-        .await
+        .await?;
+        if !ttl.is_zero() {
+            if let Ok(mut cache) = self.mount_cache.lock() {
+                if cache.len() >= 4096 {
+                    cache.clear();
+                }
+                cache.insert(ckey, (std::time::Instant::now(), mount.clone()));
+            }
+        }
+        Ok(mount)
     }
 
     /// Owner-scoped read execution (no audit/outbox — reads never emit). The
@@ -910,15 +954,39 @@ pub(crate) async fn bypass_verify(
             "INTERNAL_SERVICE_TOKEN not set on the data plane",
         ));
     }
+    // Cache hit → skip the tenant-control round-trip (+ its Argon2id). Mirrors the
+    // query-router's 30 s ApiKeyMiddleware cache, so a revoked key has the same
+    // (short) validity window on both front doors. The lock is never held across
+    // the await below.
+    let ttl = std::time::Duration::from_millis(state.config.verify_cache_ttl_ms);
+    if !ttl.is_zero() {
+        if let Ok(cache) = state.verify_cache.lock() {
+            if let Some((at, id)) = cache.get(&key) {
+                if at.elapsed() < ttl {
+                    return Ok(id.clone());
+                }
+            }
+        }
+    }
     // Go performs the Argon2id compare; Rust trusts the verified result.
-    crate::auth::verify_key(
+    let identity = crate::auth::verify_key(
         &state.http_client,
         &state.config.tenant_control_url,
         &state.config.internal_service_token,
         &key,
     )
     .await
-    .map_err(auth_error_response)
+    .map_err(auth_error_response)?;
+    if !ttl.is_zero() {
+        if let Ok(mut cache) = state.verify_cache.lock() {
+            // Bound the map so a key-spray can't grow it unboundedly.
+            if cache.len() >= 4096 {
+                cache.clear();
+            }
+            cache.insert(key, (std::time::Instant::now(), identity.clone()));
+        }
+    }
+    Ok(identity)
 }
 
 /// Shared `/data/v1` authentication: verify the key + resolve the (single) mount,

@@ -15,6 +15,23 @@ deletion is gated (CLAUDE.md). This tracks where the live demo stands.
 | query-router / permission-engine | ✅ **kept as the fallback — NOT deleted** |
 | **App flips its base path `/query/v1` → `/data/v1`** | ⏳ pending (osionos-side change) |
 
+## Performance — the cutover is FASTER than the legacy path
+
+Benchmark (40 reqs, aggregate through Kong, app's live mount):
+
+| Path | Before caches | After caches |
+|---|---|---|
+| `/data/v1` (Rust cutover) | 358 ms/req | **8 ms/req** |
+| `/query/v1` (TS legacy) | 40 ms/req | 40 ms/req |
+
+The bypass originally re-ran the Argon2id key-verify (a tenant-control round-trip)
+**and** the mount resolution (an adapter-registry round-trip) on *every* request,
+making it slower than the door it replaces. Two short-TTL caches in the data plane
+(`verify_cache` api-key→identity, `mount_cache` (tenant,db_id)→DSN, both
+`DATA_PLANE_VERIFY_CACHE_TTL_MS`, default 30 s — matching the query-router) fix
+that: the cutover door is now **~5× faster** than legacy. Rotation evicts
+`mount_cache` (`/v1/admin/rotate`) so the gap-G8/S2 stale-DSN guarantee holds.
+
 ## The remaining step (app-side, deliberately not done here)
 
 The osionos app calls `/query/v1/<dbId>/tables/<table>` with a `{op, …}` body in

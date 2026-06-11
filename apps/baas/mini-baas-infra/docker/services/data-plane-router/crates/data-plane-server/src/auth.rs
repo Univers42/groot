@@ -37,6 +37,7 @@ struct VerifyResponse {
 }
 
 /// A verified caller identity (the trusted output of tenant-control).
+#[derive(Clone)]
 pub struct VerifiedIdentity {
     pub tenant_id: String,
     pub key_id: String,
@@ -111,6 +112,7 @@ struct ConnectResponse {
 }
 
 /// A resolved mount: engine + DSN + the tenant's tier mask (Phase 4).
+#[derive(Clone)]
 pub struct ResolvedMount {
     pub engine: String,
     pub connection_string: String,

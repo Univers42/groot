@@ -75,6 +75,9 @@ pub struct ServerConfig {
     /// OFF by default (the query-router still masks → byte-parity); flip ON
     /// (`DATA_PLANE_APPLY_MASKS=1`) once the query-router's mask is removed.
     pub apply_masks: bool,
+    /// TTL (ms) for the bypass `api-key → identity` cache; default 30 000 to
+    /// match the query-router. 0 disables (verify every request).
+    pub verify_cache_ttl_ms: u64,
 }
 
 impl ServerConfig {
@@ -134,6 +137,9 @@ impl ServerConfig {
                 read_env("DATA_PLANE_APPLY_MASKS", "false").to_lowercase().as_str(),
                 "1" | "true" | "on"
             ),
+            verify_cache_ttl_ms: read_env("DATA_PLANE_VERIFY_CACHE_TTL_MS", "30000")
+                .parse()
+                .unwrap_or(30000),
         }
     }
 }
