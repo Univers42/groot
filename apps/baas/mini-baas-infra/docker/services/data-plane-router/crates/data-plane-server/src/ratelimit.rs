@@ -71,9 +71,12 @@ impl TenantRateLimiter {
         map.retain(|_, b| now.duration_since(b.last) < idle);
     }
 
-    #[cfg(test)]
-    fn tracked(&self) -> usize {
-        self.buckets.lock().unwrap().len()
+    /// Number of tenant buckets currently tracked — the `/metrics` gauge the
+    /// scale experiments watch (B3): growth without matching `evict_idle`
+    /// shrinkage under N-tenant fan-out means the map is becoming the leak.
+    #[must_use]
+    pub fn tracked(&self) -> usize {
+        self.buckets.lock().expect("rate limiter poisoned").len()
     }
 }
 

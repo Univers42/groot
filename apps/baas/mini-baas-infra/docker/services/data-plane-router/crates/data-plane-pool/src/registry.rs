@@ -4,6 +4,7 @@ use data_plane_core::{
     EnginePool, PoolRegistry, PoolStats, RequestIdentity, TxBeginRequest, TxHandle,
 };
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -33,6 +34,12 @@ pub struct DefaultPoolRegistry {
     adapters: HashMap<String, Arc<dyn EngineAdapter>>,
     pools: Mutex<HashMap<String, PoolEntry>>,
     max_pools: usize,
+    // Scale counters (B3): cumulative pool lifecycle events. evicted climbing
+    // at steady state means the mount working set exceeds max_pools (LRU
+    // churn) — the primary signal the 10K-tenant experiments watch.
+    created: AtomicU64,
+    evicted: AtomicU64,
+    reaped: AtomicU64,
 }
 
 impl DefaultPoolRegistry {
@@ -54,7 +61,23 @@ impl DefaultPoolRegistry {
             adapters: map,
             pools: Mutex::new(HashMap::new()),
             max_pools: max_pools.max(1),
+            created: AtomicU64::new(0),
+            evicted: AtomicU64::new(0),
+            reaped: AtomicU64::new(0),
         }
+    }
+
+    /// Scale-counter snapshot for `/metrics` (B3):
+    /// `(created_total, evicted_total, reaped_total, open_now)`.
+    #[must_use]
+    pub fn scale_counters(&self) -> (u64, u64, u64, usize) {
+        let open = self.pools.lock().expect("pool registry poisoned").len();
+        (
+            self.created.load(Ordering::Relaxed),
+            self.evicted.load(Ordering::Relaxed),
+            self.reaped.load(Ordering::Relaxed),
+            open,
+        )
     }
 
     /// Touch an entry (update `last_access`) and clone its pool, if cached.
@@ -121,18 +144,28 @@ impl PoolRegistry for DefaultPoolRegistry {
 
         let (pool, evicted) = {
             let mut guard = self.pools.lock().expect("pool registry poisoned");
-            let entry = guard.entry(key.clone()).or_insert_with(|| PoolEntry {
-                engine,
-                pool: created,
-                last_access: Instant::now(),
-                idle_ttl,
-                tx_pins: 0,
+            let mut was_new = false;
+            let entry = guard.entry(key.clone()).or_insert_with(|| {
+                was_new = true;
+                PoolEntry {
+                    engine,
+                    pool: created,
+                    last_access: Instant::now(),
+                    idle_ttl,
+                    tx_pins: 0,
+                }
             });
             entry.last_access = Instant::now();
             let pool = entry.pool.clone();
             // Enforce the cap AFTER inserting, protecting the pool we just
             // created/touched so it's never the eviction victim.
             let evicted = Self::collect_evictions(&mut guard, self.max_pools, &key);
+            if was_new {
+                self.created.fetch_add(1, Ordering::Relaxed);
+            }
+            if !evicted.is_empty() {
+                self.evicted.fetch_add(evicted.len() as u64, Ordering::Relaxed);
+            }
             (pool, evicted)
         };
         // Close evicted pools outside the lock (close() is async).
@@ -163,6 +196,9 @@ impl PoolRegistry for DefaultPoolRegistry {
                 .map(|e| e.pool)
                 .collect()
         };
+        if !expired.is_empty() {
+            self.reaped.fetch_add(expired.len() as u64, Ordering::Relaxed);
+        }
         for pool in expired {
             let _ = pool.close().await;
         }
@@ -518,6 +554,28 @@ mod tests {
         // Sanity: the surviving key is v2, not v1.
         reg.drain_pool_key(&key_v2).await.unwrap();
         assert_eq!(closed.load(Ordering::SeqCst), 2, "v2 still drainable");
+    }
+
+    // B3 — scale counters track create/evict/reap lifecycle events.
+    #[tokio::test]
+    async fn scale_counters_track_lifecycle() {
+        let closed = Arc::new(AtomicUsize::new(0));
+        let reg = registry(closed.clone(), 2);
+        reg.get_or_create(mount_n(1, 1)).await.unwrap();
+        reg.get_or_create(mount_n(2, 30_000)).await.unwrap();
+        reg.get_or_create(mount_n(1, 1)).await.unwrap(); // cache hit — no create
+        reg.get_or_create(mount_n(3, 30_000)).await.unwrap(); // over cap → evict
+        let (created, evicted, reaped, open) = reg.scale_counters();
+        assert_eq!(created, 3, "three distinct pools created");
+        assert_eq!(evicted, 1, "one LRU eviction");
+        assert_eq!(reaped, 0);
+        assert_eq!(open, 2, "at cap");
+        // Reap the idle (1ms TTL) pool — mount 1 was evicted? mount 2 was LRU
+        // victim (mount 1 touched last). Whichever survives with 1ms TTL reaps.
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        reg.release_idle().await.unwrap();
+        let (_, _, reaped_after, _) = reg.scale_counters();
+        assert!(reaped_after >= 1, "idle pool reaped is counted");
     }
 
     // t10 — drain skips a pinned pool (open tx); after unpin it drains.

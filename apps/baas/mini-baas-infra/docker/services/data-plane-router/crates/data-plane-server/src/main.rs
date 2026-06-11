@@ -18,9 +18,16 @@ async fn main() -> anyhow::Result<()> {
 
     let config = ServerConfig::from_env();
 
+    // binocle-one ("our PocketBase"): nano + user accounts/JWT — the superset
+    // single-binary edition. Checked FIRST because `one` implies `nano`.
+    #[cfg(feature = "one")]
+    {
+        return data_plane_server::one::run(config).await;
+    }
+
     // Nano edition: one static binary, embedded SQLite, in-process auth —
     // the control-plane round-trips below never exist in this build.
-    #[cfg(feature = "nano")]
+    #[cfg(all(feature = "nano", not(feature = "one")))]
     {
         return data_plane_server::nano::run(config).await;
     }
