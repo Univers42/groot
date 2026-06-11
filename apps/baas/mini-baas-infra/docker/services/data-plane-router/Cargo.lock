@@ -720,6 +720,7 @@ dependencies = [
  "data-plane-core",
  "data-plane-pool",
  "deadpool-postgres",
+ "futures",
  "reqwest",
  "rusqlite",
  "serde",

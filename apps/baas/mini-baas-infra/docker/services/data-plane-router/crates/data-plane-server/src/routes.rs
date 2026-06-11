@@ -520,14 +520,14 @@ async fn metrics_handler(State(state): State<AppState>) -> Response {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct HealthResponse {
+pub(crate) struct HealthResponse {
     status: &'static str,
     service: &'static str,
     version: &'static str,
     product_mode: String,
 }
 
-async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
+pub(crate) async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok",
         service: "data-plane-router",
@@ -537,7 +537,7 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct CapabilitiesResponse {
+pub(crate) struct CapabilitiesResponse {
     router: RouterDescriptor,
     engines: Vec<EngineDescriptor>,
 }
@@ -558,7 +558,7 @@ struct EngineDescriptor {
     capabilities: EngineCapabilities,
 }
 
-async fn capabilities(State(state): State<AppState>) -> Json<CapabilitiesResponse> {
+pub(crate) async fn capabilities(State(state): State<AppState>) -> Json<CapabilitiesResponse> {
     Json(CapabilitiesResponse {
         router: RouterDescriptor {
             language: "rust",
@@ -907,7 +907,7 @@ async fn run_query(
 /// rate limit, owner scoping) is identical on both paths. Only mounted when
 /// `DATA_PLANE_BYPASS_ENABLED=1`; otherwise this code is never reachable.
 #[derive(Debug, Clone, Deserialize)]
-struct DataQueryRequest {
+pub(crate) struct DataQueryRequest {
     #[serde(alias = "databaseId", alias = "dbId")]
     db_id: String,
     operation: DataOperation,
@@ -950,6 +950,12 @@ impl AppState {
         tenant: &str,
         db_id: &str,
     ) -> Result<crate::auth::ResolvedMount, crate::auth::AuthError> {
+        // Nano edition: mounts are a static in-process map (no adapter-registry).
+        #[cfg(feature = "nano")]
+        if let Some(nano) = self.nano.as_ref() {
+            let _ = tenant; // single-tenant: every verified key sees the local mounts
+            return nano.resolve_mount(db_id);
+        }
         // Cache the DSN/engine/tier resolution per (tenant, db_id), like the
         // query-router's 30 s DSN cache — without it the bypass re-hits
         // adapter-registry on every request. Rotation evicts via /v1/admin/rotate
@@ -1017,6 +1023,13 @@ pub(crate) async fn bypass_verify(
     state: &AppState,
     headers: &header::HeaderMap,
 ) -> Result<crate::auth::VerifiedIdentity, axum::response::Response> {
+    // Nano edition: the key store lives IN-PROCESS (no tenant-control, no
+    // service token, no network hop) — the local verify replaces the whole
+    // HTTP path below.
+    #[cfg(feature = "nano")]
+    if let Some(nano) = state.nano.as_ref() {
+        return nano.verify_headers(headers);
+    }
     let key = match headers.get("x-baas-api-key").and_then(|v| v.to_str().ok()) {
         Some(k) if !k.trim().is_empty() => k.to_string(),
         _ => {
@@ -1088,7 +1101,7 @@ async fn bypass_auth(
 /// Build the internal (identity, mount) envelope for a verified bypass caller —
 /// the SAME shape the query-router constructs, including the `api-key:<id>`
 /// principal so bypass writes are owner-stamped identically.
-fn bypass_envelope(
+pub(crate) fn bypass_envelope(
     id: &crate::auth::VerifiedIdentity,
     db_id: &str,
     mount_info: crate::auth::ResolvedMount,
@@ -1169,7 +1182,7 @@ pub(crate) fn bypass_ratelimit(
     Ok(())
 }
 
-async fn data_query(
+pub(crate) async fn data_query(
     State(state): State<AppState>,
     headers: header::HeaderMap,
     Json(req): Json<DataQueryRequest>,
@@ -1205,12 +1218,12 @@ async fn data_query(
 // engine capability gates (introspect / schema_ddl) still apply inside the core.
 
 #[derive(Debug, Clone, Deserialize)]
-struct DataSchemaRequest {
+pub(crate) struct DataSchemaRequest {
     #[serde(alias = "databaseId", alias = "dbId")]
     db_id: String,
 }
 
-async fn data_describe_schema(
+pub(crate) async fn data_describe_schema(
     State(state): State<AppState>,
     headers: header::HeaderMap,
     Json(req): Json<DataSchemaRequest>,
@@ -1232,13 +1245,13 @@ async fn data_describe_schema(
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct DataSchemaDdlRequest {
+pub(crate) struct DataSchemaDdlRequest {
     #[serde(alias = "databaseId", alias = "dbId")]
     db_id: String,
     ddl: SchemaDdlRequest,
 }
 
-async fn data_apply_schema_ddl(
+pub(crate) async fn data_apply_schema_ddl(
     State(state): State<AppState>,
     headers: header::HeaderMap,
     Json(req): Json<DataSchemaDdlRequest>,
@@ -1305,7 +1318,7 @@ fn require_capability(
     Ok(())
 }
 
-fn map_data_plane_error(err: &DataPlaneError) -> axum::response::Response {
+pub(crate) fn map_data_plane_error(err: &DataPlaneError) -> axum::response::Response {
     let (status, code) = match err {
         DataPlaneError::NotImplemented { .. } => (StatusCode::NOT_IMPLEMENTED, "not_implemented"),
         // G6: an (engine, op) the engine cannot serve is a *semantically*

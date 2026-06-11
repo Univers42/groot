@@ -17,13 +17,23 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = ServerConfig::from_env();
-    tracing::info!(
-        product_mode = %config.product_mode,
-        adapter_registry_url = %config.adapter_registry_url,
-        "starting Rust data-plane-router"
-    );
 
-    data_plane_server::server::run(config).await
+    // Nano edition: one static binary, embedded SQLite, in-process auth —
+    // the control-plane round-trips below never exist in this build.
+    #[cfg(feature = "nano")]
+    {
+        return data_plane_server::nano::run(config).await;
+    }
+
+    #[cfg(not(feature = "nano"))]
+    {
+        tracing::info!(
+            product_mode = %config.product_mode,
+            adapter_registry_url = %config.adapter_registry_url,
+            "starting Rust data-plane-router"
+        );
+        data_plane_server::server::run(config).await
+    }
 }
 
 fn healthcheck() -> anyhow::Result<()> {
