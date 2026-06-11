@@ -19,6 +19,7 @@
 #[cfg(test)]
 mod capability_honesty;
 mod credential;
+pub mod service_auth;
 mod http;
 mod ident;
 mod mongo;

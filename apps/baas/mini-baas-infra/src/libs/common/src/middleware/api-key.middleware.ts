@@ -24,6 +24,7 @@ import { Injectable, NestMiddleware, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Request, Response, NextFunction } from 'express';
 import { signIdentityEnvelope } from '../identity/request-identity';
+import { serviceAuthHeaders } from '../security/service-auth';
 
 interface VerifyResponse {
   valid: boolean;
@@ -101,14 +102,16 @@ export class ApiKeyMiddleware implements NestMiddleware {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), this.timeoutMs);
     try {
+      const payload = JSON.stringify({ key });
       const resp = await fetch(this.verifyUrl, {
         method: 'POST',
         signal: ctrl.signal,
         headers: {
           'Content-Type': 'application/json',
-          'X-Service-Token': this.serviceToken,
+          // hmac mode signs the exact payload string sent below (audit O1).
+          ...serviceAuthHeaders(this.serviceToken, 'POST', '/v1/keys/verify', payload),
         },
-        body: JSON.stringify({ key }),
+        body: payload,
       });
       // Both 200 (valid) and 401 (invalid but well-formed) return JSON.
       if (resp.status !== 200 && resp.status !== 401) {

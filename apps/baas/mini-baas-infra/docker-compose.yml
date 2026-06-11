@@ -823,6 +823,7 @@ services:
       # INTERNAL_SERVICE_TOKEN to translate X-Baas-Api-Key -> tenant headers.
       TENANT_CONTROL_URL: ${TENANT_CONTROL_URL:-http://tenant-control:3022}
       INTERNAL_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
+      SERVICE_TOKEN_MODE: ${SERVICE_TOKEN_MODE:-static}
       API_KEY_VERIFY_TIMEOUT_MS: ${API_KEY_VERIFY_TIMEOUT_MS:-2000}
       CONTROL_PLANE_TIMEOUT_MS: ${CONTROL_PLANE_TIMEOUT_MS:-2000}
       CONTROL_PLANE_RETRY_ATTEMPTS: ${CONTROL_PLANE_RETRY_ATTEMPTS:-2}
@@ -919,6 +920,7 @@ services:
       DATA_PLANE_BYPASS_ENABLED: ${DATA_PLANE_BYPASS_ENABLED:-0}
       TENANT_CONTROL_URL: ${TENANT_CONTROL_URL:-http://tenant-control:3022}
       INTERNAL_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
+      SERVICE_TOKEN_MODE: ${SERVICE_TOKEN_MODE:-static}
       # Phase 7d: system Postgres holding public.outbox_events. On the bypass
       # write path the data plane emits the row-change event itself (the
       # query-router is out of the path), so realtime/webhooks keep firing.
@@ -961,6 +963,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/postgres}
       VAULT_ENC_KEY: ${VAULT_ENC_KEY:-0123456789abcdef0123456789abcdef}
       INTERNAL_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
+      SERVICE_TOKEN_MODE: ${SERVICE_TOKEN_MODE:-static}
       # Phase 4 tiering kill switch. Default 0 (OFF) so enabling tiering never
       # retroactively gates existing `free` tenants — flip to 1 once tenant
       # plans are assigned to enforce engine allowlist + mount quota + the
@@ -1005,6 +1008,7 @@ services:
       TENANT_CONTROL_PRODUCT_MODE: ${TENANT_CONTROL_PRODUCT_MODE:-shadow}
       DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/postgres}
       INTERNAL_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
+      SERVICE_TOKEN_MODE: ${SERVICE_TOKEN_MODE:-static}
       # Enables POST /v1/provision to register a tenant's data mounts in one call,
       # and to create the per-tenant schema for schema_per_tenant mounts.
       ADAPTER_REGISTRY_URL: ${ADAPTER_REGISTRY_URL:-http://adapter-registry-go:3021}

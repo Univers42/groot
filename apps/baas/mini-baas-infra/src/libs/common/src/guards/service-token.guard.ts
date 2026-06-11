@@ -18,6 +18,7 @@ import {
   resolveRequestIdentity,
   serviceIdentityFromHeaders,
 } from '../identity/request-identity';
+import { timingSafeStringEqual } from '../security/service-auth';
 
 /**
  * Accepts either a service token (X-Service-Token) or Kong user headers.
@@ -35,7 +36,12 @@ export class ServiceTokenGuard implements CanActivate {
     const serviceToken = req.headers['x-service-token'] as string | undefined;
     const expectedToken = this.config.get<string>('ADAPTER_REGISTRY_SERVICE_TOKEN');
 
-    if (serviceToken && expectedToken && serviceToken === expectedToken) {
+    // Constant-time compare — a `===` on a secret leaks length/prefix timing.
+    // This TS↔TS hop (query-router → permission-engine) intentionally stays
+    // static-token in both modes: it carries no secrets, and the guard also
+    // accepts Kong user headers. The secrets-bearing Go routes are the ones
+    // that flip to per-request HMAC under SERVICE_TOKEN_MODE=hmac.
+    if (serviceToken && expectedToken && timingSafeStringEqual(serviceToken, expectedToken)) {
       const serviceId = (req.headers['x-service-id'] as string | undefined) ?? 'internal-service';
       const identity = serviceIdentityFromHeaders(req, serviceId);
       req.identity = identity;

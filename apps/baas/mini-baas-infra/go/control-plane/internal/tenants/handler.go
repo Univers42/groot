@@ -61,7 +61,7 @@ const msgInvalidJSON = "invalid JSON"
 
 func (rt *routes) requireServiceToken(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !shared.SecureCompare(r.Header.Get("X-Service-Token"), rt.serviceToken) {
+		if !shared.VerifyServiceRequest(r, rt.serviceToken) {
 			shared.WriteError(w, http.StatusUnauthorized, "unauthorized", "service token required")
 			return
 		}
@@ -291,7 +291,7 @@ func (rt *routes) verifyKey(w http.ResponseWriter, r *http.Request) {
 // tokenOrSelf authorises read of a tenant by either a service token or by a
 // matching X-Baas-Tenant-Id header (a tenant fetching its own row).
 func (rt *routes) tokenOrSelf(w http.ResponseWriter, r *http.Request, id string) bool {
-	if shared.SecureCompare(r.Header.Get("X-Service-Token"), rt.serviceToken) {
+	if shared.VerifyServiceRequest(r, rt.serviceToken) {
 		return true
 	}
 	if r.Header.Get("X-Baas-Tenant-Id") == id || r.Header.Get("X-Tenant-Id") == id {

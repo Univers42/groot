@@ -25,6 +25,7 @@ export * from './observability/metrics.interceptor';
 export * from './observability/observability.module';
 export * from './tracing/otel.bootstrap';
 export * from './security/security.middleware';
+export * from './security/service-auth';
 export * from './middleware/idempotency.middleware';
 export * from './middleware/api-key.middleware';
 export * from './audit/audit.service';

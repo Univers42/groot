@@ -299,15 +299,21 @@ impl CredentialProvider for AdapterRegistryProvider {
         if validate_ref_segment(&mount.id).is_err() {
             return Err(Self::fail(&mount.id));
         }
-        let url = format!("{}/databases/{}/connect", self.base_url, mount.id);
-        let resp = self
+        let path = format!("/databases/{}/connect", mount.id);
+        let url = format!("{}{path}", self.base_url);
+        let req = self
             .client
             .get(&url)
-            .header("X-Service-Token", &self.service_token)
-            .header("X-Baas-Tenant-Id", &mount.tenant_id)
-            .send()
-            .await
-            .map_err(|_| Self::fail(&mount.id))?;
+            .header("X-Baas-Tenant-Id", &mount.tenant_id);
+        let req = if crate::service_auth::hmac_mode() {
+            req.header(
+                "X-Service-Auth",
+                crate::service_auth::compute_service_auth(&self.service_token, "GET", &path, b""),
+            )
+        } else {
+            req.header("X-Service-Token", &self.service_token)
+        };
+        let resp = req.send().await.map_err(|_| Self::fail(&mount.id))?;
         if !resp.status().is_success() {
             return Err(Self::fail(&mount.id));
         }

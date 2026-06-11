@@ -23,6 +23,7 @@ import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import type { VerifiedRequestIdentity } from '@mini-baas/common';
+import { serviceAuthHeaders } from '@mini-baas/common';
 import type { EngineCaps, IDatabaseAdapter, QueryResult } from '@mini-baas/database';
 // All TS in-process engines have been removed. The 5 real engines
 // (postgresql/mongodb/mysql/redis/http) flow through `RustDataPlaneProxy` to
@@ -313,12 +314,14 @@ export class QueryService implements OnModuleInit {
   }
 
   private async fetchConnectionFromRegistry(dbId: string, userId: string): Promise<AdapterResponse> {
-    const url = `${this.registryUrl}/databases/${dbId}/connect`;
+    const path = `/databases/${dbId}/connect`;
+    const url = `${this.registryUrl}${path}`;
     try {
       const { data } = await firstValueFrom(
         this.http.get<AdapterResponse>(url, {
           headers: {
-            'X-Service-Token': this.serviceToken,
+            // hmac mode replaces the raw token with a per-request signature (O1).
+            ...serviceAuthHeaders(this.serviceToken, 'GET', path, ''),
             'X-Tenant-Id': userId,
           },
         }),

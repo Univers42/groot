@@ -155,5 +155,5 @@ func requireUser(w http.ResponseWriter, r *http.Request) (string, bool) {
 
 func validServiceToken(r *http.Request, expected string) bool {
 	// Constant-time compare (timing-leak fix) — see shared.SecureCompare.
-	return shared.SecureCompare(r.Header.Get("X-Service-Token"), expected)
+	return shared.VerifyServiceRequest(r, expected)
 }

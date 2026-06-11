@@ -51,11 +51,24 @@ pub async fn verify_key(
     token: &str,
     key: &str,
 ) -> Result<VerifiedIdentity, AuthError> {
-    let url = format!("{}/v1/keys/verify", base_url.trim_end_matches('/'));
-    let resp = client
+    let path = "/v1/keys/verify";
+    let url = format!("{}{path}", base_url.trim_end_matches('/'));
+    // Serialize once so the HMAC body digest signs the exact bytes sent.
+    let body = serde_json::to_vec(&serde_json::json!({ "key": key }))
+        .map_err(|e| AuthError::Upstream(format!("verify body encode: {e}")))?;
+    let req = client
         .post(&url)
-        .header("X-Service-Token", token)
-        .json(&serde_json::json!({ "key": key }))
+        .header(reqwest::header::CONTENT_TYPE, "application/json");
+    let req = if data_plane_pool::service_auth::hmac_mode() {
+        req.header(
+            "X-Service-Auth",
+            data_plane_pool::service_auth::compute_service_auth(token, "POST", path, &body),
+        )
+    } else {
+        req.header("X-Service-Token", token)
+    };
+    let resp = req
+        .body(body)
         .send()
         .await
         .map_err(|e| AuthError::Upstream(format!("tenant-control verify: {e}")))?;
@@ -116,15 +129,18 @@ pub async fn resolve_mount(
     tenant: &str,
     db_id: &str,
 ) -> Result<ResolvedMount, AuthError> {
-    let url = format!(
-        "{}/databases/{}/connect",
-        registry_url.trim_end_matches('/'),
-        db_id
-    );
-    let resp = client
-        .get(&url)
-        .header("X-Service-Token", token)
-        .header("X-Tenant-Id", tenant)
+    let path = format!("/databases/{db_id}/connect");
+    let url = format!("{}{path}", registry_url.trim_end_matches('/'));
+    let req = client.get(&url).header("X-Tenant-Id", tenant);
+    let req = if data_plane_pool::service_auth::hmac_mode() {
+        req.header(
+            "X-Service-Auth",
+            data_plane_pool::service_auth::compute_service_auth(token, "GET", &path, b""),
+        )
+    } else {
+        req.header("X-Service-Token", token)
+    };
+    let resp = req
         .send()
         .await
         .map_err(|e| AuthError::Upstream(format!("adapter-registry connect: {e}")))?;
