@@ -45,9 +45,13 @@ panic = "abort"
 [workspace.dependencies]
 anyhow = "1"
 # binocle-one: password hashing (argon2id — passwords are low-entropy, unlike
-# API keys) + HS256 JWT mint/verify. pem support off: no PEM keys in one.
+# API keys) + JWT mint/verify. `use_pem` parses Apple's ES256 .p8 signing key.
 argon2 = "0.5"
-jsonwebtoken = { version = "9", default-features = false }
+jsonwebtoken = { version = "9", default-features = false, features = ["use_pem"] }
+# binocle-one B3: SMTP mail (verification/reset/OTP codes; rustls, no openssl)
+# + RFC 6238 TOTP (authenticator apps mandate HMAC-SHA1; hmac is in-tree).
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1", "tokio1-rustls-tls", "builder"] }
+sha1 = "0.10"
 async-trait = "0.1"
 axum = "0.7"
 bson = { version = "2.10", features = ["chrono-0_4"] }

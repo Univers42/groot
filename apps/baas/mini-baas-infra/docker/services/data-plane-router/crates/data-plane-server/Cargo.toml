@@ -32,8 +32,10 @@ control-pg = ["dep:deadpool-postgres", "dep:tokio-postgres", "data-plane-pool/ht
 # memory-hard KDFs exist for low-entropy passwords, which nano keys are not.
 nano = ["sqlite", "dep:rusqlite", "dep:futures", "uuid/v4"]
 # binocle-one — "our PocketBase": nano + user accounts. Email/password with
-# argon2id (passwords ARE low-entropy) + HS256 JWTs minted/verified in-process.
-one = ["nano", "dep:argon2", "dep:jsonwebtoken"]
+# argon2id (passwords ARE low-entropy) + HS256 JWTs minted/verified in-process,
+# the OAuth2/OIDC provider matrix, SMTP mail codes (verification/reset/OTP)
+# and RFC 6238 TOTP MFA (hmac+sha1 — authenticator apps mandate SHA1).
+one = ["nano", "dep:argon2", "dep:jsonwebtoken", "dep:lettre", "dep:hmac", "dep:sha1"]
 
 [dependencies]
 data-plane-core = { path = "../data-plane-core" }
@@ -51,9 +53,12 @@ tokio-postgres = { workspace = true, optional = true }
 # the SSE stream adapter (futures::stream::unfold over a broadcast receiver).
 rusqlite = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
-# binocle-one: password hashing + JWT sessions.
+# binocle-one: password hashing + JWT sessions + SMTP codes + TOTP MFA.
 argon2 = { workspace = true, optional = true }
 jsonwebtoken = { workspace = true, optional = true }
+lettre = { workspace = true, optional = true }
+hmac = { workspace = true, optional = true }
+sha1 = { workspace = true, optional = true }
 sha2 = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
