@@ -8,7 +8,10 @@
 ARG APP=adapter-registry
 ARG PORT=3021
 
-FROM golang:1.23-bookworm AS builder
+# Go 1.25 build toolchain — pulls the patched stdlib (crypto/x509, crypto/tls,
+# net/http, net/url, os) that closes the ~10 GO-2026-* advisories govulncheck
+# flags at go1.23 (a stdlib-only fix; no code change). `make verify-deps` re-scans.
+FROM golang:1.25-bookworm AS builder
 ARG APP
 WORKDIR /src
 
