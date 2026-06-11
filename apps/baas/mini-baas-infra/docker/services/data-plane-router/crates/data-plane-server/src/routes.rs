@@ -825,6 +825,9 @@ async fn run_query(
             | DataOperationKind::Batch
     );
     let outbox_identity = request.identity.clone();
+    // Response projection (`fields`) — applied LAST, after outbox/realtime
+    // emission and masks, so server-side consumers keep full rows.
+    let projection = request.operation.fields.clone();
     #[cfg(any(feature = "control-pg", feature = "nano"))]
     let outbox_data = request.operation.data.clone();
     #[cfg(any(feature = "control-pg", feature = "nano"))]
@@ -932,6 +935,7 @@ async fn run_query(
                         op_wire,
                         pk.as_ref(),
                         result.affected_rows,
+                        outbox_identity.user_id.as_deref().unwrap_or(""),
                     );
                 }
             }
@@ -965,6 +969,8 @@ async fn run_query(
                     }
                 }
             }
+            // `fields` projection: engine-neutral, post-mask, response-only.
+            data_plane_core::DataOperation::project_rows(&projection, &mut result.rows);
             (StatusCode::OK, Json(result)).into_response()
         }
         Err(err) => map_data_plane_error(&err),
