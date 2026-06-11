@@ -27,12 +27,15 @@ services:
       # 10K tenants × N mounts exceed the default 256-pool LRU (the #1 scale
       # bottleneck — registry churn). The experiments sweep this value.
       DATA_PLANE_MAX_POOLS: ${DATA_PLANE_MAX_POOLS:-4096}
-      # B4-pools (100K lever): collapse shared_rls tenants on one DB to a single
-      # pool keyed by connection target, not tenant. Flip to 1 for the shared_rls
-      # variant of the scale run and watch baas_data_plane_pools_open stay flat
-      # as tenants climb (instead of tracking tenant count). Default off → the
-      # per-tenant-pool baseline the churn curve is measured against.
-      DATA_PLANE_SHARE_POOLS: ${DATA_PLANE_SHARE_POOLS:-0}
+      # B4-pools (THE 100K lever): collapse shared_rls tenants on one DB to a
+      # single pool keyed by connection target, not tenant. VERIFIED 2026-06-12
+      # (master-plan §7.4): 10K tenants → 1 pool, 0×5xx; isolation byte-identical
+      # to per-tenant pools (apply_rls_context re-stamps app.current_tenant_id +
+      # owner_id per request — the pool holds no tenant state). The check_tenant
+      # single-owner guard that used to 502 every non-creator tenant is fixed.
+      # Default ON for the scale override (the 100K-on-one-box config); set to 0
+      # to measure the per-tenant-pool baseline.
+      DATA_PLANE_SHARE_POOLS: ${DATA_PLANE_SHARE_POOLS:-1}
 
   # NOTE: the former PACKAGE_ENFORCEMENT=0 workaround here is GONE. provision's
   # CreateTenant now threads the request `plan` field (reconcile.go →

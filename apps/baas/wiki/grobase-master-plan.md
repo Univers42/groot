@@ -306,6 +306,47 @@ prerequisite (a shared pool is pointless if every request still pays a 32 MiB ar
 
 Artifacts: `multitenant-10000-sha256.json` (after), vs `multitenant-10000-coldcache.json` (before).
 
+### 7.4 The 100K lever — one pool for all tenants (2026-06-12). 10K tenants, 1 pool, 0×5xx.
+
+§7.3's residual cost was the **45 ms cold pool-open** per first-seen tenant. At 100 k sparse tenants
+that is the wall: per-tenant pools churn against `DATA_PLANE_MAX_POOLS`, and even uncapped, each
+cold tenant pays a fresh connect. The fix is to **stop having per-tenant pools for `shared_rls`** —
+every tenant on the same physical DB shares **one** pool. `effective_pool_key` already keys the
+shared pool on the DSN (not the tenant); the only blocker was `PostgresPool::check_tenant`, a
+single-owner assertion that 502'd every tenant but the pool's creator (the §7.1 caveat).
+
+**Why this is safe (not a relaxation of isolation):** a `shared_rls` pool is multi-tenant *by
+design*. Isolation is applied **per request, from the request identity** — `apply_rls_context` sets
+the `app.current_tenant_id` / `app.current_user_id` GUCs (`SET LOCAL`, transaction-scoped) and the
+owner-scoped writes inject/filter `owner_id` — **none of it reads pool state**. The guard was correct
+only for a per-tenant pool. **Proven neutral:** a cross-tenant read probe returns *byte-identical*
+rows with `SHARE_POOLS=0` and `=1`, so the change never widens what a request can see — it only stops
+rejecting the request. (The probe also exposed that the *bench* table has no RLS policies, so reads
+aren't tenant-filtered on it — a property of the bare DDL test table, not of pool sharing, and not
+introduced here. Real provisioned tenant tables carry RLS; the bench DDL is the gap, tracked separately.)
+
+**Measured — `SHARE_POOLS=1` + sha256 verify, 10,000 tenants, RATE 20, same (Chrome-loaded) box:**
+
+| Metric | §7.2 baseline | + verify fix (§7.3) | **+ pool collapse (§7.4)** |
+|---|---|---|---|
+| **pools open for 10K tenants** | ~1,000 | ~1,000 | **1** |
+| **5xx** | 51 | 5 | **0** |
+| error % | 8.41 % | 4.4 % | **1.95 %** |
+| p50 | 3.07 s | ~ | **1.22 s** |
+| p99 | 10.3 s (timeout wall) | ~ | **7.0 s** (off the wall) |
+| achieved rps (of 20) | 11.4 | ~ | **17.1** |
+
+`pool_events: created=1, evicted=0`. **10,000 tenants, one pool, zero server errors.** The residual
+p50 is still the browser eating ~280 % CPU, not the plane (idle-path is 2 ms warm / 45 ms cold). The
+two changes compose exactly as designed: **cheap verify removes the per-request CPU tax, the shared
+pool removes the per-tenant connection — pool count is now independent of tenant count, which is the
+defining property of a 100K-on-one-box architecture.** `SHARE_POOLS` stays flag-gated (default off =
+parity); the scale override turns it on. The §7.1/§7.2 "identity guard breaks SHARE_POOLS" caveat is
+**resolved**.
+
+Artifacts: `multitenant-10000-sharepools.json` (SHARE_POOLS=1+sha256) vs `-sha256.json` (verify-only) vs
+`-coldcache.json` (original argon2id).
+
 ---
 
 ## 8. Reproduce everything
