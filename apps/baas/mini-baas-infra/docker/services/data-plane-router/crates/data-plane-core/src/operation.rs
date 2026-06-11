@@ -109,6 +109,68 @@ pub struct DataOperation {
     /// Aggregation request — present (and required) only for `op = Aggregate`.
     #[serde(default)]
     pub aggregate: Option<AggregateSpec>,
+    /// Response projection: keep only these columns in returned rows.
+    /// Applied post-fetch in the server (engine-neutral); absent/empty =
+    /// full rows, so the existing wire shape is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fields: Option<Vec<String>>,
+}
+
+impl DataOperation {
+    /// Strip non-requested columns from `rows` in place. No-op when the
+    /// projection is absent or empty.
+    pub fn project_rows(fields: &Option<Vec<String>>, rows: &mut [Value]) {
+        let Some(fields) = fields.as_ref().filter(|f| !f.is_empty()) else {
+            return;
+        };
+        for row in rows {
+            if let Value::Object(map) = row {
+                map.retain(|k, _| fields.iter().any(|f| f == k));
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod projection_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn project_rows_keeps_only_requested_columns() {
+        let mut rows = vec![
+            json!({"id": 1, "title": "a", "secret": "x"}),
+            json!({"id": 2, "title": "b", "secret": "y"}),
+        ];
+        DataOperation::project_rows(&Some(vec!["id".into(), "title".into()]), &mut rows);
+        assert_eq!(rows[0], json!({"id": 1, "title": "a"}));
+        assert_eq!(rows[1], json!({"id": 2, "title": "b"}));
+    }
+
+    #[test]
+    fn project_rows_noop_when_absent_or_empty() {
+        let original = vec![json!({"id": 1, "x": 2})];
+        let mut rows = original.clone();
+        DataOperation::project_rows(&None, &mut rows);
+        assert_eq!(rows, original);
+        DataOperation::project_rows(&Some(vec![]), &mut rows);
+        assert_eq!(rows, original, "empty projection means full rows, not none");
+        // Unknown columns simply project to empty objects (no error).
+        DataOperation::project_rows(&Some(vec!["nope".into()]), &mut rows);
+        assert_eq!(rows, vec![json!({})]);
+    }
+
+    #[test]
+    fn fields_is_wire_optional() {
+        let op: DataOperation =
+            serde_json::from_value(json!({"op": "list", "resource": "t"})).unwrap();
+        assert!(op.fields.is_none(), "absent fields deserializes to None");
+        let op: DataOperation = serde_json::from_value(
+            json!({"op": "list", "resource": "t", "fields": ["id"]}),
+        )
+        .unwrap();
+        assert_eq!(op.fields.as_deref(), Some(["id".to_string()].as_slice()));
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
