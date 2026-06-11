@@ -147,7 +147,7 @@ services:
   trino:
     image: trinodb/trino:467
     container_name: mini-baas-trino
-    profiles: [analytics, data-plane, extras]
+    profiles: [analytics, extras]
     # Trino's jvm.config sizes the heap as 80% of visible RAM
     # (Initial/MaxRAMPercentage=80): without a limit it reserves against the
     # whole HOST (~25GB on a 32GB machine, ~900MB RSS idle). The cap makes the
@@ -303,7 +303,7 @@ services:
   iceberg-rest:
     image: apache/iceberg-rest-fixture:1.8.1
     container_name: mini-baas-iceberg-rest
-    profiles: [analytics, data-plane, extras]
+    profiles: [analytics, extras]
     env_file: [.env]
     environment:
       CATALOG_WAREHOUSE: s3://iceberg/
@@ -370,7 +370,7 @@ services:
   debezium:
     image: quay.io/debezium/server:3.0
     container_name: mini-baas-debezium
-    profiles: [data-plane]
+    profiles: [analytics]
     env_file: [.env]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -393,7 +393,7 @@ services:
   minio-iceberg-init:
     image: minio/mc:RELEASE.2025-04-08T15-39-49Z
     container_name: mini-baas-minio-iceberg-init
-    profiles: [analytics, data-plane, extras, storage]
+    profiles: [analytics, extras, storage]
     env_file: [.env]
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
@@ -1112,7 +1112,7 @@ services:
       dockerfile: Dockerfile
       args:
         APP: storage-router
-    profiles: [storage, data-plane, extras]
+    profiles: [storage, extras]
     container_name: mini-baas-storage-router
     env_file: [.env]
     environment:
@@ -1219,7 +1219,7 @@ services:
       dockerfile: Dockerfile
       args:
         APP: analytics-service
-    profiles: [analytics, background, data-plane]
+    profiles: [analytics, background]
     container_name: mini-baas-analytics-service
     env_file: [.env]
     environment:
@@ -1318,7 +1318,7 @@ services:
       dockerfile: Dockerfile
       args:
         APP: ai-service
-    profiles: [background, data-plane]
+    profiles: [background]
     container_name: mini-baas-ai-service
     env_file: [.env]
     environment:
@@ -1411,7 +1411,7 @@ services:
   minio:
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z-cpuv1
     container_name: mini-baas-minio
-    profiles: [storage, data-plane, extras]
+    profiles: [storage, extras]
     env_file: [.env]
     command: server /data --console-address ":9001"
     ports:
@@ -1435,7 +1435,7 @@ services:
     build:
       context: ./docker/services/functions-runtime
       dockerfile: Dockerfile
-    profiles: [functions, data-plane, extras]
+    profiles: [functions, extras]
     container_name: mini-baas-functions
     env_file: [.env]
     environment:
