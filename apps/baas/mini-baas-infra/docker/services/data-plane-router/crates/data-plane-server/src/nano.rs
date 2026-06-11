@@ -206,12 +206,25 @@ struct NanoMountSpec {
     dsn: String,
 }
 
+/// A committed mutation on the realtime bus. The envelope is pre-serialized
+/// once per event; the routing fields ride beside it so subscribers filter
+/// without re-parsing JSON.
+#[derive(Clone)]
+pub(crate) struct MutationEvent {
+    pub(crate) db: String,
+    pub(crate) table: String,
+    /// The mutating principal (`user:<id>` / `api-key:<id>`) — drives
+    /// owner-filtered delivery for user subscribers.
+    pub(crate) owner: String,
+    pub(crate) payload: String,
+}
+
 /// In-process state the nano runtime adds on top of [`AppState`]: the key
 /// store, the static mount map, and the realtime broadcast bus.
 pub struct NanoState {
     keys: KeyStore,
     mounts: HashMap<String, ResolvedMount>,
-    events: tokio::sync::broadcast::Sender<String>,
+    events: tokio::sync::broadcast::Sender<MutationEvent>,
 }
 
 impl NanoState {
@@ -336,6 +349,7 @@ impl NanoState {
         op: &str,
         pk: Option<&serde_json::Value>,
         affected: u64,
+        owner: &str,
     ) {
         let payload = json!({
             "db_id": db_id,
@@ -343,9 +357,15 @@ impl NanoState {
             "op": op,
             "pk": pk,
             "affected": affected,
+            "owner": owner,
             "ts": chrono::Utc::now().to_rfc3339(),
         });
-        let _ = self.events.send(payload.to_string());
+        let _ = self.events.send(MutationEvent {
+            db: db_id.to_string(),
+            table: table.to_string(),
+            owner: owner.to_string(),
+            payload: payload.to_string(),
+        });
     }
 }
 
@@ -540,6 +560,37 @@ struct RealtimeQuery {
     #[cfg(feature = "one")]
     #[serde(default)]
     token: Option<String>,
+    /// Server-side topic filter: comma-separated `table:<name>` / `db:<id>`
+    /// tokens (a bare token means `table:`). Empty/absent = everything.
+    #[serde(default)]
+    topics: Option<String>,
+}
+
+/// One parsed subscription token.
+enum Topic {
+    Table(String),
+    Db(String),
+}
+
+fn parse_topics(raw: Option<&str>) -> Vec<Topic> {
+    raw.unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(|t| match t.split_once(':') {
+            Some(("db", id)) => Topic::Db(id.to_string()),
+            Some(("table", name)) => Topic::Table(name.to_string()),
+            _ => Topic::Table(t.to_string()),
+        })
+        .collect()
+}
+
+fn topics_match(topics: &[Topic], ev: &MutationEvent) -> bool {
+    topics.is_empty()
+        || topics.iter().any(|t| match t {
+            Topic::Table(name) => *name == ev.table,
+            Topic::Db(id) => *id == ev.db,
+        })
 }
 
 /// SSE stream of committed mutations. Auth: `X-Baas-Api-Key` header or `?key=`
@@ -593,20 +644,41 @@ async fn realtime(
         return crate::routes::scope_denied(&id, "realtime", missing);
     }
 
+    // Server-side delivery filter: requested topics, and — for user (JWT)
+    // identities — only the subscriber's OWN mutations, mirroring the
+    // owner-scoping their reads get on /data/v1. Machine keys see the bus.
+    let topics = parse_topics(q.topics.as_deref());
+    let owner_filter = (!matches!(id.source, data_plane_core::IdentitySource::ServiceToken))
+        .then(|| id.principal.clone());
+
     let rx = nano.events.subscribe();
-    let stream = futures::stream::unfold(rx, |mut rx| async move {
-        loop {
-            match rx.recv().await {
-                Ok(payload) => {
-                    let event = Event::default().event("mutation").data(payload);
-                    return Some((Ok::<_, std::convert::Infallible>(event), rx));
+    let stream = futures::stream::unfold(
+        (rx, topics, owner_filter),
+        |(mut rx, topics, owner_filter)| async move {
+            loop {
+                match rx.recv().await {
+                    Ok(ev) => {
+                        if !topics_match(&topics, &ev) {
+                            continue;
+                        }
+                        if let Some(owner) = owner_filter.as_deref() {
+                            if ev.owner != owner {
+                                continue;
+                            }
+                        }
+                        let event = Event::default().event("mutation").data(ev.payload);
+                        return Some((
+                            Ok::<_, std::convert::Infallible>(event),
+                            (rx, topics, owner_filter),
+                        ));
+                    }
+                    // A slow consumer skips missed events rather than erroring out.
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
                 }
-                // A slow consumer skips missed events rather than erroring out.
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
             }
-        }
-    });
+        },
+    );
     Sse::new(stream)
         .keep_alive(KeepAlive::new().interval(Duration::from_secs(15)).text("ping"))
         .into_response()
@@ -672,6 +744,26 @@ pub async fn run(config: ServerConfig) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn topics_parse_and_match() {
+        use super::{parse_topics, topics_match, MutationEvent};
+        let ev = |db: &str, table: &str| MutationEvent {
+            db: db.into(),
+            table: table.into(),
+            owner: "user:u1".into(),
+            payload: String::new(),
+        };
+        // Empty filter matches everything.
+        assert!(topics_match(&parse_topics(None), &ev("main", "notes")));
+        assert!(topics_match(&parse_topics(Some("")), &ev("main", "notes")));
+        // Bare token == table filter; explicit forms work; commas + spaces ok.
+        let t = parse_topics(Some("notes, table:posts ,db:other"));
+        assert!(topics_match(&t, &ev("main", "notes")));
+        assert!(topics_match(&t, &ev("main", "posts")));
+        assert!(topics_match(&t, &ev("other", "anything")));
+        assert!(!topics_match(&t, &ev("main", "todos")));
+    }
+
     use super::*;
 
     #[test]
