@@ -133,6 +133,14 @@ impl UserStore {
             CREATE TABLE IF NOT EXISTS one_config (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS one_user_identities (
+                provider   TEXT NOT NULL,
+                subject    TEXT NOT NULL,
+                user_id    TEXT NOT NULL,
+                email      TEXT,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (provider, subject)
             );",
         )?;
         Ok(Self {
@@ -193,6 +201,45 @@ impl UserStore {
         .ok()
     }
 
+    fn find_user_id_by_email(&self, email: &str) -> Option<String> {
+        let conn = self.conn.lock().expect("user store poisoned");
+        conn.query_row("SELECT id FROM one_users WHERE email = ?1", [email], |r| r.get(0))
+            .ok()
+    }
+
+    /// `subject` is already provider-prefixed (`<provider>:<remote id>`).
+    fn find_identity(&self, provider: &str, subject: &str) -> Option<String> {
+        let conn = self.conn.lock().expect("user store poisoned");
+        conn.query_row(
+            "SELECT user_id FROM one_user_identities WHERE provider = ?1 AND subject = ?2",
+            [provider, subject],
+            |r| r.get(0),
+        )
+        .ok()
+    }
+
+    fn link_identity(
+        &self,
+        provider: &str,
+        subject: &str,
+        user_id: &str,
+        email: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let conn = self.conn.lock().expect("user store poisoned");
+        conn.execute(
+            "INSERT INTO one_user_identities (provider, subject, user_id, email, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(provider, subject) DO NOTHING",
+            rusqlite::params![provider, subject, user_id, email, chrono::Utc::now().to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    fn mark_verified(&self, user_id: &str) {
+        let conn = self.conn.lock().expect("user store poisoned");
+        let _ = conn.execute("UPDATE one_users SET verified = 1 WHERE id = ?1", [user_id]);
+    }
+
     /// Mint a refresh token: `nrt_<rowid>.<secret>`, digest-stored, 30-day TTL.
     fn mint_refresh(&self, user_id: &str) -> anyhow::Result<String> {
         let row_id = uuid::Uuid::new_v4().simple().to_string()[..12].to_string();
@@ -249,6 +296,8 @@ pub struct OneState {
     jwt_secret: Vec<u8>,
     jwt_ttl: u64,
     allow_signup: bool,
+    /// OAuth2/OIDC flow state (PKCE pending store + provider endpoints).
+    pub(crate) oauth: crate::one_oauth::OAuthRuntime,
 }
 
 impl OneState {
@@ -285,7 +334,85 @@ impl OneState {
             jwt_secret,
             jwt_ttl,
             allow_signup,
+            oauth: crate::one_oauth::OAuthRuntime::default(),
         })
+    }
+
+    /// Mint the full session bundle (JWT + rotating refresh) for a known user.
+    /// Shared by password login and the OAuth callback.
+    pub(crate) fn issue_session(
+        &self,
+        user_id: &str,
+    ) -> Result<serde_json::Value, axum::response::Response> {
+        let user = self.users.get_user(user_id).ok_or_else(|| {
+            api_err(StatusCode::UNAUTHORIZED, "unauthorized", "account no longer exists")
+        })?;
+        let (token, ttl) = self
+            .mint_jwt(&user.id, &user.email)
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, "jwt_failed", &e))?;
+        let refresh = self.users.mint_refresh(&user.id).map_err(|e| {
+            api_err(StatusCode::INTERNAL_SERVER_ERROR, "refresh_failed", &e.to_string())
+        })?;
+        Ok(session_json(Some(&user), token, ttl, refresh))
+    }
+
+    /// Map a provider identity to a local account:
+    /// identity match → verified-email link → signup (toggle permitting).
+    /// OAuth-created accounts get an unloginable password sentinel — argon2
+    /// parsing fails closed on it, so password login can never claim them.
+    pub(crate) fn oauth_login(
+        &self,
+        subject: &str,
+        email: Option<&str>,
+        email_verified: bool,
+    ) -> Result<String, axum::response::Response> {
+        let provider = subject.split(':').next().unwrap_or_default().to_string();
+        if let Some(uid) = self.users.find_identity(&provider, subject) {
+            return Ok(uid);
+        }
+        if let Some(email) = email {
+            if let Some(uid) = self.users.find_user_id_by_email(email) {
+                if !email_verified {
+                    return Err(api_err(
+                        StatusCode::FORBIDDEN,
+                        "email_unverified",
+                        "the provider did not verify this email; cannot link it to an existing account",
+                    ));
+                }
+                self.users
+                    .link_identity(&provider, subject, &uid, Some(email))
+                    .map_err(|e| {
+                        api_err(StatusCode::INTERNAL_SERVER_ERROR, "link_failed", &e.to_string())
+                    })?;
+                self.users.mark_verified(&uid);
+                tracing::info!(target: "audit", event = "oauth_linked", user = %uid, subject = %subject, "identity linked to existing account");
+                return Ok(uid);
+            }
+        }
+        if !self.allow_signup {
+            return Err(api_err(
+                StatusCode::FORBIDDEN,
+                "signup_disabled",
+                "signups are disabled (ONE_ALLOW_SIGNUP=0)",
+            ));
+        }
+        // No password: the sentinel is not a PHC string, so verify_password
+        // always returns false for it.
+        let synth_email = email
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{}@users.noreply.binocle.local", subject.replace(':', ".")));
+        let uid = self
+            .users
+            .create_user(&synth_email, "!oauth-only")
+            .map_err(|e| api_err(StatusCode::CONFLICT, "signup_failed", &e.to_string()))?;
+        if email.is_some() && email_verified {
+            self.users.mark_verified(&uid);
+        }
+        self.users
+            .link_identity(&provider, subject, &uid, email)
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, "link_failed", &e.to_string()))?;
+        tracing::info!(target: "audit", event = "oauth_signup", user = %uid, subject = %subject, "account created via oauth");
+        Ok(uid)
     }
 
     fn mint_jwt(&self, user_id: &str, email: &str) -> Result<(String, u64), String> {
@@ -521,10 +648,11 @@ fn auth_routes() -> Router<AppState> {
         .route("/one/v1/auth/me", get(me))
 }
 
-/// nano's full route set + the account surface, one router.
+/// nano's full route set + the account surface + the OAuth matrix, one router.
 pub fn router(state: AppState) -> Router {
     crate::nano::routes()
         .merge(auth_routes())
+        .merge(crate::one_oauth::routes())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
@@ -611,6 +739,27 @@ mod tests {
         assert!(one.verify_jwt(&foreign).is_err(), "cross-secret token rejected");
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&dir2);
+    }
+
+    #[test]
+    fn oauth_login_links_and_creates() {
+        let dir = std::env::temp_dir().join(format!("one-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let one = OneState::open(&dir).unwrap();
+        let dave = one.users.create_user("dave@x.y", "$argon2-fake").unwrap();
+        // First OAuth login with dave's provider-verified email LINKS, not duplicates.
+        assert_eq!(one.oauth_login("oidc:s1", Some("dave@x.y"), true).unwrap(), dave);
+        // Later logins match by identity alone (email not needed).
+        assert_eq!(one.oauth_login("oidc:s1", None, true).unwrap(), dave);
+        // An unverified email must NOT link to an existing account.
+        one.users.create_user("eve@x.y", "h").unwrap();
+        assert!(one.oauth_login("oidc:s2", Some("eve@x.y"), false).is_err());
+        // Unknown identity + unknown email signs up a new account.
+        let new = one.oauth_login("oidc:s3", Some("new@x.y"), true).unwrap();
+        assert_ne!(new, dave);
+        // The OAuth password sentinel can never pass password login.
+        assert!(!verify_password("anything", "!oauth-only"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

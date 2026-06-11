@@ -9,6 +9,8 @@ pub mod metrics;
 pub mod nano;
 #[cfg(feature = "one")]
 pub mod one;
+#[cfg(feature = "one")]
+pub mod one_oauth;
 #[cfg(feature = "control-pg")]
 pub mod outbox;
 pub mod ratelimit;

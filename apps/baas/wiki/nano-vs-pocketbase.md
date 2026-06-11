@@ -31,7 +31,7 @@
 
 | # | Capability | PocketBase | binocle today | Plan |
 |---|---|---|---|---|
-| G1 | **User auth** — email/password, OAuth2 (30+ providers), OTP, MFA, verification, reset, refresh | ✅ | API keys only | **B1** users+JWT → **B2** OAuth matrix (one OIDC+PKCE flow + presets) → **B3** OTP/TOTP/SMTP |
+| G1 | **User auth** — email/password, OAuth2 (30+ providers), OTP, MFA, verification, reset, refresh | ✅ | **email/password + JWT ✅** (m40) · **OAuth2 matrix ✅** (m41: one OIDC+PKCE flow, 10 presets + any-OIDC via discovery, verified-email linking) | **B3** closes the rest: OTP/TOTP/SMTP |
 | G2 | **Typed collections API** (field types, validation, create via API/UI) | ✅ | raw SQL escape hatch (`/nano/v1/raw`) | **C** structured DDL for the sqlite adapter → `/data/v1/schema/ddl` works everywhere |
 | G3 | **Per-record authorization** (`@request.auth` rules) | ✅ | key scopes + owner-scoping; ABAC engine compiled-in but keyless | **B1** wires user identity → owner-scoping per user + ABAC field masks live |
 | G4 | **File storage** (upload/serve, thumbnails, protected files; S3) | ✅ | ❌ | **D** (S3 stays cloud-tier MinIO; documented) |
