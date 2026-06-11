@@ -32,6 +32,10 @@ const RULES_CACHE_TTL: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Deserialize)]
 struct Rule {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
     #[serde(default = "default_true")]
     enabled: bool,
     table: String,
@@ -58,6 +62,10 @@ struct Action {
     column: Option<String>,
     #[serde(default)]
     value: Option<Value>,
+    #[serde(default)]
+    message: Option<String>,
+    #[serde(default)]
+    url: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -140,6 +148,12 @@ fn as_f64(v: Option<&Value>) -> f64 {
 pub struct AutomationEngine {
     pool: Pool,
     cache: Mutex<HashMap<String, (Instant, Vec<Rule>)>>,
+    /// Realtime publish endpoint for `notify` actions (best-effort).
+    realtime_url: Option<String>,
+    /// Short-timeout, redirect-free client for notify/webhook fan-out.
+    /// Redirects are DISABLED so a public webhook target cannot 302 the
+    /// request to an internal address after the SSRF check passed.
+    http: reqwest::Client,
 }
 
 impl AutomationEngine {
@@ -153,9 +167,19 @@ impl AutomationEngine {
         let mut cfg = PgConfig::new();
         cfg.url = Some(dsn);
         let pool = cfg.create_pool(Some(Runtime::Tokio1), NoTls).ok()?;
+        let realtime_url = std::env::var("REALTIME_PUBLISH_URL")
+            .ok()
+            .filter(|s| !s.trim().is_empty());
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .ok()?;
         Some(Self {
             pool,
             cache: Mutex::new(HashMap::new()),
+            realtime_url,
+            http,
         })
     }
 
@@ -226,9 +250,20 @@ impl AutomationEngine {
                 }
             }
             for action in &rule.actions {
-                if action.kind == "set_property" {
-                    self.fire_set_property(pool, identity, table, op, row, pk, action)
-                        .await;
+                match action.kind.as_str() {
+                    "set_property" => {
+                        self.fire_set_property(pool, identity, table, op, row, pk, action)
+                            .await;
+                    }
+                    "notify" => {
+                        self.fire_notify(identity, db_id, table, rule, action, row, pk)
+                            .await;
+                    }
+                    "webhook" => {
+                        self.fire_webhook(identity, db_id, table, op, rule, action, row, pk)
+                            .await;
+                    }
+                    _ => {}
                 }
             }
         }
@@ -290,6 +325,155 @@ impl AutomationEngine {
                 table = %table,
                 column = %column,
                 "set_property follow-up write failed: {e}"
+            ),
+        }
+    }
+}
+
+impl AutomationEngine {
+    /// `notify` → realtime publish, the same envelope the query-router's
+    /// `publishAutomationFired` sends: topic `table:<dbId>:<table>`, event
+    /// `automation_fired`, payload {dbId, table, ruleId, ruleName, message,
+    /// pk, ts}. Best-effort: failure is logged, never surfaced.
+    async fn fire_notify(
+        &self,
+        identity: &RequestIdentity,
+        db_id: &str,
+        table: &str,
+        rule: &Rule,
+        action: &Action,
+        row: &Value,
+        pk: Option<&Value>,
+    ) {
+        let Some(url) = self.realtime_url.as_deref() else {
+            return; // no realtime endpoint configured — notify is a no-op
+        };
+        let pk_val = pk
+            .cloned()
+            .or_else(|| row.get("id").cloned())
+            .or_else(|| row.get("_id").cloned())
+            .unwrap_or(Value::Null);
+        let message = action
+            .message
+            .clone()
+            .or_else(|| rule.name.clone())
+            .unwrap_or_else(|| "automation fired".to_string());
+        let body = json!({
+            "topic": format!("table:{db_id}:{table}"),
+            "event_type": "automation_fired",
+            "payload": {
+                "dbId": db_id,
+                "table": table,
+                "ruleId": rule.id,
+                "ruleName": rule.name,
+                "message": message,
+                "pk": pk_val,
+                "ts": chrono::Utc::now().to_rfc3339(),
+            },
+        });
+        match self.http.post(url).json(&body).send().await {
+            Ok(r) if r.status().is_success() => tracing::info!(
+                target: "audit", event = "automation_notify",
+                tenant = %identity.tenant_id, db = %db_id, table = %table,
+                "notify published to realtime"
+            ),
+            Ok(r) => tracing::warn!(
+                target: "audit", event = "automation_notify_failed",
+                tenant = %identity.tenant_id, table = %table, status = %r.status(),
+                "realtime publish rejected"
+            ),
+            Err(e) => tracing::warn!(
+                target: "audit", event = "automation_notify_failed",
+                tenant = %identity.tenant_id, table = %table,
+                "realtime publish error: {e}"
+            ),
+        }
+    }
+
+    /// `webhook` → HTTPS-only POST to a PUBLIC address: the URL passes the same
+    /// SSRF guard as the http engine adapter (private/link-local/metadata
+    /// blocked, every resolved IP validated and PINNED — and the client never
+    /// follows redirects, so a public 302 cannot bounce the call inward).
+    /// Payload mirrors the query-router: {rule:{id,name}, dbId, table, op, pk, ts}.
+    #[allow(clippy::too_many_arguments)]
+    async fn fire_webhook(
+        &self,
+        identity: &RequestIdentity,
+        db_id: &str,
+        table: &str,
+        op: &str,
+        rule: &Rule,
+        action: &Action,
+        row: &Value,
+        pk: Option<&Value>,
+    ) {
+        let Some(url) = action.url.as_deref().filter(|u| !u.trim().is_empty()) else {
+            return;
+        };
+        if !url.to_ascii_lowercase().starts_with("https://") {
+            tracing::warn!(
+                target: "audit", event = "automation_webhook_blocked",
+                tenant = %identity.tenant_id, table = %table,
+                "webhook rejected: https-only"
+            );
+            return;
+        }
+        let pinned = match data_plane_pool::guard_and_resolve(url).await {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!(
+                    target: "audit", event = "automation_webhook_blocked",
+                    tenant = %identity.tenant_id, table = %table,
+                    "webhook rejected by SSRF guard: {e}"
+                );
+                return;
+            }
+        };
+        let pk_val = pk
+            .cloned()
+            .or_else(|| row.get("id").cloned())
+            .or_else(|| row.get("_id").cloned())
+            .unwrap_or(Value::Null);
+        let body = json!({
+            "rule": { "id": rule.id, "name": rule.name },
+            "dbId": db_id,
+            "table": table,
+            "op": op,
+            "pk": pk_val,
+            "ts": chrono::Utc::now().to_rfc3339(),
+        });
+        // Pin the request to the validated IPs (anti-DNS-rebind), mirroring the
+        // http engine adapter. A fresh client per fire is fine at automation rates.
+        let client = match &pinned {
+            Some((host, addrs)) => {
+                let mut b = reqwest::Client::builder()
+                    .timeout(Duration::from_secs(5))
+                    .redirect(reqwest::redirect::Policy::none());
+                for addr in addrs {
+                    b = b.resolve(host, *addr);
+                }
+                match b.build() {
+                    Ok(c) => c,
+                    Err(_) => return,
+                }
+            }
+            None => self.http.clone(), // dev escape (DATA_PLANE_HTTP_ALLOW_INTERNAL=1)
+        };
+        match client.post(url).json(&body).send().await {
+            Ok(r) if r.status().is_success() => tracing::info!(
+                target: "audit", event = "automation_webhook",
+                tenant = %identity.tenant_id, db = %db_id, table = %table,
+                "webhook delivered"
+            ),
+            Ok(r) => tracing::warn!(
+                target: "audit", event = "automation_webhook_failed",
+                tenant = %identity.tenant_id, table = %table, status = %r.status(),
+                "webhook target rejected the POST"
+            ),
+            Err(e) => tracing::warn!(
+                target: "audit", event = "automation_webhook_failed",
+                tenant = %identity.tenant_id, table = %table,
+                "webhook delivery error: {e}"
             ),
         }
     }

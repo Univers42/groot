@@ -925,6 +925,9 @@ services:
       # write path the data plane emits the row-change event itself (the
       # query-router is out of the path), so realtime/webhooks keep firing.
       DATA_PLANE_OUTBOX_DSN: ${DATA_PLANE_OUTBOX_DSN:-postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}}
+      # Automation `notify` actions publish here (same contract as outbox-relay;
+      # empty/absent disables — notify is a no-op in realtime-less tiers).
+      REALTIME_PUBLISH_URL: ${REALTIME_PUBLISH_URL:-http://realtime:4000/v1/publish}
       RUST_LOG: ${RUST_LOG:-info}
     ports:
       - "127.0.0.1:${DATA_PLANE_RUST_PORT:-4011}:4011"
