@@ -19,11 +19,21 @@ use data_plane_core::{
     EngineCapabilities, IdentitySource, MigrationRequest, Plan, PoolPolicy, PoolRegistry,
     RawStatement, RequestIdentity, SchemaDdlRequest, TxBeginRequest, TxHandle, WorkloadContext,
 };
-use data_plane_pool::{
-    DefaultPoolRegistry, EnvMountResolver, HttpEngineAdapter, MongoEngineAdapter,
-    MssqlEngineAdapter, MysqlEngineAdapter, PgDialect, PostgresEngineAdapter, ProviderConfig,
-    RedisEngineAdapter, SqliteEngineAdapter,
-};
+use data_plane_pool::{DefaultPoolRegistry, EnvMountResolver, ProviderConfig};
+#[cfg(feature = "http")]
+use data_plane_pool::HttpEngineAdapter;
+#[cfg(feature = "mongodb")]
+use data_plane_pool::MongoEngineAdapter;
+#[cfg(feature = "mssql")]
+use data_plane_pool::MssqlEngineAdapter;
+#[cfg(feature = "mysql")]
+use data_plane_pool::MysqlEngineAdapter;
+#[cfg(feature = "postgres")]
+use data_plane_pool::{PgDialect, PostgresEngineAdapter};
+#[cfg(feature = "redis")]
+use data_plane_pool::RedisEngineAdapter;
+#[cfg(feature = "sqlite")]
+use data_plane_pool::SqliteEngineAdapter;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -155,11 +165,18 @@ pub struct AppState {
     /// Phase 7d outbox emitter (row-change events on the bypass write path).
     /// `None` unless `DATA_PLANE_OUTBOX_DSN` is set — the bypass works without
     /// it, but realtime/webhooks only fire post-cutover once it's wired.
+    #[cfg(feature = "control-pg")]
     outbox: Option<Arc<crate::outbox::OutboxEmitter>>,
     /// Phase D — server-backed automations on the bypass write path. `None`
     /// unless `DATA_PLANE_OUTBOX_DSN` is set (the control Postgres holding the
     /// `automation_rules`); fires `set_property` follow-ups after bypass writes.
+    #[cfg(feature = "control-pg")]
     automations: Option<Arc<crate::automations::AutomationEngine>>,
+    /// Nano edition: the in-process key store + realtime broadcast. `Some` only
+    /// when the nano runtime booted this state (`nano::run`); the full router
+    /// never sets it, so every nano branch is dead code there.
+    #[cfg(feature = "nano")]
+    pub(crate) nano: Option<Arc<crate::nano::NanoState>>,
     /// Short-TTL cache of `api-key → VerifiedIdentity` for the bypass front door,
     /// mirroring the query-router's `ApiKeyMiddleware` 30 s cache. Without it the
     /// bypass re-runs the Argon2id key-verify (a tenant-control round-trip) on
@@ -200,33 +217,40 @@ impl AppState {
             &provider_cfg,
             config.credential_cache_ttl_ms,
         ));
-        let postgres: Arc<dyn EngineAdapter> =
-            Arc::new(PostgresEngineAdapter::new(resolver.clone()));
-        // CockroachDB rides the Postgres adapter (pgwire) under its own engine
-        // id with a serializable-only descriptor, so a `cockroachdb` mount
-        // routes here.
-        let cockroach: Arc<dyn EngineAdapter> = Arc::new(PostgresEngineAdapter::with_dialect(
-            resolver.clone(),
-            PgDialect::Cockroach,
-        ));
-        let mongo: Arc<dyn EngineAdapter> =
-            Arc::new(MongoEngineAdapter::new(resolver.clone()));
-        let mysql: Arc<dyn EngineAdapter> =
-            Arc::new(MysqlEngineAdapter::new(resolver.clone()));
-        // MariaDB rides the MySQL adapter (same wire protocol + dispatch) under
-        // its own engine id, so a `mariadb` mount routes here.
-        let mariadb: Arc<dyn EngineAdapter> =
-            Arc::new(MysqlEngineAdapter::with_engine_name(resolver.clone(), "mariadb"));
-        let redis: Arc<dyn EngineAdapter> =
-            Arc::new(RedisEngineAdapter::new(resolver.clone()));
-        let sqlite: Arc<dyn EngineAdapter> =
-            Arc::new(SqliteEngineAdapter::new(resolver.clone()));
-        let mssql: Arc<dyn EngineAdapter> =
-            Arc::new(MssqlEngineAdapter::new(resolver.clone()));
-        let http: Arc<dyn EngineAdapter> =
-            Arc::new(HttpEngineAdapter::new(resolver.clone()));
-        let adapters: Vec<Arc<dyn EngineAdapter>> =
-            vec![postgres, cockroach, mongo, mysql, mariadb, redis, sqlite, mssql, http];
+        // Feature-gated registration: a lean build (nano) compiles + registers
+        // only the engines it mounts; the default build registers all nine.
+        #[allow(unused_mut)]
+        let mut adapters: Vec<Arc<dyn EngineAdapter>> = Vec::new();
+        #[cfg(feature = "postgres")]
+        {
+            adapters.push(Arc::new(PostgresEngineAdapter::new(resolver.clone())));
+            // CockroachDB rides the Postgres adapter (pgwire) under its own
+            // engine id with a serializable-only descriptor.
+            adapters.push(Arc::new(PostgresEngineAdapter::with_dialect(
+                resolver.clone(),
+                PgDialect::Cockroach,
+            )));
+        }
+        #[cfg(feature = "mongodb")]
+        adapters.push(Arc::new(MongoEngineAdapter::new(resolver.clone())));
+        #[cfg(feature = "mysql")]
+        {
+            adapters.push(Arc::new(MysqlEngineAdapter::new(resolver.clone())));
+            // MariaDB rides the MySQL adapter (same wire protocol + dispatch)
+            // under its own engine id.
+            adapters.push(Arc::new(MysqlEngineAdapter::with_engine_name(
+                resolver.clone(),
+                "mariadb",
+            )));
+        }
+        #[cfg(feature = "redis")]
+        adapters.push(Arc::new(RedisEngineAdapter::new(resolver.clone())));
+        #[cfg(feature = "sqlite")]
+        adapters.push(Arc::new(SqliteEngineAdapter::new(resolver.clone())));
+        #[cfg(feature = "mssql")]
+        adapters.push(Arc::new(MssqlEngineAdapter::new(resolver.clone())));
+        #[cfg(feature = "http")]
+        adapters.push(Arc::new(HttpEngineAdapter::new(resolver.clone())));
         // Boot-time honesty self-check (04/S1b): fail fast if any descriptor
         // advertises an op the adapter doesn't dispatch.
         assert_capability_honesty(&adapters);
@@ -244,8 +268,12 @@ impl AppState {
                 .timeout(Duration::from_secs(10))
                 .build()
                 .unwrap_or_default(),
+            #[cfg(feature = "control-pg")]
             outbox: crate::outbox::OutboxEmitter::from_env().map(Arc::new),
+            #[cfg(feature = "control-pg")]
             automations: crate::automations::AutomationEngine::from_env().map(Arc::new),
+            #[cfg(feature = "nano")]
+            nano: None,
             verify_cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
             mount_cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
@@ -593,17 +621,37 @@ async fn run_query(
         return bad_request("operation.resource is required".to_string());
     }
 
-    // Engines with a live Rust pool. MariaDB rides the MySQL adapter. Engines
-    // beyond this list (jdbc, cassandra, neo4j, es, qdrant, influx) stay
-    // contract-only and are rejected here.
-    let executable_engines = [
-        "postgresql", "cockroachdb", "mongodb", "mysql", "mariadb", "redis", "sqlite", "mssql",
+    // Engines with a live Rust pool IN THIS BUILD (feature-gated; the default
+    // build lists all nine, a nano build only sqlite). MariaDB rides the MySQL
+    // adapter. Engines beyond this list (jdbc, cassandra, neo4j, es, qdrant,
+    // influx) stay contract-only and are rejected here.
+    let executable_engines: &[&str] = &[
+        #[cfg(feature = "postgres")]
+        "postgresql",
+        #[cfg(feature = "postgres")]
+        "cockroachdb",
+        #[cfg(feature = "mongodb")]
+        "mongodb",
+        #[cfg(feature = "mysql")]
+        "mysql",
+        #[cfg(feature = "mysql")]
+        "mariadb",
+        #[cfg(feature = "redis")]
+        "redis",
+        #[cfg(feature = "sqlite")]
+        "sqlite",
+        #[cfg(feature = "mssql")]
+        "mssql",
+        #[cfg(feature = "http")]
         "http",
     ];
     if !executable_engines.contains(&request.mount.engine.as_str()) {
         return not_implemented(
             "engine_execution_not_enabled",
-            "engine has no Rust pool; supported engines: postgresql, cockroachdb, mysql, mariadb, mongodb, redis, sqlite, mssql, http",
+            &format!(
+                "engine has no Rust pool in this build; supported engines: {}",
+                executable_engines.join(", ")
+            ),
         );
     }
 
@@ -686,11 +734,16 @@ async fn run_query(
     // Capture audit + outbox fields before the request is consumed by the pool.
     let audit_tenant = request.identity.tenant_id.clone();
     let audit_engine = request.mount.engine.clone();
+    #[cfg(any(feature = "control-pg", feature = "nano"))]
     let automation_db_id = request.mount.id.clone();
     let audit_op = request.operation.op.clone();
     let audit_resource = request.operation.resource.clone();
     let mask_action = mask_action_for(&audit_op);
-    let op_wire = crate::automations::op_wire_str(&audit_op);
+    #[cfg(any(feature = "control-pg", feature = "nano"))]
+    let op_wire = audit_op.wire_name();
+    // Consumed only by the control-pg / nano post-write hooks below.
+    #[cfg(not(any(feature = "control-pg", feature = "nano")))]
+    let _ = emit_outbox;
     let is_mutation = matches!(
         audit_op,
         DataOperationKind::Insert
@@ -700,8 +753,11 @@ async fn run_query(
             | DataOperationKind::Batch
     );
     let outbox_identity = request.identity.clone();
+    #[cfg(any(feature = "control-pg", feature = "nano"))]
     let outbox_data = request.operation.data.clone();
+    #[cfg(any(feature = "control-pg", feature = "nano"))]
     let outbox_filter = request.operation.filter.clone();
+    #[cfg(feature = "control-pg")]
     let outbox_idem = request.operation.idempotency_key.clone();
 
     let pool = match state.registry.get_or_create(request.mount).await {
@@ -729,6 +785,7 @@ async fn run_query(
             // query-router would have — best-effort, never fails the (committed)
             // write. No-op for reads, for the internal path (emit_outbox=false),
             // and when the outbox DSN is unset.
+            #[cfg(feature = "control-pg")]
             if emit_outbox && is_mutation {
                 if let Some(ob) = state.outbox.as_ref() {
                     if let Err(e) = ob
@@ -751,6 +808,7 @@ async fn run_query(
             // Phase D — fire set_property automations on the bypass write path
             // (best-effort; never fails the committed write). Gated to the bypass
             // so /query/v1 (where the query-router fires them inline) never doubles.
+            #[cfg(feature = "control-pg")]
             if emit_outbox && is_mutation {
                 if let Some(au) = state.automations.as_ref() {
                     let row = result.rows.first().cloned().unwrap_or_else(|| {
@@ -782,6 +840,28 @@ async fn run_query(
                         pk.as_ref(),
                     )
                     .await;
+                }
+            }
+            // Nano edition: fan the committed mutation out to the in-process SSE
+            // bus (the single-binary equivalent of the outbox → realtime path).
+            // Best-effort; lagging subscribers drop events, never the write.
+            #[cfg(feature = "nano")]
+            if emit_outbox && is_mutation {
+                if let Some(nano) = state.nano.as_ref() {
+                    let pk = result
+                        .rows
+                        .first()
+                        .and_then(|r| r.get("id"))
+                        .cloned()
+                        .or_else(|| outbox_data.as_ref().and_then(|d| d.get("id")).cloned())
+                        .or_else(|| outbox_filter.as_ref().and_then(|f| f.get("id")).cloned());
+                    nano.publish_mutation(
+                        &automation_db_id,
+                        &audit_resource,
+                        op_wire,
+                        pk.as_ref(),
+                        result.affected_rows,
+                    );
                 }
             }
             // Phase D — apply ABAC field masks in Rust (cutover prep). Flag-gated;
@@ -1865,48 +1945,59 @@ fn too_many_requests(rps: u32) -> axum::response::Response {
         .into_response()
 }
 
+/// The engines advertised at `/v1/capabilities` — feature-gated to match what
+/// this build can actually pool (the honesty self-check compares the two).
 fn default_engines() -> Vec<EngineDescriptor> {
     vec![
+        #[cfg(feature = "postgres")]
         EngineDescriptor {
             engine: "postgresql".to_string(),
             phase: "pool_v2_active".to_string(),
             capabilities: EngineCapabilities::postgresql(),
         },
+        #[cfg(feature = "postgres")]
         EngineDescriptor {
             engine: "cockroachdb".to_string(),
             phase: "pool_v2_active".to_string(),
             capabilities: EngineCapabilities::cockroachdb(),
         },
+        #[cfg(feature = "mongodb")]
         EngineDescriptor {
             engine: "mongodb".to_string(),
             phase: "pool_v2_active".to_string(),
             capabilities: EngineCapabilities::mongodb(),
         },
+        #[cfg(feature = "mysql")]
         EngineDescriptor {
             engine: "mysql".to_string(),
             phase: "pool_v2_active".to_string(),
             capabilities: EngineCapabilities::mysql(),
         },
+        #[cfg(feature = "mysql")]
         EngineDescriptor {
             engine: "mariadb".to_string(),
             phase: "pool_v2_active".to_string(),
             capabilities: EngineCapabilities::mariadb(),
         },
+        #[cfg(feature = "redis")]
         EngineDescriptor {
             engine: "redis".to_string(),
             phase: "pool_v2_active".to_string(),
             capabilities: EngineCapabilities::redis(),
         },
+        #[cfg(feature = "sqlite")]
         EngineDescriptor {
             engine: "sqlite".to_string(),
             phase: "pool_v2_active".to_string(),
             capabilities: EngineCapabilities::sqlite(),
         },
+        #[cfg(feature = "mssql")]
         EngineDescriptor {
             engine: "mssql".to_string(),
             phase: "pool_v2_active".to_string(),
             capabilities: EngineCapabilities::mssql(),
         },
+        #[cfg(feature = "http")]
         EngineDescriptor {
             engine: "http".to_string(),
             phase: "pool_v2_active".to_string(),

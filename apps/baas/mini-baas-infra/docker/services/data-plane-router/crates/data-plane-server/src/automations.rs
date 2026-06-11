@@ -72,21 +72,6 @@ fn default_true() -> bool {
     true
 }
 
-/// The wire op name (`insert`/`update`/…) used for automation trigger matching.
-pub fn op_wire_str(op: &DataOperationKind) -> &'static str {
-    use DataOperationKind::*;
-    match op {
-        List => "list",
-        Get => "get",
-        Insert => "insert",
-        Update => "update",
-        Delete => "delete",
-        Upsert => "upsert",
-        Batch => "batch",
-        Aggregate => "aggregate",
-    }
-}
-
 /// `row_added` → insert/upsert, `row_updated` → update/upsert, `row_deleted` → delete.
 fn trigger_matches(trigger: &str, op: &str) -> bool {
     match trigger {

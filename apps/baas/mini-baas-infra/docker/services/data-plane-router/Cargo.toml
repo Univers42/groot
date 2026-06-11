@@ -22,6 +22,26 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 
+# Strip + thin-LTO the production binary. Before this profile existed the
+# release build shipped DEFAULT flags — a 29 MB binary with full debug symbol
+# tables. Thin LTO keeps build times sane for the 9-engine workspace; the nano
+# profile below goes further for the single-engine build.
+[profile.release]
+strip = true
+lto = "thin"
+
+# Nano edition (single-binary, PocketBase-class): smallest credible binary that
+# is still fast. `opt-level = "s"` (not "z") keeps SQLite + hot loops quick;
+# fat LTO + 1 codegen unit maximize cross-crate dead-code elimination;
+# `panic = "abort"` drops the unwinder + landing pads (the nano process model
+# is restart-on-crash, same as PocketBase).
+[profile.nano]
+inherits = "release"
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+
 [workspace.dependencies]
 anyhow = "1"
 async-trait = "0.1"

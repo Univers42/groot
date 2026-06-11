@@ -1,9 +1,13 @@
 pub mod abac;
 pub mod auth;
+#[cfg(feature = "control-pg")]
 pub mod automations;
 pub mod config;
 pub mod graph;
 pub mod metrics;
+#[cfg(feature = "nano")]
+pub mod nano;
+#[cfg(feature = "control-pg")]
 pub mod outbox;
 pub mod ratelimit;
 pub mod routes;

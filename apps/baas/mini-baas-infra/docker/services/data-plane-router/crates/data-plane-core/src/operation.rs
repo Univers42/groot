@@ -31,6 +31,23 @@ impl DataOperationKind {
         Self::Batch,
         Self::Aggregate,
     ];
+
+    /// The wire name (`insert`/`update`/…) — the snake_case serde tag as a
+    /// `&'static str`, for audit events, automation trigger matching and
+    /// realtime payloads without a serde round-trip.
+    #[must_use]
+    pub fn wire_name(&self) -> &'static str {
+        match self {
+            Self::List => "list",
+            Self::Get => "get",
+            Self::Insert => "insert",
+            Self::Update => "update",
+            Self::Delete => "delete",
+            Self::Upsert => "upsert",
+            Self::Batch => "batch",
+            Self::Aggregate => "aggregate",
+        }
+    }
 }
 
 /// A SQL aggregate function — an allowlist, so the function name is never
