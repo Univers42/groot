@@ -20,10 +20,12 @@ func TestForResolvesPlansAndAliases(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := map[string]string{
-		"essential":  "essential", // direct package key
+		"nano":       "nano",       // v2 first-class package
+		"basic":      "basic",      // direct package key
+		"essential":  "essential",  // direct package key
 		"pro":        "pro",        // direct (also a legacy plan value)
 		"max":        "max",        // direct
-		"free":       "essential",  // legacy alias
+		"free":       "nano",       // v2 alias (was essential — pointed free at the $13/mo tier)
 		"enterprise": "max",        // legacy alias
 		"":           "essential",  // empty → default
 		"bogus":      "essential",  // unknown → default
@@ -36,18 +38,30 @@ func TestForResolvesPlansAndAliases(t *testing.T) {
 	}
 }
 
-func TestEssentialNarrowsButProDoesNot(t *testing.T) {
+func TestTierCapabilityLadder(t *testing.T) {
 	m, _ := Load()
+	// v2: basic is CRUD-only; essential differentiates by gaining aggregate
+	// (a real capability, not just a higher rate — the v1 weakness was that
+	// basic and essential were identical). pro adds batch + transactions +
+	// multi-engine.
+	_, basic := m.For("basic")
+	if basic.Capabilities["aggregate"] || basic.Capabilities["batch"] {
+		t.Error("basic is CRUD-only: no aggregate, no batch")
+	}
+
 	_, ess := m.For("essential")
-	if ess.Capabilities["aggregate"] {
-		t.Error("essential must NOT include aggregate")
+	if !ess.Capabilities["aggregate"] {
+		t.Error("essential MUST include aggregate (its differentiation from basic)")
+	}
+	if ess.Capabilities["batch"] || ess.Capabilities["transactions"] {
+		t.Error("essential stops below pro: no batch/transactions")
 	}
 	if !ess.AllowsEngine("postgresql") || ess.AllowsEngine("mysql") {
 		t.Error("essential allows postgresql, not mysql")
 	}
 	ov := ess.CapabilityOverrides()
-	if ov["aggregate"] != false {
-		t.Errorf("essential override aggregate=%v, want false", ov["aggregate"])
+	if ov["aggregate"] != true {
+		t.Errorf("essential override aggregate=%v, want true", ov["aggregate"])
 	}
 	if ov["rps"] == nil || ov["burst"] == nil {
 		t.Error("override must carry rps/burst for the token bucket")
@@ -59,6 +73,20 @@ func TestEssentialNarrowsButProDoesNot(t *testing.T) {
 	}
 	if !pro.AllowsEngine("mysql") || !pro.AllowsEngine("mongodb") {
 		t.Error("pro must allow mysql + mongodb")
+	}
+}
+
+func TestNanoTierExistsAsFreeShape(t *testing.T) {
+	m, _ := Load()
+	// v2 adds nano as a first-class package and maps free→nano (was free→
+	// essential, which pointed the free plan at the ~$13/mo tier).
+	_, nano := m.For("nano")
+	if !nano.AllowsEngine("sqlite") || nano.AllowsEngine("postgresql") {
+		t.Error("nano is the single-binary sqlite shape")
+	}
+	_, freed := m.For("free")
+	if freed.Label != nano.Label {
+		t.Errorf("free must resolve to nano, got %q", freed.Label)
 	}
 }
 

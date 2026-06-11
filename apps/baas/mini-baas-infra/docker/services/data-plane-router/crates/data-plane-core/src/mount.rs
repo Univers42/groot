@@ -67,6 +67,38 @@ impl DatabaseMount {
         )
     }
 
+    /// B4-pools: the pool key to actually use, honoring the registry's
+    /// pool-sharing policy. When `share_shared_rls` is on AND this mount is
+    /// `shared_rls`, the key is the connection TARGET (inline DSN hash, else the
+    /// credential reference) — NOT the tenant — so every tenant pointing at the
+    /// same physical database shares ONE pool. This is correct only for
+    /// shared_rls: its tenant scoping (`app.current_tenant_id`) is re-applied
+    /// per checkout from the request identity, so the pool holds no tenant
+    /// state. `schema_per_tenant` pins `search_path` into the pool and
+    /// `db_per_tenant` / `tenant_owned` use distinct DSNs, so all three keep the
+    /// per-tenant [`pool_key`]. With sharing off, this is byte-identical to
+    /// `pool_key()`.
+    ///
+    /// The cred `version` stays in the shared key so a rotation forks a fresh
+    /// pool (parity with `pool_key`'s rotation behavior).
+    #[must_use]
+    pub fn effective_pool_key(&self, share_shared_rls: bool) -> String {
+        if share_shared_rls && matches!(self.isolation(), Isolation::SharedRls) {
+            let target = match self.inline_dsn.as_deref() {
+                Some(dsn) if !dsn.is_empty() => format!("dsn:{:016x}", stable_hash(dsn)),
+                _ => format!(
+                    "cred:{}/{}/{}",
+                    self.credential_ref.provider,
+                    self.credential_ref.reference,
+                    self.credential_ref.version
+                ),
+            };
+            format!("shared/{}/{}", self.engine, target)
+        } else {
+            self.pool_key()
+        }
+    }
+
     /// The parsed [`Isolation`] strategy for this mount. The wire `isolation`
     /// string is parsed exactly once here; every consumer matches the enum.
     /// Absent / empty / unknown degrades to [`Isolation::SharedRls`] (parity).
@@ -92,6 +124,20 @@ impl DatabaseMount {
             Isolation::SharedRls | Isolation::DbPerTenant | Isolation::TenantOwned => None,
         }
     }
+}
+
+/// A stable, non-reversible digest of a DSN for use inside a pool key — so two
+/// mounts with the same inline DSN collapse to the same pool WITHOUT the DSN (a
+/// secret) appearing in the key, logs, or `/metrics`. `DefaultHasher` is
+/// fixed-seed (deterministic within and across process runs), which is all a
+/// pool key needs; it is NOT a cryptographic guarantee, but the input is never
+/// recovered from the digest and the digest is never security-load-bearing.
+#[must_use]
+fn stable_hash(s: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    s.hash(&mut h);
+    h.finish()
 }
 
 #[cfg(test)]
@@ -122,6 +168,69 @@ mod tests {
         assert_eq!(mount("acme", None).tenant_schema(), None);
         assert_eq!(mount("acme", Some("shared_rls")).tenant_schema(), None);
         assert_eq!(mount("acme", Some("db_per_tenant")).tenant_schema(), None);
+    }
+
+    #[test]
+    fn effective_pool_key_off_is_byte_identical_to_pool_key() {
+        for iso in [None, Some("shared_rls"), Some("schema_per_tenant"), Some("db_per_tenant")] {
+            let m = mount("acme", iso);
+            assert_eq!(m.effective_pool_key(false), m.pool_key());
+        }
+    }
+
+    #[test]
+    fn shared_rls_tenants_on_same_credential_collapse_to_one_pool() {
+        // Same engine + same credential_ref, different tenants → SAME shared key.
+        let a = mount("tenant-a", Some("shared_rls"));
+        let b = mount("tenant-b", Some("shared_rls"));
+        assert_ne!(a.pool_key(), b.pool_key(), "per-tenant keys must differ");
+        assert_eq!(
+            a.effective_pool_key(true),
+            b.effective_pool_key(true),
+            "shared_rls on one DB must share a pool"
+        );
+        assert!(!a.effective_pool_key(true).contains("tenant-a"));
+    }
+
+    #[test]
+    fn shared_rls_inline_dsn_collapses_by_target_not_tenant() {
+        let mut a = mount("tenant-a", Some("shared_rls"));
+        let mut b = mount("tenant-b", Some("shared_rls"));
+        a.inline_dsn = Some("postgres://shared/db".into());
+        b.inline_dsn = Some("postgres://shared/db".into());
+        assert_eq!(a.effective_pool_key(true), b.effective_pool_key(true));
+        // The DSN itself must never appear in the key (it's a secret).
+        assert!(!a.effective_pool_key(true).contains("postgres://"));
+        // A different DSN forks a different pool.
+        b.inline_dsn = Some("postgres://other/db".into());
+        assert_ne!(a.effective_pool_key(true), b.effective_pool_key(true));
+    }
+
+    #[test]
+    fn non_shared_rls_never_shares_even_when_enabled() {
+        // schema_per_tenant and db_per_tenant keep per-tenant pools regardless.
+        for iso in [Some("schema_per_tenant"), Some("db_per_tenant"), Some("tenant_owned")] {
+            let a = mount("tenant-a", iso);
+            let b = mount("tenant-b", iso);
+            assert_ne!(
+                a.effective_pool_key(true),
+                b.effective_pool_key(true),
+                "{iso:?} must not share a pool"
+            );
+            assert_eq!(a.effective_pool_key(true), a.pool_key());
+        }
+    }
+
+    #[test]
+    fn shared_rls_cred_version_still_forks_on_rotation() {
+        let a = mount("tenant-a", Some("shared_rls"));
+        let mut b = mount("tenant-b", Some("shared_rls"));
+        b.credential_ref.version = "2".into();
+        assert_ne!(
+            a.effective_pool_key(true),
+            b.effective_pool_key(true),
+            "a rotated credential must fork a fresh pool"
+        );
     }
 
     #[test]

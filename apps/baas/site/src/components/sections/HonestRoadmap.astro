@@ -1,0 +1,36 @@
+---
+import SectionHeading from '../ui/SectionHeading.astro';
+import HonestyNote from '../ui/HonestyNote.astro';
+---
+
+<section class="gb-section" data-galaxy-state="nebula" aria-labelledby="roadmap-title">
+	<div class="gb-container">
+		<SectionHeading
+			kicker="What we won't pretend"
+			title="The honest roadmap."
+			lede="Marketing pages usually hide this part. We think the gaps are as load-bearing as the features — here is exactly where the engine is still being built."
+			id="roadmap-title"
+		/>
+		<div class="gb-roadmap-list">
+			<HonestyNote title="Postgres update/delete on the new plane is in flight.">
+				The Rust data plane serves list/get/insert on all engines today; the remaining Postgres write
+				verbs ship behind the same shadow→parity→cutover gates as everything else.
+			</HonestyNote>
+			<HonestyNote title="OLAP/OLTP cost-routing is partial.">
+				Trino analytics is reachable, but as its own endpoint — the unified "point-reads hit the engine,
+				analytics hit the lakehouse, automatically" plane is the roadmap's centrepiece, not today's reality.
+			</HonestyNote>
+			<HonestyNote title="No billing layer yet.">
+				Capability masks and rate limits are enforced live; metering, quotas and invoicing are still to come.
+			</HonestyNote>
+			<HonestyNote title="Single-node today.">
+				The stack is Docker-Compose-first; HA and horizontal scale (Helm/K8s) are a later phase. Most
+				tenants on most tiers genuinely don't need them yet — see the measured footprints.
+			</HonestyNote>
+			<HonestyNote title="8 engines, not 20.">
+				DreamFactory connects more systems. We'd rather grow the adapter list one honest, capability-typed
+				engine at a time than advertise breadth we can't gate.
+			</HonestyNote>
+		</div>
+	</div>
+</section>

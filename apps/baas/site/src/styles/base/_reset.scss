@@ -1,0 +1,62 @@
+// Minimal modern reset.
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+* {
+	margin: 0;
+}
+
+html {
+	color-scheme: dark;
+	scroll-behavior: smooth;
+	text-size-adjust: 100%;
+}
+
+body {
+	min-height: 100dvh;
+	background: var(--gb-bg);
+	color: var(--gb-text);
+	font-family: var(--gb-font-body);
+	font-size: var(--gb-text-base);
+	line-height: 1.65;
+	-webkit-font-smoothing: antialiased;
+	text-rendering: optimizelegibility;
+}
+
+img,
+svg,
+canvas {
+	display: block;
+	max-width: 100%;
+}
+
+button,
+input,
+select,
+textarea {
+	font: inherit;
+	color: inherit;
+}
+
+a {
+	color: var(--gb-primary);
+	text-decoration-thickness: 1px;
+	text-underline-offset: 0.2em;
+}
+
+a:hover {
+	color: var(--gb-text);
+}
+
+:focus-visible {
+	outline: none;
+	box-shadow: var(--gb-focus-ring);
+	border-radius: var(--gb-radius-sm);
+}
+
+::selection {
+	background: rgb(52 211 153 / 30%);
+}

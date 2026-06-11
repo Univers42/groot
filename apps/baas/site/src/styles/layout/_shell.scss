@@ -1,0 +1,39 @@
+.gb-shell {
+	position: relative;
+	z-index: 1; // content sits above the fixed galaxy canvas (z-index 0)
+}
+
+.gb-container {
+	width: min(var(--gb-content-width), 100% - 2.5rem);
+	margin-inline: auto;
+}
+
+.gb-section {
+	padding-block: var(--gb-section-gap);
+}
+
+.gb-section--dim {
+	background: linear-gradient(rgb(5 7 13 / 0%), rgb(5 7 13 / 72%) 18%, rgb(5 7 13 / 72%) 82%, rgb(5 7 13 / 0%));
+}
+
+.gb-section__head {
+	display: grid;
+	gap: var(--gb-space-3);
+	margin-bottom: var(--gb-space-12);
+	max-width: 46rem;
+}
+
+.gb-grid {
+	display: grid;
+	gap: var(--gb-space-6);
+}
+
+@media (width >= 760px) {
+	.gb-grid--2 {
+		grid-template-columns: repeat(2, 1fr);
+	}
+
+	.gb-grid--3 {
+		grid-template-columns: repeat(3, 1fr);
+	}
+}

@@ -504,12 +504,19 @@ services:
             config:
               allowed_payload_size: 1
               size_unit: megabytes
+          # Per-IP DoS shield ONLY — the real product limiter is the per-tenant
+          # token bucket in the Rust plane (ratelimit.rs, tier-mask rps/burst).
+          # This bound must sit ABOVE the largest tier ceiling (max: 2000 rps =
+          # 120000/min): a single-IP app server is the NORMAL deployment shape,
+          # so an edge limit below the tier rate silently voids the offer
+          # (measured 2026-06-11: the previous 300/min rejected 76% of a 20 rps
+          # single-IP run — see scripts/bench/load.sh).
           - name: rate-limiting
             config:
               policy: local
               limit_by: ip
-              minute: 300
-              hour: 8000
+              minute: 150000
+              hour: 9000000
 
   - name: trino
     url: http://trino:8080

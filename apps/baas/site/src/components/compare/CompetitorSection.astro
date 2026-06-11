@@ -1,0 +1,43 @@
+---
+import type { Competitor } from '../../data/competitors';
+import HonestyNote from '../ui/HonestyNote.astro';
+
+type Props = { competitor: Competitor };
+const { competitor: c } = Astro.props;
+---
+
+<section class="gb-section" id={`vs-${c.id}`} aria-labelledby={`vs-${c.id}-title`}>
+	<div class="gb-container">
+		<p class="gb-kicker">Grobase vs {c.name}</p>
+		<div class="gb-verdict" data-rise>
+			<p id={`vs-${c.id}-title`}>{c.verdict}</p>
+		</div>
+		<p class="gb-lede">{c.intro}</p>
+		<div class="gb-table-wrap" data-rise>
+			<table class="gb-table">
+				<caption>Grobase vs {c.name}, axis by axis. "Win" marks who we honestly think is ahead.</caption>
+				<thead>
+					<tr>
+						<th scope="col">Axis</th>
+						<th scope="col">Grobase</th>
+						<th scope="col">{c.name}</th>
+						<th scope="col">Win</th>
+					</tr>
+				</thead>
+				<tbody>
+					{c.rows.map((row) => (
+						<tr>
+							<th scope="row">{row.axis}</th>
+							<td>{row.grobase}</td>
+							<td>{row.them}</td>
+							<td class={row.win === 'us' ? 'is-yes' : row.win === 'them' ? 'is-warn' : 'is-no'}>
+								{row.win === 'us' ? 'Grobase' : row.win === 'them' ? c.name : 'tie'}
+							</td>
+						</tr>
+					))}
+				</tbody>
+			</table>
+		</div>
+		<HonestyNote title={`When to choose ${c.name} instead`}>{c.honesty}</HonestyNote>
+	</div>
+</section>

@@ -1,0 +1,86 @@
+// The tenant-galaxy canvas: fixed full-viewport backdrop on the landing page.
+// Content scrolls above it (.gb-shell has z-index 1). CLS-free by construction.
+.gb-galaxy {
+	position: fixed;
+	inset: 0;
+	z-index: 0;
+	pointer-events: none;
+}
+
+.gb-galaxy canvas {
+	width: 100%;
+	height: 100%;
+}
+
+// Static fallback (no JS): a calm SVG starfield so the hero still has depth.
+.gb-galaxy__fallback {
+	position: fixed;
+	inset: 0;
+	z-index: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	opacity: 0.7;
+}
+
+// Hover/pin card describing one tenant's stack. Built via createElement only.
+.gb-galaxy-card {
+	position: fixed;
+	z-index: 30;
+	max-width: 17rem;
+	padding: var(--gb-space-4);
+	border: 1px solid var(--gb-line-strong);
+	border-radius: var(--gb-radius);
+	background: rgb(10 15 26 / 94%);
+	box-shadow: var(--gb-glow-card);
+	font-size: var(--gb-text-sm);
+	pointer-events: none;
+}
+
+.gb-galaxy-card[hidden] {
+	display: none;
+}
+
+.gb-galaxy-card__name {
+	font-family: var(--gb-font-display);
+	font-weight: 700;
+	margin-bottom: 0.2rem;
+}
+
+.gb-galaxy-card__tier {
+	font-family: var(--gb-font-mono);
+	font-size: var(--gb-text-xs);
+	color: var(--tier-color, var(--gb-primary));
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+}
+
+.gb-galaxy-card__row {
+	color: var(--gb-text-muted);
+	font-size: var(--gb-text-xs);
+	margin-top: 0.35rem;
+}
+
+// Keyboard path: visible-on-focus tenant explorer buttons (hero only).
+.gb-galaxy-explorer {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--gb-space-2);
+}
+
+.gb-galaxy-explorer button {
+	border: 1px solid var(--gb-line);
+	background: rgb(13 20 36 / 70%);
+	color: var(--gb-text-muted);
+	border-radius: 999px;
+	padding: 0.3rem 0.85rem;
+	font-size: var(--gb-text-xs);
+	font-family: var(--gb-font-mono);
+	cursor: pointer;
+}
+
+.gb-galaxy-explorer button:hover,
+.gb-galaxy-explorer button[aria-pressed='true'] {
+	border-color: var(--gb-primary);
+	color: var(--gb-text);
+}

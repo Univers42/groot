@@ -1,0 +1,129 @@
+.gb-pricing-grid {
+	display: grid;
+	gap: var(--gb-space-4);
+	grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+	align-items: stretch;
+}
+
+.gb-price-card {
+	display: grid;
+	gap: var(--gb-space-3);
+	align-content: start;
+	border: 1px solid var(--gb-line);
+	border-top: 3px solid var(--tier-color, var(--gb-primary));
+	border-radius: var(--gb-radius-lg);
+	background: linear-gradient(170deg, rgb(18 27 48 / 85%), rgb(10 15 26 / 90%));
+	padding: var(--gb-space-6);
+}
+
+.gb-price-card--flag {
+	border-color: var(--gb-primary);
+	box-shadow: var(--gb-glow-primary);
+}
+
+.gb-price-card__name {
+	font-family: var(--gb-font-display);
+	font-size: var(--gb-text-xl);
+	font-weight: 700;
+}
+
+.gb-price-card__price {
+	font-family: var(--gb-font-mono);
+	font-size: var(--gb-text-2xl);
+	line-height: 1.1;
+	color: var(--gb-text);
+}
+
+.gb-price-card__price small {
+	display: block;
+	font-size: var(--gb-text-xs);
+	color: var(--gb-text-faint);
+	margin-top: 0.3rem;
+}
+
+.gb-price-card__cost {
+	font-family: var(--gb-font-mono);
+	font-size: var(--gb-text-xs);
+	color: var(--gb-accent);
+	border: 1px dashed rgb(251 191 36 / 40%);
+	border-radius: var(--gb-radius-sm);
+	padding: 0.5rem 0.7rem;
+}
+
+.gb-price-card__features {
+	list-style: none;
+	padding: 0;
+	display: grid;
+	gap: 0.45rem;
+	font-size: var(--gb-text-sm);
+	color: var(--gb-text-muted);
+}
+
+.gb-price-card__features li::before {
+	content: '· ';
+	color: var(--tier-color, var(--gb-primary));
+	font-weight: 700;
+}
+
+.gb-price-card__audience {
+	margin-top: auto;
+	padding-top: var(--gb-space-3);
+	border-top: 1px solid var(--gb-line);
+	color: var(--gb-text-faint);
+	font-size: var(--gb-text-xs);
+}
+
+.gb-math {
+	border: 1px solid var(--gb-line);
+	border-radius: var(--gb-radius-lg);
+	background: var(--gb-bg-raised);
+	padding: var(--gb-space-6);
+	font-family: var(--gb-font-mono);
+	font-size: var(--gb-text-sm);
+	overflow-x: auto;
+}
+
+.gb-math table {
+	border-collapse: collapse;
+	width: 100%;
+}
+
+.gb-math td,
+.gb-math th {
+	text-align: left;
+	padding: 0.3rem 1.2rem 0.3rem 0;
+	color: var(--gb-text-muted);
+	font-weight: 400;
+	white-space: nowrap;
+}
+
+.gb-math .is-total td {
+	border-top: 1px solid var(--gb-line-strong);
+	color: var(--gb-text);
+	font-weight: 600;
+}
+
+.gb-faq {
+	display: grid;
+	gap: var(--gb-space-3);
+	max-width: 46rem;
+}
+
+.gb-faq details {
+	border: 1px solid var(--gb-line);
+	border-radius: var(--gb-radius);
+	background: rgb(10 15 26 / 75%);
+	padding: var(--gb-space-4) var(--gb-space-6);
+}
+
+.gb-faq summary {
+	cursor: pointer;
+	font-weight: 600;
+	color: var(--gb-text);
+}
+
+.gb-faq details p {
+	margin-top: var(--gb-space-3);
+	color: var(--gb-text-muted);
+	font-size: var(--gb-text-sm);
+}

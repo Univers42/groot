@@ -1,0 +1,47 @@
+---
+// The nano→max staircase: same SDK across every step.
+import { TIERS } from '../../data/tiers';
+
+const steps = TIERS.map((t, i) => {
+	const h = 64 + i * 30;
+	return {
+		name: t.name,
+		ram: t.ram,
+		cost: t.allIn.replace('≈ ', '').replace(' / mo', ''),
+		x: 16 + i * 138,
+		y: 236 - h,
+		h,
+	};
+});
+---
+
+<figure>
+	<svg class="gb-diagram" viewBox="0 0 720 260" role="img" aria-labelledby="dg-grow-title dg-grow-desc">
+		<title id="dg-grow-title">The grow path: Nano to Max</title>
+		<desc id="dg-grow-desc">
+			A staircase of five tiers rising from Nano (15 to 25 mebibytes, about 2 to 3 dollars a month)
+			through Basic, Essential and Pro up to Max (about 3.1 gibibytes, 40 to 45 dollars a month). A
+			single arrow spans all five steps, labelled: same SDK, same codebase, zero rewrites.
+		</desc>
+		<defs>
+			<marker id="gb-arrow-grow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+				<path d="M0 0L8 4L0 8z" fill="#34d399" />
+			</marker>
+		</defs>
+
+		{steps.map((s) => (
+			<>
+				<rect class="d-box d-box--accent" x={s.x} y={s.y} width="126" height={s.h} rx="10" />
+				<text class="d-label" x={s.x + 63} y={s.y + 22} text-anchor="middle">{s.name}</text>
+				<text class="d-faint" x={s.x + 63} y={s.y + 38} text-anchor="middle">{s.ram}</text>
+				<text class="d-ram" x={s.x + 63} y={s.y + 54} text-anchor="middle">{s.cost}</text>
+			</>
+		))}
+
+		<path class="d-flow d-flow--hot" d="M40 44C200 8 480 8 668 36" marker-end="url(#gb-arrow-grow)" />
+		<text class="d-label" x="360" y="14" text-anchor="middle">same SDK · same codebase · zero rewrites</text>
+	</svg>
+	<figcaption class="gb-diagram-note">
+		Graduating is a deployment decision, not a migration project — the tiers are shapes of one stack.
+	</figcaption>
+</figure>

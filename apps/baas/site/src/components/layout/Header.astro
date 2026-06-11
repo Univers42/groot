@@ -1,0 +1,27 @@
+---
+import { NAV, SITE } from '../../data/site';
+
+const current = Astro.url.pathname;
+const isCurrent = (href: string) => (href === '/' ? current === '/' : current.startsWith(href.replace(/\/$/, '')));
+---
+
+<header class="gb-header">
+	<div class="gb-container gb-header__inner">
+		<a class="gb-header__brand" href="/" aria-label={`${SITE.name} — home`}>
+			<svg viewBox="0 0 64 64" aria-hidden="true" fill="none">
+				<path d="M46.5 21.5A17 17 0 1 0 49 32h-15" stroke="#34d399" stroke-width="4" stroke-linecap="round" />
+				<circle cx="46.5" cy="21.5" r="4.5" fill="#34d399" />
+				<circle cx="49" cy="32" r="3.5" fill="#fbbf24" />
+			</svg>
+			{SITE.name}
+		</a>
+		<nav class="gb-header__nav" aria-label="Main">
+			{NAV.map((item) => (
+				<a class="gb-header__link" href={item.href} aria-current={isCurrent(item.href) ? 'page' : undefined}>
+					{item.label}
+				</a>
+			))}
+			<a class="gb-btn gb-btn--primary gb-header__cta" href="/pricing/">Start free</a>
+		</nav>
+	</div>
+</header>

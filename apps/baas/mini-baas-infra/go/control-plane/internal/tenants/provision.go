@@ -75,12 +75,53 @@ func (ar *AdapterRegistry) register(ctx context.Context, tenantScope string, m M
 		_ = json.NewDecoder(resp.Body).Decode(&out)
 		return out.ID, "created", nil
 	case http.StatusConflict:
-		return "", "exists", nil
+		// Idempotency: the mount already exists. Recover its id (by name,
+		// tenant-scoped) so a re-provision still returns a usable mount id —
+		// without it, every reconcile after the first loses the db_id, which
+		// breaks resumable bulk provisioning and re-run scale experiments.
+		id, _ := ar.findMountID(ctx, tenantScope, m.Name)
+		return id, "exists", nil
 	default:
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		// Redact any DSN the upstream may have echoed back before surfacing it.
 		return "", "", fmt.Errorf("adapter-registry %d: %s", resp.StatusCode, shared.RedactDSN(strings.TrimSpace(string(b))))
 	}
+}
+
+// findMountID resolves an already-registered mount's id by name, tenant-scoped
+// (the GET /databases list the same X-Baas-Tenant-Id sees). Best-effort: a
+// lookup failure returns "" so the reconcile still reports "exists".
+func (ar *AdapterRegistry) findMountID(ctx context.Context, tenantScope, name string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ar.baseURL+"/databases", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("X-Baas-Tenant-Id", tenantScope)
+	if ar.serviceToken != "" {
+		req.Header.Set("X-Service-Token", ar.serviceToken)
+	}
+	shared.PropagateHeaders(ctx, req)
+	resp, err := ar.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("list databases: %d", resp.StatusCode)
+	}
+	var list []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&list); err != nil {
+		return "", err
+	}
+	for _, d := range list {
+		if d.Name == name {
+			return d.ID, nil
+		}
+	}
+	return "", fmt.Errorf("mount %q not found in list", name)
 }
 
 // DataPlane is a minimal client for the Rust data-plane-router's admin migrate

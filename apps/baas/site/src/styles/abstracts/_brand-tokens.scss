@@ -1,0 +1,68 @@
+// Grobase brand layer — the product's visual identity.
+// Deep-space canvas, signal-emerald primary, amber accent. Per-engine and
+// per-tier colors mirror src/data/galaxy-palette.ts (keep both in sync).
+:root {
+	// Canvas
+	--gb-bg: #05070d;
+	--gb-bg-raised: #0a0f1a;
+	--gb-surface: #0d1424;
+	--gb-surface-2: #121b30;
+	--gb-line: rgb(148 163 198 / 18%);
+	--gb-line-strong: rgb(148 163 198 / 32%);
+
+	// Ink
+	--gb-text: #e9eef7;
+	--gb-text-muted: #a3b0c6;
+	--gb-text-faint: #7a8aa6;
+
+	// Brand
+	--gb-primary: #34d399; // signal emerald
+	--gb-primary-strong: #10b981;
+	--gb-primary-ink: #04281b; // text on primary fills
+	--gb-accent: #fbbf24; // amber
+	--gb-accent-ink: #2b1f02;
+	--gb-danger: #f87171;
+
+	// Engines (galaxy node colors)
+	--gb-engine-postgres: #7dd3fc;
+	--gb-engine-mysql: #fb923c;
+	--gb-engine-mongodb: #4ade80;
+	--gb-engine-sqlite: #a5b4fc;
+	--gb-engine-redis: #f87171;
+	--gb-engine-cockroach: #c084fc;
+	--gb-engine-mssql: #f472b6;
+	--gb-engine-http: #fde047;
+
+	// Tiers
+	--gb-tier-nano: #34d399;
+	--gb-tier-basic: #7dd3fc;
+	--gb-tier-essential: #a78bfa;
+	--gb-tier-pro: #fbbf24;
+	--gb-tier-max: #f472b6;
+
+	// Planes (architecture diagram)
+	--gb-plane-ts: #7dd3fc;
+	--gb-plane-go: #67e8f9;
+	--gb-plane-rust: #fb923c;
+
+	// Type
+	--gb-font-display: 'Sora', 'Inter', system-ui, sans-serif;
+	--gb-font-body: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+	--gb-font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+	// Motion
+	--gb-dur-fast: 160ms;
+	--gb-dur-slow: 420ms;
+	--gb-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+
+	// Geometry
+	--gb-radius-sm: 8px;
+	--gb-radius: 14px;
+	--gb-radius-lg: 22px;
+	--gb-content-width: 72rem;
+	--gb-section-gap: clamp(5rem, 12vh, 8.5rem);
+
+	// Glows
+	--gb-glow-primary: 0 0 42px rgb(52 211 153 / 22%);
+	--gb-glow-card: 0 18px 60px rgb(2 6 18 / 60%);
+}

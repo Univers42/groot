@@ -1,0 +1,18 @@
+---
+import SectionHeading from '../ui/SectionHeading.astro';
+import DiagramGrowPath from '../diagrams/DiagramGrowPath.astro';
+---
+
+<section class="gb-section" data-galaxy-state="tiers" aria-labelledby="grow-title">
+	<div class="gb-container">
+		<SectionHeading
+			kicker="The promise"
+			title="Start on Nano. Graduate to Max. Never rewrite."
+			lede="Every tier runs the same codebase and speaks the same SDK. PocketBase makes you migrate off when you grow; Firebase makes leaving expensive. Grobase makes growth a deployment decision."
+			id="grow-title"
+		/>
+		<div data-rise>
+			<DiagramGrowPath />
+		</div>
+	</div>
+</section>

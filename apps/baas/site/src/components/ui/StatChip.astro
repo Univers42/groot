@@ -1,0 +1,12 @@
+---
+type Props = {
+	value: string;
+	label: string;
+};
+const { value, label } = Astro.props;
+---
+
+<div class="gb-stat">
+	<span class="gb-stat__value">{value}</span>
+	<span class="gb-stat__label">{label}</span>
+</div>

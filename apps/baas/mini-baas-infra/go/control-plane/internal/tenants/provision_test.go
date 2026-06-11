@@ -116,20 +116,27 @@ func TestAdapterRegistryRegister(t *testing.T) {
 		wantID     string
 		wantErr    bool
 	}{
+		// On 409 the register recovers the existing mount id via GET /databases
+		// (idempotency — re-provision must still return a usable db_id).
 		{"created", http.StatusCreated, `{"id":"abc","engine":"redis","name":"r"}`, "created", "abc", false},
-		{"conflict_is_idempotent", http.StatusConflict, `{"error":"conflict"}`, "exists", "", false},
+		{"conflict_is_idempotent", http.StatusConflict, `{"error":"conflict"}`, "exists", "existing-id", false},
 		{"server_error", http.StatusInternalServerError, `{"error":"boom"}`, "", "", true},
 		{"validation_error", http.StatusBadRequest, `{"error":"validation_error"}`, "", "", true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method != http.MethodPost || r.URL.Path != "/databases" {
-					t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
-				}
 				// Mounts must be scoped by the tenant slug (the query path's key).
 				if r.Header.Get("X-Baas-Tenant-Id") != "t-acme" {
 					t.Errorf("missing/incorrect X-Baas-Tenant-Id: %q", r.Header.Get("X-Baas-Tenant-Id"))
+				}
+				// Conflict-recovery lookup: list the tenant's mounts by name.
+				if r.Method == http.MethodGet && r.URL.Path == "/databases" {
+					_, _ = w.Write([]byte(`[{"id":"existing-id","name":"r"}]`))
+					return
+				}
+				if r.Method != http.MethodPost || r.URL.Path != "/databases" {
+					t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 				}
 				w.WriteHeader(c.statusCode)
 				_, _ = w.Write([]byte(c.body))

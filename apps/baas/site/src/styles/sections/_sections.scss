@@ -1,0 +1,197 @@
+// Landing-page section specifics.
+.gb-engines-strip {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--gb-space-3);
+}
+
+.gb-engine-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.55rem;
+	padding: 0.55rem 1.05rem;
+	border: 1px solid var(--gb-line-strong);
+	border-radius: 999px;
+	background: rgb(13 20 36 / 70%);
+	font-family: var(--gb-font-mono);
+	font-size: var(--gb-text-sm);
+	color: var(--gb-text);
+}
+
+.gb-engine-chip::before {
+	content: '';
+	width: 0.62rem;
+	height: 0.62rem;
+	border-radius: 50%;
+	background: var(--engine-color, var(--gb-primary));
+	box-shadow: 0 0 10px var(--engine-color, var(--gb-primary));
+}
+
+.gb-split {
+	display: grid;
+	gap: var(--gb-space-12);
+	align-items: center;
+}
+
+@media (width >= 900px) {
+	.gb-split {
+		grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+	}
+
+	.gb-split--flip > :first-child {
+		order: 2;
+	}
+}
+
+.gb-checklist {
+	list-style: none;
+	padding: 0;
+	display: grid;
+	gap: var(--gb-space-3);
+}
+
+.gb-checklist li {
+	display: grid;
+	grid-template-columns: 1.4rem 1fr;
+	gap: 0.6rem;
+	color: var(--gb-text-muted);
+	font-size: var(--gb-text-sm);
+}
+
+.gb-checklist li::before {
+	content: '◆';
+	color: var(--gb-primary);
+	font-size: 0.8rem;
+	line-height: 1.9;
+}
+
+.gb-checklist strong {
+	color: var(--gb-text);
+}
+
+.gb-tier-row {
+	display: grid;
+	gap: var(--gb-space-4);
+	grid-template-columns: repeat(auto-fit, minmax(11.5rem, 1fr));
+}
+
+.gb-tier-mini {
+	border: 1px solid var(--gb-line);
+	border-top: 3px solid var(--tier-color, var(--gb-primary));
+	border-radius: var(--gb-radius);
+	background: rgb(10 15 26 / 80%);
+	padding: var(--gb-space-4);
+	display: grid;
+	gap: 0.3rem;
+}
+
+.gb-tier-mini__name {
+	font-family: var(--gb-font-display);
+	font-weight: 700;
+	font-size: var(--gb-text-lg);
+}
+
+.gb-tier-mini__meta {
+	font-family: var(--gb-font-mono);
+	font-size: var(--gb-text-xs);
+	color: var(--gb-text-faint);
+}
+
+.gb-tier-mini__price {
+	font-family: var(--gb-font-mono);
+	color: var(--gb-primary);
+	font-size: var(--gb-text-sm);
+}
+
+.gb-roadmap-list {
+	display: grid;
+	gap: var(--gb-space-4);
+}
+
+.gb-cta-final {
+	text-align: center;
+	display: grid;
+	justify-items: center;
+	gap: var(--gb-space-6);
+	padding-block: var(--gb-space-16);
+}
+
+.gb-cta-final h2 {
+	max-width: 18ch;
+}
+
+.gb-code-note {
+	margin-top: var(--gb-space-3);
+	font-size: var(--gb-text-xs);
+	color: var(--gb-text-faint);
+}
+
+pre.gb-code .c {
+	color: var(--gb-text-faint);
+}
+
+pre.gb-code .k {
+	color: var(--gb-engine-sqlite);
+}
+
+pre.gb-code .s {
+	color: var(--gb-primary);
+}
+
+pre.gb-code .f {
+	color: var(--gb-engine-postgres);
+}
+
+// Color hooks — inline style= attributes are banned (hashed CSP), so engine
+// and tier accents are applied via classes that set the custom property.
+.engine--postgres {
+	--engine-color: var(--gb-engine-postgres);
+}
+
+.engine--mysql {
+	--engine-color: var(--gb-engine-mysql);
+}
+
+.engine--mongodb {
+	--engine-color: var(--gb-engine-mongodb);
+}
+
+.engine--sqlite {
+	--engine-color: var(--gb-engine-sqlite);
+}
+
+.engine--redis {
+	--engine-color: var(--gb-engine-redis);
+}
+
+.engine--cockroach {
+	--engine-color: var(--gb-engine-cockroach);
+}
+
+.engine--mssql {
+	--engine-color: var(--gb-engine-mssql);
+}
+
+.engine--http {
+	--engine-color: var(--gb-engine-http);
+}
+
+.tier--nano {
+	--tier-color: var(--gb-tier-nano);
+}
+
+.tier--basic {
+	--tier-color: var(--gb-tier-basic);
+}
+
+.tier--essential {
+	--tier-color: var(--gb-tier-essential);
+}
+
+.tier--pro {
+	--tier-color: var(--gb-tier-pro);
+}
+
+.tier--max {
+	--tier-color: var(--gb-tier-max);
+}

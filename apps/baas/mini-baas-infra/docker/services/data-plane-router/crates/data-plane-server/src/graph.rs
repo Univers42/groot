@@ -531,7 +531,7 @@ pub async fn data_graph(
         .ok()
         .and_then(|m| m.capability_overrides);
     if let Err(resp) =
-        crate::routes::bypass_ratelimit(&state, &id.tenant_id, overrides.as_ref(), "graph")
+        crate::routes::bypass_ratelimit(&state, &id.tenant_id, overrides.as_ref(), "graph").await
     {
         return resp;
     }
@@ -557,7 +557,7 @@ pub async fn data_graph_overview(
         .ok()
         .and_then(|m| m.capability_overrides);
     if let Err(resp) =
-        crate::routes::bypass_ratelimit(&state, &id.tenant_id, overrides.as_ref(), "graph")
+        crate::routes::bypass_ratelimit(&state, &id.tenant_id, overrides.as_ref(), "graph").await
     {
         return resp;
     }

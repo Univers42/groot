@@ -17,6 +17,21 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
+/// The pure token-bucket step, shared by the in-process limiter AND mirrored by
+/// the Redis Lua script (B4-limiter) so both backends admit identically. Given
+/// the current `tokens`, the seconds `elapsed` since last access, the refill
+/// `rps` and bucket `burst`, returns `(new_tokens, admitted)`.
+#[must_use]
+pub fn refill_and_take(tokens: f64, elapsed: f64, rps: u32, burst: u32) -> (f64, bool) {
+    let cap = f64::from(burst.max(1));
+    let refilled = (tokens + elapsed.max(0.0) * f64::from(rps)).min(cap);
+    if refilled >= 1.0 {
+        (refilled - 1.0, true)
+    } else {
+        (refilled, false)
+    }
+}
+
 struct Bucket {
     tokens: f64,
     last: Instant,
@@ -52,14 +67,10 @@ impl TenantRateLimiter {
             .or_insert_with(|| Bucket { tokens: cap, last: now });
         // Lazy refill: add tokens for the elapsed time, capped at the burst size.
         let elapsed = now.duration_since(bucket.last).as_secs_f64();
-        bucket.tokens = (bucket.tokens + elapsed * f64::from(rps)).min(cap);
+        let (new_tokens, admitted) = refill_and_take(bucket.tokens, elapsed, rps, burst);
+        bucket.tokens = new_tokens;
         bucket.last = now;
-        if bucket.tokens >= 1.0 {
-            bucket.tokens -= 1.0;
-            true
-        } else {
-            false
-        }
+        admitted
     }
 
     /// Best-effort eviction of buckets untouched for longer than `idle`. Bounds
@@ -77,6 +88,158 @@ impl TenantRateLimiter {
     #[must_use]
     pub fn tracked(&self) -> usize {
         self.buckets.lock().expect("rate limiter poisoned").len()
+    }
+}
+
+/// B4-limiter: the rate-limit backend the server actually calls. The in-process
+/// token bucket is the single-node fast path (sub-µs, zero network) and the
+/// DEFAULT — selected unless `DATA_PLANE_RATELIMIT_BACKEND=redis`. The Redis
+/// backend makes the limit AUTHORITATIVE across replicas (N instances otherwise
+/// each admit the full per-tenant rate, so a 3-replica deploy lets a tenant
+/// burst 3× its tier). `allow` is async so the Redis EVAL fits; the in-process
+/// arm is sync work in an async wrapper (no runtime cost).
+pub enum RateLimiter {
+    InProcess(TenantRateLimiter),
+    #[cfg(feature = "ratelimit-redis")]
+    Redis(RedisRateLimiter),
+}
+
+impl RateLimiter {
+    /// Build from `DATA_PLANE_RATELIMIT_BACKEND` (`memory` default | `redis`).
+    /// The Redis URL comes from `DATA_PLANE_RATELIMIT_REDIS_URL` (falls back to
+    /// `REDIS_URL`). An unknown/empty backend, or `redis` without the feature
+    /// compiled, degrades to in-process (parity) — never a boot failure.
+    #[must_use]
+    pub fn from_env() -> Self {
+        let backend = std::env::var("DATA_PLANE_RATELIMIT_BACKEND")
+            .unwrap_or_default()
+            .to_lowercase();
+        #[cfg(feature = "ratelimit-redis")]
+        if backend == "redis" {
+            if let Ok(url) = std::env::var("DATA_PLANE_RATELIMIT_REDIS_URL")
+                .or_else(|_| std::env::var("REDIS_URL"))
+            {
+                if !url.trim().is_empty() {
+                    return Self::Redis(RedisRateLimiter::new(url));
+                }
+            }
+            tracing::warn!("ratelimit backend=redis but no REDIS URL — using in-process");
+        }
+        let _ = backend;
+        Self::InProcess(TenantRateLimiter::new())
+    }
+
+    /// Admit one request for `tenant`. `rps == 0` is unlimited (parity).
+    pub async fn allow(&self, tenant: &str, rps: u32, burst: u32) -> bool {
+        if rps == 0 {
+            return true;
+        }
+        match self {
+            Self::InProcess(rl) => rl.allow(tenant, rps, burst),
+            #[cfg(feature = "ratelimit-redis")]
+            Self::Redis(rl) => rl.allow(tenant, rps, burst).await,
+        }
+    }
+
+    /// In-process: drop idle buckets. Redis: no-op (PEXPIRE reclaims keys).
+    pub fn evict_idle(&self, idle: Duration) {
+        match self {
+            Self::InProcess(rl) => rl.evict_idle(idle),
+            #[cfg(feature = "ratelimit-redis")]
+            Self::Redis(_) => {}
+        }
+    }
+
+    /// In-process: buckets tracked. Redis: 0 (state lives in Redis, not here).
+    #[must_use]
+    pub fn tracked(&self) -> usize {
+        match self {
+            Self::InProcess(rl) => rl.tracked(),
+            #[cfg(feature = "ratelimit-redis")]
+            Self::Redis(_) => 0,
+        }
+    }
+}
+
+impl Default for RateLimiter {
+    fn default() -> Self {
+        Self::InProcess(TenantRateLimiter::new())
+    }
+}
+
+/// The atomic Redis token bucket (B4-limiter). The Lua script mirrors
+/// [`refill_and_take`] exactly so a tenant sees the same admit/deny whether the
+/// limiter is in-process or Redis. State: one hash per tenant
+/// (`drl:{tenant}` → `tokens`,`ts`), PEXPIRE'd so idle tenants self-evict.
+///
+/// **Fail-open:** if Redis is unreachable the limiter ADMITS (and logs) — the
+/// rate limiter must never become an availability single-point-of-failure for
+/// the data path. The same posture as Kong's outer per-IP shell still applying.
+#[cfg(feature = "ratelimit-redis")]
+pub struct RedisRateLimiter {
+    url: String,
+    conn: tokio::sync::OnceCell<redis_rl::aio::ConnectionManager>,
+}
+
+#[cfg(feature = "ratelimit-redis")]
+impl RedisRateLimiter {
+    // KEYS[1]=bucket; ARGV: rps, burst, now_ms. Returns 1 (admit) | 0 (deny).
+    // Mirrors refill_and_take: refill by elapsed×rps capped at burst, take 1.
+    const SCRIPT: &'static str = r"
+        local rps = tonumber(ARGV[1])
+        local burst = tonumber(ARGV[2])
+        local now = tonumber(ARGV[3])
+        local h = redis.call('HMGET', KEYS[1], 'tokens', 'ts')
+        local tokens = tonumber(h[1])
+        local ts = tonumber(h[2])
+        if tokens == nil then tokens = burst; ts = now end
+        local elapsed = math.max(0, now - ts) / 1000.0
+        tokens = math.min(burst, tokens + elapsed * rps)
+        local admit = 0
+        if tokens >= 1 then tokens = tokens - 1; admit = 1 end
+        redis.call('HMSET', KEYS[1], 'tokens', tokens, 'ts', now)
+        redis.call('PEXPIRE', KEYS[1], 60000)
+        return admit
+    ";
+
+    #[must_use]
+    pub fn new(url: String) -> Self {
+        Self { url, conn: tokio::sync::OnceCell::new() }
+    }
+
+    async fn allow(&self, tenant: &str, rps: u32, burst: u32) -> bool {
+        let mgr = self
+            .conn
+            .get_or_try_init(|| async {
+                let client = redis_rl::Client::open(self.url.as_str())?;
+                redis_rl::aio::ConnectionManager::new(client).await
+            })
+            .await;
+        let Ok(mgr) = mgr else {
+            tracing::warn!("ratelimit redis connect failed — admitting (fail-open)");
+            return true;
+        };
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let mut conn = mgr.clone();
+        let res: redis_rl::RedisResult<i64> = redis_rl::cmd("EVAL")
+            .arg(Self::SCRIPT)
+            .arg(1)
+            .arg(format!("drl:{tenant}"))
+            .arg(rps)
+            .arg(burst)
+            .arg(now_ms)
+            .query_async(&mut conn)
+            .await;
+        match res {
+            Ok(v) => v == 1,
+            Err(e) => {
+                tracing::warn!("ratelimit redis EVAL failed — admitting (fail-open): {e}");
+                true
+            }
+        }
     }
 }
 
@@ -143,6 +306,24 @@ mod tests {
         std::thread::sleep(Duration::from_millis(5));
         rl.evict_idle(Duration::from_millis(1));
         assert_eq!(rl.tracked(), 0, "stale bucket evicted");
+    }
+
+    #[test]
+    fn refill_and_take_is_the_shared_bucket_math() {
+        // Empty bucket, no elapsed time → deny, tokens unchanged.
+        assert_eq!(refill_and_take(0.0, 0.0, 100, 5), (0.0, false));
+        // One token present → admit, leaving 0.
+        assert_eq!(refill_and_take(1.0, 0.0, 100, 5), (0.0, true));
+        // Refill caps at burst: 1s elapsed @100rps but burst=5 → capped at 5,
+        // take 1 → 4 left, admit.
+        assert_eq!(refill_and_take(0.0, 1.0, 100, 5), (4.0, true));
+        // Negative elapsed (clock skew) is clamped to 0 → no spurious refill.
+        assert_eq!(refill_and_take(0.0, -10.0, 100, 5), (0.0, false));
+    }
+
+    #[test]
+    fn default_backend_is_in_process() {
+        assert!(matches!(RateLimiter::default(), RateLimiter::InProcess(_)));
     }
 
     #[test]

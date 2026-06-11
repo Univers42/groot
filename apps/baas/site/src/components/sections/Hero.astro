@@ -1,0 +1,31 @@
+---
+import StatChip from '../ui/StatChip.astro';
+import { HOT_PATH } from '../../data/tiers';
+---
+
+<section class="gb-section gb-hero" data-galaxy-state="nebula" aria-labelledby="hero-title">
+	<div class="gb-container">
+		<p class="gb-kicker">Grobase — the engine-agnostic backend factory</p>
+		<h1 id="hero-title">One backend. <em>Every engine.</em> Any size.</h1>
+		<p class="gb-lede">
+			Auth, REST, realtime, storage, graph and edge functions over <strong>8 database engines</strong> —
+			from a 5 MB single binary to a multi-tenant cloud. Each node in this galaxy is a tenant running
+			its own composition of engines, tier and isolation. Yours would be one of them.
+		</p>
+		<div class="gb-hero__ctas">
+			<a class="gb-btn gb-btn--primary" href="/pricing/">See transparent pricing</a>
+			<a class="gb-btn gb-btn--ghost" href="/compare/">Compare us honestly</a>
+		</div>
+		<div class="gb-hero__stats">
+			<StatChip value={HOT_PATH.newRam} label="hot path (was 127 MiB)" />
+			<StatChip value={HOT_PATH.newLatency} label={`p50 (was ${HOT_PATH.oldLatency})`} />
+			<StatChip value="8 engines" label="one /query/v1 API" />
+			<StatChip value="$2/mo" label="infra floor, < $1 idle" />
+		</div>
+		<p class="gb-hero__hint">scroll — the galaxy reorganises with the story ↓</p>
+		<!-- Keyboard/SR path into the galaxy: JS fills this with one button per
+		     example tenant; focusing one highlights its node and reads its stack. -->
+		<div class="gb-galaxy-explorer" id="galaxy-explorer" role="group" aria-label="Explore example tenants" hidden></div>
+		<p class="visually-hidden" role="status" id="galaxy-status"></p>
+	</div>
+</section>

@@ -15,6 +15,15 @@ pub struct ServerConfig {
     /// beyond this). Bounds memory under N-tenant fan-out (db_per_tenant /
     /// schema_per_tenant). Default 256; from `DATA_PLANE_MAX_POOLS`.
     pub max_pools: usize,
+    /// B4-pools: collapse `shared_rls` tenants that share a connection target
+    /// onto ONE pool (keyed by DSN/credential, not tenant). Safe ONLY for
+    /// shared_rls — RLS scoping is re-applied per checkout from the request
+    /// identity, so the pool carries no tenant state. schema_per_tenant pins
+    /// `search_path` per pool and db_per_tenant/tenant_owned have distinct DSNs,
+    /// so those keep per-tenant pools regardless. Default `false` (per-tenant
+    /// pools, byte-parity). From `DATA_PLANE_SHARE_POOLS` (`1`/`true`/`on`).
+    /// This is the 100K lever: 10K shared_rls tenants on one DB → 1 pool.
+    pub share_pools: bool,
     /// Whether the capability-aware planner (G6) may route a `Federate` verdict
     /// to the analytics plane. Default `false` — until Trino is wired, a
     /// federation plan is lowered to a clean `NotImplemented`. From
@@ -110,6 +119,10 @@ impl ServerConfig {
             max_pools: read_env("DATA_PLANE_MAX_POOLS", "256")
                 .parse()
                 .unwrap_or(256),
+            share_pools: matches!(
+                read_env("DATA_PLANE_SHARE_POOLS", "false").to_lowercase().as_str(),
+                "1" | "true" | "on"
+            ),
             planner_federation_enabled: matches!(
                 read_env("DATA_PLANE_FEDERATION_ENABLED", "false")
                     .to_lowercase()
