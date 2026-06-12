@@ -276,6 +276,105 @@ await step("collections-import", async () => {
   return { imported: c?.name === IMP };
 });
 
+// ── rules matrix: advanced constructs (:modifiers, multi-value, geoDistance) ──
+const RM = `m49rules${TS}`;
+await step("rules-matrix-collection", async () => {
+  await su.collections.create({
+    name: RM,
+    type: "base",
+    fields: [
+      { name: "title", type: "text" },
+      { name: "tags", type: "select", maxSelect: 5, values: ["a", "b", "c", "x", "y"] },
+      { name: "place", type: "geoPoint" },
+    ],
+    // list rule exercises a :modifier; records visible only with >=2 tags
+    listRule: "tags:length >= 2",
+    viewRule: "",
+    createRule: "",
+    updateRule: "",
+    deleteRule: "",
+  });
+  // seed: one with 1 tag (hidden), two with >=2 tags (visible)
+  await su.collection(RM).create({ title: "one", tags: ["a"], place: { lon: 2.35, lat: 48.85 } });
+  await su.collection(RM).create({ title: "two", tags: ["a", "b"], place: { lon: 2.35, lat: 48.85 } });
+  await su.collection(RM).create({ title: "three", tags: ["a", "b", "c"], place: { lon: -0.12, lat: 51.5 } });
+  return { ok: true };
+});
+
+await step("rule-modifier-length-filters-list", async () => {
+  // an anonymous client sees only records the :length list rule admits
+  const anon = new PocketBase(base);
+  const res = await anon.collection(RM).getList(1, 50, { sort: "title" });
+  return { titles: res.items.map((i) => i.title), totalItems: res.totalItems };
+});
+
+await step("filter-each-anyof", async () => {
+  // PB multi-value idiom: :each ?= matches records where ANY element equals
+  const any = await su.collection(RM).getList(1, 50, { filter: "tags:each ?= 'c'", sort: "title" });
+  // :each = matches records where ALL elements equal (none here)
+  const all = await su.collection(RM).getList(1, 50, { filter: "tags:each = 'c'", sort: "title" });
+  return { anyTitles: any.items.map((i) => i.title), allTitles: all.items.map((i) => i.title) };
+});
+
+await step("filter-modifier-length", async () => {
+  const res = await su.collection(RM).getList(1, 50, { filter: "tags:length = 3", sort: "title" });
+  return { titles: res.items.map((i) => i.title) };
+});
+
+await step("filter-geodistance", async () => {
+  // within ~50km of Paris → the two Paris records
+  const res = await su.collection(RM).getList(1, 50, {
+    filter: "geoDistance(place.lon, place.lat, 2.35, 48.85) < 50",
+    sort: "title",
+  });
+  return { titles: res.items.map((i) => i.title) };
+});
+
+// @collection.* join (membership pattern): a doc is visible only if the
+// caller has a membership row for it.
+const DOCS = `m49docs${TS}`;
+const MEM = `m49mem${TS}`;
+await step("collection-join-setup", async () => {
+  // MEM must exist before DOCS references it (PB validates @collection refs)
+  await su.collections.create({
+    name: MEM, type: "base",
+    fields: [{ name: "doc", type: "text" }, { name: "user", type: "text" }],
+    listRule: "", viewRule: "", createRule: "", updateRule: "", deleteRule: "",
+  });
+  await su.collections.create({
+    name: DOCS, type: "base",
+    fields: [{ name: "title", type: "text" }],
+    listRule: `@collection.${MEM}.doc ?= id && @collection.${MEM}.user ?= @request.auth.id`,
+    viewRule: `@collection.${MEM}.doc ?= id && @collection.${MEM}.user ?= @request.auth.id`,
+    createRule: "", updateRule: "", deleteRule: "",
+  });
+  const d1 = await su.collection(DOCS).create({ title: "doc-alice" });
+  const d2 = await su.collection(DOCS).create({ title: "doc-bob" });
+  await su.collection(MEM).create({ doc: d1.id, user: aliceId });
+  await su.collection(MEM).create({ doc: d2.id, user: bobId });
+  return { ok: true };
+});
+
+await step("collection-join-isolation", async () => {
+  const a = await alice.collection(DOCS).getList(1, 50, { sort: "title" });
+  const b = await bob.collection(DOCS).getList(1, 50, { sort: "title" });
+  return {
+    aliceSees: a.items.map((i) => i.title),
+    bobSees: b.items.map((i) => i.title),
+  };
+});
+
+await step("collection-join-cleanup", async () => {
+  await su.collections.delete(DOCS);
+  await su.collections.delete(MEM);
+  return { ok: true };
+});
+
+await step("rules-matrix-cleanup", async () => {
+  await su.collections.delete(RM);
+  return { ok: true };
+});
+
 await step("cleanup", async () => {
   await su.collections.delete(POSTS);
   await su.collections.delete(USERS);

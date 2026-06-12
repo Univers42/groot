@@ -54,27 +54,6 @@ async fn caller(
     (auth, ctx)
 }
 
-/// Apply a lowered rule to a query op. Returns Err(response) for Deny;
-/// Ok(true) = proceed, Ok(false) = rule can never match (caller handles).
-fn apply_rule(
-    op: &mut DataOperation,
-    lowered: super::rules::Lowered,
-) -> Result<bool, axum::response::Response> {
-    use super::rules::Lowered::*;
-    match lowered {
-        Open => Ok(true),
-        Constrain(extra) => {
-            op.filter = Some(super::rules::and_filters(op.filter.take(), extra));
-            Ok(true)
-        }
-        Never => Ok(false),
-        Deny => Err(pb_err(
-            StatusCode::FORBIDDEN,
-            "Only superusers can perform this action.",
-        )),
-    }
-}
-
 // ─── type-aware row shaping ──────────────────────────────────────────────────
 
 #[derive(Clone, Copy, PartialEq)]
@@ -264,6 +243,7 @@ fn base_op(kind: DataOperationKind, resource: &str) -> DataOperation {
 
 /// Translate `?filter=` via the PB DSL parser into the engine filter wire
 /// shape (the engine re-validates; this just bridges grammars).
+#[cfg(test)]
 fn filter_wire(raw: &str) -> Result<Option<Value>, String> {
     if raw.trim().is_empty() {
         return Ok(None);
@@ -362,10 +342,14 @@ async fn apply_expand(
         } else {
             continue;
         };
-        let rule_filter = match super::rules::lower_rule(target_col.view_rule.as_ref(), ctx) {
-            super::rules::Lowered::Open => None,
-            super::rules::Lowered::Constrain(f) => Some(f),
-            _ => continue, // locked/never: PB omits the expansion
+        let (rule_filter, rule_mem) = match super::rules::lower_rule(target_col.view_rule.as_ref(), ctx) {
+            super::rules::Lowered::Open => (None, None),
+            super::rules::Lowered::Constrain(f) => (Some(f), None),
+            super::rules::Lowered::Memory(e) => {
+                (e.sql_prefilter().map(|x| filter_to_wire(&x)), Some(e))
+            }
+            // locked/never: PB omits the expansion
+            super::rules::Lowered::Never | super::rules::Lowered::Deny => continue,
         };
         let target_kinds = field_kinds(&target_col);
 
@@ -419,6 +403,15 @@ async fn apply_expand(
             .iter()
             .map(|r| shape_record(&target_col, &target_kinds, r))
             .collect();
+        if let Some(e) = &rule_mem {
+            let mut kept: Vec<Value> = Vec::new();
+            for rec in shaped.into_iter() {
+                if eval_access(state, e, &rec).await {
+                    kept.push(rec);
+                }
+            }
+            shaped = kept;
+        }
         if let Some(rest) = rest {
             Box::pin(apply_expand(state, &target_col, &mut shaped, rest, ctx, depth + 1)).await;
         }
@@ -463,6 +456,125 @@ async fn apply_expand(
                 }
             }
         }
+    }
+}
+
+// ─── @collection.* join resolution (rules engine) ────────────────────────────
+
+/// Build one engine-filter term for a `@collection.X.field <op> value` ref.
+fn collection_term(field: &str, op: super::predicate::Cmp, value: Value) -> data_plane_core::Filter {
+    use data_plane_core::{CmpOp, Filter};
+    use super::predicate::Cmp;
+    match op {
+        Cmp::Eq if value.is_null() => Filter::IsNull { field: field.into(), negate: false },
+        Cmp::Ne if value.is_null() => Filter::IsNull { field: field.into(), negate: true },
+        Cmp::Eq => Filter::Cmp { field: field.into(), op: CmpOp::Eq, value },
+        Cmp::Ne => Filter::Cmp { field: field.into(), op: CmpOp::Ne, value },
+        Cmp::Gt => Filter::Cmp { field: field.into(), op: CmpOp::Gt, value },
+        Cmp::Gte => Filter::Cmp { field: field.into(), op: CmpOp::Gte, value },
+        Cmp::Lt => Filter::Cmp { field: field.into(), op: CmpOp::Lt, value },
+        Cmp::Lte => Filter::Cmp { field: field.into(), op: CmpOp::Lte, value },
+        Cmp::Like => {
+            let raw = value.as_str().map(String::from).unwrap_or_else(|| value.to_string());
+            let pat = if raw.contains('%') { raw } else { format!("%{raw}%") };
+            Filter::Like { field: field.into(), pattern: Value::String(pat), ci: true }
+        }
+        Cmp::NLike => {
+            let raw = value.as_str().map(String::from).unwrap_or_else(|| value.to_string());
+            let pat = if raw.contains('%') { raw } else { format!("%{raw}%") };
+            Filter::Not(Box::new(Filter::Like { field: field.into(), pattern: Value::String(pat), ci: true }))
+        }
+    }
+}
+
+/// Collect `@collection.X.field` comparison terms, grouped by collection X,
+/// resolving the OTHER operand against the outer record. (Same-name refs join
+/// one row — PB semantics — so all of X's terms AND together for the EXISTS.)
+fn collect_collection_terms(
+    expr: &super::predicate::PbExpr,
+    outer: &Value,
+    groups: &mut HashMap<String, Vec<data_plane_core::Filter>>,
+) {
+    use super::predicate::{Operand, PbExpr};
+    match expr {
+        PbExpr::And(parts) | PbExpr::Or(parts) => {
+            for p in parts {
+                collect_collection_terms(p, outer, groups);
+            }
+        }
+        PbExpr::Cmp { left, op, right, .. } => {
+            if let Operand::Collection { collection, field } = left {
+                let val = super::predicate::operand_literal(right, outer);
+                groups
+                    .entry(collection.clone())
+                    .or_default()
+                    .push(collection_term(field, *op, val));
+            }
+        }
+        PbExpr::Const(_) => {}
+    }
+}
+
+/// Replace each `@collection.X.*` comparison with the EXISTS result for X.
+fn substitute_collection_refs(
+    expr: &super::predicate::PbExpr,
+    exists: &HashMap<String, bool>,
+) -> super::predicate::PbExpr {
+    use super::predicate::{Operand, PbExpr};
+    match expr {
+        PbExpr::And(parts) => {
+            PbExpr::And(parts.iter().map(|p| substitute_collection_refs(p, exists)).collect())
+        }
+        PbExpr::Or(parts) => {
+            PbExpr::Or(parts.iter().map(|p| substitute_collection_refs(p, exists)).collect())
+        }
+        PbExpr::Cmp { left, .. } => {
+            if let Operand::Collection { collection, .. } = left {
+                PbExpr::Const(*exists.get(collection).unwrap_or(&false))
+            } else {
+                expr.clone()
+            }
+        }
+        PbExpr::Const(b) => PbExpr::Const(*b),
+    }
+}
+
+/// Resolve `@collection.*` joins (async EXISTS sub-queries) then return the
+/// predicate with those terms folded to constants for one outer record.
+async fn resolve_collection_refs(
+    state: &AppState,
+    expr: &super::predicate::PbExpr,
+    outer: &Value,
+) -> super::predicate::PbExpr {
+    let mut groups: HashMap<String, Vec<data_plane_core::Filter>> = HashMap::new();
+    collect_collection_terms(expr, outer, &mut groups);
+    let mut exists: HashMap<String, bool> = HashMap::new();
+    for (coll, terms) in groups {
+        let sub = if terms.len() == 1 {
+            terms.into_iter().next().unwrap()
+        } else {
+            data_plane_core::Filter::And(terms)
+        };
+        let mut op = base_op(DataOperationKind::List, &coll);
+        op.limit = Some(1);
+        op.filter = Some(filter_to_wire(&sub));
+        let found = matches!(exec(state, op).await, Ok(r) if !r.rows.is_empty());
+        exists.insert(coll, found);
+    }
+    substitute_collection_refs(expr, &exists)
+}
+
+/// Evaluate an access predicate against one record, resolving any
+/// `@collection.*` joins first (async). Use everywhere a rule is checked.
+pub(crate) async fn eval_access(
+    state: &AppState,
+    expr: &super::predicate::PbExpr,
+    record: &Value,
+) -> bool {
+    if expr.has_collection_refs() {
+        resolve_collection_refs(state, expr, record).await.eval(record)
+    } else {
+        expr.eval(record)
     }
 }
 
@@ -771,7 +883,6 @@ async fn list(
         Err(r) => return r,
     };
     let (_auth, ctx) = caller(&state, &headers).await;
-    let lowered = super::rules::lower_rule(col.list_rule.as_ref(), &ctx);
     let page: u32 = q.get("page").and_then(|v| v.parse().ok()).unwrap_or(1).max(1);
     let per_page: u32 = q
         .get("perPage")
@@ -780,15 +891,28 @@ async fn list(
         .clamp(1, 1000);
     let skip_total = matches!(q.get("skipTotal").map(String::as_str), Some("1" | "true"));
 
-    let mut op = base_op(DataOperationKind::List, &col.name);
-    op.limit = Some(per_page);
-    op.offset = Some((page - 1) * per_page);
-    if let Some(raw) = q.get("filter") {
-        match filter_wire(raw) {
-            Ok(f) => op.filter = f,
+    // Build the combined predicate (user filter AND list rule). Both can use
+    // advanced constructs; if either needs in-memory evaluation we fetch a
+    // capped candidate set (narrowed by the SQL-expressible conjuncts), filter
+    // in Rust, and paginate in Rust — outcome-identical to PB.
+    let filter_expr = match q.get("filter").filter(|f| !f.trim().is_empty()) {
+        Some(raw) => match super::predicate::parse(raw, &|_| None) {
+            Ok(e) => e,
             Err(m) => return pb_err(StatusCode::BAD_REQUEST, &m),
+        },
+        None => super::predicate::PbExpr::And(vec![]),
+    };
+    let combined = match super::rules::rule_pred(col.list_rule.as_ref(), &ctx) {
+        super::rules::RulePred::Deny => {
+            return pb_err(StatusCode::FORBIDDEN, "Only superusers can perform this action.");
         }
-    }
+        super::rules::RulePred::Open => filter_expr,
+        super::rules::RulePred::Pred(rp) => {
+            super::predicate::PbExpr::And(vec![filter_expr, rp])
+        }
+    };
+
+    let mut op = base_op(DataOperationKind::List, &col.name);
     if let Some(raw) = q.get("sort") {
         match parse_sort(raw, &kinds, col.kind == "view") {
             Ok(s) if !s.is_empty() => op.sort_order = Some(s),
@@ -796,17 +920,33 @@ async fn list(
             Err(m) => return pb_err(StatusCode::BAD_REQUEST, &m),
         }
     }
-    let matchable = match apply_rule(&mut op, lowered) {
-        Ok(m) => m,
-        Err(r) => return r,
+
+    // memory flag + SQL filter
+    let memory = combined.needs_memory();
+    let sql_filter = if memory {
+        combined.sql_prefilter().map(|f| filter_to_wire(&f))
+    } else {
+        match combined.to_engine_filter().map(|f| (f.fold(), f)) {
+            Some((data_plane_core::Folded::AlwaysFalse, _)) => {
+                return (
+                    StatusCode::OK,
+                    Json(json!({ "page": page, "perPage": per_page, "totalItems": 0,
+                                  "totalPages": 0, "items": [] })),
+                )
+                    .into_response();
+            }
+            Some((data_plane_core::Folded::AlwaysTrue, _)) => None,
+            Some((_, f)) => Some(filter_to_wire(&f)),
+            None => None,
+        }
     };
-    if !matchable {
-        return (
-            StatusCode::OK,
-            Json(json!({ "page": page, "perPage": per_page, "totalItems": 0,
-                          "totalPages": 0, "items": [] })),
-        )
-            .into_response();
+    op.filter = sql_filter.clone();
+    if memory {
+        // fetch a capped candidate window (sort honored, no LIMIT/OFFSET)
+        op.limit = Some(5000);
+    } else {
+        op.limit = Some(per_page);
+        op.offset = Some((page - 1) * per_page);
     }
     let filter_for_count = op.filter.clone();
     let result = match exec(&state, op).await {
@@ -844,12 +984,32 @@ async fn list(
         })
         .collect();
     let mut items = items;
+
+    // in-memory predicate: keep matching rows, then paginate in Rust
+    let mem_total: Option<i64> = if memory {
+        // async filter (resolves @collection refs per row)
+        let mut kept: Vec<Value> = Vec::new();
+        for rec in items.into_iter() {
+            if eval_access(&state, &combined, &rec).await {
+                kept.push(rec);
+            }
+        }
+        let total = kept.len() as i64;
+        let start = ((page - 1) * per_page) as usize;
+        items = kept.into_iter().skip(start).take(per_page as usize).collect();
+        Some(total)
+    } else {
+        None
+    };
+
     if let Some(exp) = q.get("expand").filter(|e| !e.trim().is_empty()) {
         apply_expand(&state, &col, &mut items, exp, &ctx, 1).await;
     }
 
     let (total_items, total_pages) = if skip_total {
         (-1i64, -1i64)
+    } else if let Some(total) = mem_total {
+        (total, (total + per_page as i64 - 1) / per_page as i64)
     } else {
         let mut count_op = base_op(DataOperationKind::Aggregate, &col.name);
         count_op.filter = filter_for_count;
@@ -913,15 +1073,20 @@ async fn view(
         Err(r) => return r,
     };
     let (_auth, ctx) = caller(&state, &headers).await;
+    let pred = super::rules::rule_pred(col.view_rule.as_ref(), &ctx);
+    if matches!(pred, super::rules::RulePred::Deny) {
+        return pb_err(StatusCode::NOT_FOUND, "The requested resource wasn't found.");
+    }
     let mut op = base_op(DataOperationKind::Get, &col.name);
     op.filter = Some(json!({ "id": rid }));
-    match apply_rule(&mut op, super::rules::lower_rule(col.view_rule.as_ref(), &ctx)) {
-        Ok(true) => {}
-        Ok(false) => return pb_err(StatusCode::NOT_FOUND, "The requested resource wasn't found."),
-        Err(r) => return r,
-    }
     match exec(&state, op).await.map(|r| r.rows.first().map(|row| shape_record(&col, &kinds, row))) {
         Ok(Some(mut rec)) => {
+            // the view rule gates the record in memory (covers advanced rules)
+            if let super::rules::RulePred::Pred(e) = &pred {
+                if !eval_access(&state, e, &rec).await {
+                    return pb_err(StatusCode::NOT_FOUND, "The requested resource wasn't found.");
+                }
+            }
             if let Some(exp) = q.get("expand").filter(|e| !e.trim().is_empty()) {
                 let mut one_item = vec![rec];
                 apply_expand(&state, &col, &mut one_item, exp, &ctx, 1).await;
@@ -959,12 +1124,9 @@ async fn create(
         return pb_err(StatusCode::BAD_REQUEST, "unable to create a view collection record");
     }
     let (_auth, ctx) = caller(&state, &headers).await;
-    let create_rule = super::rules::lower_rule(col.create_rule.as_ref(), &ctx);
-    if matches!(create_rule, super::rules::Lowered::Deny) {
+    let create_rule = super::rules::rule_pred(col.create_rule.as_ref(), &ctx);
+    if matches!(create_rule, super::rules::RulePred::Deny) {
         return pb_err(StatusCode::FORBIDDEN, "Only superusers can perform this action.");
-    }
-    if matches!(create_rule, super::rules::Lowered::Never) {
-        return pb_err(StatusCode::BAD_REQUEST, "Failed to create record.");
     }
     let pb = match pb_of(&state) {
         Ok(p) => p,
@@ -1025,12 +1187,9 @@ async fn create(
             }
         }
     }
-    if let super::rules::Lowered::Constrain(wire) = &create_rule {
+    if let super::rules::RulePred::Pred(e) = &create_rule {
         // createRule constrains the WOULD-BE record: evaluate in memory.
-        let ok = data_plane_core::Filter::parse(wire)
-            .map(|ast| super::rules::eval(&ast, &Value::Object(data.clone())))
-            .unwrap_or(false);
-        if !ok {
+        if !eval_access(&state, e, &Value::Object(data.clone())).await {
             return pb_err(StatusCode::BAD_REQUEST, "Failed to create record.");
         }
     }
@@ -1070,12 +1229,19 @@ async fn update(
         return pb_err(StatusCode::BAD_REQUEST, "unable to update a view collection record");
     }
     let (_auth, ctx) = caller(&state, &headers).await;
-    let lowered = super::rules::lower_rule(col.update_rule.as_ref(), &ctx);
-    if matches!(lowered, super::rules::Lowered::Deny) {
+    let update_rule = super::rules::rule_pred(col.update_rule.as_ref(), &ctx);
+    if matches!(update_rule, super::rules::RulePred::Deny) {
         return pb_err(StatusCode::FORBIDDEN, "Only superusers can perform this action.");
     }
-    if matches!(lowered, super::rules::Lowered::Never) {
-        return pb_err(StatusCode::NOT_FOUND, "The requested resource wasn't found.");
+    // The update rule is checked against the EXISTING record (PB semantics).
+    if let super::rules::RulePred::Pred(e) = &update_rule {
+        let allowed = match fetch_by_id(&state, &col, &kinds, &rid).await {
+            Ok(Some(existing)) => eval_access(&state, e, &existing).await,
+            _ => false,
+        };
+        if !allowed {
+            return pb_err(StatusCode::NOT_FOUND, "The requested resource wasn't found.");
+        }
     }
     let pb = match pb_of(&state) {
         Ok(p) => p,
@@ -1123,9 +1289,6 @@ async fn update(
     let mut op = base_op(DataOperationKind::Update, &col.name);
     op.data = Some(Value::Object(data));
     op.filter = Some(json!({ "id": rid }));
-    if let Err(r) = apply_rule(&mut op, lowered) {
-        return r;
-    }
     let result = match exec(&state, op).await {
         Ok(r) => r,
         Err(r) => return r,
@@ -1157,16 +1320,22 @@ async fn remove(
         return pb_err(StatusCode::BAD_REQUEST, "unable to delete a view collection record");
     }
     let (_auth, ctx) = caller(&state, &headers).await;
-    let lowered = super::rules::lower_rule(col.delete_rule.as_ref(), &ctx);
-    if matches!(lowered, super::rules::Lowered::Deny) {
+    let delete_rule = super::rules::rule_pred(col.delete_rule.as_ref(), &ctx);
+    if matches!(delete_rule, super::rules::RulePred::Deny) {
         return pb_err(StatusCode::FORBIDDEN, "Only superusers can perform this action.");
     }
-    if matches!(lowered, super::rules::Lowered::Never) {
-        return pb_err(StatusCode::NOT_FOUND, "The requested resource wasn't found.");
-    }
     // Pre-image for the realtime event (PB sends the deleted record's last
-    // known state).
+    // known state) AND the delete-rule gate (checked in memory).
     let pre = fetch_by_id(&state, &col, &kinds, &rid).await.ok().flatten();
+    if let super::rules::RulePred::Pred(e) = &delete_rule {
+        let allowed = match &pre {
+            Some(rec) => eval_access(&state, e, rec).await,
+            None => false,
+        };
+        if !allowed {
+            return pb_err(StatusCode::NOT_FOUND, "The requested resource wasn't found.");
+        }
+    }
     #[cfg(feature = "hooks")]
     if let Some(hooks) = state.hooks.clone() {
         if hooks.active_for(super::hooks::ACT_DELETE) {
@@ -1178,9 +1347,6 @@ async fn remove(
     }
     let mut op = base_op(DataOperationKind::Delete, &col.name);
     op.filter = Some(json!({ "id": rid }));
-    if let Err(r) = apply_rule(&mut op, lowered) {
-        return r;
-    }
     let result = match exec(&state, op).await {
         Ok(r) => r,
         Err(r) => return r,
