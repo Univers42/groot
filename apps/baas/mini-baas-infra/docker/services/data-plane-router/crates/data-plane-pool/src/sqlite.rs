@@ -34,6 +34,36 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
+/// GLOBAL schema generation per database FILE PATH. `prepare_cached`
+/// statements survive `ALTER TABLE` with STALE column metadata (a cached
+/// `SELECT *` keeps the old column list — a row read after a DDL silently
+/// misses the new column; the m48 expand suite caught it). DDL bumps the
+/// path's generation; every reader flushes its statement cache when the
+/// generation it last saw differs. Keyed by PATH (not pool instance) so it
+/// survives pool eviction/recreation — the thread-local connections do too.
+static SCHEMA_GENS: std::sync::OnceLock<std::sync::Mutex<HashMap<String, u64>>> =
+    std::sync::OnceLock::new();
+
+fn schema_gens() -> &'static std::sync::Mutex<HashMap<String, u64>> {
+    SCHEMA_GENS.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+fn schema_gen_for(path: &str) -> u64 {
+    *schema_gens()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(path)
+        .unwrap_or(&0)
+}
+
+fn bump_schema_gen_for(path: &str) {
+    *schema_gens()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .entry(path.to_string())
+        .or_insert(0) += 1;
+}
+
 thread_local! {
     /// Per-thread read connections, keyed by database path. List/Get run
     /// DIRECTLY on the calling (tokio worker) thread: a LIMIT-capped,
@@ -43,7 +73,13 @@ thread_local! {
     /// throughput ceiling). Unbounded work (aggregate, raw SQL,
     /// introspection) stays on the interact pool so a long scan can never
     /// pin an async worker.
-    static READ_CONNS: RefCell<HashMap<String, Connection>> = RefCell::new(HashMap::new());
+    static READ_CONNS: RefCell<HashMap<String, ReadConn>> = RefCell::new(HashMap::new());
+}
+
+struct ReadConn {
+    conn: Connection,
+    /// Schema generation the connection was opened at.
+    gen: u64,
 }
 
 /// Server-controlled columns a client may never set/override.
@@ -173,7 +209,8 @@ impl EngineAdapter for SqliteEngineAdapter {
 pub struct SqlitePool {
     mount_id: String,
     tenant_id: String,
-    /// Database file path — keys the thread-local direct-read connections.
+    /// Database file path — keys the thread-local direct-read connections
+    /// AND the global schema-generation map.
     path: String,
     /// `true` for `shared_rls` (the default) — every read/write is scoped to the
     /// caller's `owner_id`. `false` for `tenant_owned` (the whole file is one
@@ -209,17 +246,24 @@ impl SqlitePool {
     /// Run a bounded (LIMIT-capped) read on this thread's cached connection.
     /// See [`READ_CONNS`] for why this beats the interact pool.
     fn read_direct(&self, plan: &SqlPlan) -> DataPlaneResult<DataResult> {
+        let gen_now = schema_gen_for(&self.path);
         READ_CONNS.with(|cell| {
             let mut map = cell.borrow_mut();
-            if !map.contains_key(&self.path) {
+            // (re)open when absent OR when a DDL advanced the schema generation
+            // past what this thread's connection was opened at
+            let need_open = match map.get(&self.path) {
+                None => true,
+                Some(entry) => entry.gen != gen_now,
+            };
+            if need_open {
                 let conn = Connection::open(&self.path).map_err(backend)?;
                 init_read_conn(&conn).map_err(backend)?;
-                map.insert(self.path.clone(), conn);
+                map.insert(self.path.clone(), ReadConn { conn, gen: gen_now });
             }
-            let conn = map
+            let entry = map
                 .get(&self.path)
                 .expect("read connection inserted just above");
-            run_plan(conn, plan)
+            run_plan(&entry.conn, plan)
         })
     }
 
@@ -301,8 +345,17 @@ impl EnginePool for SqlitePool {
             return self.read_direct(&plan);
         }
         let obj = self.checkout().await?;
-        obj.interact(move |conn| run_plan(&*conn, &plan))
-            .await
+        // Aggregate/raw reads run on the interact pool; its long-lived
+        // connections can cache a stale `SELECT *` across DDL just like the
+        // direct readers. Flush this connection's statement cache when the
+        // schema generation advanced (cheap; these are not the hot path).
+        obj.interact(move |conn| {
+            // drop possibly-stale cached plans (e.g. a `SELECT *` raw read
+            // across a DDL); aggregate/raw are not the hot path
+            conn.flush_prepared_statement_cache();
+            run_plan(&*conn, &plan)
+        })
+        .await
             .map_err(|e| DataPlaneError::Backend {
                 message: format!("sqlite interact: {e}"),
             })?
@@ -336,12 +389,15 @@ impl EnginePool for SqlitePool {
         // `expect_rows=false` is the write/DDL shape — writer-thread queue;
         // row-returning raw SQL reads in parallel off the pool.
         if !expect_rows {
+            // DDL bump happens in the writer thread on commit (reliable, at
+            // the point the statement runs)
             return self
                 .submit(|reply| WriteJob::Raw { sql, params: sql_params, reply })
                 .await;
         }
         let obj = self.checkout().await?;
         obj.interact(move |conn| {
+            conn.flush_prepared_statement_cache();
             let rows = query_rows(&*conn, &sql, &sql_params)?;
             let affected = rows.len() as u64;
             Ok(DataResult { rows, affected_rows: affected, next_cursor: None, batch: None })
@@ -795,11 +851,24 @@ fn writer_loop(path: &str, mut jobs: tokio::sync::mpsc::UnboundedReceiver<WriteJ
             continue;
         }
 
+        // Did this group contain DDL (Raw non-row / Ddl)? A committed DDL must
+        // bump the path's schema generation so readers reopen against the new
+        // schema (a cached `SELECT *` otherwise serves stale columns — the m48
+        // expand suite caught it). Detected HERE, where the statement runs.
+        let group_has_ddl = group.iter().any(|j| {
+            matches!(j, WriteJob::Ddl(_, _))
+                || matches!(j, WriteJob::Raw { .. })
+        });
         let mut deferred: Vec<Deferred> = Vec::with_capacity(group.len());
         for (i, job) in group.into_iter().enumerate() {
             deferred.push(process_in_savepoint(&conn, i, job));
         }
         let commit_ok = conn.execute_batch("COMMIT").is_ok();
+        if commit_ok && group_has_ddl {
+            // the writer's own cached plans + every reader's view are now stale
+            conn.flush_prepared_statement_cache();
+            bump_schema_gen_for(path);
+        }
         if !commit_ok {
             // Roll anything half-open back so the connection is reusable.
             let _ = conn.execute_batch("ROLLBACK");

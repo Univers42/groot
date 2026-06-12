@@ -66,6 +66,7 @@ code{color:var(--acc)}
   <button data-s="keys" onclick="show(this)">Keys</button>
   <button data-s="files" onclick="show(this)">Files</button>
   <button data-s="tail" onclick="show(this)">Realtime</button>
+  <button data-s="ops" onclick="show(this);opsBoot()">Ops</button>
 </nav>
 <main>
 <div id="gmsg" class="msg"></div>
@@ -127,6 +128,17 @@ code{color:var(--acc)}
 
 <section id="s-files">
   <div class="card"><h2>Files</h2><div id="f-out"></div></div>
+</section>
+
+<section id="s-ops">
+  <div class="grid2">
+    <div class="card"><h2>Request logs <button onclick="opsBoot()" style="float:right">refresh</button></h2><div id="o-logs"></div></div>
+    <div class="card"><h2>Backups <button onclick="opsBackup()" style="float:right">create now</button></h2><div id="o-backups"></div></div>
+    <div class="card"><h2>Crons</h2><div id="o-crons"></div></div>
+    <div class="card"><h2>Settings <button onclick="opsSaveSettings()" style="float:right">save</button></h2>
+      <textarea id="o-settings" style="width:100%;height:220px;background:var(--bg);color:var(--fg);border:1px solid var(--line);font:12px monospace"></textarea>
+    </div>
+  </div>
 </section>
 
 <section id="s-tail">
@@ -305,6 +317,38 @@ async function openFile(id){
 async function delFile(id){
   if(!confirm("Delete file "+id+"?"))return;
   try{await api("/one/v1/file/"+id,{method:"DELETE"});loadFiles()}catch(e){gmsg("err",e.message)}
+}
+
+/* ── ops: logs / backups / crons / settings (PB-compat surfaces) ── */
+async function pbapi(path,opt={}){
+  opt.headers=Object.assign({"X-Baas-Api-Key":KEY,"Content-Type":"application/json"},opt.headers||{});
+  const r=await fetch(path,opt);
+  if(!r.ok)throw new Error(path+" -> "+r.status);
+  const t=await r.text();return t?JSON.parse(t):null;
+}
+async function opsBoot(){
+  try{
+    const logs=await pbapi("/api/logs?perPage=15");
+    $("o-logs").innerHTML="<table><tr><th>when</th><th>msg</th><th>status</th><th>ms</th></tr>"+
+      logs.items.map(l=>`<tr><td>${l.created}</td><td>${l.message}</td><td>${l.data?.status??""}</td><td>${(l.data?.execTime??0).toFixed(1)}</td></tr>`).join("")+"</table>";
+    const bks=await pbapi("/api/backups");
+    $("o-backups").innerHTML="<table><tr><th>key</th><th>size</th><th></th></tr>"+
+      bks.map(b=>`<tr><td>${b.key}</td><td>${(b.size/1e6).toFixed(2)} MB</td>
+        <td><button onclick="opsRestore('${b.key}')">restore</button>
+        <button onclick="opsDelBk('${b.key}')">delete</button></td></tr>`).join("")+"</table>";
+    const crons=await pbapi("/api/crons");
+    $("o-crons").innerHTML="<table><tr><th>job</th><th>expr</th><th></th></tr>"+
+      crons.map(c=>`<tr><td>${c.id}</td><td>${c.expression}</td><td><button onclick="opsRunCron('${c.id}')">run now</button></td></tr>`).join("")+"</table>";
+    $("o-settings").value=JSON.stringify(await pbapi("/api/settings"),null,2);
+  }catch(e){$("o-logs").textContent=String(e)}
+}
+async function opsBackup(){await pbapi("/api/backups",{method:"POST",body:"{}"});opsBoot()}
+async function opsDelBk(k){await pbapi("/api/backups/"+k,{method:"DELETE"});opsBoot()}
+async function opsRestore(k){if(confirm("Restore "+k+"? The server restarts."))await pbapi("/api/backups/"+k+"/restore",{method:"POST"})}
+async function opsRunCron(id){await pbapi("/api/crons/"+id,{method:"POST"})}
+async function opsSaveSettings(){
+  try{await pbapi("/api/settings",{method:"PATCH",body:$("o-settings").value});alert("saved")}
+  catch(e){alert(e)}
 }
 
 /* ── realtime tail ── */

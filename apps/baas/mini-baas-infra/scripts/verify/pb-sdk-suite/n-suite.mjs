@@ -63,6 +63,11 @@ await step("view-list-sorted", async () => {
   };
 });
 
+await step("view-filter-and-sort", async () => {
+  const res = await pb.collection(VIEW).getList(1, 10, { filter: "n > 1", sort: "-n" });
+  return { titles: res.items.map((i) => i.title), totalItems: res.totalItems };
+});
+
 await step("view-create-rejected", async () => {
   try {
     await pb.collection(VIEW).create({ title: "nope" });

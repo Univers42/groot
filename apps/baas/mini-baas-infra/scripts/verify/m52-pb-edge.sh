@@ -56,6 +56,7 @@ step "boot pebble (test ACME CA) + compatibility shim"
 # alias on our container) and dials its validation tlsPort 5001 — which is
 # exactly where our ACME listener answers with the challenge certificate.
 docker run -d --name m52-pebble --network "${NET}" \
+  -e PEBBLE_WFE_NONCEREJECT=0 \
   ghcr.io/letsencrypt/pebble:latest >/dev/null
 # pebble REQUIRES a User-Agent; rustls-acme 0.14 sends none. Pebble builds its
 # returned URLs from the Host header, so a tiny https shim that injects the
@@ -193,4 +194,24 @@ if diffs:
 print(f"\n  {len(us)} steps — outcome maps are IDENTICAL")
 PY
 
-green "[M52] PASS — ACME HTTPS + views + S3 + gif thumbs proven"
+step "binocle-only lane: protected file field requires a token"
+SU_TOKEN=$(curl -s -X POST "http://127.0.0.1:${US_PORT}/api/collections/_superusers/auth-with-password" \
+  -H "Content-Type: application/json" -d "{\"identity\":\"${SU_EMAIL}\",\"password\":\"${SU_PASS}\"}" \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
+curl -s -X POST "http://127.0.0.1:${US_PORT}/api/collections" -H "Authorization: ${SU_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"m52prot","type":"base","fields":[{"name":"title","type":"text"},{"name":"doc","type":"file","maxSelect":1,"protected":true}],"listRule":"","viewRule":"","createRule":"","updateRule":"","deleteRule":""}' >/dev/null
+printf '\x89PNG\r\n\x1a\n' > "${WORK}/p.png"; head -c 200 /dev/urandom >> "${WORK}/p.png"
+PR=$(curl -s -X POST "http://127.0.0.1:${US_PORT}/api/collections/m52prot/records" \
+  -F "title=secret" -F "doc=@${WORK}/p.png;type=image/png")
+PRID=$(printf '%s' "${PR}" | python3 -c "import sys,json;print(json.load(sys.stdin)['id'])")
+PRDOC=$(printf '%s' "${PR}" | python3 -c "import sys,json;print(json.load(sys.stdin)['doc'])")
+BARE=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${US_PORT}/api/files/m52prot/${PRID}/${PRDOC}")
+FTOK=$(curl -s -X POST "http://127.0.0.1:${US_PORT}/api/files/token" -H "Authorization: ${SU_TOKEN}" \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
+WITHTOK=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${US_PORT}/api/files/m52prot/${PRID}/${PRDOC}?token=${FTOK}")
+[[ "${BARE}" == "404" ]] || fail "protected file served without a token (${BARE})"
+[[ "${WITHTOK}" == "200" ]] || fail "protected file not served WITH a token (${WITHTOK})"
+green "  ✓ protected file: bare ${BARE}, with-token ${WITHTOK}"
+
+green "[M52] PASS — ACME HTTPS + views + S3 + gif thumbs + protected files proven"

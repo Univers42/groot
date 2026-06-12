@@ -22,7 +22,7 @@ const OTP_TTL_SECS: i64 = 600;
 const OTP_MAX_ATTEMPTS: i64 = 5;
 
 impl super::PbState {
-    fn code_issue(&self, otp_id: &str, collection: &str, record: &str, code: &str) {
+    pub(crate) fn code_issue(&self, otp_id: &str, collection: &str, record: &str, code: &str) {
         let conn = self.meta.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let _ = conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS pb_codes (
@@ -49,7 +49,7 @@ impl super::PbState {
 
     /// Burn an attempt; deletes on success or exhaustion. Returns the record
     /// id on a correct, fresh code.
-    fn code_consume(&self, otp_id: &str, collection: &str, code: &str) -> Option<String> {
+    pub(crate) fn code_consume(&self, otp_id: &str, collection: &str, code: &str) -> Option<String> {
         let conn = self.meta.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let row: Option<(String, String, i64, i64)> = conn
             .query_row(
@@ -169,6 +169,16 @@ async fn auth_with_otp(
     let Some(rid) = pb.code_consume(otp_id, &col.id, code) else {
         return pb_err(StatusCode::BAD_REQUEST, "Failed to authenticate.");
     };
+    // second factor of an MFA flow: the mfaId minted by the first factor
+    // must exist, match this record, and burn on use
+    if let Some(mfa_id) = req.get("mfaId").and_then(|v| v.as_str()) {
+        let Some(mfa_rid) = pb.code_consume(&format!("mfa-{mfa_id}"), &col.id, mfa_id) else {
+            return pb_err(StatusCode::BAD_REQUEST, "Invalid or expired MFA session.");
+        };
+        if mfa_rid != rid {
+            return pb_err(StatusCode::BAD_REQUEST, "Invalid or expired MFA session.");
+        }
+    }
     let mut record = match super::records::fetch_shaped(&state, &col.name, &rid).await {
         Ok(Some(rec)) => rec,
         _ => return pb_err(StatusCode::BAD_REQUEST, "Failed to authenticate."),

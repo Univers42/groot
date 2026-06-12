@@ -250,6 +250,18 @@ pub(crate) enum PbAuth {
 /// PB SDKs send `Authorization: <raw token>` (NO `Bearer` prefix; PB also
 /// accepts the prefixed form, so both are honored here).
 pub(crate) fn pb_auth(state: &AppState, headers: &header::HeaderMap) -> PbAuth {
+    // The nano admin key is the deployment's ROOT credential — it acts as
+    // superuser on the facade too (the embedded dashboard drives the ops
+    // panels with it).
+    if let Some(key) = headers.get("x-baas-api-key").and_then(|v| v.to_str().ok()) {
+        if let Some(nano) = state.nano.as_ref() {
+            if let Ok(id) = nano.verify_key_str(key) {
+                if id.scopes.iter().any(|s| s == "admin") {
+                    return PbAuth::Superuser;
+                }
+            }
+        }
+    }
     let Some(raw) = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())

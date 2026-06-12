@@ -154,6 +154,18 @@ async fn auth_with_password(
     if !ok {
         return pb_err(StatusCode::BAD_REQUEST, "Failed to authenticate.");
     }
+    // PB MFA: when the collection enables it, the FIRST factor answers 401
+    // with an mfaId; the client completes with a second method (OTP here),
+    // passing the mfaId along.
+    if col.options["mfa"]["enabled"] == serde_json::json!(true) {
+        let mfa_id = super::pb_id();
+        pb.code_issue(&format!("mfa-{mfa_id}"), &col.id, &rid, &mfa_id);
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "mfaId": mfa_id })),
+        )
+            .into_response();
+    }
     let token = match mint_record_token(&state, &col.id, &rid, &identity) {
         Ok(t) => t,
         Err(r) => return r,
@@ -199,11 +211,13 @@ async fn auth_refresh(
     (StatusCode::OK, Json(json!({ "token": token, "record": record }))).into_response()
 }
 
-/// POST /api/collections/{c}/impersonate/{id} — superuser-only, non-renewable.
+/// POST /api/collections/{c}/impersonate/{id} — superuser-only,
+/// non-renewable; honors the SDK's custom `{duration}` (seconds).
 async fn impersonate(
     State(state): State<AppState>,
     headers: axum::http::header::HeaderMap,
     Path((cname, rid)): Path<(String, String)>,
+    body: Option<Json<Value>>,
 ) -> axum::response::Response {
     let pb = match pb_of(&state) {
         Ok(p) => p,
@@ -220,9 +234,25 @@ async fn impersonate(
         _ => return pb_err(StatusCode::NOT_FOUND, "The requested resource wasn't found."),
     };
     let email = record.get("email").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-    let token = match mint_record_token(&state, &col.id, &rid, &email) {
-        Ok(t) => t,
-        Err(r) => return r,
+    let duration = body
+        .as_ref()
+        .and_then(|Json(b)| b.get("duration").and_then(Value::as_u64))
+        .filter(|d| *d > 0);
+    let token = match duration {
+        Some(ttl) => {
+            let one = match crate::one::one_of(&state) {
+                Ok(o) => o,
+                Err(r) => return r,
+            };
+            match one.mint_jwt_ttl(&format!("pb:{}:{}", col.id, rid), &email, ttl) {
+                Ok(t) => t,
+                Err(e) => return pb_err(StatusCode::INTERNAL_SERVER_ERROR, &e),
+            }
+        }
+        None => match mint_record_token(&state, &col.id, &rid, &email) {
+            Ok(t) => t,
+            Err(r) => return r,
+        },
     };
     scrub_auth_record(&mut record, true);
     (StatusCode::OK, Json(json!({ "token": token, "record": record }))).into_response()
