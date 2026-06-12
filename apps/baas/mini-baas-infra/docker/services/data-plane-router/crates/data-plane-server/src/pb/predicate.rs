@@ -45,10 +45,11 @@ pub(crate) enum Operand {
     Lit(Value),
     /// `geoDistance(lonA, latA, lonB, latB)` → km (haversine).
     Geo(Box<[Operand; 4]>),
-    /// `@collection.NAME.FIELD` — a cross-collection join reference (resolved
-    /// to a literal by the async resolver before eval; see records::resolve_
-    /// collection_refs).
-    Collection { collection: String, field: String },
+    /// `@collection.NAME[:alias].FIELD` — a cross-collection join reference
+    /// (resolved to a literal by the async resolver before eval; see
+    /// records::resolve_collection_refs). Distinct aliases on the same
+    /// collection are DIFFERENT join rows (PB semantics).
+    Collection { collection: String, alias: Option<String>, field: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -289,13 +290,17 @@ impl Parser<'_> {
                     .ok_or_else(|| format!("'{w}' is not available in this context"));
             }
             if let Some(rest) = w.strip_prefix("@collection.") {
-                // NAME[:alias].FIELD — alias is dropped (single-row join, v1)
-                let (name, field) = rest
+                // NAME[:alias].FIELD
+                let (head, field) = rest
                     .split_once('.')
                     .ok_or_else(|| format!("malformed collection ref '{w}'"))?;
-                let name = name.split(':').next().unwrap_or(name);
+                let (name, alias) = match head.split_once(':') {
+                    Some((n, a)) => (n.to_string(), Some(a.to_string())),
+                    None => (head.to_string(), None),
+                };
                 return Ok(Operand::Collection {
-                    collection: name.to_string(),
+                    collection: name,
+                    alias,
                     field: field.to_string(),
                 });
             }
