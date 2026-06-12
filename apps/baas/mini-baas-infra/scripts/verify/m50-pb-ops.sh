@@ -127,4 +127,32 @@ POST=$(printf '%s' "${POST_RAW}" | python3 -c "import sys,json;print(json.load(s
 [[ "${POST}" == "1" ]] || fail "restore did not rewind state (rows: ${POST}, want 1)"
 green "  ✓ restore rewound 2 rows -> 1 (the post-backup write is gone)"
 
-green "[M50] PASS — ops surfaces identical + restore round-trip proven"
+step "binocle-only lane: PB-style rate limits enforce + recover"
+curl -s -X PATCH "http://127.0.0.1:${US_PORT}/api/settings" -H "Authorization: ${SU_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"rateLimits":{"enabled":true,"rules":[{"label":"/api/health","maxRequests":3,"duration":5}]}}' >/dev/null
+sleep 6   # settings cache TTL is 5 s
+CODES=""
+for i in $(seq 1 8); do
+  CODES="${CODES} $(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${US_PORT}/api/health")"
+done
+echo "  health codes:${CODES}"
+[[ "${CODES}" == *"429"* ]] || fail "no 429 under a 3-per-5s rule (codes:${CODES})"
+[[ "${CODES}" == *"200"* ]] || fail "rule blocked everything including the first requests"
+curl -s -X PATCH "http://127.0.0.1:${US_PORT}/api/settings" -H "Authorization: ${SU_TOKEN}" \
+  -H "Content-Type: application/json" -d '{"rateLimits":{"enabled":false}}' >/dev/null
+green "  ✓ fixed-window 429s under the rule, first requests pass"
+
+step "binocle-only lane: automigrate journal records collection changes"
+docker cp m50-one:/data/pb_meta.db "${WORK}/pb_meta.db" >/dev/null
+HIST=$(python3 - "${WORK}/pb_meta.db" <<'PYEOF'
+import sqlite3, sys
+conn = sqlite3.connect(sys.argv[1])
+rows = conn.execute("SELECT type, collection FROM pb_migrations_history ORDER BY created").fetchall()
+print(sum(1 for t, c in rows if c == 'm50r' and t == 'create'))
+PYEOF
+)
+[[ "${HIST}" -ge 1 ]] || fail "no automigrate journal row for the m50r collection (got ${HIST})"
+green "  ✓ migrations history journal captured the collection create"
+
+green "[M50] PASS — ops surfaces identical + restore round-trip + rate limits + migrations journal proven"

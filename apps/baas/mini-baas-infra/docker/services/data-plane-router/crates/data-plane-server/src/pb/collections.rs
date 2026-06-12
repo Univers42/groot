@@ -115,6 +115,24 @@ const COL_SELECT: &str = "SELECT id, name, type, fields, listRule, viewRule, cre
      updateRule, deleteRule, indexes, created, updated, options FROM pb_collections";
 
 impl super::PbState {
+    /// Automigrate journal — the file-less equivalent of PB's pb_migrations:
+    /// every collection change records a full snapshot, so schema history is
+    /// inspectable and replayable.
+    pub(crate) fn migration_record(&self, kind: &str, c: &Collection) {
+        let conn = self.meta.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _ = conn.execute(
+            "INSERT INTO pb_migrations_history (id, type, collection, snapshot, created)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                pb_id(),
+                kind,
+                c.name,
+                c.to_json().to_string(),
+                pb_now(),
+            ],
+        );
+    }
+
     pub(crate) fn col_get(&self, id_or_name: &str) -> Option<Collection> {
         let conn = self.meta.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         conn.query_row(
@@ -367,6 +385,7 @@ async fn create(
     if let Err(m) = pb.col_insert(&col) {
         return pb_err(StatusCode::BAD_REQUEST, &m);
     }
+    pb.migration_record("create", &col);
     tracing::info!(target: "audit", event = "pb_collection_created", name = %col.name, "pb collection created");
     (StatusCode::OK, Json(col.to_json())).into_response()
 }
@@ -495,6 +514,7 @@ async fn update(
     if let Err(m) = pb.col_update(&col) {
         return pb_err(StatusCode::BAD_REQUEST, &m);
     }
+    pb.migration_record("update", &col);
     (StatusCode::OK, Json(pb.col_get(&col.id).map(|c| c.to_json()).unwrap_or_else(|| col.to_json()))).into_response()
 }
 
@@ -518,6 +538,7 @@ async fn remove(
         return r;
     }
     pb.col_delete(&col.id);
+    pb.migration_record("delete", &col);
     tracing::info!(target: "audit", event = "pb_collection_deleted", name = %col.name, "pb collection deleted");
     StatusCode::NO_CONTENT.into_response()
 }

@@ -1256,10 +1256,15 @@ fn pb_routes() -> axum::Router<AppState> {
 /// for it). Applied at merge time so it wraps exactly the pb router.
 #[cfg(feature = "pbcompat")]
 fn pb_routes_logged(state: AppState) -> axum::Router<AppState> {
-    pb_routes().layer(axum::middleware::from_fn_with_state(
-        state,
-        crate::pb::logs::capture,
-    ))
+    pb_routes()
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::pb::logs::capture,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state,
+            crate::pb::ratelimit::enforce,
+        ))
 }
 #[cfg(not(feature = "pbcompat"))]
 fn pb_routes_logged(_state: AppState) -> axum::Router<AppState> {
@@ -1333,9 +1338,12 @@ pub async fn run(config: ServerConfig) -> anyhow::Result<()> {
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!(address = %addr, data_dir = %data_dir.display(), "binocle-one listening (accounts + data plane, single binary)");
-    axum::serve(listener, router(state))
-        .with_graceful_shutdown(crate::signal::shutdown_signal())
-        .await?;
+    axum::serve(
+        listener,
+        router(state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(crate::signal::shutdown_signal())
+    .await?;
     Ok(())
 }
 
