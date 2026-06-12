@@ -7,8 +7,9 @@
 use axum::extract::{Path, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
-use axum::routing::get;
-use axum::Router;
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use serde_json::json;
 use std::collections::HashMap;
 
 use super::{pb_err, pb_of};
@@ -189,9 +190,75 @@ fn make_thumb(bytes: &[u8], spec: &str) -> Option<Vec<u8>> {
     Some(buf.into_inner())
 }
 
+/// POST /api/files/token — an authenticated caller (record or superuser)
+/// mints a short-lived token that unlocks PROTECTED file fields via
+/// `?token=` (PB's flow for files behind auth).
+async fn file_token(
+    State(state): State<AppState>,
+    headers: header::HeaderMap,
+) -> axum::response::Response {
+    let principal = match super::pb_auth(&state, &headers) {
+        super::PbAuth::Superuser => "su".to_string(),
+        super::PbAuth::Record { collection_id, record_id } => {
+            format!("{collection_id}:{record_id}")
+        }
+        _ => {
+            return super::pb_err(
+                StatusCode::UNAUTHORIZED,
+                "The request requires valid authorization token.",
+            )
+        }
+    };
+    let one = match crate::one::one_of(&state) {
+        Ok(o) => o,
+        Err(r) => return r,
+    };
+    match one.mint_flow_jwt(&principal, "", "pbfile") {
+        Ok(t) => (StatusCode::OK, Json(json!({ "token": t }))).into_response(),
+        Err(e) => super::pb_err(StatusCode::INTERNAL_SERVER_ERROR, &e),
+    }
+}
+
+/// Which file FIELD owns `filename` on this record, and is it protected?
+async fn field_is_protected(
+    state: &AppState,
+    col: &super::collections::Collection,
+    rid: &str,
+    filename: &str,
+) -> bool {
+    let protected_fields: Vec<String> = col
+        .fields
+        .as_array()
+        .map(|fields| {
+            fields
+                .iter()
+                .filter(|f| {
+                    f.get("type").and_then(serde_json::Value::as_str) == Some("file")
+                        && f.get("protected").and_then(serde_json::Value::as_bool) == Some(true)
+                })
+                .filter_map(|f| f.get("name").and_then(serde_json::Value::as_str).map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    if protected_fields.is_empty() {
+        return false;
+    }
+    let mut op = super::records::base_op_pub(data_plane_core::DataOperationKind::Get, &col.name);
+    op.filter = Some(json!({ "id": rid }));
+    let Ok(result) = super::exec(state, op).await else {
+        return true; // can't prove it's public → protect
+    };
+    let Some(row) = result.rows.first() else { return true };
+    protected_fields.iter().any(|f| match row.get(f) {
+        Some(serde_json::Value::String(s)) => s == filename || s.starts_with('[') && s.contains(filename),
+        _ => false,
+    })
+}
+
 /// GET /api/files/{collection}/{recordId}/{filename}[?thumb=spec]
 async fn serve(
     State(state): State<AppState>,
+    headers: header::HeaderMap,
     Path((cname, rid, filename)): Path<(String, String, String)>,
     Query(q): Query<HashMap<String, String>>,
 ) -> axum::response::Response {
@@ -204,6 +271,21 @@ async fn serve(
     };
     if !safe_segment(&rid) || !safe_segment(&filename) {
         return pb_err(StatusCode::BAD_REQUEST, "invalid path");
+    }
+    if field_is_protected(&state, &col, &rid, &filename).await {
+        let authorized = q
+            .get("token")
+            .map(|t| {
+                crate::one::one_of(&state)
+                    .ok()
+                    .map(|one| one.verify_flow_jwt(t, "pbfile").is_ok())
+                    .unwrap_or(false)
+            })
+            .unwrap_or(false)
+            || matches!(super::pb_auth(&state, &headers), super::PbAuth::Superuser);
+        if !authorized {
+            return pb_err(StatusCode::NOT_FOUND, "The requested resource wasn't found.");
+        }
     }
     let dir = pb.storage_root.join(&col.id).join(&rid);
     let path = dir.join(&filename);
@@ -259,5 +341,7 @@ pub(crate) async fn remove_record_files(pb: &super::PbState, collection_id: &str
 }
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/api/files/:collection/:record/:filename", get(serve))
+    Router::new()
+        .route("/api/files/token", post(file_token))
+        .route("/api/files/:collection/:record/:filename", get(serve))
 }

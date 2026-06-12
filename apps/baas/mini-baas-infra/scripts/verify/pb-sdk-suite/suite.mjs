@@ -148,6 +148,62 @@ await step("typed-values", async () => {
   };
 });
 
+const AUTHORS = `m48authors${Date.now() % 100000}`;
+let authorsId = "";
+let authorId = "";
+await step("expand-setup", async () => {
+  const a = await pb.collections.create({
+    name: AUTHORS,
+    type: "base",
+    fields: [{ name: "name", type: "text" }],
+    listRule: "", viewRule: "", createRule: "", updateRule: "", deleteRule: "",
+  });
+  authorsId = a.id;
+  await pb.collections.update(COL, {
+    fields: [
+      { name: "title", type: "text" },
+      { name: "views", type: "number" },
+      { name: "done", type: "bool" },
+      { name: "meta", type: "json" },
+      { name: "author", type: "relation", collectionId: authorsId, maxSelect: 1 },
+    ],
+  });
+  const author = await pb.collection(AUTHORS).create({ name: "ada" });
+  authorId = author.id;
+  await pb.collection(COL).create({ title: "with-author", views: 1, done: false, author: authorId });
+  return { ok: true };
+});
+
+await step("expand-forward", async () => {
+  const res = await pb.collection(COL).getList(1, 50, {
+    filter: "title = 'with-author'",
+    expand: "author",
+  });
+  const item = res.items[0];
+  return {
+    found: !!item,
+    expandedName: item?.expand?.author?.name,
+    rawIdKept: typeof item?.author === "string" && item.author.length === 15,
+  };
+});
+
+await step("expand-back-relation", async () => {
+  const res = await pb.collection(AUTHORS).getList(1, 10, {
+    expand: `${COL}_via_author`,
+  });
+  const ada = res.items.find((a) => a.name === "ada");
+  const back = ada?.expand?.[`${COL}_via_author`];
+  return {
+    isArray: Array.isArray(back),
+    titles: Array.isArray(back) ? back.map((p) => p.title) : null,
+  };
+});
+
+await step("expand-cleanup", async () => {
+  await pb.collections.delete(AUTHORS).catch(() => {});
+  return { ok: true };
+});
+
 await step("record-delete", async () => {
   await pb.collection(COL).delete(rid);
   try {

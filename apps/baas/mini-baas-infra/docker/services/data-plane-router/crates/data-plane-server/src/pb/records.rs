@@ -208,7 +208,11 @@ fn lower_body(
 /// `?sort=-created,name` → ordered (column, direction) pairs. `@random` and
 /// `@rowid` are PB specials; `@random` has no stable PB-faithful lowering in
 /// the shared op (and PB documents it as random) — lowered to rowid for now.
-fn parse_sort(raw: &str, kinds: &HashMap<String, FieldKind>) -> Result<Vec<(String, String)>, String> {
+fn parse_sort(
+    raw: &str,
+    kinds: &HashMap<String, FieldKind>,
+    any_safe_ident: bool,
+) -> Result<Vec<(String, String)>, String> {
     let mut out = Vec::new();
     for part in raw.split(',').map(str::trim).filter(|p| !p.is_empty()) {
         let (dir, name) = match part.strip_prefix('-') {
@@ -219,6 +223,15 @@ fn parse_sort(raw: &str, kinds: &HashMap<String, FieldKind>) -> Result<Vec<(Stri
             "@rowid" | "@random" => "rowid".to_string(),
             "id" => name.to_string(),
             other if kinds.contains_key(other) => other.to_string(),
+            // views: columns come from the SELECT, unknown to the registry —
+            // any safe identifier is allowed (quoted, parameter-free)
+            other
+                if any_safe_ident
+                    && !other.is_empty()
+                    && other.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') =>
+            {
+                other.to_string()
+            }
             other => return Err(format!("unknown sort field '{other}'")),
         };
         out.push((column, dir.to_string()));
@@ -283,6 +296,173 @@ pub(crate) fn filter_to_wire(f: &data_plane_core::Filter) -> Value {
         }
         Filter::Between { field, low, high } => json!({ field: { "$between": [low, high] } }),
         Filter::IsNull { field, negate } => json!({ field: { "$null": !negate } }),
+    }
+}
+
+
+// ─── expand (relations + back-relations) ─────────────────────────────────────
+
+/// Declared relation fields → (field name, target collection id/name, multi).
+fn relation_fields(col: &Collection) -> Vec<(String, String, bool)> {
+    col.fields
+        .as_array()
+        .map(|fields| {
+            fields
+                .iter()
+                .filter(|f| f.get("type").and_then(Value::as_str) == Some("relation"))
+                .filter_map(|f| {
+                    let name = f.get("name").and_then(Value::as_str)?.to_string();
+                    let target = f.get("collectionId").and_then(Value::as_str)?.to_string();
+                    let multi = f.get("maxSelect").and_then(Value::as_i64).unwrap_or(1) > 1;
+                    Some((name, target, multi))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+enum Link {
+    Forward { multi: bool },
+    Back { via: String },
+}
+
+/// PB's `?expand=` — comma-separated dot paths over relation fields, plus
+/// `X_via_field` back-relations; ≤ 6 levels. Expanded records honor the
+/// TARGET collection's viewRule for the caller (unexpandable → omitted,
+/// exactly PB). Attached under `record.expand.{token}`.
+async fn apply_expand(
+    state: &AppState,
+    col: &Collection,
+    items: &mut [Value],
+    expand_raw: &str,
+    ctx: &super::rules::RuleCtx,
+    depth: usize,
+) {
+    if depth > 6 || items.is_empty() {
+        return;
+    }
+    let Ok(pb) = pb_of(state) else { return };
+    for token in expand_raw.split(',').map(str::trim).filter(|t| !t.is_empty()) {
+        let (head, rest) = match token.split_once('.') {
+            Some((h, r)) => (h, Some(r)),
+            None => (token, None),
+        };
+        let (target_col, link): (Collection, Link) = if let Some((_, target, multi)) =
+            relation_fields(col).into_iter().find(|(n, _, _)| n == head)
+        {
+            match pb.col_get(&target) {
+                Some(t) => (t, Link::Forward { multi }),
+                None => continue,
+            }
+        } else if let Some((tname, via)) = head.rsplit_once("_via_") {
+            match pb.col_get(tname) {
+                Some(t) => (t, Link::Back { via: via.to_string() }),
+                None => continue,
+            }
+        } else {
+            continue;
+        };
+        let rule_filter = match super::rules::lower_rule(target_col.view_rule.as_ref(), ctx) {
+            super::rules::Lowered::Open => None,
+            super::rules::Lowered::Constrain(f) => Some(f),
+            _ => continue, // locked/never: PB omits the expansion
+        };
+        let target_kinds = field_kinds(&target_col);
+
+        let mut fetched: Vec<Value> = Vec::new();
+        match &link {
+            Link::Forward { .. } => {
+                let mut ids: Vec<Value> = Vec::new();
+                for item in items.iter() {
+                    match item.get(head) {
+                        Some(Value::String(id)) if !id.is_empty() => ids.push(json!(id)),
+                        Some(Value::Array(a)) => ids.extend(a.iter().cloned()),
+                        _ => {}
+                    }
+                }
+                ids.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
+                ids.dedup();
+                if ids.is_empty() {
+                    continue;
+                }
+                let mut op = base_op(DataOperationKind::List, &target_col.name);
+                op.limit = Some(1000);
+                let base = json!({ "id": { "$in": ids } });
+                op.filter = Some(match rule_filter {
+                    Some(rf) => json!({ "$and": [base, rf] }),
+                    None => base,
+                });
+                if let Ok(r) = exec(state, op).await {
+                    fetched = r.rows;
+                }
+            }
+            Link::Back { via } => {
+                let ids: Vec<Value> = items.iter().filter_map(|i| i.get("id").cloned()).collect();
+                if ids.is_empty() {
+                    continue;
+                }
+                let mut op = base_op(DataOperationKind::List, &target_col.name);
+                op.limit = Some(1000);
+                let mut base_map = serde_json::Map::new();
+                base_map.insert(via.clone(), json!({ "$in": ids }));
+                let base = Value::Object(base_map);
+                op.filter = Some(match rule_filter {
+                    Some(rf) => json!({ "$and": [base, rf] }),
+                    None => base,
+                });
+                if let Ok(r) = exec(state, op).await {
+                    fetched = r.rows;
+                }
+            }
+        }
+        let mut shaped: Vec<Value> = fetched
+            .iter()
+            .map(|r| shape_record(&target_col, &target_kinds, r))
+            .collect();
+        if let Some(rest) = rest {
+            Box::pin(apply_expand(state, &target_col, &mut shaped, rest, ctx, depth + 1)).await;
+        }
+        let by_id: HashMap<String, Value> = shaped
+            .into_iter()
+            .filter_map(|r| Some((r.get("id")?.as_str()?.to_string(), r)))
+            .collect();
+
+        for item in items.iter_mut() {
+            let attached: Option<Value> = match &link {
+                Link::Forward { multi } => match item.get(head) {
+                    Some(Value::String(id)) => by_id.get(id.as_str()).cloned(),
+                    Some(Value::Array(a)) => {
+                        let v: Vec<Value> = a
+                            .iter()
+                            .filter_map(|id| by_id.get(id.as_str()?).cloned())
+                            .collect();
+                        (!v.is_empty() || *multi).then_some(Value::Array(v))
+                    }
+                    _ => None,
+                },
+                Link::Back { via } => {
+                    let my_id = item.get("id").and_then(Value::as_str).unwrap_or_default();
+                    let v: Vec<Value> = by_id
+                        .values()
+                        .filter(|r| match r.get(via) {
+                            Some(Value::String(s)) => s == my_id,
+                            Some(Value::Array(a)) => a.iter().any(|x| x.as_str() == Some(my_id)),
+                            _ => false,
+                        })
+                        .cloned()
+                        .collect();
+                    (!v.is_empty()).then_some(Value::Array(v))
+                }
+            };
+            if let Some(val) = attached {
+                if let Some(obj) = item.as_object_mut() {
+                    let exp = obj.entry("expand").or_insert_with(|| json!({}));
+                    if let Some(e) = exp.as_object_mut() {
+                        e.insert(head.to_string(), val);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -579,97 +759,6 @@ fn load_collection(
     Ok((col, kinds))
 }
 
-/// View collections: run the stored SELECT through the raw read path with
-/// ORDER/LIMIT/OFFSET wrapped around it. Filters on views arrive later
-/// (documented; PB filters views server-side) — `?filter=` answers 400.
-async fn list_view(
-    state: &AppState,
-    col: &Collection,
-    page: u32,
-    per_page: u32,
-    skip_total: bool,
-    sort: Option<&String>,
-    filter: Option<&String>,
-) -> axum::response::Response {
-    if filter.map(|f| !f.trim().is_empty()).unwrap_or(false) {
-        return pb_err(
-            StatusCode::BAD_REQUEST,
-            "filtering view collections is not supported by this engine version",
-        );
-    }
-    let Some(q) = col.options.get("viewQuery").and_then(Value::as_str) else {
-        return pb_err(StatusCode::INTERNAL_SERVER_ERROR, "view lost its query");
-    };
-    let mut order = String::new();
-    if let Some(raw) = sort {
-        let mut parts = Vec::new();
-        for token in raw.split(',').map(str::trim).filter(|p| !p.is_empty()) {
-            let (dir, name) = match token.strip_prefix('-') {
-                Some(rest) => ("DESC", rest),
-                None => ("ASC", token.strip_prefix('+').unwrap_or(token)),
-            };
-            if name.is_empty()
-                || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-            {
-                return pb_err(StatusCode::BAD_REQUEST, "invalid sort field for a view");
-            }
-            parts.push(format!("\"{name}\" {dir}"));
-        }
-        if !parts.is_empty() {
-            order = format!(" ORDER BY {}", parts.join(", "));
-        }
-    }
-    let sql = format!(
-        "SELECT * FROM ({q}) AS v{order} LIMIT {} OFFSET {}",
-        per_page,
-        (page - 1) * per_page
-    );
-    let rows = match super::exec_raw(
-        state,
-        data_plane_core::RawStatement { statement: sql, params: vec![], expect_rows: true },
-    )
-    .await
-    {
-        Ok(r) => r.rows,
-        Err(r) => return r,
-    };
-    let items: Vec<Value> = rows
-        .into_iter()
-        .map(|mut row| {
-            if let Some(o) = row.as_object_mut() {
-                o.insert("collectionId".into(), json!(col.id));
-                o.insert("collectionName".into(), json!(col.name));
-            }
-            row
-        })
-        .collect();
-    let (total_items, total_pages) = if skip_total {
-        (-1i64, -1i64)
-    } else {
-        let count_sql = format!("SELECT COUNT(*) AS n FROM ({q}) AS v");
-        match super::exec_raw(
-            state,
-            data_plane_core::RawStatement { statement: count_sql, params: vec![], expect_rows: true },
-        )
-        .await
-        {
-            Ok(r) => {
-                let n = r.rows.first().and_then(|row| row.get("n")).and_then(Value::as_i64).unwrap_or(0);
-                (n, (n + per_page as i64 - 1) / per_page as i64)
-            }
-            Err(r) => return r,
-        }
-    };
-    (
-        StatusCode::OK,
-        Json(json!({
-            "page": page, "perPage": per_page, "totalItems": total_items,
-            "totalPages": total_pages, "items": items,
-        })),
-    )
-        .into_response()
-}
-
 /// GET /api/collections/{c}/records — PB list envelope.
 async fn list(
     State(state): State<AppState>,
@@ -684,18 +773,6 @@ async fn list(
     let (_auth, ctx) = caller(&state, &headers).await;
     let lowered = super::rules::lower_rule(col.list_rule.as_ref(), &ctx);
     let page: u32 = q.get("page").and_then(|v| v.parse().ok()).unwrap_or(1).max(1);
-    if col.kind == "view" {
-        if matches!(lowered, super::rules::Lowered::Deny) {
-            return pb_err(StatusCode::FORBIDDEN, "Only superusers can perform this action.");
-        }
-        let per_page: u32 = q
-            .get("perPage")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(30)
-            .clamp(1, 1000);
-        let skip_total = matches!(q.get("skipTotal").map(String::as_str), Some("1" | "true"));
-        return list_view(&state, &col, page, per_page, skip_total, q.get("sort"), q.get("filter")).await;
-    }
     let per_page: u32 = q
         .get("perPage")
         .and_then(|v| v.parse().ok())
@@ -713,7 +790,7 @@ async fn list(
         }
     }
     if let Some(raw) = q.get("sort") {
-        match parse_sort(raw, &kinds) {
+        match parse_sort(raw, &kinds, col.kind == "view") {
             Ok(s) if !s.is_empty() => op.sort_order = Some(s),
             Ok(_) => {}
             Err(m) => return pb_err(StatusCode::BAD_REQUEST, &m),
@@ -747,7 +824,17 @@ async fn list(
         .rows
         .iter()
         .map(|r| {
-            let mut rec = shape_record(&col, &kinds, r);
+            let mut rec = if col.kind == "view" {
+                // view columns come from the SELECT — pass rows through raw
+                let mut row = r.clone();
+                if let Some(o) = row.as_object_mut() {
+                    o.insert("collectionId".into(), json!(col.id));
+                    o.insert("collectionName".into(), json!(col.name));
+                }
+                row
+            } else {
+                shape_record(&col, &kinds, r)
+            };
             if col.kind == "auth" {
                 let is_self = self_id.as_deref()
                     == rec.get("id").and_then(Value::as_str);
@@ -756,6 +843,10 @@ async fn list(
             rec
         })
         .collect();
+    let mut items = items;
+    if let Some(exp) = q.get("expand").filter(|e| !e.trim().is_empty()) {
+        apply_expand(&state, &col, &mut items, exp, &ctx, 1).await;
+    }
 
     let (total_items, total_pages) = if skip_total {
         (-1i64, -1i64)
@@ -815,6 +906,7 @@ async fn view(
     State(state): State<AppState>,
     headers: header::HeaderMap,
     Path((cname, rid)): Path<(String, String)>,
+    Query(q): Query<HashMap<String, String>>,
 ) -> axum::response::Response {
     let (col, kinds) = match load_collection(&state, &cname) {
         Ok(v) => v,
@@ -830,6 +922,11 @@ async fn view(
     }
     match exec(&state, op).await.map(|r| r.rows.first().map(|row| shape_record(&col, &kinds, row))) {
         Ok(Some(mut rec)) => {
+            if let Some(exp) = q.get("expand").filter(|e| !e.trim().is_empty()) {
+                let mut one_item = vec![rec];
+                apply_expand(&state, &col, &mut one_item, exp, &ctx, 1).await;
+                rec = one_item.pop().unwrap_or(Value::Null);
+            }
             if col.kind == "auth" {
                 let su = ctx.superuser;
                 let is_self = ctx
@@ -969,6 +1066,9 @@ async fn update(
         Ok(v) => v,
         Err(r) => return r,
     };
+    if col.kind == "view" {
+        return pb_err(StatusCode::BAD_REQUEST, "unable to update a view collection record");
+    }
     let (_auth, ctx) = caller(&state, &headers).await;
     let lowered = super::rules::lower_rule(col.update_rule.as_ref(), &ctx);
     if matches!(lowered, super::rules::Lowered::Deny) {
@@ -1053,6 +1153,9 @@ async fn remove(
         Ok(v) => v,
         Err(r) => return r,
     };
+    if col.kind == "view" {
+        return pb_err(StatusCode::BAD_REQUEST, "unable to delete a view collection record");
+    }
     let (_auth, ctx) = caller(&state, &headers).await;
     let lowered = super::rules::lower_rule(col.delete_rule.as_ref(), &ctx);
     if matches!(lowered, super::rules::Lowered::Deny) {
@@ -1189,14 +1292,14 @@ mod tests {
     fn sort_parses_ordered_and_rejects_unknown() {
         let col = col_with(json!([{"name": "b", "type": "text"}, {"name": "a", "type": "text"}]));
         let kinds = field_kinds(&col);
-        let s = parse_sort("-b,a,+id", &kinds).unwrap();
+        let s = parse_sort("-b,a,+id", &kinds, false).unwrap();
         assert_eq!(s, vec![
             ("b".to_string(), "desc".to_string()),
             ("a".to_string(), "asc".to_string()),
             ("id".to_string(), "asc".to_string()),
         ], "declaration order preserved — the reason sort_order exists");
-        assert!(parse_sort("created", &kinds).is_err(), "created only when declared");
-        assert!(parse_sort("nope", &kinds).is_err());
+        assert!(parse_sort("created", &kinds, false).is_err(), "created only when declared");
+        assert!(parse_sort("nope", &kinds, false).is_err());
     }
 
     #[test]

@@ -355,10 +355,15 @@ async fn create(
         Ok(v) => v,
         Err(m) => return pb_err(StatusCode::BAD_REQUEST, &m),
     };
-    if kind != "view" {
-        if let Err(r) = exec_ddl(&state, create_table_sql(&name, &cols)).await {
+    if kind == "view" {
+        // a REAL SQLite view: filters/sorts/getOne flow through the normal
+        // engine path; the records layer only blocks mutations
+        let q = req.get("viewQuery").and_then(|v| v.as_str()).unwrap_or_default().trim();
+        if let Err(r) = exec_ddl(&state, format!("CREATE VIEW IF NOT EXISTS \"{name}\" AS {q}")).await {
             return r;
         }
+    } else if let Err(r) = exec_ddl(&state, create_table_sql(&name, &cols)).await {
+        return r;
     }
     if kind == "auth" {
         let idx = format!(
@@ -542,10 +547,13 @@ async fn remove(
     let Some(col) = pb.col_get(&id_or_name) else {
         return pb_err(StatusCode::NOT_FOUND, "collection not found");
     };
-    if col.kind != "view" {
-        if let Err(r) = exec_ddl(&state, format!("DROP TABLE IF EXISTS \"{}\"", col.name)).await {
-            return r;
-        }
+    let drop_sql = if col.kind == "view" {
+        format!("DROP VIEW IF EXISTS \"{}\"", col.name)
+    } else {
+        format!("DROP TABLE IF EXISTS \"{}\"", col.name)
+    };
+    if let Err(r) = exec_ddl(&state, drop_sql).await {
+        return r;
     }
     pb.col_delete(&col.id);
     pb.migration_record("delete", &col);
@@ -553,9 +561,58 @@ async fn remove(
     StatusCode::NO_CONTENT.into_response()
 }
 
+/// PUT /api/collections/import {collections, deleteMissing?} — superuser.
+/// Create-or-update each entry (additive field changes only, like PATCH);
+/// deleteMissing removes collections absent from the payload.
+async fn import(
+    State(state): State<AppState>,
+    headers: header::HeaderMap,
+    Json(req): Json<Value>,
+) -> axum::response::Response {
+    if let Err(r) = require_superuser(&state, &headers) {
+        return r;
+    }
+    let pb = match pb_of(&state) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    let Some(entries) = req.get("collections").and_then(|v| v.as_array()) else {
+        return pb_err(StatusCode::BAD_REQUEST, "missing collections array");
+    };
+    let mut names = std::collections::HashSet::new();
+    for entry in entries {
+        let name = entry.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        names.insert(name.clone());
+        let exists = pb.col_get(&name).is_some();
+        let resp = if exists {
+            update(
+                State(state.clone()),
+                headers.clone(),
+                Path(name),
+                Json(entry.clone()),
+            )
+            .await
+        } else {
+            create(State(state.clone()), headers.clone(), Json(entry.clone())).await
+        };
+        if resp.status().as_u16() >= 400 {
+            return resp;
+        }
+    }
+    if req.get("deleteMissing").and_then(Value::as_bool).unwrap_or(false) {
+        for col in pb.col_list() {
+            if !names.contains(&col.name) {
+                let _ = remove(State(state.clone()), headers.clone(), Path(col.name.clone())).await;
+            }
+        }
+    }
+    StatusCode::NO_CONTENT.into_response()
+}
+
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/collections", post(create).get(list))
+        .route("/api/collections/import", axum::routing::put(import))
         .route(
             "/api/collections/:id_or_name",
             get(view).patch(update).delete(remove),

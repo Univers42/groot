@@ -94,26 +94,41 @@ process); bounded caches everywhere; system maintenance crons (expired
 codes/refresh purge, orphan-file sweep, `PRAGMA optimize`);
 `clippy --workspace --all-features -D warnings` is a build wall.
 
-## Honest residuals (on the board, not hidden)
+## Filled in the gap-fill pass (2026-06-12, all SDK-certified)
 
-The SDK certificate covers the surfaces above. These PB features are **not
-yet implemented** and fail loud (clear 400s), never silently wrong:
+A second pass closed the bulk of the original residual list — each now
+proven against real PocketBase by an added suite step:
 
-- `expand` relations (incl. `X_via_field` back-relations) on records reads;
-  multi-value relation/select columns store JSON arrays but `?`-operator
-  any-of semantics over them are v1 (single-value equivalence)
+- **`expand` relations + `X_via_field` back-relations** on records list and
+  getOne (≤6 levels, target-collection viewRule honored) — m48
+- **`?filter=` and `?sort=` on view collections** (now backed by a real
+  SQLite `VIEW`, so the whole engine read path applies) — m52
+- **MFA `mfaId` 401 flow** on the facade (first factor → `{mfaId}`, OTP
+  second factor consumes it) — m49
+- **collections `import`** (create-or-update, optional deleteMissing) — m49
+- **protected file fields + `/api/files/token`** (bare request 404s, token
+  unlocks) — m52
+- **`impersonate(duration)`** honors the caller's custom TTL — m49
+- **admin-UI ops panels** (`/_/` → Ops tab: request logs, backups
+  create/restore/delete, crons run, settings editor); the nano admin key
+  acts as facade superuser
+
+This pass also fixed a real **engine bug the expand suite surfaced**:
+`prepare_cached` statements kept stale column metadata across an
+`ALTER TABLE` (a `SELECT *`/`INSERT` cached before a relation column was
+added silently dropped it). Fixed with a per-mount schema generation that
+flushes every reader's statement cache on DDL.
+
+## Remaining residuals (still on the board, fail loud)
+
 - rules: `@collection.*` cross-collection joins, `:isset/:changed/:length/
   :each/:lower` modifiers, `geoDistance()` in filters/rules (geoPoint
   STORAGE ships), `@request.body/query/headers` references — the v1 engine
   fails CLOSED on all of these
-- `?filter=` on view collections
-- the PB-facade MFA `mfaId` 401 flow (binocle-one's native TOTP MFA exists,
-  m42; the facade bridge does not)
-- collections import/export endpoints + `/api/files/token` protected-file
-  flow on the facade (native signed links exist, m43)
-- admin-UI panels for the new surfaces (the m45 dashboard ships; logs/
-  backups/crons panels are CLI/API-only today)
-- `impersonate(duration)` accepts but does not honor a custom duration
+- multi-value relation/select columns store JSON arrays, but `?`-operator
+  any-of semantics over them stay v1 (single-value equivalence)
+- the MFA second factor is shape-certified (the `mfaId` handshake); a full
+  end-to-end OTP completion needs an SMTP sink, covered natively by m42
 
 ## Benchmark method (kept honest)
 

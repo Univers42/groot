@@ -248,6 +248,34 @@ await step("request-email-change-requires-auth", async () => {
   }
 });
 
+await step("mfa-first-factor-401-with-mfaId", async () => {
+  await su.collections.update(USERS, { mfa: { enabled: true, duration: 300 } });
+  const fresh = new PocketBase(base);
+  let got = null;
+  try {
+    await fresh.collection(USERS).authWithPassword("alice@m49.dev", "alice-pass-123");
+  } catch (e) {
+    got = e?.response?.mfaId ?? null;
+  }
+  await su.collections.update(USERS, { mfa: { enabled: false } });
+  return { mfaIdIssued: typeof got === "string" && got.length > 5 };
+});
+
+const IMP = `m49import${TS}`;
+await step("collections-import", async () => {
+  await su.collections.import([
+    {
+      name: IMP,
+      type: "base",
+      fields: [{ name: "x", type: "text" }],
+      listRule: "", viewRule: "", createRule: "", updateRule: "", deleteRule: "",
+    },
+  ]);
+  const c = await su.collections.getOne(IMP);
+  await su.collections.delete(IMP);
+  return { imported: c?.name === IMP };
+});
+
 await step("cleanup", async () => {
   await su.collections.delete(POSTS);
   await su.collections.delete(USERS);

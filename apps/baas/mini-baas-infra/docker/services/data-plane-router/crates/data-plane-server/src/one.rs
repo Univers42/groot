@@ -1054,6 +1054,11 @@ impl OneState {
         Ok(data.claims.sub)
     }
 
+    /// Custom-TTL token (facade impersonation with a caller duration).
+    pub(crate) fn mint_jwt_ttl(&self, user_id: &str, email: &str, ttl: u64) -> Result<String, String> {
+        self.mint_typed(user_id, email, "auth", ttl)
+    }
+
     pub(crate) fn mint_jwt(&self, user_id: &str, email: &str) -> Result<(String, u64), String> {
         self.mint_typed(user_id, email, "auth", self.jwt_ttl)
             .map(|t| (t, self.jwt_ttl))
