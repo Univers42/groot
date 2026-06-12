@@ -27,6 +27,7 @@ pub mod filter;
 #[cfg(feature = "hooks")]
 pub mod hooks;
 pub mod logs;
+pub mod predicate;
 pub mod ratelimit;
 pub mod realtime;
 pub mod rules;

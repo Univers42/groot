@@ -131,14 +131,38 @@ This pass also fixed a real **engine bug the expand suite surfaced**:
 added silently dropped it). Fixed with a per-mount schema generation that
 flushes every reader's statement cache on DDL.
 
+## Filter + rules: 100% parity (the predicate engine, 2026-06-12)
+
+The third pass replaced the SQL-only filter lowering with a **predicate
+engine** (`pb/predicate.rs`): a PB filter/rule parses into an AST that lowers
+to a fast SQL `WHERE` when it can, and falls back to **in-memory evaluation**
+(over a SQL-pre-filtered candidate set) when it uses an advanced construct.
+That closes the last of the rules board — each certified against real PB by a
+rules-matrix step (m49):
+
+- **`:modifiers`** — `:isset`, `:length`, `:each`, `:lower`
+- **multi-value `:each` semantics** — `field:each = v` (ALL elements),
+  `field:each ?= v` (ANY element); verified to match PB exactly, including
+  that a plain `?op` on a stored array does **not** decompose it (PB compares
+  the serialized value — `tags ~ 'x'` is the element-match idiom)
+- **`geoDistance(lonA, latA, lonB, latB)`** — haversine km over geoPoint
+  fields, dotted access (`place.lon`)
+- **`@collection.*` cross-collection joins** — resolved as an EXISTS
+  sub-query per outer record (same-name refs share one join row, PB's
+  membership pattern), with `@request.auth.*` + outer-record substitution
+
+Honest performance characteristics (NOT gaps — outcome is PB-identical):
+advanced predicates fetch a candidate window (≤5000 rows, narrowed by the
+SQL-expressible conjuncts) and filter in Rust; `@collection` joins run one
+sub-query per candidate row. These live on the **rules / advanced-filter**
+path only — the simple-filter CRUD hot path stays entirely on SQL (the
+benchmark numbers above are unchanged).
+
 ## Remaining residuals (still on the board, fail loud)
 
-- rules: `@collection.*` cross-collection joins, `:isset/:changed/:length/
-  :each/:lower` modifiers, `geoDistance()` in filters/rules (geoPoint
-  STORAGE ships), `@request.body/query/headers` references — the v1 engine
-  fails CLOSED on all of these
-- multi-value relation/select columns store JSON arrays, but `?`-operator
-  any-of semantics over them stay v1 (single-value equivalence)
+- rule references to `@request.body/query/headers` (only `@request.auth.*`
+  resolves today) and `@collection` row aliases (`:alias`) — the engine
+  fails CLOSED on these
 - the MFA second factor is shape-certified (the `mfaId` handshake); a full
   end-to-end OTP completion needs an SMTP sink, covered natively by m42
 
