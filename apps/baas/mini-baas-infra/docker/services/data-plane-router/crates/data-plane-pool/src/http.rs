@@ -106,9 +106,11 @@ impl EngineAdapter for HttpEngineAdapter {
         let client = builder.build().map_err(|e| DataPlaneError::Backend {
             message: format!("reqwest client init failed: {e}"),
         })?;
+        let shared_pool = crate::pools_shared(&mount);
         Ok(Box::new(HttpPool {
             mount_id: mount.id,
             tenant_id: mount.tenant_id,
+            shared_pool,
             client,
             conn,
         }))
@@ -126,6 +128,10 @@ impl EngineAdapter for HttpEngineAdapter {
 pub struct HttpPool {
     mount_id: String,
     tenant_id: String,
+    /// True for a SHARE_POOLS shared_rls pool: the single-owner guard is skipped
+    /// (the per-request `x-owner-id` header carries isolation to the upstream).
+    /// See `crate::pools_shared`.
+    shared_pool: bool,
     client: Client,
     conn: HttpConnection,
 }
@@ -141,7 +147,9 @@ impl EnginePool for HttpPool {
         operation: DataOperation,
         identity: RequestIdentity,
     ) -> DataPlaneResult<DataResult> {
-        if identity.tenant_id != self.tenant_id {
+        // SHARE_POOLS shared_rls pool: multi-tenant by design, no single owner to
+        // assert; the per-request `x-owner-id` header carries isolation upstream.
+        if !self.shared_pool && identity.tenant_id != self.tenant_id {
             return Err(DataPlaneError::Backend {
                 message: "identity tenant does not match pool tenant".into(),
             });
@@ -372,7 +380,7 @@ fn ssrf_blocked(host: &str) -> DataPlaneError {
 }
 
 /// Validate an http mount's base URL against the SSRF guard and return the host
-/// + its validated socket addresses to PIN (so a later DNS rebind cannot point
+/// and its validated socket addresses to PIN (so a later DNS rebind cannot point
 /// the client inward). `Ok(None)` when the dev escape is set (no check, no pin).
 pub async fn guard_and_resolve(base_url: &str) -> DataPlaneResult<Option<(String, Vec<SocketAddr>)>> {
     if std::env::var("DATA_PLANE_HTTP_ALLOW_INTERNAL").ok().as_deref() == Some("1") {

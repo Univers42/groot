@@ -69,3 +69,32 @@ pub use credential::{
 };
 pub use registry::DefaultPoolRegistry;
 pub use resolver::{EnvMountResolver, MountResolver};
+
+/// B4-pools: whether this mount's connection pool is SHARED across tenants.
+///
+/// True only when `DATA_PLANE_SHARE_POOLS` is on AND the mount is `shared_rls`
+/// — the one isolation strategy whose tenant scoping is re-applied per request
+/// from the request identity (Postgres RLS GUCs; the `owner_id` predicate /
+/// `x-owner-id` header / owner key-prefix on every other engine), so the pool
+/// holds NO tenant state and can serve every tenant on one physical backend.
+/// `schema_per_tenant` pins a namespace into the pool and `db_per_tenant` /
+/// `tenant_owned` use distinct DSNs, so none of those ever share (and
+/// [`data_plane_core::DatabaseMount::effective_pool_key`] keeps their per-tenant
+/// pool key regardless).
+///
+/// This is the single source of truth every engine adapter calls to set its
+/// `shared_pool` flag, so the env parse + isolation predicate live in ONE place
+/// instead of drifting across seven files. Parsed identically to
+/// `data-plane-server` config (`∈ {1, true, on}`); the env is fixed at process
+/// start, so reading it at `open_pool` (per-pool, not per-request) is correct.
+#[allow(dead_code)] // not every feature-set compiles every adapter caller
+pub(crate) fn pools_shared(mount: &data_plane_core::DatabaseMount) -> bool {
+    matches!(mount.isolation(), data_plane_core::Isolation::SharedRls)
+        && matches!(
+            std::env::var("DATA_PLANE_SHARE_POOLS")
+                .unwrap_or_default()
+                .to_lowercase()
+                .as_str(),
+            "1" | "true" | "on"
+        )
+}

@@ -119,9 +119,11 @@ impl EngineAdapter for RedisEngineAdapter {
         // shared_rls / db_per_tenant → the historical `<owner>:<resource>:<id>`
         // envelope, byte-identical to before G5.
         let namespace = resolve_namespace(&mount);
+        let shared_pool = crate::pools_shared(&mount);
         Ok(Box::new(RedisPool {
             mount_id: mount.id,
             tenant_id: mount.tenant_id,
+            shared_pool,
             manager,
             namespace,
         }))
@@ -139,6 +141,11 @@ impl EngineAdapter for RedisEngineAdapter {
 pub struct RedisPool {
     mount_id: String,
     tenant_id: String,
+    /// True for a SHARE_POOLS shared_rls pool serving many tenants on one redis:
+    /// the single-owner guard is skipped (the per-request owner key-prefix —
+    /// `<owner>:<resource>` derived from the identity — carries isolation). See
+    /// `crate::pools_shared`.
+    shared_pool: bool,
     manager: ConnectionManager,
     /// `Some("tenant_<id>")` for `schema_per_tenant` mounts: prepended to every
     /// key so a tenant's keyspace is fully partitioned. `None` (shared_rls /
@@ -276,7 +283,9 @@ impl EnginePool for RedisPool {
         operation: DataOperation,
         identity: RequestIdentity,
     ) -> DataPlaneResult<DataResult> {
-        if identity.tenant_id != self.tenant_id {
+        // SHARE_POOLS shared_rls pool: multi-tenant by design, no single owner to
+        // assert; the per-request owner key-prefix carries isolation.
+        if !self.shared_pool && identity.tenant_id != self.tenant_id {
             return Err(DataPlaneError::Backend {
                 message: "identity tenant does not match pool tenant".into(),
             });

@@ -253,9 +253,9 @@ impl EngineAdapter for PostgresEngineAdapter {
         // tenant on this physical DB from one connection set, so it must NOT
         // assert a single owner tenant — isolation is re-applied per request
         // (`app.current_tenant_id` GUC + the owner_id predicate, both from the
-        // request identity). Computed once here (open_pool is per-pool, not per-
-        // request); env is immutable at runtime and parsed exactly as config.rs.
-        let shared_pool = matches!(isolation, Isolation::SharedRls) && share_pools_enabled();
+        // request identity). `crate::pools_shared` is the one place the env +
+        // isolation predicate live, shared with every other engine adapter.
+        let shared_pool = crate::pools_shared(&mount);
         Ok(Box::new(PostgresPool {
             mount_id: mount.id.clone(),
             tenant_id: mount.tenant_id.clone(),
@@ -306,19 +306,6 @@ pub struct PostgresPool {
     /// ([`DatabaseMount::tenant_schema`] in `apply_migration`). Cheap: opened
     /// once per pool, not per request.
     mount: DatabaseMount,
-}
-
-/// Whether pool-sharing is enabled, parsed identically to
-/// `data-plane-server` config (`DATA_PLANE_SHARE_POOLS` ∈ {1,true,on}). Read at
-/// `open_pool` (per-pool, not per-request); the env is fixed at process start.
-fn share_pools_enabled() -> bool {
-    matches!(
-        std::env::var("DATA_PLANE_SHARE_POOLS")
-            .unwrap_or_default()
-            .to_lowercase()
-            .as_str(),
-        "1" | "true" | "on"
-    )
 }
 
 impl PostgresPool {
@@ -2841,7 +2828,9 @@ mod tests {
 
     #[test]
     fn pg_numeric_binary_encoding_golden_vectors() {
-        // (input, ndigits, weight, sign, dscale, base-10000 groups)
+        // (input, ndigits, weight, sign, dscale, base-10000 groups) — the
+        // explicit tuple IS the golden-vector contract, kept verbatim.
+        #[allow(clippy::type_complexity)]
         let cases: [(&str, i16, i16, u16, u16, &[i16]); 7] = [
             ("0", 0, 0, 0, 0, &[]),
             ("1", 1, 0, 0, 0, &[1]),

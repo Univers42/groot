@@ -259,6 +259,8 @@ measurement did its job: it replaced a guess (pools) with a located, mechanism-l
 > get `identity tenant does not match pool tenant` (502). The pool-count win is real; the per-checkout RLS
 > **re-stamp is not yet implemented**, so `SHARE_POOLS` stays **off (parity default)** and is *not* the
 > ready 100K lever until that guard is fixed. This is why the 10K run above used per-tenant pools (987), not 1.
+> **(Resolved: §7.4 fixed the guard on Postgres and remeasured 1 pool / 0×5xx; §7.5 extended the fix to all
+> seven engine adapters. This caveat narrates the run that predates both.)**
 
 Artifacts: `artifacts/bench/multitenant-10000.json` (cold, default cache),
 `multitenant-10000-coldcache.json` (same, preserved), `multitenant-10000-warmcache.json` (10-min TTL),
@@ -346,6 +348,52 @@ parity); the scale override turns it on. The §7.1/§7.2 "identity guard breaks 
 
 Artifacts: `multitenant-10000-sharepools.json` (SHARE_POOLS=1+sha256) vs `-sha256.json` (verify-only) vs
 `-coldcache.json` (original argon2id).
+
+### 7.5 The lever, every engine (2026-06-12). Pool-sharing made correct on all seven adapters, not just Postgres.
+
+§7.4 proved the lever on PostgreSQL. But `effective_pool_key` collapses a shared pool
+**engine-agnostically** — so the instant `SHARE_POOLS=1` becomes the scale default, a `shared_rls`
+mount on *any* engine collapses to one pool and its single-owner guard 502s every tenant but the
+pool's opener. The lever was correct on Postgres and **silently broken on the other six adapters**.
+This pass closes that.
+
+The single-owner `check_tenant` was never the isolation boundary — it is a defense-in-depth assertion
+that is simply *wrong* for a multi-tenant pool. Every adapter applies tenant isolation **per request,
+from the request identity**, and *that* is what carries on a shared pool:
+
+| Engine adapter | Per-request isolation (carries on a shared pool) | `self.tenant_id` was… |
+|---|---|---|
+| postgresql / cockroachdb | `app.current_tenant_id` RLS GUC + `owner_id` predicate | guard-only |
+| mysql / mariadb | `owner_id = ?` predicate from `owner_of(identity)` | guard-only |
+| mssql | `[owner_id] =` predicate from identity | guard-only |
+| sqlite | `owner_id = ?` predicate from identity | guard-only |
+| redis | `<owner>:<resource>` key prefix from identity | guard-only |
+| http | `x-owner-id` header from identity (upstream authz) | guard-only |
+| **mongodb** | `owner_id` **and `tenant_id`** stamped + filtered per request | **also sourced `tenant_id` from the pool field** |
+
+Six adapters used `self.tenant_id` only for the guard, so skipping it when the pool is shared is
+isolation-neutral by the exact argument Postgres proved. **MongoDB was the one real hazard:** it stamps
+*and filters* `tenant_id` on every document, and all seven call sites sourced it from the pool's
+`self.tenant_id` — which on a shared pool is the *opener's* tenant. Left unfixed, a shared mongo pool
+would tag every tenant's writes with one tenant id (owner_id would still isolate, but the tag would be
+wrong, and would invert the moment the lever toggled). The fix sources `tenant_id` from
+`identity.tenant_id` at every call site — **byte-identical on a per-tenant pool** (the guard proves
+`identity.tenant_id == self.tenant_id` there) and correct on a shared one. The MySQL transaction handle
+got the same treatment: it now binds the txn to the tenant that *began* it (`request.identity`), not the
+pool opener.
+
+**One predicate, one place.** The env + isolation gate is hoisted to `crate::pools_shared(mount)` (the
+former postgres-local `share_pools_enabled` is deleted), so all seven adapters read the lever identically
+and it cannot drift.
+
+**Verified:** `cargo test` green across the workspace — core 66 + pool 156 + server 35 = **257** unit
+tests, including two new per-engine isolation tests (mongo stamps + filters each request's *own*
+tenant+owner; mysql scopes each request by its *own* owner). `cargo clippy -D warnings` clean. Each
+engine is reasoned isolation-neutral per the table. The remaining gate is the **live cross-engine probe**
+— a `shared_rls` mysql + mongo mount under `SHARE_POOLS=1`, two tenants, prove byte-identical isolation
+to `=0` (the same probe that validated Postgres in §7.4), to run when the live-demo stack is up.
+
+Code: `data-plane-pool/src/{lib,postgres,mysql,mongo,mssql,sqlite,redis,http}.rs`.
 
 ---
 

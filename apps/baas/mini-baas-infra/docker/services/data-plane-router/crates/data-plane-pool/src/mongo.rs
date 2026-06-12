@@ -207,10 +207,12 @@ impl EngineAdapter for MongoEngineAdapter {
         // once here. For shared_rls / db_per_tenant the directive is `None` →
         // the DSN-default db, byte-identical to before G5.
         let db_name = resolve_namespace(&mount).unwrap_or_else(|| parse_db_name(&dsn));
+        let shared_pool = crate::pools_shared(&mount);
 
         Ok(Box::new(MongoPool {
             mount_id: mount.id.clone(),
             tenant_id: mount.tenant_id.clone(),
+            shared_pool,
             client,
             db_name,
         }))
@@ -229,6 +231,12 @@ impl EngineAdapter for MongoEngineAdapter {
 pub struct MongoPool {
     mount_id: String,
     tenant_id: String,
+    /// True for a SHARE_POOLS shared_rls pool serving many tenants: the
+    /// single-owner `check_tenant` assertion is skipped AND the per-request
+    /// `tenant_id`/`owner_id` stamp is sourced from the request identity (not
+    /// this field) so isolation travels with the request. See
+    /// `crate::pools_shared` and the postgres adapter.
+    shared_pool: bool,
     client: Client,
     db_name: String,
 }
@@ -248,6 +256,23 @@ impl MongoPool {
             .clone()
             .unwrap_or_else(|| identity.tenant_id.clone())
     }
+
+    /// Defense-in-depth tenant cross-check, skipped for a SHARE_POOLS shared_rls
+    /// pool (multi-tenant by design — no single owner to assert). Unlike the
+    /// relational adapters, mongo also stamps `tenant_id` onto every document;
+    /// the call sites therefore source it from `identity.tenant_id` (not this
+    /// pool field) so a shared pool stamps/filters each request's OWN tenant.
+    fn check_tenant(&self, identity: &RequestIdentity) -> DataPlaneResult<()> {
+        if self.shared_pool {
+            return Ok(());
+        }
+        if identity.tenant_id != self.tenant_id {
+            return Err(DataPlaneError::Backend {
+                message: "identity tenant does not match pool tenant".into(),
+            });
+        }
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -263,11 +288,7 @@ impl EnginePool for MongoPool {
     ) -> DataPlaneResult<DataResult> {
         // Fail-closed cross-check: the dispatcher should already have rejected
         // identity/mount mismatches, but the pool is the second line of defense.
-        if identity.tenant_id != self.tenant_id {
-            return Err(DataPlaneError::Backend {
-                message: "identity tenant does not match pool tenant".into(),
-            });
-        }
+        self.check_tenant(&identity)?;
 
         if !SUPPORTED_OPS.contains(&operation.op) {
             return Err(DataPlaneError::NotImplemented {
@@ -315,11 +336,7 @@ impl EnginePool for MongoPool {
         &self,
         identity: RequestIdentity,
     ) -> DataPlaneResult<SchemaDescriptor> {
-        if identity.tenant_id != self.tenant_id {
-            return Err(DataPlaneError::Backend {
-                message: "identity tenant does not match pool tenant".into(),
-            });
-        }
+        self.check_tenant(&identity)?;
         let db = self.client.database(&self.db_name);
         let mut specs: Vec<CollectionSpecification> = db
             .list_collections()
@@ -386,11 +403,7 @@ impl EnginePool for MongoPool {
         ddl: SchemaDdlRequest,
         identity: RequestIdentity,
     ) -> DataPlaneResult<SchemaDdlResult> {
-        if identity.tenant_id != self.tenant_id {
-            return Err(DataPlaneError::Backend {
-                message: "identity tenant does not match pool tenant".into(),
-            });
-        }
+        self.check_tenant(&identity)?;
         // Same name gate the request path uses (rejects `$`, dots, etc.).
         let _ = self.collection(&ddl.table)?;
         let db = self.client.database(&self.db_name);
@@ -739,7 +752,7 @@ impl MongoPool {
             }
         }
 
-        let match_doc = build_tenant_filter(op.filter.as_ref(), identity, &self.tenant_id)?;
+        let match_doc = build_tenant_filter(op.filter.as_ref(), identity, &identity.tenant_id)?;
 
         // `_id` carries the group key (null = single global group).
         let mut group = Document::new();
@@ -795,7 +808,7 @@ impl MongoPool {
         op: &DataOperation,
         identity: &RequestIdentity,
     ) -> DataPlaneResult<DataResult> {
-        let filter = build_tenant_filter(op.filter.as_ref(), identity, &self.tenant_id)?;
+        let filter = build_tenant_filter(op.filter.as_ref(), identity, &identity.tenant_id)?;
         let limit = op.limit.unwrap_or(100).min(1_000) as i64;
         let skip = op.offset.unwrap_or(0) as u64;
         let find_opts = FindOptions::builder()
@@ -822,7 +835,7 @@ impl MongoPool {
         op: &DataOperation,
         identity: &RequestIdentity,
     ) -> DataPlaneResult<DataResult> {
-        let filter = build_tenant_filter(op.filter.as_ref(), identity, &self.tenant_id)?;
+        let filter = build_tenant_filter(op.filter.as_ref(), identity, &identity.tenant_id)?;
         let doc = col.find_one(filter).await.map_err(mongo_err)?;
         match doc {
             Some(d) => Ok(DataResult {
@@ -849,7 +862,7 @@ impl MongoPool {
         let data = op.data.as_ref().ok_or_else(|| DataPlaneError::InvalidRequest {
             message: "insert requires operation.data".to_string(),
         })?;
-        let doc = build_owned_doc(data, identity, &self.tenant_id)?;
+        let doc = build_owned_doc(data, identity, &identity.tenant_id)?;
         let result = col.insert_one(doc.clone()).await.map_err(mongo_err)?;
         let mut out = doc;
         out.insert("_id", result.inserted_id);
@@ -868,7 +881,7 @@ impl MongoPool {
         identity: &RequestIdentity,
     ) -> DataPlaneResult<DataResult> {
         require_row_filter(op.filter.as_ref(), "update")?;
-        let filter = build_tenant_filter(op.filter.as_ref(), identity, &self.tenant_id)?;
+        let filter = build_tenant_filter(op.filter.as_ref(), identity, &identity.tenant_id)?;
         let data = op.data.as_ref().ok_or_else(|| DataPlaneError::InvalidRequest {
             message: "update requires operation.data".to_string(),
         })?;
@@ -891,7 +904,7 @@ impl MongoPool {
         identity: &RequestIdentity,
     ) -> DataPlaneResult<DataResult> {
         require_row_filter(op.filter.as_ref(), "delete")?;
-        let filter = build_tenant_filter(op.filter.as_ref(), identity, &self.tenant_id)?;
+        let filter = build_tenant_filter(op.filter.as_ref(), identity, &identity.tenant_id)?;
         let result = col.delete_many(filter).await.map_err(mongo_err)?;
         Ok(DataResult {
             rows: vec![],
@@ -932,7 +945,7 @@ impl MongoPool {
         filter.insert("owner_id", MongoPool::owner(identity));
         filter.insert("tenant_id", identity.tenant_id.clone());
 
-        let set_doc = build_owned_doc(data, identity, &self.tenant_id)?;
+        let set_doc = build_owned_doc(data, identity, &identity.tenant_id)?;
         let update = bson::doc! { "$set": set_doc };
         let update_opts = UpdateOptions::builder().upsert(true).build();
         let result = col
@@ -1400,6 +1413,44 @@ mod tests {
         assert_eq!(doc.get_str("_id").unwrap(), "evt-000001");
         assert_eq!(doc.get_str("owner_id").unwrap(), "api-key:k1");
         assert_eq!(doc.get_str("tenant_id").unwrap(), "t1");
+    }
+
+    #[test]
+    fn shared_pool_stamps_and_filters_each_requests_own_tenant() {
+        // SHARE_POOLS isolation proof: the adapter's call sites now pass
+        // `&identity.tenant_id` (not the pool's `self.tenant_id`) into
+        // build_owned_doc / build_tenant_filter, so ONE pool shared across
+        // tenants stamps + filters each request by its OWN tenant + owner.
+        // Two distinct identities must produce two distinct stamps — never the
+        // pool-opener's. This is what makes skipping the single-owner guard safe.
+        let id_a = RequestIdentity {
+            tenant_id: "tenant-a".into(),
+            user_id: Some("api-key:a".into()),
+            ..probe_identity()
+        };
+        let id_b = RequestIdentity {
+            tenant_id: "tenant-b".into(),
+            user_id: Some("api-key:b".into()),
+            ..probe_identity()
+        };
+        let data = json!({ "kind": "login" });
+
+        // Writes: each request stamps its own owner + tenant.
+        let doc_a = build_owned_doc(&data, &id_a, &id_a.tenant_id).unwrap();
+        let doc_b = build_owned_doc(&data, &id_b, &id_b.tenant_id).unwrap();
+        assert_eq!(doc_a.get_str("tenant_id").unwrap(), "tenant-a");
+        assert_eq!(doc_a.get_str("owner_id").unwrap(), "api-key:a");
+        assert_eq!(doc_b.get_str("tenant_id").unwrap(), "tenant-b");
+        assert_eq!(doc_b.get_str("owner_id").unwrap(), "api-key:b");
+
+        // Reads: each request filters by its own owner + tenant — so tenant-a
+        // can never select tenant-b's documents through the shared pool.
+        let filt_a = build_tenant_filter(Some(&json!({})), &id_a, &id_a.tenant_id).unwrap();
+        assert_eq!(filt_a.get_str("tenant_id").unwrap(), "tenant-a");
+        assert_eq!(filt_a.get_str("owner_id").unwrap(), "api-key:a");
+        let filt_b = build_tenant_filter(Some(&json!({})), &id_b, &id_b.tenant_id).unwrap();
+        assert_eq!(filt_b.get_str("tenant_id").unwrap(), "tenant-b");
+        assert_eq!(filt_b.get_str("owner_id").unwrap(), "api-key:b");
     }
 
     #[test]

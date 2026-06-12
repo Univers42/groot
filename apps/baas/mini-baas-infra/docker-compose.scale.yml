@@ -32,7 +32,10 @@ services:
       # (master-plan §7.4): 10K tenants → 1 pool, 0×5xx; isolation byte-identical
       # to per-tenant pools (apply_rls_context re-stamps app.current_tenant_id +
       # owner_id per request — the pool holds no tenant state). The check_tenant
-      # single-owner guard that used to 502 every non-creator tenant is fixed.
+      # single-owner guard that used to 502 every non-creator tenant is fixed on
+      # EVERY engine adapter (pg/mysql/mongo/mssql/sqlite/redis/http — §7.5), not
+      # just Postgres; mongo additionally sources its tenant_id stamp from the
+      # request identity so a shared pool tags each request's own tenant.
       # Default ON for the scale override (the 100K-on-one-box config); set to 0
       # to measure the per-tenant-pool baseline.
       DATA_PLANE_SHARE_POOLS: ${DATA_PLANE_SHARE_POOLS:-1}

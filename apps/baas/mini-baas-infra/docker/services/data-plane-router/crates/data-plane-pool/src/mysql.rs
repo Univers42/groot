@@ -201,10 +201,12 @@ impl EngineAdapter for MysqlEngineAdapter {
         // independent) so it's resolved once here; `None` for shared_rls /
         // db_per_tenant → no `USE`, byte-identical to before G5.
         let namespace = resolve_namespace(&mount);
+        let shared_pool = crate::pools_shared(&mount);
 
         Ok(Box::new(MysqlPool {
             mount_id: mount.id,
             tenant_id: mount.tenant_id,
+            shared_pool,
             pool,
             namespace,
         }))
@@ -223,6 +225,12 @@ impl EngineAdapter for MysqlEngineAdapter {
 pub struct MysqlPool {
     mount_id: String,
     tenant_id: String,
+    /// True for a SHARE_POOLS shared_rls pool serving many tenants from one
+    /// connection set: the single-owner `check_tenant` assertion is then
+    /// skipped (the `owner_id` predicate from each request's identity carries
+    /// isolation — `self.tenant_id` has no single value to assert). See
+    /// `crate::pools_shared` and the postgres adapter.
+    shared_pool: bool,
     pool: Pool,
     /// `Some("tenant_<id>")` for `schema_per_tenant` mounts: the per-tenant
     /// database selected via `USE` on every checkout. `None` (shared_rls /
@@ -231,6 +239,24 @@ pub struct MysqlPool {
 }
 
 impl MysqlPool {
+    /// Defense-in-depth tenant cross-check (the dispatcher already rejected
+    /// identity/mount mismatches). Skipped for a SHARE_POOLS shared_rls pool:
+    /// it is multi-tenant by design and has no single owner to assert — the
+    /// `owner_id` predicate from THIS request's identity (`build_owner_filter`)
+    /// carries isolation, exactly as the postgres adapter relies on its
+    /// per-request RLS GUCs.
+    fn check_tenant(&self, identity: &RequestIdentity) -> DataPlaneResult<()> {
+        if self.shared_pool {
+            return Ok(());
+        }
+        if identity.tenant_id != self.tenant_id {
+            return Err(DataPlaneError::Backend {
+                message: "identity tenant does not match pool tenant".into(),
+            });
+        }
+        Ok(())
+    }
+
     /// Pin the per-tenant database on a freshly checked-out connection.
     ///
     /// `USE` is re-issued on EVERY checkout (never assumed sticky): pooled
@@ -283,11 +309,7 @@ impl EnginePool for MysqlPool {
     ) -> DataPlaneResult<DataResult> {
         // Second line of defense (the dispatcher should already have rejected
         // tenant/mount mismatches — see routes::validate_identity_mount).
-        if identity.tenant_id != self.tenant_id {
-            return Err(DataPlaneError::Backend {
-                message: "identity tenant does not match pool tenant".into(),
-            });
-        }
+        self.check_tenant(&identity)?;
 
         // Parity with the TS adapter: every request runs in its own
         // transaction so a multi-statement write is atomic per request even
@@ -357,7 +379,11 @@ impl EnginePool for MysqlPool {
         Ok(Box::new(MysqlTxHandle {
             tx_id,
             mount_id: self.mount_id.clone(),
-            tenant_id: self.tenant_id.clone(),
+            // Bind the txn to the tenant that BEGAN it — not the pool's opener,
+            // which differs under SHARE_POOLS. On a per-tenant pool this is
+            // byte-identical (the dispatcher guarantees identity == pool tenant);
+            // on a shared pool it is the only correct owner of this transaction.
+            tenant_id: request.identity.tenant_id.clone(),
             conn: Mutex::new(Some(conn)),
         }))
     }
@@ -496,11 +522,7 @@ impl EnginePool for MysqlPool {
         &self,
         identity: RequestIdentity,
     ) -> DataPlaneResult<SchemaDescriptor> {
-        if identity.tenant_id != self.tenant_id {
-            return Err(DataPlaneError::Backend {
-                message: "identity tenant does not match pool tenant".into(),
-            });
-        }
+        self.check_tenant(&identity)?;
         let mut conn = self.pool.get_conn().await.map_err(backend)?;
         self.select_namespace(&mut conn).await?;
 
@@ -589,11 +611,7 @@ impl EnginePool for MysqlPool {
         ddl: SchemaDdlRequest,
         identity: RequestIdentity,
     ) -> DataPlaneResult<SchemaDdlResult> {
-        if identity.tenant_id != self.tenant_id {
-            return Err(DataPlaneError::Backend {
-                message: "identity tenant does not match pool tenant".into(),
-            });
-        }
+        self.check_tenant(&identity)?;
         let stmt = build_mysql_ddl(&ddl)?;
         let mut conn = self.pool.get_conn().await.map_err(backend)?;
         self.select_namespace(&mut conn).await?;
@@ -1636,6 +1654,19 @@ mod tests {
         assert_eq!(sql, " WHERE `owner_id` = ?");
         assert_eq!(params.len(), 1);
         assert!(matches!(&params[0], MysqlValue::Bytes(b) if b == b"u-1"));
+    }
+
+    #[test]
+    fn shared_pool_scopes_each_request_by_its_own_owner() {
+        // SHARE_POOLS isolation proof: a pool shared across tenants holds NO
+        // tenant state — the owner predicate is bound from THIS request's
+        // identity, so two tenants sharing one pool get two different owner
+        // filters and can never read each other's rows. This is what makes
+        // skipping the single-owner `check_tenant` guard safe on MySQL.
+        let (_, pa) = build_owner_filter(None, &identity_with(Some("api-key:a"))).unwrap();
+        let (_, pb) = build_owner_filter(None, &identity_with(Some("api-key:b"))).unwrap();
+        assert!(matches!(&pa[0], MysqlValue::Bytes(b) if b == b"api-key:a"));
+        assert!(matches!(&pb[0], MysqlValue::Bytes(b) if b == b"api-key:b"));
     }
 
     #[test]

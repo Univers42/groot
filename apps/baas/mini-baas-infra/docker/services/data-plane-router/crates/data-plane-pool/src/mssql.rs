@@ -83,6 +83,7 @@ impl EngineAdapter for MssqlEngineAdapter {
             mount_id: mount.id.clone(),
             tenant_id: mount.tenant_id.clone(),
             owner_scoped: mount.isolation().owner_scoped(),
+            shared_pool: crate::pools_shared(&mount),
             pool,
         }))
     }
@@ -100,11 +101,21 @@ pub struct MssqlPool {
     mount_id: String,
     tenant_id: String,
     owner_scoped: bool,
+    /// True for a SHARE_POOLS shared_rls pool serving many tenants: the
+    /// single-owner `check_tenant` assertion is skipped (the `owner_id`
+    /// predicate from each request's identity carries isolation). See
+    /// `crate::pools_shared`.
+    shared_pool: bool,
     pool: Pool<ConnectionManager>,
 }
 
 impl MssqlPool {
     fn check_tenant(&self, identity: &RequestIdentity) -> DataPlaneResult<()> {
+        // SHARE_POOLS shared_rls pool: multi-tenant by design, no single owner
+        // to assert; the per-request `owner_id` predicate carries isolation.
+        if self.shared_pool {
+            return Ok(());
+        }
         if identity.tenant_id != self.tenant_id {
             return Err(DataPlaneError::Backend {
                 message: "identity tenant does not match pool tenant".into(),
