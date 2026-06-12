@@ -13,7 +13,6 @@
 //! `@request.body/query/headers`) fails CLOSED with an audit line — a rule
 //! must never silently widen.
 
-use data_plane_core::{CmpOp, Filter};
 use serde_json::{json, Value};
 
 use super::PbAuth;
@@ -50,12 +49,14 @@ pub(crate) enum Lowered {
     Open,
     /// AND this engine-filter wire shape into the operation.
     Constrain(Value),
-    /// The rule folded to FALSE for this caller (e.g. a guest with
-    /// `owner = @request.auth.id` and an empty owner is still Constrain, but
-    /// `@request.auth.id != ''` folds): list → empty, view/update/delete →
-    /// 404, create → 400. Matches nothing, ever.
+    /// The rule uses an advanced construct (`:modifier`, multi-value `?op`,
+    /// `geoDistance()`) — it must be evaluated IN MEMORY per record. The
+    /// caller fetches candidates (with `sql_prefilter`) and applies this.
+    Memory(super::predicate::PbExpr),
+    /// The rule folded to FALSE for this caller: list → empty, view/update/
+    /// delete → 404, create → 400. Matches nothing, ever.
     Never,
-    /// Locked (None rule, non-superuser) or unsupported construct.
+    /// Locked (None rule, non-superuser).
     Deny,
 }
 
@@ -71,111 +72,53 @@ pub(crate) fn lower_rule(rule: Option<&String>, ctx: &RuleCtx) -> Lowered {
     if raw.trim().is_empty() {
         return Lowered::Open;
     }
-    match super::filter::parse_pb_filter_with(raw, &|r| ctx.resolve(r)) {
-        Ok(ast) => match ast.fold() {
-            data_plane_core::Folded::AlwaysTrue => Lowered::Open,
-            data_plane_core::Folded::AlwaysFalse => Lowered::Never,
-            data_plane_core::Folded::Constrained => {
-                Lowered::Constrain(super::records::filter_to_wire(&ast))
-            }
+    match super::predicate::parse(raw, &|r| ctx.resolve(r)) {
+        Ok(expr) => match expr.to_engine_filter() {
+            Some(ast) => match ast.fold() {
+                data_plane_core::Folded::AlwaysTrue => Lowered::Open,
+                data_plane_core::Folded::AlwaysFalse => Lowered::Never,
+                data_plane_core::Folded::Constrained => {
+                    Lowered::Constrain(super::records::filter_to_wire(&ast))
+                }
+            },
+            // advanced construct → in-memory evaluation
+            None => Lowered::Memory(expr),
         },
         Err(e) => {
-            tracing::warn!(target: "audit", event = "pb_rule_unsupported", rule = %raw, error = %e,
-                "rule construct not supported by the v1 engine — failing CLOSED");
+            tracing::warn!(target: "audit", event = "pb_rule_unparseable", rule = %raw, error = %e,
+                "rule did not parse — failing CLOSED");
             Lowered::Deny
         }
     }
 }
 
-/// AND two optional engine filters.
-pub(crate) fn and_filters(base: Option<Value>, extra: Value) -> Value {
-    match base {
-        Some(b) => json!({ "$and": [b, extra] }),
-        None => extra,
-    }
+/// The rule as a parsed predicate (or Open/Deny sentinel) — the single-record
+/// handlers fetch the target and `eval` this in memory, which uniformly
+/// covers SQL-able AND advanced (`:modifier`/`?any`/`geoDistance`) rules.
+pub(crate) enum RulePred {
+    Open,
+    Deny,
+    Pred(super::predicate::PbExpr),
 }
 
-/// In-memory evaluation for createRule: does `record` satisfy the filter?
-pub(crate) fn eval(filter: &Filter, record: &Value) -> bool {
-    match filter {
-        Filter::And(parts) => parts.iter().all(|p| eval(p, record)),
-        Filter::Or(parts) => parts.iter().any(|p| eval(p, record)),
-        Filter::Not(inner) => !eval(inner, record),
-        Filter::Cmp { field, op, value } => {
-            let got = record.get(field).cloned().unwrap_or(Value::Null);
-            cmp_values(&got, *op, value)
-        }
-        Filter::In { field, values } => {
-            let got = record.get(field).cloned().unwrap_or(Value::Null);
-            values.iter().any(|v| loose_eq(&got, v))
-        }
-        Filter::Like { field, pattern, .. } => {
-            let got = record.get(field).and_then(|v| v.as_str()).unwrap_or("");
-            let pat = pattern.as_str().unwrap_or("");
-            like_match(got, pat)
-        }
-        Filter::Between { field, low, high } => {
-            let got = record.get(field).cloned().unwrap_or(Value::Null);
-            cmp_values(&got, CmpOp::Gte, low) && cmp_values(&got, CmpOp::Lte, high)
-        }
-        Filter::IsNull { field, negate } => {
-            let is_null = record.get(field).map(Value::is_null).unwrap_or(true);
-            is_null != *negate
-        }
+pub(crate) fn rule_pred(rule: Option<&String>, ctx: &RuleCtx) -> RulePred {
+    if ctx.superuser {
+        return RulePred::Open;
     }
-}
-
-fn loose_eq(a: &Value, b: &Value) -> bool {
-    if a == b {
-        return true;
-    }
-    match (a.as_f64(), b.as_f64()) {
-        (Some(x), Some(y)) => x == y,
-        _ => match (a.as_str(), b.as_str()) {
-            (Some(x), Some(y)) => x == y,
-            // empty-vs-null are PB-equal zero values
-            _ => (a.is_null() && b.as_str() == Some("")) || (b.is_null() && a.as_str() == Some("")),
-        },
-    }
-}
-
-fn cmp_values(a: &Value, op: CmpOp, b: &Value) -> bool {
-    use std::cmp::Ordering::*;
-    let ord = if let (Some(x), Some(y)) = (a.as_f64(), b.as_f64()) {
-        x.partial_cmp(&y)
-    } else {
-        let x = a.as_str().map(str::to_string).unwrap_or_else(|| a.to_string());
-        let y = b.as_str().map(str::to_string).unwrap_or_else(|| b.to_string());
-        Some(x.cmp(&y))
+    let Some(raw) = rule else {
+        return RulePred::Deny;
     };
-    match (op, ord) {
-        (CmpOp::Eq, _) => loose_eq(a, b),
-        (CmpOp::Ne, _) => !loose_eq(a, b),
-        (CmpOp::Lt, Some(Less)) => true,
-        (CmpOp::Lte, Some(Less | Equal)) => true,
-        (CmpOp::Gt, Some(Greater)) => true,
-        (CmpOp::Gte, Some(Greater | Equal)) => true,
-        _ => false,
+    if raw.trim().is_empty() {
+        return RulePred::Open;
     }
-}
-
-/// SQL-LIKE matching (`%` multi, `_` single), case-insensitive like PB's `~`.
-fn like_match(text: &str, pattern: &str) -> bool {
-    fn inner(t: &[char], p: &[char]) -> bool {
-        match (t, p) {
-            (_, []) => t.is_empty(),
-            (_, ['%', rest @ ..]) => {
-                (0..=t.len()).any(|i| inner(&t[i..], rest))
-            }
-            ([], _) => false,
-            ([tc, trest @ ..], [pc, prest @ ..]) => {
-                (*pc == '_' || tc.eq_ignore_ascii_case(pc)) && inner(trest, prest)
-            }
+    match super::predicate::parse(raw, &|r| ctx.resolve(r)) {
+        Ok(e) => RulePred::Pred(e),
+        Err(e) => {
+            tracing::warn!(target: "audit", event = "pb_rule_unparseable", rule = %raw, error = %e,
+                "rule did not parse — failing CLOSED");
+            RulePred::Deny
         }
     }
-    let t: Vec<char> = text.to_lowercase().chars().collect();
-    let p: Vec<char> = pattern.to_lowercase().chars().collect();
-    inner(&t, &p)
 }
 
 #[cfg(test)]
@@ -209,35 +152,27 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_constructs_fail_closed() {
+    fn modifiers_route_to_memory_not_deny() {
+        // :modifiers are now SUPPORTED — they route to in-memory evaluation
         let c = ctx(Some(json!({ "id": "u" })));
-        for rule in [
-            "@collection.other.x = 1",
-            "title:isset = true",
-            "@request.body.x = 1",
-        ] {
-            assert!(
-                matches!(lower_rule(Some(&rule.to_string()), &c), Lowered::Deny),
-                "{rule} must deny"
-            );
-        }
+        assert!(matches!(
+            lower_rule(Some(&"title:isset = true".to_string()), &c),
+            Lowered::Memory(_)
+        ));
+        assert!(matches!(
+            lower_rule(Some(&"tags:length > 0".to_string()), &c),
+            Lowered::Memory(_)
+        ));
     }
 
     #[test]
-    fn eval_covers_create_rule_shapes() {
-        let rec = json!({ "owner": "u1", "status": "open", "n": 5, "title": "hello world" });
-        let f = |s: &str| {
-            super::super::filter::parse_pb_filter_with(s, &|r| {
-                (r == "@request.auth.id").then(|| json!("u1"))
-            })
-            .unwrap()
-        };
-        assert!(eval(&f("owner = @request.auth.id"), &rec));
-        assert!(!eval(&f("owner != @request.auth.id"), &rec));
-        assert!(eval(&f("n > 3 && status = 'open'"), &rec));
-        assert!(eval(&f("title ~ 'world'"), &rec));
-        assert!(!eval(&f("title ~ 'mars'"), &rec));
-        assert!(eval(&f("missing = null"), &rec));
-        assert!(eval(&f("n >= 5 || n < 0"), &rec));
+    fn truly_unsupported_constructs_still_fail_closed() {
+        let c = ctx(Some(json!({ "id": "u" })));
+        // @request.body/@request.query are not yet resolvable → fail closed
+        assert!(matches!(
+            lower_rule(Some(&"@request.body.x = 1".to_string()), &c),
+            Lowered::Deny
+        ));
     }
+
 }
