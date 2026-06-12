@@ -424,7 +424,7 @@ fn run_js_thread(
                 let handlers: Vec<(String, Vec<String>, usize)> =
                     registry.borrow().record.clone();
                 for (act, cols, idx) in &handlers {
-                    if act != action || !(cols.is_empty() || cols.iter().any(|c| *c == collection)) {
+                    if act != action || !(cols.is_empty() || cols.contains(&collection)) {
                         continue;
                     }
                     let payload = json!({ "collection": collection, "record": serde_json::from_str::<Value>(&current).unwrap_or(Value::Null) }).to_string();
