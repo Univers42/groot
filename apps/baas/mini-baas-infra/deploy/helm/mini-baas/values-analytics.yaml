@@ -10,8 +10,6 @@ services:
     enabled: true
   debezium:
     enabled: true
-  functions-runtime:
-    enabled: true
   gotrue:
     enabled: true
   iceberg-rest:

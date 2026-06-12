@@ -9,26 +9,20 @@ profiles:
 - rust-data-plane
 services:
 - adapter-registry-go
-- ai-service
-- analytics-service
 - data-plane-router-rust
 - db-bootstrap
-- debezium
 - email-service
-- functions-runtime
 - gdpr-service
 - gotrue
-- iceberg-rest
 - kong
 - log-service
-- minio
-- minio-iceberg-init
 - mongo
 - mongo-api
 - mongo-init
 - mongo-keyfile
 - mysql
 - newsletter-service
+- orchestrator
 - outbox-relay
 - permission-engine
 - postgres
@@ -37,8 +31,6 @@ services:
 - realtime
 - redis
 - session-service
-- storage-router
 - tenant-control
-- trino
 - waf
 - webhook-dispatcher

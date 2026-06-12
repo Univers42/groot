@@ -14,17 +14,12 @@ profiles:
 - storage
 services:
 - adapter-registry-go
-- ai-service
-- analytics-service
 - data-plane-router-rust
 - db-bootstrap
-- debezium
 - email-service
-- functions-runtime
 - gdpr-service
 - gotrue
 - grafana
-- iceberg-rest
 - kong
 - log-service
 - loki
@@ -36,6 +31,7 @@ services:
 - mongo-keyfile
 - mysql
 - newsletter-service
+- orchestrator
 - outbox-relay
 - permission-engine
 - pg-backup
@@ -49,6 +45,5 @@ services:
 - session-service
 - storage-router
 - tenant-control
-- trino
 - waf
 - webhook-dispatcher

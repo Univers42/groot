@@ -40,5 +40,8 @@ ENV PG_BACKUP_SCHEDULE="0 3 * * *" \
     PG_BACKUP_RETAIN_DAYS=14 \
     PG_BACKUP_PHYSICAL=0
 
+HEALTHCHECK --interval=60s --timeout=10s --start-period=15s --retries=3 \
+  CMD ["/opt/pg-backup/entrypoint.sh", "liveness"]
+
 ENTRYPOINT ["/usr/bin/tini", "--", "/opt/pg-backup/entrypoint.sh"]
 CMD ["loop"]

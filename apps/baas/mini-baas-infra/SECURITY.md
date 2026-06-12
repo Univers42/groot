@@ -28,7 +28,9 @@ Set these before exposing a deployment (see [DEPLOYMENT.md](DEPLOYMENT.md) for c
       dump alone can then never validate keys.
 - [ ] **`SECURITY_MODE=max`** — external database mounts must present a verifiable
       TLS chain (`sslmode=require` is auto-upgraded to `verify-full`); custom CA
-      via `DATA_PLANE_TLS_CA_FILE`.
+      via `DATA_PLANE_TLS_CA_FILE`. This also neutralizes the dev escape
+      `DATA_PLANE_TLS_INSECURE` (default 1 so the bundled self-signed mssql
+      works out of the box; ignored under max — remote mounts always verify).
 - [ ] **`PACKAGE_ENFORCEMENT=1`** — tier engine-allowlists, capability masks and
       rate limits are enforced (default 0 to avoid retroactively gating existing
       tenants; assign plans first).

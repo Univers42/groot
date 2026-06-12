@@ -25,10 +25,10 @@ services:
     replicas: 1
     resources:
       limits:
-        cpu: 250m
-        memory: 48Mi
+        cpu: 500m
+        memory: 96Mi
       requests:
-        cpu: 125m
+        cpu: 250m
         memory: 0Mi
   ai-service:
     enabled: false
@@ -44,8 +44,7 @@ services:
       periodSeconds: 5
       timeoutSeconds: 3
     profiles:
-    - background
-    - data-plane
+    - analytics
     replicas: 1
     resources:
       limits:
@@ -69,8 +68,6 @@ services:
       timeoutSeconds: 3
     profiles:
     - analytics
-    - background
-    - data-plane
     replicas: 1
     resources:
       limits:
@@ -78,6 +75,34 @@ services:
         memory: 128Mi
       requests:
         cpu: 125m
+        memory: 0Mi
+  cockroach:
+    enabled: false
+    image: cockroachdb/cockroach:v24.3.5
+    ports:
+    - 8080
+    - 26257
+    probe:
+      exec:
+      - cockroach
+      - sql
+      - --insecure
+      - --host=127.0.0.1:26257
+      - -e
+      - SELECT 1
+      failureThreshold: 5
+      initialDelaySeconds: 20
+      periodSeconds: 10
+      timeoutSeconds: 5
+    profiles:
+    - engines-extra
+    replicas: 1
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1024Mi
+      requests:
+        cpu: 500m
         memory: 0Mi
   data-plane-router-rust:
     enabled: false
@@ -113,8 +138,17 @@ services:
     enabled: false
     image: quay.io/debezium/server:3.0
     ports: []
+    probe:
+      exec:
+      - sh
+      - -c
+      - curl -fsS http://localhost:8080/q/health >/dev/null || exit 1
+      failureThreshold: 5
+      initialDelaySeconds: 30
+      periodSeconds: 15
+      timeoutSeconds: 5
     profiles:
-    - data-plane
+    - analytics
     replicas: 1
     resources:
       limits:
@@ -151,8 +185,16 @@ services:
     image: ghcr.io/les-baas/mini-baas-functions-runtime:latest
     ports:
     - 3060
+    probe:
+      exec:
+      - deno
+      - eval
+      - try{const r=await fetch('http://localhost:3060/health/live');Deno.exit(r.ok?0:1)}catch{Deno.exit(1)}
+      failureThreshold: 5
+      initialDelaySeconds: 10
+      periodSeconds: 15
+      timeoutSeconds: 5
     profiles:
-    - data-plane
     - extras
     - functions
     replicas: 1
@@ -214,6 +256,15 @@ services:
     image: grafana/grafana:10.4.2
     ports:
     - 3000
+    probe:
+      exec:
+      - sh
+      - -c
+      - curl -fsS http://localhost:3000/api/health >/dev/null || exit 1
+      failureThreshold: 5
+      initialDelaySeconds: 20
+      periodSeconds: 15
+      timeoutSeconds: 5
     profiles:
     - observability
     replicas: 1
@@ -222,9 +273,17 @@ services:
     image: apache/iceberg-rest-fixture:1.8.1
     ports:
     - 8181
+    probe:
+      exec:
+      - sh
+      - -c
+      - curl -fsS http://localhost:8181/v1/config >/dev/null || exit 1
+      failureThreshold: 5
+      initialDelaySeconds: 20
+      periodSeconds: 15
+      timeoutSeconds: 5
     profiles:
     - analytics
-    - data-plane
     - extras
     replicas: 1
     resources:
@@ -287,17 +346,58 @@ services:
     image: grafana/loki:3.0.0
     ports:
     - 3100
+    probe:
+      exec:
+      - sh
+      - -c
+      - wget -qO- http://localhost:3100/ready >/dev/null || exit 1
+      failureThreshold: 5
+      initialDelaySeconds: 20
+      periodSeconds: 15
+      timeoutSeconds: 5
     profiles:
     - observability
     replicas: 1
+  mariadb:
+    enabled: false
+    image: mariadb:11
+    ports:
+    - 3306
+    probe:
+      exec:
+      - healthcheck.sh
+      - --connect
+      - --innodb_initialized
+      failureThreshold: 5
+      initialDelaySeconds: 20
+      periodSeconds: 10
+      timeoutSeconds: 5
+    profiles:
+    - engines-extra
+    replicas: 1
+    resources:
+      limits:
+        cpu: 500m
+        memory: 384Mi
+      requests:
+        cpu: 250m
+        memory: 0Mi
   minio:
     enabled: false
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z-cpuv1
     ports:
     - 9000
     - 9001
+    probe:
+      exec:
+      - sh
+      - -c
+      - curl -fsS http://localhost:9000/minio/health/live >/dev/null || exit 1
+      failureThreshold: 5
+      initialDelaySeconds: 15
+      periodSeconds: 15
+      timeoutSeconds: 5
     profiles:
-    - data-plane
     - extras
     - storage
     replicas: 1
@@ -307,7 +407,6 @@ services:
     ports: []
     profiles:
     - analytics
-    - data-plane
     - extras
     - storage
     replicas: 1
@@ -373,6 +472,31 @@ services:
     profiles:
     - data-plane
     replicas: 1
+  mssql:
+    enabled: false
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    ports:
+    - 1433
+    probe:
+      exec:
+      - sh
+      - -c
+      - /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$$MSSQL_SA_PASSWORD" -C -No -Q 'SELECT 1'
+        -b -o /dev/null
+      failureThreshold: 10
+      initialDelaySeconds: 45
+      periodSeconds: 10
+      timeoutSeconds: 5
+    profiles:
+    - engines-extra
+    replicas: 1
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 2048Mi
+      requests:
+        cpu: 500m
+        memory: 0Mi
   mysql:
     enabled: false
     image: mysql:8.4
@@ -423,6 +547,31 @@ services:
       limits:
         cpu: 250m
         memory: 128Mi
+      requests:
+        cpu: 125m
+        memory: 0Mi
+  orchestrator:
+    enabled: false
+    image: ghcr.io/les-baas/mini-baas-orchestrator:latest
+    ports:
+    - 3026
+    probe:
+      exec:
+      - /app/app
+      - --healthcheck
+      failureThreshold: 5
+      initialDelaySeconds: 30
+      periodSeconds: 5
+      timeoutSeconds: 3
+    profiles:
+    - background
+    - control-plane
+    - go-control-plane
+    replicas: 1
+    resources:
+      limits:
+        cpu: 250m
+        memory: 32Mi
       requests:
         cpu: 125m
         memory: 0Mi
@@ -501,6 +650,15 @@ services:
     enabled: false
     image: supabase/postgres-meta:v0.91.0
     ports: []
+    probe:
+      exec:
+      - sh
+      - -c
+      - node -e "fetch('http://localhost:8080/health').then(r=>{if(r.status!==200)throw 1}).catch(()=>process.exit(1))"
+      failureThreshold: 5
+      initialDelaySeconds: 15
+      periodSeconds: 15
+      timeoutSeconds: 5
     profiles:
     - control-plane
     - extras
@@ -554,6 +712,15 @@ services:
     image: prom/prometheus:v2.52.0
     ports:
     - 9090
+    probe:
+      exec:
+      - sh
+      - -c
+      - wget -qO- http://localhost:9090/-/healthy >/dev/null || exit 1
+      failureThreshold: 5
+      initialDelaySeconds: 15
+      periodSeconds: 15
+      timeoutSeconds: 5
     profiles:
     - observability
     replicas: 1
@@ -589,7 +756,7 @@ services:
         memory: 0Mi
   realtime:
     enabled: false
-    image: dlesieur/realtime-agnostic:latest
+    image: dlesieur/realtime-agnostic:0.2.1
     ports: []
     probe:
       exec:
@@ -628,7 +795,7 @@ services:
     resources:
       limits:
         cpu: 250m
-        memory: 128Mi
+        memory: 512Mi
       requests:
         cpu: 125m
         memory: 0Mi
@@ -692,7 +859,6 @@ services:
       periodSeconds: 5
       timeoutSeconds: 3
     profiles:
-    - data-plane
     - extras
     - storage
     replicas: 1
@@ -734,6 +900,15 @@ services:
     enabled: false
     image: supabase/supavisor:2.7.4
     ports: []
+    probe:
+      exec:
+      - sh
+      - -c
+      - curl -sSfL --head -o /dev/null http://127.0.0.1:4000/api/health || exit 1
+      failureThreshold: 5
+      initialDelaySeconds: 30
+      periodSeconds: 15
+      timeoutSeconds: 5
     profiles:
     - control-plane
     - extras
@@ -757,20 +932,35 @@ services:
     replicas: 1
     resources:
       limits:
-        cpu: 250m
-        memory: 64Mi
+        cpu: 500m
+        memory: 160Mi
       requests:
-        cpu: 125m
+        cpu: 250m
         memory: 0Mi
   trino:
     enabled: false
     image: trinodb/trino:467
     ports: []
+    probe:
+      exec:
+      - sh
+      - -c
+      - curl -fsS http://localhost:8080/v1/info >/dev/null || exit 1
+      failureThreshold: 5
+      initialDelaySeconds: 60
+      periodSeconds: 15
+      timeoutSeconds: 5
     profiles:
     - analytics
-    - data-plane
     - extras
     replicas: 1
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 2048Mi
+      requests:
+        cpu: 1000m
+        memory: 0Mi
   vault:
     enabled: false
     image: ghcr.io/les-baas/mini-baas-vault:latest

@@ -10,7 +10,6 @@ services:
 - analytics-service
 - db-bootstrap
 - debezium
-- functions-runtime
 - gotrue
 - iceberg-rest
 - kong

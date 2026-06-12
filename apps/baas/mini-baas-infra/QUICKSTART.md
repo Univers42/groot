@@ -20,7 +20,7 @@ zero dependencies.
 
 ```sh
 # install (verifies sha256; BINOCLE_EDITION=nano for headless)
-curl -fsSL https://github.com/Univers42/ft_transcendence/releases/download/baas-v1.0.0/install.sh | sh
+curl -fsSL https://github.com/Univers42/groot/releases/download/baas-v1.0.0/install.sh | sh
 
 ./binocle-one
 #  → admin key printed on FIRST boot only — save it
@@ -51,7 +51,7 @@ Prerequisites: `git`, `make`, `curl`, Docker with the compose plugin. ~1 GB RAM
 for the default tier.
 
 ```sh
-git clone https://github.com/Univers42/ft_transcendence.git
+git clone https://github.com/Univers42/groot.git
 cd ft_transcendence/apps/baas/mini-baas-infra
 
 make quickstart                  # .env (generated, chmod 600) → stack up → health
