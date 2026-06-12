@@ -9,6 +9,9 @@ node_modules/
 .env*.bak
 .vault/
 audit/
+# `audit/` (report-output dirs) accidentally swallowed the BaaS audit MODULE
+# source — CI builds failed on imports a local tree resolved fine (rc.2).
+!apps/baas/mini-baas-infra/src/libs/common/src/audit/
 vendor/sdk/
 *.secret
 docker-compose.override.yml
