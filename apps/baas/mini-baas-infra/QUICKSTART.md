@@ -95,7 +95,7 @@ Every tier is a measured, repeatable shape (`make up PACKAGE=<tier>`):
 | **basic** | ~460 MiB | 11 (0 Node) | CRUD on SQLite+Postgres through the Rust plane |
 | **essential** | ~950 MiB | 19 | + aggregates, orchestration (default) |
 | **pro** | ~1.4 GiB | 28 | + MySQL/Mongo/Redis/Cockroach, realtime, storage, txns |
-| **max** | ~3.1 GiB | 41 | + MSSQL/HTTP, DDL, analytics (Trino), observability |
+| **max** | ~3.5 GiB | 41 | + MSSQL/HTTP, DDL, analytics (Trino), observability |
 
 Add-ons compose: `make up PACKAGE=basic ADDONS="realtime"`.
 

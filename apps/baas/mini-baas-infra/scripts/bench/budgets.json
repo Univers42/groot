@@ -5,7 +5,7 @@
     "basic": 512,
     "essential": 1024,
     "pro": 1500,
-    "max": 3200
+    "max": 3700
   },
   "load": {
     "_comment": "p95 in ms for the canonical CRUD mix THROUGH Kong at the smoke rps; err_pct is the failed-request budget (429s count as failures — the smoke rate must be sustainable). smoke rps == the tier's advertised rps except max, held at 800 until bench-capacity measures the true ceiling (Phase C then reconciles the advertised number with the measurement — that reconciliation IS the offer revision).",

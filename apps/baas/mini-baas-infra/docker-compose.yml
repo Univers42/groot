@@ -469,7 +469,12 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
-      start_period: 10s
+      # Crash-recovery boots (ungraceful stop on a sizable volume) spend 40s+
+      # in fsync + WAL redo before accepting connections — 10s of grace marked
+      # a perfectly healthy recovery "unhealthy" and aborted every dependent.
+      # start_period failures don't count toward retries and the first passing
+      # probe flips healthy immediately, so fast boots lose nothing.
+      start_period: 90s
     mem_limit: 512m
     cpus: 1.0
 
@@ -1794,6 +1799,11 @@ services:
     networks:
       - mini-baas
     restart: unless-stopped
+    # The one long-running service that had no base cap: a heavy log day blew
+    # it to 750+ MiB of chunk/index cache (uncapped = host-RAM-bounded). Under
+    # a cap loki evicts caches and keeps working; prod overlay tightens to 384m.
+    mem_limit: 512m
+    cpus: 0.50
 
   # ─── Observability: Promtail ─────────────────────────────────────
   promtail:

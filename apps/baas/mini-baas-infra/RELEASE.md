@@ -75,7 +75,7 @@ git tag -a baas-v1.0.0 -m "Grobase BaaS v1.0.0" && git push origin baas-v1.0.0
 | **self-host basic** | Node-free Pi-class CRUD (Rust `/data/v1`) | ~460 MiB · 11 svc |
 | **self-host essential** | The default: full product, aggregates | ~950 MiB · 19 svc |
 | **self-host pro** | Multi-engine + realtime + storage + txns | ~1.4 GiB · 28 svc |
-| **self-host max** | Everything incl. DDL + analytics | ~3.1 GiB · 41 svc |
+| **self-host max** | Everything incl. DDL + analytics | ~3.5 GiB · 41 svc |
 
 ## Bumping the realtime pin
 

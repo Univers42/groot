@@ -16,7 +16,7 @@ Cloud costs assume Fly.io-class pricing (~$0.77/vCPU + ~$5/GB RAM per month).
 | **basic** | ~460 MiB | ~0.9 GB | 1 vCPU · 1 GB | ~$6/mo |
 | **essential** | ~950 MiB | ~3 GB | 1 vCPU · 1.5–2 GB | ~$13/mo |
 | **pro** | ~1.4 GiB | ~5.5 GB | 2 vCPU · 2 GB | ~$21/mo |
-| **max** | ~3.1 GiB | ~11 GB | 2–4 vCPU · 4 GB | ~$41/mo |
+| **max** | ~3.5 GiB | ~11 GB | 2–4 vCPU · 4 GB | ~$41/mo |
 
 basic/essential are RAM-bound, not CPU-bound, until they take real traffic.
 

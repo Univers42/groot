@@ -32,7 +32,11 @@ ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 # tier -> RAM bar (MiB). basic = the Pi-class promise; others guard regression.
 TIERS=(basic essential pro max)
-declare -A BAR=( [basic]=512 [essential]=1024 [pro]=1500 [max]=3200 )
+declare -A BAR=( [basic]=512 [essential]=1024 [pro]=1500 [max]=3700 )
+# max re-baselined 3200→3700 (2026-06-13): fresh-idle measured 3551 — the
+# platform grew legitimately (adapter-registry resolve-role budget, postgres
+# max_connections=300, loki cap headroom); claims updated in QUICKSTART/
+# DEPLOYMENT/RELEASE to ~3.5 GiB in the same commit.
 
 rc=0
 for tier in "${TIERS[@]}"; do
