@@ -30,6 +30,16 @@ make check-secrets            # no hardcoded secrets
 # git status clean · .env untracked
 ```
 
+Gate context notes (learned 2026-06-13):
+- **m32/m33 measure LIVE RSS** — run them on a fresh tier-shaped stack
+  (`make up PACKAGE=<tier>` after a `down`), not on a long-running box that
+  load tests have inflated (one untrimmed Debezium CDC stream
+  `mini_baas.public.outbox_events` alone held 250 MB of redis after a bench
+  storm — its trim policy is a v1.1 item).
+- **m46** needs `SHARE_POOLS_PROBE=1 SHARE_POOLS_EXPECT=0|1` (live probe).
+- **m39** runs on the scale shape only (`DATA_PLANE_SHARE_POOLS=1`); on the
+  base per-tenant-pool shape it SKIPs by design.
+
 ## Cut the release
 
 ```sh
