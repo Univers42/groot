@@ -139,7 +139,7 @@ impl TransactionRegistry {
 pub struct AppState {
     config: Arc<ServerConfig>,
     engines: Arc<Vec<EngineDescriptor>>,
-    registry: Arc<DefaultPoolRegistry>,
+    pub(crate) registry: Arc<DefaultPoolRegistry>,
     /// The DSN resolver, shared (same `Arc`) with every engine adapter so a
     /// rotation can evict its credential cache. Holding it here lets ONE handler
     /// (`/v1/admin/rotate`) perform BOTH halves of a rotation atomically: drain
@@ -180,6 +180,12 @@ pub struct AppState {
     /// binocle-one: user accounts + JWT sessions on top of nano.
     #[cfg(feature = "one")]
     pub(crate) one: Option<Arc<crate::one::OneState>>,
+    /// PocketBase-compatible facade runtime (collections registry).
+    #[cfg(feature = "pbcompat")]
+    pub(crate) pb: Option<Arc<crate::pb::PbState>>,
+    /// JS hooks engine (pb_hooks) — None when the dir doesn't exist.
+    #[cfg(feature = "hooks")]
+    pub(crate) hooks: Option<Arc<crate::pb::hooks::Hooks>>,
     /// Short-TTL cache of `api-key → VerifiedIdentity` for the bypass front door,
     /// mirroring the query-router's `ApiKeyMiddleware` 30 s cache. Without it the
     /// bypass re-runs the Argon2id key-verify (a tenant-control round-trip) on
@@ -279,6 +285,10 @@ impl AppState {
             nano: None,
             #[cfg(feature = "one")]
             one: None,
+            #[cfg(feature = "pbcompat")]
+            pb: None,
+            #[cfg(feature = "hooks")]
+            hooks: None,
             verify_cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
             mount_cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
@@ -288,6 +298,7 @@ impl AppState {
     /// BOTH cached views of the old credential or a stale DSN survives:
     ///   1. the resolver's DSN cache entry for `pool_key`, and
     ///   2. the pool the registry opened with that old DSN.
+    ///
     /// We evict the cache FIRST so that even if the drain races a concurrent
     /// `get_or_create`, the rebuild cannot re-read the stale cached DSN. Returns
     /// the number of pools actually drained (0 if the key was unknown or the
@@ -797,6 +808,9 @@ async fn run_query(
             | DataOperationKind::Batch
     );
     let outbox_identity = request.identity.clone();
+    // Response projection (`fields`) — applied LAST, after outbox/realtime
+    // emission and masks, so server-side consumers keep full rows.
+    let projection = request.operation.fields.clone();
     #[cfg(any(feature = "control-pg", feature = "nano"))]
     let outbox_data = request.operation.data.clone();
     #[cfg(any(feature = "control-pg", feature = "nano"))]
@@ -905,6 +919,7 @@ async fn run_query(
                         op_wire,
                         pk.as_ref(),
                         result.affected_rows,
+                        outbox_identity.user_id.as_deref().unwrap_or(""),
                     );
                 }
             }
@@ -938,6 +953,8 @@ async fn run_query(
                     }
                 }
             }
+            // `fields` projection: engine-neutral, post-mask, response-only.
+            data_plane_core::DataOperation::project_rows(&projection, &mut result.rows);
             (StatusCode::OK, Json(result)).into_response()
         }
         Err(err) => map_data_plane_error(&err),

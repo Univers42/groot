@@ -428,8 +428,8 @@ CARGO_VOLS           = -v mini-baas-cargo-registry:/usr/local/cargo/registry -v 
 CARGO_DPR            = docker run --rm -v "$(PWD)/docker/services/data-plane-router":/work -w /work $(CARGO_VOLS) -v mini-baas-dpr-target:/work/target $(RUST_TOOLCHAIN_IMG)
 CARGO_REALTIME       = docker run --rm -v "$(PWD)/docker/services/realtime/realtime-agnostic":/work -w /work $(CARGO_VOLS) -v mini-baas-realtime-target:/work/target $(RUST_TOOLCHAIN_IMG)
 
-_rust-toolchain: ## (internal) cargo-in-docker image: rust + pkg-config/libssl (layer-cached)
-	@printf 'FROM $(RUST_IMAGE)\nRUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*\n' \
+_rust-toolchain: ## (internal) cargo-in-docker image: rust + pkg-config/libssl/make (layer-cached)
+	@printf 'FROM $(RUST_IMAGE)\nRUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev make && rm -rf /var/lib/apt/lists/*\n' \
 		| docker build -q -t $(RUST_TOOLCHAIN_IMG) - >/dev/null
 
 rust-data-plane-check: _rust-toolchain ## Rust: cargo check the data-plane workspace (in Docker)

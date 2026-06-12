@@ -371,9 +371,10 @@ fn ssrf_blocked(host: &str) -> DataPlaneError {
     }
 }
 
-/// Validate an http mount's base URL against the SSRF guard and return the host
-/// + its validated socket addresses to PIN (so a later DNS rebind cannot point
-/// the client inward). `Ok(None)` when the dev escape is set (no check, no pin).
+/// Validate an http mount's base URL against the SSRF guard and return the
+/// host plus its validated socket addresses to PIN (so a later DNS rebind
+/// cannot point the client inward). `Ok(None)` when the dev escape is set
+/// (no check, no pin).
 pub async fn guard_and_resolve(base_url: &str) -> DataPlaneResult<Option<(String, Vec<SocketAddr>)>> {
     if std::env::var("DATA_PLANE_HTTP_ALLOW_INTERNAL").ok().as_deref() == Some("1") {
         return Ok(None);
@@ -659,6 +660,8 @@ mod tests {
             expected_version: None,
             returning: None,
             aggregate: None,
+            fields: None,
+            sort_order: None,
         };
         let path = append_query("/users", &op);
         assert!(path.starts_with("/users?"));
