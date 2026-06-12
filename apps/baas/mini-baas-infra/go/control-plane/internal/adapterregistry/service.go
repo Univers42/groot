@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sync"
 
 	"github.com/dlesieur/mini-baas/control-plane/internal/packages"
 	"github.com/dlesieur/mini-baas/control-plane/internal/shared"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"golang.org/x/sync/singleflight"
 )
 
 // ErrNotFound is returned when a tenant database row does not exist.
@@ -40,6 +42,28 @@ type Service struct {
 	// ships dormant (parity), the operator turns it on once tenant plans are
 	// set. When OFF, /connect emits no mask and registration gates nothing.
 	enforce bool
+	// connCache short-circuits the per-record scrypt KDF (N=16384, ~50-100ms
+	// CPU) in Decrypt on the hot /connect path: under 200-tenant fan-out the
+	// per-call KDF convoyed the service to 100s+ responses (m39). Keyed by db
+	// id and validated against the ciphertext auth tag, which changes whenever
+	// the stored payload changes — re-registration self-invalidates, deletes
+	// 404 before the cache is consulted. The tenant-ownership check and the
+	// health stamp still run per call; only the KDF+decrypt is skipped.
+	connCache sync.Map // db id (string) → connCacheEntry
+	// sf coalesces concurrent cache misses for the SAME mount into one
+	// Decrypt: a cold fan-out otherwise stampedes N identical scrypt runs
+	// before the first can populate the cache. Concurrency across DISTINCT
+	// mounts is already bounded inside the Encryptor (crypto.go scryptSlots,
+	// SCRYPT_MAX_CONCURRENT) — the memory bound that stopped the 2026-06-11
+	// bulk-registration OOM loop.
+	sf singleflight.Group
+}
+
+// connCacheEntry pins the decrypted DSN to the exact ciphertext (auth tag)
+// it came from.
+type connCacheEntry struct {
+	tag  string
+	conn string
 }
 
 // NewService wires the store dependencies. The package manifest is loaded once
@@ -264,9 +288,35 @@ func (s *Service) GetConnection(ctx context.Context, userID, id string) (Connect
 		return ConnectionResult{}, err
 	}
 
-	conn, err := s.enc.Decrypt(payload)
-	if err != nil {
-		return ConnectionResult{}, err
+	// scrypt-decrypt only when the ciphertext changed since the last call (the
+	// auth tag is a cryptographic digest of payload+key — equal tag ⇒ equal
+	// plaintext). Concurrent misses for one mount coalesce (sf) and distinct
+	// cold mounts queue on kdfSem. See connCache.
+	var conn string
+	tag := string(payload.Tag)
+	if v, ok := s.connCache.Load(id); ok {
+		if e, ok := v.(connCacheEntry); ok && e.tag == tag {
+			conn = e.conn
+		}
+	}
+	if conn == "" {
+		v, derr, _ := s.sf.Do(id+"\x00"+tag, func() (any, error) {
+			if v, ok := s.connCache.Load(id); ok {
+				if e, ok := v.(connCacheEntry); ok && e.tag == tag {
+					return e.conn, nil
+				}
+			}
+			c, err := s.enc.Decrypt(payload)
+			if err != nil {
+				return nil, err
+			}
+			s.connCache.Store(id, connCacheEntry{tag: tag, conn: c})
+			return c, nil
+		})
+		if derr != nil {
+			return ConnectionResult{}, derr
+		}
+		conn, _ = v.(string)
 	}
 	result := ConnectionResult{Engine: engine, ConnectionString: conn, Isolation: isolation}
 	// Phase 4 tiering: stamp the tenant's package tier mask so the data plane

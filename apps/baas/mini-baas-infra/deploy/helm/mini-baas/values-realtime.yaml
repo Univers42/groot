@@ -4,25 +4,15 @@ edition: realtime
 services:
   adapter-registry-go:
     enabled: true
-  ai-service:
-    enabled: true
-  analytics-service:
-    enabled: true
   data-plane-router-rust:
     enabled: true
   db-bootstrap:
     enabled: true
-  debezium:
-    enabled: true
   email-service:
-    enabled: true
-  functions-runtime:
     enabled: true
   gdpr-service:
     enabled: true
   gotrue:
-    enabled: true
-  iceberg-rest:
     enabled: true
   kong:
     enabled: true
@@ -44,6 +34,8 @@ services:
     enabled: true
   newsletter-service:
     enabled: true
+  orchestrator:
+    enabled: true
   outbox-relay:
     enabled: true
   permission-engine:
@@ -63,8 +55,6 @@ services:
   storage-router:
     enabled: true
   tenant-control:
-    enabled: true
-  trino:
     enabled: true
   waf:
     enabled: true

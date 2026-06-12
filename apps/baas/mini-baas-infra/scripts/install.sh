@@ -2,7 +2,7 @@
 # **************************************************************************** #
 # install.sh — binocle single-binary installer (Grobase BaaS)
 #
-#   curl -fsSL https://github.com/Univers42/ft_transcendence/releases/download/baas-v1.0.0/install.sh | sh
+#   curl -fsSL https://github.com/Univers42/groot/releases/download/baas-v1.0.0/install.sh | sh
 #
 # Downloads the binocle-one (default) or binocle-nano static binary from the
 # GitHub Release, verifies its sha256, and unpacks it into the current
@@ -20,7 +20,7 @@ set -eu
 
 VERSION="${BINOCLE_VERSION:-1.0.0}"
 EDITION="${BINOCLE_EDITION:-one}"
-REPO="Univers42/ft_transcendence"
+REPO="Univers42/groot"
 TAG="baas-v${VERSION}"
 
 say()  { printf '%s\n' "$*"; }

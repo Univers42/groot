@@ -8,6 +8,8 @@ services:
     enabled: true
   analytics-service:
     enabled: true
+  cockroach:
+    enabled: true
   data-plane-router-rust:
     enabled: true
   db-bootstrap:
@@ -32,6 +34,8 @@ services:
     enabled: true
   loki:
     enabled: true
+  mariadb:
+    enabled: true
   minio:
     enabled: true
   minio-iceberg-init:
@@ -44,9 +48,13 @@ services:
     enabled: true
   mongo-keyfile:
     enabled: true
+  mssql:
+    enabled: true
   mysql:
     enabled: true
   newsletter-service:
+    enabled: true
+  orchestrator:
     enabled: true
   outbox-relay:
     enabled: true

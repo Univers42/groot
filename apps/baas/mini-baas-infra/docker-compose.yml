@@ -458,6 +458,7 @@ services:
         -c shared_preload_libraries=pg_net
         -c wal_level=logical
         -c pg_net.database_name=${POSTGRES_DB:-postgres}
+        -c max_connections=${PG_MAX_CONNECTIONS:-300}
     networks:
       mini-baas:
         aliases:
@@ -947,6 +948,13 @@ services:
       # credentials; baseline keeps libpq `require` semantics. See config.rs.
       SECURITY_MODE: ${SECURITY_MODE:-baseline}
       DATA_PLANE_TLS_CA_FILE: ${DATA_PLANE_TLS_CA_FILE:-}
+      # The bundled mssql container self-signs its cert, and since the Phase B
+      # hardening tiberius VERIFIES chains by default — without this escape the
+      # in-box mssql engine is unreachable (bb8 surfaces it as checkout
+      # timeouts). Default 1 so the stock stack works; the escape is dev-only
+      # by construction: SECURITY_MODE=max (the prod checklist) ignores it and
+      # always verifies. Pin DATA_PLANE_TLS_CA_FILE for remote mssql mounts.
+      DATA_PLANE_TLS_INSECURE: ${DATA_PLANE_TLS_INSECURE:-1}
       # Phase 7 / D6 direct front door (Kong→Rust /data/v1). Default ON: the Kong
       # /data/v1 route is live and proven row-identical to /query/v1 on the app's
       # real mount (m36-cutover-parity). The app still calls /query/v1 until it
@@ -1025,9 +1033,14 @@ services:
       timeout: 3s
       start_period: 30s
       retries: 5
-    # baseline (~12 MiB) + SCRYPT_MAX_CONCURRENT × 16 MiB + headroom.
-    mem_limit: 96m
-    cpus: 0.5
+    # baseline (~12 MiB) + SCRYPT_MAX_CONCURRENT × 16 MiB + headroom. The CPU
+    # budget is sized for the RESOLVE role, not just registration: /connect
+    # cold misses each cost one scrypt (~80ms of a full core), and a fan-out
+    # across N fresh mounts needs slots × cores ≈ 25 scrypts/s to keep the
+    # tail under the data plane's 10s resolve timeout (m39). Steady state is
+    # cache-hits (decrypted-DSN cache keyed by ciphertext tag + singleflight).
+    mem_limit: 192m
+    cpus: 2.0
 
   # ─── Go Control Plane: tenant-control ─────────────────────────────
   # Owns the top-level tenants registry + tenant_api_keys CRUD. Exposes

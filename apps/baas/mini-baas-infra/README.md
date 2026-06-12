@@ -8,7 +8,7 @@ The intent is to provide a single stack that any frontend — or any set of micr
 
 ```sh
 # Single binary (PocketBase-class, linux-amd64, no Docker):
-curl -fsSL https://github.com/Univers42/ft_transcendence/releases/download/baas-v1.0.0/install.sh | sh
+curl -fsSL https://github.com/Univers42/groot/releases/download/baas-v1.0.0/install.sh | sh
 
 # Full stack (Docker Compose):
 make quickstart                  # .env → stack up → health (default tier: essential)

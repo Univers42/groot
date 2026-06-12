@@ -231,7 +231,7 @@ scale-seed: _require-compose ## Provision SCALE= bench tenants (+keys+mounts) â†
 	PG_PASS="$$(docker inspect mini-baas-postgres --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^POSTGRES_PASSWORD=//p' | head -1)"; \
 	PG_DB="$$(docker inspect mini-baas-postgres --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^POSTGRES_DB=//p' | head -1)"; \
 	mkdir -p artifacts/scale; \
-	docker run --rm --network host -v "$(PWD)/go/control-plane":/src -v "$(PWD)/artifacts":/artifacts -w /src \
+	docker run --rm --network host -v "$(CURDIR)/go/control-plane":/src -v "$(CURDIR)/artifacts":/artifacts -w /src \
 		-v mini-baas-gomod:/go/pkg/mod -v mini-baas-gobuild:/root/.cache/go-build \
 		-e SERVICE_TOKEN_MODE="$$TMODE" golang:1.25-bookworm \
 		go run ./cmd/scale-seed -n "$$SCALE" -base "http://127.0.0.1:$$TC_PORT" -token "$$TOKEN" \
@@ -241,14 +241,14 @@ scale-seed: _require-compose ## Provision SCALE= bench tenants (+keys+mounts) â†
 		-prefix "$(if $(PREFIX),$(PREFIX),scale)" \
 		-concurrency "$(if $(CONCURRENCY),$(CONCURRENCY),16)" $(if $(RESUME),-resume,) \
 		-out "/artifacts/scale/tenants-$$SCALE.jsonl"; \
-	docker run --rm -v "$(PWD)/artifacts":/a alpine:3.21 chown -R $(shell id -u):$(shell id -g) /a/scale
+	docker run --rm -v "$(CURDIR)/artifacts":/a alpine:3.21 chown -R $(shell id -u):$(shell id -g) /a/scale
 
 scale-teardown: _require-compose ## Soft-delete every tenant in artifacts/scale/tenants-<SCALE>.jsonl
 	@SCALE="$(if $(SCALE),$(SCALE),1000)"; \
 	TC_PORT="$$(docker port mini-baas-tenant-control 3022/tcp 2>/dev/null | head -1 | sed 's/.*://')"; \
 	TOKEN="$$(docker inspect mini-baas-tenant-control --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^INTERNAL_SERVICE_TOKEN=//p' | head -1)"; \
 	TMODE="$$(docker inspect mini-baas-tenant-control --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^SERVICE_TOKEN_MODE=//p' | head -1)"; \
-	docker run --rm --network host -v "$(PWD)/go/control-plane":/src -v "$(PWD)/artifacts":/artifacts -w /src \
+	docker run --rm --network host -v "$(CURDIR)/go/control-plane":/src -v "$(CURDIR)/artifacts":/artifacts -w /src \
 		-v mini-baas-gomod:/go/pkg/mod -v mini-baas-gobuild:/root/.cache/go-build \
 		-e SERVICE_TOKEN_MODE="$$TMODE" golang:1.25-bookworm \
 		go run ./cmd/scale-seed -teardown -base "http://127.0.0.1:$$TC_PORT" -token "$$TOKEN" \
@@ -410,7 +410,7 @@ vault-rotate: _require-compose ## Rotate Vault secrets (GROUP=jwt|postgres|mongo
 # Node also runs INSIDE Docker (no node/npm on the host); node_modules lives
 # in a named volume so the host tree stays clean and installs stay warm.
 NODE_IMAGE := public.ecr.aws/docker/library/node:20-alpine
-NODE_RUN    = docker run --rm -v "$(PWD)/src":/app -w /app \
+NODE_RUN    = docker run --rm -v "$(CURDIR)/src":/app -w /app \
 	-v mini-baas-src-node-modules:/app/node_modules \
 	-v mini-baas-npm-cache:/root/.npm \
 	$(NODE_IMAGE)
@@ -426,8 +426,8 @@ nestjs-build-%: ## TS: build one app in Docker (e.g. make nestjs-build-query-rou
 RUST_IMAGE          := public.ecr.aws/docker/library/rust:1.89-slim-bookworm
 RUST_TOOLCHAIN_IMG  := mini-baas-rust-toolchain
 CARGO_VOLS           = -v mini-baas-cargo-registry:/usr/local/cargo/registry -v mini-baas-cargo-git:/usr/local/cargo/git
-CARGO_DPR            = docker run --rm -v "$(PWD)/docker/services/data-plane-router":/work -w /work $(CARGO_VOLS) -v mini-baas-dpr-target:/work/target $(RUST_TOOLCHAIN_IMG)
-CARGO_REALTIME       = docker run --rm -v "$(PWD)/docker/services/realtime/realtime-agnostic":/work -w /work $(CARGO_VOLS) -v mini-baas-realtime-target:/work/target $(RUST_TOOLCHAIN_IMG)
+CARGO_DPR            = docker run --rm -v "$(CURDIR)/docker/services/data-plane-router":/work -w /work $(CARGO_VOLS) -v mini-baas-dpr-target:/work/target $(RUST_TOOLCHAIN_IMG)
+CARGO_REALTIME       = docker run --rm -v "$(CURDIR)/docker/services/realtime/realtime-agnostic":/work -w /work $(CARGO_VOLS) -v mini-baas-realtime-target:/work/target $(RUST_TOOLCHAIN_IMG)
 
 _rust-toolchain: ## (internal) cargo-in-docker image: rust + pkg-config/libssl (layer-cached)
 	@printf 'FROM $(RUST_IMAGE)\nRUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*\n' \
@@ -490,7 +490,7 @@ rust-realtime-test: _rust-toolchain ## Rust: run the realtime unit tests (in Doc
 rust-realtime-build: _rust-toolchain ## Rust: build the realtime-server release binary (in Docker)
 	@$(CARGO_REALTIME) cargo build --release --bin realtime-server
 go-control-plane-check: ## Go: vet + test the control-plane module (in Docker, cached modules)
-	@docker run --rm -v "$(PWD)/go/control-plane":/src -w /src \
+	@docker run --rm -v "$(CURDIR)/go/control-plane":/src -w /src \
 		-v mini-baas-gomod:/go/pkg/mod -v mini-baas-gobuild:/root/.cache/go-build \
 		golang:1.23-bookworm sh -c 'GOFLAGS=-mod=mod go vet ./... && GOFLAGS=-mod=mod go test ./...'
 go-control-plane-build: ## Go: build the control-plane images
@@ -550,7 +550,7 @@ release-images: _require-version ## Release: bake + push all suite images to GHC
 release-check: ## Release: run the pre-tag gate checklist (see RELEASE.md)
 	@echo -e "$(_B)Pre-tag checklist (RELEASE.md is the authority)$(_0)"
 	@$(MAKE) check-secrets
-	@git -C "$(PWD)" status --porcelain | grep -q . \
+	@git -C "$(CURDIR)" status --porcelain | grep -q . \
 		&& echo -e "  $(_R)âœ— working tree dirty$(_0)" \
 		|| echo -e "  $(_G)âœ“ working tree clean$(_0)"
 	@[ -f scripts/install.sh ] && echo -e "  $(_G)âœ“ scripts/install.sh present$(_0)" \

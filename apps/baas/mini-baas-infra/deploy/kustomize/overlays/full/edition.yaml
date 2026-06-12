@@ -8,6 +8,7 @@ profiles:
 - backups
 - control-plane
 - data-plane
+- engines-extra
 - functions
 - go-control-plane
 - observability
@@ -20,6 +21,7 @@ services:
 - adapter-registry-go
 - ai-service
 - analytics-service
+- cockroach
 - data-plane-router-rust
 - db-bootstrap
 - debezium
@@ -32,14 +34,17 @@ services:
 - kong
 - log-service
 - loki
+- mariadb
 - minio
 - minio-iceberg-init
 - mongo
 - mongo-api
 - mongo-init
 - mongo-keyfile
+- mssql
 - mysql
 - newsletter-service
+- orchestrator
 - outbox-relay
 - permission-engine
 - pg-backup

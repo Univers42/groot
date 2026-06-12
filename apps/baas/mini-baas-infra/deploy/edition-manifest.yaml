@@ -27,6 +27,7 @@ editionPlanes:
   - observability
   - ops
   - studio
+  - engines
   lean: []
   prod:
   - data
@@ -64,6 +65,7 @@ editionProfiles:
   - backups
   - control-plane
   - data-plane
+  - engines-extra
   - functions
   - go-control-plane
   - observability
@@ -104,7 +106,6 @@ editionServices:
   - analytics-service
   - db-bootstrap
   - debezium
-  - functions-runtime
   - gotrue
   - iceberg-rest
   - kong
@@ -126,6 +127,7 @@ editionServices:
   - adapter-registry-go
   - ai-service
   - analytics-service
+  - cockroach
   - data-plane-router-rust
   - db-bootstrap
   - debezium
@@ -138,14 +140,17 @@ editionServices:
   - kong
   - log-service
   - loki
+  - mariadb
   - minio
   - minio-iceberg-init
   - mongo
   - mongo-api
   - mongo-init
   - mongo-keyfile
+  - mssql
   - mysql
   - newsletter-service
+  - orchestrator
   - outbox-relay
   - permission-engine
   - pg-backup
@@ -178,17 +183,12 @@ editionServices:
   - waf
   prod:
   - adapter-registry-go
-  - ai-service
-  - analytics-service
   - data-plane-router-rust
   - db-bootstrap
-  - debezium
   - email-service
-  - functions-runtime
   - gdpr-service
   - gotrue
   - grafana
-  - iceberg-rest
   - kong
   - log-service
   - loki
@@ -200,6 +200,7 @@ editionServices:
   - mongo-keyfile
   - mysql
   - newsletter-service
+  - orchestrator
   - outbox-relay
   - permission-engine
   - pg-backup
@@ -213,31 +214,24 @@ editionServices:
   - session-service
   - storage-router
   - tenant-control
-  - trino
   - waf
   - webhook-dispatcher
   query:
   - adapter-registry-go
-  - ai-service
-  - analytics-service
   - data-plane-router-rust
   - db-bootstrap
-  - debezium
   - email-service
-  - functions-runtime
   - gdpr-service
   - gotrue
-  - iceberg-rest
   - kong
   - log-service
-  - minio
-  - minio-iceberg-init
   - mongo
   - mongo-api
   - mongo-init
   - mongo-keyfile
   - mysql
   - newsletter-service
+  - orchestrator
   - outbox-relay
   - permission-engine
   - postgres
@@ -246,23 +240,16 @@ editionServices:
   - realtime
   - redis
   - session-service
-  - storage-router
   - tenant-control
-  - trino
   - waf
   - webhook-dispatcher
   realtime:
   - adapter-registry-go
-  - ai-service
-  - analytics-service
   - data-plane-router-rust
   - db-bootstrap
-  - debezium
   - email-service
-  - functions-runtime
   - gdpr-service
   - gotrue
-  - iceberg-rest
   - kong
   - log-service
   - minio
@@ -273,6 +260,7 @@ editionServices:
   - mongo-keyfile
   - mysql
   - newsletter-service
+  - orchestrator
   - outbox-relay
   - permission-engine
   - postgres
@@ -283,7 +271,6 @@ editionServices:
   - session-service
   - storage-router
   - tenant-control
-  - trino
   - waf
   - webhook-dispatcher
 planeProfiles:
@@ -297,6 +284,8 @@ planeProfiles:
   - control-plane
   data:
   - data-plane
+  engines:
+  - engines-extra
   functions:
   - functions
   go:

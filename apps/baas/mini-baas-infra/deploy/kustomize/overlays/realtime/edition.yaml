@@ -11,16 +11,11 @@ profiles:
 - storage
 services:
 - adapter-registry-go
-- ai-service
-- analytics-service
 - data-plane-router-rust
 - db-bootstrap
-- debezium
 - email-service
-- functions-runtime
 - gdpr-service
 - gotrue
-- iceberg-rest
 - kong
 - log-service
 - minio
@@ -31,6 +26,7 @@ services:
 - mongo-keyfile
 - mysql
 - newsletter-service
+- orchestrator
 - outbox-relay
 - permission-engine
 - postgres
@@ -41,6 +37,5 @@ services:
 - session-service
 - storage-router
 - tenant-control
-- trino
 - waf
 - webhook-dispatcher

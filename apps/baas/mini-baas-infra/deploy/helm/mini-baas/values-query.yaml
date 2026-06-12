@@ -4,33 +4,19 @@ edition: query
 services:
   adapter-registry-go:
     enabled: true
-  ai-service:
-    enabled: true
-  analytics-service:
-    enabled: true
   data-plane-router-rust:
     enabled: true
   db-bootstrap:
     enabled: true
-  debezium:
-    enabled: true
   email-service:
-    enabled: true
-  functions-runtime:
     enabled: true
   gdpr-service:
     enabled: true
   gotrue:
     enabled: true
-  iceberg-rest:
-    enabled: true
   kong:
     enabled: true
   log-service:
-    enabled: true
-  minio:
-    enabled: true
-  minio-iceberg-init:
     enabled: true
   mongo:
     enabled: true
@@ -43,6 +29,8 @@ services:
   mysql:
     enabled: true
   newsletter-service:
+    enabled: true
+  orchestrator:
     enabled: true
   outbox-relay:
     enabled: true
@@ -60,11 +48,7 @@ services:
     enabled: true
   session-service:
     enabled: true
-  storage-router:
-    enabled: true
   tenant-control:
-    enabled: true
-  trino:
     enabled: true
   waf:
     enabled: true
