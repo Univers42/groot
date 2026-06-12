@@ -73,7 +73,9 @@ pass "pg writes/DDL/txn gated on owner_scoped(); mysql/mongo fail closed"
 
 # ── 3) TLS: rustls connector behind sslmode, NoTls path intact ───────────────
 step "checking the Postgres TLS connector"
-grep -q "fn dsn_wants_tls" "${PG_RS}" || fail "dsn_wants_tls missing"
+# dsn_wants_tls evolved into effective_tls_mode (adds the SECURITY_MODE=max
+# require→verify upgrade); either name proves the sslmode parser is present.
+grep -qE "fn (dsn_wants_tls|effective_tls_mode)" "${PG_RS}" || fail "sslmode parser (effective_tls_mode) missing"
 grep -q "fn rustls_connector" "${PG_RS}" || fail "rustls_connector missing"
 grep -q "tokio_postgres_rustls::MakeRustlsConnect" "${PG_RS}" || fail "MakeRustlsConnect not used"
 grep -q "cfg.create_pool(Some(Runtime::Tokio1), NoTls)" "${PG_RS}" \
@@ -101,7 +103,7 @@ docker run --rm -v "${PWD}/${ROUTER_DIR}":/work -w /work rust:1.89-slim \
   sh -c 'cargo test -p data-plane-core 2>&1 | tail -8 && echo "===POOL===" && cargo test -p data-plane-pool 2>&1 | tail -12' \
   > /tmp/m24-cargo.log 2>&1 || fail "cargo tests failed: $(grep -E 'FAILED|error' /tmp/m24-cargo.log | head -3)"
 grep -q "test result: FAILED" /tmp/m24-cargo.log && fail "cargo test failures: $(tail -5 /tmp/m24-cargo.log)"
-docker run --rm -v "${PWD}/${GO_DIR}":/work -w /work golang:1.23 \
+docker run --rm -v "${PWD}/${GO_DIR}":/work -w /work golang:1.25-bookworm \
   sh -c 'go test ./internal/adapterregistry/ 2>&1 | tail -3' \
   > /tmp/m24-go.log 2>&1 || fail "go tests failed: $(tail -3 /tmp/m24-go.log)"
 grep -q '^ok' /tmp/m24-go.log || fail "go test did not report ok: $(cat /tmp/m24-go.log)"

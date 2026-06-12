@@ -76,7 +76,7 @@ else
   docker run --rm \
     -v "${REPO_ROOT}/${GO_DIR}:/src" \
     -w /src \
-    golang:1.23-bookworm \
+    golang:1.25-bookworm \
     sh -c 'go mod tidy && go vet ./... && go test ./...'
 fi
 pass "go vet + go test passed"

@@ -16,13 +16,19 @@ const opDelete = new Trend('bench_op_delete');
 // would erode the list-filter working set).
 let lastInserted = null;
 
+// Per-process nonce: warmup + each of the 3 measured runs replay the SAME
+// (__VU, __ITER) sequence into ONE shared table, so a bare b-VU-ITER id 409s
+// against the previous process's rows (err climbed 2.6→5.5→8.1% run-over-run
+// from pure id collisions, zero 5xx). The nonce makes ids unique per process.
+const NONCE = (__ENV.RUN_NONCE || Date.now().toString(36)).toString();
+
 export default function () {
 	const r = Math.random();
 	if (r < 0.7) {
 		const res = dataOp({ op: 'list', resource: TABLE, filter: { grp: { $eq: 'g3' } }, limit: 30, sort: { id: 'asc' } }, opList);
 		check(res, { 'list 200': (x) => x.status === 200 });
 	} else if (r < 0.9) {
-		const id = `b-${__VU}-${__ITER}`;
+		const id = `b-${NONCE}-${__VU}-${__ITER}`;
 		const res = dataOp({ op: 'insert', resource: TABLE, data: { id, name: `bench-${__ITER}`, grp: `g${__ITER % 8}`, val: __ITER % 1000 } }, opInsert);
 		if (res.status === 200 || res.status === 201) lastInserted = id;
 		check(res, { 'insert 2xx': (x) => x.status === 200 || x.status === 201 });
@@ -40,7 +46,7 @@ export default function () {
 	} else {
 		// No VU-owned row yet → insert instead (keeps the op count constant;
 		// the realized delete share converges to its 5% as VUs warm up).
-		const id = `b-${__VU}-${__ITER}`;
+		const id = `b-${NONCE}-${__VU}-${__ITER}`;
 		const res = dataOp({ op: 'insert', resource: TABLE, data: { id, name: `bench-${__ITER}`, grp: `g${__ITER % 8}`, val: __ITER % 1000 } }, opInsert);
 		if (res.status === 200 || res.status === 201) lastInserted = id;
 		check(res, { 'insert 2xx': (x) => x.status === 200 || x.status === 201 });

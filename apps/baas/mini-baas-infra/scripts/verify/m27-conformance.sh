@@ -130,6 +130,7 @@ run_engine() { # $1 engine -> 0 green, 1 fail, 2 skip (engine down)
     -e CONFORMANCE_ENGINE="${engine}" \
     -e CONFORMANCE_DSN="${dsn}" \
     -e CONFORMANCE_TENANT="conf-${engine}" \
+    -e DATA_PLANE_TLS_INSECURE=1 \
     -v "${ROUTER_DIR}":/work -w /work \
     -v mini-baas-cargo-registry:/usr/local/cargo/registry \
     -v mini-baas-cargo-git:/usr/local/cargo/git \

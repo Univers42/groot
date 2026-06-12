@@ -115,11 +115,16 @@ grep -q '"/v1/schema"' "${ROUTES}" || fail "POST /v1/schema route missing"
 grep -q "struct DescribeSchemaRequest" "${ROUTES}" \
   || fail "DescribeSchemaRequest envelope missing"
 grep -q "async fn describe_schema" "${ROUTES}" || fail "describe_schema handler missing"
-grep -A8 "async fn describe_schema" "${ROUTES}" | grep -q "validate_identity_mount" \
+# The gating moved into run_describe_schema, the core shared by the /v1/schema
+# envelope handler and the /data/v1/schema api-key bypass — assert it there
+# (falling back to the handler itself for older layouts).
+SCHEMA_CORE="async fn run_describe_schema"
+grep -q "${SCHEMA_CORE}" "${ROUTES}" || SCHEMA_CORE="async fn describe_schema"
+grep -A8 "${SCHEMA_CORE}" "${ROUTES}" | grep -q "validate_identity_mount" \
   || fail "describe_schema must validate identity/mount (begin_transaction-style gating)"
-grep -A14 "async fn describe_schema" "${ROUTES}" | grep -q '"introspect"' \
+grep -A14 "${SCHEMA_CORE}" "${ROUTES}" | grep -q '"introspect"' \
   || fail "describe_schema must gate on the introspect capability"
-grep -A14 "async fn describe_schema" "${ROUTES}" | grep -q "is_admin" \
+grep -A14 "${SCHEMA_CORE}" "${ROUTES}" | grep -q "is_admin" \
   && fail "/v1/schema must NOT be admin-gated (any authenticated identity reads its own mount)"
 pass "/v1/schema mounted: validate_identity_mount + introspect capability gate, no admin gate"
 
@@ -201,11 +206,15 @@ pass "SchemaDdlRequest contract + apply_schema_ddl port + schema_ddl capability 
 step "checking the Rust /v1/schema/ddl route"
 grep -q '"/v1/schema/ddl"' "${ROUTES}" || fail "POST /v1/schema/ddl route missing"
 grep -q "struct SchemaDdlEnvelope" "${ROUTES}" || fail "SchemaDdlEnvelope missing"
-grep -A8 "async fn apply_schema_ddl" "${ROUTES}" | grep -q "validate_identity_mount" \
+# Gating lives in run_apply_schema_ddl, the core shared by the envelope handler
+# and the /data/v1 api-key bypass (fall back to the handler for older layouts).
+DDL_CORE="async fn run_apply_schema_ddl"
+grep -q "${DDL_CORE}" "${ROUTES}" || DDL_CORE="async fn apply_schema_ddl"
+grep -A8 "${DDL_CORE}" "${ROUTES}" | grep -q "validate_identity_mount" \
   || fail "apply_schema_ddl must validate identity/mount"
-grep -A16 "async fn apply_schema_ddl" "${ROUTES}" | grep -q '"schema_ddl"' \
+grep -A16 "${DDL_CORE}" "${ROUTES}" | grep -q '"schema_ddl"' \
   || fail "apply_schema_ddl must gate on the schema_ddl capability"
-grep -A16 "async fn apply_schema_ddl" "${ROUTES}" | grep -q "is_admin" \
+grep -A16 "${DDL_CORE}" "${ROUTES}" | grep -q "is_admin" \
   && fail "/v1/schema/ddl must NOT be admin-gated (same trust model as /v1/query writes)"
 pass "/v1/schema/ddl mounted: validate_identity_mount + schema_ddl capability gate, no admin gate"
 

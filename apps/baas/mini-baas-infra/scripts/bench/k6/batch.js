@@ -9,7 +9,7 @@ export default function () {
 	// own `resource` (data-plane-core operation.rs batch_items).
 	const items = [];
 	for (let i = 0; i < 10; i += 1) {
-		items.push({ op: 'insert', resource: TABLE, data: { id: `bb-${__VU}-${__ITER}-${i}`, name: 'batch', grp: `g${i % 8}`, val: i } });
+		items.push({ op: 'insert', resource: TABLE, data: { id: `bb-${NONCE}-${__VU}-${__ITER}-${i}`, name: 'batch', grp: `g${i % 8}`, val: i } });
 	}
 	const res = dataOp({ op: 'batch', resource: TABLE, data: items });
 	check(res, { 'batch 2xx': (x) => x.status === 200 || x.status === 201 });

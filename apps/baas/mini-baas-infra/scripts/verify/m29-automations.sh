@@ -43,7 +43,19 @@ source "${SCRIPT_DIR}/lib-live-tenant.sh"
 SLUG="m29auto$(date +%s)"
 step "provisioning probe tenant '${SLUG}' + scratch mount"
 live_tenant_provision "${SLUG}" || fail "tenant provisioning failed"
-trap live_tenant_cleanup EXIT
+# Drop the probe table BEFORE tearing the tenant down — once the tenant is
+# gone its owner-stamped relation becomes undroppable via the API (shared
+# DDL catalog) and would litter the shared schema.
+m29_cleanup() {
+  if [[ -n "${DB:-}" && -n "${TABLE:-}" ]]; then
+    curl -s -o /dev/null -X POST "${KONG}/query/v1/${DB}/schema/ddl" \
+      -H "apikey: ${LIVE_ANON_APIKEY}" -H "X-Baas-Api-Key: ${LIVE_TENANT_API_KEY}" \
+      -H 'Content-Type: application/json' \
+      -d "{\"op\":\"drop_table\",\"table\":\"${TABLE}\"}" || true
+  fi
+  live_tenant_cleanup
+}
+trap m29_cleanup EXIT
 KONG="${LIVE_KONG_URL}"; DB="${LIVE_TENANT_DB_ID}"
 
 # gw <expected> <method> <path> <json|-> → body in /tmp/m29.json (429 retried).
@@ -70,7 +82,11 @@ has() { grep -q "$1" /tmp/m29.json || fail "response missing $1: $(head -c 300 /
 
 # ── 0) probe table on the scratch mount ─────────────────────────────────────
 step "probe table"
-TABLE="m29_rows"
+# Unique per run: the shared_rls DDL catalog is shared across mounts (rows are
+# RLS-scoped, relations are not) and the leftover from an interrupted run is
+# owner-stamped by a tenant that no longer exists — a fixed name 409s forever
+# and no later tenant may drop it. Unique name + drop-on-exit (below) instead.
+TABLE="m29_rows_$$"
 gw 2xx POST "/query/v1/${DB}/schema/ddl" \
   "{\"op\":\"create_table\",\"table\":\"${TABLE}\",\"columns\":[
       {\"name\":\"id\",\"normalized_type\":\"integer\",\"nullable\":false,\"default\":null,\"enum_values\":null},

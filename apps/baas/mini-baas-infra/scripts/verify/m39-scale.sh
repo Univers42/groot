@@ -35,10 +35,24 @@ BUDGETS="${ROOT}/scripts/bench/budgets.json"
 SCALE="${SCALE:-$(jq -r '.scale.smoke_tenants' "${BUDGETS}")}"
 P99_FACTOR="$(jq -r '.scale.p99_factor' "${BUDGETS}")"
 RSS_BAR="$(jq -r '.scale.data_plane_rss_mib' "${BUDGETS}")"
-PREFIX="m39"
+# Overridable so re-runs use a fresh slug namespace: re-seeding an already-used
+# prefix returns status:"exists" with NO api key (keys are issued once at
+# creation), which the load step rejects as "no usable tenants". A unique prefix
+# guarantees freshly-created tenants whose keys are captured.
+PREFIX="${PREFIX:-m39}"
 
 docker inspect mini-baas-data-plane-router-rust >/dev/null 2>&1 || skip "data plane not up"
 [[ "$(docker inspect --format '{{.State.Health.Status}}' mini-baas-tenant-control 2>/dev/null)" == "healthy" ]] || skip "tenant-control not healthy"
+# Shape precondition (same opt-in discipline as m46): N-tenant fan-out on
+# PER-TENANT pools needs SCALE × pool_max(10) backend connections — the base
+# parity stack (SHARE_POOLS off, postgres max_connections=300) measurably
+# fails on "too many clients" (3,578 rejections @ 200 tenants, 2026-06-12),
+# which is precisely the limit SHARE_POOLS exists to remove (m46 proves its
+# isolation). Run this gate on the scale shape (DATA_PLANE_SHARE_POOLS=1) or
+# force the base shape explicitly with M39_FORCE=1 to study the failure mode.
+M39_SP="$(docker inspect mini-baas-data-plane-router-rust --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | sed -n 's/^DATA_PLANE_SHARE_POOLS=//p' | head -1)"
+[[ "${M39_SP}" == "1" || "${M39_FORCE:-0}" == "1" ]] \
+  || skip "per-tenant-pool shape can't serve ${SCALE:-200}-tenant fan-out (needs DATA_PLANE_SHARE_POOLS=1 — scale overlay — or M39_FORCE=1)"
 
 DP="mini-baas-data-plane-router-rust"
 TC="mini-baas-tenant-control"
@@ -59,8 +73,12 @@ EV0="$(metric 'pool_events_total{service="data-plane-router",event="evicted"' ||
 cyan "seeding ${SCALE} tenants…"
 make -C "${ROOT}" scale-seed SCALE="${SCALE}" PREFIX="${PREFIX}" >/tmp/m39-seed.txt 2>&1 || { tail -5 /tmp/m39-seed.txt; red "seed failed"; make -C "${ROOT}" scale-teardown SCALE="${SCALE}" >/dev/null 2>&1 || true; exit 1; }
 trap 'make -C "'"${ROOT}"'" scale-teardown SCALE="'"${SCALE}"'" >/dev/null 2>&1 || true' EXIT
-SEEDED="$(grep -c '"status":"created"\|"status":"exists"' "${ROOT}/artifacts/scale/tenants-${SCALE}.jsonl" 2>/dev/null || echo 0)"
-ERRORED="$(grep -c '"status":"error"' "${ROOT}/artifacts/scale/tenants-${SCALE}.jsonl" 2>/dev/null || echo 0)"
+# grep -c already prints 0 on no match (and exits 1); a `|| echo 0` would append
+# a SECOND 0 → "0\n0" and break the later (( )) arithmetic. `|| true` keeps the
+# clean single 0 AND survives set -e (grep -c's exit-1-on-zero-matches killed
+# the script here silently); ${VAR:-0} still covers the missing-file case.
+SEEDED="$(grep -c '"status":"created"\|"status":"exists"' "${ROOT}/artifacts/scale/tenants-${SCALE}.jsonl" 2>/dev/null || true)"; SEEDED="${SEEDED:-0}"
+ERRORED="$(grep -c '"status":"error"' "${ROOT}/artifacts/scale/tenants-${SCALE}.jsonl" 2>/dev/null || true)"; ERRORED="${ERRORED:-0}"
 cyan "seeded ok=${SEEDED} errors=${ERRORED}"
 
 # ── crypto-OOM guard: provisioning must not restart the control plane ────────

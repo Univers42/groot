@@ -127,7 +127,7 @@ grep -q "RedisEngineAdapter" "${ROUTES}" \
   || fail "AppState::new does not build RedisEngineAdapter (R8 not wired)"
 grep -q "HttpEngineAdapter" "${ROUTES}" \
   || fail "AppState::new does not build HttpEngineAdapter (R8 not wired)"
-grep -qE "DefaultPoolRegistry::(new|with_max_pools)" "${ROUTES}" \
+grep -qE "DefaultPoolRegistry::(new|with_max_pools|with_config)" "${ROUTES}" \
   || fail "AppState::new does not build DefaultPoolRegistry"
 # executable_engines must include every Rust-served engine (mariadb rides the
 # mysql adapter — Phase 3). Check each token rather than pinning the order.
@@ -156,10 +156,11 @@ done
 grep -q 'pub use mongo::MongoEngineAdapter' \
   "${ROUTER_DIR}/crates/data-plane-pool/src/lib.rs" \
   || fail "data-plane-pool lib.rs does not re-export MongoEngineAdapter"
-# 2.8 driver — make sure we use options-style call signatures, not the 3.x
-# builders (otherwise we silently lose tenant filter / sort when we upgrade).
-grep -q 'col.find(filter, find_opts)' "${MONGO_RS}" \
-  || fail "MongoPool::run_list must use (filter, options) signature for mongodb 2.8 compatibility"
+# The driver moved 2.8 → 3.x: either the (filter, options) signature or the
+# 3.x builder with .with_options(find_opts) proves filter AND sort/options are
+# both applied (the failure mode this guards = silently dropping one of them).
+grep -qE 'col\.find\(filter, find_opts\)|col\.find\(filter\)\.with_options\(find_opts\)' "${MONGO_RS}" \
+  || fail "MongoPool::run_list must apply both filter and find options (tenant scope + sort)"
 pass "Rust Mongo adapter (R3) compiles, exports, and enforces server-side tenant scope"
 
 # ── R7 specific: MySQL adapter implementation surface ────────────────────────
@@ -226,7 +227,9 @@ for symbol in \
   grep -q "${symbol}" "${HTTP_RS}" \
     || fail "${HTTP_RS} missing required symbol: ${symbol}"
 done
-grep -q 'pub use http::HttpEngineAdapter' \
+# Accept both the bare and the braced re-export form
+# (pub use http::{guard_and_resolve, HttpEngineAdapter}).
+grep -qE 'pub use http::(\{[^}]*)?HttpEngineAdapter' \
   "${ROUTER_DIR}/crates/data-plane-pool/src/lib.rs" \
   || fail "data-plane-pool lib.rs does not re-export HttpEngineAdapter"
 grep -q 'identity tenant does not match pool tenant' "${HTTP_RS}" \
