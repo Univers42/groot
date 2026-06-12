@@ -114,6 +114,12 @@ pub struct DataOperation {
     /// full rows, so the existing wire shape is unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fields: Option<Vec<String>>,
+    /// ORDERED multi-key sort: `sort` is a BTreeMap, which alphabetizes keys
+    /// and so cannot express "b first, then a" — the PB facade's
+    /// `?sort=-b,a` needs declaration order. Additive + defaulted: absent on
+    /// every existing wire payload, adapters prefer it only when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort_order: Option<Vec<(String, String)>>,
 }
 
 impl DataOperation {

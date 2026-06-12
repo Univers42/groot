@@ -1,0 +1,9 @@
+{
+  "name": "pb-sdk-suite",
+  "private": true,
+  "type": "module",
+  "description": "m48 parity certificate: the official PocketBase JS SDK, run against binocle-one AND real PocketBase, outcomes diffed",
+  "dependencies": {
+    "pocketbase": "0.26.2"
+  }
+}

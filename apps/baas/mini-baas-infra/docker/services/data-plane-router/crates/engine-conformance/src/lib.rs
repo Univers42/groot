@@ -466,6 +466,7 @@ fn op(kind: DataOperationKind, filter: Value) -> DataOperation {
         returning: Some(ReturningMode::Full),
         aggregate: None,
         fields: None,
+        sort_order: None,
     }
 }
 

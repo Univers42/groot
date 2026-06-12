@@ -69,7 +69,7 @@ pub(crate) fn sha256_hex(input: &str) -> String {
     hex
 }
 
-fn ct_eq(a: &str, b: &str) -> bool {
+pub(crate) fn ct_eq(a: &str, b: &str) -> bool {
     if a.len() != b.len() {
         return false;
     }
@@ -987,7 +987,7 @@ impl OneState {
         .map_err(|e| e.to_string())
     }
 
-    fn mint_jwt(&self, user_id: &str, email: &str) -> Result<(String, u64), String> {
+    pub(crate) fn mint_jwt(&self, user_id: &str, email: &str) -> Result<(String, u64), String> {
         self.mint_typed(user_id, email, "auth", self.jwt_ttl)
             .map(|t| (t, self.jwt_ttl))
     }
@@ -1220,8 +1220,18 @@ pub fn router(state: AppState) -> Router {
         .merge(crate::one_totp::routes())
         .merge(crate::one_files::routes())
         .merge(crate::one_admin::routes())
+        .merge(pb_routes())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
+}
+
+#[cfg(feature = "pbcompat")]
+fn pb_routes() -> axum::Router<AppState> {
+    crate::pb::routes()
+}
+#[cfg(not(feature = "pbcompat"))]
+fn pb_routes() -> axum::Router<AppState> {
+    axum::Router::new()
 }
 
 /// Boot binocle-one: nano state + the account store, same reaper, same door.
@@ -1235,6 +1245,10 @@ pub async fn run(config: ServerConfig) -> anyhow::Result<()> {
     let mut state = AppState::new(config);
     state.nano = Some(Arc::new(NanoState::open(&data_dir)?));
     state.one = Some(Arc::new(OneState::open(&data_dir)?));
+    #[cfg(feature = "pbcompat")]
+    {
+        state.pb = Some(Arc::new(crate::pb::PbState::open(&data_dir)?));
+    }
 
     let reaper_state = state.clone();
     tokio::spawn(async move {

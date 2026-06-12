@@ -297,7 +297,8 @@ impl NanoState {
                 },
             )]),
         };
-        Ok(specs
+        #[allow(unused_mut)]
+        let mut mounts: HashMap<String, ResolvedMount> = specs
             .into_iter()
             .map(|(id, s)| {
                 (
@@ -310,7 +311,18 @@ impl NanoState {
                     },
                 )
             })
-            .collect())
+            .collect();
+        // PB facade data file: `tenant_owned` — PB's access model is
+        // per-collection rules at the facade, NOT per-row owner columns, so
+        // the platform's owner-scoping must stay out of PB-shaped tables.
+        #[cfg(feature = "pbcompat")]
+        mounts.entry(crate::pb::PB_MOUNT.to_string()).or_insert(ResolvedMount {
+            engine: "sqlite".to_string(),
+            connection_string: data_dir.join("pb_data.db").to_string_lossy().into_owned(),
+            isolation: Some("tenant_owned".to_string()),
+            capability_overrides: None,
+        });
+        Ok(mounts)
     }
 
     /// The in-process replacement for the tenant-control verify: header →

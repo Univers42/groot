@@ -418,7 +418,10 @@ fn build_plan(op: &DataOperation, owner: Option<&str>) -> DataPlaneResult<SqlPla
 fn build_list(op: &DataOperation, owner: Option<&str>) -> DataPlaneResult<SqlPlan> {
     let table = quote_ident(&op.resource)?;
     let (where_sql, params) = build_owner_filter(op.filter.as_ref(), owner)?;
-    let order_sql = build_order_by(op.sort.as_ref())?;
+    let order_sql = match op.sort_order.as_deref() {
+        Some(ordered) => build_order_by_ordered(ordered)?,
+        None => build_order_by(op.sort.as_ref())?,
+    };
     let limit = op.limit.unwrap_or(100).min(500);
     let offset = op.offset.unwrap_or(0);
     Ok(SqlPlan {
@@ -1206,13 +1209,24 @@ fn build_order_by(sort: Option<&BTreeMap<String, String>>) -> DataPlaneResult<St
     let Some(map) = sort else {
         return Ok(String::new());
     };
-    if map.is_empty() {
-        return Ok(String::new());
-    }
-    let mut parts: Vec<String> = Vec::with_capacity(map.len());
-    for (col, dir) in map {
+    render_order_by(map.iter().map(|(c, d)| (c.as_str(), d.as_str())))
+}
+
+/// Declaration-ordered variant (`sort_order`) — see the core field doc.
+fn build_order_by_ordered(sort: &[(String, String)]) -> DataPlaneResult<String> {
+    render_order_by(sort.iter().map(|(c, d)| (c.as_str(), d.as_str())))
+}
+
+fn render_order_by<'a>(
+    cols: impl Iterator<Item = (&'a str, &'a str)>,
+) -> DataPlaneResult<String> {
+    let mut parts: Vec<String> = Vec::new();
+    for (col, dir) in cols {
         let dir_sql = if dir.eq_ignore_ascii_case("desc") { "DESC" } else { "ASC" };
         parts.push(format!("{} {dir_sql}", quote_ident(col)?));
+    }
+    if parts.is_empty() {
+        return Ok(String::new());
     }
     Ok(format!(" ORDER BY {}", parts.join(", ")))
 }

@@ -139,7 +139,7 @@ impl TransactionRegistry {
 pub struct AppState {
     config: Arc<ServerConfig>,
     engines: Arc<Vec<EngineDescriptor>>,
-    registry: Arc<DefaultPoolRegistry>,
+    pub(crate) registry: Arc<DefaultPoolRegistry>,
     /// The DSN resolver, shared (same `Arc`) with every engine adapter so a
     /// rotation can evict its credential cache. Holding it here lets ONE handler
     /// (`/v1/admin/rotate`) perform BOTH halves of a rotation atomically: drain
@@ -180,6 +180,9 @@ pub struct AppState {
     /// binocle-one: user accounts + JWT sessions on top of nano.
     #[cfg(feature = "one")]
     pub(crate) one: Option<Arc<crate::one::OneState>>,
+    /// PocketBase-compatible facade runtime (collections registry).
+    #[cfg(feature = "pbcompat")]
+    pub(crate) pb: Option<Arc<crate::pb::PbState>>,
     /// Short-TTL cache of `api-key → VerifiedIdentity` for the bypass front door,
     /// mirroring the query-router's `ApiKeyMiddleware` 30 s cache. Without it the
     /// bypass re-runs the Argon2id key-verify (a tenant-control round-trip) on
@@ -279,6 +282,8 @@ impl AppState {
             nano: None,
             #[cfg(feature = "one")]
             one: None,
+            #[cfg(feature = "pbcompat")]
+            pb: None,
             verify_cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
             mount_cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }

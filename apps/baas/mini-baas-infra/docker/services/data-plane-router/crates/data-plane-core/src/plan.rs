@@ -350,6 +350,7 @@ mod tests {
             returning: None,
             aggregate: None,
             fields: None,
+            sort_order: None,
         }
     }
 
