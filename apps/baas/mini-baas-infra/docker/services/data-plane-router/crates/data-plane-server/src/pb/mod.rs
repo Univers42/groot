@@ -16,8 +16,12 @@
 //! (PB bootstraps its first superuser the same way), authenticated through
 //! `/api/collections/_superusers/auth-with-password`.
 
+pub mod batch;
 pub mod collections;
+pub mod files;
 pub mod filter;
+pub mod realtime;
+pub mod settings;
 pub mod records;
 
 use axum::http::{header, StatusCode};
@@ -42,6 +46,10 @@ pub struct PbState {
     /// Collections registry connection ({data_dir}/pb_meta.db). Same poison
     /// policy as the rest of the crate: recover, never brick.
     pub(crate) meta: std::sync::Mutex<rusqlite::Connection>,
+    /// Connected SSE clients + their subscription sets.
+    pub(crate) realtime: realtime::Realtime,
+    /// Root of PB file storage ({data_dir}/pb_storage).
+    pub(crate) storage_root: std::path::PathBuf,
     su_email: Option<String>,
     su_pass: Option<String>,
 }
@@ -68,6 +76,10 @@ impl PbState {
                 options    TEXT NOT NULL DEFAULT '{}',
                 created    TEXT NOT NULL,
                 updated    TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS pb_config (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
             );",
         )?;
         let su_email = std::env::var("ONE_SUPERUSER_EMAIL")
@@ -84,6 +96,8 @@ impl PbState {
         }
         Ok(Self {
             meta: std::sync::Mutex::new(conn),
+            realtime: realtime::Realtime::default(),
+            storage_root: data_dir.join("pb_storage"),
             su_email,
             su_pass,
         })
@@ -378,4 +392,8 @@ pub fn routes() -> Router<AppState> {
         )
         .merge(collections::routes())
         .merge(records::routes())
+        .merge(realtime::routes())
+        .merge(batch::routes())
+        .merge(settings::routes())
+        .merge(files::routes())
 }

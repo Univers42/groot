@@ -255,6 +255,267 @@ fn filter_to_wire(f: &data_plane_core::Filter) -> Value {
     }
 }
 
+// ─── batch bridge (used by pb::batch) ───────────────────────────────────────
+
+/// One planned batch sub-request: the lowered native op + what to re-fetch.
+pub(crate) struct BatchPlan {
+    pub op: DataOperation,
+    pub collection: String,
+    pub record_id: String,
+}
+
+/// Parse a PB batch sub-request (`method` + `/api/collections/{c}/records
+/// [/{id}]` + body) into a ready native operation, enforcing the same rules
+/// and lowering as the live handlers.
+pub(crate) fn record_for_batch(
+    pb: &super::PbState,
+    _state: &AppState,
+    _headers: &header::HeaderMap,
+    superuser: bool,
+    method: &str,
+    url: &str,
+    body: &Value,
+) -> Result<BatchPlan, String> {
+    let path = url.split('?').next().unwrap_or(url);
+    let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
+    // api / collections / {c} / records [ / {id} ]
+    if parts.len() < 4 || parts[0] != "api" || parts[1] != "collections" || parts[3] != "records" {
+        return Err(format!("unsupported batch url '{url}'"));
+    }
+    let cname = parts[2];
+    let rid = parts.get(4).map(|s| s.to_string());
+    let Some(col) = pb.col_get(cname) else {
+        return Err(format!("collection '{cname}' not found"));
+    };
+    let kinds = field_kinds(&col);
+    let pass = |raw: &Option<String>| match rule_of(raw.as_ref()) {
+        Rule::Public => true,
+        _ => superuser,
+    };
+    let now = pb_now();
+    match (method.to_ascii_uppercase().as_str(), rid) {
+        ("POST", None) => {
+            if !pass(&col.create_rule) {
+                return Err("not allowed to create here".into());
+            }
+            let mut data = lower_body(&kinds, body)?;
+            let id = body
+                .get("id")
+                .and_then(|v| v.as_str())
+                .filter(|s| s.len() == 15)
+                .map(String::from)
+                .unwrap_or_else(super::pb_id);
+            data.insert("id".into(), json!(id));
+            for (name, on_create, _) in autodates(&col) {
+                if on_create {
+                    data.insert(name, json!(now));
+                }
+            }
+            let mut op = base_op(DataOperationKind::Insert, &col.name);
+            op.data = Some(Value::Object(data));
+            Ok(BatchPlan { op, collection: col.name.clone(), record_id: id })
+        }
+        ("PATCH", Some(id)) => {
+            if !pass(&col.update_rule) {
+                return Err("not allowed to update here".into());
+            }
+            let mut data = lower_body(&kinds, body)?;
+            for (name, _, on_update) in autodates(&col) {
+                if on_update {
+                    data.insert(name, json!(now.clone()));
+                }
+            }
+            if data.is_empty() {
+                return Err("empty update body".into());
+            }
+            let mut op = base_op(DataOperationKind::Update, &col.name);
+            op.data = Some(Value::Object(data));
+            op.filter = Some(json!({ "id": id }));
+            Ok(BatchPlan { op, collection: col.name.clone(), record_id: id })
+        }
+        ("DELETE", Some(id)) => {
+            if !pass(&col.delete_rule) {
+                return Err("not allowed to delete here".into());
+            }
+            let mut op = base_op(DataOperationKind::Delete, &col.name);
+            op.filter = Some(json!({ "id": id }));
+            Ok(BatchPlan { op, collection: col.name.clone(), record_id: id })
+        }
+        (m, r) => Err(format!("unsupported batch op {m} (id: {r:?})")),
+    }
+}
+
+/// Shaped record by collection NAME + id (post-commit re-fetch for batch).
+pub(crate) async fn fetch_shaped(
+    state: &AppState,
+    collection: &str,
+    id: &str,
+) -> Result<Option<Value>, axum::response::Response> {
+    let pb = pb_of(state)?;
+    let Some(col) = pb.col_get(collection) else {
+        return Ok(None);
+    };
+    let kinds = field_kinds(&col);
+    fetch_by_id(state, &col, &kinds, id).await
+}
+
+/// Fan a record event to PB realtime subscribers. `public` mirrors the
+/// collection's view rule at this phase.
+fn publish_event(state: &AppState, col: &Collection, action: &str, record: &Value) {
+    let Ok(pb) = pb_of(state) else { return };
+    let rid = record
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let public = matches!(rule_of(col.view_rule.as_ref()), Rule::Public);
+    pb.realtime
+        .publish(&[col.name.as_str(), col.id.as_str()], &rid, action, record, public);
+}
+
+
+// ─── request-body extraction (JSON or multipart) ─────────────────────────────
+
+/// Buffered upload: (file-field name, original filename, bytes).
+type PendingFiles = Vec<(String, String, Vec<u8>)>;
+
+/// Read a record payload from either JSON or multipart/form-data (the shape
+/// the official SDK sends when a body contains File/Blob values). Multipart
+/// text fields are coerced by their declared field kind (number/bool/json);
+/// repeated keys accumulate (multi-select). File parts are buffered and
+/// persisted by the caller once the record id is settled.
+async fn extract_body(
+    kinds: &HashMap<String, FieldKind>,
+    headers: &header::HeaderMap,
+    request: axum::extract::Request,
+    state: &AppState,
+) -> Result<(Value, PendingFiles), axum::response::Response> {
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    if content_type.starts_with("multipart/form-data") {
+        use axum::extract::FromRequest;
+        let mut multipart = axum::extract::Multipart::from_request(request, state)
+            .await
+            .map_err(|_| pb_err(StatusCode::BAD_REQUEST, "malformed multipart body"))?;
+        let mut map = JsonMap::new();
+        let mut files: PendingFiles = Vec::new();
+        let mut total: usize = 0;
+        while let Ok(Some(field)) = multipart.next_field().await {
+            let name = field.name().unwrap_or_default().to_string();
+            if name == "@jsonPayload" {
+                if let Ok(text) = field.text().await {
+                    if let Ok(Value::Object(extra)) = serde_json::from_str::<Value>(&text) {
+                        for (k, v) in extra {
+                            map.insert(k, v);
+                        }
+                    }
+                }
+                continue;
+            }
+            let is_file = field.file_name().is_some();
+            if is_file {
+                let original = field.file_name().unwrap_or("file").to_string();
+                let bytes = field
+                    .bytes()
+                    .await
+                    .map_err(|_| pb_err(StatusCode::BAD_REQUEST, "unreadable file part"))?;
+                total += bytes.len();
+                if total > 64 * 1024 * 1024 {
+                    return Err(pb_err(StatusCode::PAYLOAD_TOO_LARGE, "upload too large"));
+                }
+                files.push((name, original, bytes.to_vec()));
+                continue;
+            }
+            let text = field.text().await.unwrap_or_default();
+            let coerced = match kinds.get(name.as_str()) {
+                Some(FieldKind::Number) => text
+                    .parse::<f64>()
+                    .ok()
+                    .and_then(serde_json::Number::from_f64)
+                    .map(Value::Number)
+                    .unwrap_or(Value::Null),
+                Some(FieldKind::Bool) => {
+                    Value::Bool(matches!(text.as_str(), "true" | "1" | "on"))
+                }
+                Some(FieldKind::Json) => {
+                    serde_json::from_str(&text).unwrap_or(Value::String(text))
+                }
+                _ => Value::String(text),
+            };
+            match map.get_mut(&name) {
+                Some(Value::Array(arr)) => arr.push(coerced),
+                Some(prev) => {
+                    let first = prev.clone();
+                    map.insert(name, Value::Array(vec![first, coerced]));
+                }
+                None => {
+                    map.insert(name, coerced);
+                }
+            }
+        }
+        Ok((Value::Object(map), files))
+    } else {
+        let bytes = axum::body::to_bytes(request.into_body(), 16 * 1024 * 1024)
+            .await
+            .map_err(|_| pb_err(StatusCode::BAD_REQUEST, "unreadable body"))?;
+        let v = if bytes.is_empty() {
+            json!({})
+        } else {
+            serde_json::from_slice(&bytes)
+                .map_err(|_| pb_err(StatusCode::BAD_REQUEST, "invalid JSON body"))?
+        };
+        Ok((v, Vec::new()))
+    }
+}
+
+/// Write buffered uploads under `{storage}/{col id}/{record id}/` and fold
+/// the stored names into `data` (single file field = string, multi = array).
+async fn persist_files(
+    pb: &super::PbState,
+    kinds: &HashMap<String, FieldKind>,
+    col_id: &str,
+    record_id: &str,
+    files: PendingFiles,
+    data: &mut JsonMap<String, Value>,
+) -> Result<(), axum::response::Response> {
+    if files.is_empty() {
+        return Ok(());
+    }
+    let dir = pb.storage_root.join(col_id).join(record_id);
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|_| pb_err(StatusCode::INTERNAL_SERVER_ERROR, "storage unavailable"))?;
+    for (field, original, bytes) in files {
+        if !matches!(kinds.get(field.as_str()), Some(FieldKind::Single | FieldKind::Multi)) {
+            continue; // not a declared file-capable field — ignored like unknown keys
+        }
+        let stored = super::files::stored_name(&original);
+        tokio::fs::write(dir.join(&stored), &bytes)
+            .await
+            .map_err(|_| pb_err(StatusCode::INTERNAL_SERVER_ERROR, "could not persist the file"))?;
+        match kinds.get(field.as_str()) {
+            Some(FieldKind::Multi) => match data.get_mut(&field) {
+                Some(Value::String(prev)) if prev.starts_with('[') => {
+                    let mut arr: Vec<Value> =
+                        serde_json::from_str(prev).unwrap_or_default();
+                    arr.push(json!(stored));
+                    data.insert(field, Value::String(Value::Array(arr).to_string()));
+                }
+                _ => {
+                    data.insert(field, Value::String(json!([stored]).to_string()));
+                }
+            },
+            _ => {
+                data.insert(field, Value::String(stored));
+            }
+        }
+    }
+    Ok(())
+}
+
 // ─── handlers ────────────────────────────────────────────────────────────────
 
 fn load_collection(
@@ -396,7 +657,7 @@ async fn create(
     State(state): State<AppState>,
     headers: header::HeaderMap,
     Path(cname): Path<String>,
-    Json(body): Json<Value>,
+    request: axum::extract::Request,
 ) -> axum::response::Response {
     let (col, kinds) = match load_collection(&state, &cname) {
         Ok(v) => v,
@@ -405,6 +666,14 @@ async fn create(
     if !allowed(&state, &headers, col.create_rule.as_ref()) {
         return pb_err(StatusCode::FORBIDDEN, "Only superusers can perform this action.");
     }
+    let pb = match pb_of(&state) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    let (body, pending) = match extract_body(&kinds, &headers, request, &state).await {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
     let mut data = match lower_body(&kinds, &body) {
         Ok(d) => d,
         Err(m) => return pb_err(StatusCode::BAD_REQUEST, &m),
@@ -423,13 +692,19 @@ async fn create(
         }
     }
 
+    if let Err(r) = persist_files(&pb, &kinds, &col.id, &id, pending, &mut data).await {
+        return r;
+    }
     let mut op = base_op(DataOperationKind::Insert, &col.name);
     op.data = Some(Value::Object(data));
     if let Err(r) = exec(&state, op).await {
         return r;
     }
     match fetch_by_id(&state, &col, &kinds, &id).await {
-        Ok(Some(rec)) => (StatusCode::OK, Json(rec)).into_response(),
+        Ok(Some(rec)) => {
+            publish_event(&state, &col, "create", &rec);
+            (StatusCode::OK, Json(rec)).into_response()
+        }
         Ok(None) => pb_err(StatusCode::INTERNAL_SERVER_ERROR, "record vanished after insert"),
         Err(r) => r,
     }
@@ -440,7 +715,7 @@ async fn update(
     State(state): State<AppState>,
     headers: header::HeaderMap,
     Path((cname, rid)): Path<(String, String)>,
-    Json(body): Json<Value>,
+    request: axum::extract::Request,
 ) -> axum::response::Response {
     let (col, kinds) = match load_collection(&state, &cname) {
         Ok(v) => v,
@@ -449,10 +724,21 @@ async fn update(
     if !allowed(&state, &headers, col.update_rule.as_ref()) {
         return pb_err(StatusCode::FORBIDDEN, "Only superusers can perform this action.");
     }
+    let pb = match pb_of(&state) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    let (body, pending) = match extract_body(&kinds, &headers, request, &state).await {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
     let mut data = match lower_body(&kinds, &body) {
         Ok(d) => d,
         Err(m) => return pb_err(StatusCode::BAD_REQUEST, &m),
     };
+    if let Err(r) = persist_files(&pb, &kinds, &col.id, &rid, pending, &mut data).await {
+        return r;
+    }
     let now = pb_now();
     for (name, _, on_update) in autodates(&col) {
         if on_update {
@@ -479,7 +765,10 @@ async fn update(
         return pb_err(StatusCode::NOT_FOUND, "The requested resource wasn't found.");
     }
     match fetch_by_id(&state, &col, &kinds, &rid).await {
-        Ok(Some(rec)) => (StatusCode::OK, Json(rec)).into_response(),
+        Ok(Some(rec)) => {
+            publish_event(&state, &col, "update", &rec);
+            (StatusCode::OK, Json(rec)).into_response()
+        }
         Ok(None) => pb_err(StatusCode::NOT_FOUND, "The requested resource wasn't found."),
         Err(r) => r,
     }
@@ -491,13 +780,16 @@ async fn remove(
     headers: header::HeaderMap,
     Path((cname, rid)): Path<(String, String)>,
 ) -> axum::response::Response {
-    let (col, _kinds) = match load_collection(&state, &cname) {
+    let (col, kinds) = match load_collection(&state, &cname) {
         Ok(v) => v,
         Err(r) => return r,
     };
     if !allowed(&state, &headers, col.delete_rule.as_ref()) {
         return pb_err(StatusCode::FORBIDDEN, "Only superusers can perform this action.");
     }
+    // Pre-image for the realtime event (PB sends the deleted record's last
+    // known state).
+    let pre = fetch_by_id(&state, &col, &kinds, &rid).await.ok().flatten();
     let mut op = base_op(DataOperationKind::Delete, &col.name);
     op.filter = Some(json!({ "id": rid }));
     let result = match exec(&state, op).await {
@@ -506,6 +798,12 @@ async fn remove(
     };
     if result.affected_rows == 0 {
         return pb_err(StatusCode::NOT_FOUND, "The requested resource wasn't found.");
+    }
+    if let Some(rec) = pre {
+        publish_event(&state, &col, "delete", &rec);
+    }
+    if let Ok(pb) = pb_of(&state) {
+        super::files::remove_record_files(&pb, &col.id, &rid).await;
     }
     StatusCode::NO_CONTENT.into_response()
 }

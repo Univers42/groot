@@ -9,6 +9,9 @@
 // structure: field presence, types, status codes, counts, ordering.
 
 import PocketBase from "pocketbase";
+import { EventSource } from "eventsource";
+// Node has no global EventSource; the official SDK expects one for realtime.
+globalThis.EventSource = EventSource;
 
 const [base, suEmail, suPass] = process.argv.slice(2);
 if (!base || !suEmail || !suPass) {
@@ -164,6 +167,110 @@ await step("guest-forbidden-on-locked", async () => {
   } catch (e) {
     return { blocked: e?.status === 401 || e?.status === 403 };
   }
+});
+
+await step("realtime-create-event", async () => {
+  // subscribe, mutate, await the event — the SSE protocol end to end
+  const got = new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("no realtime event within 8s")), 8000);
+    pb.collection(COL)
+      .subscribe("*", (e) => {
+        clearTimeout(t);
+        resolve(e);
+      })
+      .catch(reject);
+  });
+  // give the subscription a moment to register
+  await new Promise((r) => setTimeout(r, 600));
+  await pb.collection(COL).create({ title: "rt-target", views: 1, done: false });
+  const e = await got;
+  await pb.collection(COL).unsubscribe("*");
+  return { action: e.action, title: e.record?.title, hasId: ID15.test(e.record?.id ?? "") };
+});
+
+await step("batch-disabled-by-default", async () => {
+  const b = pb.createBatch();
+  b.collection(COL).create({ title: "nope", views: 0, done: false });
+  try {
+    await b.send();
+    return { blocked: false };
+  } catch (e) {
+    return { blocked: e?.status === 403 };
+  }
+});
+
+await step("enable-batch", async () => {
+  const s = await pb.settings.update({ batch: { enabled: true, maxRequests: 50, timeout: 3 } });
+  return { batchEnabled: s?.batch?.enabled === true };
+});
+
+await step("batch-atomic-create", async () => {
+  const b = pb.createBatch();
+  b.collection(COL).create({ title: "batch-1", views: 11, done: false });
+  b.collection(COL).create({ title: "batch-2", views: 12, done: true });
+  const res = await b.send();
+  return {
+    statuses: res.map((r) => r.status),
+    titles: res.map((r) => r.body?.title),
+    idsOk: res.every((r) => ID15.test(r.body?.id ?? "")),
+  };
+});
+
+const FCOL = `m48files${Date.now() % 100000}`;
+let fileRecId = "";
+let fileUrl = "";
+await step("file-collection-create", async () => {
+  const c = await pb.collections.create({
+    name: FCOL,
+    type: "base",
+    fields: [
+      { name: "title", type: "text" },
+      { name: "doc", type: "file", maxSelect: 1 },
+    ],
+    listRule: "", viewRule: "", createRule: "", updateRule: "", deleteRule: "",
+  });
+  return { named: c.name === FCOL };
+});
+
+await step("file-upload-multipart", async () => {
+  // ~600-byte deterministic png
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAJElEQVR4nGP8z4APMOGV" +
+    "HZUelR6VHpUelR6VHpUelaZUGgAcwwIkSdvNNQAAAABJRU5ErkJggg==", "base64");
+  const r = await pb.collection(FCOL).create({
+    title: "with-file",
+    doc: new File([png], "pic one.PNG", { type: "image/png" }),
+  });
+  fileRecId = r.id;
+  return {
+    titled: r.title === "with-file",
+    storedNameShape: /^pic_one_[a-zA-Z0-9]{10}\.png$/i.test(r.doc),
+  };
+});
+
+await step("file-serve", async () => {
+  const r = await pb.collection(FCOL).getOne(fileRecId);
+  fileUrl = pb.files.getURL(r, r.doc);
+  const resp = await fetch(fileUrl);
+  const bytes = new Uint8Array(await resp.arrayBuffer());
+  return { status: resp.status, isPng: bytes[1] === 0x50 && bytes[2] === 0x4e, sizeOk: bytes.length > 100 };
+});
+
+await step("file-thumb", async () => {
+  const resp = await fetch(`${fileUrl}?thumb=16x16`);
+  const bytes = new Uint8Array(await resp.arrayBuffer());
+  return { status: resp.status, isPng: bytes[1] === 0x50, smaller: bytes.length > 0 };
+});
+
+await step("file-gone-after-record-delete", async () => {
+  await pb.collection(FCOL).delete(fileRecId);
+  const resp = await fetch(fileUrl);
+  return { status: resp.status };
+});
+
+await step("file-collection-delete", async () => {
+  await pb.collections.delete(FCOL);
+  return { deleted: true };
 });
 
 await step("collection-delete", async () => {
