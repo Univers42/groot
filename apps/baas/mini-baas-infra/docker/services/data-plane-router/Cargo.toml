@@ -67,6 +67,17 @@ deadpool-postgres = "0.14"
 # rusqlite's sync API on a blocking thread via `interact()`.
 rusqlite = { version = "0.31", features = ["bundled"] }
 deadpool-sqlite = "0.8"
+# Nano/one images are musl-static; musl's allocator serializes badly under
+# concurrent allocation (measured: argon2's 19 MiB arenas and per-row JSON
+# maps both pay for it at c=64). mimalloc replaces it as global allocator in
+# those builds only — glibc images keep their (fine) system malloc.
+mimalloc = { version = "0.1", default-features = false }
+# The allocator that is BOTH fast under 64-way small-alloc concurrency (musl's
+# global-lock malloc capped list throughput at ~12k RPS) AND returns freed
+# memory (mimalloc retained argon2 arenas forever — 378 MiB after 200 logins).
+# jemalloc purges via decay + a background thread; disable_initial_exec_tls is
+# required for musl-static builds.
+tikv-jemallocator = { version = "0.6", features = ["disable_initial_exec_tls", "background_threads_runtime_support"] }
 # R-mssql: Microsoft SQL Server (TDS) via the pure-Rust tiberius driver +
 # bb8 pool. `rustls` matches the workspace TLS posture; `tokio-util` provides
 # the AsyncRead/Write compat tiberius needs over a tokio TcpStream.

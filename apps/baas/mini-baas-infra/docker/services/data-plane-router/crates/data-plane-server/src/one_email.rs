@@ -218,8 +218,8 @@ async fn confirm_reset(
         return api_err(StatusCode::UNAUTHORIZED, "invalid_code", "wrong, expired or used code");
     };
     let password = req.password;
-    let hash = match tokio::task::spawn_blocking(move || hash_password(&password)).await {
-        Ok(Ok(h)) => h,
+    let hash = match crate::one::kdf_blocking(move || hash_password(&password)).await {
+        Some(Ok(h)) => h,
         _ => return api_err(StatusCode::INTERNAL_SERVER_ERROR, "hash_failed", "password hashing failed"),
     };
     if one.users.set_password(&uid, &hash).is_err() {

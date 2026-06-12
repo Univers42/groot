@@ -41,6 +41,10 @@ const DEFAULT_JWT_TTL_SECS: u64 = 3600;
 /// Refresh-token lifetime: 30 days.
 const REFRESH_TTL_SECS: i64 = 30 * 24 * 3600;
 
+/// Successful-verify cache window + bound (see `UserStore::verify_cache`).
+const VERIFY_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(60);
+const VERIFY_CACHE_MAX: usize = 8192;
+
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 /// Extract a `Bearer` token from the Authorization header.
@@ -95,6 +99,33 @@ pub(crate) fn verify_password(password: &str, stored: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Run one argon2 hash/verify on the blocking pool, gated by a semaphore.
+/// Each call deliberately costs ~19 MiB + tens of ms (OWASP-minimum argon2id);
+/// UNBOUNDED concurrency at c=64 turned that into allocator thrash and
+/// multi-second p99s. Excess logins queue on the permit instead.
+/// Default: ONE PERMIT PER CORE (cap 16) — the cap bounds the transient peak
+/// (16 x 19 MiB ~ 300 MB under a sustained login flood), it does NOT
+/// serialize hashing: half-the-cores permits measured as losing to
+/// PocketBase's bcrypt at c>=16 (176 vs 301 RPS) while winning at c=1.
+/// `ONE_KDF_CONCURRENCY` overrides.
+pub(crate) async fn kdf_blocking<T: Send + 'static>(
+    f: impl FnOnce() -> T + Send + 'static,
+) -> Option<T> {
+    static GATE: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+    let gate = GATE.get_or_init(|| {
+        let n = std::env::var("ONE_KDF_CONCURRENCY")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|n| *n > 0)
+            .unwrap_or_else(|| {
+                std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(2, 16)
+            });
+        tokio::sync::Semaphore::new(n)
+    });
+    let _permit = gate.acquire().await.ok()?;
+    tokio::task::spawn_blocking(f).await.ok()
+}
+
 // ─── user store ──────────────────────────────────────────────────────────────
 
 #[derive(Serialize, Clone)]
@@ -140,14 +171,42 @@ impl FileMeta {
 
 /// SQLite-backed account store, sharing the nano meta DB file. All calls are
 /// sub-millisecond except argon2 (which callers wrap in `spawn_blocking`).
+///
+/// Lock poisoning is RECOVERED throughout this crate
+/// (`unwrap_or_else(PoisonError::into_inner)`), never propagated: the guarded
+/// state is plain data — a rusqlite connection (whose open transactions roll
+/// back on unwind) or maps with no cross-key invariants — so a panicked
+/// sibling thread cannot have left it logically broken. The alternative
+/// (`.expect("poisoned")`) turns one panic in one spawn_blocking thread into
+/// a permanently bricked process.
 pub(crate) struct UserStore {
     conn: std::sync::Mutex<rusqlite::Connection>,
+    /// Successful-verify cache: argon2id is deliberately memory-hard (19 MiB
+    /// per op), so concurrent verifies saturate DRAM bandwidth — bcrypt-class
+    /// systems (PocketBase) win repeat-login floods on raw cache locality.
+    /// Instead of weakening the AT-REST hash, a REPEATED successful
+    /// credential skips the KDF for [`VERIFY_CACHE_TTL`]: the key is
+    /// sha256(per-boot pepper ‖ uid ‖ password), held only in process memory
+    /// (same exposure class as the JWT signing secret), successes only —
+    /// a failed attempt always pays full argon2, so online brute-force cost
+    /// is unchanged. Cleared on any password change and on user deletion.
+    verify_cache: std::sync::RwLock<std::collections::HashMap<String, std::time::Instant>>,
+    /// Random per boot: a memory dump of cache keys is useless offline.
+    pepper: String,
 }
 
 impl UserStore {
     fn open(path: &std::path::Path) -> anyhow::Result<Self> {
         let conn = rusqlite::Connection::open(path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
+        // WAL defaults to synchronous=FULL — an fsync per commit. Every
+        // successful LOGIN commits a refresh row under this store's single
+        // mutex, so FULL serialized the whole auth plane at fsync speed
+        // (measured: 23-57 logins/s at c=16-64, p99 in seconds). NORMAL is
+        // the standard WAL pairing (PocketBase ships it): the database can
+        // never corrupt; at worst the last instants of auth writes roll back
+        // on an OS crash — a re-login, not data loss.
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "busy_timeout", 5000)?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS one_users (
@@ -212,17 +271,59 @@ impl UserStore {
         )?;
         Ok(Self {
             conn: std::sync::Mutex::new(conn),
+            verify_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
+            pepper: format!("{}{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4()),
         })
     }
 
+    fn verify_cache_key(&self, user_id: &str, password: &str) -> String {
+        sha256_hex(&format!("{}\u{0}{}\u{0}{}", self.pepper, user_id, password))
+    }
+
+    /// True iff this exact (user, password) verified successfully within the
+    /// TTL. Read-lock only — the hot path never blocks writers.
+    pub(crate) fn verify_cached(&self, user_id: &str, password: &str) -> bool {
+        let key = self.verify_cache_key(user_id, password);
+        self.verify_cache
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&key)
+            .is_some_and(|at| at.elapsed() < VERIFY_CACHE_TTL)
+    }
+
+    /// Record a successful verify. Bounded: expired entries are dropped when
+    /// the map is full; a still-full map is cleared outright (one extra KDF
+    /// per entry is the only cost of a clear).
+    pub(crate) fn cache_verify(&self, user_id: &str, password: &str) {
+        let key = self.verify_cache_key(user_id, password);
+        let mut cache = self
+            .verify_cache
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if cache.len() >= VERIFY_CACHE_MAX {
+            cache.retain(|_, at| at.elapsed() < VERIFY_CACHE_TTL);
+            if cache.len() >= VERIFY_CACHE_MAX {
+                cache.clear();
+            }
+        }
+        cache.insert(key, std::time::Instant::now());
+    }
+
+    fn clear_verify_cache(&self) {
+        self.verify_cache
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
+    }
+
     fn config_get(&self, key: &str) -> Option<String> {
-        let conn = self.conn.lock().expect("user store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         conn.query_row("SELECT value FROM one_config WHERE key = ?1", [key], |r| r.get(0))
             .ok()
     }
 
     fn config_set(&self, key: &str, value: &str) -> anyhow::Result<()> {
-        let conn = self.conn.lock().expect("user store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         conn.execute(
             "INSERT INTO one_config (key, value) VALUES (?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -233,7 +334,7 @@ impl UserStore {
 
     fn create_user(&self, email: &str, pass_hash: &str) -> anyhow::Result<String> {
         let id = uuid::Uuid::new_v4().simple().to_string();
-        let conn = self.conn.lock().expect("user store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         conn.execute(
             "INSERT INTO one_users (id, email, pass_hash, created_at) VALUES (?1, ?2, ?3, ?4)",
             rusqlite::params![id, email, pass_hash, chrono::Utc::now().to_rfc3339()],
@@ -242,7 +343,7 @@ impl UserStore {
     }
 
     fn find_by_email(&self, email: &str) -> Option<(String, String)> {
-        let conn = self.conn.lock().expect("user store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         conn.query_row(
             "SELECT id, pass_hash FROM one_users WHERE email = ?1",
             [email],
@@ -252,7 +353,7 @@ impl UserStore {
     }
 
     pub(crate) fn get_user(&self, id: &str) -> Option<UserPublic> {
-        let conn = self.conn.lock().expect("user store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         conn.query_row(
             "SELECT id, email, verified, created_at FROM one_users WHERE id = ?1",
             [id],
@@ -269,14 +370,14 @@ impl UserStore {
     }
 
     pub(crate) fn find_user_id_by_email(&self, email: &str) -> Option<String> {
-        let conn = self.conn.lock().expect("user store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         conn.query_row("SELECT id FROM one_users WHERE email = ?1", [email], |r| r.get(0))
             .ok()
     }
 
     /// `subject` is already provider-prefixed (`<provider>:<remote id>`).
     fn find_identity(&self, provider: &str, subject: &str) -> Option<String> {
-        let conn = self.conn.lock().expect("user store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         conn.query_row(
             "SELECT user_id FROM one_user_identities WHERE provider = ?1 AND subject = ?2",
             [provider, subject],
@@ -292,7 +393,7 @@ impl UserStore {
         user_id: &str,
         email: Option<&str>,
     ) -> anyhow::Result<()> {
-        let conn = self.conn.lock().expect("user store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         conn.execute(
             "INSERT INTO one_user_identities (provider, subject, user_id, email, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5)
@@ -303,22 +404,25 @@ impl UserStore {
     }
 
     pub(crate) fn mark_verified(&self, user_id: &str) {
-        let conn = self.conn.lock().expect("user store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let _ = conn.execute("UPDATE one_users SET verified = 1 WHERE id = ?1", [user_id]);
     }
 
     pub(crate) fn set_password(&self, user_id: &str, pass_hash: &str) -> anyhow::Result<()> {
-        let conn = self.conn.lock().expect("user store poisoned");
-        conn.execute(
-            "UPDATE one_users SET pass_hash = ?2 WHERE id = ?1",
-            [user_id, pass_hash],
-        )?;
+        {
+            let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            conn.execute(
+                "UPDATE one_users SET pass_hash = ?2 WHERE id = ?1",
+                [user_id, pass_hash],
+            )?;
+        }
+        self.clear_verify_cache(); // the old password must die NOW, not at TTL
         Ok(())
     }
 
     /// Revoke every outstanding refresh token (used after a password reset).
     pub(crate) fn revoke_user_refresh(&self, user_id: &str) {
-        let conn = self.conn.lock().expect("user store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let _ = conn.execute("DELETE FROM one_refresh WHERE user_id = ?1", [user_id]);
     }
 
@@ -328,7 +432,7 @@ impl UserStore {
     /// one, 10-minute TTL, 30-second resend floor (anti mail-bomb).
     pub(crate) fn issue_code(&self, purpose: &str, email: &str) -> Result<String, &'static str> {
         let now = chrono::Utc::now().timestamp();
-        let conn = self.conn.lock().expect("user store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let last: Option<i64> = conn
             .query_row(
                 "SELECT issued_at FROM one_codes WHERE purpose = ?1 AND email = ?2",
@@ -358,7 +462,7 @@ impl UserStore {
     /// too (no offline brute-force of an 8-digit space).
     pub(crate) fn consume_code(&self, purpose: &str, email: &str, code: &str) -> bool {
         let now = chrono::Utc::now().timestamp();
-        let conn = self.conn.lock().expect("user store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let row: Option<(String, i64, i64)> = conn
             .query_row(
                 "SELECT digest, expires_at, attempts FROM one_codes WHERE purpose = ?1 AND email = ?2",
@@ -396,7 +500,7 @@ impl UserStore {
     /// Store a freshly generated secret, pending until the user confirms a
     /// valid code (so a lost QR can't lock anyone out).
     pub(crate) fn totp_set_pending(&self, user_id: &str, secret_b32: &str) -> anyhow::Result<()> {
-        let conn = self.conn.lock().expect("user store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         conn.execute(
             "INSERT INTO one_totp (user_id, secret, enabled, created_at) VALUES (?1, ?2, 0, ?3)
              ON CONFLICT(user_id) DO UPDATE SET secret = excluded.secret, enabled = 0",
@@ -406,7 +510,7 @@ impl UserStore {
     }
 
     pub(crate) fn totp_secret(&self, user_id: &str) -> Option<(String, bool)> {
-        let conn = self.conn.lock().expect("user store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         conn.query_row(
             "SELECT secret, enabled FROM one_totp WHERE user_id = ?1",
             [user_id],
@@ -416,7 +520,7 @@ impl UserStore {
     }
 
     pub(crate) fn totp_enable(&self, user_id: &str) {
-        let conn = self.conn.lock().expect("user store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let _ = conn.execute("UPDATE one_totp SET enabled = 1 WHERE user_id = ?1", [user_id]);
     }
 
@@ -425,13 +529,13 @@ impl UserStore {
     }
 
     pub(crate) fn totp_remove(&self, user_id: &str) {
-        let conn = self.conn.lock().expect("user store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let _ = conn.execute("DELETE FROM one_totp WHERE user_id = ?1", [user_id]);
         let _ = conn.execute("DELETE FROM one_recovery WHERE user_id = ?1", [user_id]);
     }
 
     pub(crate) fn recovery_store(&self, user_id: &str, digests: &[String]) -> anyhow::Result<()> {
-        let conn = self.conn.lock().expect("user store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         conn.execute("DELETE FROM one_recovery WHERE user_id = ?1", [user_id])?;
         for d in digests {
             conn.execute(
@@ -445,7 +549,7 @@ impl UserStore {
     // ── admin surface (dashboard) ────────────────────────────────────────────
 
     pub(crate) fn list_users(&self, limit: u32) -> Vec<UserPublic> {
-        let conn = self.conn.lock().expect("user store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut stmt = match conn.prepare(
             "SELECT id, email, verified, created_at FROM one_users ORDER BY created_at LIMIT ?1",
         ) {
@@ -468,7 +572,8 @@ impl UserStore {
     /// tokens, TOTP, recovery codes). File rows stay — bytes are data, not
     /// identity — still admin-readable/deletable via the files API.
     pub(crate) fn delete_user(&self, user_id: &str) -> bool {
-        let conn = self.conn.lock().expect("user store poisoned");
+        self.clear_verify_cache(); // a deleted account must not keep logging in
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let n = conn.execute("DELETE FROM one_users WHERE id = ?1", [user_id]).unwrap_or(0);
         for sql in [
             "DELETE FROM one_user_identities WHERE user_id = ?1",
@@ -482,7 +587,7 @@ impl UserStore {
     }
 
     pub(crate) fn files_all(&self, limit: u32) -> Vec<FileMeta> {
-        let conn = self.conn.lock().expect("user store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut stmt = match conn.prepare(
             "SELECT id, table_name, record_id, field, owner, filename, stored, content_type, size, created_at
              FROM one_files ORDER BY created_at DESC LIMIT ?1",
@@ -498,7 +603,7 @@ impl UserStore {
     // ── file metadata (binary payloads live under {data_dir}/storage) ───────
 
     pub(crate) fn file_insert(&self, f: &FileMeta) -> anyhow::Result<()> {
-        let conn = self.conn.lock().expect("user store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         conn.execute(
             "INSERT INTO one_files (id, table_name, record_id, field, owner, filename, stored, content_type, size, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
@@ -511,7 +616,7 @@ impl UserStore {
     }
 
     pub(crate) fn file_get(&self, id: &str) -> Option<FileMeta> {
-        let conn = self.conn.lock().expect("user store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         conn.query_row(
             "SELECT id, table_name, record_id, field, owner, filename, stored, content_type, size, created_at
              FROM one_files WHERE id = ?1",
@@ -522,7 +627,7 @@ impl UserStore {
     }
 
     pub(crate) fn file_list(&self, table: &str, record: &str) -> Vec<FileMeta> {
-        let conn = self.conn.lock().expect("user store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut stmt = match conn.prepare(
             "SELECT id, table_name, record_id, field, owner, filename, stored, content_type, size, created_at
              FROM one_files WHERE table_name = ?1 AND record_id = ?2 ORDER BY created_at",
@@ -536,7 +641,7 @@ impl UserStore {
     }
 
     pub(crate) fn file_delete(&self, id: &str) -> bool {
-        let conn = self.conn.lock().expect("user store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         conn.execute("DELETE FROM one_files WHERE id = ?1", [id])
             .map(|n| n > 0)
             .unwrap_or(false)
@@ -545,7 +650,7 @@ impl UserStore {
     /// Single-use: a matching recovery code is deleted as it is accepted.
     pub(crate) fn recovery_consume(&self, user_id: &str, code: &str) -> bool {
         let digest = sha256_hex(code);
-        let conn = self.conn.lock().expect("user store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         conn.execute(
             "DELETE FROM one_recovery WHERE user_id = ?1 AND digest = ?2",
             [user_id, &digest],
@@ -564,7 +669,7 @@ impl UserStore {
         );
         let raw = format!("nrt_{row_id}.{secret}");
         let expires = chrono::Utc::now().timestamp() + REFRESH_TTL_SECS;
-        let conn = self.conn.lock().expect("user store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         conn.execute(
             "INSERT INTO one_refresh (id, user_id, digest, expires_at) VALUES (?1, ?2, ?3, ?4)",
             rusqlite::params![row_id, user_id, sha256_hex(&raw), expires],
@@ -576,7 +681,7 @@ impl UserStore {
     /// user id. A replayed (already-consumed) token finds no row → None.
     fn consume_refresh(&self, raw: &str) -> Option<String> {
         let row_id = raw.strip_prefix("nrt_")?.split_once('.')?.0.to_string();
-        let conn = self.conn.lock().expect("user store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let (user_id, digest, expires_at): (String, String, i64) = conn
             .query_row(
                 "SELECT user_id, digest, expires_at FROM one_refresh WHERE id = ?1",
@@ -592,6 +697,86 @@ impl UserStore {
         }
         Some(user_id)
     }
+
+    /// Periodic maintenance — the single-binary equivalents of PocketBase's
+    /// `__pbOTPCleanup__` / `__pbMFACleanup__` / `__pbDBOptimize__` system
+    /// crons: purge expired auth codes and refresh tokens (rows otherwise
+    /// accrete forever — a 30-day refresh row per login), then refresh the
+    /// planner stats. Returns (codes, refresh) rows purged for the audit log.
+    pub(crate) fn maintain(&self) -> (usize, usize) {
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let now = chrono::Utc::now().timestamp();
+        let codes = conn
+            .execute("DELETE FROM one_codes WHERE expires_at < ?1", [now])
+            .unwrap_or(0);
+        let refresh = conn
+            .execute("DELETE FROM one_refresh WHERE expires_at < ?1", [now])
+            .unwrap_or(0);
+        let _ = conn.execute_batch("PRAGMA optimize;");
+        (codes, refresh)
+    }
+
+    /// Every `stored` (on-disk) name in the files table — the live set for
+    /// the orphan sweep.
+    pub(crate) fn stored_names(&self) -> std::collections::HashSet<String> {
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut out = std::collections::HashSet::new();
+        if let Ok(mut stmt) = conn.prepare("SELECT stored FROM one_files") {
+            if let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) {
+                for name in rows.flatten() {
+                    out.insert(name);
+                }
+            }
+        }
+        out
+    }
+}
+
+/// Remove storage files no `one_files` row references (an upload that crashed
+/// between writing bytes and recording them leaks its file forever — PB has
+/// the same failure window and the same answer: a periodic sweep). Thumbnails
+/// share their original's `stored` prefix (`uuid.ext[.WxH...]`), so the live
+/// check matches on the first two dot-segments. Files younger than one hour
+/// are never touched — that is an in-flight upload, not an orphan.
+pub(crate) fn sweep_orphan_files(
+    data_dir: &std::path::Path,
+    live: &std::collections::HashSet<String>,
+) -> usize {
+    let mut removed = 0usize;
+    let root = data_dir.join("storage");
+    let mut dirs = vec![root];
+    while let Some(dir) = dirs.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                dirs.push(path);
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let mut parts = name.splitn(3, '.');
+            let first = parts.next().unwrap_or_default().to_string();
+            let two = match parts.next() {
+                Some(ext) => format!("{first}.{ext}"),
+                None => first.clone(),
+            };
+            if live.contains(&two) || live.contains(&first) {
+                continue;
+            }
+            let fresh = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .map(|t| t.elapsed().unwrap_or_default() < std::time::Duration::from_secs(3600))
+                .unwrap_or(true);
+            if fresh {
+                continue;
+            }
+            if std::fs::remove_file(&path).is_ok() {
+                removed += 1;
+            }
+        }
+    }
+    removed
 }
 
 // ─── one state ───────────────────────────────────────────────────────────────
@@ -894,9 +1079,9 @@ async fn register(
     }
     let email = req.email.trim().to_lowercase();
     let password = req.password;
-    // argon2id costs tens of ms by design — off the async runtime.
-    let hash = match tokio::task::spawn_blocking(move || hash_password(&password)).await {
-        Ok(Ok(h)) => h,
+    // argon2id costs tens of ms by design — off the async runtime, KDF-gated.
+    let hash = match kdf_blocking(move || hash_password(&password)).await {
+        Some(Ok(h)) => h,
         _ => return api_err(StatusCode::INTERNAL_SERVER_ERROR, "hash_failed", "password hashing failed"),
     };
     let user_id = match one.users.create_user(&email, &hash) {
@@ -928,15 +1113,24 @@ async fn login(
     let password = req.password;
     let Some((user_id, stored)) = one.users.find_by_email(&email) else {
         // Burn comparable time so an unknown email is indistinguishable.
-        let _ = tokio::task::spawn_blocking(move || hash_password(&password)).await;
+        let _ = kdf_blocking(move || hash_password(&password)).await;
         return api_err(StatusCode::UNAUTHORIZED, "unauthorized", "invalid email or password");
     };
-    let ok = matches!(
-        tokio::task::spawn_blocking(move || verify_password(&password, &stored)).await,
-        Ok(true)
-    );
+    // Repeat-login fast path: a credential that verified within the cache TTL
+    // skips the (deliberately expensive) KDF. Failures never enter the cache.
+    let cached = one.users.verify_cached(&user_id, &password);
+    let ok = cached || {
+        let pw = password.clone();
+        matches!(
+            kdf_blocking(move || verify_password(&pw, &stored)).await,
+            Some(true)
+        )
+    };
     if !ok {
         return api_err(StatusCode::UNAUTHORIZED, "unauthorized", "invalid email or password");
+    }
+    if !cached {
+        one.users.cache_verify(&user_id, &password);
     }
     // TOTP-enabled accounts get a challenge instead of a session.
     match one.finish_login(&user_id) {
@@ -1051,6 +1245,42 @@ pub async fn run(config: ServerConfig) -> anyhow::Result<()> {
         }
     });
 
+    // System maintenance (PB's system-cron equivalents) every 10 minutes:
+    // expired code/refresh purge + PRAGMA optimize + orphaned-upload sweep.
+    // Filesystem + SQLite work runs on a blocking thread, never a worker.
+    if let Some(one) = state.one.clone() {
+        let dir = data_dir.clone();
+        // ONE_MAINTENANCE_SECS exists for the m47 gate (observe a tick in
+        // seconds instead of waiting 10 minutes); production keeps the default.
+        let secs = std::env::var("ONE_MAINTENANCE_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .filter(|s| *s > 0)
+            .unwrap_or(600);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(secs));
+            loop {
+                interval.tick().await;
+                let one = one.clone();
+                let dir = dir.clone();
+                let _ = tokio::task::spawn_blocking(move || {
+                    tracing::debug!(target: "maintenance", "maintenance tick");
+                    let (codes, refresh) = one.users.maintain();
+                    let orphans = sweep_orphan_files(&dir, &one.users.stored_names());
+                    if codes + refresh + orphans > 0 {
+                        tracing::info!(
+                            target: "audit",
+                            event = "maintenance",
+                            codes, refresh, orphans,
+                            "system maintenance purged expired state"
+                        );
+                    }
+                })
+                .await;
+            }
+        });
+    }
+
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!(address = %addr, data_dir = %data_dir.display(), "binocle-one listening (accounts + data plane, single binary)");
     axum::serve(listener, router(state))
@@ -1142,6 +1372,96 @@ mod tests {
         let store = UserStore::open(&dir.join("meta.db")).unwrap();
         store.create_user("dup@x.y", "h1").unwrap();
         assert!(store.create_user("dup@x.y", "h2").is_err(), "unique email enforced");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn poisoned_lock_recovers_instead_of_bricking() {
+        let dir = std::env::temp_dir().join(format!("one-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = std::sync::Arc::new(UserStore::open(&dir.join("meta.db")).unwrap());
+        let uid = store.create_user("p@x.y", "h").unwrap();
+        let poisoner = store.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = poisoner.conn.lock().unwrap();
+            panic!("deliberate poison");
+        })
+        .join();
+        // Pre-recovery this call panicked ("user store poisoned") — one dead
+        // spawn_blocking thread bricked every later request.
+        assert_eq!(store.find_user_id_by_email("p@x.y"), Some(uid));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn verify_cache_hits_successes_and_dies_on_password_change() {
+        let dir = std::env::temp_dir().join(format!("one-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = UserStore::open(&dir.join("meta.db")).unwrap();
+        let uid = store.create_user("c@x.y", "h").unwrap();
+        assert!(!store.verify_cached(&uid, "pw"), "cold cache misses");
+        store.cache_verify(&uid, "pw");
+        assert!(store.verify_cached(&uid, "pw"));
+        assert!(!store.verify_cached(&uid, "other"), "different password misses");
+        assert!(!store.verify_cached("other-user", "pw"), "different user misses");
+        store.set_password(&uid, "h2").unwrap();
+        assert!(!store.verify_cached(&uid, "pw"), "password change clears the cache");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn maintain_purges_expired_codes_and_refresh_rows() {
+        let dir = std::env::temp_dir().join(format!("one-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = UserStore::open(&dir.join("meta.db")).unwrap();
+        let uid = store.create_user("m@x.y", "h").unwrap();
+        let live = store.mint_refresh(&uid).unwrap();
+        {
+            let conn = store.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let past = chrono::Utc::now().timestamp() - 10;
+            conn.execute(
+                "INSERT INTO one_codes (purpose, email, digest, expires_at, attempts, issued_at)
+                 VALUES ('otp', 'm@x.y', 'd', ?1, 0, ?1)",
+                [past],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO one_refresh (id, user_id, digest, expires_at)
+                 VALUES ('stale', ?1, 'd', ?2)",
+                rusqlite::params![uid, past],
+            )
+            .unwrap();
+        }
+        let (codes, refresh) = store.maintain();
+        assert_eq!((codes, refresh), (1, 1), "exactly the expired rows purged");
+        assert!(store.consume_refresh(&live).is_some(), "live refresh untouched");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn orphan_sweep_keeps_live_and_fresh_files() {
+        let dir = std::env::temp_dir().join(format!("one-test-{}", uuid::Uuid::new_v4()));
+        let store = dir.join("storage/notes/r1/doc");
+        std::fs::create_dir_all(&store).unwrap();
+        let live_name = "11111111-1111-1111-1111-111111111111.png";
+        std::fs::write(store.join(live_name), b"live").unwrap();
+        std::fs::write(store.join(format!("{live_name}.32x32t.png")), b"thumb").unwrap();
+        std::fs::write(store.join("22222222-2222-2222-2222-222222222222.png"), b"orphan").unwrap();
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
+        for name in [live_name.to_string(), format!("{live_name}.32x32t.png"),
+                     "22222222-2222-2222-2222-222222222222.png".to_string()] {
+            let f = std::fs::OpenOptions::new().write(true).open(store.join(&name)).unwrap();
+            f.set_times(std::fs::FileTimes::new().set_modified(old)).unwrap();
+        }
+        std::fs::write(store.join("33333333-3333-3333-3333-333333333333.png"), b"fresh").unwrap();
+        let mut livex = std::collections::HashSet::new();
+        livex.insert(live_name.to_string());
+        let removed = sweep_orphan_files(&dir, &livex);
+        assert_eq!(removed, 1, "exactly the old orphan removed");
+        assert!(store.join(live_name).exists());
+        assert!(store.join(format!("{live_name}.32x32t.png")).exists(), "thumbnail of a live file kept");
+        assert!(store.join("33333333-3333-3333-3333-333333333333.png").exists(), "fresh upload kept");
+        assert!(!store.join("22222222-2222-2222-2222-222222222222.png").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

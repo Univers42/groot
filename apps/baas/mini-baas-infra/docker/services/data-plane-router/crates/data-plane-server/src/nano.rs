@@ -66,6 +66,12 @@ struct KeyInfo {
 /// sub-millisecond and never held across an await, so a std Mutex is right.
 struct KeyStore {
     conn: std::sync::Mutex<rusqlite::Connection>,
+    /// digest → (name, scopes) for keys that have already verified. Without
+    /// this, EVERY request paid a mutex-serialized SQLite query just to auth —
+    /// the measured per-request ceiling at c=64. Entries are only inserted
+    /// after a successful digest match, so the map is bounded by the number of
+    /// live keys; revoke clears it (a revoked key must die immediately).
+    verified: std::sync::RwLock<std::collections::HashMap<String, (String, Vec<String>)>>,
 }
 
 impl KeyStore {
@@ -84,11 +90,12 @@ impl KeyStore {
         )?;
         Ok(Self {
             conn: std::sync::Mutex::new(conn),
+            verified: std::sync::RwLock::new(std::collections::HashMap::new()),
         })
     }
 
     fn active_count(&self) -> anyhow::Result<i64> {
-        let conn = self.conn.lock().expect("key store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         Ok(conn.query_row(
             "SELECT COUNT(*) FROM nano_keys WHERE revoked = 0",
             [],
@@ -97,7 +104,7 @@ impl KeyStore {
     }
 
     fn insert(&self, id: &str, name: &str, digest: &str, scopes: &[String]) -> anyhow::Result<()> {
-        let conn = self.conn.lock().expect("key store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         conn.execute(
             "INSERT INTO nano_keys (id, name, digest, scopes, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
             rusqlite::params![
@@ -130,12 +137,21 @@ impl KeyStore {
     /// its shape — the digest of the FULL key string must match either way, so
     /// the fallback can only ever match the one key it stores.
     fn verify(&self, key: &str) -> Option<(String, Vec<String>)> {
+        let digest = sha256_hex(key);
+        // Fast path: this digest already proved itself against the store. The
+        // read lock is uncontended (writes only on first-verify and revoke),
+        // so concurrent requests no longer serialize through the SQLite query.
+        {
+            let cache = self.verified.read().unwrap_or_else(|e| e.into_inner());
+            if let Some(hit) = cache.get(&digest) {
+                return Some(hit.clone());
+            }
+        }
         let embedded_id = key
             .strip_prefix("nbk_")
             .and_then(|rest| rest.split_once('.'))
             .map(|(id, _)| id.to_string());
-        let digest = sha256_hex(key);
-        let conn = self.conn.lock().expect("key store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let lookup = |id: &str| -> Option<(String, String, String)> {
             conn.query_row(
                 "SELECT name, digest, scopes FROM nano_keys WHERE id = ?1 AND revoked = 0",
@@ -148,13 +164,18 @@ impl KeyStore {
             .and_then(|id| lookup(&id))
             .filter(|(_, d, _)| ct_eq(&digest, d))
             .or_else(|| lookup("env-admin").filter(|(_, d, _)| ct_eq(&digest, d)))?;
+        drop(conn);
         let (name, _, scopes_json) = verified;
         let scopes: Vec<String> = serde_json::from_str(&scopes_json).unwrap_or_default();
+        self.verified
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(digest, (name.clone(), scopes.clone()));
         Some((name, scopes))
     }
 
     fn list(&self) -> anyhow::Result<Vec<KeyInfo>> {
-        let conn = self.conn.lock().expect("key store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut stmt =
             conn.prepare("SELECT id, name, scopes, created_at, revoked FROM nano_keys ORDER BY created_at")?;
         let rows = stmt.query_map([], |r| {
@@ -171,8 +192,15 @@ impl KeyStore {
     }
 
     fn revoke(&self, id: &str) -> anyhow::Result<bool> {
-        let conn = self.conn.lock().expect("key store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let n = conn.execute("UPDATE nano_keys SET revoked = 1 WHERE id = ?1", [id])?;
+        drop(conn);
+        // A revoked key must stop verifying NOW — drop every cached entry
+        // (the next verify of any live key repopulates from the store).
+        self.verified
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
         Ok(n > 0)
     }
 }
@@ -794,6 +822,10 @@ mod tests {
         let (name, scopes) = store.verify(&key).expect("freshly minted key verifies");
         assert_eq!(name, "ci");
         assert_eq!(scopes, vec!["read".to_string()]);
+
+        // Second verify hits the in-memory cache — identical result.
+        let (name2, scopes2) = store.verify(&key).expect("cached key verifies");
+        assert_eq!((name2, scopes2), (name, scopes));
 
         // Wrong secret with the right id must fail (digest mismatch).
         let forged = format!("nbk_{id}.{}", "0".repeat(64));

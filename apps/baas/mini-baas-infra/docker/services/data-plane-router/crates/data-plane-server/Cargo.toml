@@ -30,13 +30,27 @@ control-pg = ["dep:deadpool-postgres", "dep:tokio-postgres", "data-plane-pool/ht
 # key store (rusqlite) + uuid v4 for key material. High-entropy keys are
 # stored as SHA-256 digests (sha2 is already in-tree via service_auth) —
 # memory-hard KDFs exist for low-entropy passwords, which nano keys are not.
-nano = ["sqlite", "dep:rusqlite", "dep:futures", "uuid/v4"]
+nano = ["sqlite", "dep:rusqlite", "dep:futures", "uuid/v4", "jemalloc-alloc"]
+# Default allocator for the static SKUs — fast under concurrency AND returns
+# memory via decay (see workspace Cargo.toml note).
+jemalloc-alloc = ["dep:tikv-jemallocator"]
+# OPT-IN global mimalloc. Measured 2026-06-12: with the thread-local direct
+# read path, row buffers alloc+free on one thread and musl's malloc keeps up —
+# while mimalloc's per-thread heaps RETAIN freed argon2 arenas (378 MiB after
+# 200 logins; 40 MiB after a plain health flood) and never return them. musl
+# munmaps large frees immediately, so the idle-RSS budgets hold. Enable only
+# if a future workload shows cross-thread allocator contention again.
+mimalloc-alloc = ["dep:mimalloc"]
 # binocle-one — "our PocketBase": nano + user accounts. Email/password with
 # argon2id (passwords ARE low-entropy) + HS256 JWTs minted/verified in-process,
 # the OAuth2/OIDC provider matrix, SMTP mail codes (verification/reset/OTP)
 # and RFC 6238 TOTP MFA (hmac+sha1 — authenticator apps mandate SHA1).
 # File storage rides the same feature: multipart upload + jpeg/png thumbnails.
-one = ["nano", "dep:argon2", "dep:jsonwebtoken", "dep:lettre", "dep:hmac", "dep:sha1", "dep:image", "axum/multipart"]
+one = ["nano", "pbcompat", "dep:argon2", "dep:jsonwebtoken", "dep:lettre", "dep:hmac", "dep:sha1", "dep:image", "axum/multipart"]
+# PocketBase-compatible facade (/api/...): PB filter DSL, collections registry,
+# records/realtime/files in PB envelopes — so the official PB SDKs work
+# unchanged. Rides in `one`; nano stays headless-minimal without it.
+pbcompat = []
 
 [dependencies]
 data-plane-core = { path = "../data-plane-core" }
@@ -54,6 +68,8 @@ tokio-postgres = { workspace = true, optional = true }
 # the SSE stream adapter (futures::stream::unfold over a broadcast receiver).
 rusqlite = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
+mimalloc = { workspace = true, optional = true }
+tikv-jemallocator = { workspace = true, optional = true }
 # binocle-one: password hashing + JWT sessions + SMTP codes + TOTP MFA.
 argon2 = { workspace = true, optional = true }
 jsonwebtoken = { workspace = true, optional = true }
