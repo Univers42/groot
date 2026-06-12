@@ -16,11 +16,13 @@
 //! (PB bootstraps its first superuser the same way), authenticated through
 //! `/api/collections/_superusers/auth-with-password`.
 
+pub mod auth;
 pub mod batch;
 pub mod collections;
 pub mod files;
 pub mod filter;
 pub mod realtime;
+pub mod rules;
 pub mod settings;
 pub mod records;
 
@@ -50,6 +52,11 @@ pub struct PbState {
     pub(crate) realtime: realtime::Realtime,
     /// Root of PB file storage ({data_dir}/pb_storage).
     pub(crate) storage_root: std::path::PathBuf,
+    /// Successful-verify cache for auth records (same design + rationale as
+    /// `UserStore::verify_cache`: argon2id is memory-hard by design, repeat
+    /// logins skip it; failures always pay full cost).
+    verify_cache: std::sync::RwLock<std::collections::HashMap<String, std::time::Instant>>,
+    pepper: String,
     su_email: Option<String>,
     su_pass: Option<String>,
 }
@@ -98,9 +105,39 @@ impl PbState {
             meta: std::sync::Mutex::new(conn),
             realtime: realtime::Realtime::default(),
             storage_root: data_dir.join("pb_storage"),
+            verify_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
+            pepper: format!("{}{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4()),
             su_email,
             su_pass,
         })
+    }
+}
+
+impl PbState {
+    fn cache_key(&self, rid: &str, password: &str) -> String {
+        crate::one::sha256_hex(&format!("{}\u{0}{}\u{0}{}", self.pepper, rid, password))
+    }
+    pub(crate) fn verify_cached_pb(&self, rid: &str, password: &str) -> bool {
+        let key = self.cache_key(rid, password);
+        self.verify_cache
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&key)
+            .is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(60))
+    }
+    pub(crate) fn cache_verify_pb(&self, rid: &str, password: &str) {
+        let key = self.cache_key(rid, password);
+        let mut cache = self
+            .verify_cache
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if cache.len() >= 8192 {
+            cache.retain(|_, at| at.elapsed() < std::time::Duration::from_secs(60));
+            if cache.len() >= 8192 {
+                cache.clear();
+            }
+        }
+        cache.insert(key, std::time::Instant::now());
     }
 }
 
@@ -151,8 +188,10 @@ pub(crate) fn pb_now() -> String {
 
 pub(crate) enum PbAuth {
     Superuser,
-    /// The authenticated record id — feeds `@request.auth.*` once the
-    /// Phase K rules engine lands (unused until then by design).
+    /// An authenticated AUTH-COLLECTION record (`sub = pb:{col id}:{rid}`)
+    /// — the identity `@request.auth.*` rules read.
+    Record { collection_id: String, record_id: String },
+    /// A native binocle-one account JWT (not a PB auth record).
     #[allow(dead_code)]
     User(String),
     Guest,
@@ -179,7 +218,13 @@ pub(crate) fn pb_auth(state: &AppState, headers: &header::HeaderMap) -> PbAuth {
     };
     match one.verify_jwt(raw) {
         Ok(id) if id.key_id == "pb:su" => PbAuth::Superuser,
-        Ok(id) => PbAuth::User(id.key_id),
+        Ok(id) => match id.key_id.strip_prefix("pb:").and_then(|r| r.split_once(':')) {
+            Some((col, rid)) => PbAuth::Record {
+                collection_id: col.to_string(),
+                record_id: rid.to_string(),
+            },
+            None => PbAuth::User(id.key_id),
+        },
         Err(_) => PbAuth::Guest,
     }
 }
@@ -396,4 +441,5 @@ pub fn routes() -> Router<AppState> {
         .merge(batch::routes())
         .merge(settings::routes())
         .merge(files::routes())
+        .merge(auth::routes())
 }

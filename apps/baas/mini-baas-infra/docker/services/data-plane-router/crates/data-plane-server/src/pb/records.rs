@@ -43,12 +43,35 @@ fn rule_of(raw: Option<&String>) -> Rule<'_> {
     }
 }
 
-fn allowed(state: &AppState, headers: &header::HeaderMap, raw: Option<&String>) -> bool {
-    match rule_of(raw) {
-        Rule::Public => true,
-        Rule::Locked => matches!(pb_auth(state, headers), PbAuth::Superuser),
-        // Fail closed until the Phase K rules engine evaluates expressions.
-        Rule::Expr(_) => matches!(pb_auth(state, headers), PbAuth::Superuser),
+/// Resolve the caller + their auth record once per request (rule context).
+async fn caller(
+    state: &AppState,
+    headers: &header::HeaderMap,
+) -> (PbAuth, super::rules::RuleCtx) {
+    let auth = pb_auth(state, headers);
+    let record = super::auth::auth_record_of(state, &auth).await;
+    let ctx = super::rules::RuleCtx::from_auth(&auth, record);
+    (auth, ctx)
+}
+
+/// Apply a lowered rule to a query op. Returns Err(response) for Deny;
+/// Ok(true) = proceed, Ok(false) = rule can never match (caller handles).
+fn apply_rule(
+    op: &mut DataOperation,
+    lowered: super::rules::Lowered,
+) -> Result<bool, axum::response::Response> {
+    use super::rules::Lowered::*;
+    match lowered {
+        Open => Ok(true),
+        Constrain(extra) => {
+            op.filter = Some(super::rules::and_filters(op.filter.take(), extra));
+            Ok(true)
+        }
+        Never => Ok(false),
+        Deny => Err(pb_err(
+            StatusCode::FORBIDDEN,
+            "Only superusers can perform this action.",
+        )),
     }
 }
 
@@ -63,6 +86,7 @@ enum FieldKind {
     Multi, // select/file/relation with maxSelect > 1 → JSON array in TEXT
     Single,
     Autodate, // server-stamped datetime; renders as text
+    Password, // argon2id hash column; write-only
 }
 
 fn field_kinds(col: &Collection) -> HashMap<String, FieldKind> {
@@ -79,6 +103,7 @@ fn field_kinds(col: &Collection) -> HashMap<String, FieldKind> {
                 "select" | "file" | "relation" if max_select > 1 => FieldKind::Multi,
                 "select" | "file" | "relation" => FieldKind::Single,
                 "autodate" => FieldKind::Autodate,
+                "password" => FieldKind::Password,
                 _ => FieldKind::Text,
             };
             map.insert(name.to_string(), kind);
@@ -141,6 +166,7 @@ fn shape_record(col: &Collection, kinds: &HashMap<String, FieldKind>, row: &Valu
                 Value::Null => json!(""),
                 other => other,
             },
+            FieldKind::Password => continue, // write-only, never serialized
         };
         out.insert(name.clone(), shaped);
     }
@@ -162,8 +188,8 @@ fn lower_body(
         let Some(kind) = kinds.get(k.as_str()) else {
             continue;
         };
-        if *kind == FieldKind::Autodate {
-            continue; // server-stamped, never client-set (PB ignores them too)
+        if matches!(kind, FieldKind::Autodate | FieldKind::Password) {
+            continue; // server-managed (stamped / hashed), never raw client input
         }
         let lowered = match kind {
             FieldKind::Json | FieldKind::Multi => match v {
@@ -200,6 +226,11 @@ fn parse_sort(raw: &str, kinds: &HashMap<String, FieldKind>) -> Result<Vec<(Stri
     Ok(out)
 }
 
+/// Public alias for sibling modules (auth) that build raw ops.
+pub(crate) fn base_op_pub(kind: DataOperationKind, resource: &str) -> DataOperation {
+    base_op(kind, resource)
+}
+
 fn base_op(kind: DataOperationKind, resource: &str) -> DataOperation {
     DataOperation {
         op: kind,
@@ -228,7 +259,7 @@ fn filter_wire(raw: &str) -> Result<Option<Value>, String> {
     Ok(Some(filter_to_wire(&ast)))
 }
 
-fn filter_to_wire(f: &data_plane_core::Filter) -> Value {
+pub(crate) fn filter_to_wire(f: &data_plane_core::Filter) -> Value {
     use data_plane_core::{CmpOp, Filter};
     match f {
         Filter::And(parts) => json!({ "$and": parts.iter().map(filter_to_wire).collect::<Vec<_>>() }),
@@ -288,6 +319,8 @@ pub(crate) fn record_for_batch(
         return Err(format!("collection '{cname}' not found"));
     };
     let kinds = field_kinds(&col);
+    // Batch v1 honors public/locked; expression rules in batch arrive with
+    // the Phase L hardening pass (documented limitation, fails CLOSED).
     let pass = |raw: &Option<String>| match rule_of(raw.as_ref()) {
         Rule::Public => true,
         _ => superuser,
@@ -541,9 +574,8 @@ async fn list(
         Ok(v) => v,
         Err(r) => return r,
     };
-    if !allowed(&state, &headers, col.list_rule.as_ref()) {
-        return pb_err(StatusCode::FORBIDDEN, "Only superusers can perform this action.");
-    }
+    let (_auth, ctx) = caller(&state, &headers).await;
+    let lowered = super::rules::lower_rule(col.list_rule.as_ref(), &ctx);
     let page: u32 = q.get("page").and_then(|v| v.parse().ok()).unwrap_or(1).max(1);
     let per_page: u32 = q
         .get("perPage")
@@ -568,15 +600,42 @@ async fn list(
             Err(m) => return pb_err(StatusCode::BAD_REQUEST, &m),
         }
     }
+    let matchable = match apply_rule(&mut op, lowered) {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    if !matchable {
+        return (
+            StatusCode::OK,
+            Json(json!({ "page": page, "perPage": per_page, "totalItems": 0,
+                          "totalPages": 0, "items": [] })),
+        )
+            .into_response();
+    }
     let filter_for_count = op.filter.clone();
     let result = match exec(&state, op).await {
         Ok(r) => r,
         Err(r) => return r,
     };
+    let su = ctx.superuser;
+    let self_id = ctx
+        .auth
+        .as_ref()
+        .and_then(|a| a.get("id"))
+        .and_then(Value::as_str)
+        .map(String::from);
     let items: Vec<Value> = result
         .rows
         .iter()
-        .map(|r| shape_record(&col, &kinds, r))
+        .map(|r| {
+            let mut rec = shape_record(&col, &kinds, r);
+            if col.kind == "auth" {
+                let is_self = self_id.as_deref()
+                    == rec.get("id").and_then(Value::as_str);
+                super::auth::scrub_auth_record(&mut rec, su || is_self);
+            }
+            rec
+        })
         .collect();
 
     let (total_items, total_pages) = if skip_total {
@@ -642,11 +701,28 @@ async fn view(
         Ok(v) => v,
         Err(r) => return r,
     };
-    if !allowed(&state, &headers, col.view_rule.as_ref()) {
-        return pb_err(StatusCode::FORBIDDEN, "Only superusers can perform this action.");
+    let (_auth, ctx) = caller(&state, &headers).await;
+    let mut op = base_op(DataOperationKind::Get, &col.name);
+    op.filter = Some(json!({ "id": rid }));
+    match apply_rule(&mut op, super::rules::lower_rule(col.view_rule.as_ref(), &ctx)) {
+        Ok(true) => {}
+        Ok(false) => return pb_err(StatusCode::NOT_FOUND, "The requested resource wasn't found."),
+        Err(r) => return r,
     }
-    match fetch_by_id(&state, &col, &kinds, &rid).await {
-        Ok(Some(rec)) => (StatusCode::OK, Json(rec)).into_response(),
+    match exec(&state, op).await.map(|r| r.rows.first().map(|row| shape_record(&col, &kinds, row))) {
+        Ok(Some(mut rec)) => {
+            if col.kind == "auth" {
+                let su = ctx.superuser;
+                let is_self = ctx
+                    .auth
+                    .as_ref()
+                    .and_then(|a| a.get("id"))
+                    .and_then(Value::as_str)
+                    == rec.get("id").and_then(Value::as_str);
+                super::auth::scrub_auth_record(&mut rec, su || is_self);
+            }
+            (StatusCode::OK, Json(rec)).into_response()
+        }
         Ok(None) => pb_err(StatusCode::NOT_FOUND, "The requested resource wasn't found."),
         Err(r) => r,
     }
@@ -663,8 +739,13 @@ async fn create(
         Ok(v) => v,
         Err(r) => return r,
     };
-    if !allowed(&state, &headers, col.create_rule.as_ref()) {
+    let (_auth, ctx) = caller(&state, &headers).await;
+    let create_rule = super::rules::lower_rule(col.create_rule.as_ref(), &ctx);
+    if matches!(create_rule, super::rules::Lowered::Deny) {
         return pb_err(StatusCode::FORBIDDEN, "Only superusers can perform this action.");
+    }
+    if matches!(create_rule, super::rules::Lowered::Never) {
+        return pb_err(StatusCode::BAD_REQUEST, "Failed to create record.");
     }
     let pb = match pb_of(&state) {
         Ok(p) => p,
@@ -678,6 +759,25 @@ async fn create(
         Ok(d) => d,
         Err(m) => return pb_err(StatusCode::BAD_REQUEST, &m),
     };
+    // Auth collections: validate + hash the password server-side.
+    if col.kind == "auth" {
+        let password = body.get("password").and_then(|v| v.as_str()).unwrap_or_default();
+        let confirm = body.get("passwordConfirm").and_then(|v| v.as_str()).unwrap_or_default();
+        if password.len() < 8 || password != confirm {
+            return pb_err(StatusCode::BAD_REQUEST, "invalid or unconfirmed password");
+        }
+        let email = body.get("email").and_then(|v| v.as_str()).unwrap_or_default().trim().to_lowercase();
+        if email.is_empty() || !email.contains('@') {
+            return pb_err(StatusCode::BAD_REQUEST, "invalid email");
+        }
+        let pw = password.to_string();
+        let hash = match crate::one::kdf_blocking(move || crate::one::hash_password(&pw)).await {
+            Some(Ok(h)) => h,
+            _ => return pb_err(StatusCode::INTERNAL_SERVER_ERROR, "password hashing failed"),
+        };
+        data.insert("email".into(), json!(email));
+        data.insert("password".into(), json!(hash));
+    }
     let id = body
         .get("id")
         .and_then(|v| v.as_str())
@@ -692,6 +792,15 @@ async fn create(
         }
     }
 
+    if let super::rules::Lowered::Constrain(wire) = &create_rule {
+        // createRule constrains the WOULD-BE record: evaluate in memory.
+        let ok = data_plane_core::Filter::parse(wire)
+            .map(|ast| super::rules::eval(&ast, &Value::Object(data.clone())))
+            .unwrap_or(false);
+        if !ok {
+            return pb_err(StatusCode::BAD_REQUEST, "Failed to create record.");
+        }
+    }
     if let Err(r) = persist_files(&pb, &kinds, &col.id, &id, pending, &mut data).await {
         return r;
     }
@@ -701,8 +810,11 @@ async fn create(
         return r;
     }
     match fetch_by_id(&state, &col, &kinds, &id).await {
-        Ok(Some(rec)) => {
+        Ok(Some(mut rec)) => {
             publish_event(&state, &col, "create", &rec);
+            if col.kind == "auth" {
+                super::auth::scrub_auth_record(&mut rec, true);
+            }
             (StatusCode::OK, Json(rec)).into_response()
         }
         Ok(None) => pb_err(StatusCode::INTERNAL_SERVER_ERROR, "record vanished after insert"),
@@ -721,8 +833,13 @@ async fn update(
         Ok(v) => v,
         Err(r) => return r,
     };
-    if !allowed(&state, &headers, col.update_rule.as_ref()) {
+    let (_auth, ctx) = caller(&state, &headers).await;
+    let lowered = super::rules::lower_rule(col.update_rule.as_ref(), &ctx);
+    if matches!(lowered, super::rules::Lowered::Deny) {
         return pb_err(StatusCode::FORBIDDEN, "Only superusers can perform this action.");
+    }
+    if matches!(lowered, super::rules::Lowered::Never) {
+        return pb_err(StatusCode::NOT_FOUND, "The requested resource wasn't found.");
     }
     let pb = match pb_of(&state) {
         Ok(p) => p,
@@ -757,6 +874,9 @@ async fn update(
     let mut op = base_op(DataOperationKind::Update, &col.name);
     op.data = Some(Value::Object(data));
     op.filter = Some(json!({ "id": rid }));
+    if let Err(r) = apply_rule(&mut op, lowered) {
+        return r;
+    }
     let result = match exec(&state, op).await {
         Ok(r) => r,
         Err(r) => return r,
@@ -784,14 +904,22 @@ async fn remove(
         Ok(v) => v,
         Err(r) => return r,
     };
-    if !allowed(&state, &headers, col.delete_rule.as_ref()) {
+    let (_auth, ctx) = caller(&state, &headers).await;
+    let lowered = super::rules::lower_rule(col.delete_rule.as_ref(), &ctx);
+    if matches!(lowered, super::rules::Lowered::Deny) {
         return pb_err(StatusCode::FORBIDDEN, "Only superusers can perform this action.");
+    }
+    if matches!(lowered, super::rules::Lowered::Never) {
+        return pb_err(StatusCode::NOT_FOUND, "The requested resource wasn't found.");
     }
     // Pre-image for the realtime event (PB sends the deleted record's last
     // known state).
     let pre = fetch_by_id(&state, &col, &kinds, &rid).await.ok().flatten();
     let mut op = base_op(DataOperationKind::Delete, &col.name);
     op.filter = Some(json!({ "id": rid }));
+    if let Err(r) = apply_rule(&mut op, lowered) {
+        return r;
+    }
     let result = match exec(&state, op).await {
         Ok(r) => r,
         Err(r) => return r,

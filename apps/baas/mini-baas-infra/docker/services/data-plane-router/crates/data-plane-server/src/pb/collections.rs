@@ -185,6 +185,13 @@ impl super::PbState {
 type ColumnDefs = Vec<(String, &'static str)>;
 
 fn normalize_fields(input: Option<&Value>) -> Result<(Value, ColumnDefs), String> {
+    normalize_fields_for(input, false)
+}
+
+fn normalize_fields_for(
+    input: Option<&Value>,
+    is_auth: bool,
+) -> Result<(Value, ColumnDefs), String> {
     let mut out: Vec<Value> = Vec::new();
     let mut cols: ColumnDefs = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -196,8 +203,10 @@ fn normalize_fields(input: Option<&Value>) -> Result<(Value, ColumnDefs), String
         if !valid_ident(name) {
             return Err(format!("invalid field name '{name}'"));
         }
-        if name == "id" {
-            continue; // the only implicit system field (PB injects just id)
+        if name == "id"
+            || (is_auth && matches!(name, "email" | "password" | "verified" | "emailVisibility"))
+        {
+            continue; // system fields are injected below
         }
         let Some(col) = column_type(ftype) else {
             return Err(format!("unknown field type '{ftype}'"));
@@ -219,6 +228,24 @@ fn normalize_fields(input: Option<&Value>) -> Result<(Value, ColumnDefs), String
                "required": true, "primaryKey": true, "min": 15, "max": 15,
                "pattern": "^[a-z0-9]+$", "autogeneratePattern": "[a-z0-9]{15}"});
     let mut all = vec![id_field];
+    if is_auth {
+        // PB auth-collection system fields: identity columns the auth
+        // endpoints depend on. `password` is write-only (never serialized).
+        all.push(json!({"id": "f_sys_email0000", "name": "email", "type": "email",
+                        "system": true, "required": true}));
+        all.push(json!({"id": "f_sys_password0", "name": "password", "type": "password",
+                        "system": true, "required": true, "hidden": true}));
+        all.push(json!({"id": "f_sys_verified0", "name": "verified", "type": "bool",
+                        "system": true}));
+        all.push(json!({"id": "f_sys_emailvis0", "name": "emailVisibility", "type": "bool",
+                        "system": true}));
+        for (name, ty) in [("email", "TEXT"), ("password", "TEXT"),
+                           ("verified", "INTEGER"), ("emailVisibility", "INTEGER")] {
+            if !cols.iter().any(|(n, _)| n == name) {
+                cols.push((name.to_string(), ty));
+            }
+        }
+    }
     all.extend(out);
     Ok((Value::Array(all), cols))
 }
@@ -285,12 +312,20 @@ async fn create(
     if pb.col_get(&name).is_some() {
         return pb_err(StatusCode::BAD_REQUEST, "a collection with this name already exists");
     }
-    let (fields, cols) = match normalize_fields(req.get("fields")) {
+    let (fields, cols) = match normalize_fields_for(req.get("fields"), kind == "auth") {
         Ok(v) => v,
         Err(m) => return pb_err(StatusCode::BAD_REQUEST, &m),
     };
     if let Err(r) = exec_ddl(&state, create_table_sql(&name, &cols)).await {
         return r;
+    }
+    if kind == "auth" {
+        let idx = format!(
+            "CREATE UNIQUE INDEX IF NOT EXISTS \"idx_{name}_email\" ON \"{name}\" (\"email\")"
+        );
+        if let Err(r) = exec_ddl(&state, idx).await {
+            return r;
+        }
     }
     let rule = |k: &str| req.get(k).and_then(|v| v.as_str()).map(String::from);
     let col = Collection {

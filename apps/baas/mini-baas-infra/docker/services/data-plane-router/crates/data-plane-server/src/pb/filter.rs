@@ -26,12 +26,26 @@ use serde_json::Value;
 const MAX_PAREN_DEPTH: usize = 32;
 
 pub fn parse_pb_filter(input: &str) -> Result<Filter, String> {
+    // Plain record filters resolve nothing: any `@request...` reference errors.
+    parse_pb_filter_with(input, &|_| None)
+}
+
+/// Rules-engine entry: `resolver` maps `@request.auth.<field>` references to
+/// the caller's literal values. A reference the resolver declines (returns
+/// `None` for) is an error — the rules engine fails CLOSED on it.
+/// Left-side references const-fold: `@request.auth.id != ''` becomes
+/// `And([])` (always true) or `Or([])` (always false), which `Filter::fold`
+/// reports as tautology/contradiction.
+pub fn parse_pb_filter_with(
+    input: &str,
+    resolver: &dyn Fn(&str) -> Option<Value>,
+) -> Result<Filter, String> {
     let tokens = lex(input)?;
     if tokens.is_empty() {
         return Ok(Filter::And(vec![]));
     }
     let mut p = Parser { tokens, pos: 0 };
-    let f = p.or_expr(0)?;
+    let f = p.or_expr(0, resolver)?;
     match p.peek() {
         None => Ok(f),
         Some(t) => Err(format!("unexpected trailing token {t:?}")),
@@ -151,50 +165,78 @@ impl Parser {
         t
     }
 
-    fn or_expr(&mut self, depth: usize) -> Result<Filter, String> {
-        let mut parts = vec![self.and_expr(depth)?];
+    fn or_expr(
+        &mut self,
+        depth: usize,
+        resolver: &dyn Fn(&str) -> Option<Value>,
+    ) -> Result<Filter, String> {
+        let mut parts = vec![self.and_expr(depth, resolver)?];
         while self.peek() == Some(&Tok::OrOr) {
             self.next();
-            parts.push(self.and_expr(depth)?);
+            parts.push(self.and_expr(depth, resolver)?);
         }
         Ok(if parts.len() == 1 { parts.pop().expect("len checked") } else { Filter::Or(parts) })
     }
 
-    fn and_expr(&mut self, depth: usize) -> Result<Filter, String> {
-        let mut parts = vec![self.atom(depth)?];
+    fn and_expr(
+        &mut self,
+        depth: usize,
+        resolver: &dyn Fn(&str) -> Option<Value>,
+    ) -> Result<Filter, String> {
+        let mut parts = vec![self.atom(depth, resolver)?];
         while self.peek() == Some(&Tok::AndAnd) {
             self.next();
-            parts.push(self.atom(depth)?);
+            parts.push(self.atom(depth, resolver)?);
         }
         Ok(if parts.len() == 1 { parts.pop().expect("len checked") } else { Filter::And(parts) })
     }
 
-    fn atom(&mut self, depth: usize) -> Result<Filter, String> {
+    fn atom(
+        &mut self,
+        depth: usize,
+        resolver: &dyn Fn(&str) -> Option<Value>,
+    ) -> Result<Filter, String> {
         if depth > MAX_PAREN_DEPTH {
             return Err(format!("filter nesting exceeds the {MAX_PAREN_DEPTH}-level limit"));
         }
         match self.next() {
             Some(Tok::LParen) => {
-                let f = self.or_expr(depth + 1)?;
+                let f = self.or_expr(depth + 1, resolver)?;
                 match self.next() {
                     Some(Tok::RParen) => Ok(f),
                     _ => Err("missing ')'".into()),
                 }
             }
-            Some(Tok::Ident(field)) => self.comparison(field),
+            Some(Tok::Ident(field)) => self.comparison(field, resolver),
             Some(t) => Err(format!("expected a field or '(', got {t:?}")),
             None => Err("unexpected end of filter".into()),
         }
     }
 
-    fn comparison(&mut self, field: String) -> Result<Filter, String> {
-        if field.starts_with("@request") || field.starts_with("@collection") {
-            return Err(format!(
-                "'{field}' is only valid in collection API rules, not record filters"
-            ));
+    fn comparison(
+        &mut self,
+        field: String,
+        resolver: &dyn Fn(&str) -> Option<Value>,
+    ) -> Result<Filter, String> {
+        // Left-side caller reference: resolve and const-fold the comparison.
+        if field.starts_with("@request") {
+            let Some(left) = resolver(&field) else {
+                return Err(format!(
+                    "'{field}' is only valid in collection API rules, not record filters"
+                ));
+            };
+            let Some(Tok::Op(op)) = self.next() else {
+                return Err(format!("expected an operator after '{field}'"));
+            };
+            let right = self.literal(resolver)?;
+            let truth = const_compare(&left, op.strip_prefix('?').unwrap_or(op), &right)?;
+            return Ok(if truth { Filter::And(vec![]) } else { Filter::Or(vec![]) });
+        }
+        if field.starts_with("@collection") {
+            return Err(format!("'{field}' joins are not supported by this engine version"));
         }
         if field.contains(':') {
-            return Err(format!("field modifiers are not valid in record filters: '{field}'"));
+            return Err(format!("field modifiers are not supported: '{field}'"));
         }
         if field.starts_with('@') {
             return Err(format!("a datetime macro ('{field}') cannot be the left operand"));
@@ -202,7 +244,7 @@ impl Parser {
         let Some(Tok::Op(op)) = self.next() else {
             return Err(format!("expected an operator after '{field}'"));
         };
-        let value = self.literal()?;
+        let value = self.literal(resolver)?;
         // `?op` ≡ `op` while every facade column is single-valued (PB defines
         // the "any of" forms as plain `op` over each value).
         let plain = op.strip_prefix('?').unwrap_or(op);
@@ -221,7 +263,7 @@ impl Parser {
         })
     }
 
-    fn literal(&mut self) -> Result<Value, String> {
+    fn literal(&mut self, resolver: &dyn Fn(&str) -> Option<Value>) -> Result<Value, String> {
         match self.next() {
             Some(Tok::Str(s)) => Ok(Value::String(s)),
             Some(Tok::Num(n)) => Ok(serde_json::Number::from_f64(n)
@@ -231,6 +273,8 @@ impl Parser {
                 "true" => Ok(Value::Bool(true)),
                 "false" => Ok(Value::Bool(false)),
                 "null" => Ok(Value::Null),
+                m if m.starts_with("@request") => resolver(m)
+                    .ok_or_else(|| format!("'{m}' is not available in this context")),
                 m if m.starts_with('@') => datetime_macro(m),
                 other => Err(format!(
                     "right operand must be a literal or datetime macro, got '{other}'"
@@ -243,6 +287,40 @@ impl Parser {
 
 fn cmp(field: String, op: CmpOp, value: Value) -> Filter {
     Filter::Cmp { field, op, value }
+}
+
+/// Compare two resolved literals at parse time (left-side `@request.*`).
+/// Supports the equality/ordering operators; `~` on two literals is rare
+/// enough to refuse (fail closed) rather than approximate.
+fn const_compare(left: &Value, op: &str, right: &Value) -> Result<bool, String> {
+    let eq = || {
+        left == right
+            || matches!((left.as_f64(), right.as_f64()), (Some(a), Some(b)) if a == b)
+            || matches!((left.as_str(), right.as_str()), (Some(a), Some(b)) if a == b)
+            || (left.is_null() && right.as_str() == Some(""))
+            || (right.is_null() && left.as_str() == Some(""))
+    };
+    let ord = || -> Option<std::cmp::Ordering> {
+        if let (Some(a), Some(b)) = (left.as_f64(), right.as_f64()) {
+            a.partial_cmp(&b)
+        } else {
+            Some(
+                left.as_str()
+                    .unwrap_or(&left.to_string())
+                    .cmp(right.as_str().unwrap_or(&right.to_string())),
+            )
+        }
+    };
+    use std::cmp::Ordering::*;
+    Ok(match op {
+        "=" => eq(),
+        "!=" => !eq(),
+        ">" => matches!(ord(), Some(Greater)),
+        ">=" => matches!(ord(), Some(Greater | Equal)),
+        "<" => matches!(ord(), Some(Less)),
+        "<=" => matches!(ord(), Some(Less | Equal)),
+        other => return Err(format!("operator '{other}' is not supported on caller references")),
+    })
 }
 
 /// PB `~`: case-insensitive LIKE; the operand is wrapped `%…%` unless the
