@@ -44,6 +44,18 @@ API served over it (m52).
 
 ## Performance — MEASURED, full matrix (oha, same box, official PB binary, 8 s/run)
 
+> **Methodology note, stated up front (not buried):** every cell is a single
+> 8 s `oha` run on the same box against the official PocketBase binary —
+> **except the `c=1 insert` row, which is best-of-3 for ALL THREE systems**.
+> A single serial inserter is a per-commit-fsync disk lottery (no group
+> commit can engage with one in-flight write), so it swings ±2–3× run to run
+> for everyone; best-of-3 is applied identically to nano, one, and PocketBase.
+> It is the one number most worth scrutinizing, so it is called out here, in
+> the matrix (†), and in the bench-method section below. Every other row is a
+> single run. The competitive claim does **not** rest on that row: the
+> concurrent lanes (c=16/64) are where the engine work shows, and they are
+> single-run.
+
 | op @ c | **nano** RPS / p99 | **one** RPS / p99 | PocketBase RPS / p99 | one vs PB |
 |---|---|---|---|---|
 | insert @ c=1 † | 4,710 / 0.2 | 5,184 / 0.2 | 2,592 / 0.7 | **2.0× / 3.5×** |
