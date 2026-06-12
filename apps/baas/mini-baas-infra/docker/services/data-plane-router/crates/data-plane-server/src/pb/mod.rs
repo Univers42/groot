@@ -25,6 +25,7 @@ pub mod crons;
 pub mod files;
 pub mod filter;
 pub mod logs;
+pub mod ratelimit;
 pub mod realtime;
 pub mod rules;
 pub mod settings;
@@ -58,6 +59,11 @@ pub struct PbState {
     pub(crate) storage_root: std::path::PathBuf,
     /// Batched request-log writer (pb_logs.db).
     pub(crate) logs: logs::Logs,
+    /// Fixed-window rate-limit state (label, ip) — see pb::ratelimit.
+    pub(crate) rate_windows: ratelimit::Windows,
+    /// 5s-TTL settings cache: the rate limiter reads settings on EVERY /api
+    /// request — a per-request sqlite query would tax the facade hot path.
+    settings_cache: std::sync::RwLock<(std::time::Instant, serde_json::Value)>,
     /// Successful-verify cache for auth records (same design + rationale as
     /// `UserStore::verify_cache`: argon2id is memory-hard by design, repeat
     /// logins skip it; failures always pay full cost).
@@ -93,6 +99,13 @@ impl PbState {
             CREATE TABLE IF NOT EXISTS pb_config (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS pb_migrations_history (
+                id         TEXT PRIMARY KEY,
+                type       TEXT NOT NULL,
+                collection TEXT NOT NULL,
+                snapshot   TEXT NOT NULL,
+                created    TEXT NOT NULL
             );",
         )?;
         let su_email = std::env::var("ONE_SUPERUSER_EMAIL")
@@ -112,6 +125,11 @@ impl PbState {
             realtime: realtime::Realtime::default(),
             storage_root: data_dir.join("pb_storage"),
             logs: logs::Logs::start(data_dir.join("pb_logs.db")),
+            rate_windows: ratelimit::Windows::default(),
+            settings_cache: std::sync::RwLock::new((
+                std::time::Instant::now() - std::time::Duration::from_secs(60),
+                serde_json::Value::Null,
+            )),
             verify_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
             pepper: format!("{}{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4()),
             su_email,
@@ -145,6 +163,29 @@ impl PbState {
             }
         }
         cache.insert(key, std::time::Instant::now());
+    }
+}
+
+impl PbState {
+    /// Settings with a 5 s TTL (hot-path reads); writers go through
+    /// `settings_patch`, which refreshes within one TTL window.
+    pub(crate) fn settings_cached(&self) -> serde_json::Value {
+        {
+            let guard = self
+                .settings_cache
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if guard.0.elapsed() < std::time::Duration::from_secs(5) && !guard.1.is_null() {
+                return guard.1.clone();
+            }
+        }
+        let fresh = self.settings();
+        *self
+            .settings_cache
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            (std::time::Instant::now(), fresh.clone());
+        fresh
     }
 }
 
