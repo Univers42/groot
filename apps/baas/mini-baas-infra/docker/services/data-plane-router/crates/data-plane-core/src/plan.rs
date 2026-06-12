@@ -349,6 +349,8 @@ mod tests {
             expected_version: None,
             returning: None,
             aggregate: None,
+            fields: None,
+            sort_order: None,
         }
     }
 

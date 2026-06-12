@@ -959,6 +959,8 @@ mod tests {
             expected_version: None,
             returning: None,
             aggregate: None,
+            fields: None,
+            sort_order: None,
         };
         let plan = build_list(&op, Some("u1")).unwrap();
         assert!(plan.sql.contains("ORDER BY (SELECT NULL)"), "{}", plan.sql);

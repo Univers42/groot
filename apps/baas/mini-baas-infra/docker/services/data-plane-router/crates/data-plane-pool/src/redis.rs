@@ -720,6 +720,8 @@ mod tests {
             expected_version: None,
             returning: None,
             aggregate: None,
+            fields: None,
+            sort_order: None,
         };
         let (id, rest) = split_id_data(&op, false).unwrap();
         assert_eq!(id, "filter-id");
@@ -741,6 +743,8 @@ mod tests {
             expected_version: None,
             returning: None,
             aggregate: None,
+            fields: None,
+            sort_order: None,
         };
         let (id, _) = split_id_data(&op, true).unwrap();
         assert!(!id.is_empty());
@@ -760,6 +764,8 @@ mod tests {
             expected_version: None,
             returning: None,
             aggregate: None,
+            fields: None,
+            sort_order: None,
         };
         assert!(split_id_data(&op, false).is_err());
     }

@@ -66,6 +66,12 @@ struct KeyInfo {
 /// sub-millisecond and never held across an await, so a std Mutex is right.
 struct KeyStore {
     conn: std::sync::Mutex<rusqlite::Connection>,
+    /// digest → (name, scopes) for keys that have already verified. Without
+    /// this, EVERY request paid a mutex-serialized SQLite query just to auth —
+    /// the measured per-request ceiling at c=64. Entries are only inserted
+    /// after a successful digest match, so the map is bounded by the number of
+    /// live keys; revoke clears it (a revoked key must die immediately).
+    verified: std::sync::RwLock<std::collections::HashMap<String, (String, Vec<String>)>>,
 }
 
 impl KeyStore {
@@ -84,11 +90,12 @@ impl KeyStore {
         )?;
         Ok(Self {
             conn: std::sync::Mutex::new(conn),
+            verified: std::sync::RwLock::new(std::collections::HashMap::new()),
         })
     }
 
     fn active_count(&self) -> anyhow::Result<i64> {
-        let conn = self.conn.lock().expect("key store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         Ok(conn.query_row(
             "SELECT COUNT(*) FROM nano_keys WHERE revoked = 0",
             [],
@@ -97,7 +104,7 @@ impl KeyStore {
     }
 
     fn insert(&self, id: &str, name: &str, digest: &str, scopes: &[String]) -> anyhow::Result<()> {
-        let conn = self.conn.lock().expect("key store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         conn.execute(
             "INSERT INTO nano_keys (id, name, digest, scopes, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
             rusqlite::params![
@@ -130,12 +137,21 @@ impl KeyStore {
     /// its shape — the digest of the FULL key string must match either way, so
     /// the fallback can only ever match the one key it stores.
     fn verify(&self, key: &str) -> Option<(String, Vec<String>)> {
+        let digest = sha256_hex(key);
+        // Fast path: this digest already proved itself against the store. The
+        // read lock is uncontended (writes only on first-verify and revoke),
+        // so concurrent requests no longer serialize through the SQLite query.
+        {
+            let cache = self.verified.read().unwrap_or_else(|e| e.into_inner());
+            if let Some(hit) = cache.get(&digest) {
+                return Some(hit.clone());
+            }
+        }
         let embedded_id = key
             .strip_prefix("nbk_")
             .and_then(|rest| rest.split_once('.'))
             .map(|(id, _)| id.to_string());
-        let digest = sha256_hex(key);
-        let conn = self.conn.lock().expect("key store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let lookup = |id: &str| -> Option<(String, String, String)> {
             conn.query_row(
                 "SELECT name, digest, scopes FROM nano_keys WHERE id = ?1 AND revoked = 0",
@@ -148,13 +164,18 @@ impl KeyStore {
             .and_then(|id| lookup(&id))
             .filter(|(_, d, _)| ct_eq(&digest, d))
             .or_else(|| lookup("env-admin").filter(|(_, d, _)| ct_eq(&digest, d)))?;
+        drop(conn);
         let (name, _, scopes_json) = verified;
         let scopes: Vec<String> = serde_json::from_str(&scopes_json).unwrap_or_default();
+        self.verified
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(digest, (name.clone(), scopes.clone()));
         Some((name, scopes))
     }
 
     fn list(&self) -> anyhow::Result<Vec<KeyInfo>> {
-        let conn = self.conn.lock().expect("key store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut stmt =
             conn.prepare("SELECT id, name, scopes, created_at, revoked FROM nano_keys ORDER BY created_at")?;
         let rows = stmt.query_map([], |r| {
@@ -171,8 +192,15 @@ impl KeyStore {
     }
 
     fn revoke(&self, id: &str) -> anyhow::Result<bool> {
-        let conn = self.conn.lock().expect("key store poisoned");
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let n = conn.execute("UPDATE nano_keys SET revoked = 1 WHERE id = ?1", [id])?;
+        drop(conn);
+        // A revoked key must stop verifying NOW — drop every cached entry
+        // (the next verify of any live key repopulates from the store).
+        self.verified
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
         Ok(n > 0)
     }
 }
@@ -206,12 +234,25 @@ struct NanoMountSpec {
     dsn: String,
 }
 
+/// A committed mutation on the realtime bus. The envelope is pre-serialized
+/// once per event; the routing fields ride beside it so subscribers filter
+/// without re-parsing JSON.
+#[derive(Clone)]
+pub(crate) struct MutationEvent {
+    pub(crate) db: String,
+    pub(crate) table: String,
+    /// The mutating principal (`user:<id>` / `api-key:<id>`) — drives
+    /// owner-filtered delivery for user subscribers.
+    pub(crate) owner: String,
+    pub(crate) payload: String,
+}
+
 /// In-process state the nano runtime adds on top of [`AppState`]: the key
 /// store, the static mount map, and the realtime broadcast bus.
 pub struct NanoState {
     keys: KeyStore,
     mounts: HashMap<String, ResolvedMount>,
-    events: tokio::sync::broadcast::Sender<String>,
+    events: tokio::sync::broadcast::Sender<MutationEvent>,
 }
 
 impl NanoState {
@@ -256,7 +297,8 @@ impl NanoState {
                 },
             )]),
         };
-        Ok(specs
+        #[allow(unused_mut)]
+        let mut mounts: HashMap<String, ResolvedMount> = specs
             .into_iter()
             .map(|(id, s)| {
                 (
@@ -269,7 +311,18 @@ impl NanoState {
                     },
                 )
             })
-            .collect())
+            .collect();
+        // PB facade data file: `tenant_owned` — PB's access model is
+        // per-collection rules at the facade, NOT per-row owner columns, so
+        // the platform's owner-scoping must stay out of PB-shaped tables.
+        #[cfg(feature = "pbcompat")]
+        mounts.entry(crate::pb::PB_MOUNT.to_string()).or_insert(ResolvedMount {
+            engine: "sqlite".to_string(),
+            connection_string: data_dir.join("pb_data.db").to_string_lossy().into_owned(),
+            isolation: Some("tenant_owned".to_string()),
+            capability_overrides: None,
+        });
+        Ok(mounts)
     }
 
     /// The in-process replacement for the tenant-control verify: header →
@@ -336,6 +389,7 @@ impl NanoState {
         op: &str,
         pk: Option<&serde_json::Value>,
         affected: u64,
+        owner: &str,
     ) {
         let payload = json!({
             "db_id": db_id,
@@ -343,9 +397,15 @@ impl NanoState {
             "op": op,
             "pk": pk,
             "affected": affected,
+            "owner": owner,
             "ts": chrono::Utc::now().to_rfc3339(),
         });
-        let _ = self.events.send(payload.to_string());
+        let _ = self.events.send(MutationEvent {
+            db: db_id.to_string(),
+            table: table.to_string(),
+            owner: owner.to_string(),
+            payload: payload.to_string(),
+        });
     }
 }
 
@@ -364,7 +424,7 @@ fn nano_of(state: &AppState) -> Result<Arc<NanoState>, axum::response::Response>
 }
 
 /// Verify + require a scope, in one step (admin satisfies everything).
-fn authorize(
+pub(crate) fn authorize(
     state: &AppState,
     headers: &header::HeaderMap,
     needed: &'static str,
@@ -540,6 +600,37 @@ struct RealtimeQuery {
     #[cfg(feature = "one")]
     #[serde(default)]
     token: Option<String>,
+    /// Server-side topic filter: comma-separated `table:<name>` / `db:<id>`
+    /// tokens (a bare token means `table:`). Empty/absent = everything.
+    #[serde(default)]
+    topics: Option<String>,
+}
+
+/// One parsed subscription token.
+enum Topic {
+    Table(String),
+    Db(String),
+}
+
+fn parse_topics(raw: Option<&str>) -> Vec<Topic> {
+    raw.unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(|t| match t.split_once(':') {
+            Some(("db", id)) => Topic::Db(id.to_string()),
+            Some(("table", name)) => Topic::Table(name.to_string()),
+            _ => Topic::Table(t.to_string()),
+        })
+        .collect()
+}
+
+fn topics_match(topics: &[Topic], ev: &MutationEvent) -> bool {
+    topics.is_empty()
+        || topics.iter().any(|t| match t {
+            Topic::Table(name) => *name == ev.table,
+            Topic::Db(id) => *id == ev.db,
+        })
 }
 
 /// SSE stream of committed mutations. Auth: `X-Baas-Api-Key` header or `?key=`
@@ -593,20 +684,41 @@ async fn realtime(
         return crate::routes::scope_denied(&id, "realtime", missing);
     }
 
+    // Server-side delivery filter: requested topics, and — for user (JWT)
+    // identities — only the subscriber's OWN mutations, mirroring the
+    // owner-scoping their reads get on /data/v1. Machine keys see the bus.
+    let topics = parse_topics(q.topics.as_deref());
+    let owner_filter = (!matches!(id.source, data_plane_core::IdentitySource::ServiceToken))
+        .then(|| id.principal.clone());
+
     let rx = nano.events.subscribe();
-    let stream = futures::stream::unfold(rx, |mut rx| async move {
-        loop {
-            match rx.recv().await {
-                Ok(payload) => {
-                    let event = Event::default().event("mutation").data(payload);
-                    return Some((Ok::<_, std::convert::Infallible>(event), rx));
+    let stream = futures::stream::unfold(
+        (rx, topics, owner_filter),
+        |(mut rx, topics, owner_filter)| async move {
+            loop {
+                match rx.recv().await {
+                    Ok(ev) => {
+                        if !topics_match(&topics, &ev) {
+                            continue;
+                        }
+                        if let Some(owner) = owner_filter.as_deref() {
+                            if ev.owner != owner {
+                                continue;
+                            }
+                        }
+                        let event = Event::default().event("mutation").data(ev.payload);
+                        return Some((
+                            Ok::<_, std::convert::Infallible>(event),
+                            (rx, topics, owner_filter),
+                        ));
+                    }
+                    // A slow consumer skips missed events rather than erroring out.
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
                 }
-                // A slow consumer skips missed events rather than erroring out.
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
             }
-        }
-    });
+        },
+    );
     Sse::new(stream)
         .keep_alive(KeepAlive::new().interval(Duration::from_secs(15)).text("ping"))
         .into_response()
@@ -672,6 +784,26 @@ pub async fn run(config: ServerConfig) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn topics_parse_and_match() {
+        use super::{parse_topics, topics_match, MutationEvent};
+        let ev = |db: &str, table: &str| MutationEvent {
+            db: db.into(),
+            table: table.into(),
+            owner: "user:u1".into(),
+            payload: String::new(),
+        };
+        // Empty filter matches everything.
+        assert!(topics_match(&parse_topics(None), &ev("main", "notes")));
+        assert!(topics_match(&parse_topics(Some("")), &ev("main", "notes")));
+        // Bare token == table filter; explicit forms work; commas + spaces ok.
+        let t = parse_topics(Some("notes, table:posts ,db:other"));
+        assert!(topics_match(&t, &ev("main", "notes")));
+        assert!(topics_match(&t, &ev("main", "posts")));
+        assert!(topics_match(&t, &ev("other", "anything")));
+        assert!(!topics_match(&t, &ev("main", "todos")));
+    }
+
     use super::*;
 
     #[test]
@@ -702,6 +834,10 @@ mod tests {
         let (name, scopes) = store.verify(&key).expect("freshly minted key verifies");
         assert_eq!(name, "ci");
         assert_eq!(scopes, vec!["read".to_string()]);
+
+        // Second verify hits the in-memory cache — identical result.
+        let (name2, scopes2) = store.verify(&key).expect("cached key verifies");
+        assert_eq!((name2, scopes2), (name, scopes));
 
         // Wrong secret with the right id must fail (digest mismatch).
         let forged = format!("nbk_{id}.{}", "0".repeat(64));

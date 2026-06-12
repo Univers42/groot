@@ -30,8 +30,57 @@ use deadpool_sqlite::{Config as SqliteConfig, Pool, Runtime};
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{params_from_iter, Connection};
 use serde_json::{Map as JsonMap, Value};
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
+
+/// GLOBAL schema generation per database FILE PATH. `prepare_cached`
+/// statements survive `ALTER TABLE` with STALE column metadata (a cached
+/// `SELECT *` keeps the old column list — a row read after a DDL silently
+/// misses the new column; the m48 expand suite caught it). DDL bumps the
+/// path's generation; every reader flushes its statement cache when the
+/// generation it last saw differs. Keyed by PATH (not pool instance) so it
+/// survives pool eviction/recreation — the thread-local connections do too.
+static SCHEMA_GENS: std::sync::OnceLock<std::sync::Mutex<HashMap<String, u64>>> =
+    std::sync::OnceLock::new();
+
+fn schema_gens() -> &'static std::sync::Mutex<HashMap<String, u64>> {
+    SCHEMA_GENS.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+fn schema_gen_for(path: &str) -> u64 {
+    *schema_gens()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(path)
+        .unwrap_or(&0)
+}
+
+fn bump_schema_gen_for(path: &str) {
+    *schema_gens()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .entry(path.to_string())
+        .or_insert(0) += 1;
+}
+
+thread_local! {
+    /// Per-thread read connections, keyed by database path. List/Get run
+    /// DIRECTLY on the calling (tokio worker) thread: a LIMIT-capped,
+    /// page-cached SQLite read costs less than the pool round-trip it would
+    /// otherwise pay (async semaphore + closure channel + blocking-thread
+    /// wake ≈ two context switches per request — measured as the c=16
+    /// throughput ceiling). Unbounded work (aggregate, raw SQL,
+    /// introspection) stays on the interact pool so a long scan can never
+    /// pin an async worker.
+    static READ_CONNS: RefCell<HashMap<String, ReadConn>> = RefCell::new(HashMap::new());
+}
+
+struct ReadConn {
+    conn: Connection,
+    /// Schema generation the connection was opened at.
+    gen: u64,
+}
 
 /// Server-controlled columns a client may never set/override.
 const RESERVED_COLUMNS: &[&str] = &["owner_id", "tenant_id"];
@@ -78,27 +127,45 @@ impl EngineAdapter for SqliteEngineAdapter {
         let dsn = self.resolver.resolve_dsn(&mount).await?;
         let path = sqlite_path(&dsn);
         let cfg = SqliteConfig::new(path.clone());
-        let pool = cfg
-            .create_pool(Runtime::Tokio1)
+        // post_create: pragmas are PER-CONNECTION — applying them on one
+        // checkout (the old shape) left every other pooled reader on SQLite
+        // defaults (busy_timeout=0, 2 MB cache, no statement cache). The hook
+        // runs once per connection the pool ever creates.
+        let manager = deadpool_sqlite::Manager::from_config(&cfg, Runtime::Tokio1);
+        // List/Get run on per-worker thread-local connections (see
+        // READ_CONNS); this pool only serves aggregate, raw SQL and
+        // introspection — 4-8 connections are plenty, and each one costs a
+        // private page cache + a blocking thread.
+        let pool = Pool::builder(manager)
+            .max_size(std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(4, 8))
+            .runtime(Runtime::Tokio1)
+            .post_create(deadpool_sqlite::Hook::sync_fn(|wrapper, _| {
+                let guard = wrapper.lock().map_err(|_| {
+                    deadpool_sqlite::HookError::message("sqlite init: connection poisoned")
+                })?;
+                init_read_conn(&guard).map_err(|e| {
+                    deadpool_sqlite::HookError::message(format!("sqlite init: {e}"))
+                })
+            }))
+            .build()
             .map_err(|e| DataPlaneError::Backend {
                 message: format!("sqlite pool create failed: {e}"),
             })?;
 
-        // Enable WAL + a busy timeout once (WAL persists in the file; the timeout
-        // is per-connection but harmless to set here on the first checkout).
+        // First checkout: fails fast on a bad path and persists WAL mode in
+        // the file (journal_mode survives; the per-connection pragmas come
+        // from the post_create hook above).
         let obj = pool.get().await.map_err(|e| DataPlaneError::Backend {
             message: format!("sqlite checkout failed: {e}"),
         })?;
         obj.interact(|conn| {
-            conn.pragma_update(None, "journal_mode", "WAL")?;
             // The standard WAL pairing (and what PocketBase ships): NORMAL
             // skips the per-commit fsync that FULL forces — the database can
             // never corrupt, at worst the last commits roll back on an OS
             // crash. Default FULL made every insert pay a ~10 ms fsync,
             // 2-3x slower than PocketBase on the same disk.
-            conn.pragma_update(None, "synchronous", "NORMAL")?;
-            conn.pragma_update(None, "busy_timeout", 5000)?;
-            conn.pragma_update(None, "foreign_keys", "ON")
+            conn.pragma_update(None, "journal_mode", "WAL")?;
+            conn.pragma_update(None, "synchronous", "NORMAL")
         })
         .await
         .map_err(|e| DataPlaneError::Backend {
@@ -123,6 +190,7 @@ impl EngineAdapter for SqliteEngineAdapter {
         Ok(Box::new(SqlitePool {
             mount_id: mount.id.clone(),
             tenant_id: mount.tenant_id.clone(),
+            path,
             owner_scoped: mount.isolation().owner_scoped(),
             pool,
             writer,
@@ -141,6 +209,9 @@ impl EngineAdapter for SqliteEngineAdapter {
 pub struct SqlitePool {
     mount_id: String,
     tenant_id: String,
+    /// Database file path — keys the thread-local direct-read connections
+    /// AND the global schema-generation map.
+    path: String,
     /// `true` for `shared_rls` (the default) — every read/write is scoped to the
     /// caller's `owner_id`. `false` for `tenant_owned` (the whole file is one
     /// tenant's, scoped at mount resolution) — no per-row owner predicate.
@@ -170,6 +241,30 @@ impl SqlitePool {
 
     fn owner(&self, identity: &RequestIdentity) -> Option<String> {
         self.owner_scoped.then(|| owner_of(identity))
+    }
+
+    /// Run a bounded (LIMIT-capped) read on this thread's cached connection.
+    /// See [`READ_CONNS`] for why this beats the interact pool.
+    fn read_direct(&self, plan: &SqlPlan) -> DataPlaneResult<DataResult> {
+        let gen_now = schema_gen_for(&self.path);
+        READ_CONNS.with(|cell| {
+            let mut map = cell.borrow_mut();
+            // (re)open when absent OR when a DDL advanced the schema generation
+            // past what this thread's connection was opened at
+            let need_open = match map.get(&self.path) {
+                None => true,
+                Some(entry) => entry.gen != gen_now,
+            };
+            if need_open {
+                let conn = Connection::open(&self.path).map_err(backend)?;
+                init_read_conn(&conn).map_err(backend)?;
+                map.insert(self.path.clone(), ReadConn { conn, gen: gen_now });
+            }
+            let entry = map
+                .get(&self.path)
+                .expect("read connection inserted just above");
+            run_plan(&entry.conn, plan)
+        })
     }
 
     /// Enqueue a job on the writer thread and await its (post-commit) reply.
@@ -241,9 +336,26 @@ impl EnginePool for SqlitePool {
         if is_write {
             return self.submit(|reply| WriteJob::Plan(plan, reply)).await;
         }
+        // List/Get are LIMIT-capped — bounded work runs directly on this
+        // thread. Aggregate (unbounded scan) keeps the blocking pool.
+        if matches!(
+            operation.op,
+            DataOperationKind::List | DataOperationKind::Get
+        ) {
+            return self.read_direct(&plan);
+        }
         let obj = self.checkout().await?;
-        obj.interact(move |conn| run_plan(&*conn, &plan))
-            .await
+        // Aggregate/raw reads run on the interact pool; its long-lived
+        // connections can cache a stale `SELECT *` across DDL just like the
+        // direct readers. Flush this connection's statement cache when the
+        // schema generation advanced (cheap; these are not the hot path).
+        obj.interact(move |conn| {
+            // drop possibly-stale cached plans (e.g. a `SELECT *` raw read
+            // across a DDL); aggregate/raw are not the hot path
+            conn.flush_prepared_statement_cache();
+            run_plan(&*conn, &plan)
+        })
+        .await
             .map_err(|e| DataPlaneError::Backend {
                 message: format!("sqlite interact: {e}"),
             })?
@@ -277,12 +389,15 @@ impl EnginePool for SqlitePool {
         // `expect_rows=false` is the write/DDL shape — writer-thread queue;
         // row-returning raw SQL reads in parallel off the pool.
         if !expect_rows {
+            // DDL bump happens in the writer thread on commit (reliable, at
+            // the point the statement runs)
             return self
                 .submit(|reply| WriteJob::Raw { sql, params: sql_params, reply })
                 .await;
         }
         let obj = self.checkout().await?;
         obj.interact(move |conn| {
+            conn.flush_prepared_statement_cache();
             let rows = query_rows(&*conn, &sql, &sql_params)?;
             let affected = rows.len() as u64;
             Ok(DataResult { rows, affected_rows: affected, next_cursor: None, batch: None })
@@ -359,7 +474,10 @@ fn build_plan(op: &DataOperation, owner: Option<&str>) -> DataPlaneResult<SqlPla
 fn build_list(op: &DataOperation, owner: Option<&str>) -> DataPlaneResult<SqlPlan> {
     let table = quote_ident(&op.resource)?;
     let (where_sql, params) = build_owner_filter(op.filter.as_ref(), owner)?;
-    let order_sql = build_order_by(op.sort.as_ref())?;
+    let order_sql = match op.sort_order.as_deref() {
+        Some(ordered) => build_order_by_ordered(ordered)?,
+        None => build_order_by(op.sort.as_ref())?,
+    };
     let limit = op.limit.unwrap_or(100).min(500);
     let offset = op.offset.unwrap_or(0);
     Ok(SqlPlan {
@@ -657,12 +775,32 @@ impl Deferred {
     }
 }
 
+/// Per-read-connection setup, applied by the pool's `post_create` hook.
+/// Keep the private page cache modest: it multiplies by pool size, and the
+/// 64 MB mmap below shares file-backed pages across every connection anyway
+/// (that sharing is what keeps RSS flat while reads go fast).
+fn init_read_conn(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.pragma_update(None, "busy_timeout", 5000)?;
+    // 1 MB private cache only: this pragma multiplies by EVERY reader (one
+    // thread-local connection per tokio worker + the interact pool), and the
+    // 64 MB mmap below already serves the hot read set as SHARED file-backed
+    // pages. 4 MB here measured as ~40 MiB of duplicated cache under load.
+    conn.pragma_update(None, "cache_size", -1000)?;
+    conn.pragma_update(None, "temp_store", "MEMORY")?;
+    conn.pragma_update(None, "mmap_size", 67_108_864_i64)?; // 64 MB shared mmap
+    conn.set_prepared_statement_cache_capacity(64);
+    Ok(())
+}
+
 fn open_writer_conn(path: &str) -> Result<Connection, rusqlite::Error> {
     let conn = Connection::open(path)?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "synchronous", "NORMAL")?;
     conn.pragma_update(None, "busy_timeout", 5000)?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
+    conn.pragma_update(None, "cache_size", -8000)?; // one writer: 8 MB is cheap
+    conn.pragma_update(None, "temp_store", "MEMORY")?;
+    conn.set_prepared_statement_cache_capacity(64);
     Ok(conn)
 }
 
@@ -713,11 +851,24 @@ fn writer_loop(path: &str, mut jobs: tokio::sync::mpsc::UnboundedReceiver<WriteJ
             continue;
         }
 
+        // Did this group contain DDL (Raw non-row / Ddl)? A committed DDL must
+        // bump the path's schema generation so readers reopen against the new
+        // schema (a cached `SELECT *` otherwise serves stale columns — the m48
+        // expand suite caught it). Detected HERE, where the statement runs.
+        let group_has_ddl = group.iter().any(|j| {
+            matches!(j, WriteJob::Ddl(_, _))
+                || matches!(j, WriteJob::Raw { .. })
+        });
         let mut deferred: Vec<Deferred> = Vec::with_capacity(group.len());
         for (i, job) in group.into_iter().enumerate() {
             deferred.push(process_in_savepoint(&conn, i, job));
         }
         let commit_ok = conn.execute_batch("COMMIT").is_ok();
+        if commit_ok && group_has_ddl {
+            // the writer's own cached plans + every reader's view are now stale
+            conn.flush_prepared_statement_cache();
+            bump_schema_gen_for(path);
+        }
         if !commit_ok {
             // Roll anything half-open back so the connection is reusable.
             let _ = conn.execute_batch("ROLLBACK");
@@ -822,7 +973,9 @@ fn run_batch_in_savepoint(
 }
 
 fn query_rows(conn: &Connection, sql: &str, params: &[SqlValue]) -> DataPlaneResult<Vec<Value>> {
-    let mut stmt = conn.prepare(sql).map_err(backend)?;
+    // prepare_cached: CRUD SQL shapes repeat endlessly — reparsing them per
+    // request was pure overhead. SQLite recompiles on schema change itself.
+    let mut stmt = conn.prepare_cached(sql).map_err(backend)?;
     let col_names: Vec<String> = stmt.column_names().into_iter().map(String::from).collect();
     let mapped = stmt
         .query_map(params_from_iter(params.iter()), move |row| {
@@ -841,8 +994,9 @@ fn query_rows(conn: &Connection, sql: &str, params: &[SqlValue]) -> DataPlaneRes
 }
 
 fn exec_write(conn: &Connection, sql: &str, params: &[SqlValue]) -> DataPlaneResult<u64> {
-    let n = conn
-        .execute(sql, params_from_iter(params.iter()))
+    let mut stmt = conn.prepare_cached(sql).map_err(backend)?;
+    let n = stmt
+        .execute(params_from_iter(params.iter()))
         .map_err(backend)?;
     Ok(n as u64)
 }
@@ -1124,13 +1278,24 @@ fn build_order_by(sort: Option<&BTreeMap<String, String>>) -> DataPlaneResult<St
     let Some(map) = sort else {
         return Ok(String::new());
     };
-    if map.is_empty() {
-        return Ok(String::new());
-    }
-    let mut parts: Vec<String> = Vec::with_capacity(map.len());
-    for (col, dir) in map {
+    render_order_by(map.iter().map(|(c, d)| (c.as_str(), d.as_str())))
+}
+
+/// Declaration-ordered variant (`sort_order`) — see the core field doc.
+fn build_order_by_ordered(sort: &[(String, String)]) -> DataPlaneResult<String> {
+    render_order_by(sort.iter().map(|(c, d)| (c.as_str(), d.as_str())))
+}
+
+fn render_order_by<'a>(
+    cols: impl Iterator<Item = (&'a str, &'a str)>,
+) -> DataPlaneResult<String> {
+    let mut parts: Vec<String> = Vec::new();
+    for (col, dir) in cols {
         let dir_sql = if dir.eq_ignore_ascii_case("desc") { "DESC" } else { "ASC" };
         parts.push(format!("{} {dir_sql}", quote_ident(col)?));
+    }
+    if parts.is_empty() {
+        return Ok(String::new());
     }
     Ok(format!(" ORDER BY {}", parts.join(", ")))
 }

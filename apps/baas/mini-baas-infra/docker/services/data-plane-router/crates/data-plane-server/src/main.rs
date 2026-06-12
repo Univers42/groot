@@ -3,6 +3,29 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
 use tracing_subscriber::EnvFilter;
 
+/// Allocator choice, measured 2026-06-12 on the c=64 matrix:
+/// - musl malloc: global lock serializes small allocs — list capped ~12k RPS;
+///   returns memory immediately (idle 7.8 MiB).
+/// - mimalloc: list 71-75k RPS but NEVER returns freed argon2 arenas
+///   (378 MiB retained after 200 logins) — fails the idle budgets.
+/// - jemalloc (default for nano/one): list throughput on par with mimalloc,
+///   and decay-based purging + a background thread return freed pages within
+///   ~2 s. `narenas:4` bounds per-arena retention.
+#[cfg(all(feature = "jemalloc-alloc", not(feature = "mimalloc-alloc")))]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
+#[cfg(all(feature = "jemalloc-alloc", not(feature = "mimalloc-alloc")))]
+#[allow(non_upper_case_globals)]
+#[export_name = "malloc_conf"]
+pub static malloc_conf: &[u8] =
+    b"background_thread:true,narenas:4,dirty_decay_ms:2000,muzzy_decay_ms:2000\0";
+
+/// Opt-in mimalloc, kept for A/B benchmarking only (retains memory).
+#[cfg(feature = "mimalloc-alloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     if std::env::args().any(|arg| arg == "--healthcheck") {
