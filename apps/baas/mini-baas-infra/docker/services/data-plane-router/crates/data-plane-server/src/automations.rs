@@ -29,6 +29,9 @@ use tokio_postgres::NoTls;
 use data_plane_core::{DataOperation, DataOperationKind, EnginePool, RequestIdentity};
 
 const RULES_CACHE_TTL: Duration = Duration::from_secs(30);
+/// Hard bound on cached (tenant, db) rule sets. The cache is keyed by caller
+/// input, so without a cap a tenant-id scan grows it without limit.
+const RULES_CACHE_MAX: usize = 1024;
 
 #[derive(Debug, Clone, Deserialize)]
 struct Rule {
@@ -196,6 +199,15 @@ impl AutomationEngine {
             None => Vec::new(),
         };
         if let Ok(mut cache) = self.cache.lock() {
+            // Bound the map: expired entries first; if a hostile key pattern
+            // still fills it, clear outright — refilling is one SELECT per
+            // 30s TTL window, unbounded growth is a slow OOM.
+            if cache.len() >= RULES_CACHE_MAX {
+                cache.retain(|_, (at, _)| at.elapsed() < RULES_CACHE_TTL);
+                if cache.len() >= RULES_CACHE_MAX {
+                    cache.clear();
+                }
+            }
             cache.insert(key, (Instant::now(), rules.clone()));
         }
         Ok(rules)
@@ -205,6 +217,8 @@ impl AutomationEngine {
     /// `set_property` follow-ups. Best-effort: a rule failure is logged, never
     /// surfaced (the write is already committed). `notify`/`webhook` actions are
     /// deferred (see module docs) and skipped here.
+    // Internal fan-out plumbing: a params struct would be pure ceremony here.
+    #[allow(clippy::too_many_arguments)]
     pub async fn run_for_write(
         &self,
         pool: &dyn EnginePool,
@@ -254,6 +268,8 @@ impl AutomationEngine {
         }
     }
 
+    // Internal fan-out plumbing: a params struct would be pure ceremony here.
+    #[allow(clippy::too_many_arguments)]
     async fn fire_set_property(
         &self,
         pool: &dyn EnginePool,
@@ -321,6 +337,8 @@ impl AutomationEngine {
     /// `publishAutomationFired` sends: topic `table:<dbId>:<table>`, event
     /// `automation_fired`, payload {dbId, table, ruleId, ruleName, message,
     /// pk, ts}. Best-effort: failure is logged, never surfaced.
+    // Internal fan-out plumbing: a params struct would be pure ceremony here.
+    #[allow(clippy::too_many_arguments)]
     async fn fire_notify(
         &self,
         identity: &RequestIdentity,

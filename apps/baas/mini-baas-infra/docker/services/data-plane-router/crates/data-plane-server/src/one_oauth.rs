@@ -290,7 +290,7 @@ impl Default for OAuthRuntime {
 
 impl OAuthRuntime {
     fn stash(&self, state: String, p: Pending) -> Result<(), &'static str> {
-        let mut pending = self.pending.lock().expect("oauth pending poisoned");
+        let mut pending = self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         pending.retain(|_, v| v.created.elapsed() < PENDING_TTL);
         if pending.len() >= PENDING_MAX {
             return Err("too many in-flight authorizations");
@@ -301,7 +301,7 @@ impl OAuthRuntime {
 
     /// Single-use: a state is removed on first lookup, replay finds nothing.
     fn take(&self, state: &str) -> Option<Pending> {
-        let mut pending = self.pending.lock().expect("oauth pending poisoned");
+        let mut pending = self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let p = pending.remove(state)?;
         (p.created.elapsed() < PENDING_TTL).then_some(p)
     }
@@ -319,7 +319,7 @@ impl OAuthRuntime {
             ));
         }
         if provider == "oidc" {
-            if let Some(e) = self.oidc.lock().expect("oidc cache poisoned").clone() {
+            if let Some(e) = self.oidc.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone() {
                 return Ok((e, "openid email".to_string(), String::new()));
             }
             let issuer = provider_env("oidc", "ISSUER").ok_or("ONE_OAUTH_OIDC_ISSUER not set")?;
@@ -344,7 +344,7 @@ impl OAuthRuntime {
                 token_url: need("token_endpoint")?,
                 userinfo_url: need("userinfo_endpoint")?,
             };
-            *self.oidc.lock().expect("oidc cache poisoned") = Some(e.clone());
+            *self.oidc.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(e.clone());
             return Ok((e, "openid email".to_string(), String::new()));
         }
         Err(format!("unknown provider '{provider}'"))

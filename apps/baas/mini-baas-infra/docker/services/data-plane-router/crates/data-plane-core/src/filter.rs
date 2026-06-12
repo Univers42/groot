@@ -31,6 +31,12 @@ use serde_json::Value;
 /// array can't balloon the generated predicate / parameter count.
 pub const MAX_IN_LEN: usize = 1000;
 
+/// Maximum `$and`/`$or`/`$not` nesting. serde_json already refuses JSON deeper
+/// than 128 levels, so this is defense-in-depth with a clear error instead of
+/// relying on the JSON parser's limit (which a future `Value`-constructing
+/// caller would bypass).
+pub const MAX_FILTER_DEPTH: usize = 32;
+
 /// The result of constant-folding a [`Filter`] — whether it constrains nothing
 /// (a tautology, e.g. `NOT (FALSE)`), matches nothing, or is a real predicate.
 /// Used by mutation guards: an `AlwaysTrue` filter on update/delete is a full-
@@ -100,6 +106,15 @@ impl Filter {
     /// Parse and validate the JSON wire grammar into a [`Filter`] tree. Keys are
     /// processed in sorted order so the lowering is deterministic.
     pub fn parse(value: &Value) -> Result<Filter, DataPlaneError> {
+        Self::parse_at(value, 0)
+    }
+
+    fn parse_at(value: &Value, depth: usize) -> Result<Filter, DataPlaneError> {
+        if depth > MAX_FILTER_DEPTH {
+            return Err(invalid(format!(
+                "filter nesting exceeds the {MAX_FILTER_DEPTH}-level limit"
+            )));
+        }
         let Value::Object(map) = value else {
             return Err(invalid("filter must be a JSON object"));
         };
@@ -108,9 +123,9 @@ impl Filter {
         let mut parts = Vec::with_capacity(entries.len());
         for (key, val) in entries {
             let node = match key {
-                "$and" => Filter::And(parse_array(val)?),
-                "$or" => Filter::Or(parse_array(val)?),
-                "$not" => Filter::Not(Box::new(Filter::parse(val)?)),
+                "$and" => Filter::And(parse_array(val, depth + 1)?),
+                "$or" => Filter::Or(parse_array(val, depth + 1)?),
+                "$not" => Filter::Not(Box::new(Filter::parse_at(val, depth + 1)?)),
                 col => parse_column(col, val)?,
             };
             parts.push(node);
@@ -161,11 +176,11 @@ impl Filter {
     }
 }
 
-fn parse_array(val: &Value) -> Result<Vec<Filter>, DataPlaneError> {
+fn parse_array(val: &Value, depth: usize) -> Result<Vec<Filter>, DataPlaneError> {
     let Value::Array(items) = val else {
         return Err(invalid("`$and`/`$or` expects an array of filters"));
     };
-    items.iter().map(Filter::parse).collect()
+    items.iter().map(|v| Filter::parse_at(v, depth)).collect()
 }
 
 fn parse_column(col: &str, val: &Value) -> Result<Filter, DataPlaneError> {
@@ -341,5 +356,19 @@ mod tests {
         assert!(Filter::parse(&json!("not an object")).is_err());
         let big: Vec<i64> = (0..(MAX_IN_LEN as i64 + 1)).collect();
         assert!(Filter::parse(&json!({ "a": { "$in": big } })).is_err());
+    }
+
+    #[test]
+    fn rejects_nesting_beyond_depth_limit() {
+        // depth == limit parses; one deeper is a clean InvalidRequest (never
+        // a stack overflow, regardless of how the Value was constructed).
+        let mut at_limit = json!({ "a": 1 });
+        for _ in 0..MAX_FILTER_DEPTH {
+            at_limit = json!({ "$and": [at_limit] });
+        }
+        assert!(Filter::parse(&at_limit).is_ok());
+        let over = json!({ "$not": at_limit });
+        let err = Filter::parse(&over).unwrap_err();
+        assert!(err.to_string().contains("nesting"), "got: {err}");
     }
 }

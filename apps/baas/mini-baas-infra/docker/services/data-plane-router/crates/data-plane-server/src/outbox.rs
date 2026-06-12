@@ -42,6 +42,8 @@ impl OutboxEmitter {
     /// query-router's `emitForQuery`. Best-effort + fire-and-forget at the call
     /// site: a failed emit must never fail the (already-committed) write, it just
     /// logs — exactly the query-router's `.catch(warn)` posture.
+    // Internal fan-out plumbing: a params struct would be pure ceremony here.
+    #[allow(clippy::too_many_arguments)]
     pub async fn emit_mutation(
         &self,
         engine: &str,

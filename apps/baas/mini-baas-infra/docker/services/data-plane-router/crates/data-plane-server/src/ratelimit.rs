@@ -46,7 +46,7 @@ impl TenantRateLimiter {
         }
         let cap = f64::from(burst.max(1));
         let now = Instant::now();
-        let mut map = self.buckets.lock().expect("rate limiter poisoned");
+        let mut map = self.buckets.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let bucket = map
             .entry(tenant.to_string())
             .or_insert_with(|| Bucket { tokens: cap, last: now });
@@ -67,7 +67,7 @@ impl TenantRateLimiter {
     /// dropped (it re-creates full on next access).
     pub fn evict_idle(&self, idle: Duration) {
         let now = Instant::now();
-        let mut map = self.buckets.lock().expect("rate limiter poisoned");
+        let mut map = self.buckets.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         map.retain(|_, b| now.duration_since(b.last) < idle);
     }
 
@@ -76,7 +76,7 @@ impl TenantRateLimiter {
     /// shrinkage under N-tenant fan-out means the map is becoming the leak.
     #[must_use]
     pub fn tracked(&self) -> usize {
-        self.buckets.lock().expect("rate limiter poisoned").len()
+        self.buckets.lock().unwrap_or_else(std::sync::PoisonError::into_inner).len()
     }
 }
 

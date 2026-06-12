@@ -288,6 +288,7 @@ impl AppState {
     /// BOTH cached views of the old credential or a stale DSN survives:
     ///   1. the resolver's DSN cache entry for `pool_key`, and
     ///   2. the pool the registry opened with that old DSN.
+    ///
     /// We evict the cache FIRST so that even if the drain races a concurrent
     /// `get_or_create`, the rebuild cannot re-read the stale cached DSN. Returns
     /// the number of pools actually drained (0 if the key was unknown or the
