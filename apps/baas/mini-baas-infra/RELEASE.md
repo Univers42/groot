@@ -69,9 +69,17 @@ git tag -a baas-v1.0.0 -m "Grobase BaaS v1.0.0" && git push origin baas-v1.0.0
 
 ## Bumping the realtime pin
 
-1. Tag `vX.Y.Z` in `Univers42/realtime-agnostic` → its release workflow publishes
-   `dlesieur/realtime-agnostic:X.Y.Z` (+ GHCR mirror).
+1. Tag `vX.Y.Z` in `Univers42/realtime-agnostic` → its release workflow builds
+   the binary + GitHub Release, then publishes `dlesieur/realtime-agnostic:X.Y.Z`
+   (+ GHCR mirror).
+   **Gotcha (bit v0.2.0 and v0.2.1):** the publish job needs repo secrets
+   `DOCKER_HUB_USERNAME` / `DOCKER_HUB_TOKEN` — without them the binary/Release
+   jobs go green but the image job fails at login. Add the secrets
+   (`gh secret set … --repo Univers42/realtime-agnostic`), then re-run just the
+   failed job: `gh run rerun <run-id> --failed`.
 2. Bump the pin in `docker-compose.yml` (`image: dlesieur/realtime-agnostic:…`).
+   The service keeps its `build:` context, so local stacks build from source
+   regardless of the pin — the pin only governs pull-only deployments.
 3. Re-verify: `make verify-m44` (SSE) + `bash scripts/phase11-realtime-websocket-test.sh`.
 
 ## Standalone-repo note
