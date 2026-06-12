@@ -50,7 +50,7 @@ one = ["nano", "pbcompat", "dep:argon2", "dep:jsonwebtoken", "dep:lettre", "dep:
 # PocketBase-compatible facade (/api/...): PB filter DSL, collections registry,
 # records/realtime/files in PB envelopes — so the official PB SDKs work
 # unchanged. Rides in `one`; nano stays headless-minimal without it.
-pbcompat = []
+pbcompat = ["dep:zip"]
 
 [dependencies]
 data-plane-core = { path = "../data-plane-core" }
@@ -70,6 +70,7 @@ rusqlite = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 mimalloc = { workspace = true, optional = true }
 tikv-jemallocator = { workspace = true, optional = true }
+zip = { workspace = true, optional = true }
 # binocle-one: password hashing + JWT sessions + SMTP codes + TOTP MFA.
 argon2 = { workspace = true, optional = true }
 jsonwebtoken = { workspace = true, optional = true }

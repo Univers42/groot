@@ -1242,7 +1242,7 @@ pub fn router(state: AppState) -> Router {
         .merge(crate::one_totp::routes())
         .merge(crate::one_files::routes())
         .merge(crate::one_admin::routes())
-        .merge(pb_routes())
+        .merge(pb_routes_logged(state.clone()))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
@@ -1250,6 +1250,20 @@ pub fn router(state: AppState) -> Router {
 #[cfg(feature = "pbcompat")]
 fn pb_routes() -> axum::Router<AppState> {
     crate::pb::routes()
+}
+
+/// Request-log capture for /api traffic only (the native doors never pay
+/// for it). Applied at merge time so it wraps exactly the pb router.
+#[cfg(feature = "pbcompat")]
+fn pb_routes_logged(state: AppState) -> axum::Router<AppState> {
+    pb_routes().layer(axum::middleware::from_fn_with_state(
+        state,
+        crate::pb::logs::capture,
+    ))
+}
+#[cfg(not(feature = "pbcompat"))]
+fn pb_routes_logged(_state: AppState) -> axum::Router<AppState> {
+    axum::Router::new()
 }
 #[cfg(not(feature = "pbcompat"))]
 fn pb_routes() -> axum::Router<AppState> {

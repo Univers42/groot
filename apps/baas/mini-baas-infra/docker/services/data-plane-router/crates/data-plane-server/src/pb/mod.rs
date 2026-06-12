@@ -18,10 +18,13 @@
 
 pub mod auth;
 pub mod auth_flows;
+pub mod backups;
 pub mod batch;
 pub mod collections;
+pub mod crons;
 pub mod files;
 pub mod filter;
+pub mod logs;
 pub mod realtime;
 pub mod rules;
 pub mod settings;
@@ -53,6 +56,8 @@ pub struct PbState {
     pub(crate) realtime: realtime::Realtime,
     /// Root of PB file storage ({data_dir}/pb_storage).
     pub(crate) storage_root: std::path::PathBuf,
+    /// Batched request-log writer (pb_logs.db).
+    pub(crate) logs: logs::Logs,
     /// Successful-verify cache for auth records (same design + rationale as
     /// `UserStore::verify_cache`: argon2id is memory-hard by design, repeat
     /// logins skip it; failures always pay full cost).
@@ -106,6 +111,7 @@ impl PbState {
             meta: std::sync::Mutex::new(conn),
             realtime: realtime::Realtime::default(),
             storage_root: data_dir.join("pb_storage"),
+            logs: logs::Logs::start(data_dir.join("pb_logs.db")),
             verify_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
             pepper: format!("{}{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4()),
             su_email,
@@ -444,4 +450,7 @@ pub fn routes() -> Router<AppState> {
         .merge(files::routes())
         .merge(auth::routes())
         .merge(auth_flows::routes())
+        .merge(backups::routes())
+        .merge(crons::routes())
+        .merge(logs::routes())
 }

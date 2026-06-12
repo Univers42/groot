@@ -78,6 +78,9 @@ mimalloc = { version = "0.1", default-features = false }
 # jemalloc purges via decay + a background thread; disable_initial_exec_tls is
 # required for musl-static builds.
 tikv-jemallocator = { version = "0.6", features = ["disable_initial_exec_tls", "background_threads_runtime_support"] }
+# PB-compat backups: one zip archive of the data dir. deflate only — every
+# extra codec is binary weight inside the <=12 MB budget.
+zip = { version = "2", default-features = false, features = ["deflate"] }
 # R-mssql: Microsoft SQL Server (TDS) via the pure-Rust tiberius driver +
 # bb8 pool. `rustls` matches the workspace TLS posture; `tokio-util` provides
 # the AsyncRead/Write compat tiberius needs over a tokio TcpStream.
