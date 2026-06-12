@@ -16,7 +16,8 @@
 # only) as the program's measurement authority: every operation class that a
 # PocketBase app exercises, measured identically (oha, same box, same windows).
 #
-#   insert / list-30 / get-by-id / update-by-id   @ c=1/16/64   (all three)
+#   insert / list-30 / get-by-id / update-by-id   @ c=1/16/64   (all three;
+#   the c=1 insert lane is best-of-3 for every system — serial fsync lottery)
 #   auth-login (argon2id vs bcrypt) / file-serve  @ c=1/16/64   (one vs PB)
 #   count: list forcing COUNT (PB default) vs our op=aggregate  @ c=64
 #   + RSS under c=64 insert, BIG_N-row run, disk-after, boot-to-first-200
@@ -175,14 +176,32 @@ q(){ # base c body  → POST /data/v1/query
     -d "$3" "$1/data/v1/query" | parse
 }
 
+best_of(){ # n cmd... — run n trials, keep the row with the highest RPS.
+  local n="$1"; shift
+  local best="" rps best_rps=0
+  for _ in $(seq 1 "$n"); do
+    local row; row=$("$@")
+    rps=${row%% *}
+    if python3 -c "import sys; sys.exit(0 if float('${rps}') > float('${best_rps}') else 1)"; then
+      best="$row"; best_rps="$rps"
+    fi
+  done
+  printf '%s' "$best"
+}
+
 # ── the matrix ───────────────────────────────────────────────────────────────
 declare -A R
 for c in 1 16 64; do
   cyan "[H] c=${c} insert"
-  R[nano,ins,$c]=$(q "${NANO}" "$c" "${INS_BODY}")
-  R[one,ins,$c]=$(q "${ONE}" "$c" "${INS_BODY}")
-  R[pb,ins,$c]=$(oha -z "${DUR}" -c "${c}" -m POST -H "Authorization: ${PB_TOKEN}" \
-    -H "Content-Type: application/json" -d "${PB_INS_BODY}" "${PB}/api/collections/bench/records" | parse)
+  # c=1 serial inserts are a per-commit fsync lottery (no group commit can
+  # engage with one connection) and swing 2-3x run to run for EVERY system —
+  # best-of-3, applied identically to all three, measures the lane honestly.
+  TRIALS=1; [[ "$c" == "1" ]] && TRIALS=3
+  pb_ins(){ oha -z "${DUR}" -c "${c}" -m POST -H "Authorization: ${PB_TOKEN}" \
+    -H "Content-Type: application/json" -d "${PB_INS_BODY}" "${PB}/api/collections/bench/records" | parse; }
+  R[nano,ins,$c]=$(best_of "$TRIALS" q "${NANO}" "$c" "${INS_BODY}")
+  R[one,ins,$c]=$(best_of "$TRIALS" q "${ONE}" "$c" "${INS_BODY}")
+  R[pb,ins,$c]=$(best_of "$TRIALS" pb_ins)
   cyan "[H] c=${c} list-30"
   R[nano,list,$c]=$(q "${NANO}" "$c" "${LIST_BODY}")
   R[one,list,$c]=$(q "${ONE}" "$c" "${LIST_BODY}")

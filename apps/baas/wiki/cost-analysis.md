@@ -181,3 +181,5 @@ Compute cost = `($0.77 × vCPUs) + ($5.00 × GB RAM)` + `$0.15/GB` volume + `$0.
 **Sources:** [Fly.io pricing](https://fly.io/docs/about/pricing/) · live
 `mini-baas-infra/artifacts/footprint-*.json` (`make bench-footprint`, 2026-06-11) · data-path
 benchmark in [`cutover-status.md`](./cutover-status.md).
+
+*Updated 2026-06-12: the Total-Win program shipped the PB-compatible /api facade (official-SDK certified, gate m53), JS hooks, backups, ACME HTTPS, S3 and rate limits in binocle-one — 10.08 MB image, 8.3 MiB idle. Per-tenant cost math below is unchanged (same engine); the competitive standing vs PocketBase is documented in nano-vs-pocketbase.md.*

@@ -131,7 +131,7 @@ accounts (argon2id passwords, JWT + rotating refresh), the **full OAuth2 matrix*
 PKCE flow, 11 presets incl. Apple/ES256, any-OIDC via discovery), email verification /
 password reset / OTP login over SMTP, **TOTP MFA** with recovery codes, **file storage**
 (multipart, thumbnails, signed links), **topic+owner-filtered SSE**, `fields` projection,
-and an **embedded admin dashboard** at `/_/` — all in one **6.41 MB** scratch image idling
+and an **embedded admin dashboard** at `/_/` — all in one **10.08 MB** scratch image idling
 at **2.2 MiB**. Gates m40–m45 prove every claim live; the three-column load bench
 (`scripts/bench/nano-one-pb-load.sh`) shows one at **9,283 RPS insert @ c=64 (3.8×
 PocketBase) on 15.4 MiB under load (26× lighter)**. Full comparison + honest losses:

@@ -108,6 +108,51 @@ pub(crate) fn verify_password(password: &str, stored: &str) -> bool {
 /// serialize hashing: half-the-cores permits measured as losing to
 /// PocketBase's bcrypt at c>=16 (176 vs 301 RPS) while winning at c=1.
 /// `ONE_KDF_CONCURRENCY` overrides.
+/// Cache-checked, single-flight password verify: the first caller for a
+/// given (user, password) computes the KDF; concurrent identical callers
+/// wait on a per-key async lock and re-check the cache instead of hashing.
+pub(crate) async fn verify_password_singleflight(
+    one: &OneState,
+    user_id: &str,
+    stored: &str,
+    password: &str,
+) -> bool {
+    if one.users.verify_cached(user_id, password) {
+        return true;
+    }
+    static FLIGHTS: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
+    > = std::sync::OnceLock::new();
+    let flights = FLIGHTS.get_or_init(Default::default);
+    let key = sha256_hex(&format!("{user_id}\u{0}{password}"));
+    let gate = {
+        let mut map = flights.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if map.len() > 4096 {
+            map.retain(|_, v| std::sync::Arc::strong_count(v) > 1);
+        }
+        map.entry(key.clone()).or_default().clone()
+    };
+    let _guard = gate.lock().await;
+    if one.users.verify_cached(user_id, password) {
+        return true; // a sibling in this flight already proved it
+    }
+    let pw = password.to_string();
+    let st = stored.to_string();
+    let ok = matches!(
+        kdf_blocking(move || verify_password(&pw, &st)).await,
+        Some(true)
+    );
+    if ok {
+        one.users.cache_verify(user_id, password);
+    }
+    drop(_guard);
+    let mut map = flights.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if map.get(&key).map(|v| std::sync::Arc::strong_count(v) <= 1).unwrap_or(false) {
+        map.remove(&key);
+    }
+    ok
+}
+
 pub(crate) async fn kdf_blocking<T: Send + 'static>(
     f: impl FnOnce() -> T + Send + 'static,
 ) -> Option<T> {
@@ -1138,21 +1183,14 @@ async fn login(
         let _ = kdf_blocking(move || hash_password(&password)).await;
         return api_err(StatusCode::UNAUTHORIZED, "unauthorized", "invalid email or password");
     };
-    // Repeat-login fast path: a credential that verified within the cache TTL
-    // skips the (deliberately expensive) KDF. Failures never enter the cache.
-    let cached = one.users.verify_cached(&user_id, &password);
-    let ok = cached || {
-        let pw = password.clone();
-        matches!(
-            kdf_blocking(move || verify_password(&pw, &stored)).await,
-            Some(true)
-        )
-    };
+    // Repeat-login fast path + SINGLE-FLIGHT: a credential that verified
+    // within the cache TTL skips the KDF, and N identical in-flight logins
+    // collapse into ONE argon2 computation (a cold c=64 burst of the same
+    // credential queued 64 hashes on the KDF permits — the p99 tail was
+    // pure duplicate work). Failures never enter the cache.
+    let ok = verify_password_singleflight(&one, &user_id, &stored, &password).await;
     if !ok {
         return api_err(StatusCode::UNAUTHORIZED, "unauthorized", "invalid email or password");
-    }
-    if !cached {
-        one.users.cache_verify(&user_id, &password);
     }
     // TOTP-enabled accounts get a challenge instead of a session.
     match one.finish_login(&user_id) {

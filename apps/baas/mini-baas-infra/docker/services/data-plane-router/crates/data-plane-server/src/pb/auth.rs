@@ -44,6 +44,49 @@ pub(crate) fn scrub_auth_record(record: &mut Value, privileged: bool) {
     }
 }
 
+/// Facade twin of `one::verify_password_singleflight` over PbState's cache.
+async fn pb_verify_singleflight(
+    pb: &super::PbState,
+    rid: &str,
+    stored: &str,
+    password: &str,
+) -> bool {
+    if pb.verify_cached_pb(rid, password) {
+        return true;
+    }
+    static FLIGHTS: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
+    > = std::sync::OnceLock::new();
+    let flights = FLIGHTS.get_or_init(Default::default);
+    let key = crate::one::sha256_hex(&format!("{rid}\u{0}{password}"));
+    let gate = {
+        let mut map = flights.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if map.len() > 4096 {
+            map.retain(|_, v| std::sync::Arc::strong_count(v) > 1);
+        }
+        map.entry(key.clone()).or_default().clone()
+    };
+    let _guard = gate.lock().await;
+    if pb.verify_cached_pb(rid, password) {
+        return true;
+    }
+    let pw = password.to_string();
+    let st = stored.to_string();
+    let ok = matches!(
+        crate::one::kdf_blocking(move || crate::one::verify_password(&pw, &st)).await,
+        Some(true)
+    );
+    if ok {
+        pb.cache_verify_pb(rid, password);
+    }
+    drop(_guard);
+    let mut map = flights.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if map.get(&key).map(|v| std::sync::Arc::strong_count(v) <= 1).unwrap_or(false) {
+        map.remove(&key);
+    }
+    ok
+}
+
 fn mint_record_token(
     state: &AppState,
     collection_id: &str,
@@ -106,20 +149,10 @@ async fn auth_with_password(
         .unwrap_or_default()
         .to_string();
     let rid = row.get("id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-    let cached = pb.verify_cached_pb(&rid, &password);
-    let ok = cached || {
-        let pw = password.clone();
-        let st = stored.clone();
-        matches!(
-            crate::one::kdf_blocking(move || crate::one::verify_password(&pw, &st)).await,
-            Some(true)
-        )
-    };
+    // cache + single-flight: identical concurrent logins collapse to one KDF
+    let ok = pb_verify_singleflight(&pb, &rid, &stored, &password).await;
     if !ok {
         return pb_err(StatusCode::BAD_REQUEST, "Failed to authenticate.");
-    }
-    if !cached {
-        pb.cache_verify_pb(&rid, &password);
     }
     let token = match mint_record_token(&state, &col.id, &rid, &identity) {
         Ok(t) => t,
