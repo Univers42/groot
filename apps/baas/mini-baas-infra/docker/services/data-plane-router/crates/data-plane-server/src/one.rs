@@ -1243,6 +1243,7 @@ pub fn router(state: AppState) -> Router {
         .merge(crate::one_files::routes())
         .merge(crate::one_admin::routes())
         .merge(pb_routes_logged(state.clone()))
+        .fallback(hooks_fallback)
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
@@ -1275,6 +1276,53 @@ fn pb_routes() -> axum::Router<AppState> {
     axum::Router::new()
 }
 
+/// routerAdd fallback: a JS-registered route serves anything the built-in
+/// routers don't; everything else stays the standard 404.
+#[cfg(feature = "hooks")]
+async fn hooks_fallback(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    request: axum::extract::Request,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let method = request.method().to_string();
+    let path = request.uri().path().to_string();
+    let query = request.uri().query().unwrap_or_default().to_string();
+    if let Some(hooks) = state.hooks.clone() {
+        if hooks.has_route(&method, &path) {
+            let body_bytes = axum::body::to_bytes(request.into_body(), 1024 * 1024)
+                .await
+                .unwrap_or_default();
+            let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap_or(serde_json::Value::Null);
+            return match hooks.serve_route(&method, &path, &query, &body).await {
+                Ok((status, body)) => (
+                    axum::http::StatusCode::from_u16(status)
+                        .unwrap_or(axum::http::StatusCode::OK),
+                    axum::Json(body),
+                )
+                    .into_response(),
+                Err(m) => crate::routes::api_err(
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    "hook_failed",
+                    &m,
+                ),
+            };
+        }
+    }
+    crate::routes::api_err(
+        axum::http::StatusCode::NOT_FOUND,
+        "not_found",
+        "route not found",
+    )
+}
+#[cfg(not(feature = "hooks"))]
+async fn hooks_fallback() -> axum::response::Response {
+    crate::routes::api_err(
+        axum::http::StatusCode::NOT_FOUND,
+        "not_found",
+        "route not found",
+    )
+}
+
 /// Boot binocle-one: nano state + the account store, same reaper, same door.
 pub async fn run(config: ServerConfig) -> anyhow::Result<()> {
     let data_dir = std::path::PathBuf::from(
@@ -1289,6 +1337,13 @@ pub async fn run(config: ServerConfig) -> anyhow::Result<()> {
     #[cfg(feature = "pbcompat")]
     {
         state.pb = Some(Arc::new(crate::pb::PbState::open(&data_dir)?));
+    }
+    #[cfg(feature = "hooks")]
+    {
+        let hooks_dir = std::env::var("ONE_HOOKS_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| data_dir.join("pb_hooks"));
+        state.hooks = crate::pb::hooks::start(state.clone(), hooks_dir);
     }
 
     let reaper_state = state.clone();

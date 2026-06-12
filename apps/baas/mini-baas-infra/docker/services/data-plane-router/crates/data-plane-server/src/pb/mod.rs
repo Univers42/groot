@@ -24,6 +24,8 @@ pub mod collections;
 pub mod crons;
 pub mod files;
 pub mod filter;
+#[cfg(feature = "hooks")]
+pub mod hooks;
 pub mod logs;
 pub mod ratelimit;
 pub mod realtime;

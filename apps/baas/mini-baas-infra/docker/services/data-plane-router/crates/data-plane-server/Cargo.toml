@@ -46,11 +46,13 @@ mimalloc-alloc = ["dep:mimalloc"]
 # the OAuth2/OIDC provider matrix, SMTP mail codes (verification/reset/OTP)
 # and RFC 6238 TOTP MFA (hmac+sha1 — authenticator apps mandate SHA1).
 # File storage rides the same feature: multipart upload + jpeg/png thumbnails.
-one = ["nano", "pbcompat", "dep:argon2", "dep:jsonwebtoken", "dep:lettre", "dep:hmac", "dep:sha1", "dep:image", "axum/multipart"]
+one = ["nano", "pbcompat", "hooks", "dep:argon2", "dep:jsonwebtoken", "dep:lettre", "dep:hmac", "dep:sha1", "dep:image", "axum/multipart"]
 # PocketBase-compatible facade (/api/...): PB filter DSL, collections registry,
 # records/realtime/files in PB envelopes — so the official PB SDKs work
 # unchanged. Rides in `one`; nano stays headless-minimal without it.
 pbcompat = ["dep:zip"]
+# JS hooks (pb_hooks): QuickJS runtime — rides in one, never nano.
+hooks = ["dep:rquickjs"]
 
 [dependencies]
 data-plane-core = { path = "../data-plane-core" }
@@ -71,6 +73,7 @@ futures = { workspace = true, optional = true }
 mimalloc = { workspace = true, optional = true }
 tikv-jemallocator = { workspace = true, optional = true }
 zip = { workspace = true, optional = true }
+rquickjs = { workspace = true, optional = true }
 # binocle-one: password hashing + JWT sessions + SMTP codes + TOTP MFA.
 argon2 = { workspace = true, optional = true }
 jsonwebtoken = { workspace = true, optional = true }

@@ -81,6 +81,9 @@ tikv-jemallocator = { version = "0.6", features = ["disable_initial_exec_tls", "
 # PB-compat backups: one zip archive of the data dir. deflate only — every
 # extra codec is binary weight inside the <=12 MB budget.
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# PB-compat JS hooks (pb_hooks/*.pb.js): QuickJS embedded via rquickjs —
+# C library, musl-static friendly, ~1.2 MB of the one image's budget.
+rquickjs = { version = "0.9", features = ["loader"] }
 # R-mssql: Microsoft SQL Server (TDS) via the pure-Rust tiberius driver +
 # bb8 pool. `rustls` matches the workspace TLS posture; `tokio-util` provides
 # the AsyncRead/Write compat tiberius needs over a tokio TcpStream.

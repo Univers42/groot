@@ -792,6 +792,20 @@ async fn create(
         }
     }
 
+    // JS hooks: onRecordCreateRequest may mutate the record or reject.
+    #[cfg(feature = "hooks")]
+    if let Some(hooks) = state.hooks.clone() {
+        if hooks.active_for(super::hooks::ACT_CREATE) {
+            match hooks
+                .fire_record("create", &col.name, &Value::Object(data.clone()))
+                .await
+            {
+                Ok(Some(Value::Object(mutated))) => data = mutated,
+                Ok(_) => {}
+                Err(m) => return pb_err(StatusCode::BAD_REQUEST, &m),
+            }
+        }
+    }
     if let super::rules::Lowered::Constrain(wire) = &create_rule {
         // createRule constrains the WOULD-BE record: evaluate in memory.
         let ok = data_plane_core::Filter::parse(wire)
@@ -871,6 +885,19 @@ async fn update(
             Err(r) => r,
         };
     }
+    #[cfg(feature = "hooks")]
+    if let Some(hooks) = state.hooks.clone() {
+        if hooks.active_for(super::hooks::ACT_UPDATE) {
+            match hooks
+                .fire_record("update", &col.name, &Value::Object(data.clone()))
+                .await
+            {
+                Ok(Some(Value::Object(mutated))) => data = mutated,
+                Ok(_) => {}
+                Err(m) => return pb_err(StatusCode::BAD_REQUEST, &m),
+            }
+        }
+    }
     let mut op = base_op(DataOperationKind::Update, &col.name);
     op.data = Some(Value::Object(data));
     op.filter = Some(json!({ "id": rid }));
@@ -915,6 +942,15 @@ async fn remove(
     // Pre-image for the realtime event (PB sends the deleted record's last
     // known state).
     let pre = fetch_by_id(&state, &col, &kinds, &rid).await.ok().flatten();
+    #[cfg(feature = "hooks")]
+    if let Some(hooks) = state.hooks.clone() {
+        if hooks.active_for(super::hooks::ACT_DELETE) {
+            let payload = pre.clone().unwrap_or_else(|| json!({ "id": rid }));
+            if let Err(m) = hooks.fire_record("delete", &col.name, &payload).await {
+                return pb_err(StatusCode::BAD_REQUEST, &m);
+            }
+        }
+    }
     let mut op = base_op(DataOperationKind::Delete, &col.name);
     op.filter = Some(json!({ "id": rid }));
     if let Err(r) = apply_rule(&mut op, lowered) {

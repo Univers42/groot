@@ -183,6 +183,9 @@ pub struct AppState {
     /// PocketBase-compatible facade runtime (collections registry).
     #[cfg(feature = "pbcompat")]
     pub(crate) pb: Option<Arc<crate::pb::PbState>>,
+    /// JS hooks engine (pb_hooks) — None when the dir doesn't exist.
+    #[cfg(feature = "hooks")]
+    pub(crate) hooks: Option<Arc<crate::pb::hooks::Hooks>>,
     /// Short-TTL cache of `api-key → VerifiedIdentity` for the bypass front door,
     /// mirroring the query-router's `ApiKeyMiddleware` 30 s cache. Without it the
     /// bypass re-runs the Argon2id key-verify (a tenant-control round-trip) on
@@ -284,6 +287,8 @@ impl AppState {
             one: None,
             #[cfg(feature = "pbcompat")]
             pb: None,
+            #[cfg(feature = "hooks")]
+            hooks: None,
             verify_cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
             mount_cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
