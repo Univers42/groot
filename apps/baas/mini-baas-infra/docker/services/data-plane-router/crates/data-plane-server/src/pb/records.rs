@@ -50,7 +50,7 @@ async fn caller(
 ) -> (PbAuth, super::rules::RuleCtx) {
     let auth = pb_auth(state, headers);
     let record = super::auth::auth_record_of(state, &auth).await;
-    let ctx = super::rules::RuleCtx::from_auth(&auth, record);
+    let ctx = super::rules::RuleCtx::from_auth(&auth, record).with_headers(headers);
     (auth, ctx)
 }
 
@@ -493,7 +493,7 @@ fn collection_term(field: &str, op: super::predicate::Cmp, value: Value) -> data
 fn collect_collection_terms(
     expr: &super::predicate::PbExpr,
     outer: &Value,
-    groups: &mut HashMap<String, Vec<data_plane_core::Filter>>,
+    groups: &mut HashMap<String, Vec<(String, data_plane_core::Filter)>>,
 ) {
     use super::predicate::{Operand, PbExpr};
     match expr {
@@ -503,12 +503,13 @@ fn collect_collection_terms(
             }
         }
         PbExpr::Cmp { left, op, right, .. } => {
-            if let Operand::Collection { collection, field } = left {
+            if let Operand::Collection { collection, alias, field } = left {
                 let val = super::predicate::operand_literal(right, outer);
-                groups
-                    .entry(collection.clone())
-                    .or_default()
-                    .push(collection_term(field, *op, val));
+                let key = match alias {
+                    Some(a) => format!("{collection}:{a}"),
+                    None => collection.clone(),
+                };
+                groups.entry(key).or_default().push((collection.clone(), collection_term(field, *op, val)));
             }
         }
         PbExpr::Const(_) => {}
@@ -529,8 +530,12 @@ fn substitute_collection_refs(
             PbExpr::Or(parts.iter().map(|p| substitute_collection_refs(p, exists)).collect())
         }
         PbExpr::Cmp { left, .. } => {
-            if let Operand::Collection { collection, .. } = left {
-                PbExpr::Const(*exists.get(collection).unwrap_or(&false))
+            if let Operand::Collection { collection, alias, .. } = left {
+                let key = match alias {
+                    Some(a) => format!("{collection}:{a}"),
+                    None => collection.clone(),
+                };
+                PbExpr::Const(*exists.get(&key).unwrap_or(&false))
             } else {
                 expr.clone()
             }
@@ -546,20 +551,22 @@ async fn resolve_collection_refs(
     expr: &super::predicate::PbExpr,
     outer: &Value,
 ) -> super::predicate::PbExpr {
-    let mut groups: HashMap<String, Vec<data_plane_core::Filter>> = HashMap::new();
+    let mut groups: HashMap<String, Vec<(String, data_plane_core::Filter)>> = HashMap::new();
     collect_collection_terms(expr, outer, &mut groups);
     let mut exists: HashMap<String, bool> = HashMap::new();
-    for (coll, terms) in groups {
-        let sub = if terms.len() == 1 {
-            terms.into_iter().next().unwrap()
+    for (key, terms) in groups {
+        let coll = terms.first().map(|(c, _)| c.clone()).unwrap_or_default();
+        let filters: Vec<data_plane_core::Filter> = terms.into_iter().map(|(_, f)| f).collect();
+        let sub = if filters.len() == 1 {
+            filters.into_iter().next().unwrap()
         } else {
-            data_plane_core::Filter::And(terms)
+            data_plane_core::Filter::And(filters)
         };
         let mut op = base_op(DataOperationKind::List, &coll);
         op.limit = Some(1);
         op.filter = Some(filter_to_wire(&sub));
         let found = matches!(exec(state, op).await, Ok(r) if !r.rows.is_empty());
-        exists.insert(coll, found);
+        exists.insert(key, found);
     }
     substitute_collection_refs(expr, &exists)
 }
@@ -883,6 +890,7 @@ async fn list(
         Err(r) => return r,
     };
     let (_auth, ctx) = caller(&state, &headers).await;
+    let ctx = ctx.with_query(&q);
     let page: u32 = q.get("page").and_then(|v| v.parse().ok()).unwrap_or(1).max(1);
     let per_page: u32 = q
         .get("perPage")
@@ -1073,6 +1081,7 @@ async fn view(
         Err(r) => return r,
     };
     let (_auth, ctx) = caller(&state, &headers).await;
+    let ctx = ctx.with_query(&q);
     let pred = super::rules::rule_pred(col.view_rule.as_ref(), &ctx);
     if matches!(pred, super::rules::RulePred::Deny) {
         return pb_err(StatusCode::NOT_FOUND, "The requested resource wasn't found.");
@@ -1124,10 +1133,6 @@ async fn create(
         return pb_err(StatusCode::BAD_REQUEST, "unable to create a view collection record");
     }
     let (_auth, ctx) = caller(&state, &headers).await;
-    let create_rule = super::rules::rule_pred(col.create_rule.as_ref(), &ctx);
-    if matches!(create_rule, super::rules::RulePred::Deny) {
-        return pb_err(StatusCode::FORBIDDEN, "Only superusers can perform this action.");
-    }
     let pb = match pb_of(&state) {
         Ok(p) => p,
         Err(r) => return r,
@@ -1187,8 +1192,13 @@ async fn create(
             }
         }
     }
+    // createRule is checked against the submitted body + the would-be record
+    let create_rule =
+        super::rules::rule_pred(col.create_rule.as_ref(), &ctx.clone().with_body(body.clone()));
+    if matches!(create_rule, super::rules::RulePred::Deny) {
+        return pb_err(StatusCode::FORBIDDEN, "Only superusers can perform this action.");
+    }
     if let super::rules::RulePred::Pred(e) = &create_rule {
-        // createRule constrains the WOULD-BE record: evaluate in memory.
         if !eval_access(&state, e, &Value::Object(data.clone())).await {
             return pb_err(StatusCode::BAD_REQUEST, "Failed to create record.");
         }
@@ -1229,19 +1239,11 @@ async fn update(
         return pb_err(StatusCode::BAD_REQUEST, "unable to update a view collection record");
     }
     let (_auth, ctx) = caller(&state, &headers).await;
-    let update_rule = super::rules::rule_pred(col.update_rule.as_ref(), &ctx);
-    if matches!(update_rule, super::rules::RulePred::Deny) {
+    if matches!(
+        super::rules::rule_pred(col.update_rule.as_ref(), &ctx),
+        super::rules::RulePred::Deny
+    ) {
         return pb_err(StatusCode::FORBIDDEN, "Only superusers can perform this action.");
-    }
-    // The update rule is checked against the EXISTING record (PB semantics).
-    if let super::rules::RulePred::Pred(e) = &update_rule {
-        let allowed = match fetch_by_id(&state, &col, &kinds, &rid).await {
-            Ok(Some(existing)) => eval_access(&state, e, &existing).await,
-            _ => false,
-        };
-        if !allowed {
-            return pb_err(StatusCode::NOT_FOUND, "The requested resource wasn't found.");
-        }
     }
     let pb = match pb_of(&state) {
         Ok(p) => p,
@@ -1255,6 +1257,18 @@ async fn update(
         Ok(d) => d,
         Err(m) => return pb_err(StatusCode::BAD_REQUEST, &m),
     };
+    // The update rule is checked against the EXISTING record + submitted body.
+    if let super::rules::RulePred::Pred(e) =
+        super::rules::rule_pred(col.update_rule.as_ref(), &ctx.clone().with_body(body.clone()))
+    {
+        let allowed = match fetch_by_id(&state, &col, &kinds, &rid).await {
+            Ok(Some(existing)) => eval_access(&state, &e, &existing).await,
+            _ => false,
+        };
+        if !allowed {
+            return pb_err(StatusCode::NOT_FOUND, "The requested resource wasn't found.");
+        }
+    }
     if let Err(r) = persist_files(&pb, &kinds, &col.id, &rid, pending, &mut data).await {
         return r;
     }

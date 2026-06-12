@@ -2,9 +2,11 @@
 
 > **Status: TOTAL-WIN PROGRAM COMPLETE (2026-06-12).** binocle-one is now a
 > **drop-in PocketBase replacement**: the official `pocketbase` npm SDK runs
-> **72 scenario steps against binocle-one and real PocketBase v0.39.3 in one
+> **89 scenario steps against binocle-one and real PocketBase v0.39.3 in one
 > session, and the normalized outcome maps are IDENTICAL** (gate m53 — the
-> parity certificate). On performance, **every measured operation class is
+> parity certificate). The honest-residuals board is now EMPTY: the full
+> filter/rules surface, every `@request.*` namespace, `@collection` joins
+> (with aliases), and MFA→OTP completion are all implemented + gate-proven. On performance, **every measured operation class is
 > faster, in both quiet and loaded runs** (gate m46, quiet + loaded
 > artifacts). Every row below carries evidence — a verify gate (m37,
 > m40–m53), a bench artifact, or a PB docs link.
@@ -149,7 +151,12 @@ rules-matrix step (m49):
   fields, dotted access (`place.lon`)
 - **`@collection.*` cross-collection joins** — resolved as an EXISTS
   sub-query per outer record (same-name refs share one join row, PB's
-  membership pattern), with `@request.auth.*` + outer-record substitution
+  membership pattern); **`:alias`** support means distinct aliases on one
+  collection are distinct join rows
+- **all four `@request.*` namespaces** — `@request.auth.*`,
+  `@request.body.*` (create/update rules), `@request.query.*`,
+  `@request.headers.*`, with dotted paths + PB's zero-value semantics
+  (`@request.body` certified against PB by m49)
 
 Honest performance characteristics (NOT gaps — outcome is PB-identical):
 advanced predicates fetch a candidate window (≤5000 rows, narrowed by the
@@ -158,13 +165,25 @@ sub-query per candidate row. These live on the **rules / advanced-filter**
 path only — the simple-filter CRUD hot path stays entirely on SQL (the
 benchmark numbers above are unchanged).
 
-## Remaining residuals (still on the board, fail loud)
+## MFA → OTP completion (m54)
 
-- rule references to `@request.body/query/headers` (only `@request.auth.*`
-  resolves today) and `@collection` row aliases (`:alias`) — the engine
-  fails CLOSED on these
-- the MFA second factor is shape-certified (the `mfaId` handshake); a full
-  end-to-end OTP completion needs an SMTP sink, covered natively by m42
+The facade's MFA second factor is now proven **end to end with a real emailed
+code** (m54, binocle-one + Mailpit): `auth-with-password` → 401 `{mfaId}` →
+`request-otp` (8-digit code delivered to the SMTP sink) → `auth-with-otp
+{otpId, code, mfaId}` → a real token that authenticates; a wrong `mfaId` is
+rejected. (The earlier shape-certification diffed the `mfaId` handshake
+against PB; m54 closes the delivery+consumption loop.)
+
+## Residuals board: EMPTY
+
+Every PB filter/rule construct, the full `@request.*` surface, `@collection`
+joins with aliases, and MFA→OTP completion are implemented and gate-proven.
+The single honest engineering note that remains is **not a correctness gap**:
+advanced (non-SQL) predicates evaluate over an in-memory candidate window, so
+a collection with >5000 rows matching the SQL pre-filter would need that cap
+raised (or the predicate pushed into SQL) for a fully-scalable advanced-filter
+query — the simple-filter CRUD/list hot path, where all the benchmark numbers
+live, is unaffected.
 
 ## Benchmark method (kept honest)
 

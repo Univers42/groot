@@ -330,6 +330,26 @@ await step("filter-geodistance", async () => {
   return { titles: res.items.map((i) => i.title) };
 });
 
+// @request.body.* in a create rule: the submitted owner must equal auth.id
+const RB = `m49reqbody${TS}`;
+await step("request-body-rule", async () => {
+  await su.collections.create({
+    name: RB, type: "base",
+    fields: [{ name: "title", type: "text" }, { name: "owner", type: "text" }],
+    listRule: "", viewRule: "",
+    createRule: "@request.body.owner = @request.auth.id",
+    updateRule: "", deleteRule: "",
+  });
+  // alice may create a record whose body owner is her own id
+  const okRec = await alice.collection(RB).create({ title: "mine", owner: aliceId }).then(() => true).catch(() => false);
+  // ...but not one owned by bob
+  let forged = false;
+  try { await alice.collection(RB).create({ title: "forged", owner: bobId }); forged = true; }
+  catch (e) { forged = e?.status === 400 ? false : "err" + e?.status; }
+  await su.collections.delete(RB);
+  return { ownCreateAllowed: okRec, foreignBodyRejected: forged === false };
+});
+
 // @collection.* join (membership pattern): a doc is visible only if the
 // caller has a membership row for it.
 const DOCS = `m49docs${TS}`;

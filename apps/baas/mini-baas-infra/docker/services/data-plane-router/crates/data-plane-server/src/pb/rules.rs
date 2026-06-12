@@ -17,11 +17,18 @@ use serde_json::{json, Value};
 
 use super::PbAuth;
 
-/// The caller context a rule can reference.
+/// The caller context a rule can reference (`@request.*`).
+#[derive(Clone)]
 pub(crate) struct RuleCtx {
     /// Shaped auth record (None for guests).
     pub auth: Option<Value>,
     pub superuser: bool,
+    /// Submitted body (create/update rules: `@request.body.*`).
+    pub body: Option<Value>,
+    /// Query params as a flat object (`@request.query.*`).
+    pub query: Value,
+    /// Request headers, lowercased keys (`@request.headers.*`).
+    pub headers: Value,
 }
 
 impl RuleCtx {
@@ -29,18 +36,67 @@ impl RuleCtx {
         Self {
             auth: record,
             superuser: matches!(auth, PbAuth::Superuser),
+            body: None,
+            query: json!({}),
+            headers: json!({}),
         }
     }
 
-    fn resolve(&self, reference: &str) -> Option<Value> {
-        let field = reference.strip_prefix("@request.auth.")?;
-        Some(match self.auth.as_ref().and_then(|a| a.get(field)) {
-            Some(v) => v.clone(),
-            // PB renders an absent auth value as the zero value — guests
-            // compare as empty string.
-            None => json!(""),
-        })
+    /// Attach request headers (lowercased keys) — list/view/etc rules.
+    pub(crate) fn with_headers(mut self, headers: &axum::http::HeaderMap) -> Self {
+        self.headers = Value::Object(
+            headers
+                .iter()
+                .filter_map(|(k, v)| v.to_str().ok().map(|v| (k.as_str().to_lowercase(), json!(v))))
+                .collect(),
+        );
+        self
     }
+
+    /// Attach query params (handlers that have a `Query` extractor).
+    pub(crate) fn with_query(mut self, query: &std::collections::HashMap<String, String>) -> Self {
+        self.query = Value::Object(query.iter().map(|(k, v)| (k.clone(), json!(v))).collect());
+        self
+    }
+
+    /// Attach the submitted body (create/update rules).
+    pub(crate) fn with_body(mut self, body: Value) -> Self {
+        self.body = Some(body);
+        self
+    }
+
+    pub(crate) fn resolve(&self, reference: &str) -> Option<Value> {
+        // PB renders an absent `@request.*` value as the zero value (empty
+        // string), so a reference into a configured namespace always resolves.
+        if let Some(field) = reference.strip_prefix("@request.auth.") {
+            return Some(zero_or(self.auth.as_ref().and_then(|a| nested(a, field))));
+        }
+        if let Some(field) = reference.strip_prefix("@request.body.") {
+            return Some(zero_or(self.body.as_ref().and_then(|b| nested(b, field))));
+        }
+        if let Some(field) = reference.strip_prefix("@request.query.") {
+            return Some(zero_or(nested(&self.query, field)));
+        }
+        if let Some(field) = reference.strip_prefix("@request.headers.") {
+            // PB lowercases header names and uses `_` for `-`
+            let key = field.replace('-', "_").to_lowercase();
+            return Some(zero_or(nested(&self.headers, &key.replace('_', "-"))));
+        }
+        None
+    }
+}
+
+/// Traverse a dotted path into a JSON value (`a.b.c`).
+fn nested(v: &Value, path: &str) -> Option<Value> {
+    let mut cur = v;
+    for seg in path.split('.') {
+        cur = cur.get(seg)?;
+    }
+    Some(cur.clone())
+}
+
+fn zero_or(v: Option<Value>) -> Value {
+    v.unwrap_or_else(|| json!(""))
 }
 
 /// Outcome of lowering a rule for query-shaped ops.
@@ -126,7 +182,7 @@ mod tests {
     use super::*;
 
     fn ctx(auth: Option<Value>) -> RuleCtx {
-        RuleCtx { auth, superuser: false }
+        RuleCtx { auth, superuser: false, body: None, query: json!({}), headers: json!({}) }
     }
 
     #[test]
@@ -166,11 +222,19 @@ mod tests {
     }
 
     #[test]
-    fn truly_unsupported_constructs_still_fail_closed() {
-        let c = ctx(Some(json!({ "id": "u" })));
-        // @request.body/@request.query are not yet resolvable → fail closed
+    fn request_namespaces_resolve() {
+        // @request.body/query/headers now RESOLVE (repaired); an absent value
+        // is the zero value, so the rule evaluates rather than failing closed
+        let mut c = ctx(Some(json!({ "id": "u" })));
+        c.body = Some(json!({ "owner": "u" }));
+        // @request.body.owner = @request.auth.id → 'u' = 'u' → AlwaysTrue
         assert!(matches!(
-            lower_rule(Some(&"@request.body.x = 1".to_string()), &c),
+            lower_rule(Some(&"@request.body.owner = @request.auth.id".to_string()), &c),
+            Lowered::Open
+        ));
+        // a genuinely unknown @request namespace still fails closed
+        assert!(matches!(
+            lower_rule(Some(&"@request.nonsense.x = 1".to_string()), &c),
             Lowered::Deny
         ));
     }
