@@ -1,168 +1,71 @@
 # File: docker-compose.prod.yml
-# Production overlay — secrets, resource limits, no dev ports
+# Production overlay — no direct dev ports, limits for everything.
 # Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Design (rewritten 2026-06-12 — the previous overlay was REJECTED by compose:
+# base shorthand `cpus:`/`mem_limit:` conflicted with `deploy.resources.*`,
+# and it still configured the retired TS `adapter-registry`):
+#   • The BASE compose already carries mem_limit/cpus for every long-running
+#     service and `restart: unless-stopped` — those ARE the production budgets.
+#   • This overlay therefore only (a) strips direct dev ports — the gateway is
+#     the single public door — and (b) fills in limits for the services the
+#     base leaves uncapped (observability + infra helpers).
+#   • Same shorthand keys as the base (mem_limit/cpus), never deploy.resources,
+#     so the merge can never conflict.
+# Kept exposed on purpose: kong (the product), grafana :3030 (operator
+# dashboard — firewall it), minio :9000 (S3 API for presigned URLs; console
+# stripped).
 
 services:
-  kong:
-    deploy:
-      resources:
-        limits:
-          memory: 512m
-          cpus: '0.50'
-        reservations:
-          memory: 128m
-          cpus: '0.10'
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-        window: 120s
-
+  # ── strip direct data-store ports (reachable in-network only) ──────────────
   postgres:
-    ports: []  # Remove direct access
-    deploy:
-      resources:
-        limits:
-          memory: 512m
-          cpus: '0.50'
-        reservations:
-          memory: 128m
-          cpus: '0.10'
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-        window: 120s
-
+    ports: []
   mongo:
     ports: []
-    deploy:
-      resources:
-        limits:
-          memory: 512m
-          cpus: '0.50'
-        reservations:
-          memory: 128m
-          cpus: '0.10'
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-        window: 120s
-
-  mongo-api:
-    deploy:
-      resources:
-        limits:
-          memory: 256m
-          cpus: '0.25'
-        reservations:
-          memory: 64m
-          cpus: '0.05'
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-        window: 120s
-
-  gotrue:
-    ports: []
-    deploy:
-      resources:
-        limits:
-          memory: 256m
-          cpus: '0.25'
-        reservations:
-          memory: 64m
-          cpus: '0.05'
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-        window: 120s
-
-  postgrest:
-    ports: []
-    deploy:
-      resources:
-        limits:
-          memory: 256m
-          cpus: '0.25'
-        reservations:
-          memory: 64m
-          cpus: '0.05'
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-        window: 120s
-
-  adapter-registry:
-    deploy:
-      resources:
-        limits:
-          memory: 256m
-          cpus: '0.25'
-        reservations:
-          memory: 64m
-          cpus: '0.05'
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-        window: 120s
-
-  query-router:
-    deploy:
-      resources:
-        limits:
-          memory: 256m
-          cpus: '0.25'
-        reservations:
-          memory: 64m
-          cpus: '0.05'
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-        window: 120s
-
   redis:
     ports: []
-    deploy:
-      resources:
-        limits:
-          memory: 128m
-          cpus: '0.10'
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-        window: 120s
+  mysql:
+    ports: []
+  mariadb:
+    ports: []
+  cockroach:
+    ports: []
+  mssql:
+    ports: []
+  iceberg-rest:
+    ports: []
 
-  minio:
-    ports:
-      - "9000:9000"  # Keep S3 API, remove console
-    deploy:
-      resources:
-        limits:
-          memory: 512m
-          cpus: '0.25'
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-        window: 120s
-
+  # ── strip direct service ports (everything flows through Kong) ─────────────
+  gotrue:
+    ports: []
+  postgrest:
+    ports: []
   studio:
     ports: []
-    deploy:
-      resources:
-        limits:
-          memory: 512m
-          cpus: '0.25'
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-        window: 120s
+
+  # ── observability + infra: strip ports AND cap the uncapped ────────────────
+  prometheus:
+    ports: []          # scraped in-network; expose via Grafana only
+    mem_limit: 512m
+    cpus: 0.50
+  loki:
+    ports: []          # queried by Grafana in-network
+    mem_limit: 384m
+    cpus: 0.50
+  grafana:
+    mem_limit: 256m    # stays on :3030 — the operator dashboard; firewall it
+    cpus: 0.25
+  promtail:
+    mem_limit: 128m
+    cpus: 0.25
+  pg-meta:
+    mem_limit: 256m
+    cpus: 0.25
+  supavisor:
+    mem_limit: 512m
+    cpus: 0.50
+  minio:
+    ports:
+      - "9000:9000"    # keep the S3 API (presigned URLs), strip the console
+    mem_limit: 512m
+    cpus: 0.50

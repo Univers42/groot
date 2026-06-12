@@ -4,6 +4,22 @@ A self-hosted, Docker Compose–first **Backend as a Service** (BaaS) platform.
 
 The intent is to provide a single stack that any frontend — or any set of microservices — can treat as a complete backend without writing server-side code. You get authentication, relational data, document data, realtime subscriptions, object storage, email, and a multi-tenant query plane, all behind one API gateway with a unified auth model.
 
+## Install
+
+```sh
+# Single binary (PocketBase-class, linux-amd64, no Docker):
+curl -fsSL https://github.com/Univers42/ft_transcendence/releases/download/baas-v1.0.0/install.sh | sh
+
+# Full stack (Docker Compose):
+make quickstart                  # .env → stack up → health (default tier: essential)
+```
+
+→ **[QUICKSTART.md](QUICKSTART.md)** (5 minutes) · **[DEPLOYMENT.md](DEPLOYMENT.md)** (production)
+· **[SECURITY.md](SECURITY.md)** (model + checklist) · **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)**
+· **[RELEASE.md](RELEASE.md)** (how versions ship)
+
+Images: `ghcr.io/univers42/mini-baas/<service>:1.0.0` · SDK: `npm i @mini-baas/js`
+
 ---
 
 ## Table of contents

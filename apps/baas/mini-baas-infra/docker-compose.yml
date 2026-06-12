@@ -146,6 +146,12 @@ services:
   # ─── SQL Federation (M2) ─────────────────────────────────────────
   trino:
     image: trinodb/trino:467
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/v1/info >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 60s
+      retries: 5
     container_name: mini-baas-trino
     profiles: [analytics, extras]
     # Trino's jvm.config sizes the heap as 80% of visible RAM
@@ -302,6 +308,12 @@ services:
   # ─── Iceberg REST Catalog (M2 federation) ────────────────────────
   iceberg-rest:
     image: apache/iceberg-rest-fixture:1.8.1
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8181/v1/config >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
     container_name: mini-baas-iceberg-rest
     profiles: [analytics, extras]
     env_file: [.env]
@@ -373,6 +385,12 @@ services:
   # ─── Debezium outbox CDC (M8 coherence — PG outbox → Redis Streams) ──
   debezium:
     image: quay.io/debezium/server:3.0
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/q/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
     container_name: mini-baas-debezium
     profiles: [analytics]
     env_file: [.env]
@@ -678,6 +696,9 @@ services:
   postgrest:
     image: postgrest/postgrest:v12.2.3
     container_name: mini-baas-postgrest
+    # No healthcheck BY DESIGN: the postgrest image is shell-less (no sh/curl/
+    # wget), so an exec probe is impossible. Its health is observed upstream —
+    # Kong's /rest/v1 route + `make health` probe it over HTTP.
     env_file: [.env]
     environment:
       PGRST_DB_URI: ${PGRST_DB_URI:-postgres://postgres:postgres@postgres:5432/postgres}
@@ -702,6 +723,13 @@ services:
   # ─── PostgreSQL Metadata (control plane / extras) ─────────────────
   pg-meta:
     image: supabase/postgres-meta:v0.91.0
+    healthcheck:
+      # node-based image (no curl/wget) — probe with node fetch, supabase's own pattern
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:8080/health').then(r=>{if(r.status!==200)throw 1}).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      start_period: 15s
+      retries: 5
     container_name: mini-baas-pg-meta
     profiles: [control-plane, extras]
     env_file: [.env]
@@ -777,7 +805,11 @@ services:
     env_file: [.env]
     ports:
       - "${REDIS_PORT:-6379}:6379"
-    command: redis-server --appendonly yes
+    # auto-aof-rewrite-percentage 0 disables the background AOF rewrite that was
+    # OOM-killed in a loop at 128m (bloated AOF on a cache/stream store); the
+    # mem bump gives load + bench headroom. maxmemory caps the working set under
+    # the container limit so it can't spike into the OOM killer again.
+    command: redis-server --appendonly yes --auto-aof-rewrite-percentage 0 --maxmemory 384mb --maxmemory-policy allkeys-lru
     volumes:
       - redis-data:/data
     networks:
@@ -789,7 +821,7 @@ services:
       timeout: 3s
       start_period: 5s
       retries: 5
-    mem_limit: 128m
+    mem_limit: 512m
     cpus: 0.25
 
   # ─── Adapter Registry: see `adapter-registry-go` further below. The TS
@@ -1520,6 +1552,12 @@ services:
   minio:
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z-cpuv1
     container_name: mini-baas-minio
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 15s
+      retries: 5
     profiles: [storage, extras]
     env_file: [.env]
     command: server /data --console-address ":9001"
@@ -1547,6 +1585,13 @@ services:
     profiles: [functions, extras]
     container_name: mini-baas-functions
     env_file: [.env]
+    healthcheck:
+      # deno-based image (no curl/wget) — probe the /health/live route with deno itself
+      test: ["CMD", "deno", "eval", "try{const r=await fetch('http://localhost:3060/health/live');Deno.exit(r.ok?0:1)}catch{Deno.exit(1)}"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
     environment:
       FUNCTIONS_HOST: 0.0.0.0
       FUNCTIONS_PORT: 3060
@@ -1603,6 +1648,12 @@ services:
   # ─── Connection Pooler (control plane / close to Postgres) ────────
   supavisor:
     image: supabase/supavisor:2.7.4
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sSfL --head -o /dev/null http://127.0.0.1:4000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
     container_name: mini-baas-supavisor
     profiles: [control-plane, extras]
     env_file: [.env]
@@ -1667,6 +1718,12 @@ services:
   # ─── Observability: Prometheus ───────────────────────────────────
   prometheus:
     image: prom/prometheus:v2.52.0
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 15s
+      retries: 5
     container_name: mini-baas-prometheus
     profiles: ["observability"]
     volumes:
@@ -1681,6 +1738,12 @@ services:
   # ─── Observability: Grafana ──────────────────────────────────────
   grafana:
     image: grafana/grafana:10.4.2
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:3000/api/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
     container_name: mini-baas-grafana
     profiles: ["observability"]
     environment:
@@ -1698,6 +1761,12 @@ services:
   # ─── Observability: Loki ─────────────────────────────────────────
   loki:
     image: grafana/loki:3.0.0
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3100/ready >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
     container_name: mini-baas-loki
     profiles: ["observability"]
     volumes:
@@ -1712,6 +1781,9 @@ services:
 
   # ─── Observability: Promtail ─────────────────────────────────────
   promtail:
+    # No healthcheck BY DESIGN: the promtail image ships neither curl nor wget.
+    # It is a push-only agent — failure is visible as missing log streams, and
+    # Loki's own /ready healthcheck covers the receiving end of the pipeline.
     image: grafana/promtail:3.0.0
     container_name: mini-baas-promtail
     profiles: ["observability"]
@@ -1726,6 +1798,9 @@ services:
 
   # ─── Playground Frontend ─────────────────────────────────────────
   playground:
+    # No healthcheck BY DESIGN: dev-only static playground whose content is
+    # optional (./playground assets) — a content probe would flap on a bare
+    # checkout. Never part of a production edition.
     image: nginx:1.27-alpine
     container_name: mini-baas-playground
     profiles: ["playground"]
