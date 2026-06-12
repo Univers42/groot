@@ -14,6 +14,89 @@ use std::collections::HashMap;
 use super::{pb_err, pb_of};
 use crate::routes::AppState;
 
+// ─── S3 backend (settings.s3, feature s3) ────────────────────────────────────
+
+/// Presign-capable S3 target from settings: (bucket, credentials).
+#[cfg(feature = "s3")]
+pub(crate) fn s3_target(
+    settings: &serde_json::Value,
+) -> Option<(rusty_s3::Bucket, rusty_s3::Credentials)> {
+    let s3 = settings.get("s3")?;
+    if s3.get("enabled") != Some(&serde_json::Value::Bool(true)) {
+        return None;
+    }
+    let endpoint = s3.get("endpoint")?.as_str()?.parse().ok()?;
+    let bucket = s3.get("bucket")?.as_str()?.to_string();
+    let region = s3.get("region").and_then(|v| v.as_str()).unwrap_or("us-east-1").to_string();
+    let path_style = if s3.get("forcePathStyle") == Some(&serde_json::Value::Bool(true)) {
+        rusty_s3::UrlStyle::Path
+    } else {
+        rusty_s3::UrlStyle::VirtualHost
+    };
+    let bucket = rusty_s3::Bucket::new(endpoint, path_style, bucket, region).ok()?;
+    let creds = rusty_s3::Credentials::new(
+        s3.get("accessKey")?.as_str()?.to_string(),
+        s3.get("secret")?.as_str()?.to_string(),
+    );
+    Some((bucket, creds))
+}
+
+#[cfg(feature = "s3")]
+fn s3_http() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .unwrap_or_default()
+    })
+}
+
+#[cfg(feature = "s3")]
+pub(crate) async fn s3_put(
+    bucket: &rusty_s3::Bucket,
+    creds: &rusty_s3::Credentials,
+    key: &str,
+    bytes: Vec<u8>,
+) -> Result<(), String> {
+    use rusty_s3::S3Action;
+    let action = bucket.put_object(Some(creds), key);
+    let url = action.sign(std::time::Duration::from_secs(300));
+    let resp = s3_http().put(url).body(bytes).send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("s3 put {} -> {}", key, resp.status()));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "s3")]
+pub(crate) async fn s3_get(
+    bucket: &rusty_s3::Bucket,
+    creds: &rusty_s3::Credentials,
+    key: &str,
+) -> Option<Vec<u8>> {
+    use rusty_s3::S3Action;
+    let action = bucket.get_object(Some(creds), key);
+    let url = action.sign(std::time::Duration::from_secs(300));
+    let resp = s3_http().get(url).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    resp.bytes().await.ok().map(|b| b.to_vec())
+}
+
+#[cfg(feature = "s3")]
+pub(crate) async fn s3_delete(
+    bucket: &rusty_s3::Bucket,
+    creds: &rusty_s3::Credentials,
+    key: &str,
+) {
+    use rusty_s3::S3Action;
+    let action = bucket.delete_object(Some(creds), key);
+    let url = action.sign(std::time::Duration::from_secs(300));
+    let _ = s3_http().delete(url).send().await;
+}
+
 /// `photo one.PNG` → `photo_one_a1b2c3d4e5.PNG` — PB sanitizes the base and
 /// KEEPS the original extension case (the m48 diff caught a lowercased ext).
 pub(crate) fn stored_name(original: &str) -> String {
@@ -124,7 +207,15 @@ async fn serve(
     }
     let dir = pb.storage_root.join(&col.id).join(&rid);
     let path = dir.join(&filename);
-    let Ok(bytes) = tokio::fs::read(&path).await else {
+    #[allow(unused_mut)]
+    let mut bytes: Option<Vec<u8>> = tokio::fs::read(&path).await.ok();
+    #[cfg(feature = "s3")]
+    if bytes.is_none() {
+        if let Some((bucket, creds)) = s3_target(&pb.settings_cached()) {
+            bytes = s3_get(&bucket, &creds, &format!("{}/{}/{}", col.id, rid, filename)).await;
+        }
+    }
+    let Some(bytes) = bytes else {
         return pb_err(StatusCode::NOT_FOUND, "The requested resource wasn't found.");
     };
 

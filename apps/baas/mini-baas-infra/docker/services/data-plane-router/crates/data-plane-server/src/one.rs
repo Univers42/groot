@@ -1391,6 +1391,14 @@ pub async fn run(config: ServerConfig) -> anyhow::Result<()> {
         });
     }
 
+    #[cfg(feature = "acme")]
+    {
+        let acme_state = state.clone();
+        if crate::acme::maybe_serve(acme_state, &data_dir, router) {
+            tracing::info!("automatic-HTTPS listener spawned (ONE_HTTPS_DOMAIN)");
+        }
+    }
+
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!(address = %addr, data_dir = %data_dir.display(), "binocle-one listening (accounts + data plane, single binary)");
     axum::serve(

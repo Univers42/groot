@@ -54,7 +54,7 @@ lettre = { version = "0.11", default-features = false, features = ["smtp-transpo
 sha1 = "0.10"
 # binocle-one D: ?thumb=WxH image thumbnails. jpeg+png only — every extra
 # decoder is binary weight inside the ≤12 MB budget.
-image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif"] }
 async-trait = "0.1"
 axum = "0.7"
 bson = { version = "2.10", features = ["chrono-0_4"] }
@@ -84,6 +84,14 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 # PB-compat JS hooks (pb_hooks/*.pb.js): QuickJS embedded via rquickjs —
 # C library, musl-static friendly, ~1.2 MB of the one image's budget.
 rquickjs = { version = "0.9", features = ["loader"] }
+# In-binary automatic HTTPS (PB's --https equivalent): ACME TLS-ALPN-01 with
+# certs cached in the data dir. ring matches the workspace TLS posture.
+rustls-acme = { version = "0.14", default-features = false, features = ["ring", "tls12", "axum"] }
+axum-server = { version = "0.7", default-features = false }
+tokio-stream = "0.1"
+# S3 file storage backend: sans-io presigned URLs (rusty-s3) driven through
+# the reqwest client already in-tree.
+rusty-s3 = "0.8"
 # R-mssql: Microsoft SQL Server (TDS) via the pure-Rust tiberius driver +
 # bb8 pool. `rustls` matches the workspace TLS posture; `tokio-util` provides
 # the AsyncRead/Write compat tiberius needs over a tokio TcpStream.
