@@ -4,7 +4,7 @@
 
 group "default" {
   targets = [
-    "adapter-registry", "mongo-api", "query-router",
+    "outbox-relay", "mongo-api", "query-router",
     "email-service", "storage-router",
     "permission-engine", "schema-service",
     "analytics-service", "gdpr-service", "newsletter-service",
@@ -15,7 +15,7 @@ group "default" {
 
 group "apps" {
   targets = [
-    "adapter-registry", "mongo-api", "query-router",
+    "outbox-relay", "mongo-api", "query-router",
     "email-service", "storage-router",
     "permission-engine", "schema-service",
     "analytics-service", "gdpr-service", "newsletter-service",
@@ -42,12 +42,14 @@ target "nestjs-base" {
   platforms  = ["linux/amd64", "linux/arm64"]
 }
 
-target "adapter-registry" {
+# (the TS adapter-registry was retired — its successor adapter-registry-go
+# ships inside the Go control-plane image; outbox-relay had been left out)
+target "outbox-relay" {
   inherits   = ["nestjs-base"]
-  args       = { APP = "adapter-registry" }
-  tags       = ["${REGISTRY}/adapter-registry:${TAG}"]
-  cache-from = ["type=registry,ref=${REGISTRY}/cache:adapter-registry"]
-  cache-to   = ["type=registry,ref=${REGISTRY}/cache:adapter-registry,mode=max"]
+  args       = { APP = "outbox-relay" }
+  tags       = ["${REGISTRY}/outbox-relay:${TAG}"]
+  cache-from = ["type=registry,ref=${REGISTRY}/cache:outbox-relay"]
+  cache-to   = ["type=registry,ref=${REGISTRY}/cache:outbox-relay,mode=max"]
 }
 
 target "mongo-api" {
