@@ -46,13 +46,17 @@ mimalloc-alloc = ["dep:mimalloc"]
 # the OAuth2/OIDC provider matrix, SMTP mail codes (verification/reset/OTP)
 # and RFC 6238 TOTP MFA (hmac+sha1 — authenticator apps mandate SHA1).
 # File storage rides the same feature: multipart upload + jpeg/png thumbnails.
-one = ["nano", "pbcompat", "hooks", "dep:argon2", "dep:jsonwebtoken", "dep:lettre", "dep:hmac", "dep:sha1", "dep:image", "axum/multipart"]
+one = ["nano", "pbcompat", "hooks", "acme", "s3", "dep:argon2", "dep:jsonwebtoken", "dep:lettre", "dep:hmac", "dep:sha1", "dep:image", "axum/multipart"]
 # PocketBase-compatible facade (/api/...): PB filter DSL, collections registry,
 # records/realtime/files in PB envelopes — so the official PB SDKs work
 # unchanged. Rides in `one`; nano stays headless-minimal without it.
 pbcompat = ["dep:zip"]
 # JS hooks (pb_hooks): QuickJS runtime — rides in one, never nano.
 hooks = ["dep:rquickjs"]
+# In-binary automatic HTTPS via ACME (ONE_HTTPS_DOMAIN).
+acme = ["dep:rustls-acme", "dep:axum-server", "dep:tokio-stream", "dep:webpki-roots"]
+# S3 file storage backend (settings.s3).
+s3 = ["dep:rusty-s3"]
 
 [dependencies]
 data-plane-core = { path = "../data-plane-core" }
@@ -74,6 +78,10 @@ mimalloc = { workspace = true, optional = true }
 tikv-jemallocator = { workspace = true, optional = true }
 zip = { workspace = true, optional = true }
 rquickjs = { workspace = true, optional = true }
+rustls-acme = { workspace = true, optional = true }
+axum-server = { workspace = true, optional = true }
+tokio-stream = { workspace = true, optional = true }
+rusty-s3 = { workspace = true, optional = true }
 # binocle-one: password hashing + JWT sessions + SMTP codes + TOTP MFA.
 argon2 = { workspace = true, optional = true }
 jsonwebtoken = { workspace = true, optional = true }
@@ -90,6 +98,7 @@ tokio = { workspace = true }
 tower-http = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+webpki-roots = { workspace = true, optional = true }
 
 [dev-dependencies]
 # For implementing the `TxHandle` trait (which is `#[async_trait]`) in the

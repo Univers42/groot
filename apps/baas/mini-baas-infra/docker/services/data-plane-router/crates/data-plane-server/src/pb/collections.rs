@@ -340,7 +340,13 @@ async fn create(
         return pb_err(StatusCode::BAD_REQUEST, "invalid collection name");
     }
     if kind == "view" {
-        return pb_err(StatusCode::BAD_REQUEST, "view collections arrive in a later phase");
+        // SELECT-backed read-only collection: no table, the query IS the data.
+        let Some(q) = req.get("viewQuery").and_then(|v| v.as_str()).map(str::trim) else {
+            return pb_err(StatusCode::BAD_REQUEST, "view collections require a viewQuery");
+        };
+        if !q.to_ascii_uppercase().starts_with("SELECT") || q.contains(';') || q.len() > 4096 {
+            return pb_err(StatusCode::BAD_REQUEST, "viewQuery must be a single SELECT statement");
+        }
     }
     if pb.col_get(&name).is_some() {
         return pb_err(StatusCode::BAD_REQUEST, "a collection with this name already exists");
@@ -349,8 +355,10 @@ async fn create(
         Ok(v) => v,
         Err(m) => return pb_err(StatusCode::BAD_REQUEST, &m),
     };
-    if let Err(r) = exec_ddl(&state, create_table_sql(&name, &cols)).await {
-        return r;
+    if kind != "view" {
+        if let Err(r) = exec_ddl(&state, create_table_sql(&name, &cols)).await {
+            return r;
+        }
     }
     if kind == "auth" {
         let idx = format!(
@@ -362,7 +370,7 @@ async fn create(
     }
     let rule = |k: &str| req.get(k).and_then(|v| v.as_str()).map(String::from);
     let mut options = serde_json::Map::new();
-    for key in ["otp", "mfa", "passwordAuth", "oauth2", "authToken", "authRule", "manageRule"] {
+    for key in ["otp", "mfa", "passwordAuth", "oauth2", "authToken", "authRule", "manageRule", "viewQuery"] {
         if let Some(v) = req.get(key) {
             options.insert(key.to_string(), v.clone());
         }
@@ -534,8 +542,10 @@ async fn remove(
     let Some(col) = pb.col_get(&id_or_name) else {
         return pb_err(StatusCode::NOT_FOUND, "collection not found");
     };
-    if let Err(r) = exec_ddl(&state, format!("DROP TABLE IF EXISTS \"{}\"", col.name)).await {
-        return r;
+    if col.kind != "view" {
+        if let Err(r) = exec_ddl(&state, format!("DROP TABLE IF EXISTS \"{}\"", col.name)).await {
+            return r;
+        }
     }
     pb.col_delete(&col.id);
     pb.migration_record("delete", &col);

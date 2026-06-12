@@ -21,6 +21,8 @@ pub mod one;
 pub mod one_admin;
 #[cfg(feature = "pbcompat")]
 pub mod pb;
+#[cfg(feature = "acme")]
+pub(crate) mod acme;
 #[cfg(feature = "one")]
 pub mod one_email;
 #[cfg(feature = "one")]

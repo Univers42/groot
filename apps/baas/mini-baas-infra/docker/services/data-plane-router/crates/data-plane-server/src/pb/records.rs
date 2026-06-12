@@ -517,18 +517,34 @@ async fn persist_files(
     if files.is_empty() {
         return Ok(());
     }
+    #[cfg(feature = "s3")]
+    let s3 = super::files::s3_target(&pb.settings_cached());
     let dir = pb.storage_root.join(col_id).join(record_id);
-    tokio::fs::create_dir_all(&dir)
-        .await
-        .map_err(|_| pb_err(StatusCode::INTERNAL_SERVER_ERROR, "storage unavailable"))?;
+    #[cfg(feature = "s3")]
+    let use_s3 = s3.is_some();
+    #[cfg(not(feature = "s3"))]
+    let use_s3 = false;
+    if !use_s3 {
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .map_err(|_| pb_err(StatusCode::INTERNAL_SERVER_ERROR, "storage unavailable"))?;
+    }
     for (field, original, bytes) in files {
         if !matches!(kinds.get(field.as_str()), Some(FieldKind::Single | FieldKind::Multi)) {
             continue; // not a declared file-capable field — ignored like unknown keys
         }
         let stored = super::files::stored_name(&original);
-        tokio::fs::write(dir.join(&stored), &bytes)
-            .await
-            .map_err(|_| pb_err(StatusCode::INTERNAL_SERVER_ERROR, "could not persist the file"))?;
+        #[cfg(feature = "s3")]
+        if let Some((bucket, creds)) = s3.as_ref() {
+            super::files::s3_put(bucket, creds, &format!("{col_id}/{record_id}/{stored}"), bytes.clone())
+                .await
+                .map_err(|e| pb_err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+        }
+        if !use_s3 {
+            tokio::fs::write(dir.join(&stored), &bytes)
+                .await
+                .map_err(|_| pb_err(StatusCode::INTERNAL_SERVER_ERROR, "could not persist the file"))?;
+        }
         match kinds.get(field.as_str()) {
             Some(FieldKind::Multi) => match data.get_mut(&field) {
                 Some(Value::String(prev)) if prev.starts_with('[') => {
@@ -563,6 +579,97 @@ fn load_collection(
     Ok((col, kinds))
 }
 
+/// View collections: run the stored SELECT through the raw read path with
+/// ORDER/LIMIT/OFFSET wrapped around it. Filters on views arrive later
+/// (documented; PB filters views server-side) — `?filter=` answers 400.
+async fn list_view(
+    state: &AppState,
+    col: &Collection,
+    page: u32,
+    per_page: u32,
+    skip_total: bool,
+    sort: Option<&String>,
+    filter: Option<&String>,
+) -> axum::response::Response {
+    if filter.map(|f| !f.trim().is_empty()).unwrap_or(false) {
+        return pb_err(
+            StatusCode::BAD_REQUEST,
+            "filtering view collections is not supported by this engine version",
+        );
+    }
+    let Some(q) = col.options.get("viewQuery").and_then(Value::as_str) else {
+        return pb_err(StatusCode::INTERNAL_SERVER_ERROR, "view lost its query");
+    };
+    let mut order = String::new();
+    if let Some(raw) = sort {
+        let mut parts = Vec::new();
+        for token in raw.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+            let (dir, name) = match token.strip_prefix('-') {
+                Some(rest) => ("DESC", rest),
+                None => ("ASC", token.strip_prefix('+').unwrap_or(token)),
+            };
+            if name.is_empty()
+                || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            {
+                return pb_err(StatusCode::BAD_REQUEST, "invalid sort field for a view");
+            }
+            parts.push(format!("\"{name}\" {dir}"));
+        }
+        if !parts.is_empty() {
+            order = format!(" ORDER BY {}", parts.join(", "));
+        }
+    }
+    let sql = format!(
+        "SELECT * FROM ({q}) AS v{order} LIMIT {} OFFSET {}",
+        per_page,
+        (page - 1) * per_page
+    );
+    let rows = match super::exec_raw(
+        state,
+        data_plane_core::RawStatement { statement: sql, params: vec![], expect_rows: true },
+    )
+    .await
+    {
+        Ok(r) => r.rows,
+        Err(r) => return r,
+    };
+    let items: Vec<Value> = rows
+        .into_iter()
+        .map(|mut row| {
+            if let Some(o) = row.as_object_mut() {
+                o.insert("collectionId".into(), json!(col.id));
+                o.insert("collectionName".into(), json!(col.name));
+            }
+            row
+        })
+        .collect();
+    let (total_items, total_pages) = if skip_total {
+        (-1i64, -1i64)
+    } else {
+        let count_sql = format!("SELECT COUNT(*) AS n FROM ({q}) AS v");
+        match super::exec_raw(
+            state,
+            data_plane_core::RawStatement { statement: count_sql, params: vec![], expect_rows: true },
+        )
+        .await
+        {
+            Ok(r) => {
+                let n = r.rows.first().and_then(|row| row.get("n")).and_then(Value::as_i64).unwrap_or(0);
+                (n, (n + per_page as i64 - 1) / per_page as i64)
+            }
+            Err(r) => return r,
+        }
+    };
+    (
+        StatusCode::OK,
+        Json(json!({
+            "page": page, "perPage": per_page, "totalItems": total_items,
+            "totalPages": total_pages, "items": items,
+        })),
+    )
+        .into_response()
+}
+
 /// GET /api/collections/{c}/records — PB list envelope.
 async fn list(
     State(state): State<AppState>,
@@ -577,6 +684,18 @@ async fn list(
     let (_auth, ctx) = caller(&state, &headers).await;
     let lowered = super::rules::lower_rule(col.list_rule.as_ref(), &ctx);
     let page: u32 = q.get("page").and_then(|v| v.parse().ok()).unwrap_or(1).max(1);
+    if col.kind == "view" {
+        if matches!(lowered, super::rules::Lowered::Deny) {
+            return pb_err(StatusCode::FORBIDDEN, "Only superusers can perform this action.");
+        }
+        let per_page: u32 = q
+            .get("perPage")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30)
+            .clamp(1, 1000);
+        let skip_total = matches!(q.get("skipTotal").map(String::as_str), Some("1" | "true"));
+        return list_view(&state, &col, page, per_page, skip_total, q.get("sort"), q.get("filter")).await;
+    }
     let per_page: u32 = q
         .get("perPage")
         .and_then(|v| v.parse().ok())
@@ -739,6 +858,9 @@ async fn create(
         Ok(v) => v,
         Err(r) => return r,
     };
+    if col.kind == "view" {
+        return pb_err(StatusCode::BAD_REQUEST, "unable to create a view collection record");
+    }
     let (_auth, ctx) = caller(&state, &headers).await;
     let create_rule = super::rules::lower_rule(col.create_rule.as_ref(), &ctx);
     if matches!(create_rule, super::rules::Lowered::Deny) {
@@ -963,11 +1085,34 @@ async fn remove(
     if result.affected_rows == 0 {
         return pb_err(StatusCode::NOT_FOUND, "The requested resource wasn't found.");
     }
-    if let Some(rec) = pre {
-        publish_event(&state, &col, "delete", &rec);
+    if let Some(rec) = pre.as_ref() {
+        publish_event(&state, &col, "delete", rec);
     }
     if let Ok(pb) = pb_of(&state) {
         super::files::remove_record_files(&pb, &col.id, &rid).await;
+        #[cfg(feature = "s3")]
+        if let Some((bucket, creds)) = super::files::s3_target(&pb.settings_cached()) {
+            if let Some(rec) = pre.as_ref() {
+                for (name, kind) in &kinds {
+                    if !matches!(kind, FieldKind::Single | FieldKind::Multi) {
+                        continue;
+                    }
+                    match rec.get(name) {
+                        Some(Value::String(stored)) if !stored.is_empty() => {
+                            super::files::s3_delete(&bucket, &creds, &format!("{}/{}/{}", col.id, rid, stored)).await;
+                        }
+                        Some(Value::Array(items)) => {
+                            for it in items {
+                                if let Some(stored) = it.as_str() {
+                                    super::files::s3_delete(&bucket, &creds, &format!("{}/{}/{}", col.id, rid, stored)).await;
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
     }
     StatusCode::NO_CONTENT.into_response()
 }
