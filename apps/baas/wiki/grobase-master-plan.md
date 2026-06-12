@@ -386,14 +386,27 @@ pool opener.
 former postgres-local `share_pools_enabled` is deleted), so all seven adapters read the lever identically
 and it cannot drift.
 
-**Verified:** `cargo test` green across the workspace — core 66 + pool 156 + server 35 = **257** unit
-tests, including two new per-engine isolation tests (mongo stamps + filters each request's *own*
-tenant+owner; mysql scopes each request by its *own* owner). `cargo clippy -D warnings` clean. Each
-engine is reasoned isolation-neutral per the table. The remaining gate is the **live cross-engine probe**
-— a `shared_rls` mysql + mongo mount under `SHARE_POOLS=1`, two tenants, prove byte-identical isolation
-to `=0` (the same probe that validated Postgres in §7.4), to run when the live-demo stack is up.
+**Verified — unit:** `cargo test` green across the workspace — core 66 + pool 156 + server 35 = **257**
+unit tests, including two new per-engine isolation tests (mongo stamps + filters each request's *own*
+tenant+owner; mysql scopes each request by its *own* owner). `cargo clippy -D warnings` clean.
 
-Code: `data-plane-pool/src/{lib,postgres,mysql,mongo,mssql,sqlite,redis,http}.rs`.
+**Verified — live (2026-06-12, `scripts/verify/m46-share-pools-isolation.sh`):** two `shared_rls` tenants
+pointed at ONE mysql backend and ONE mongo backend, on a freshly-built data plane, under both lever
+positions:
+
+| `SHARE_POOLS` | cross-tenant isolation (mysql + mongo) | pools for 2 tenants × 2 engines |
+|---|---|---|
+| **1** (collapse) | each tenant lists ONLY its own row — 0 leaks, 0×502 | **2** — 1/engine, collapsed |
+| **0** (per-tenant) | **byte-identical** — each sees only its own row | **4** — 2/engine |
+
+Isolation is identical at both positions (the change never widens what a request sees — it only stops
+*rejecting* it), while the pool count drops 4→2. The live insert responses confirm the mongo fix
+end-to-end: tenant B's document is stamped `tenant_id: "sp-b-…"` — its OWN tenant from the request
+identity, **not** the pool opener's (which the pre-fix code would have written). Artifacts:
+`share-pools-cross-engine-expect{1,0}.json`. This closes the §7.4 "remaining gate" for every engine.
+
+Code: `data-plane-pool/src/{lib,postgres,mysql,mongo,mssql,sqlite,redis,http}.rs`; gate:
+`scripts/verify/m46-share-pools-isolation.sh`.
 
 ---
 
