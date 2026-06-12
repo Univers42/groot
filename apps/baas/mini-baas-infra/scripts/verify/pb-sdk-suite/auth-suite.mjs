@@ -38,6 +38,7 @@ await step("auth-collection-create", async () => {
     name: USERS,
     type: "auth",
     fields: [{ name: "nick", type: "text" }],
+    otp: { enabled: true, duration: 300, length: 8 },
     createRule: "", // public registration
     listRule: null,
     viewRule: null,
@@ -197,6 +198,54 @@ await step("impersonate", async () => {
   const client = await su.collection(USERS).impersonate(bobId, 3600);
   const list = await client.collection(POSTS).getList(1, 10);
   return { actsAsBob: list.items.every((i) => i.owner === bobId), count: list.items.length };
+});
+
+await step("request-otp-shape", async () => {
+  // enumeration-safe: an otpId comes back whether or not the email exists
+  const known = await alice.collection(USERS).requestOTP("alice@m49.dev");
+  const unknown = await alice.collection(USERS).requestOTP("ghost@m49.dev");
+  return { knownHasId: typeof known.otpId === "string" && known.otpId.length > 5,
+           unknownHasId: typeof unknown.otpId === "string" && unknown.otpId.length > 5 };
+});
+
+await step("auth-with-otp-wrong-code", async () => {
+  const { otpId } = await alice.collection(USERS).requestOTP("alice@m49.dev");
+  try {
+    await alice.collection(USERS).authWithOTP(otpId, "00000000");
+    return { rejected: false };
+  } catch (e) {
+    return { rejected: e?.status === 400 };
+  }
+});
+
+await step("request-verification-204", async () => {
+  const ok = await alice.collection(USERS).requestVerification("alice@m49.dev");
+  const ghost = await alice.collection(USERS).requestVerification("ghost@m49.dev");
+  return { ok, ghost };
+});
+
+await step("confirm-verification-garbage-400", async () => {
+  try {
+    await alice.collection(USERS).confirmVerification("not-a-real-token");
+    return { rejected: false };
+  } catch (e) {
+    return { rejected: e?.status === 400 };
+  }
+});
+
+await step("request-password-reset-204", async () => {
+  const ok = await alice.collection(USERS).requestPasswordReset("alice@m49.dev");
+  return { ok };
+});
+
+await step("request-email-change-requires-auth", async () => {
+  const anon = new PocketBase(base);
+  try {
+    await anon.collection(USERS).requestEmailChange("new@m49.dev");
+    return { blocked: false };
+  } catch (e) {
+    return { blocked: e?.status === 401 };
+  }
 });
 
 await step("cleanup", async () => {

@@ -50,6 +50,9 @@ pub(crate) struct Collection {
     pub name: String,
     pub kind: String,
     pub fields: Value,
+    /// Auth-config blob (otp/mfa/passwordAuth/oauth2...), spread at the top
+    /// level of the PB-shaped JSON like PB does.
+    pub options: Value,
     pub list_rule: Option<String>,
     pub view_rule: Option<String>,
     pub create_rule: Option<String>,
@@ -62,7 +65,7 @@ pub(crate) struct Collection {
 
 impl Collection {
     pub(crate) fn to_json(&self) -> Value {
-        json!({
+        let mut base = json!({
             "id": self.id,
             "name": self.name,
             "type": self.kind,
@@ -76,17 +79,26 @@ impl Collection {
             "deleteRule": self.delete_rule,
             "created": self.created,
             "updated": self.updated,
-        })
+        });
+        // PB spreads auth-config keys (otp/mfa/passwordAuth/...) at the top.
+        if let (Some(b), Some(o)) = (base.as_object_mut(), self.options.as_object()) {
+            for (k, v) in o {
+                b.insert(k.clone(), v.clone());
+            }
+        }
+        base
     }
 
     fn from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
         let fields_raw: String = r.get(3)?;
         let indexes_raw: String = r.get(9)?;
+        let options_raw: String = r.get(12)?;
         Ok(Self {
             id: r.get(0)?,
             name: r.get(1)?,
             kind: r.get(2)?,
             fields: serde_json::from_str(&fields_raw).unwrap_or(Value::Array(vec![])),
+            options: serde_json::from_str(&options_raw).unwrap_or_else(|_| json!({})),
             list_rule: r.get(4)?,
             view_rule: r.get(5)?,
             create_rule: r.get(6)?,
@@ -100,7 +112,7 @@ impl Collection {
 }
 
 const COL_SELECT: &str = "SELECT id, name, type, fields, listRule, viewRule, createRule, \
-     updateRule, deleteRule, indexes, created, updated FROM pb_collections";
+     updateRule, deleteRule, indexes, created, updated, options FROM pb_collections";
 
 impl super::PbState {
     pub(crate) fn col_get(&self, id_or_name: &str) -> Option<Collection> {
@@ -127,7 +139,7 @@ impl super::PbState {
         conn.execute(
             "INSERT INTO pb_collections (id, name, type, system, fields, listRule, viewRule,
              createRule, updateRule, deleteRule, indexes, options, created, updated)
-             VALUES (?1, ?2, ?3, 0, ?4, ?5, ?6, ?7, ?8, ?9, ?10, '{}', ?11, ?11)",
+             VALUES (?1, ?2, ?3, 0, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?12, ?11, ?11)",
             rusqlite::params![
                 c.id,
                 c.name,
@@ -140,6 +152,7 @@ impl super::PbState {
                 c.delete_rule,
                 c.indexes.to_string(),
                 c.created,
+                c.options.to_string(),
             ],
         )
         .map(|_| ())
@@ -150,7 +163,8 @@ impl super::PbState {
         let conn = self.meta.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         conn.execute(
             "UPDATE pb_collections SET fields = ?2, listRule = ?3, viewRule = ?4,
-             createRule = ?5, updateRule = ?6, deleteRule = ?7, indexes = ?8, updated = ?9
+             createRule = ?5, updateRule = ?6, deleteRule = ?7, indexes = ?8, updated = ?9,
+             options = ?10
              WHERE id = ?1",
             rusqlite::params![
                 c.id,
@@ -162,6 +176,7 @@ impl super::PbState {
                 c.delete_rule,
                 c.indexes.to_string(),
                 pb_now(),
+                c.options.to_string(),
             ],
         )
         .map(|_| ())
@@ -328,11 +343,18 @@ async fn create(
         }
     }
     let rule = |k: &str| req.get(k).and_then(|v| v.as_str()).map(String::from);
+    let mut options = serde_json::Map::new();
+    for key in ["otp", "mfa", "passwordAuth", "oauth2", "authToken", "authRule", "manageRule"] {
+        if let Some(v) = req.get(key) {
+            options.insert(key.to_string(), v.clone());
+        }
+    }
     let col = Collection {
         id: format!("pbc_{}", pb_id()),
         name,
         kind,
         fields,
+        options: Value::Object(options),
         list_rule: rule("listRule"),
         view_rule: rule("viewRule"),
         create_rule: rule("createRule"),
@@ -462,6 +484,13 @@ async fn update(
     col.delete_rule = rule("deleteRule", &col.delete_rule);
     if let Some(idx) = req.get("indexes") {
         col.indexes = idx.clone();
+    }
+    for key in ["otp", "mfa", "passwordAuth", "oauth2", "authToken", "authRule", "manageRule"] {
+        if let Some(v) = req.get(key) {
+            if let Some(o) = col.options.as_object_mut() {
+                o.insert(key.to_string(), v.clone());
+            }
+        }
     }
     if let Err(m) = pb.col_update(&col) {
         return pb_err(StatusCode::BAD_REQUEST, &m);

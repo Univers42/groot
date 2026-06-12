@@ -987,6 +987,28 @@ impl OneState {
         .map_err(|e| e.to_string())
     }
 
+    /// Short-TTL typed JWT for email flows (verification/reset/email-change)
+    /// — the PB facade's confirmation tokens.
+    pub(crate) fn mint_flow_jwt(&self, sub: &str, email: &str, typ: &str) -> Result<String, String> {
+        self.mint_typed(sub, email, typ, 1800)
+    }
+
+    /// Verify a flow JWT of the expected type → its `sub`.
+    pub(crate) fn verify_flow_jwt(&self, token: &str, expected_typ: &str) -> Result<String, ()> {
+        let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
+        validation.validate_exp = true;
+        let data = jsonwebtoken::decode::<Claims>(
+            token,
+            &jsonwebtoken::DecodingKey::from_secret(&self.jwt_secret),
+            &validation,
+        )
+        .map_err(|_| ())?;
+        if data.claims.typ != expected_typ {
+            return Err(());
+        }
+        Ok(data.claims.sub)
+    }
+
     pub(crate) fn mint_jwt(&self, user_id: &str, email: &str) -> Result<(String, u64), String> {
         self.mint_typed(user_id, email, "auth", self.jwt_ttl)
             .map(|t| (t, self.jwt_ttl))

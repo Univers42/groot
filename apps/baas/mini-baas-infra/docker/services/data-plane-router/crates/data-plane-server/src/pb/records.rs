@@ -956,6 +956,7 @@ mod tests {
             name: "t".into(),
             kind: "base".into(),
             fields,
+            options: json!({}),
             list_rule: Some(String::new()),
             view_rule: Some(String::new()),
             create_rule: Some(String::new()),

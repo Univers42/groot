@@ -17,6 +17,7 @@
 //! `/api/collections/_superusers/auth-with-password`.
 
 pub mod auth;
+pub mod auth_flows;
 pub mod batch;
 pub mod collections;
 pub mod files;
@@ -442,4 +443,5 @@ pub fn routes() -> Router<AppState> {
         .merge(settings::routes())
         .merge(files::routes())
         .merge(auth::routes())
+        .merge(auth_flows::routes())
 }
