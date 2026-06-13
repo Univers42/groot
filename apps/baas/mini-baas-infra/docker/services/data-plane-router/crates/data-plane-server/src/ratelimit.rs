@@ -261,6 +261,21 @@ pub fn tier_rate(overrides: Option<&Value>) -> Option<(u32, u32)> {
     Some((rps, burst))
 }
 
+/// G-QoS sliceA — extract the rows-per-query cap from a mount's tier mask
+/// (`capability_overrides`). Mirrors [`tier_rate`]: returns `None` (→ no cap,
+/// unlimited) when there is no mask, no `max_rows` key, or `max_rows == 0` —
+/// the parity path. A resolved cap clamps the operation's `limit` before the
+/// adapter runs, engine-agnostically.
+#[must_use]
+pub fn tier_max_rows(overrides: Option<&Value>) -> Option<u32> {
+    let obj = overrides?.as_object()?;
+    let cap = u32::try_from(obj.get("max_rows")?.as_u64()?).ok()?;
+    if cap == 0 {
+        return None;
+    }
+    Some(cap)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -333,6 +348,17 @@ mod tests {
         assert_eq!(tier_rate(Some(&json!({ "rps": 0 }))), None, "rps 0 → unlimited");
         assert_eq!(tier_rate(Some(&json!({ "rps": 20 }))), Some((20, 40)), "burst defaults 2x");
         assert_eq!(tier_rate(Some(&json!({ "rps": 200, "burst": 250 }))), Some((200, 250)));
+    }
+
+    #[test]
+    fn tier_max_rows_parsing() {
+        // No mask / no key / 0 all mean "unlimited" (parity — no clamp).
+        assert_eq!(tier_max_rows(None), None);
+        assert_eq!(tier_max_rows(Some(&json!({ "rps": 20 }))), None, "no max_rows → unlimited");
+        assert_eq!(tier_max_rows(Some(&json!({ "max_rows": 0 }))), None, "max_rows 0 → unlimited");
+        assert_eq!(tier_max_rows(Some(&json!(42))), None, "non-object → unlimited");
+        // A present positive cap is returned verbatim.
+        assert_eq!(tier_max_rows(Some(&json!({ "max_rows": 1000 }))), Some(1000));
     }
 
     // C1/m51 — the multi-instance correctness proof. Two RedisRateLimiter on the

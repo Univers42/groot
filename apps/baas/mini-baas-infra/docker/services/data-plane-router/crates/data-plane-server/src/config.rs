@@ -87,6 +87,12 @@ pub struct ServerConfig {
     /// TTL (ms) for the bypass `api-key → identity` cache; default 30 000 to
     /// match the query-router. 0 disables (verify every request).
     pub verify_cache_ttl_ms: u64,
+    /// G-ReadAudit (A6) — also audit-log successful READS, not just mutations.
+    /// OFF by default (`DATA_PLANE_AUDIT_READS`) → byte-parity: the read path
+    /// emits nothing extra and stays off the hot path. Flip ON to get a `read`
+    /// audit event (tenant/engine/op/resource/returned_rows) per served read,
+    /// at the cost of audit-log volume. Mutations are audited unconditionally.
+    pub audit_reads: bool,
 }
 
 impl ServerConfig {
@@ -153,6 +159,10 @@ impl ServerConfig {
             verify_cache_ttl_ms: read_env("DATA_PLANE_VERIFY_CACHE_TTL_MS", "30000")
                 .parse()
                 .unwrap_or(30000),
+            audit_reads: matches!(
+                read_env("DATA_PLANE_AUDIT_READS", "false").to_lowercase().as_str(),
+                "1" | "true" | "on"
+            ),
         }
     }
 }

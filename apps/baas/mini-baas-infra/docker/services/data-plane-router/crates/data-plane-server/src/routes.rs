@@ -13,7 +13,7 @@ use axum::http::header;
 use axum::middleware::Next;
 use axum::response::Response;
 use crate::metrics::{escape_label, Metrics};
-use crate::ratelimit::{tier_rate, RateLimiter};
+use crate::ratelimit::{tier_max_rows, tier_rate, RateLimiter};
 use data_plane_core::{
     CredentialRef, DataOperation, DataOperationKind, DataPlaneError, DatabaseMount, EngineAdapter,
     EngineCapabilities, MigrationRequest, Plan, PoolPolicy, PoolRegistry, RawStatement,
@@ -703,7 +703,7 @@ fn mask_action_for(op: &DataOperationKind) -> &'static str {
 
 async fn run_query(
     state: AppState,
-    request: QueryRequest,
+    mut request: QueryRequest,
     emit_outbox: bool,
 ) -> axum::response::Response {
     if let Err(message) = validate_identity_mount(&state, &request.identity, &request.mount) {
@@ -855,6 +855,17 @@ async fn run_query(
     #[cfg(feature = "control-pg")]
     let outbox_idem = request.operation.idempotency_key.clone();
 
+    // G-QoS sliceA (A6): clamp the rows returned per query to the tier cap. The
+    // cap comes from the mount's tier mask (`max_rows`); absent/zero → no clamp
+    // (today's behavior, parity). Engine-agnostic — every adapter honors
+    // `operation.limit` — so a present cap bounds a missing/larger client limit
+    // without touching any adapter. A client limit already at/under the cap is
+    // left as-is. Applied just before execution so it covers the bypass path too.
+    if let Some(cap) = tier_max_rows(request.mount.capability_overrides.as_ref()) {
+        request.operation.limit =
+            Some(request.operation.limit.map_or(cap, |l| l.min(cap)));
+    }
+
     let pool = match state.registry.get_or_create(request.mount).await {
         Ok(pool) => pool,
         Err(err) => return map_data_plane_error(&err),
@@ -874,6 +885,23 @@ async fn run_query(
                     resource = %audit_resource,
                     affected_rows = result.affected_rows,
                     "data mutation committed"
+                );
+            }
+            // G-ReadAudit (A6): optionally audit successful READS too. OFF by
+            // default (volume); when `DATA_PLANE_AUDIT_READS` is on, emit a
+            // sibling `read` event. The flag short-circuits BEFORE any field
+            // access, so the read hot path is untouched at parity (today's
+            // behavior — no read audit).
+            if !is_mutation && state.config.audit_reads {
+                tracing::info!(
+                    target: "audit",
+                    event = "read",
+                    tenant = %audit_tenant,
+                    engine = %audit_engine,
+                    op = ?audit_op,
+                    resource = %audit_resource,
+                    returned_rows = result.rows.len(),
+                    "data read served"
                 );
             }
             // Phase 7d: on the bypass write path, emit the row-change event the
