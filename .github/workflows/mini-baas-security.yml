@@ -199,6 +199,42 @@ jobs:
           head: ${{ github.event.pull_request.head.sha || github.sha }}
           extra_args: --only-verified --fail
 
+  # ── 5b. Secret — gitleaks (working-tree regex/entropy, blocking) ───────────
+  secret-gitleaks:
+    name: Secret · gitleaks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          VER=8.21.2
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+
+      - name: gitleaks detect (baas working tree, blocking)
+        run: |
+          gitleaks detect --no-git \
+            --source apps/baas \
+            --config apps/baas/mini-baas-infra/.gitleaks.toml \
+            --redact --no-banner --exit-code 1 \
+            --report-format sarif --report-path gitleaks.sarif
+
+      - name: Upload gitleaks SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gitleaks.sarif
+          category: gitleaks
+
   # ── 6. DAST — ZAP baseline on main only (heavy) ────────────────────────────
   dast-zap:
     name: DAST · ZAP baseline
@@ -258,7 +294,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    needs: [sast-semgrep, sca-npm-audit, container-trivy, secret-trufflehog]
+    needs: [sast-semgrep, sca-npm-audit, container-trivy, secret-trufflehog, secret-gitleaks]
     if: always()
     steps:
       - name: Aggregate verdict
@@ -268,7 +304,8 @@ jobs:
           for need in "${{ needs.sast-semgrep.result }}" \
                      "${{ needs.sca-npm-audit.result }}" \
                      "${{ needs.container-trivy.result }}" \
-                     "${{ needs.secret-trufflehog.result }}"; do
+                     "${{ needs.secret-trufflehog.result }}" \
+                     "${{ needs.secret-gitleaks.result }}"; do
             if [[ "${need}" != "success" && "${need}" != "skipped" ]]; then
               fail=1
             fi

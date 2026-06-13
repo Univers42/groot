@@ -42,6 +42,10 @@ export declare const routes: {
     };
     readonly storage: {
         readonly sign: (bucket: string, key: string) => string;
+        readonly object: (bucket: string, key: string) => string;
+        readonly list: (bucket: string, prefix?: string) => string;
+        readonly buckets: "/storage/v1/bucket";
+        readonly bucket: (name: string) => string;
     };
     readonly analytics: {
         readonly events: "/analytics/v1/events";

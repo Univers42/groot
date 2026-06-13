@@ -173,9 +173,12 @@ This is a relative strength and materially above hobby-grade.
 - **No tenant-DSN credential-rotation drill** end-to-end (JWT rotates; tenant DB creds don't).
 - **Secrets materialize to local `.env`** for dev convenience; the path to "Vault is the only
   source of truth" is documented but not enforced.
-- **A live `ANON_KEY` JWT is committed** in `.env` / `.env.local`. For a dev anon key this is
-  low-risk, but it signals the secret-hygiene boundary is porous; a commercial release needs
-  zero committed credentials and CI that fails on any.
+- ~~**A live `ANON_KEY` JWT is committed** in `.env` / `.env.local`.~~ **[Corrected 2026-06-13:**
+  verified that `.env` / `.env.local` are gitignored and were **never git-tracked** (`git ls-files`
+  empty; `git log --all -- '**/.env'` empty), and `ANON_KEY` is **runtime-generated** (HS256 from
+  `JWT_SECRET` in `scripts/generate-env.sh`) — there is **no committed secret**. The real items are
+  per-deployment keys + the RS256 issuer flip (see [roadmap-to-market.md](roadmap-to-market.md) A6)
+  and a blocking secret-scan CI gate so none is ever committed.**]**
 
 **Net:** the security *architecture* is genuinely good. The *operational* security needed for
 multi-tenant SaaS (isolation selection, per-tenant limits, rotation, zero committed secrets) is

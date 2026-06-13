@@ -55,6 +55,12 @@ export const routes = {
   storage: {
     sign: (bucket: string, key: string) =>
       `/storage/v1/sign/${encodeURIComponent(bucket)}/${encodePath(key)}`,
+    object: (bucket: string, key: string) =>
+      `/storage/v1/object/${encodeURIComponent(bucket)}/${encodePath(key)}`,
+    list: (bucket: string, prefix?: string) =>
+      `/storage/v1/list/${encodeURIComponent(bucket)}${prefix ? `?prefix=${encodeURIComponent(prefix)}` : ''}`,
+    buckets: '/storage/v1/bucket',
+    bucket: (name: string) => `/storage/v1/bucket/${encodeURIComponent(name)}`,
   },
   analytics: {
     events: '/analytics/v1/events',

@@ -6,26 +6,45 @@
 /*   By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/18 21:19:16 by dlesieur          #+#    #+#             */
-/*   Updated: 2026/05/18 21:19:16 by dlesieur         ###   ########.fr       */
+/*   Updated: 2026/06/13 00:00:00 by dlesieur         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, BadRequestException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   S3Client,
   GetObjectCommand,
   PutObjectCommand,
+  DeleteObjectCommand,
+  ListObjectsV2Command,
   ListBucketsCommand,
+  CreateBucketCommand,
+  HeadBucketCommand,
+  S3ServiceException,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { PresignDto } from './dto/presign.dto';
+
+export interface StorageObject {
+  key: string;
+  size: number;
+  lastModified: string | null;
+  etag?: string;
+}
+
+export interface BucketInfo {
+  name: string;
+  createdAt: string | null;
+}
 
 @Injectable()
 export class StorageService implements OnModuleInit {
   private readonly logger = new Logger(StorageService.name);
   private s3!: S3Client;
   private defaultExpires!: number;
+  private publicEndpoint?: string;
+  private maxUploadBytes!: number;
 
   constructor(private readonly config: ConfigService) {}
 
@@ -41,6 +60,13 @@ export class StorageService implements OnModuleInit {
     });
 
     this.defaultExpires = this.config.get<number>('PRESIGN_EXPIRES_SECONDS', 3600);
+    // Optional public-facing S3 endpoint for presigned URLs that browsers must
+    // reach (S3_ENDPOINT is the internal docker hostname minio:9000, which is
+    // not routable from outside the network). When unset, presign falls back to
+    // S3_ENDPOINT — fine for server-to-server, broken for external clients,
+    // which is why upload()/download() proxy through this service instead.
+    this.publicEndpoint = this.config.get<string>('S3_PUBLIC_ENDPOINT') || undefined;
+    this.maxUploadBytes = this.config.get<number>('STORAGE_MAX_UPLOAD_BYTES', 50 * 1024 * 1024);
     this.logger.log('S3 client initialised');
   }
 
@@ -54,29 +80,41 @@ export class StorageService implements OnModuleInit {
     }
   }
 
-  async presign(
-    bucket: string,
-    objectPath: string,
-    userId: string,
-    dto: PresignDto,
-  ) {
-    // Auto-prefix key with user ID for tenant isolation
-    const key = `${userId}/${objectPath}`;
+  /** Auto-prefix every object key with the caller's user id for isolation. */
+  private ownedKey(userId: string, objectPath: string): string {
+    const clean = objectPath.replace(/^\/+/, '');
+    if (!clean) throw new BadRequestException('object path required');
+    return `${userId}/${clean}`;
+  }
+
+  async presign(bucket: string, objectPath: string, userId: string, dto: PresignDto) {
+    const key = this.ownedKey(userId, objectPath);
     const expiresIn = Math.min(Math.max(dto.expiresIn ?? this.defaultExpires, 60), 86400);
 
-    let command: GetObjectCommand | PutObjectCommand;
+    const command =
+      dto.method === 'GET'
+        ? new GetObjectCommand({ Bucket: bucket, Key: key })
+        : new PutObjectCommand({
+            Bucket: bucket,
+            Key: key,
+            ContentType: dto.contentType ?? 'application/octet-stream',
+          });
 
-    if (dto.method === 'GET') {
-      command = new GetObjectCommand({ Bucket: bucket, Key: key });
-    } else {
-      command = new PutObjectCommand({
-        Bucket: bucket,
-        Key: key,
-        ContentType: dto.contentType ?? 'application/octet-stream',
-      });
-    }
+    // Sign against the public endpoint when configured so the URL is reachable
+    // by external clients; otherwise use the default (internal) client.
+    const signer = this.publicEndpoint
+      ? new S3Client({
+          endpoint: this.publicEndpoint,
+          region: this.config.get<string>('S3_REGION', 'us-east-1'),
+          credentials: {
+            accessKeyId: this.config.get<string>('S3_ACCESS_KEY', 'minioadmin'),
+            secretAccessKey: this.config.get<string>('S3_SECRET_KEY', 'minioadmin'),
+          },
+          forcePathStyle: true,
+        })
+      : this.s3;
 
-    const signedUrl = await getSignedUrl(this.s3, command, { expiresIn });
+    const signedUrl = await getSignedUrl(signer, command, { expiresIn });
 
     return {
       signedUrl,
@@ -85,5 +123,101 @@ export class StorageService implements OnModuleInit {
       bucket,
       key,
     };
+  }
+
+  /** Server-side upload (proxied) — works even with an internal S3 endpoint. */
+  async putObject(bucket: string, objectPath: string, userId: string, body: Buffer, contentType?: string) {
+    if (body.byteLength > this.maxUploadBytes) {
+      throw new BadRequestException(`object exceeds max upload size (${this.maxUploadBytes} bytes)`);
+    }
+    const key = this.ownedKey(userId, objectPath);
+    await this.s3.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: body,
+        ContentType: contentType ?? 'application/octet-stream',
+        Metadata: { 'owner-id': userId },
+      }),
+    );
+    return { bucket, key, size: body.byteLength };
+  }
+
+  /** Server-side download (proxied) — returns bytes + content type. */
+  async getObject(bucket: string, objectPath: string, userId: string) {
+    const key = this.ownedKey(userId, objectPath);
+    try {
+      const out = await this.s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+      const body = out.Body as { transformToByteArray?: () => Promise<Uint8Array> } | undefined;
+      if (!body?.transformToByteArray) throw new NotFoundException('object not found');
+      const bytes = await body.transformToByteArray();
+      return {
+        body: Buffer.from(bytes),
+        contentType: out.ContentType ?? 'application/octet-stream',
+        size: out.ContentLength ?? bytes.byteLength,
+      };
+    } catch (err) {
+      throw this.mapS3Error(err, 'object');
+    }
+  }
+
+  async deleteObject(bucket: string, objectPath: string, userId: string) {
+    const key = this.ownedKey(userId, objectPath);
+    await this.s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+    return { bucket, key, deleted: true };
+  }
+
+  /** List objects the caller owns under bucket/prefix (owner-prefix stripped). */
+  async listObjects(bucket: string, userId: string, prefix = ''): Promise<StorageObject[]> {
+    const ownerPrefix = `${userId}/`;
+    const cleanPrefix = prefix.replace(/^\/+/, '');
+    try {
+      const out = await this.s3.send(
+        new ListObjectsV2Command({ Bucket: bucket, Prefix: `${ownerPrefix}${cleanPrefix}`, MaxKeys: 1000 }),
+      );
+      return (out.Contents ?? []).map((o) => ({
+        key: (o.Key ?? '').slice(ownerPrefix.length),
+        size: o.Size ?? 0,
+        lastModified: o.LastModified ? o.LastModified.toISOString() : null,
+        etag: o.ETag?.replace(/"/g, ''),
+      }));
+    } catch (err) {
+      throw this.mapS3Error(err, 'bucket');
+    }
+  }
+
+  async listBuckets(): Promise<BucketInfo[]> {
+    const out = await this.s3.send(new ListBucketsCommand({}));
+    return (out.Buckets ?? []).map((b) => ({
+      name: b.Name ?? '',
+      createdAt: b.CreationDate ? b.CreationDate.toISOString() : null,
+    }));
+  }
+
+  async createBucket(name: string): Promise<{ name: string; created: boolean }> {
+    this.assertBucketName(name);
+    try {
+      await this.s3.send(new HeadBucketCommand({ Bucket: name }));
+      return { name, created: false }; // already exists — idempotent
+    } catch {
+      await this.s3.send(new CreateBucketCommand({ Bucket: name }));
+      return { name, created: true };
+    }
+  }
+
+  private assertBucketName(name: string): void {
+    if (!/^[a-z0-9][a-z0-9.-]{2,62}$/.test(name)) {
+      throw new BadRequestException('invalid bucket name (3-63 chars, lowercase alnum/.-)');
+    }
+  }
+
+  private mapS3Error(err: unknown, kind: 'object' | 'bucket') {
+    if (err instanceof S3ServiceException) {
+      const code = err.name;
+      if (code === 'NoSuchKey' || code === 'NotFound' || code === 'NoSuchBucket') {
+        return new NotFoundException(`${kind} not found`);
+      }
+    }
+    return err;
   }
 }

@@ -4,7 +4,7 @@
 //! over the same authorization-code grant. We implement that grant ONCE —
 //! with PKCE (S256), `state` CSRF protection, and a single-use pending store
 //! — and ship a compiled-in preset table (Google, GitHub, GitLab, Discord,
-//! Microsoft, Facebook, Twitch, Spotify, LinkedIn, Notion). The long tail is
+//! Microsoft, Facebook, Twitch, Spotify, LinkedIn, Apple, Notion). The long tail is
 //! covered by the `oidc` provider: point `ONE_OAUTH_OIDC_ISSUER` at ANY
 //! OpenID Connect issuer and endpoints come from its discovery document.
 //!

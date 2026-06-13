@@ -112,6 +112,36 @@ export class HttpClient {
     throw lastError;
   }
 
+  /**
+   * Raw fetch for binary payloads (storage upload/download). Bypasses the JSON
+   * (de)serialization of `request()`: the body is sent verbatim and the raw
+   * `Response` is returned for the caller to read as blob/arrayBuffer/text.
+   * Auth headers (apikey + bearer) are still applied.
+   */
+  async rawFetch(
+    path: string,
+    init: { method?: string; body?: BodyInit | null; headers?: HeadersInit } = {},
+  ): Promise<Response> {
+    const headers = new Headers(init.headers);
+    headers.set('apikey', this.anonKey);
+    headers.set('Authorization', `Bearer ${this.session?.accessToken ?? this.anonKey}`);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      return await this.fetchImpl(`${this.baseUrl}${path}`, {
+        method: init.method ?? 'GET',
+        headers,
+        body: init.body ?? undefined,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (isAbortError(error)) throw new MiniBaasTimeoutError(this.timeoutMs);
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   private async fetchOnce<T>(path: string, init: RequestOptions): Promise<T> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
