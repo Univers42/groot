@@ -13,7 +13,14 @@ path = "src/main.rs"
 # The nano edition builds `--no-default-features --features nano`: embedded
 # SQLite only, in-process auth, no control-plane round-trips.
 [features]
-default = ["engines-full", "control-pg"]
+# ratelimit-redis is in default so the full self-host/SaaS data-plane image
+# (Dockerfile builds with default features) ships the multi-node limiter
+# compiled in — runtime-selected via DATA_PLANE_RATELIMIT_BACKEND=redis,
+# default in-memory so single-node is byte-unchanged, fail-open if Redis is
+# unreachable. The size-sensitive binocle SKUs build --no-default-features
+# (nano/one), so they are NOT affected; redis-rl reuses the `redis` crate
+# already compiled for the redis engine, so the cost is a few KB of glue.
+default = ["engines-full", "control-pg", "ratelimit-redis"]
 engines-full = ["postgres", "mongodb", "mysql", "redis", "sqlite", "mssql", "http"]
 postgres = ["data-plane-pool/postgres"]
 mongodb = ["data-plane-pool/mongodb"]

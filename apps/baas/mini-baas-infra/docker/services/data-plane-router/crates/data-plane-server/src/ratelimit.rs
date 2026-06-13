@@ -334,4 +334,43 @@ mod tests {
         assert_eq!(tier_rate(Some(&json!({ "rps": 20 }))), Some((20, 40)), "burst defaults 2x");
         assert_eq!(tier_rate(Some(&json!({ "rps": 200, "burst": 250 }))), Some((200, 250)));
     }
+
+    // C1/m51 — the multi-instance correctness proof. Two RedisRateLimiter on the
+    // SAME redis model two data-plane replicas: they MUST draw from one shared
+    // bucket per tenant, else a tenant bursts its tier once PER replica. Skips
+    // (not fails) without a live REDIS_URL so unit CI stays hermetic; the m51
+    // gate runs it networked to mini-baas-redis.
+    #[cfg(feature = "ratelimit-redis")]
+    #[tokio::test]
+    async fn redis_backend_is_one_global_bucket_across_instances() {
+        let Ok(url) = std::env::var("REDIS_URL") else {
+            eprintln!("SKIP redis_backend_is_one_global_bucket_across_instances: REDIS_URL unset");
+            return;
+        };
+        let a = RedisRateLimiter::new(url.clone());
+        let b = RedisRateLimiter::new(url);
+        // Unique tenant per run → no collision with a prior run's 60s-TTL bucket.
+        let tenant = format!(
+            "m51-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let (rps, burst) = (1u32, 5u32);
+        // 20 fast requests alternating instances. Sharing one bucket → only the
+        // burst (~5) admits globally; per-instance buckets would admit ~2×5=10.
+        let mut admits = 0;
+        for i in 0..20 {
+            let rl = if i % 2 == 0 { &a } else { &b };
+            if rl.allow(&tenant, rps, burst).await {
+                admits += 1;
+            }
+        }
+        assert!(
+            admits >= 1 && admits <= burst as i32 + 1,
+            "two instances on one redis admitted {admits}; expected ≈ burst {burst} \
+             (a shared global bucket), not a per-replica multiple"
+        );
+    }
 }
