@@ -189,6 +189,45 @@ func (dp *DataPlane) ensureSchema(ctx context.Context, slug, schema string, m Mo
 	return nil
 }
 
+// evictVerify clears the data plane's key-verify cache (B3): without it a
+// revoked key keeps authenticating there for up to the cache TTL (~30s).
+// Same in-network admin trust model as ensureSchema (body-borne service
+// identity). Callers treat failures as best-effort — the TTL still bounds
+// the exposure when the data plane is unreachable.
+func (dp *DataPlane) evictVerify(ctx context.Context) error {
+	envelope := map[string]any{
+		"identity": map[string]any{
+			"tenant_id": "tenant-control",
+			"user_id":   "revoke-control",
+			"source":    "service_token",
+			"roles":     []string{"service_role"},
+		},
+	}
+	body, err := json.Marshal(envelope)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, dp.baseURL+"/v1/admin/evict-verify", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if dp.serviceToken != "" {
+		req.Header.Set("X-Service-Token", dp.serviceToken)
+	}
+	shared.PropagateHeaders(ctx, req)
+	resp, err := dp.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("data-plane evict-verify %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	return nil
+}
+
 // tenantSchema derives the per-tenant schema name for a tenant id, mirroring the
 // Rust `DatabaseMount::tenant_schema` sanitization EXACTLY (lowercase, keep
 // [a-z0-9_], replace others with '_', trim '_', truncate 50, prefix `tenant_`).

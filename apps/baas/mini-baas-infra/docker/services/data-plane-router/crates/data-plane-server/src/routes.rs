@@ -315,12 +315,31 @@ impl AppState {
         if let Ok(mut c) = self.mount_cache.lock() {
             c.clear();
         }
+        // Same reasoning for the key-verify cache: a credential event must not
+        // leave any cached identity serving requests for up to TTL (B3 — the
+        // revoked-key-valid-≤30s hole). Wholesale clear; re-verifies are cheap
+        // post-fast-hash (~ms) and credential events are rare admin ops.
+        self.evict_verify_cache();
         let before = self.registry.stats().await.map(|s| s.len()).unwrap_or(0);
         // drain_pool_key is a no-op for an unknown/pinned key; comparing the pool
         // count before/after tells the caller whether a pool was actually closed.
         let _ = self.registry.drain_pool_key(pool_key).await;
         let after = self.registry.stats().await.map(|s| s.len()).unwrap_or(0);
         before.saturating_sub(after)
+    }
+
+    /// Drop every cached key-verify identity. Called on credential events
+    /// (rotate, key revocation via `/v1/admin/evict-verify`) so a revoked key
+    /// dies on its NEXT request instead of riding the cache for up to TTL.
+    /// Returns the number of entries evicted.
+    pub fn evict_verify_cache(&self) -> usize {
+        if let Ok(mut c) = self.verify_cache.lock() {
+            let n = c.len();
+            c.clear();
+            n
+        } else {
+            0
+        }
     }
 
     /// The pool registry (shared `Arc`). Used by the background reaper in
@@ -449,6 +468,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/admin/raw", post(execute_raw_admin))
         .route("/v1/admin/migrate", post(apply_migration_admin))
         .route("/v1/admin/rotate", post(rotate_credential_admin))
+        .route("/v1/admin/evict-verify", post(evict_verify_admin))
         .route("/v1/permissions/decide", post(decide_permission))
         .fallback(not_found)
         .layer(axum::middleware::from_fn_with_state(metrics_state, track_metrics))
@@ -1976,6 +1996,45 @@ async fn rotate_credential_admin(
         Json(AdminRotateResponse { pool_key, pools_drained }),
     )
         .into_response()
+}
+
+// ── /v1/admin/evict-verify ────────────────────────────────────────────────────
+//
+// Credential-event hook (B3): the control plane calls this after revoking an
+// API key so the cached VerifiedIdentity dies NOW, not after the verify-cache
+// TTL (the revoked-key-valid-≤30s hole). In-network admin surface, same trust
+// model as /v1/admin/raw: body-borne identity, service_role/admin gated.
+// Wholesale eviction by design — entries are keyed by raw key material, so a
+// per-key contract would put secrets on the wire for no win (re-verifies are
+// ~ms post-fast-hash and credential events are rare).
+
+#[derive(Debug, Clone, Deserialize)]
+struct AdminEvictVerifyRequest {
+    identity: RequestIdentity,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminEvictVerifyResponse {
+    evicted: usize,
+}
+
+async fn evict_verify_admin(
+    State(state): State<AppState>,
+    Json(request): Json<AdminEvictVerifyRequest>,
+) -> impl IntoResponse {
+    if !is_admin(&request.identity) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiError {
+                error: "forbidden".to_string(),
+                message: "/v1/admin/evict-verify requires role=service_role or scope=admin"
+                    .to_string(),
+            }),
+        )
+            .into_response();
+    }
+    let evicted = state.evict_verify_cache();
+    (StatusCode::OK, Json(AdminEvictVerifyResponse { evicted })).into_response()
 }
 
 async fn not_found() -> impl IntoResponse {
