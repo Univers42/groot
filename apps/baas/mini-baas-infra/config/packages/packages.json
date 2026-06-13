@@ -25,7 +25,7 @@
         "ddl": false,
         "introspect": true
       },
-      "limits": { "rps": 50, "burst": 100 },
+      "limits": { "rps": 50, "burst": 100, "max_rows": 1000 },
       "pool_policy": { "max_conn": 1, "max_mounts": 1 },
       "security_mode": "baseline",
       "addons": []
@@ -46,7 +46,7 @@
         "ddl": false,
         "introspect": true
       },
-      "limits": { "rps": 100, "burst": 200 },
+      "limits": { "rps": 100, "burst": 200, "max_rows": 5000 },
       "pool_policy": { "max_conn": 4, "max_mounts": 1 },
       "security_mode": "baseline",
       "addons": []
@@ -67,7 +67,7 @@
         "ddl": false,
         "introspect": true
       },
-      "limits": { "rps": 200, "burst": 400 },
+      "limits": { "rps": 200, "burst": 400, "max_rows": 20000 },
       "pool_policy": { "max_conn": 6, "max_mounts": 2 },
       "security_mode": "baseline",
       "addons": []
@@ -88,7 +88,7 @@
         "ddl": true,
         "introspect": true
       },
-      "limits": { "rps": 400, "burst": 800 },
+      "limits": { "rps": 400, "burst": 800, "max_rows": 50000 },
       "pool_policy": { "max_conn": 10, "max_mounts": 10 },
       "security_mode": "baseline",
       "addons": ["realtime", "analytics"]

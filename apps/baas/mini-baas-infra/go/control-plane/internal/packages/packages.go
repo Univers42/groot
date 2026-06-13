@@ -30,6 +30,12 @@ var embedded []byte
 type Limits struct {
 	RPS   uint32 `json:"rps"`
 	Burst uint32 `json:"burst"`
+	// MaxRows (G-QoS sliceA) is the optional rows-per-query cap the data plane
+	// clamps `operation.limit` to (engine-agnostic). A nil pointer / omitted key
+	// means "unlimited" — the parity path that leaves the limit untouched. Only
+	// stamped onto capability_overrides when present, so absent tiers behave
+	// exactly as today.
+	MaxRows *uint32 `json:"max_rows,omitempty"`
 }
 
 // PoolPolicy bounds a tenant's footprint: connection-pool size + how many
@@ -124,5 +130,11 @@ func (p Package) CapabilityOverrides() map[string]any {
 	}
 	out["rps"] = p.Limits.RPS
 	out["burst"] = p.Limits.Burst
+	// G-QoS sliceA: only carry max_rows when the tier sets it, so tiers without
+	// a cap produce byte-identical overrides to today (Rust treats absent =
+	// unlimited).
+	if p.Limits.MaxRows != nil {
+		out["max_rows"] = *p.Limits.MaxRows
+	}
 	return out
 }
