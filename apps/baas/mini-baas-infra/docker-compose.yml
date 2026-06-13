@@ -1153,6 +1153,11 @@ services:
       WEBHOOK_REDIS_URL: ${WEBHOOK_REDIS_URL:-${OUTBOX_REDIS_URL:-redis://redis:6379}}
       WEBHOOK_GROUP: ${WEBHOOK_GROUP:-webhook-dispatcher}
       WEBHOOK_CONSUMER: ${WEBHOOK_CONSUMER:-webhook-dispatcher-0}
+      # A2: function-trigger dispatcher (DB-event -> function invoke) + secrets.
+      FUNCTION_TRIGGER_GROUP: ${FUNCTION_TRIGGER_GROUP:-function-dispatcher}
+      FUNCTION_TRIGGER_CONSUMER: ${FUNCTION_TRIGGER_CONSUMER:-function-dispatcher-0}
+      FUNCTIONS_RUNTIME_URL: ${FUNCTIONS_RUNTIME_URL:-http://functions-runtime:3060}
+      VAULT_ENC_KEY: ${VAULT_ENC_KEY:-}
       INTERNAL_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
@@ -1250,6 +1255,47 @@ services:
       start_period: 30s
       retries: 5
     mem_limit: 32m
+    cpus: 0.25
+
+  # ─── Go Control Plane: function-scheduler (A2 Functions DX) ────────
+  # Polls function_schedules for due rows and invokes the target function on
+  # the functions-runtime, advancing next_run by the schedule's interval.
+  # Zero-dep interval grammar (@every / @hourly / @daily / bare duration).
+  # NOTE: own port 3027 — the orchestrator owns 3026 on this (scale-program) base.
+  function-scheduler:
+    build:
+      context: ./go/control-plane
+      dockerfile: Dockerfile
+      args:
+        APP: function-scheduler
+        PORT: 3027
+    profiles: [functions, background, go-control-plane]
+    container_name: mini-baas-function-scheduler
+    env_file: [.env]
+    environment:
+      FUNCTION_SCHEDULER_HOST: 0.0.0.0
+      FUNCTION_SCHEDULER_PORT: 3027
+      FUNCTION_SCHEDULER_PRODUCT_MODE: ${FUNCTION_SCHEDULER_PRODUCT_MODE:-shadow}
+      FUNCTION_SCHEDULER_TICK_SECONDS: ${FUNCTION_SCHEDULER_TICK_SECONDS:-10}
+      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/postgres}
+      FUNCTIONS_RUNTIME_URL: ${FUNCTIONS_RUNTIME_URL:-http://functions-runtime:3060}
+      INTERNAL_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "127.0.0.1:${FUNCTION_SCHEDULER_PORT:-3027}:3027"
+    depends_on:
+      db-bootstrap:
+        condition: service_completed_successfully
+    networks:
+      - mini-baas
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/app/app", "--healthcheck"]
+      interval: 5s
+      timeout: 3s
+      start_period: 30s
+      retries: 5
+    mem_limit: 96m
     cpus: 0.25
 
   # ─── Email Service (background plane) ─────────────────────────────
@@ -1646,6 +1692,10 @@ services:
       FUNCTIONS_PORT: 3060
       FUNCTIONS_DATA_DIR: /data
       FUNCTIONS_INVOKE_TIMEOUT_MS: ${FUNCTIONS_INVOKE_TIMEOUT_MS:-5000}
+      # A2: resolve per-function secrets from the Go secret store at invoke time
+      # (set on the webhook-dispatcher's /internal route). Empty => no secrets.
+      FUNCTION_SECRETS_URL: ${FUNCTION_SECRETS_URL:-http://webhook-dispatcher:3025/internal/v1/function-secrets/resolve}
+      INTERNAL_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
     ports:
       - "127.0.0.1:${FUNCTIONS_PORT:-3060}:3060"
     volumes:
