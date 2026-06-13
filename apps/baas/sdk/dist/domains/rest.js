@@ -69,6 +69,125 @@ export class RestResourceBuilder {
             headers: mutationHeaders(options),
         });
     }
+    query(options = {}) {
+        return new RestQueryBuilder(this.http, this.resource, options);
+    }
+}
+/**
+ * Supabase-js-style fluent REST builder. Every filter/order/range method
+ * mutates an internal {@link BuilderState} and returns `this`; the chain is a
+ * thenable, so `await client.from('t').query().eq(...).order(...)` issues the
+ * GET only when awaited. The resulting URL is byte-identical to what the
+ * options-object `RestResourceBuilder.select()` would build for the same
+ * filters — same PostgREST request shape, just chained.
+ */
+export class RestQueryBuilder {
+    http;
+    resource;
+    options;
+    state = { order: [], params: [], single: false, maybe: false };
+    constructor(http, resource, options) {
+        this.http = http;
+        this.resource = resource;
+        this.options = options;
+    }
+    select(columns) {
+        if (columns)
+            this.state.columns = columns;
+        return this;
+    }
+    eq(column, value) { return this.filter(column, 'eq', value); }
+    neq(column, value) { return this.filter(column, 'neq', value); }
+    gt(column, value) { return this.filter(column, 'gt', value); }
+    gte(column, value) { return this.filter(column, 'gte', value); }
+    lt(column, value) { return this.filter(column, 'lt', value); }
+    lte(column, value) { return this.filter(column, 'lte', value); }
+    like(column, pattern) { return this.filter(column, 'like', pattern); }
+    ilike(column, pattern) { return this.filter(column, 'ilike', pattern); }
+    is(column, value) { return this.filter(column, 'is', value); }
+    in(column, values) {
+        const list = values.map((v) => encodeInValue(v)).join(',');
+        this.state.params.push([String(column), `in.(${list})`]);
+        return this;
+    }
+    or(filter) {
+        this.state.params.push(['or', `(${filter})`]);
+        return this;
+    }
+    order(column, options = {}) {
+        const dir = options.ascending === false ? 'desc' : 'asc';
+        const nulls = options.nullsFirst === undefined
+            ? ''
+            : options.nullsFirst ? '.nullsfirst' : '.nullslast';
+        this.state.order.push(`${String(column)}.${dir}${nulls}`);
+        return this;
+    }
+    limit(count) {
+        this.state.limit = count;
+        return this;
+    }
+    range(from, to) {
+        this.state.offset = from;
+        this.state.limit = to - from + 1;
+        return this;
+    }
+    single() {
+        this.state.single = true;
+        this.state.maybe = false;
+        return this;
+    }
+    maybeSingle() {
+        this.state.single = true;
+        this.state.maybe = true;
+        return this;
+    }
+    then(onFulfilled, onRejected) {
+        return this.run().then(onFulfilled, onRejected);
+    }
+    filter(column, operator, value) {
+        this.state.params.push([String(column), `${operator}.${encodeFilterValue(value)}`]);
+        return this;
+    }
+    async run() {
+        const result = await this.http.request(`${routes.rest.resource(this.resource)}${this.buildQuery()}`, {
+            ...requestOptions(this.options),
+            method: 'GET',
+            headers: this.buildHeaders(),
+        });
+        return this.coerce(result);
+    }
+    coerce(result) {
+        if (!this.state.single)
+            return result;
+        if (this.state.maybe) {
+            if (result === undefined || result === null)
+                return null;
+            return (Array.isArray(result) ? (result[0] ?? null) : result);
+        }
+        return (Array.isArray(result) ? result[0] : result);
+    }
+    buildHeaders() {
+        const headers = new Headers(this.options.headers);
+        if (this.state.single) {
+            headers.set('Accept', 'application/vnd.pgrst.object+json');
+        }
+        return this.state.single || this.options.headers ? headers : undefined;
+    }
+    buildQuery() {
+        const params = new URLSearchParams();
+        if (this.state.columns)
+            params.set('select', this.state.columns);
+        if (this.state.limit !== undefined)
+            params.set('limit', String(this.state.limit));
+        if (this.state.offset !== undefined)
+            params.set('offset', String(this.state.offset));
+        if (this.state.order.length)
+            params.set('order', this.state.order.join(','));
+        for (const [key, value] of this.state.params)
+            params.append(key, value);
+        const value = params.toString();
+        return value ? `?${value}` : '';
+    }
 }
 function requestOptions(options) {
     return {
@@ -107,5 +226,14 @@ function normalizeFilters(filters = {}) {
 function encodeFilterValue(value) {
     if (value === null)
         return 'null';
+    return String(value);
+}
+/** Encode one member of a PostgREST `in.(...)` list (quote strings w/ commas). */
+function encodeInValue(value) {
+    if (value === null)
+        return 'null';
+    if (typeof value === 'string' && /[,"()]/.test(value)) {
+        return `"${value.replace(/"/g, '\\"')}"`;
+    }
     return String(value);
 }

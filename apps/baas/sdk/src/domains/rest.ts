@@ -13,8 +13,11 @@
 import { routes } from '../core/routes.js';
 import type { HttpClient, RequestOptions } from '../core/http.js';
 import type {
+  FilterPrimitive,
   RestFilterOperator,
   RestMutationOptions,
+  RestOrderOptions,
+  RestQueryBuilder as RestQueryBuilderApi,
   RestQueryOptions,
   RestRequestOptions,
   RestResourceBuilder as RestResourceBuilderApi,
@@ -95,6 +98,150 @@ export class RestResourceBuilder<Row = Record<string, unknown>> implements RestR
       headers: mutationHeaders(options),
     });
   }
+
+  query(options: RestRequestOptions = {}): RestQueryBuilder<Row> {
+    return new RestQueryBuilder<Row>(this.http, this.resource, options);
+  }
+}
+
+interface BuilderState {
+  columns?: string;
+  limit?: number;
+  offset?: number;
+  order: string[];
+  /** Raw `key=value` PostgREST query params (filters, or-groups). */
+  params: Array<[string, string]>;
+  /** PostgREST single-object mode (`Accept: application/vnd.pgrst.object+json`). */
+  single: boolean;
+  /** `maybeSingle()` — single mode that tolerates "no rows" (returns null). */
+  maybe: boolean;
+}
+
+/**
+ * Supabase-js-style fluent REST builder. Every filter/order/range method
+ * mutates an internal {@link BuilderState} and returns `this`; the chain is a
+ * thenable, so `await client.from('t').query().eq(...).order(...)` issues the
+ * GET only when awaited. The resulting URL is byte-identical to what the
+ * options-object `RestResourceBuilder.select()` would build for the same
+ * filters — same PostgREST request shape, just chained.
+ */
+export class RestQueryBuilder<Row = Record<string, unknown>, TResult = Row[]>
+  implements RestQueryBuilderApi<Row, TResult>
+{
+  private readonly state: BuilderState = { order: [], params: [], single: false, maybe: false };
+
+  constructor(
+    private readonly http: HttpClient,
+    private readonly resource: string,
+    private readonly options: RestRequestOptions,
+  ) {}
+
+  select(columns?: string): this {
+    if (columns) this.state.columns = columns;
+    return this;
+  }
+
+  eq(column: keyof Row | string, value: FilterPrimitive): this { return this.filter(column, 'eq', value); }
+  neq(column: keyof Row | string, value: FilterPrimitive): this { return this.filter(column, 'neq', value); }
+  gt(column: keyof Row | string, value: FilterPrimitive): this { return this.filter(column, 'gt', value); }
+  gte(column: keyof Row | string, value: FilterPrimitive): this { return this.filter(column, 'gte', value); }
+  lt(column: keyof Row | string, value: FilterPrimitive): this { return this.filter(column, 'lt', value); }
+  lte(column: keyof Row | string, value: FilterPrimitive): this { return this.filter(column, 'lte', value); }
+  like(column: keyof Row | string, pattern: string): this { return this.filter(column, 'like', pattern); }
+  ilike(column: keyof Row | string, pattern: string): this { return this.filter(column, 'ilike', pattern); }
+  is(column: keyof Row | string, value: FilterPrimitive): this { return this.filter(column, 'is', value); }
+
+  in(column: keyof Row | string, values: ReadonlyArray<FilterPrimitive>): this {
+    const list = values.map((v) => encodeInValue(v)).join(',');
+    this.state.params.push([String(column), `in.(${list})`]);
+    return this;
+  }
+
+  or(filter: string): this {
+    this.state.params.push(['or', `(${filter})`]);
+    return this;
+  }
+
+  order(column: keyof Row | string, options: RestOrderOptions = {}): this {
+    const dir = options.ascending === false ? 'desc' : 'asc';
+    const nulls = options.nullsFirst === undefined
+      ? ''
+      : options.nullsFirst ? '.nullsfirst' : '.nullslast';
+    this.state.order.push(`${String(column)}.${dir}${nulls}`);
+    return this;
+  }
+
+  limit(count: number): this {
+    this.state.limit = count;
+    return this;
+  }
+
+  range(from: number, to: number): this {
+    this.state.offset = from;
+    this.state.limit = to - from + 1;
+    return this;
+  }
+
+  single(): RestQueryBuilder<Row, Row> {
+    this.state.single = true;
+    this.state.maybe = false;
+    return this as unknown as RestQueryBuilder<Row, Row>;
+  }
+
+  maybeSingle(): RestQueryBuilder<Row, Row | null> {
+    this.state.single = true;
+    this.state.maybe = true;
+    return this as unknown as RestQueryBuilder<Row, Row | null>;
+  }
+
+  then<TFulfilled = TResult, TRejected = never>(
+    onFulfilled?: ((value: TResult) => TFulfilled | PromiseLike<TFulfilled>) | null,
+    onRejected?: ((reason: unknown) => TRejected | PromiseLike<TRejected>) | null,
+  ): Promise<TFulfilled | TRejected> {
+    return this.run().then(onFulfilled, onRejected);
+  }
+
+  private filter(column: keyof Row | string, operator: RestFilterOperator, value: FilterValue): this {
+    this.state.params.push([String(column), `${operator}.${encodeFilterValue(value)}`]);
+    return this;
+  }
+
+  private async run(): Promise<TResult> {
+    const result = await this.http.request<unknown>(`${routes.rest.resource(this.resource)}${this.buildQuery()}`, {
+      ...requestOptions(this.options),
+      method: 'GET',
+      headers: this.buildHeaders(),
+    });
+    return this.coerce(result);
+  }
+
+  private coerce(result: unknown): TResult {
+    if (!this.state.single) return result as TResult;
+    if (this.state.maybe) {
+      if (result === undefined || result === null) return null as TResult;
+      return (Array.isArray(result) ? (result[0] ?? null) : result) as TResult;
+    }
+    return (Array.isArray(result) ? result[0] : result) as TResult;
+  }
+
+  private buildHeaders(): HeadersInit | undefined {
+    const headers = new Headers(this.options.headers);
+    if (this.state.single) {
+      headers.set('Accept', 'application/vnd.pgrst.object+json');
+    }
+    return this.state.single || this.options.headers ? headers : undefined;
+  }
+
+  private buildQuery(): string {
+    const params = new URLSearchParams();
+    if (this.state.columns) params.set('select', this.state.columns);
+    if (this.state.limit !== undefined) params.set('limit', String(this.state.limit));
+    if (this.state.offset !== undefined) params.set('offset', String(this.state.offset));
+    if (this.state.order.length) params.set('order', this.state.order.join(','));
+    for (const [key, value] of this.state.params) params.append(key, value);
+    const value = params.toString();
+    return value ? `?${value}` : '';
+  }
 }
 
 function requestOptions(options: RestRequestOptions): RequestOptions {
@@ -135,5 +282,14 @@ function normalizeFilters<Row>(filters: RestQueryOptions<Row>['filters'] = {}): 
 
 function encodeFilterValue(value: FilterValue): string {
   if (value === null) return 'null';
+  return String(value);
+}
+
+/** Encode one member of a PostgREST `in.(...)` list (quote strings w/ commas). */
+function encodeInValue(value: FilterPrimitive): string {
+  if (value === null) return 'null';
+  if (typeof value === 'string' && /[,"()]/.test(value)) {
+    return `"${value.replace(/"/g, '\\"')}"`;
+  }
   return String(value);
 }

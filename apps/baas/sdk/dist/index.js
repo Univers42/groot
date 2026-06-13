@@ -30,6 +30,8 @@ export { WebhooksClient } from './domains/webhooks.js';
 export { AdminClient, MigrateClient, TenantsClient } from './domains/admin.js';
 export { FunctionsClient } from './domains/functions.js';
 export { StorageClient, StorageBucketClient } from './domains/storage.js';
+export { RestClient, RestResourceBuilder, RestQueryBuilder } from './domains/rest.js';
+export { AuthClient, AuthAdminClient, AuthMfaClient } from './domains/auth.js';
 export class MiniBaasClient {
     auth;
     query;

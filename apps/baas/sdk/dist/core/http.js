@@ -65,6 +65,17 @@ export class HttpClient {
     getRealtimeAuthToken() {
         return this.session?.accessToken ?? this.anonKey;
     }
+    /** The gateway anon (publishable) key — needed on OAuth redirect URLs. */
+    getAnonKey() {
+        return this.anonKey;
+    }
+    /**
+     * Build an absolute gateway URL for a `path` (used by browser-redirect flows
+     * like OAuth where the SDK hands back a URL rather than issuing a request).
+     */
+    buildUrl(path) {
+        return new URL(`${this.baseUrl}${path}`);
+    }
     async request(path, init = {}) {
         const attempts = Math.max(1, this.retry.attempts);
         let lastError;
