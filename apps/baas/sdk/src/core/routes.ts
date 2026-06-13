@@ -38,6 +38,10 @@ export const routes = {
     schema: (dbId: string) => `/query/v1/${encodeURIComponent(dbId)}/schema`,
     schemaDdl: (dbId: string) => `/query/v1/${encodeURIComponent(dbId)}/schema/ddl`,
   },
+  graphql: {
+    // PostgREST's pg_graphql endpoint, fronted by Kong (strip_path → /graphql).
+    root: '/graphql/v1',
+  },
   webhooks: {
     root: '/admin/v1/webhooks',
     one: (id: string) => `/admin/v1/webhooks/${encodeURIComponent(id)}`,

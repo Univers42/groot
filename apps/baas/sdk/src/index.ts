@@ -20,6 +20,8 @@ import { TxnClient } from './domains/txn.js';
 import { WebhooksClient } from './domains/webhooks.js';
 import { AdminClient } from './domains/admin.js';
 import { FunctionsClient } from './domains/functions.js';
+import { GraphqlClient } from './domains/graphql.js';
+import { RealtimeClient } from './domains/realtime-client.js';
 import { HttpClient } from './core/http.js';
 import { makeEngineClient } from './domains/engine-clients.js';
 import { ENGINE_IDS, type EngineId, type EnginesResponse } from './generated/engines.js';
@@ -114,6 +116,11 @@ export type {
   SchemaDdlResult,
   SchemaEngineCapabilities,
   TableSchema,
+  // ── A5: GraphQL ───────────────────────────────────────────────────────────
+  GraphqlError,
+  GraphqlQueryOptions,
+  GraphqlRequest,
+  GraphqlResponse,
 } from './types.js';
 
 export { SchemaClient } from './domains/schema.js';
@@ -125,6 +132,14 @@ export { StorageClient, StorageBucketClient } from './domains/storage.js';
 export { RestClient, RestResourceBuilder, RestQueryBuilder } from './domains/rest.js';
 export { AuthClient, AuthAdminClient, AuthMfaClient } from './domains/auth.js';
 export type { StorageObject, BucketInfo, UploadResult, UploadOptions, UploadBody } from './domains/storage.js';
+export { GraphqlClient } from './domains/graphql.js';
+export { RealtimeClient } from './domains/realtime-client.js';
+export type {
+  PresenceMember,
+  RealtimeEvent,
+  RealtimeSubscribeOptions,
+  RealtimeSubscription,
+} from './domains/realtime-client.js';
 
 export interface RetryOptions {
   attempts?: number;
@@ -159,6 +174,16 @@ export class MiniBaasClient {
   readonly schema: SchemaClient;
   /** Edge functions (`/functions/v1`). */
   readonly functions: FunctionsClient;
+  /**
+   * GraphQL passthrough to PostgREST's pg_graphql endpoint (`/graphql/v1`).
+   * Requires the `pg_graphql` extension in Postgres (see route docs).
+   */
+  readonly graphql: GraphqlClient;
+  /**
+   * Realtime WebSocket client — DB change streams, ephemeral broadcast
+   * (client→client), and presence (who's online). See {@link RealtimeClient}.
+   */
+  readonly realtime: RealtimeClient;
   /**
    * Webhook subscription registry. **Admin-only / server-side**: requires
    * `serviceRoleKey`; the gateway route is internal-only.
@@ -199,6 +224,8 @@ export class MiniBaasClient {
     this.txn = new TxnClient(this.http);
     this.schema = new SchemaClient(this.http);
     this.functions = new FunctionsClient(this.http);
+    this.graphql = new GraphqlClient(this.http);
+    this.realtime = new RealtimeClient(this.http);
     this.webhooks = new WebhooksClient(this.http, options.serviceRoleKey);
     this.admin = new AdminClient(this.http, options.serviceRoleKey);
   }
