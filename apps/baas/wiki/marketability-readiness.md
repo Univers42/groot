@@ -95,13 +95,13 @@ This doc is the **gate**. For per-feature competitive detail see [`competitive-m
 | Share-pools / 100K lever | `[v]` | Pool count independent of tenant count, proven | shipped | gate **m46**; `pools_shared` in `data-plane-pool/src/lib.rs` |
 | Read throughput / latency baseline | `[~]` | ~400 rps/pool, p95<2ms (m46 run notes). **vs-Supabase read latency MEASURED 2026-06-13** (same probe, both PostgREST, 500-row seeded): Grobase **p50 1.45 / p95 2.40 ms** vs Supabase **p50 1.58 / p95 2.66 ms** — parity (same PostgREST). RPS/p99 still TODO | Phase 0 ✓ | gate **m46**; vs-Supabase = **m54** |
 | Data-path footprint advantage | `[v]` | 3.3 MiB Rust vs 127 MiB Node (~38×) | shipped | gate **m32** (`scripts/verify/m32-footprint.sh`) |
-| **vs-Supabase benchmark RUN + published** | `[v]` | **RUN 2026-06-13.** Footprint **Supabase 2827 MiB / 13 containers** vs Grobase **~660 MiB essential / ~1.4 GiB pro** (~4.3×/2× lighter); read latency at parity. RPS + p99 still TODO | **Phase 0 ✓** | gate **m54** — `scripts/bench/grobase-vs-supabase.sh` (now seeds bench_items, remaps ports, probes both sides) |
+| **vs-Supabase benchmark RUN + published** | `[v]` | **RUN 2026-06-13.** Footprint **Supabase 2884 MiB / 13 containers** vs **like-for-like Grobase parity shape ~448 MiB** (~600 MiB w/ dashboard) → **~5–6× lighter**; read latency parity. Service-for-service map: [grobase-vs-supabase-offer.md](grobase-vs-supabase-offer.md). RPS + p99 still TODO | **Phase 0 ✓** | gate **m54** — `scripts/bench/grobase-vs-supabase.sh` |
 | 100K-tenant run measured | `[x]` | Currently **projected, not measured** | C4 | re-run → publish SLO |
 | Horizontal data-plane scale-out | `[~]` | Multi-instance **rate-limit correctness is proven** (gate **m51**); only **throughput scale-out (~800 rps)** remains unmeasured (supavisor opt-in, not wired to Rust DP) | C1 | gate **m51** (multi-instance rate-limit); target ~800 rps |
 | Production HA topology | `[~]` | Multi-instance rate-limiting proven (m51); single-node otherwise — **full HA topology unmeasured** (Helm chart is eval-only stub; HA = swap `DATABASE_URL` to managed PG) | C2/C3 | gate **m51**; `product-plan/07-scale-ha-helm-deployment.md` |
 | Published uptime SLA target | `[x]` | No SLA / status page yet | Cloud GTM | — |
 
-**Bar 2 read:** the *dense-tenancy* scale story is proven (m46), and the **vs-Supabase head-to-head is now run** (2026-06-13): **~4.3× lighter** footprint at the essential tier (660 MiB vs 2827 MiB) and read latency at **parity**. What remains for a marketable cloud SLO is (1) write-throughput/RPS + p99 numbers, and (2) the measured 100K run + horizontal/HA topology (Track C).
+**Bar 2 read:** the *dense-tenancy* scale story is proven (m46), and the **vs-Supabase head-to-head is now run** (2026-06-13): **~5–6× lighter** footprint for the like-for-like parity shape (~448 MiB vs 2884 MiB) and read latency at **parity** (see [grobase-vs-supabase-offer.md](grobase-vs-supabase-offer.md)). What remains for a marketable cloud SLO is (1) write-throughput/RPS + p99 numbers, and (2) the measured 100K run + horizontal/HA topology (Track C).
 
 ---
 

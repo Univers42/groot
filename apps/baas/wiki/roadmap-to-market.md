@@ -48,12 +48,15 @@ Work executed this session (verified):
   **big data disk** (`BENCH_WORK_BASE=/mnt/storage/bench`) so Supabase's
   bind-mounted volumes never touch the small system disk. **Results** (same curl
   probe, both PostgREST, 500-row seeded `bench_items`, same box):
-  - **Footprint:** Supabase **2827 MiB / 13 containers** vs Grobase **~660 MiB
-    essential / ~1.4 GiB pro** → **~4.3× / ~2× lighter** for a comparable
-    pg+auth+REST+realtime+storage surface.
-  - **Read latency:** Grobase **p50 1.45 / p95 2.40 ms** vs Supabase **p50 1.58 /
-    p95 2.66 ms** → **parity** (both are the same PostgREST; the edge is footprint
-    + multi-engine + dense multi-tenancy, not raw read speed).
+  - **Footprint (like-for-like):** Supabase **2884 MiB / 13 containers** vs the
+    **Grobase parity shape ~448 MiB** (Postgres+auth+REST+realtime+storage+functions+gateway;
+    ~600 MiB incl. Studio) → **~5–6× lighter** for the same feature surface. The
+    per-service map (e.g. Supabase realtime/Elixir 269 MiB vs our Rust realtime 20 MiB;
+    Supabase kong 1.5 GiB untuned vs our 124 MiB) is in
+    [grobase-vs-supabase-offer.md](grobase-vs-supabase-offer.md).
+  - **Read latency:** parity — Grobase p50 1.45–1.63 / p95 2.20–2.40 ms vs Supabase
+    p50 1.51–1.58 / p95 2.57–2.66 ms (both the same PostgREST). The edge is footprint
+    + multi-engine + dense multi-tenancy, not raw read speed.
   - Still TODO for a full SLO: write-throughput/RPS + p99, and the 100K run (Track C).
 
 Supporting context (read the code, then these):

@@ -111,6 +111,9 @@ SB_RAM="$(docker stats --no-stream --format '{{.Name}} {{.MemUsage}}' \
 	| awk '{print $2}' | sed 's/MiB//;s/GiB/*1024/' | paste -sd+ | bc 2>/dev/null | cut -d. -f1)"
 SB_RAM="${SB_RAM:-0}"
 cyan "[vs-supabase] Supabase total RSS ≈ ${SB_RAM} MiB"
+# Per-container breakdown so the offer can map service-for-service vs Grobase.
+docker stats --no-stream --format '{{.Name}} {{.MemUsage}}' | grep -E 'supabase' | sort \
+	> "${BENCH_OUT_DIR}/supabase-footprint-breakdown.txt" 2>/dev/null || true
 
 # ── latency probe: the SAME curl probe against Supabase PostgREST AND ours ──
 # Fair same-box, same-method comparison (both PostgREST + seeded bench_items).
