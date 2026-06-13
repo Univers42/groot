@@ -35,6 +35,7 @@ export const routes = {
   query: {
     execute: '/query/v1/execute',
     txn: '/query/v1/txn',
+    engines: '/query/v1/engines',
     schema: (dbId: string) => `/query/v1/${encodeURIComponent(dbId)}/schema`,
     schemaDdl: (dbId: string) => `/query/v1/${encodeURIComponent(dbId)}/schema/ddl`,
   },

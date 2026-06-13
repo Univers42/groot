@@ -73,7 +73,7 @@ Competitor cells use the audited source glyphs: `v` = first-class, `~` = partial
 |---|-----------|:--------:|:--------:|:-------:|-----|:------:|:---:|----------------|
 | 25 | Auto REST over schema | v | x | **[v]** | — PostgREST v12.2.3 (PG) + multi-engine `/v1/query` (always-on) with an opt-in `/data/v1/query` bypass (`DATA_PLANE_BYPASS_ENABLED=1`), PostgREST-style filters | — | — | postgrest (v12.2.3); `data-plane-server/src/routes.rs` |
 | 26 | Auto GraphQL | v | ~ | **[v]** | A5 — **LIVE in the graphql edition** (gate **m59**): `035` creates a `graphql_public.graphql()` **SECURITY INVOKER** RPC wrapper (PostgREST has no native `/graphql`) + Kong `/graphql/v1 → /rpc/graphql` + `Content-Profile`; SDK `client.graphql.query()`. Served by the Debian-glibc `postgres-graphql` image via `docker-compose.graphql.yml` (opt-in — lean alpine default 5xxs the route until the overlay is used). m59 proves data + errors[] over HTTP **and two-tenant RLS isolation** (the INVOKER wrapper inherits RLS) | M | P1 | `sdk/src/domains/graphql.ts`, `kong.yml`, `035_pg_graphql.sql`, `docker-compose.graphql.yml`, `scripts/verify/m59-graphql-live.sh` |
-| 27 | Fluent client query builder | v | v | **[~]** | SDK REST builder is options-object, not fluent (no `.eq/.in/.or/.single/.range` chaining) | M | P0 | `sdk/src/domains/rest.ts` |
+| 27 | Fluent client query builder | v | v | **[v]** | — **LIVE (gate m57)**: SDK built from source (npm ci + tsc) and run against the live PostgREST path — `.from().query().select().eq(id,X).single()` returns the exact inserted row, `.eq()` filters server-side (`?id=eq.X`) both ways (decoy excluded). Residual: `.in/.or/.range` breadth | — | P0 | `sdk/src/domains/rest.ts`; `scripts/verify/m57-sdk-openapi.sh` · gate m57 |
 | 28 | Server Admin SDK | v | v | **[v]** | — `admin`, `schema` domains (serviceRoleKey) | — | — | `sdk/src/domains/admin.ts` |
 
 ### Realtime
@@ -89,7 +89,7 @@ Competitor cells use the audited source glyphs: `v` = first-class, `~` = partial
 
 | # | Capability | Supabase | Firebase | Grobase | Gap | Effort | Pri | Notes / anchor |
 |---|-----------|:--------:|:--------:|:-------:|-----|:------:|:---:|----------------|
-| 33 | Object / file storage | v | v | **[~]** | MinIO + storage-router, but SDK exposes **only** `presign()` — no upload/download/list/createBucket. The **server is also presign-only** (storage-router exposes only `POST /sign`; no upload/download/list/createBucket route) — closing this needs **server endpoints**, not just SDK methods. Presign supports **PUT + GET**, so upload/download already work via the signed URL | M | P0 | `sdk/src/domains/storage.ts` (`presign` is the only method); storage-router (`POST /sign`) |
+| 33 | Object / file storage | v | v | **[v]** | — **LIVE (gate m55)**: createBucket · upload · list · byte-round-trip download · presigned-URL round-trip all proven end-to-end through Kong; owner-isolation differential (foreign identity sees empty list + 404 download; forged `X-User-Id`/tenant inert because Kong strips client identity; anon → 401). Residual: image transforms (row 36) | — | P0 | storage-router + `sdk/src/domains/storage.ts`; `scripts/verify/m55-storage-live.sh` · gate m55 |
 | 34 | Access rules on files | v | v | **[v]** | — ABAC-gated, owner-prefixed, TTL-clamped presign | — | — | storage-router (`POST /sign`) |
 | 35 | Signed URLs | v | v | **[v]** | — presigned URLs (the one thing storage does well) | — | — | storage-router |
 | 36 | On-the-fly image transforms | v | ~ | **[x]** | No transforms | M | P1 | — |
@@ -128,10 +128,10 @@ Competitor cells use the audited source glyphs: `v` = first-class, `~` = partial
 | # | Capability | Supabase | Firebase | Grobase | Gap | Effort | Pri | Notes / anchor |
 |---|-----------|:--------:|:--------:|:-------:|-----|:------:|:---:|----------------|
 | 46 | JS / TS SDK | v | v | **[v]** | — `@mini-baas/js`, Supabase-shaped (`createClient`/anonKey/serviceRoleKey/`.from()`) + **[+]** novel capability-typed `engine<E>()` client | — | — | `sdk/src/index.ts`, `types.ts` |
-| 47 | Flutter / Dart | v | v | **[~]** | Generated Dart client `sdk-dart` (openapi-generator; `dart analyze` clean) from `openapi/grobase-public.json` — not yet hand-polished/pub-published | M | P1 | `sdk-dart/`, `sdk/scripts/codegen-polyglot.sh` |
+| 47 | Flutter / Dart | v | v | **[v]** | — **LIVE (gate m58)**: `sdk-dart` `dart pub get` OK + `dart analyze --fatal-infos` clean; exposes all 5 Api surfaces and **32 distinct operations == the spec (32) == python (32)**. Residual: not yet hand-polished/pub-published | M | P1 | `sdk-dart/`, `sdk/scripts/codegen-polyglot.sh`; `scripts/verify/m58-sdks-compile.sh` · gate m58 |
 | 48 | Swift / iOS | v | v | **[x]** | No Swift SDK | L | P2 | — |
 | 49 | Kotlin / Android | v | v | **[x]** | No Kotlin SDK | L | P2 | — |
-| 50 | Python | v | v | **[~]** | Generated Python client `sdk-python` (urllib3) — pip-installs + imports (5 API groups) | M | P1 | `sdk-python/`, `sdk/scripts/codegen-polyglot.sh` |
+| 50 | Python | v | v | **[v]** | — **LIVE (gate m58)**: `sdk-python` `pip install` + import of all 5 Api surfaces in python:3.12; exposes **32 operations == the spec (32) == dart (32)**. Residual: not yet pip-published | M | P1 | `sdk-python/`, `sdk/scripts/codegen-polyglot.sh`; `scripts/verify/m58-sdks-compile.sh` · gate m58 |
 | 51 | Go / C# / Rust | ~ | v | **[~]** | Rust realtime client exists; no general Go/C#/Rust data SDK | L | P2 | `realtime-client` |
 | 52 | Unity / C++ / game | x | v | **[x]** | No game SDKs | L | P2 | — |
 | 53 | Offline persistence + auto-sync | x | v | **[x]** | No offline sync/local cache (parity with Supabase; clear Firebase win) | L | P2 | — |
@@ -152,8 +152,8 @@ Competitor cells use the audited source glyphs: `v` = first-class, `~` = partial
 
 | # | Capability | Supabase | Firebase | Grobase | Gap | Effort | Pri | Notes / anchor |
 |---|-----------|:--------:|:--------:|:-------:|-----|:------:|:---:|----------------|
-| 59 | CLI | v | v | **[~]** | A2 (rc.3): zero-dep `baas` CLI (`login`, `functions deploy/invoke/list`, `secrets`, `triggers`) shipped as the SDK `bin`; CLI tests pass. Not yet published/dogfooded as an installed binary | L | P0 | `sdk/src/bin/baas.ts` |
-| 60 | Local dev full parity | v | ~ | **[~]** | Full Docker Compose stack runs locally, but no emulator/CLI ergonomics | M | P1 | root Makefile, editions |
+| 59 | CLI | v | v | **[~]** | A2 (rc.3): zero-dep `baas` CLI (`login`, `functions deploy/invoke/list`, `secrets`, `triggers`) shipped as the SDK `bin`. **Live-proven (gate m61)**: built from source in node:20, dispatches real argv subcommands (genuine routing, not a banner — unknown command exits 1). KNOWN-OPEN (why still `[~]`): not yet published as a standalone npm/binary; no GitHub Action wrapping `baas deploy` | L | P0 | `sdk/src/bin/baas.ts`; `scripts/verify/m61-packaging.sh` · gate m61 |
+| 60 | Local dev full parity | v | ~ | **[~]** | Full Docker Compose stack runs locally; **one-command Makefile bring-up live-proven (gate m61)** (`make all` = build+start, `make up` = selected edition). Residual: no dedicated emulator/CLI ergonomics | M | P1 | root Makefile, editions; `scripts/verify/m61-packaging.sh` · gate m61 |
 | 61 | Type generation from schema | v | x | **[x]** | No schema→types gen (only engine catalog gen) | M | P0 | SDK codegen |
 | 62 | Branching / preview envs | v | ~ | **[x]** | None | L | P2 | — |
 | 63 | CI/CD integration | v | v | **[~]** | CI gates exist (m-series, security scans); no first-class deploy integration | S | P1 | `scripts/verify/*` |
@@ -173,13 +173,13 @@ Competitor cells use the audited source glyphs: `v` = first-class, `~` = partial
 
 | # | Capability | Supabase | Firebase | Grobase | Gap | Effort | Pri | Notes / anchor |
 |---|-----------|:--------:|:--------:|:-------:|-----|:------:|:---:|----------------|
-| 70 | Row / record-level authz | v | v | **[v]** | — RLS GUC + owner predicate on PG; owner-scoped writes on all engines; ABAC + field masks | — | — | `postgres.rs`, `mongo.rs` (identity-stamped `owner_id`/`tenant_id`) |
+| 70 | Row / record-level authz | v | v | **[v]** | — RLS GUC + owner predicate on PG; owner-scoped writes on all engines; ABAC + field masks. **Live-proven (gate m60)**: anon→internal tables 401/42501 · forged alg=none/wrong-sig JWT 401 · cross-tenant mount 404 (with a positive own-mount-read control proving the 404 is selective) | — | — | `postgres.rs`, `mongo.rs` (identity-stamped `owner_id`/`tenant_id`); `scripts/verify/m60-security-gate.sh` · gate m60 |
 | 71 | App attestation / anti-abuse | x | v | **[x]** | No App Check equivalent (Firebase-unique) | L | P2 | — |
 | 72 | SOC 2 | v | v | **[x]** | No SOC2 (audit-ready posture planned, not done; formal SOC2 deferred) | L | P2 | [security-audit.md](./security-audit.md) |
 | 73 | HIPAA | v | v | **[x]** | No HIPAA. Both competitors are **BAA-gated HIPAA-eligible** (BAA required) — not on by default | L | P2 | — |
 | 74 | ISO27001 / GDPR | v / v | v / v | **[x]** | No certs; GDPR-shaped controls exist but not attested. (Supabase is now **fully ISO/IEC 27001:2022 certified**, Apr 2026 — supabase.com/blog/supabase-is-now-iso-27001-certified) | L | P2 | — |
 | 75 | Network restrictions / PrivateLink | v | ~ | **[~]** | WAF ip-restricts admin; single flat bridge network (no plane isolation/NetworkPolicy) | M | P1 | residual in security-audit |
-| 76 | Audit logs | ~ | ~ | **[~]** | Writes traceable; **reads not audited**; no tenant-scoped audit log | M | P1 | residual |
+| 76 | Audit logs | ~ | ~ | **[~]** | Writes traceable; **reads not audited**; no tenant-scoped audit log. (gate m60 wires CI security gates — gitleaks·cargo-audit·govulncheck·trivy·semgrep·trufflehog·zap — + an ASVS/SOC2-lite map; this residual stays KNOWN-OPEN) | M | P1 | residual; gate m60 |
 | 89 | Data residency / region selection | v | v | **[x]** | No region/residency selection | L | P1 | → Track C3 |
 | 90 | Rate-limiting / DDoS / abuse protection | ~ | ~ | **[~]** | WAF CRS (`owasp/modsecurity-crs:4-nginx-202604040104`) + per-tenant token bucket | M | P1 | gate m51 (multi-instance rate-limit) |
 
@@ -189,7 +189,7 @@ Competitor cells use the audited source glyphs: `v` = first-class, `~` = partial
 
 | # | Capability | Supabase | Firebase | Grobase | Gap | Effort | Pri | Notes / anchor |
 |---|-----------|:--------:|:--------:|:-------:|-----|:------:|:---:|----------------|
-| 77 | OSS / self-hostable (prod) | v | x | **[+]** | — OSS, Docker-Compose-first, multi-arch on Docker Hub; **tiny footprint** (nano 5.16MB, essential ~660 MiB / 13 services[†]) beats both | — | P0 | [offer-sheet-v2.md](./offer-sheet-v2.md) |
+| 77 | OSS / self-hostable (prod) | v | x | **[+]** | — OSS, Docker-Compose-first, multi-arch on Docker Hub; **tiny footprint** (nano 5.16MB, essential ~660 MiB / 13 services[†]) beats both. **Packaging live-proven (gate m61)**: substantive Supabase/Firebase migration guides + one-command Makefile bring-up | — | P0 | [offer-sheet-v2.md](./offer-sheet-v2.md); `scripts/verify/m61-packaging.sh` · gate m61 |
 | 78 | Local emulator (dev) | v | v | **[~]** | Compose stack is the "emulator"; no dedicated emulator/CLI | M | P1 | root Makefile |
 
 > [†] Essential-tier footprint **re-baselined post-cutover** to **~660 MiB across 13 services** (commit `4325a24`; was ~950 MiB / 19 services before the FLIP orchestrator cutover retired Node six). Gate m32 is the already-shipped footprint gate.
@@ -236,11 +236,11 @@ Tallied across the 91 numbered rows (Grobase cell). Each Count is the exact leng
 | Tier | Glyph | Count | Notes |
 |------|-------|:-----:|-------|
 | **PARITY+** (differentiator — beats both) | [+] | **3** | 12, 77, 79 (+ the WAF differentiator D5, which is not a numbered row). Rows 80/81 are marked [v] but are also competitor-beating |
-| **PARITY** (first-class, on by default) | [v] | **15** | 1, 2, 9, 13, 14, 19, 23, 25, 28, 34, 35, 46, 70, 80, 81 |
-| **PARTIAL** (built-but-off / one-engine / stub) | [~] | **39** | 3, 5, 11, 15, 16, 17, 20, 24, 26, 27, 29, 30, 31, 32, 33, 39, 40, 41, 42, 47, 50, 51, 54, 55, 56, 59, 60, 63, 64, 65, 69, 75, 76, 78, 82, 86, 87, 90, 91 |
+| **PARITY** (first-class, on by default) | [v] | **22** | 1, 2, 9, 13, 14, 19, 23, 25, 26, 27, 28, 33, 34, 35, 40, 42, 46, 47, 50, 70, 80, 81 |
+| **PARTIAL** (built-but-off / one-engine / stub) | [~] | **32** | 3, 5, 11, 15, 16, 17, 20, 24, 29, 30, 31, 32, 39, 41, 51, 54, 55, 56, 59, 60, 63, 64, 65, 69, 75, 76, 78, 82, 86, 87, 90, 91 |
 | **GAP** (missing) | [x] | **34** | 4, 6, 7, 8, 10, 18, 21, 22, 36, 37, 38, 43, 44, 45, 48, 49, 52, 53, 57, 58, 61, 62, 66, 67, 68, 71, 72, 73, 74, 83, 84, 85, 88, 89 |
 
-Headline: roughly **a quarter of rows are parity-or-better today** (21 of 91: [+]3 + [v]18), **~40% are partial** (36 of 91 — most of the DX surface), and the remaining gaps (34 of 91) cluster in two places — **managed-cloud commerce** (metering/billing/dashboard) and **advanced data ops** (joins, FTS, vector). The Track-A rc.3 wave (A1 storage DX · A2 functions triggers/cron/secrets/CLI · A3/A4 fluent builder + OpenAPI + Python/Dart SDKs · A5 GraphQL + realtime broadcast/presence) flipped the DX cluster from GAP to PARTIAL, and the **v1.1.0 live-gate wave** then took DB/event triggers (40), function secrets (42) and Auto-GraphQL (26) to full `[v]` — proven by gates **m56** (functions, incl. a cross-tenant no-fire control) and **m59** (GraphQL + two-tenant RLS isolation), the latter served by an opt-in glibc edition.
+Headline: **more than a quarter of rows are parity-or-better today** (25 of 91: [+]3 + [v]22), **~35% are partial** (32 of 91 — most of the remaining DX surface), and the gaps (34 of 91) cluster in two places — **managed-cloud commerce** (metering/billing/dashboard) and **advanced data ops** (joins, FTS, vector). The Track-A rc.3 wave (A1 storage DX · A2 functions triggers/cron/secrets/CLI · A3/A4 fluent builder + OpenAPI + Python/Dart SDKs · A5 GraphQL + realtime broadcast/presence) flipped the DX cluster from GAP to PARTIAL, and the **v1.1.0 live-gate wave** then took DB/event triggers (40), function secrets (42) and Auto-GraphQL (26) to full `[v]` (gates **m56**/**m59**). The **OSS gate-debt wave** then took four more DX rows to full `[v]` on live proof: **storage** (33, gate **m55** — bucket·upload·list·byte-round-trip·presigned-URL·owner-isolation), the **fluent query builder** (27, gate **m57** — `.from().query().select().eq().single()` returns the exact row, server-side filtered), and the **Python & Dart SDKs** (50, 47, gate **m58** — install/import clean, 32 ops == the spec). The security audit-ready posture (gate **m60**) and OSS packaging (gate **m61**) are live-proven and annotated on rows 70/75/76 and 59/60/77, but their honest KNOWN-OPEN residuals (no certs; CLI not yet a published binary; no emulator) keep those numbered rows at `[~]`/`[x]` rather than `[v]`.
 
 ### Top 8 P0 gaps to close for OSS launch parity
 
@@ -248,14 +248,14 @@ These are the [v]/[~] table-stakes that block a credible OSS self-host launch (f
 
 | Rank | Row(s) | Gap | Why it's P0 | Effort |
 |:----:|--------|-----|-------------|:------:|
-| 1 | 33, 34, 36 | ✅ **rc.3 (A1)** — upload/download/list/createBucket/signedUrl shipped in the SDK + storage-router; **residual:** image transforms (row 36) still open | First thing a dev tries; stale README actively misleads | M |
+| 1 | 33, 34, 36 | ✅ **LIVE (A1, gate m55 PASS)** — createBucket/upload/list/byte-round-trip-download/presigned-URL + owner-isolation all proven end-to-end (row 33 → `[v]`); **residual:** image transforms (row 36) still open | First thing a dev tries; stale README actively misleads | M |
 | 2 | 39, 40, 41, 42 | ✅ **LIVE (A2, gate m56 PASS)** — deploy/invoke + DB/event trigger firing (+ cross-tenant no-fire control) + function secrets injection all proven end-to-end; **residual:** cron runner still shadow-mode, warm-pool, lean-default profile | "Edge Functions" is a headline BaaS feature; invoke-only is below table stakes | L |
-| 3 | 27, 61 | **SDK fluent builder + type generation** — `.eq/.in/.or/.single/.range`, schema→types | Supabase's signature DX; options-object feels foreign | M |
-| 4 | 47, 50 | ✅ **DONE** — OpenAPI 3.1 spec committed + **Python & Dart SDKs generated** (A3/A4); Swift/Kotlin next | (was the single blocker for all multi-language SDKs) | M |
-| 5 | 59 | ✅ **rc.3 (A2, now PARTIAL)** — zero-dep `baas` CLI (login / functions deploy·invoke·list / secrets / triggers); **residual:** publish as an installed binary + local-dev loop | Both competitors have one; gates functions/codegen DX | L |
+| 3 | 27, 61 | ✅ **fluent builder LIVE (A3, gate m57 PASS)** — `.from().query().select().eq().single()` returns the exact server-filtered row (row 27 → `[v]`); **residual:** schema→types generation (row 61) still open | Supabase's signature DX; options-object feels foreign | M |
+| 4 | 47, 50 | ✅ **LIVE (A4, gate m58 PASS)** — OpenAPI spec + **Python & Dart SDKs install/import clean, 32 ops == spec** (rows 47, 50 → `[v]`); Swift/Kotlin next | (was the single blocker for all multi-language SDKs) | M |
+| 5 | 59 | ✅ **dispatch LIVE (A7, gate m61 PASS)** — `baas` CLI builds from source + dispatches real argv subcommands (not a banner; unknown command exits 1); **residual (keeps row 59 `[~]`):** publish as an installed npm/binary + local-dev loop | Both competitors have one; gates functions/codegen DX | L |
 | 6 | 17, 20 | **Surface OAuth + MFA in the SDK** (built in binocle-one, not exposed) | Capability exists; only the SDK seam is missing | M |
 | 7 | 26 | ✅ **LIVE (A5, gate m59 PASS)** — `graphql_public.graphql()` INVOKER wrapper + `/rpc/graphql` over HTTP, proven incl. two-tenant RLS isolation, served by the opt-in glibc `postgres-graphql` edition; **residual:** ship the extension in the default image (today the lean alpine 5xxs the route) | Frequently a hard requirement; zero impl today | M |
-| 8 | — | **Security audit-ready posture** — add blocking CI secret-scan + cargo-audit/govulncheck gates, flip RS256 issuer + per-deployment keys, close header-trust/network residuals | Launch gate; residuals are launch-blockers ([security-audit.md](./security-audit.md)) | M |
+| 8 | — | ✅ **posture LIVE-proven (A6, gate m60 PASS)** — SHIPPED controls hold live (anon→internal 401/42501 · forged JWT 401 · cross-tenant mount 404) + CI security gates wired (gitleaks·cargo-audit·govulncheck·trivy·semgrep·trufflehog·zap) + ASVS/SOC2-lite map; **residual (7 KNOWN-OPEN):** RS256 issuer + per-deployment keys, header-trust/network, no certs | Launch gate; residuals are launch-blockers ([security-audit.md](./security-audit.md)) | M |
 
 > Not P0 but high-leverage for the *cloud* launch (Track B): metering (84), billing/Stripe (83), per-tenant observability (57, 64, 65), tenant self-service dashboard (56, 57). These are the largest net-new build — see [marketability-readiness.md](./marketability-readiness.md) Bar 4.
 
@@ -266,13 +266,13 @@ New gates are numbered **above the shipped m1–m53 range** (never reuse a shipp
 | Gate | Scope |
 |------|-------|
 | **m54** | Phase 0 — vs-Supabase benchmark |
-| **m55** | A1 — Storage DX (rows 33, 34, 36) |
+| **m55** ✅ PASS | A1 — Storage DX (rows 33→`[v]`, 34): createBucket·upload·list·byte-round-trip download·presigned-URL·owner-isolation(+forged-header reject)·anon-reject |
 | **m56** ✅ PASS | A2 — Functions DX (rows 39–42): deploy/invoke · secrets · DB-event trigger firing · **cross-tenant no-fire** · schedule CRUD · forged-header isolation · anon-reject |
-| **m57** | A3 — SDK parity / codegen (rows 27, 61) |
-| **m58** | A4 — multi-language SDKs (rows 47–51) |
+| **m57** ✅ PASS | A3 — SDK fluent builder (row 27→`[v]`): live `.from().query().select().eq().single()` returns exact server-filtered row + OpenAPI/route congruence (row 61 type-gen still open) |
+| **m58** ✅ PASS | A4 — multi-language SDKs (rows 47, 50→`[v]`): python install/import + dart clean analyze + 32 ops == spec == python == dart |
 | **m59** ✅ PASS | A5 — GraphQL live in the graphql edition (row 26): INVOKER wrapper + `/rpc/graphql` over HTTP + **two-tenant RLS isolation** |
-| **m60** | A6 — security audit-ready (rows 72–76 posture) |
-| **m61** | A7 — OSS packaging |
+| **m60** ✅ PASS | A6 — security audit-ready (rows 70/72–76 posture): live anon/forged-JWT/cross-tenant negatives + CI security gates + ASVS/SOC2-lite map; rows 72–76 stay `[x]`/`[~]` (no certs, 7 KNOWN-OPEN residuals) |
+| **m61** ✅ PASS | A7 — OSS packaging (rows 59/60/77 notes): substantive Supabase/Firebase migration guides + `baas` CLI live argv dispatch + one-command Makefile bring-up; row 59 stays `[~]` (CLI not yet a published binary) |
 | **m62–m67** | Track B (cloud) — incl. Organizations/teams (row 88 → B4), email deliverability (row 91 → A2/A6 + B) |
 | **m68–m71** | Track C (scale/HA) — incl. data residency/region (row 89 → C3) |
 
