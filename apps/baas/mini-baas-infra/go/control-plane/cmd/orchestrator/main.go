@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/dlesieur/mini-baas/control-plane/internal/orchestrator/emailsvc"
+	"github.com/dlesieur/mini-baas/control-plane/internal/orchestrator/envelope"
 	"github.com/dlesieur/mini-baas/control-plane/internal/orchestrator/gdprsvc"
 	"github.com/dlesieur/mini-baas/control-plane/internal/orchestrator/logsvc"
 	"github.com/dlesieur/mini-baas/control-plane/internal/orchestrator/newslettersvc"
@@ -101,8 +102,11 @@ func main() {
 	}
 
 	srv := &http.Server{
-		Addr:              cfg.ListenAddr(),
-		Handler:           shared.WithMiddleware(mux, log),
+		Addr: cfg.ListenAddr(),
+		// envelope.Wrap mirrors the Node TransformInterceptor so a cutover is
+		// transparent to clients (Track-2 A parity); WithMiddleware (logging,
+		// request-id, metrics) wraps that so it still observes the real status.
+		Handler:           shared.WithMiddleware(envelope.Wrap(mux), log),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {

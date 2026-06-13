@@ -21,7 +21,7 @@ type store struct {
 
 // Subscriber is the full newsletter.subscriber row (RETURNING *).
 type Subscriber struct {
-	ID             int64      `json:"id"`
+	ID             int64      `json:"id,string"`
 	Email          string     `json:"email"`
 	FirstName      *string    `json:"first_name"`
 	Token          string     `json:"token"`
@@ -33,7 +33,7 @@ type Subscriber struct {
 
 // SubscriberSummary is the redacted admin-list projection (no token).
 type SubscriberSummary struct {
-	ID          int64      `json:"id"`
+	ID          int64      `json:"id,string"`
 	Email       string     `json:"email"`
 	FirstName   *string    `json:"first_name"`
 	ConfirmedAt *time.Time `json:"confirmed_at"`
@@ -55,7 +55,7 @@ type Recipient struct {
 
 // SendLog is one newsletter.send_log row (history).
 type SendLog struct {
-	ID             int64     `json:"id"`
+	ID             int64     `json:"id,string"`
 	Subject        string    `json:"subject"`
 	RecipientCount int       `json:"recipient_count"`
 	SentAt         time.Time `json:"sent_at"`
