@@ -128,10 +128,10 @@ Competitor cells use the audited source glyphs: `v` = first-class, `~` = partial
 | # | Capability | Supabase | Firebase | Grobase | Gap | Effort | Pri | Notes / anchor |
 |---|-----------|:--------:|:--------:|:-------:|-----|:------:|:---:|----------------|
 | 46 | JS / TS SDK | v | v | **[v]** | — `@mini-baas/js`, Supabase-shaped (`createClient`/anonKey/serviceRoleKey/`.from()`) + **[+]** novel capability-typed `engine<E>()` client | — | — | `sdk/src/index.ts`, `types.ts` |
-| 47 | Flutter / Dart | v | v | **[x]** | No Dart SDK (blocked: OpenAPI spec empty) | L | P1 | `mini-baas-infra/openapi` (only `.gitkeep`) |
+| 47 | Flutter / Dart | v | v | **[~]** | Generated Dart client `sdk-dart` (openapi-generator; `dart analyze` clean) from `openapi/grobase-public.json` — not yet hand-polished/pub-published | M | P1 | `sdk-dart/`, `sdk/scripts/codegen-polyglot.sh` |
 | 48 | Swift / iOS | v | v | **[x]** | No Swift SDK | L | P2 | — |
 | 49 | Kotlin / Android | v | v | **[x]** | No Kotlin SDK | L | P2 | — |
-| 50 | Python | v | v | **[x]** | No Python SDK (blocked: OpenAPI spec empty) | L | P1 | empty openapi dir |
+| 50 | Python | v | v | **[~]** | Generated Python client `sdk-python` (urllib3) — pip-installs + imports (5 API groups) | M | P1 | `sdk-python/`, `sdk/scripts/codegen-polyglot.sh` |
 | 51 | Go / C# / Rust | ~ | v | **[~]** | Rust realtime client exists; no general Go/C#/Rust data SDK | L | P2 | `realtime-client` |
 | 52 | Unity / C++ / game | x | v | **[x]** | No game SDKs | L | P2 | — |
 | 53 | Offline persistence + auto-sync | x | v | **[x]** | No offline sync/local cache (parity with Supabase; clear Firebase win) | L | P2 | — |
@@ -237,8 +237,8 @@ Tallied across the 91 numbered rows (Grobase cell). Each Count is the exact leng
 |------|-------|:-----:|-------|
 | **PARITY+** (differentiator — beats both) | [+] | **3** | 12, 77, 79 (+ the WAF differentiator D5, which is not a numbered row). Rows 80/81 are marked [v] but are also competitor-beating |
 | **PARITY** (first-class, on by default) | [v] | **15** | 1, 2, 9, 13, 14, 19, 23, 25, 28, 34, 35, 46, 70, 80, 81 |
-| **PARTIAL** (built-but-off / one-engine / stub) | [~] | **30** | 3, 5, 11, 15, 16, 17, 20, 24, 27, 29, 32, 33, 39, 51, 54, 55, 56, 60, 63, 64, 65, 69, 75, 76, 78, 82, 86, 87, 90, 91 |
-| **GAP** (missing) | [x] | **43** | 4, 6, 7, 8, 10, 18, 21, 22, 26, 30, 31, 36, 37, 38, 40, 41, 42, 43, 44, 45, 47, 48, 49, 50, 52, 53, 57, 58, 59, 61, 62, 66, 67, 68, 71, 72, 73, 74, 83, 84, 85, 88, 89 |
+| **PARTIAL** (built-but-off / one-engine / stub) | [~] | **32** | 3, 5, 11, 15, 16, 17, 20, 24, 27, 29, 32, 33, 39, 47, 50, 51, 54, 55, 56, 60, 63, 64, 65, 69, 75, 76, 78, 82, 86, 87, 90, 91 |
+| **GAP** (missing) | [x] | **41** | 4, 6, 7, 8, 10, 18, 21, 22, 26, 30, 31, 36, 37, 38, 40, 41, 42, 43, 44, 45, 48, 49, 52, 53, 57, 58, 59, 61, 62, 66, 67, 68, 71, 72, 73, 74, 83, 84, 85, 88, 89 |
 
 Headline: roughly **a fifth of rows are parity-or-better today** (18 of 91: [+]3 + [v]15), **a third are partial (mostly off-by-default or single-engine)** (30 of 91), and the gaps cluster in three places — managed-cloud commerce (metering/billing/dashboard), DX surface (storage SDK, functions triggers/cron, CLI, codegen, multi-lang SDKs), and advanced data ops (GraphQL, joins, FTS, vector).
 
@@ -251,7 +251,7 @@ These are the [v]/[~] table-stakes that block a credible OSS self-host launch (f
 | 1 | 33, 34, 36 | **Storage DX** — SDK is presign-only; ship upload/download/list/createBucket + transforms | First thing a dev tries; stale README actively misleads | M |
 | 2 | 39, 40, 41, 42 | **Functions DX** — add DB/event triggers, cron, secrets | "Edge Functions" is a headline BaaS feature; invoke-only is below table stakes | L |
 | 3 | 27, 61 | **SDK fluent builder + type generation** — `.eq/.in/.or/.single/.range`, schema→types | Supabase's signature DX; options-object feels foreign | M |
-| 4 | 47, 50 | **Commit the OpenAPI spec** (empty today) → unblock Python + Dart codegen | Single blocker for all multi-language SDKs | M |
+| 4 | 47, 50 | ✅ **DONE** — OpenAPI 3.1 spec committed + **Python & Dart SDKs generated** (A3/A4); Swift/Kotlin next | (was the single blocker for all multi-language SDKs) | M |
 | 5 | 59 | **`baas` CLI** — deploy, local-dev, migrate | Both competitors have one; gates functions/codegen DX | L |
 | 6 | 17, 20 | **Surface OAuth + MFA in the SDK** (built in binocle-one, not exposed) | Capability exists; only the SDK seam is missing | M |
 | 7 | 26 | **GraphQL** — `pg_graphql` passthrough | Frequently a hard requirement; zero impl today | M |

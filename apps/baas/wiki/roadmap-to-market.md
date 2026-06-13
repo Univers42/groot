@@ -215,8 +215,9 @@ work; the *developer experience and SDK surface* lag. Order is dependency-driven
 
 ### A4 — Multi-language SDKs
 
-- **What:** Generate **Python** and **Dart/Flutter** SDKs from the committed spec; **Swift/Kotlin**
-  next.
+- **What:** ✅ **DONE (Python + Dart):** generated `sdk-python` (urllib3, imports clean) + `sdk-dart`
+  (`dart analyze` clean) from `openapi/grobase-public.json` via `sdk/scripts/codegen-polyglot.sh`
+  (openapi-generator run as the host UID, so no root-owned output). **Swift/Kotlin** next.
 - **Why:** Closes matrix **#46–#51 (JS have it; Dart/Swift/Kotlin/Python are GAP today)** → **BAR 1**.
   Supabase ships JS/Dart/Swift/Kotlin/Python; Firebase ships Web/iOS/Android/Flutter/Unity/C++.
   **Hard-blocked on A3 — the OpenAPI spec must be committed first.**
