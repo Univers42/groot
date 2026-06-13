@@ -175,9 +175,14 @@ jobs:
         with:
           name: binocle-binaries
           path: release-assets/
-      - name: Stage install.sh
+      - name: Stage install.sh (self-pinned to this release version)
         working-directory: .
-        run: cp apps/baas/mini-baas-infra/scripts/install.sh release-assets/install.sh
+        run: |
+          VER="${{ needs.version.outputs.version }}"
+          # shellcheck disable=SC2016  # the ${BINOCLE_VERSION:-...} in the sed script must stay literal
+          sed -E 's#^VERSION="\$\{BINOCLE_VERSION:-[^}]*\}"#VERSION="${BINOCLE_VERSION:-'"$VER"'}"#' \
+            apps/baas/mini-baas-infra/scripts/install.sh > release-assets/install.sh
+          grep '^VERSION=' release-assets/install.sh
       - uses: softprops/action-gh-release@v2
         with:
           name: "Grobase BaaS ${{ github.ref_name }}"

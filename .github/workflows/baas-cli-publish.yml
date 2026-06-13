@@ -1,0 +1,123 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# BaaS CLI / SDK — npm publish (@mini-baas/js, which ships the `baas` CLI).
+#
+# PUBLISH IS HELD. Nothing reaches npm unless YOU explicitly trigger it:
+#   • push a tag   baas-cli-v<semver>      e.g.  git tag baas-cli-v0.2.0 && git push origin baas-cli-v0.2.0
+#   • or run this workflow manually with   dry_run = false   (Actions → Run workflow)
+# Every other event — a PR touching the SDK, or a manual run with dry_run=true
+# (the default) — only BUILDS, smoke-tests, and packs the package. It never publishes.
+#
+# Requires repo secret NPM_TOKEN: an npm automation token with publish rights to
+# the @mini-baas scope. It is consumed only by `npm publish` via NODE_AUTH_TOKEN
+# and is never echoed. (Branding note: the package publishes under the name in
+# apps/baas/sdk/package.json — rename it there before tagging if you want a
+# different npm name. If the GitHub repo is private, drop `--provenance` below.)
+#
+# The tag namespace baas-cli-v* is deliberately separate from the Docker-image
+# release tag baas-v* (.github/workflows/baas-release.yml) so neither fires the other.
+# ─────────────────────────────────────────────────────────────────────────────
+name: BaaS CLI — npm publish
+
+on:
+  push:
+    tags:
+      - "baas-cli-v[0-9]+.[0-9]+.[0-9]+"
+      - "baas-cli-v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+"
+  pull_request:
+    paths:
+      - "apps/baas/sdk/**"
+      - ".github/workflows/baas-cli-publish.yml"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "true = build + pack only (default, nothing published) · false = actually publish to npm"
+        type: boolean
+        default: true
+
+concurrency:
+  group: baas-cli-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: apps/baas/sdk
+
+jobs:
+  # ── Always: build, smoke-test the CLI, and inspect the publishable tarball ───
+  build-test:
+    name: Build · smoke-test · pack (never publishes)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/baas/sdk/package-lock.json
+      - name: Install (frozen lockfile, no lifecycle scripts)
+        run: npm ci --ignore-scripts
+      - name: Build (tsc -> dist)
+        run: npm run build
+      - name: Assert the CLI built
+        run: test -f dist/bin/baas.js || { echo "::error::dist/bin/baas.js missing after build"; exit 1; }
+      - name: Smoke-test the CLI (mirrors the m61 gate teeth)
+        run: |
+          node dist/bin/baas.js --help | tee /tmp/help.txt
+          for sub in login functions secrets triggers; do
+            grep -q -- "$sub" /tmp/help.txt || { echo "::error::baas --help is missing subcommand '$sub'"; exit 1; }
+          done
+          rc=0; node dist/bin/baas.js zzz-not-a-command >/dev/null 2>&1 || rc=$?
+          [ "$rc" -ne 0 ] || { echo "::error::unknown subcommand exited 0 — the CLI is a banner, not a dispatcher"; exit 1; }
+          echo "CLI ok: --help lists the real subcommands; unknown command exits $rc"
+      - name: Pack and inspect the tarball (no publish)
+        run: |
+          npm pack --dry-run
+          npm pack
+          tar -tzf ./*.tgz | grep -E 'package/dist/bin/baas\.js' \
+            || { echo "::error::the publishable tarball would not include the baas CLI"; exit 1; }
+          tar -tzf ./*.tgz | grep -E 'package/dist/index\.js' \
+            || { echo "::error::the publishable tarball would not include the SDK entrypoint"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-tarball
+          path: apps/baas/sdk/*.tgz
+          retention-days: 14
+
+  # ── Held: publishes ONLY on an explicit baas-cli-v* tag or a manual dry_run=false run
+  publish:
+    name: Publish to npm (held — explicit trigger only)
+    runs-on: ubuntu-latest
+    needs: build-test
+    if: >-
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/baas-cli-v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.dry_run == false)
+    permissions:
+      contents: read
+      id-token: write   # npm provenance
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+          cache: npm
+          cache-dependency-path: apps/baas/sdk/package-lock.json
+      - name: Install (frozen lockfile, no lifecycle scripts)
+        run: npm ci --ignore-scripts
+      - name: Build (tsc -> dist)
+        run: npm run build
+      - name: Verify the tag matches package.json version
+        if: github.event_name == 'push'
+        run: |
+          PKG="$(node -p "require('./package.json').version")"
+          TAG="${GITHUB_REF_NAME#baas-cli-v}"
+          [ "$PKG" = "$TAG" ] || { echo "::error::tag $TAG != package.json version $PKG — bump apps/baas/sdk/package.json or retag"; exit 1; }
+          echo "package version $PKG matches tag $TAG"
+      - name: Publish @mini-baas/js (+ the baas CLI)
+        run: |
+          DIST_TAG="latest"
+          case "${GITHUB_REF_NAME:-}" in *-rc.*) DIST_TAG="next" ;; esac
+          echo "Publishing with dist-tag: ${DIST_TAG}"
+          npm publish --provenance --access public --tag "${DIST_TAG}"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -2,7 +2,7 @@
 # **************************************************************************** #
 # install.sh — binocle single-binary installer (Grobase BaaS)
 #
-#   curl -fsSL https://github.com/Univers42/groot/releases/download/baas-v1.0.0/install.sh | sh
+#   curl -fsSL https://github.com/Univers42/groot/releases/download/baas-v1.1.0/install.sh | sh
 #
 # Downloads the binocle-one (default) or binocle-nano static binary from the
 # GitHub Release, verifies its sha256, and unpacks it into the current
@@ -18,7 +18,7 @@
 # **************************************************************************** #
 set -eu
 
-VERSION="${BINOCLE_VERSION:-1.0.0}"
+VERSION="${BINOCLE_VERSION:-1.1.0}"
 EDITION="${BINOCLE_EDITION:-one}"
 REPO="Univers42/groot"
 TAG="baas-v${VERSION}"
@@ -71,4 +71,6 @@ else
   say "  Data API:      http://localhost:8090/data/v1   (admin key printed on FIRST boot only)"
 fi
 say "  Data lives in: ./data (override: NANO_DATA_DIR)"
+say ""
+say "  Full platform (Docker, all engines + realtime): git clone https://github.com/${REPO} && cd groot && make all-local"
 say "  Docs:          https://github.com/${REPO}/tree/main/apps/baas/mini-baas-infra"

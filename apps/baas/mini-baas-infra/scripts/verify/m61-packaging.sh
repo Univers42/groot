@@ -62,7 +62,7 @@ has()  { grep -q -- "$1" "$2" || fail "$3: '$1' missing — $(head -c 200 "$2")"
 ihas() { grep -qi -- "$1" "$2" || fail "$3: '$1' missing — $(head -c 200 "$2")"; }
 
 # ── 1) migration guides are substantive ──────────────────────────────────────
-step "1/3 migration guides exist AND document their patterns"
+step "1/4 migration guides exist AND document their patterns"
 SUPA="${WIKI}/migrate-from-supabase.md"
 FIRE="${WIKI}/migrate-from-firebase.md"
 [[ -s "${SUPA}" ]] || fail "migrate-from-supabase.md missing/empty"
@@ -80,7 +80,7 @@ ihas 'onSnapshot' "${FIRE}" "firebase guide realtime mapping"
 ok "firebase guide: Firestore→(Mongo/Postgres) mapping + onSnapshot→realtime documented"
 
 # ── 2) the baas CLI actually runs and shows its real subcommands ──────────────
-step "2/3 build + run the baas CLI in node:20 (must list real subcommands)"
+step "2/4 build + run the baas CLI in node:20 (must list real subcommands)"
 # Discover how the CLI is invoked: package.json bin entry → dist/bin/baas.js.
 BIN="$(node -e 'process.stdout.write(require("'"${SDK}"'/package.json").bin.baas||"")' 2>/dev/null || true)"
 if [[ -z "${BIN}" ]]; then
@@ -144,14 +144,36 @@ grep -qE 'BOGUS_RC=[1-9]' "${TMP}/cli.out" \
 ok "unknown subcommand exits non-zero — argv dispatch is real"
 
 # ── 3) one-command bring-up target exists ────────────────────────────────────
-step "3/3 Makefile one-command bring-up (all: / up:)"
+step "3/4 Makefile one-command bring-up (all: / up:)"
 grep -qE '^all:' "${MK}"  || fail "Makefile has no 'all:' target (build+start default edition)"
 grep -qE '^up:' "${MK}"   || fail "Makefile has no 'up:' target (start selected edition)"
 ok "Makefile bring-up present: 'make all' (build+start) · 'make up' (selected edition)"
 
+# ── 4) the baas CLI is npm-publishable: a HELD publish workflow + a packable tarball ──
+step "4/4 npm publish path: held baas-cli-publish.yml + the package packs the CLI"
+REPO_ROOT="$(cd "${ROOT_DIR}/../.." && pwd)"     # ft_transcendence (repo root)
+WF="${REPO_ROOT}/.github/workflows/baas-cli-publish.yml"
+[[ -s "${WF}" ]] || fail "baas-cli-publish.yml missing — no npm publish path for the CLI"
+# HELD: publishes only on an explicit baas-cli-v* tag or a manual dry_run=false run,
+# and reads the token from secrets.NPM_TOKEN (never a hardcoded credential).
+has 'baas-cli-v' "${WF}" "publish workflow tag trigger"
+has 'NPM_TOKEN' "${WF}" "publish workflow token"
+ihas 'dry_run' "${WF}" "publish workflow held-by-default manual path"
+grep -q 'npm publish' "${WF}" || fail "publish workflow never calls 'npm publish'"
+# PACKABLE: build in node:20 and assert the publishable tarball carries the CLI entry.
+docker run --rm -v "${SDK}:/sdk" -w /sdk node:20 sh -c '
+  set -e
+  npm ci --ignore-scripts -s >/dev/null 2>&1 || npm i --ignore-scripts -s >/dev/null 2>&1
+  npm run build -s >/dev/null 2>&1
+  npm pack --dry-run 2>&1
+' > "${TMP}/pack.out" 2>&1 || fail "npm pack dry-run failed — $(tail -c 300 "${TMP}/pack.out")"
+grep -q 'dist/bin/baas.js' "${TMP}/pack.out" || fail "the publishable tarball would not include dist/bin/baas.js — $(tail -c 200 "${TMP}/pack.out")"
+ok "CLI publishable: held baas-cli-publish.yml (baas-cli-v* tag / manual dry_run) + tarball includes dist/bin/baas.js"
+
 # ── residuals (KNOWN-OPEN) ───────────────────────────────────────────────────
 cyan "[M61] KNOWN-OPEN residuals:"
-echo "  - CLI not yet published as a standalone npm/binary release ('npx baas' / single-file)."
+echo "  - CLI not yet PUBLISHED to npm — baas-cli-publish.yml is wired but HELD; publishing is a"
+echo "    human-triggered 'baas-cli-v*' tag (or manual dry_run=false). No standalone single-file binary yet."
 echo "  - No GitHub Action wrapping 'baas deploy' for CI-driven function deploys."
 
-green "[M61] ALL GATES GREEN — OSS packaging real: substantive Supabase/Firebase migration guides · baas CLI builds & runs & dispatches its real subcommands · one-command Makefile bring-up"
+green "[M61] ALL GATES GREEN — OSS packaging real: substantive Supabase/Firebase migration guides · baas CLI builds & runs & dispatches its real subcommands · one-command Makefile bring-up · npm-publishable (held publish workflow + packable CLI tarball)"
