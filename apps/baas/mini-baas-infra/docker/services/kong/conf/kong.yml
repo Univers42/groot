@@ -412,6 +412,58 @@ services:
           - name: rate-limiting
             config: { policy: local, limit_by: ip, minute: 60, hour: 1000 }
 
+  # A2 Functions DX: DB-event -> function triggers, scheduled invocation, and
+  # per-function secrets. All three are served by the webhook-dispatcher (it
+  # already owns the DB pool + Redis + VAULT_ENC_KEY). Same internal-only guard
+  # as admin-webhooks; more specific than the /admin/v1 catch-all below.
+  - name: admin-function-triggers
+    url: http://webhook-dispatcher:3025/v1/function-triggers
+    routes:
+      - name: admin-function-triggers
+        paths: [/admin/v1/function-triggers]
+        strip_path: true
+        plugins:
+          - name: key-auth
+            config: { key_names: [apikey], hide_credentials: false }
+          - name: ip-restriction
+            config: { allow: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.1] }
+          - name: request-size-limiting
+            config: { allowed_payload_size: 64, size_unit: kilobytes }
+          - name: rate-limiting
+            config: { policy: local, limit_by: ip, minute: 60, hour: 1000 }
+
+  - name: admin-function-schedules
+    url: http://webhook-dispatcher:3025/v1/function-schedules
+    routes:
+      - name: admin-function-schedules
+        paths: [/admin/v1/function-schedules]
+        strip_path: true
+        plugins:
+          - name: key-auth
+            config: { key_names: [apikey], hide_credentials: false }
+          - name: ip-restriction
+            config: { allow: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.1] }
+          - name: request-size-limiting
+            config: { allowed_payload_size: 64, size_unit: kilobytes }
+          - name: rate-limiting
+            config: { policy: local, limit_by: ip, minute: 60, hour: 1000 }
+
+  - name: admin-function-secrets
+    url: http://webhook-dispatcher:3025/v1/function-secrets
+    routes:
+      - name: admin-function-secrets
+        paths: [/admin/v1/function-secrets]
+        strip_path: true
+        plugins:
+          - name: key-auth
+            config: { key_names: [apikey], hide_credentials: false }
+          - name: ip-restriction
+            config: { allow: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.1] }
+          - name: request-size-limiting
+            config: { allowed_payload_size: 64, size_unit: kilobytes }
+          - name: rate-limiting
+            config: { policy: local, limit_by: ip, minute: 60, hour: 1000 }
+
   - name: admin-migrate
     url: http://data-plane-router-rust:4011/v1/admin/migrate
     routes:
