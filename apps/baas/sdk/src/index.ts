@@ -13,7 +13,7 @@
 import { AnalyticsClient } from './domains/analytics.js';
 import { AuthClient } from './domains/auth.js';
 import { QueryClient, ResourceQueryBuilder } from './domains/query.js';
-import { RestClient, RestResourceBuilder } from './domains/rest.js';
+import { RestClient, RestResourceBuilder, RestQueryBuilder } from './domains/rest.js';
 import { SchemaClient } from './domains/schema.js';
 import { StorageClient } from './domains/storage.js';
 import { TxnClient } from './domains/txn.js';
@@ -46,8 +46,11 @@ export type {
   QueryRunInput,
   QueryRunResponse,
   RecoverInput,
+  FilterPrimitive,
   RestFilterOperator,
   RestMutationOptions,
+  RestOrderOptions,
+  RestQueryBuilder as RestQueryBuilderApi,
   RestQueryOptions,
   RestRequestOptions,
   RestResourceBuilder as RestResourceBuilderApi,
@@ -55,6 +58,16 @@ export type {
   SignUpInput,
   UpdateUserInput,
   VerifyInput,
+  // ── A3: OAuth + MFA auth helpers ─────────────────────────────────────────
+  OAuthProvider,
+  SignInWithOAuthInput,
+  SignInWithOAuthResult,
+  MfaFactorType,
+  MfaEnrollInput,
+  MfaEnrollResult,
+  MfaChallengeInput,
+  MfaChallengeResult,
+  MfaVerifyInput,
   // ── G9: transactions / webhooks / tenants / migrate / functions ──────────
   TxnExecuteInput,
   TxnOp,
@@ -109,6 +122,8 @@ export { WebhooksClient } from './domains/webhooks.js';
 export { AdminClient, MigrateClient, TenantsClient } from './domains/admin.js';
 export { FunctionsClient } from './domains/functions.js';
 export { StorageClient, StorageBucketClient } from './domains/storage.js';
+export { RestClient, RestResourceBuilder, RestQueryBuilder } from './domains/rest.js';
+export { AuthClient, AuthAdminClient, AuthMfaClient } from './domains/auth.js';
 export type { StorageObject, BucketInfo, UploadResult, UploadOptions, UploadBody } from './domains/storage.js';
 
 export interface RetryOptions {

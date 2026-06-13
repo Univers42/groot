@@ -42,6 +42,13 @@ export declare class HttpClient {
      */
     createRealtimeWsUrl(): URL;
     getRealtimeAuthToken(): string;
+    /** The gateway anon (publishable) key — needed on OAuth redirect URLs. */
+    getAnonKey(): string;
+    /**
+     * Build an absolute gateway URL for a `path` (used by browser-redirect flows
+     * like OAuth where the SDK hands back a URL rather than issuing a request).
+     */
+    buildUrl(path: string): URL;
     request<T = unknown>(path: string, init?: RequestOptions): Promise<T>;
     /**
      * Raw fetch for binary payloads (storage upload/download). Bypasses the JSON

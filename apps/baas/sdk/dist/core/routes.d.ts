@@ -6,6 +6,11 @@ export declare const routes: {
         readonly verify: "/auth/v1/verify";
         readonly logout: "/auth/v1/logout";
         readonly user: "/auth/v1/user";
+        readonly authorize: "/auth/v1/authorize";
+        readonly factors: "/auth/v1/factors";
+        readonly factor: (id: string) => string;
+        readonly factorChallenge: (id: string) => string;
+        readonly factorVerify: (id: string) => string;
         readonly adminUsers: "/auth/v1/admin/users";
         readonly adminUser: (id: string) => string;
         readonly adminGenerateLink: "/auth/v1/admin/generate_link";

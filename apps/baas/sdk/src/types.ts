@@ -39,6 +39,76 @@ export interface UpdateUserInput {
   data?: Record<string, unknown>;
 }
 
+/** External OAuth provider gotrue can redirect to (`/auth/v1/authorize`). */
+export type OAuthProvider =
+  | 'google' | 'github' | 'gitlab' | 'bitbucket' | 'azure' | 'apple'
+  | 'discord' | 'facebook' | 'twitter' | 'slack' | 'spotify'
+  | 'fortytwo' | 'keycloak' | 'workos' | (string & {});
+
+/** Input for `auth.signInWithOAuth()` — builds the gotrue authorize URL. */
+export interface SignInWithOAuthInput {
+  provider: OAuthProvider;
+  /** Where gotrue sends the browser back after the provider callback. */
+  redirectTo?: string;
+  /** Space- or comma-separated provider scopes (e.g. `'repo read:user'`). */
+  scopes?: string;
+  /** Extra query params appended to the authorize URL (provider-specific). */
+  queryParams?: Record<string, string>;
+}
+
+/** Result of `auth.signInWithOAuth()` — the URL to open in the browser. */
+export interface SignInWithOAuthResult {
+  provider: OAuthProvider;
+  url: string;
+}
+
+/** MFA factor types gotrue supports today (`/auth/v1/factors`). */
+export type MfaFactorType = 'totp' | 'phone';
+
+/** Body for `auth.mfa.enroll()`. */
+export interface MfaEnrollInput {
+  factorType?: MfaFactorType;
+  /** Human-friendly factor name. */
+  friendlyName?: string;
+  /** Issuer label embedded in the TOTP otpauth URI. */
+  issuer?: string;
+  /** Phone number — required when `factorType: 'phone'`. */
+  phone?: string;
+}
+
+/** Response of an MFA enrollment (TOTP carries the QR/secret). */
+export interface MfaEnrollResult {
+  id: string;
+  type: MfaFactorType;
+  friendly_name?: string;
+  totp?: {
+    qr_code: string;
+    secret: string;
+    uri: string;
+  };
+  [key: string]: unknown;
+}
+
+/** Body for `auth.mfa.challenge()`. */
+export interface MfaChallengeInput {
+  factorId: string;
+}
+
+/** Response of an MFA challenge — `id` is passed back to `verify()`. */
+export interface MfaChallengeResult {
+  id: string;
+  expires_at?: number;
+  [key: string]: unknown;
+}
+
+/** Body for `auth.mfa.verify()` — confirms a challenge with a code. */
+export interface MfaVerifyInput {
+  factorId: string;
+  challengeId: string;
+  /** The TOTP / SMS code the user entered. */
+  code: string;
+}
+
 export interface AdminCreateUserInput extends SignUpInput {
   email_confirm?: boolean;
   user_metadata?: Record<string, unknown>;
@@ -82,7 +152,48 @@ export interface ResourceQueryBuilder<Row = Record<string, unknown>> {
   ): Promise<TResult>;
 }
 
-export type RestFilterOperator = 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'like' | 'ilike' | 'is';
+export type RestFilterOperator =
+  | 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'like' | 'ilike' | 'is' | 'in';
+
+/** Options for the fluent builder's `.order()` — PostgREST sort direction. */
+export interface RestOrderOptions {
+  /** `true` → `.asc`, `false` → `.desc` (PostgREST default is ascending). */
+  ascending?: boolean;
+  /** `true` → `.nullsfirst`, `false` → `.nullslast`. */
+  nullsFirst?: boolean;
+}
+
+/**
+ * Supabase-shaped chainable REST builder (`.eq/.in/.or/.order/.range/.single`).
+ * Each method returns `this`, and the chain is a thenable that resolves to the
+ * PostgREST rows — the same wire shape the options-object `select()` produces.
+ */
+export interface RestQueryBuilder<Row = Record<string, unknown>, TResult = Row[]>
+  extends PromiseLike<TResult> {
+  select(columns?: string): RestQueryBuilder<Row, TResult>;
+  eq(column: keyof Row | string, value: FilterPrimitive): RestQueryBuilder<Row, TResult>;
+  neq(column: keyof Row | string, value: FilterPrimitive): RestQueryBuilder<Row, TResult>;
+  gt(column: keyof Row | string, value: FilterPrimitive): RestQueryBuilder<Row, TResult>;
+  gte(column: keyof Row | string, value: FilterPrimitive): RestQueryBuilder<Row, TResult>;
+  lt(column: keyof Row | string, value: FilterPrimitive): RestQueryBuilder<Row, TResult>;
+  lte(column: keyof Row | string, value: FilterPrimitive): RestQueryBuilder<Row, TResult>;
+  like(column: keyof Row | string, pattern: string): RestQueryBuilder<Row, TResult>;
+  ilike(column: keyof Row | string, pattern: string): RestQueryBuilder<Row, TResult>;
+  is(column: keyof Row | string, value: FilterPrimitive): RestQueryBuilder<Row, TResult>;
+  in(column: keyof Row | string, values: ReadonlyArray<FilterPrimitive>): RestQueryBuilder<Row, TResult>;
+  /** Raw PostgREST `or=` group, e.g. `or('age.gt.18,name.eq.Al')`. */
+  or(filter: string): RestQueryBuilder<Row, TResult>;
+  order(column: keyof Row | string, options?: RestOrderOptions): RestQueryBuilder<Row, TResult>;
+  limit(count: number): RestQueryBuilder<Row, TResult>;
+  range(from: number, to: number): RestQueryBuilder<Row, TResult>;
+  /** Expect exactly one row — resolves to a single `Row` (not an array). */
+  single(): RestQueryBuilder<Row, Row>;
+  /** Expect at most one row — resolves to `Row | null`. */
+  maybeSingle(): RestQueryBuilder<Row, Row | null>;
+}
+
+/** Scalar value accepted by a fluent filter clause. */
+export type FilterPrimitive = string | number | boolean | null;
 
 export interface RestRequestOptions {
   apiKey?: string;
@@ -112,6 +223,12 @@ export interface RestResourceBuilder<Row = Record<string, unknown>> {
   insert<TResult = Row>(values: Partial<Row> | Array<Partial<Row>>, options?: RestMutationOptions): Promise<TResult>;
   update<TResult = Row[]>(values: Partial<Row>, options?: RestQueryOptions<Row> & RestMutationOptions): Promise<TResult>;
   delete<TResult = Row[]>(options?: RestQueryOptions<Row> & RestMutationOptions): Promise<TResult>;
+  /**
+   * Open a supabase-js-style fluent, chainable read builder. Back-compat: the
+   * options-object `select(options)` above is unchanged; this is the new path.
+   *   await client.from('users').query().select('id,name').eq('active', true).single()
+   */
+  query(options?: RestRequestOptions): RestQueryBuilder<Row>;
 }
 
 export interface PresignInput {

@@ -17,7 +17,14 @@ import type {
   AdminCreateUserInput,
   AdminGenerateLinkInput,
   AdminUpdateUserInput,
+  MfaChallengeInput,
+  MfaChallengeResult,
+  MfaEnrollInput,
+  MfaEnrollResult,
+  MfaVerifyInput,
   RecoverInput,
+  SignInWithOAuthInput,
+  SignInWithOAuthResult,
   SignInWithPasswordInput,
   SignUpInput,
   UpdateUserInput,
@@ -26,16 +33,37 @@ import type {
 
 export class AuthClient {
   readonly admin: AuthAdminClient;
+  /** Multi-factor (TOTP / phone) enrollment + challenge/verify (gotrue). */
+  readonly mfa: AuthMfaClient;
 
   constructor(
     private readonly http: HttpClient,
     private readonly serviceRoleKey?: string,
   ) {
     this.admin = new AuthAdminClient(http, serviceRoleKey);
+    this.mfa = new AuthMfaClient(http);
   }
 
   async signIn(input: SignInWithPasswordInput): Promise<AuthSession> {
     return this.signInWithPassword(input);
+  }
+
+  /**
+   * Build the gotrue `/auth/v1/authorize` URL for a social/OIDC provider. Like
+   * supabase-js, this does **not** issue a request — it returns the URL the
+   * caller opens in the browser (gotrue 302s to the provider, then back to
+   * `redirectTo`). The `apikey` is appended so the gateway accepts the redirect.
+   */
+  signInWithOAuth(input: SignInWithOAuthInput): SignInWithOAuthResult {
+    const url = this.http.buildUrl(routes.auth.authorize);
+    url.searchParams.set('provider', input.provider);
+    url.searchParams.set('apikey', this.http.getAnonKey());
+    if (input.redirectTo) url.searchParams.set('redirect_to', input.redirectTo);
+    if (input.scopes) url.searchParams.set('scopes', input.scopes);
+    for (const [key, value] of Object.entries(input.queryParams ?? {})) {
+      url.searchParams.set(key, value);
+    }
+    return { provider: input.provider, url: url.toString() };
   }
 
   async signInWithPassword(input: SignInWithPasswordInput): Promise<AuthSession> {
@@ -138,6 +166,48 @@ export class AuthAdminClient {
       apiKey: this.serviceRoleKey,
       bearerToken: this.serviceRoleKey,
     });
+  }
+}
+
+/**
+ * MFA helpers against gotrue's `/auth/v1/factors` surface. Enroll returns the
+ * TOTP secret/QR (or registers a phone factor); challenge opens a verification
+ * window; verify confirms the code and (on success) upgrades the session's AAL.
+ * All three require an authenticated session (the user enrolling the factor).
+ */
+export class AuthMfaClient {
+  constructor(private readonly http: HttpClient) {}
+
+  async enroll(input: MfaEnrollInput = {}): Promise<MfaEnrollResult> {
+    return this.http.request<MfaEnrollResult>(routes.auth.factors, {
+      method: 'POST',
+      body: {
+        factor_type: input.factorType ?? 'totp',
+        friendly_name: input.friendlyName,
+        issuer: input.issuer,
+        phone: input.phone,
+      },
+    });
+  }
+
+  async challenge(input: MfaChallengeInput): Promise<MfaChallengeResult> {
+    return this.http.request<MfaChallengeResult>(routes.auth.factorChallenge(input.factorId), {
+      method: 'POST',
+      body: {},
+    });
+  }
+
+  async verify(input: MfaVerifyInput): Promise<AuthSession> {
+    const session = await this.http.request<AuthSession>(routes.auth.factorVerify(input.factorId), {
+      method: 'POST',
+      body: { challenge_id: input.challengeId, code: input.code },
+    });
+    if (isAuthSession(session)) this.http.setSession(session);
+    return session;
+  }
+
+  async unenroll(factorId: string): Promise<unknown> {
+    return this.http.request(routes.auth.factor(factorId), { method: 'DELETE' });
   }
 }
 
