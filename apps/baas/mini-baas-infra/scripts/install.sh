@@ -33,7 +33,7 @@ case "${EDITION}" in
 esac
 
 OS="$(uname -s)"; ARCH="$(uname -m)"
-[ "${OS}" = "Linux" ] || fail "binocle v${VERSION} ships Linux binaries only (got ${OS}). Use the Docker image instead: ghcr.io/univers42/mini-baas/binocle-${EDITION}:${VERSION}"
+[ "${OS}" = "Linux" ] || fail "binocle v${VERSION} ships Linux binaries only (got ${OS}). Use the Docker image instead: dlesieur/binocle-${EDITION}:${VERSION}"
 case "${ARCH}" in
   x86_64|amd64) : ;;
   *) fail "binocle v${VERSION} ships linux-amd64 only (got ${ARCH}). arm64 is planned; meanwhile use the Docker image on an amd64 host." ;;

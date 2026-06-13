@@ -18,7 +18,7 @@ make quickstart                  # .env → stack up → health (default tier: e
 · **[SECURITY.md](SECURITY.md)** (model + checklist) · **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)**
 · **[RELEASE.md](RELEASE.md)** (how versions ship)
 
-Images: `ghcr.io/univers42/mini-baas/<service>:1.0.0` · SDK: `npm i @mini-baas/js`
+Images: `dlesieur/mini-baas-<service>:1.0.0` + `dlesieur/binocle-{nano,one}` on Docker Hub (SDK ships in-repo at `apps/baas/sdk`)
 
 ---
 

@@ -31,7 +31,7 @@ curl -fsSL https://github.com/Univers42/groot/releases/download/baas-v1.0.0/inst
 Prefer Docker? The same editions are images:
 
 ```sh
-docker run -d -p 8090:8090 -v one-data:/data ghcr.io/univers42/mini-baas/binocle-one:1.0.0
+docker run -d -p 8090:8090 -v one-data:/data dlesieur/binocle-one:1.0.0
 ```
 
 First request:
@@ -74,10 +74,14 @@ APIKEY=$(grep '^KONG_PUBLIC_API_KEY=' .env | cut -d= -f2)
 curl -s http://localhost:8000/auth/v1/health -H "apikey: ${APIKEY}"
 ```
 
-From a frontend, use the SDK:
+From a frontend, use the SDK — it ships in this repo (no npm registry
+involved; distribution is Docker Hub + this repo by design):
 
 ```sh
-npm install @mini-baas/js
+# as a file dependency from a checkout
+npm install ./apps/baas/sdk
+# or straight from git
+npm install git+https://github.com/Univers42/groot.git#main:apps/baas/sdk
 ```
 
 ```ts

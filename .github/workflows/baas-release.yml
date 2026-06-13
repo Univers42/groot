@@ -8,10 +8,13 @@
 # binary extraction → GitHub Release → post-publish probe.
 #
 # Tag namespace: baas-v[SEMVER] (bare v* belongs to other suite products).
-# Publishes:
-#   • 16 bake images        → ghcr.io/univers42/mini-baas/<svc>:VERSION + latest
-#   • binocle-nano / -one   → ghcr.io/univers42/mini-baas/binocle-{nano,one}
+# Publishes (DOCKER HUB ONLY for user-facing artifacts — public by default on
+# push, no GHCR visibility dance; decision 2026-06-13):
+#   • 16 bake images        → docker.io/dlesieur/mini-baas-<svc>:VERSION + latest
+#   • binocle-nano / -one   → docker.io/dlesieur/binocle-{nano,one}
 #   • binary tarballs+sha256 + install.sh → GitHub Release on this repo
+#   • buildx layer cache    → ghcr.io/univers42/mini-baas/cache:* (internal,
+#     CI-only — end users never pull it, visibility irrelevant)
 # v1.0 scope: linux/amd64 only (binocle Dockerfiles are x86_64-musl; arm64
 # bake matrix deferred to v1.1 — see apps/baas/mini-baas-infra/RELEASE.md).
 # ─────────────────────────────────────────────────────────────────────────────
@@ -24,7 +27,7 @@ on:
       - "baas-v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+"
 
 env:
-  GHCR_NS: ghcr.io/univers42/mini-baas
+  HUB_NS: docker.io/dlesieur
   INFRA: apps/baas/mini-baas-infra
 
 defaults:
@@ -70,7 +73,7 @@ jobs:
 
   # ── Bake: build + push the 16 suite images ──────────────────────────────────
   bake-publish:
-    name: Bake images → GHCR
+    name: Bake images → Docker Hub
     runs-on: ubuntu-latest
     needs: [version, gates]
     permissions:
@@ -79,6 +82,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
+      # Docker Hub — where the images go (public by default on push).
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+      # GHCR — layer-cache push only (cache-to refs in docker-bake.hcl).
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -113,16 +122,15 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
       - name: Build + push binocle images
         run: |
           VERSION="${{ needs.version.outputs.version }}"
           for ed in nano one; do
-            TAGS="-t ${GHCR_NS}/binocle-${ed}:${VERSION}"
+            TAGS="-t ${HUB_NS}/binocle-${ed}:${VERSION}"
             if [ "${{ needs.version.outputs.prerelease }}" = "false" ]; then
-              TAGS="$TAGS -t ${GHCR_NS}/binocle-${ed}:latest"
+              TAGS="$TAGS -t ${HUB_NS}/binocle-${ed}:latest"
             fi
             docker buildx build --push $TAGS \
               -f docker/services/data-plane-router/Dockerfile.${ed} \
@@ -186,9 +194,11 @@ jobs:
     steps:
       - name: Pull and probe published binocle-one
         working-directory: .
+        # Deliberately anonymous: proves the image is publicly pullable, which
+        # Docker Hub gives by default on push.
         run: |
           VERSION="${{ needs.version.outputs.version }}"
-          IMG="${GHCR_NS}/binocle-one:${VERSION}"
+          IMG="${HUB_NS}/binocle-one:${VERSION}"
           echo "Pulling ${IMG} ..."
           docker pull "${IMG}"
           docker run -d --name probe -p 8090:8090 "${IMG}"

@@ -93,7 +93,7 @@ Migrations are idempotent and applied by `db-bootstrap` on start.
 ## 5. Image pin policy
 
 - **First-party images** (the 16 suite images, binocle): exact version pins
-  (`ghcr.io/univers42/mini-baas/<svc>:1.0.0`).
+  (`dlesieur/mini-baas-<svc>:1.0.0` on Docker Hub).
 - **Third-party images**: pinned at least to major (`postgres:16-alpine`,
   `mongo:7`, `redis:7-alpine`) or exact (`kong:3.8`, `supabase/gotrue:v2.188.1`).
 - Want digest-level reproducibility? `scripts/pin-digests.sh` resolves every

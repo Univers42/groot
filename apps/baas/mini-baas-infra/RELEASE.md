@@ -7,8 +7,12 @@ root); these are the human steps around it.
 
 - **One umbrella version** for the suite: the 16 bake images + binocle-nano/one
   images and binaries all carry the same `X.Y.Z`.
-- **SDK** (`@mini-baas/js`) tracks the suite's major.minor; its patch floats
-  (npm requires monotonic versions).
+- **Distribution is Docker Hub only** (decision 2026-06-13): images live under
+  `docker.io/dlesieur/*` — public by default on push, no registry-visibility
+  step. The buildx layer cache rides GHCR internally (CI-only). Binary
+  tarballs + install.sh stay GitHub Release assets.
+- **SDK** (`@mini-baas/js`) ships IN-REPO (`apps/baas/sdk`) — consumed as a
+  file/git dependency; **not published to npm** (same decision).
 - **realtime-agnostic** versions independently (it's an upstream we pin, like
   `kong:3.8`). Bump procedure below.
 - **Tag namespace**: `baas-vX.Y.Z` in the monorepo (bare `v*` belongs to other
@@ -53,17 +57,14 @@ git tag -a baas-v1.0.0 -m "Grobase BaaS v1.0.0" && git push origin baas-v1.0.0
 
 ## Post-publish checklist
 
-- [ ] `monitor` job green (pulls the published binocle-one, container healthcheck passes)
-- [ ] **GHCR packages set to PUBLIC** (first push lands private — Settings →
-      Packages → change visibility; easy to forget)
+- [ ] `monitor` job green — it pulls the published binocle-one **anonymously**
+      from Docker Hub (public by default on push; the probe IS the visibility
+      check) and waits for the container healthcheck.
 - [ ] **Clean-VM smoke** (~20 min, fresh Ubuntu with only git/curl/make/docker):
-      Path A `curl …/baas-vX.Y.Z/install.sh | sh` → run → CRUD via curl;
+      Path A `curl …/baas-vX.Y.Z/install.sh | sh` → run → CRUD via curl
+      (or pure-Docker: `docker run -d -p 8090:8090 dlesieur/binocle-one:X.Y.Z`);
       Path B clone → `make quickstart` → `make health` green →
       `bash scripts/phase1-smoke-test.sh`. Save the transcript to `artifacts/`.
-- [ ] **SDK publish** (manual at v1.0): in `apps/baas/sdk` —
-      `npm run build && npm version X.Y.Z && npm publish --access public`
-      (`.npmrc` sets ignore-scripts, so build explicitly). Verify:
-      `npm view @mini-baas/js@X.Y.Z`.
 - [ ] Release notes: lead with the SKU table below; numbers cite their artifact.
 
 ## SKU lineup (release-notes template)
