@@ -60,21 +60,37 @@ to MinIO/S3:
 # enable scheduled backups
 docker compose --profile backups up -d pg-backup
 
-# take one NOW
-docker compose run --rm pg-backup once
+make backup-now        # take one NOW (wraps `pg-backup once`)
+make restore-verify    # prove a backup restores: dump→drop→restore→checksum
+                       # on a SCRATCH db; never touches tenant data (gate m47)
 
 # restore a specific artifact (downloads from MinIO to /restore, then applies)
 docker compose run --rm pg-backup restore <key>
 ```
 
 Manual path (no MinIO): `docker/services/postgres/tools/backup.sh` (pg_dump -Fc)
-and `restore.sh`. The verify gate `make verify-m47` proves the dump→restore
-round-trip against a scratch database without touching tenant data.
+and `restore.sh`. `make restore-verify` runs the m47 gate, so "is my backup
+actually restorable" is a one-command answer you can put on a schedule.
 
-**HA, honestly:** this stack is single-node. For production-critical Postgres,
-point `DATABASE_URL` at a managed/external Postgres (RDS, Cloud SQL, Fly PG) —
-every service follows the DSN. Self-hosted replica/failover is on the roadmap,
-not in v1.0.
+**Physical / WAL backups (D2):** `PG_BACKUP_PHYSICAL=1` switches to
+`pg_basebackup` + WAL instead of logical dumps — the base Postgres already runs
+`wal_level=logical` (the outbox slot needs it), which qualifies. Use it when
+restore-time beats portability; logical dumps stay the cross-version-safe default.
+
+**Connection pooling (D4):** `supavisor` (profiles `pooler`/`extras`, opt-in —
+NOT default) is the transaction pooler for **managed/external Postgres** or very
+high mount counts: point the control-plane DSNs at `:6543` instead of `:5432`.
+It is deliberately not in the default path because `DATA_PLANE_SHARE_POOLS=1`
+(C5) already makes pool count independent of tenant count — most deployments
+never need a separate pooler. It is not wired into the Rust data plane (which
+owns its pools directly).
+
+**HA, honestly (D5):** this stack is single-node. For production-critical
+Postgres, point `DATABASE_URL` at a managed/external Postgres (RDS, Cloud SQL,
+Fly PG, Supabase) — every service follows the DSN, and the provider gives you
+the replica/failover/PITR a self-hosted single node cannot. **That DSN swap is
+the supported v1 HA answer**; self-hosted replica/failover (Patroni etc.) is
+documented-advanced, not the default path.
 
 ## 4. Upgrades
 

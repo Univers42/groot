@@ -509,6 +509,14 @@ update: ## Update git submodules
 legacy-%: ## Run any target from the preserved Makefile.legacy
 	@$(MAKE) -f Makefile.legacy $*
 
+backup-now: ## Take a one-off Postgres backup right now (pg-backup `once` → MinIO)
+	@echo -e "$(_B)Running an on-demand backup (pg-backup once)…$(_0)"
+	@docker compose --profile backups run --rm pg-backup once \
+		&& echo -e "$(_G)✓ backup complete — under the configured MinIO bucket$(_0)"
+
+restore-verify: ## Prove a backup restores (dump→drop→restore→checksum, scratch DB; tenant data untouched)
+	@bash scripts/verify/m47-backup-restore.sh
+
 # ========================================================================== #
 ##@ Release
 # ========================================================================== #
@@ -581,4 +589,5 @@ help: ## Show this help
         rust-realtime-check rust-realtime-test rust-realtime-build _rust-toolchain \
         go-control-plane-build preflight hooks update help \
         quickstart release-binaries release-images release-check _require-version \
+        backup-now restore-verify \
         _require-docker _require-compose _rm-stale
