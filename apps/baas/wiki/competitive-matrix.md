@@ -194,7 +194,7 @@ Competitor cells use the audited source glyphs: `v` = first-class, `~` = partial
 
 > [†] Essential-tier footprint **re-baselined post-cutover** to **~660 MiB across 13 services** (commit `4325a24`; was ~950 MiB / 19 services before the FLIP orchestrator cutover retired Node six). Gate m32 is the already-shipped footprint gate.
 >
-> [‡] **Measured head-to-head vs self-hosted Supabase** (2026-06-13, same box, same probe — `scripts/bench/grobase-vs-supabase.sh`): Supabase self-host = **2827 MiB / 13 containers**; Grobase essential = **~660 MiB** (**~4.3× lighter**), pro ~1.4 GiB (~2× lighter), for a comparable pg+auth+REST+realtime+storage surface. PostgREST read latency is at **parity** (Grobase p50 1.45 / p95 2.40 ms vs Supabase p50 1.58 / p95 2.66 ms — both run the same PostgREST). The edge is footprint + multi-engine + dense multi-tenancy, not raw read speed.
+> [‡] **Measured head-to-head vs self-hosted Supabase** (2026-06-13, same box, same probe — `scripts/bench/grobase-vs-supabase.sh`): Supabase self-host = **2884 MiB / 13 containers**; the **like-for-like Grobase parity shape** (Postgres + auth + REST + realtime + storage + functions + gateway) = **~448 MiB** (~600 MiB incl. the Studio dashboard) → **~5–6× lighter for the same feature surface**. PostgREST read latency is at **parity** (both run the same PostgREST — they trade ±0.1–0.4 ms across runs). Full service-for-service map + per-service RSS (e.g. Supabase realtime 269 MiB vs our Rust realtime 20 MiB): [grobase-vs-supabase-offer.md](./grobase-vs-supabase-offer.md). The edge is footprint + multi-engine + dense multi-tenancy, not raw read speed.
 
 ### Multi-tenancy
 
