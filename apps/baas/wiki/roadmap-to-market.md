@@ -85,6 +85,15 @@ Work executed this session (verified):
     build + typecheck + **68/68** tests + `npm ci` lock-in-sync; `docker compose config`
     valid (resolved the orchestrator-vs-scheduler host-port clash: orchestrator keeps 3026,
     function-scheduler moved to 3027). No legacy code deleted; no `Co-Authored-By` lines.
+  - **Adversarial review (14-agent workflow, find→verify) — 8 real findings, 0 dismissed,
+    all FIXED before tagging.** It caught a genuine multi-tenancy hole: the new realtime
+    `handle_broadcast`/`handle_publish`/`handle_track` checked *authentication* but not
+    *authorization*, so a token scoped to `tenant_a` could broadcast / publish / inject
+    presence into `tenant_b` topics — they now gate on `authorize_publish` like
+    `handle_subscribe` does (regression test `test_jwt_authorize_publish_is_namespace_scoped`).
+    Also fixed: WS publish/broadcast payload caps (65 KB, matching REST) + presence-meta cap
+    (16 KB) against DoS, and a `baas functions deploy` path-traversal. The review working is
+    itself the audit-ready posture in action (see [security-audit.md](security-audit.md)).
     **Residual for full `[v]`:** live-stack e2e gates (m56 functions-DX, m59 GraphQL+realtime)
     + a pg_graphql-capable Postgres image.
 
