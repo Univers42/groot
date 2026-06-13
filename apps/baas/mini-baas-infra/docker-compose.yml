@@ -1014,7 +1014,10 @@ services:
     environment:
       ADAPTER_REGISTRY_HOST: 0.0.0.0
       ADAPTER_REGISTRY_PORT: 3021
-      ADAPTER_REGISTRY_PRODUCT_MODE: ${ADAPTER_REGISTRY_GO_PRODUCT_MODE:-shadow}
+      # enabled: adapter-registry-go is the live mount-resolution path (the
+      # scrypt-convoy fix m39, isolation m46, enforcement m53 all run against
+      # it). ProductMode is an informational label; this just makes status honest.
+      ADAPTER_REGISTRY_PRODUCT_MODE: ${ADAPTER_REGISTRY_GO_PRODUCT_MODE:-enabled}
       DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/postgres}
       VAULT_ENC_KEY: ${VAULT_ENC_KEY:-0123456789abcdef0123456789abcdef}
       INTERNAL_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
@@ -1071,7 +1074,9 @@ services:
     environment:
       TENANT_CONTROL_HOST: 0.0.0.0
       TENANT_CONTROL_PORT: 3022
-      TENANT_CONTROL_PRODUCT_MODE: ${TENANT_CONTROL_PRODUCT_MODE:-shadow}
+      # enabled: tenant-control is the ONLY auth/key/tenant path — not shadow,
+      # the production control plane (m12, m28, the B3/m50 revoke drill).
+      TENANT_CONTROL_PRODUCT_MODE: ${TENANT_CONTROL_PRODUCT_MODE:-enabled}
       DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/postgres}
       INTERNAL_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
       SERVICE_TOKEN_MODE: ${SERVICE_TOKEN_MODE:-hmac}
@@ -1140,7 +1145,10 @@ services:
     environment:
       WEBHOOK_DISPATCHER_HOST: 0.0.0.0
       WEBHOOK_DISPATCHER_PORT: 3025
-      WEBHOOK_DISPATCHER_PRODUCT_MODE: ${WEBHOOK_DISPATCHER_PRODUCT_MODE:-shadow}
+      # enabled: the dispatcher delivers webhooks live (m29 automations, the F2
+      # jitter + baas_webhook_deliveries_total metrics). The orchestrator below
+      # stays `shadow` — the six Node services still serve Kong (A not cut over).
+      WEBHOOK_DISPATCHER_PRODUCT_MODE: ${WEBHOOK_DISPATCHER_PRODUCT_MODE:-enabled}
       DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/postgres}
       WEBHOOK_REDIS_URL: ${WEBHOOK_REDIS_URL:-${OUTBOX_REDIS_URL:-redis://redis:6379}}
       WEBHOOK_GROUP: ${WEBHOOK_GROUP:-webhook-dispatcher}
