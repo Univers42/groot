@@ -114,7 +114,7 @@ mod tests {
     }
 
     /// The serialize-once frame must be byte-identical to the previous
-    /// full-struct serde output, for every sub_id (including ones needing JSON
+    /// full-struct serde output, for every `sub_id` (including ones needing JSON
     /// escaping) — otherwise the wire protocol silently changes.
     #[test]
     fn serialize_once_is_byte_identical_to_serde() {
