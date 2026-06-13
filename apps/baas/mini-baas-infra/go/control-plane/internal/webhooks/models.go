@@ -5,9 +5,14 @@ package webhooks
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"net/url"
 	"time"
 )
+
+// maxBackoff caps the exponential retry delay. The jittered result never
+// exceeds it (jitter only fills the lower half — see backoff).
+const maxBackoff = 5 * time.Minute
 
 // Subscription is a public webhook subscription metadata view.
 type Subscription struct {
@@ -111,18 +116,25 @@ func matchAny(patterns []string, candidate string) bool {
 	return false
 }
 
-// backoff returns the delay before the next attempt using exponential backoff
-// capped at 5 minutes, with a small jitter to avoid thundering herds.
+// backoff returns the delay before the next attempt: exponential (2^attempt
+// seconds) capped at 5 minutes, then EQUAL JITTER. Half the delay stays
+// deterministic so the cap still bounds worst-case latency; the other half is
+// randomized so a batch of deliveries that failed together (a subscriber
+// outage) don't resynchronize their retries into a thundering herd the moment
+// the endpoint recovers. Result is always within [d/2, d] — never over the cap.
+//
+// (Until now this was deterministic despite the doc-comment claiming jitter —
+// the herd risk was real; see TestBackoffJitterBounds.)
 func backoff(attempt int) time.Duration {
 	if attempt < 1 {
 		attempt = 1
 	}
 	d := time.Duration(1<<min(attempt, 9)) * time.Second
-	cap := 5 * time.Minute
-	if d > cap {
-		d = cap
+	if d > maxBackoff {
+		d = maxBackoff
 	}
-	return d
+	half := d / 2
+	return half + time.Duration(rand.Int64N(int64(half)+1))
 }
 
 func min(a, b int) int {
