@@ -31,12 +31,40 @@ BEGIN
     CREATE EXTENSION IF NOT EXISTS pg_graphql;
 
     -- Expose the resolver schema to the API roles so PostgREST can call
-    -- graphql.resolve() under the caller's role + RLS.
+    -- graphql.resolve() under the caller's role + RLS. NOTE the real signature
+    -- is (query text, variables jsonb, "operationName" text, extensions jsonb)
+    -- — the 4th arg is jsonb, not boolean (pg_graphql 1.6.x).
     GRANT USAGE ON SCHEMA graphql TO anon, authenticated, service_role;
-    GRANT ALL ON FUNCTION graphql.resolve(text, jsonb, text, boolean)
+    GRANT ALL ON FUNCTION graphql.resolve(text, jsonb, text, jsonb)
       TO anon, authenticated, service_role;
 
-    RAISE NOTICE 'pg_graphql enabled: /graphql/v1 is live.';
+    -- PostgREST has NO native /graphql route. The Supabase-standard bridge is a
+    -- `graphql_public.graphql(...)` RPC that wraps graphql.resolve(); PostgREST
+    -- exposes it as POST /rpc/graphql (Kong maps /graphql/v1 → /rpc/graphql).
+    -- The arg NAMES must match the SDK's JSON body keys (query/variables/
+    -- operationName) so PostgREST binds them positionally-by-name.
+    CREATE SCHEMA IF NOT EXISTS graphql_public;
+    CREATE OR REPLACE FUNCTION graphql_public.graphql(
+      "operationName" text DEFAULT NULL,
+      query text DEFAULT NULL,
+      variables jsonb DEFAULT NULL,
+      extensions jsonb DEFAULT NULL
+    ) RETURNS jsonb
+      LANGUAGE sql
+      VOLATILE
+    AS $func$
+      SELECT graphql.resolve(
+        query := query,
+        variables := COALESCE(variables, '{}'),
+        "operationName" := "operationName",
+        extensions := extensions
+      );
+    $func$;
+    GRANT USAGE ON SCHEMA graphql_public TO anon, authenticated, service_role;
+    GRANT EXECUTE ON FUNCTION graphql_public.graphql(text, text, jsonb, jsonb)
+      TO anon, authenticated, service_role;
+
+    RAISE NOTICE 'pg_graphql enabled: /graphql/v1 → /rpc/graphql is live.';
   ELSE
     RAISE NOTICE
       'pg_graphql NOT available in this Postgres image (postgres:16-alpine '

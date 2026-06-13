@@ -9,8 +9,11 @@
 //! `OutboxService.emitForQuery` column set + payload so downstream consumers are
 //! oblivious to which plane produced the event.
 //!
-//! Disabled (no-op) unless `DATA_PLANE_OUTBOX_DSN` is set, so it ships dormant
-//! alongside the bypass.
+//! No-op only when `DATA_PLANE_OUTBOX_DSN` is unset. The default compose sets
+//! it (to the system Postgres) and `/data/v1` is on by default, so this emitter
+//! is LIVE on the standard stack — the Rust plane stamps the same authoritative
+//! top-level `tenant_id` (the verified slug, identical to the TS query-router)
+//! that the function-trigger + webhook dispatchers tenant-scope delivery on.
 //!
 //! ## D-write-tail (background emission)
 //!
@@ -79,6 +82,12 @@ impl OutboxRow {
         // consumer can act without re-reading the row.
         let sample: Vec<Value> = result.rows.iter().take(10).cloned().collect();
         let payload = json!({
+            // Top-level AUTHORITATIVE tenant (slug) from the verified request
+            // identity — the same value `apply_rls_context` scopes the write to,
+            // never a user-writable row column. The outbox consumers
+            // (function-trigger + webhook dispatchers) tenant-scope delivery on
+            // this field, so it must be server-derived (cross-tenant-safe).
+            "tenant_id": identity.tenant_id,
             "engine": engine,
             "resource": resource,
             "op": op_str,
@@ -93,7 +102,6 @@ impl OutboxRow {
         // actor_id / request_id are uuid columns; the bypass principal is
         // `api-key:<uuid>` (not a bare uuid), which the query-router also nulls —
         // so both planes write NULL here (parity).
-        let _ = identity;
         Some(Self {
             resource: resource.to_string(),
             aggregate_id,
@@ -380,6 +388,10 @@ mod tests {
         assert_eq!(row.idempotency_key.as_deref(), Some("idem-1"));
         assert_eq!(row.payload["emitted_by"], "rust-data-plane");
         assert_eq!(row.payload["rowCount"], 1);
+        // The authoritative tenant (slug) is stamped top-level so the outbox
+        // consumers (function-trigger + webhook dispatchers) can tenant-scope
+        // delivery — sourced from the verified identity, not a row column.
+        assert_eq!(row.payload["tenant_id"], "t1");
     }
 
     #[test]

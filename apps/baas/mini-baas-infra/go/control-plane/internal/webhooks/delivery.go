@@ -233,8 +233,15 @@ func (d *Dispatcher) handleEvent(ctx context.Context, aggregate string, msg redi
 }
 
 // lookupMatching reads the active subscription set for the tenant and filters
-// in-Go. For modest sub counts (<10k/tenant) this is cheaper than a SQL filter
-// on TEXT[] columns.
+// the event-type/aggregate match in-Go. For modest sub counts (<10k/tenant)
+// in-Go matching on the TEXT[] columns is cheaper than a SQL array filter.
+//
+// The `tenant_id = $1` predicate is the AUTHORITATIVE tenant scope and is NOT
+// optional: this dispatcher connects to the system Postgres as the table-owning
+// `postgres` superuser, so the per-tenant RLS policy on webhook_subscriptions
+// is silently bypassed (owner + ENABLE-not-FORCE). Without it, a write in one
+// tenant would POST that tenant's row payload to EVERY tenant's webhook URL —
+// a cross-tenant data-exfiltration breach. We scope explicitly in SQL.
 func (d *Dispatcher) lookupMatching(ctx context.Context, tenantID, aggregate, eventType string) ([]Subscription, error) {
 	if tenantID == "" {
 		return nil, nil
@@ -246,7 +253,7 @@ func (d *Dispatcher) lookupMatching(ctx context.Context, tenantID, aggregate, ev
 			       active, headers::text, max_attempts, timeout_ms,
 			       created_at::text, updated_at::text
 			  FROM public.webhook_subscriptions
-			 WHERE active = true`)
+			 WHERE active = true AND tenant_id = $1`, tenantID)
 		if err != nil {
 			return err
 		}

@@ -102,6 +102,24 @@ plugins:
           kong.service.request.clear_header("X-User-Id")
           kong.service.request.clear_header("X-User-Email")
           kong.service.request.clear_header("X-User-Role")
+          -- On the PUBLIC app routes the tenant is ALWAYS server-derived (from
+          -- the verified api-key principal / JWT `sub`), never client-supplied.
+          --  * /functions/ : the runtime namespaces by the first of
+          --    X-Baas-Tenant-Id / X-Baas-User-Id / X-Tenant-Id / X-User-Id, so a
+          --    forged *-Tenant-Id would read/deploy ANOTHER tenant's functions.
+          --  * /query/ : the legacy TS query-router defaults to compat identity
+          --    mode (NODE_ENV unset), which trusts a raw X-Baas-Tenant-Id; the
+          --    api-key middleware re-derives the authoritative tenant from the
+          --    verified key once the forged header is gone.
+          -- Strip the forgeable namespace headers on both (admin/* routes are
+          -- service-role + ip-restricted and the internal dispatcher invoke
+          -- bypasses Kong, so neither legitimate path is affected).
+          local _p = kong.request.get_path()
+          if _p and (_p:sub(1, 11) == "/functions/" or _p:sub(1, 7) == "/query/") then
+            kong.service.request.clear_header("X-Baas-Tenant-Id")
+            kong.service.request.clear_header("X-Baas-User-Id")
+            kong.service.request.clear_header("X-Tenant-Id")
+          end
           local auth = kong.request.get_header("authorization")
           if not auth then return end
           local token = auth:match("^[Bb]earer%s+(.+)$")
@@ -183,7 +201,7 @@ services:
   # vendored `postgres:16-alpine` image does NOT ship the extension, so this
   # route returns an error until an image that bundles pg_graphql is used.
   - name: graphql
-    url: http://postgrest:3000/graphql
+    url: http://postgrest:3000/rpc/graphql
     routes:
       - name: graphql-routes
         paths: [/graphql/v1]
@@ -200,6 +218,14 @@ services:
               claims_to_verify: [exp]
               run_on_preflight: false
               anonymous: __KONG_ANON_UUID__
+          # graphql_public is not PostgREST's default schema; force the RPC to
+          # resolve graphql_public.graphql() so SDK clients POST plain {query}.
+          - name: request-transformer
+            config:
+              add:
+                headers: ["Content-Profile:graphql_public"]
+              replace:
+                headers: ["Content-Profile:graphql_public"]
           - name: rate-limiting
             config:
               policy: local
@@ -433,7 +459,7 @@ services:
             config: { policy: local, limit_by: ip, minute: 60, hour: 1000 }
 
   - name: admin-function-schedules
-    url: http://webhook-dispatcher:3025/v1/function-schedules
+    url: http://function-scheduler:3027/v1/function-schedules
     routes:
       - name: admin-function-schedules
         paths: [/admin/v1/function-schedules]

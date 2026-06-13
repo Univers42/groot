@@ -437,6 +437,7 @@ export class QueryService implements OnModuleInit {
         filter: dto.filter,
         requestId: context.requestId,
         actorId: userId,
+        tenantId,
         idempotencyKey: dto.idempotencyKey,
       })
       .catch((error: Error) => {
@@ -604,6 +605,7 @@ export class QueryService implements OnModuleInit {
           filter: o.filter,
           requestId: context.requestId,
           actorId: userId,
+          tenantId: context.identity?.tenantId ?? userId,
           idempotencyKey: o.idempotencyKey,
         })
         .catch((error: Error) =>
