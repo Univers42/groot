@@ -704,3 +704,42 @@ export interface FunctionInvokeOptions {
   /** Extra request headers forwarded to the function. */
   headers?: HeadersInit;
 }
+
+// ── A5: GraphQL (pg_graphql passthrough via PostgREST) ───────────────────────
+
+/** A GraphQL request, POSTed to `/graphql/v1`. */
+export interface GraphqlRequest<Variables = Record<string, unknown>> {
+  /** The GraphQL document (query or mutation). */
+  query: string;
+  /** Variables referenced by the document. */
+  variables?: Variables;
+  /** Operation name when the document defines several. */
+  operationName?: string;
+}
+
+/**
+ * A GraphQL response envelope (per the GraphQL-over-HTTP spec). `data` is
+ * present on success; `errors` is present (non-empty) when the operation
+ * produced any errors. Both can be present for partial results.
+ */
+export interface GraphqlResponse<Data = Record<string, unknown>> {
+  data?: Data;
+  errors?: GraphqlError[];
+  extensions?: Record<string, unknown>;
+}
+
+/** A single GraphQL error entry. */
+export interface GraphqlError {
+  message: string;
+  path?: (string | number)[];
+  locations?: { line: number; column: number }[];
+  extensions?: Record<string, unknown>;
+}
+
+/** Options for a single GraphQL call. */
+export interface GraphqlQueryOptions {
+  /** Operation name when the document defines several. */
+  operationName?: string;
+  /** Extra request headers. */
+  headers?: HeadersInit;
+}
