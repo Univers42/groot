@@ -343,7 +343,7 @@ services:
       dockerfile: Dockerfile
       args:
         APP: outbox-relay
-    profiles: [adapter-plane, background]
+    profiles: [legacy-node]   # A4/A5: retired — orchestrator carries this (rollback: start the legacy-node profile)
     container_name: mini-baas-outbox-relay
     env_file: [.env]
     environment:
@@ -1192,9 +1192,16 @@ services:
     environment:
       ORCHESTRATOR_HOST: 0.0.0.0
       ORCHESTRATOR_PORT: 3026
-      ORCHESTRATOR_PRODUCT_MODE: ${ORCHESTRATOR_PRODUCT_MODE:-shadow}
+      # A4 cutover (2026-06-13): the orchestrator is now the LIVE path — Kong
+      # routes /logs /sessions /newsletter /gdpr /email here (kong.yml), and the
+      # six Node orchestrators are quarantined to the `legacy-node` profile (not
+      # started by default). enabled, not shadow. Rollback: re-point kong.yml +
+      # start the legacy-node profile. Gates: m48 (parity), m49 (through-Kong).
+      ORCHESTRATOR_PRODUCT_MODE: ${ORCHESTRATOR_PRODUCT_MODE:-enabled}
       # Comma list of ported sub-services (empty = all). Start with log only.
-      ORCHESTRATOR_SERVICES: ${ORCHESTRATOR_SERVICES:-log}
+      # Empty = ALL ported sub-services (selectServices default). The cutover
+      # runs the full six; override to a subset only for shadow experiments.
+      ORCHESTRATOR_SERVICES: ${ORCHESTRATOR_SERVICES:-}
       DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/postgres}
       INTERNAL_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
       LOG_SERVICE_LOKI_URL: ${LOG_SERVICE_LOKI_URL:-http://loki:3100/loki/api/v1/push}
@@ -1252,7 +1259,7 @@ services:
       dockerfile: Dockerfile
       args:
         APP: email-service
-    profiles: [background]
+    profiles: [legacy-node]   # A4/A5: retired — orchestrator carries this (rollback: start the legacy-node profile)
     container_name: mini-baas-email-service
     env_file: [.env]
     environment:
@@ -1426,7 +1433,7 @@ services:
       dockerfile: Dockerfile
       args:
         APP: gdpr-service
-    profiles: [background, control-plane]
+    profiles: [legacy-node]   # A4/A5: retired — orchestrator carries this (rollback: start the legacy-node profile)
     container_name: mini-baas-gdpr-service
     env_file: [.env]
     environment:
@@ -1458,7 +1465,7 @@ services:
       dockerfile: Dockerfile
       args:
         APP: newsletter-service
-    profiles: [background]
+    profiles: [legacy-node]   # A4/A5: retired — orchestrator carries this (rollback: start the legacy-node profile)
     container_name: mini-baas-newsletter-service
     env_file: [.env]
     environment:
@@ -1532,7 +1539,7 @@ services:
       dockerfile: Dockerfile
       args:
         APP: log-service
-    profiles: [observability, background]
+    profiles: [legacy-node]   # A4/A5: retired — orchestrator carries this (rollback: start the legacy-node profile)
     container_name: mini-baas-log-service
     env_file: [.env]
     environment:
@@ -1560,7 +1567,7 @@ services:
       dockerfile: Dockerfile
       args:
         APP: session-service
-    profiles: [background]
+    profiles: [legacy-node]   # A4/A5: retired — orchestrator carries this (rollback: start the legacy-node profile)
     container_name: mini-baas-session-service
     env_file: [.env]
     environment:

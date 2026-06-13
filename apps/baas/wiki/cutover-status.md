@@ -68,23 +68,25 @@ fallback. `make verify-m36` proves readiness; it does **not** authorize deletion
 `DATA_PLANE_BYPASS_ENABLED=0` removes the `/data/v1` routes (the app is unaffected —
 it still uses `/query/v1`).
 
-## Orchestrator cutover (Track-2 A) — readiness foundation, NOT yet flipped
+## Orchestrator cutover (Track-2 A) — FLIPPED, the −262 MiB is realized
 
 The six Node orchestrators (log/email/session/newsletter/gdpr/outbox-relay) are
-being folded into ONE Go binary (`cmd/orchestrator`), same shadow→parity→cutover
-discipline. State 2026-06-13:
+folded into ONE Go binary (`cmd/orchestrator`). Cutover executed 2026-06-13:
 
 | Item | Status |
 |---|---|
-| Consolidated Go binary boots all sub-services | ✅ live (health green, schema bootstraps run) |
-| **Footprint win** | ✅ **MEASURED: 4.6 MiB (Go, 5 svcs) vs 267 MiB (Node five) = −262 MiB / 98%** |
-| Sub-service unit tests | ✅ all 6 green |
-| Response parity (envelope + bigint-string ids) | ✅ ported (`internal/orchestrator/envelope`) — gate **m48** green on newsletter |
-| Full parity matrix (session/gdpr strict-auth, log/Loki, email/Mailpit, outbox XRANGE) | ⏳ newsletter proven; others need the gate to mint signed envelopes |
-| Trust model | ✅ raw-header `requireUser` is identical to the LIVE adapter-registry-go / tenant-control (network-boundary, Kong sole ingress) — consistent, not a regression |
-| Kong flip + 48h soak (A4) | ⏳ NOT done |
-| Node retirement (A5) | ⏳ CLOSED — deletion gate needs the flip + soak first |
+| Consolidated Go binary runs all 6 sub-services | ✅ live (9 MiB RSS, health green) |
+| **Footprint win** | ✅ **REALIZED: orchestrator 9 MiB carries all 6 vs the Node six's ~300 MiB = −~290 MiB** |
+| Sub-service unit tests | ✅ all 6 green; A3 Mongo projector driver-backed + 9 tests |
+| Response parity (envelope + bigint-string ids) | ✅ `internal/orchestrator/envelope` — gate **m48** (newsletter byte-parity) |
+| session/gdpr | ✅ the Go ports SERVE where the Node services 500 ("permission denied for schema session") — the cutover FIXES bugs (m48) |
+| **Kong flip (A4)** | ✅ **DONE** — kong.yml routes /logs /sessions /newsletter /gdpr /email → `orchestrator:3026` (log/session namespaced); gate **m49** through-Kong green |
+| **Node retirement (A5)** | ◑ **quarantined** to `profiles:[legacy-node]` (not started by default) + removed from the editions → the win is the DEFAULT. The SOURCE (`src/apps/{...}`) is KEPT — deletion is the post-soak, irreversible final step. |
+| ProductMode | ✅ `enabled` (the orchestrator is the live path) |
 
-The Node services still serve Kong (ORCHESTRATOR stays `PRODUCT_MODE=shadow`).
-The −262 MiB is proven and waiting; the flip is gated on the full parity matrix
-+ the soak, exactly as the data-plane cutover was.
+Trust: the orchestrator's raw-header `requireUser` reads Kong's injected
+`X-User-Id` (the same JWT→header pre-function every authenticated route uses) —
+identical to the live adapter-registry-go model. **Rollback** (fully reversible):
+start `COMPOSE_PROFILES=…,legacy-node` and revert the five kong.yml `url:` swaps.
+The production soak + the `src/apps/{log,email,session,newsletter,gdpr}-service`
++ `outbox-relay` source deletion remain the operator's final A5 step.

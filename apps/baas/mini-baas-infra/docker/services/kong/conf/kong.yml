@@ -566,7 +566,7 @@ services:
               hour: 5000
 
   - name: email
-    url: http://email-service:3030
+    url: http://orchestrator:3026          # A4 cutover (was email-service:3030)
     routes:
       - name: email-routes
         paths: [/email/v1]
@@ -746,7 +746,7 @@ services:
               size_unit: kilobytes
 
   - name: gdpr-service
-    url: http://gdpr-service:3080
+    url: http://orchestrator:3026          # A4 cutover (was gdpr-service:3080)
     routes:
       - name: gdpr-routes
         paths: [/gdpr/v1]
@@ -771,7 +771,7 @@ services:
               hour: 500
 
   - name: newsletter-service
-    url: http://newsletter-service:3090
+    url: http://orchestrator:3026          # A4 cutover (was newsletter-service:3090)
     routes:
       - name: newsletter-routes
         paths: [/newsletter/v1]
@@ -825,7 +825,7 @@ services:
               hour: 500
 
   - name: log-service
-    url: http://log-service:3110
+    url: http://orchestrator:3026/logs     # A4 cutover (was log-service:3110; orchestrator namespaces /logs)
     routes:
       - name: log-routes
         paths: [/logs/v1]
@@ -850,7 +850,7 @@ services:
               hour: 3000
 
   - name: session-service
-    url: http://session-service:3120
+    url: http://orchestrator:3026/sessions # A4 cutover (was session-service:3120; orchestrator namespaces /sessions)
     routes:
       - name: session-routes
         paths: [/sessions/v1]
