@@ -1,0 +1,93 @@
+# BaaS CI — fast checks on every PR / feature push that touches the BaaS.
+# The exhaustive live verify-all (gates needing a running stack) stays local /
+# nightly; this is the pre-merge gate: it must (a) compile + unit-test the Go
+# and Rust planes, (b) prove every image still BUILDS FROM A CLEAN CHECKOUT —
+# the rc.2-class bug where a .gitignore pattern silently swallowed a source file
+# that all local builds resolved from disk — and (c) validate the static config
+# (package manifest parity, Prometheus rules).
+name: BaaS CI
+
+on:
+  pull_request:
+    paths:
+      - "apps/baas/mini-baas-infra/**"
+      - ".github/workflows/baas-ci.yml"
+  push:
+    branches: ["feat/**", "fix/**", "chore/**"]
+    paths:
+      - "apps/baas/mini-baas-infra/**"
+
+concurrency:
+  group: baas-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: apps/baas/mini-baas-infra
+
+jobs:
+  go:
+    name: Go control-plane (vet + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: apps/baas/mini-baas-infra/go/control-plane/go.sum
+      - name: vet + test
+        working-directory: apps/baas/mini-baas-infra/go/control-plane
+        run: |
+          go vet ./...
+          go test ./...
+
+  rust:
+    name: Rust data-plane (test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/baas/mini-baas-infra/docker/services/data-plane-router
+      - name: cargo test (core + pool + server, incl. ratelimit-redis feature)
+        working-directory: apps/baas/mini-baas-infra/docker/services/data-plane-router
+        run: cargo test -p data-plane-core -p data-plane-pool -p data-plane-server --features ratelimit-redis
+
+  bake:
+    name: Bake all images (build-only, clean checkout)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      # Build every bake target from THIS checkout, no push. Catches the
+      # gitignore-swallowed-source / stale-target class of bug that local
+      # builds (which resolve files from disk) cannot — the exact failure that
+      # bit baas-v1.0.0-rc.1 and rc.2.
+      - name: bake default (build only)
+        # Clear the registry cache-to/cache-from refs: build-only validation
+        # needs no GHCR auth, and it builds every target from THIS checkout.
+        run: |
+          docker buildx bake -f docker-bake.hcl \
+            --set "*.platform=linux/amd64" \
+            --set "*.cache-to=" \
+            --set "*.cache-from=" \
+            default
+
+  static:
+    name: Static config (manifest parity + Prometheus rules)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: package manifest parity (config == Go-embedded copy)
+        run: |
+          diff <(jq -S . config/packages/packages.json) \
+               <(jq -S . go/control-plane/internal/packages/packages.json) \
+            && echo "✓ package manifest is the single source of truth"
+      - name: Prometheus rules + config (m52)
+        run: |
+          docker run --rm --entrypoint promtool \
+            -v "$PWD/config/prometheus":/etc/prometheus \
+            prom/prometheus:v2.52.0 check config /etc/prometheus/prometheus.yml
+      - name: shellcheck verify gates (advisory)
+        run: shellcheck -S error scripts/verify/m*.sh || true
