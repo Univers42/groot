@@ -40,6 +40,15 @@ services:
       # to measure the per-tenant-pool baseline.
       DATA_PLANE_SHARE_POOLS: ${DATA_PLANE_SHARE_POOLS:-1}
 
+  # The SaaS shape ENFORCES tiering (engine allowlist + mount quota + the
+  # capability/rate mask). Self-host base keeps it off so an operator's own
+  # tenant is never gated; the scale/SaaS overlay turns it on — proven by gate
+  # m53. Needs the widened tenants.plan CHECK (migration 035 / tenant-control
+  # EnsureSchema) so real tier keys are assignable.
+  adapter-registry-go:
+    environment:
+      PACKAGE_ENFORCEMENT: "1"
+
   # NOTE: the former PACKAGE_ENFORCEMENT=0 workaround here is GONE. provision's
   # CreateTenant now threads the request `plan` field (reconcile.go →
   # findOrCreateBySlug → CreateTenantRequest.Plan), so `make scale-seed` issues
