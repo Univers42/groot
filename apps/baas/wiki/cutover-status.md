@@ -29,8 +29,11 @@ The bypass originally re-ran the Argon2id key-verify (a tenant-control round-tri
 making it slower than the door it replaces. Two short-TTL caches in the data plane
 (`verify_cache` api-key→identity, `mount_cache` (tenant,db_id)→DSN, both
 `DATA_PLANE_VERIFY_CACHE_TTL_MS`, default 30 s — matching the query-router) fix
-that: the cutover door is now **~5× faster** than legacy. Rotation evicts
-`mount_cache` (`/v1/admin/rotate`) so the gap-G8/S2 stale-DSN guarantee holds.
+that: the cutover door is now **~5× faster** than legacy. Credential events evict
+both caches so no stale view survives: rotation (`/v1/admin/rotate`) drops
+`mount_cache` (gap-G8/S2 stale-DSN guarantee) and `verify_cache`; key revocation
+at tenant-control calls `/v1/admin/evict-verify` so a revoked key is rejected on
+its **next** request, not after the 30 s TTL (Track-2 B3, gate `m50-rotate-revoke`).
 
 ## The remaining step (app-side, deliberately not done here)
 
