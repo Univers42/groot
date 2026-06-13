@@ -814,11 +814,14 @@ services:
     env_file: [.env]
     ports:
       - "${REDIS_PORT:-6379}:6379"
-    # auto-aof-rewrite-percentage 0 disables the background AOF rewrite that was
-    # OOM-killed in a loop at 128m (bloated AOF on a cache/stream store); the
-    # mem bump gives load + bench headroom. maxmemory caps the working set under
-    # the container limit so it can't spike into the OOM killer again.
-    command: redis-server --appendonly yes --auto-aof-rewrite-percentage 0 --maxmemory 384mb --maxmemory-policy allkeys-lru
+    # Rewrite is back ON (100%/64mb floor): it was disabled after OOM loops at
+    # 128m, but with maxmemory capping the working set the rewrite is safe —
+    # and DISABLED rewrite means unbounded AOF growth on disk (a bench day
+    # proved the stream side: 250 MB in one untrimmed CDC stream). Eviction is
+    # volatile-lru, NOT allkeys: the outbox.* streams are relay durability
+    # state — better that writes fail loudly at the cap than events silently
+    # evaporate; cache users set TTLs and stay evictable.
+    command: redis-server --appendonly yes --auto-aof-rewrite-percentage 100 --auto-aof-rewrite-min-size 64mb --maxmemory 384mb --maxmemory-policy volatile-lru
     volumes:
       - redis-data:/data
     networks:

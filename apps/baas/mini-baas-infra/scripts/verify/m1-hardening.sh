@@ -48,6 +48,17 @@ done < <(find "${BAAS_DIR}/docker/services" "${BAAS_DIR}/src" -name Dockerfile)
 [[ $missing -eq 0 ]] || fail "${missing} Dockerfiles without HEALTHCHECK"
 pass "every Dockerfile has a HEALTHCHECK"
 
+# ── 1b) redis durability posture (D3) ─────────────────────────────────────────
+# The outbox.* streams are relay durability state: allkeys-lru could silently
+# evict them at the memory cap, and a disabled AOF rewrite grows the AOF file
+# without bound (a bench day put 250 MB into one untrimmed CDC stream).
+step "checking redis eviction + AOF-rewrite posture"
+grep -A16 '^  redis:' "${COMPOSE_FILE}" | grep -q 'maxmemory-policy volatile-lru' \
+  || fail "redis must use volatile-lru (allkeys-lru can evict outbox.* streams)"
+grep -A16 '^  redis:' "${COMPOSE_FILE}" | grep -q 'auto-aof-rewrite-percentage 100' \
+  || fail "redis AOF rewrite must be enabled (percentage 100; 0 = unbounded AOF growth)"
+pass "redis: volatile-lru + AOF rewrite enabled"
+
 # ── 2) IDatabaseAdapter contract surface ──────────────────────────────────────
 step "checking IDatabaseAdapter contract definitions"
 CONTRACT="${BAAS_DIR}/src/libs/database/src/adapter.contract.ts"
