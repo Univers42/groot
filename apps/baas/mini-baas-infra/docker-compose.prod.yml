@@ -69,3 +69,18 @@ services:
       - "9000:9000"    # keep the S3 API (presigned URLs), strip the console
     mem_limit: 512m
     cpus: 0.50
+
+  # ── multi-tenant prod lever (Track-2 C5) ───────────────────────────────────
+  data-plane-router-rust:
+    environment:
+      # Default OFF (isolation-first). A MULTI-TENANT prod operator should turn
+      # this ON: shared_rls tenants on one DB collapse to a single pool keyed by
+      # connection target, not tenant — pool count becomes independent of tenant
+      # count (the 100K-on-one-box property), isolation proven byte-identical to
+      # per-tenant pools across all 7 engines (gate m46). Decision matrix:
+      # wiki/product-plan/07 §C5. Uncomment to enable:
+      # DATA_PLANE_SHARE_POOLS: "1"
+      # Multi-replica deploys: also set the limiter backend to Redis so a tenant
+      # cannot burst its tier once per replica (gate m51):
+      # DATA_PLANE_RATELIMIT_BACKEND: redis
+      DATA_PLANE_SHARE_POOLS: ${DATA_PLANE_SHARE_POOLS:-0}
