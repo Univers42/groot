@@ -388,3 +388,9 @@ certs/*
 # generated tenant/key state from scripts/seed/agency-tenant.sh (live API key)
 .agency-tenant.env
 .gourmand-tenant.env
+
+# Go build artifacts (binaries built outside Docker land here)
+go/control-plane/orchestrator
+go/control-plane/adapter-registry
+go/control-plane/tenant-control
+go/control-plane/webhook-dispatcher

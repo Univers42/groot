@@ -25,10 +25,10 @@ services:
     replicas: 1
     resources:
       limits:
-        cpu: 500m
-        memory: 96Mi
+        cpu: 2000m
+        memory: 192Mi
       requests:
-        cpu: 250m
+        cpu: 1000m
         memory: 0Mi
   ai-service:
     enabled: false
