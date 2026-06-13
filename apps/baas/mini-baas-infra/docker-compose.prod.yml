@@ -84,3 +84,14 @@ services:
       # cannot burst its tier once per replica (gate m51):
       # DATA_PLANE_RATELIMIT_BACKEND: redis
       DATA_PLANE_SHARE_POOLS: ${DATA_PLANE_SHARE_POOLS:-0}
+
+  # ── tier enforcement (Track-2 F1) ──────────────────────────────────────────
+  adapter-registry-go:
+    environment:
+      # Default OFF — a single-operator self-host should not gate its own
+      # tenant. A SaaS operator SELLING tiers turns this ON to enforce the
+      # engine allowlist + mount quota + capability/rate mask (gate m53).
+      # Assign tenant plans FIRST: with it on, a tenant's plan decides its
+      # engines (free→nano = sqlite only). Uncomment to enable:
+      # PACKAGE_ENFORCEMENT: "1"
+      PACKAGE_ENFORCEMENT: ${PACKAGE_ENFORCEMENT:-0}
