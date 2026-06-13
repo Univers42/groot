@@ -2,7 +2,7 @@
 
 > **Source:** 6-agent code audit, 2026-06-13. Where older wiki docs (06/07) disagree, the code wins.
 
-**Thesis.** Grobase (the productized form of `mini-baas`) is **Supabase-shaped**: it runs the same open core — `gotrue` (auth), `postgrest` (auto REST), Supabase `studio`, `supavisor`, `pg-meta`, and `kong` — so anyone fluent in Supabase is immediately at home. (Auth ships in **two distinct backends**: the **default vendored gotrue stack** the multi-engine tiers run — Google/GitHub/FortyTwo only, every `*_ENABLED` defaulting false — and **binocle-one**, a separate `cargo build --features one` binary with 11 OAuth2-PKCE presets + any-OIDC + TOTP; the stronger OAuth/OIDC/MFA story lives in binocle-one, not the default stack, and is not yet surfaced in the `@mini-baas/js` SDK — see the Auth section note.) On top of that it adds two things neither Supabase nor Firebase has: a **custom Rust multi-engine data plane** (one uniform API over Postgres/MySQL/Mongo/SQLite/MSSQL/Redis/HTTP, including wrapping a customer's *existing* database) and a **Go control plane** that puts **thousands of tenants on shared infrastructure** (~10K — 9,775 seeded — tenants collapsed to a single connection pool, proven by gate m46). Grobase's competitive **edge is multi-engine + dense multi-tenancy** — Supabase is Postgres-only and single-project-per-backend; Firebase is Firestore-only and closed. The honest weaknesses are managed-cloud table stakes: no metering/billing, thin tenant self-service, and several developer-experience gaps (storage SDK, functions triggers/cron, multi-language SDKs, GraphQL).
+**Thesis.** Grobase (the productized form of `mini-baas`) is **Supabase-shaped**: it runs the same open core — `gotrue` (auth), `postgrest` (auto REST), Supabase `studio`, `supavisor`, `pg-meta`, and `kong` — so anyone fluent in Supabase is immediately at home. (Auth ships in **two distinct backends**: the **default vendored gotrue stack** the multi-engine tiers run — Google/GitHub/FortyTwo only, every `*_ENABLED` defaulting false — and **binocle-one**, a separate `cargo build --features one` binary with 11 OAuth2-PKCE presets + any-OIDC + TOTP; the stronger OAuth/OIDC/MFA story lives in binocle-one, not the default stack, and is not yet surfaced in the `@mini-baas/js` SDK — see the Auth section note.) On top of that it adds two things neither Supabase nor Firebase has: a **custom Rust multi-engine data plane** (one uniform API over Postgres/MySQL/Mongo/SQLite/MSSQL/Redis/HTTP, including wrapping a customer's *existing* database) and a **Go control plane** that puts **thousands of tenants on shared infrastructure** (~10K — 9,775 seeded — tenants collapsed to a single connection pool, proven by gate m46). Grobase's competitive **edge is multi-engine + dense multi-tenancy** — Supabase is Postgres-only and single-project-per-backend; Firebase is Firestore-only and closed. The honest weaknesses are managed-cloud table stakes: no metering/billing and thin tenant self-service. The developer-experience gaps that used to sit here (storage SDK, functions triggers/cron, multi-language SDKs, GraphQL) were built out in the Track-A rc.3 wave and are now PARTIAL — built and tested, pending live-stack gates (and, for GraphQL, a `pg_graphql`-capable Postgres image).
 
 Companion docs (ship together, cross-linked):
 - [marketability-readiness.md](./marketability-readiness.md) — the four marketability bars and where we stand.
@@ -72,7 +72,7 @@ Competitor cells use the audited source glyphs: `v` = first-class, `~` = partial
 | # | Capability | Supabase | Firebase | Grobase | Gap | Effort | Pri | Notes / anchor |
 |---|-----------|:--------:|:--------:|:-------:|-----|:------:|:---:|----------------|
 | 25 | Auto REST over schema | v | x | **[v]** | — PostgREST v12.2.3 (PG) + multi-engine `/v1/query` (always-on) with an opt-in `/data/v1/query` bypass (`DATA_PLANE_BYPASS_ENABLED=1`), PostgREST-style filters | — | — | postgrest (v12.2.3); `data-plane-server/src/routes.rs` |
-| 26 | Auto GraphQL | v | ~ | **[x]** | No GraphQL — `"graphql"` appears only in planning docs, zero impl | M | P1 | planning only |
+| 26 | Auto GraphQL | v | ~ | **[~]** | A5 (rc.3): Kong `/graphql/v1` route (same key-auth+jwt+rate-limit as `/rest/v1`) + SDK `client.graphql.query()` + availability-gated `035_pg_graphql.sql`. **Honest:** the vendored `postgres:16-alpine` does NOT ship `pg_graphql`, so the route errors until a pg_graphql-capable image is used — "wired, pending the extension", not live | M | P1 | `sdk/src/domains/graphql.ts`, `kong.yml`, `035_pg_graphql.sql` |
 | 27 | Fluent client query builder | v | v | **[~]** | SDK REST builder is options-object, not fluent (no `.eq/.in/.or/.single/.range` chaining) | M | P0 | `sdk/src/domains/rest.ts` |
 | 28 | Server Admin SDK | v | v | **[v]** | — `admin`, `schema` domains (serviceRoleKey) | — | — | `sdk/src/domains/admin.ts` |
 
@@ -81,9 +81,9 @@ Competitor cells use the audited source glyphs: `v` = first-class, `~` = partial
 | # | Capability | Supabase | Firebase | Grobase | Gap | Effort | Pri | Notes / anchor |
 |---|-----------|:--------:|:--------:|:-------:|-----|:------:|:---:|----------------|
 | 29 | Realtime DB-change subscriptions | v | v | **[~]** | WS fanout + SSE works, but PG CDC = per-table TRIGGERS + LISTEN/NOTIFY (not WAL/logical-rep; needs `CREATE TRIGGER` per table). Mongo = native change streams | M | P1 | `realtime-db-postgres` (triggers), `realtime-db-mongodb` |
-| 30 | Broadcast / pubsub channels | v | x | **[x]** | No first-class broadcast primitive (code grep for `broadcast`/`presence` hits only a tokio channel, a test fixture, and IRC docstrings — not client-facing primitives) | M | P1 | realtime workspace |
-| 31 | Presence (who is online) | v | ~ | **[x]** | No presence primitive (same grep caveat as row 30 — tokio channel + test fixture + IRC docstrings, nothing client-facing) | M | P1 | realtime workspace |
-| 32 | Realtime scale | v | v | **[~]** | In-process + IRC bus. A **JS realtime client EXISTS** (`sdk/src/domains/realtime-client.ts`, via `engine().subscribe()`) **but is mongodb-only** — SDK caps set `stream:false` for postgresql, so PG `subscribe()` is a compile error despite the Rust PG producer; no mobile client; no multi-node fanout proof; not surfaced as a top-level `client.realtime`/`.channel` API | M | P1 | `realtime-bus-irc`, `realtime-bus-inprocess`, `sdk/src/domains/realtime-client.ts` |
+| 30 | Broadcast / pubsub channels | v | x | **[~]** | A5 (rc.3): first-class `ClientMessage::Broadcast` → EventBus → topic subscribers (multi-node-capable by construction); SDK `handle.broadcast()`; `SourceKind::Api` stamped from verified claims. e2e `test_broadcast_client_to_client` PASS. Built + workspace-tested; not yet exercised in a deployed full-stack gate | M | P1 | `realtime-core/src/protocol.rs`, `ws_handler/handlers.rs`, `sdk/src/domains/realtime-client.ts` |
+| 31 | Presence (who is online) | v | ~ | **[~]** | A5 (rc.3): `PresenceTracker` + `TRACK`/`UNTRACK` + JOIN/LEAVE snapshots over the bus; SDK `onPresence`; disconnect cleanup hooked in `connection.rs`. e2e tested (join→leave, untrack-emits-leave). **Single-node authoritative** — cross-node membership merge deferred (needs a shared store) | M | P1 | `realtime-engine/src/presence.rs` |
+| 32 | Realtime scale | v | v | **[~]** | In-process + IRC bus. A5 (rc.3) surfaced a **top-level `client.realtime`** with broadcast + presence + `subscribe()`. Residual gaps: DB-change `subscribe()` is still **mongodb-only** (SDK caps set `stream:false` for postgresql despite the Rust PG producer); no mobile client; presence is single-node-authoritative (row 31); no multi-node fanout proof | M | P1 | `realtime-bus-irc`, `realtime-bus-inprocess`, `sdk/src/domains/realtime-client.ts` |
 
 ### Storage
 
@@ -103,9 +103,9 @@ Competitor cells use the audited source glyphs: `v` = first-class, `~` = partial
 | # | Capability | Supabase | Firebase | Grobase | Gap | Effort | Pri | Notes / anchor |
 |---|-----------|:--------:|:--------:|:-------:|-----|:------:|:---:|----------------|
 | 39 | Serverless functions | v | v | **[~]** | Deno worker-per-invocation, 5s timeout, **sandboxed perms (no env/fs-write/run/ffi; network NOT restricted — `net:inherit`)**, Kong-routed — but **HTTP invoke only**, in `functions`/`extras` profile (not lean default) | M | P0 | `functions-runtime/src/server.ts` (invoke-only, `TIMEOUT_MS=5000`) |
-| 40 | DB / event triggers | ~ | v | **[x]** | No DB/event triggers | L | P1 | — |
-| 41 | Scheduled / cron | v | v | **[x]** | No cron/scheduling | M | P1 | — |
-| 42 | Function secrets | v | v | **[x]** | env disabled in worker (no secrets) | M | P1 | functions-runtime |
+| 40 | DB / event triggers | ~ | v | **[~]** | A2 (rc.3): `function_triggers` + a Redis-stream dispatcher that reuses the webhook matching + retry/DLQ machinery (own consumer group on the same `outbox.*` streams) to invoke functions-runtime instead of a URL. Go unit-tested. Not yet live-verified end-to-end | L | P1 | `internal/functriggers/*`, `035_function_triggers.sql` |
+| 41 | Scheduled / cron | v | v | **[~]** | A2 (rc.3): `function_schedules` + `function-scheduler` binary; zero-dep interval grammar (`@every`/`@hourly`/`@daily`/`@weekly`/bare duration) with missed-interval catch-up. Unit-tested. Not yet live-verified | M | P1 | `internal/scheduler/*`, `cmd/function-scheduler`, `036_function_schedules.sql` |
+| 42 | Function secrets | v | v | **[~]** | A2 (rc.3): `function_secrets` (AES-256-GCM, write-only — plaintext never returned) + invoke-time env injection scoped to exactly the whitelisted keys, via a service-token-gated `/resolve`. Go unit-tested + `deno check`. Not yet live-verified | M | P1 | `internal/funcsecrets/*`, `functions-runtime/src/server.ts`, `037_function_secrets.sql` |
 | 43 | Durable queues | v | ~ | **[x]** | No queues | L | P2 | — |
 | 44 | Edge / regional invocation | v | ~ | **[x]** | Single-node, no edge/regional | L | P2 | — |
 
@@ -152,7 +152,7 @@ Competitor cells use the audited source glyphs: `v` = first-class, `~` = partial
 
 | # | Capability | Supabase | Firebase | Grobase | Gap | Effort | Pri | Notes / anchor |
 |---|-----------|:--------:|:--------:|:-------:|-----|:------:|:---:|----------------|
-| 59 | CLI | v | v | **[x]** | No `baas` CLI (Makefile + Docker Compose only) | L | P0 | — |
+| 59 | CLI | v | v | **[~]** | A2 (rc.3): zero-dep `baas` CLI (`login`, `functions deploy/invoke/list`, `secrets`, `triggers`) shipped as the SDK `bin`; CLI tests pass. Not yet published/dogfooded as an installed binary | L | P0 | `sdk/src/bin/baas.ts` |
 | 60 | Local dev full parity | v | ~ | **[~]** | Full Docker Compose stack runs locally, but no emulator/CLI ergonomics | M | P1 | root Makefile, editions |
 | 61 | Type generation from schema | v | x | **[x]** | No schema→types gen (only engine catalog gen) | M | P0 | SDK codegen |
 | 62 | Branching / preview envs | v | ~ | **[x]** | None | L | P2 | — |
@@ -237,10 +237,10 @@ Tallied across the 91 numbered rows (Grobase cell). Each Count is the exact leng
 |------|-------|:-----:|-------|
 | **PARITY+** (differentiator — beats both) | [+] | **3** | 12, 77, 79 (+ the WAF differentiator D5, which is not a numbered row). Rows 80/81 are marked [v] but are also competitor-beating |
 | **PARITY** (first-class, on by default) | [v] | **15** | 1, 2, 9, 13, 14, 19, 23, 25, 28, 34, 35, 46, 70, 80, 81 |
-| **PARTIAL** (built-but-off / one-engine / stub) | [~] | **32** | 3, 5, 11, 15, 16, 17, 20, 24, 27, 29, 32, 33, 39, 47, 50, 51, 54, 55, 56, 60, 63, 64, 65, 69, 75, 76, 78, 82, 86, 87, 90, 91 |
-| **GAP** (missing) | [x] | **41** | 4, 6, 7, 8, 10, 18, 21, 22, 26, 30, 31, 36, 37, 38, 40, 41, 42, 43, 44, 45, 48, 49, 52, 53, 57, 58, 59, 61, 62, 66, 67, 68, 71, 72, 73, 74, 83, 84, 85, 88, 89 |
+| **PARTIAL** (built-but-off / one-engine / stub) | [~] | **39** | 3, 5, 11, 15, 16, 17, 20, 24, 26, 27, 29, 30, 31, 32, 33, 39, 40, 41, 42, 47, 50, 51, 54, 55, 56, 59, 60, 63, 64, 65, 69, 75, 76, 78, 82, 86, 87, 90, 91 |
+| **GAP** (missing) | [x] | **34** | 4, 6, 7, 8, 10, 18, 21, 22, 36, 37, 38, 43, 44, 45, 48, 49, 52, 53, 57, 58, 61, 62, 66, 67, 68, 71, 72, 73, 74, 83, 84, 85, 88, 89 |
 
-Headline: roughly **a fifth of rows are parity-or-better today** (18 of 91: [+]3 + [v]15), **a third are partial (mostly off-by-default or single-engine)** (30 of 91), and the gaps cluster in three places — managed-cloud commerce (metering/billing/dashboard), DX surface (storage SDK, functions triggers/cron, CLI, codegen, multi-lang SDKs), and advanced data ops (GraphQL, joins, FTS, vector).
+Headline: roughly **a fifth of rows are parity-or-better today** (18 of 91: [+]3 + [v]15), **over 40% are partial** (39 of 91 — most of the DX surface moved here in rc.3), and the remaining gaps (34 of 91) cluster in two places — **managed-cloud commerce** (metering/billing/dashboard) and **advanced data ops** (joins, FTS, vector). The Track-A rc.3 wave (A1 storage DX · A2 functions triggers/cron/secrets/CLI · A3/A4 fluent builder + OpenAPI + Python/Dart SDKs · A5 GraphQL route + realtime broadcast/presence) flipped the DX cluster from GAP to PARTIAL; the work left to reach full `[v]` on those rows is live-stack gates + the pg_graphql image (not net-new subsystems).
 
 ### Top 8 P0 gaps to close for OSS launch parity
 
@@ -248,13 +248,13 @@ These are the [v]/[~] table-stakes that block a credible OSS self-host launch (f
 
 | Rank | Row(s) | Gap | Why it's P0 | Effort |
 |:----:|--------|-----|-------------|:------:|
-| 1 | 33, 34, 36 | **Storage DX** — SDK is presign-only; ship upload/download/list/createBucket + transforms | First thing a dev tries; stale README actively misleads | M |
-| 2 | 39, 40, 41, 42 | **Functions DX** — add DB/event triggers, cron, secrets | "Edge Functions" is a headline BaaS feature; invoke-only is below table stakes | L |
+| 1 | 33, 34, 36 | ✅ **rc.3 (A1)** — upload/download/list/createBucket/signedUrl shipped in the SDK + storage-router; **residual:** image transforms (row 36) still open | First thing a dev tries; stale README actively misleads | M |
+| 2 | 39, 40, 41, 42 | ✅ **rc.3 (A2, now PARTIAL)** — DB/event triggers + cron + function secrets built & unit-tested; **residual:** live end-to-end gate + warm-pool | "Edge Functions" is a headline BaaS feature; invoke-only is below table stakes | L |
 | 3 | 27, 61 | **SDK fluent builder + type generation** — `.eq/.in/.or/.single/.range`, schema→types | Supabase's signature DX; options-object feels foreign | M |
 | 4 | 47, 50 | ✅ **DONE** — OpenAPI 3.1 spec committed + **Python & Dart SDKs generated** (A3/A4); Swift/Kotlin next | (was the single blocker for all multi-language SDKs) | M |
-| 5 | 59 | **`baas` CLI** — deploy, local-dev, migrate | Both competitors have one; gates functions/codegen DX | L |
+| 5 | 59 | ✅ **rc.3 (A2, now PARTIAL)** — zero-dep `baas` CLI (login / functions deploy·invoke·list / secrets / triggers); **residual:** publish as an installed binary + local-dev loop | Both competitors have one; gates functions/codegen DX | L |
 | 6 | 17, 20 | **Surface OAuth + MFA in the SDK** (built in binocle-one, not exposed) | Capability exists; only the SDK seam is missing | M |
-| 7 | 26 | **GraphQL** — `pg_graphql` passthrough | Frequently a hard requirement; zero impl today | M |
+| 7 | 26 | ✅ **rc.3 (A5, now PARTIAL)** — `pg_graphql` passthrough route + SDK client wired; **residual:** the vendored postgres image must bundle `pg_graphql` for the route to serve | Frequently a hard requirement; zero impl today | M |
 | 8 | — | **Security audit-ready posture** — add blocking CI secret-scan + cargo-audit/govulncheck gates, flip RS256 issuer + per-deployment keys, close header-trust/network residuals | Launch gate; residuals are launch-blockers ([security-audit.md](./security-audit.md)) | M |
 
 > Not P0 but high-leverage for the *cloud* launch (Track B): metering (84), billing/Stripe (83), per-tenant observability (57, 64, 65), tenant self-service dashboard (56, 57). These are the largest net-new build — see [marketability-readiness.md](./marketability-readiness.md) Bar 4.

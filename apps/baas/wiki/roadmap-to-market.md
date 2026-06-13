@@ -58,6 +58,35 @@ Work executed this session (verified):
     p50 1.51–1.58 / p95 2.57–2.66 ms (both the same PostgREST). The edge is footprint
     + multi-engine + dense multi-tenancy, not raw read speed.
   - Still TODO for a full SLO: write-throughput/RPS + p99, and the 100K run (Track C).
+- **A3 / A4 / A6 / A7 — DONE (shipped in rc.2 + A7 docs).** A3 fluent query builder
+  (`.eq/.in/.or/.single/.range`) + OAuth/MFA SDK helpers + committed OpenAPI 3.1 spec;
+  A4 generated **Python + Dart** clients from that spec; A6 security CI gates
+  (cargo-audit, govulncheck) + ASVS map + adapter-registry HMAC; A7 migrate-from-Supabase
+  / migrate-from-Firebase guides + quickstart fix + wiki market index.
+- **A2 Functions DX + A5 GraphQL/realtime — BUILT, TESTED, INTEGRATED (rc.3 wave).**
+  Built on background-agent worktrees, then cherry-picked onto `feat/baas-scale-program`
+  (the worktrees had branched off the pb-total base; cherry-pick isolated exactly the
+  feature deltas — 4 A5 + 6 A2 commits — and skipped the unrelated PocketBase program).
+  - **A2:** `function_triggers` (DB-event → function via a Redis-stream dispatcher that
+    reuses the webhook matching/retry/DLQ on its own consumer group), `function_schedules`
+    + a `function-scheduler` binary (zero-dep `@every/@hourly/@daily/@weekly`/bare-duration
+    grammar with missed-interval catch-up), `function_secrets` (AES-256-GCM, write-only,
+    invoke-time env injection scoped to whitelisted keys), and a zero-dep `baas` CLI.
+    **Warm-pool/cgroups DEFERRED** (design note committed, not faked).
+  - **A5:** realtime **broadcast** (`ClientMessage::Broadcast` → EventBus → subscribers,
+    `SourceKind::Api` stamped from claims) + **presence** (`PresenceTracker`, single-node
+    authoritative; cross-node merge deferred) + a top-level `client.realtime`; **GraphQL**
+    Kong `/graphql/v1` route + SDK `client.graphql` + availability-gated `pg_graphql`
+    migration. **Honest:** the vendored `postgres:16-alpine` does NOT ship `pg_graphql`,
+    so GraphQL is "route wired, pending the extension."
+  - **Integration verification (this session):** Go build+vet + 5 pkgs green; Rust
+    realtime `cargo test --workspace` (engine 34 / e2e 27, all crates 0-fail) + clippy
+    `-D warnings` green (fixed one pre-existing `doc_markdown` lint in `writer.rs`); SDK
+    build + typecheck + **68/68** tests + `npm ci` lock-in-sync; `docker compose config`
+    valid (resolved the orchestrator-vs-scheduler host-port clash: orchestrator keeps 3026,
+    function-scheduler moved to 3027). No legacy code deleted; no `Co-Authored-By` lines.
+    **Residual for full `[v]`:** live-stack e2e gates (m56 functions-DX, m59 GraphQL+realtime)
+    + a pg_graphql-capable Postgres image.
 
 Supporting context (read the code, then these):
 [grobase-master-plan.md](grobase-master-plan.md) ·
