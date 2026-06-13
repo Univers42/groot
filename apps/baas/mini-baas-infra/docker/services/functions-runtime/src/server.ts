@@ -17,6 +17,14 @@ const HOST = Deno.env.get("FUNCTIONS_HOST") ?? "0.0.0.0";
 const DATA_DIR = Deno.env.get("FUNCTIONS_DATA_DIR") ?? "/data";
 const TIMEOUT_MS = Number(Deno.env.get("FUNCTIONS_INVOKE_TIMEOUT_MS") ?? "5000");
 
+// A2 Functions DX — per-function secrets. When FUNCTION_SECRETS_URL is set, the
+// runtime resolves the tenant+function's whitelisted secrets from the Go
+// secret store at invoke time and injects them into the Deno worker's env
+// (spawned with `--allow-env=<keys>` and the values set in the worker's
+// Deno.env). Without the URL, no secrets are injected (env stays disabled).
+const SECRETS_URL = Deno.env.get("FUNCTION_SECRETS_URL") ?? "";
+const SECRETS_TOKEN = Deno.env.get("INTERNAL_SERVICE_TOKEN") ?? "";
+
 await ensureDir(DATA_DIR);
 
 const ROUTES: Array<[string, RegExp, Handler]> = [
@@ -173,12 +181,14 @@ async function invokeFn(req: Request, m: RegExpMatchArray): Promise<Response> {
   const headers: Record<string, string> = {};
   req.headers.forEach((v, k) => { headers[k] = v; });
 
+  const secrets = await resolveSecrets(tenant, name);
+
   const result = await invokeInWorker(codePath, {
     tenant_id: tenant,
     method: req.method,
     headers,
     body: inputBody,
-  });
+  }, secrets);
   if (result.error) {
     return json(500, { error: "function_error", message: result.error });
   }
@@ -186,6 +196,34 @@ async function invokeFn(req: Request, m: RegExpMatchArray): Promise<Response> {
     status: result.status ?? 200,
     headers: { "content-type": result.contentType ?? "application/json" },
   });
+}
+
+// resolveSecrets fetches the tenant+function's decrypted secrets from the Go
+// secret store. Failures are non-fatal — the function just runs without the
+// secrets injected (logged). Returns {} when no store is configured.
+async function resolveSecrets(tenant: string, name: string): Promise<Record<string, string>> {
+  if (!SECRETS_URL) return {};
+  try {
+    const u = new URL(SECRETS_URL);
+    u.searchParams.set("tenant", tenant);
+    u.searchParams.set("function", name);
+    const resp = await fetch(u.toString(), {
+      headers: SECRETS_TOKEN ? { "X-Internal-Service-Token": SECRETS_TOKEN } : {},
+    });
+    if (!resp.ok) {
+      console.error(`[functions] secret resolve failed: HTTP ${resp.status}`);
+      return {};
+    }
+    const data = await resp.json();
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(data ?? {})) {
+      if (typeof v === "string") out[k] = v;
+    }
+    return out;
+  } catch (err) {
+    console.error("[functions] secret resolve error", err);
+    return {};
+  }
 }
 
 interface InvokeInput {
@@ -202,10 +240,23 @@ interface InvokeResult {
   error?: string;
 }
 
-function invokeInWorker(codePath: string, input: InvokeInput): Promise<InvokeResult> {
+function invokeInWorker(
+  codePath: string,
+  input: InvokeInput,
+  secrets: Record<string, string> = {},
+): Promise<InvokeResult> {
   return new Promise((resolve) => {
+    const secretKeys = Object.keys(secrets);
+    // The worker imports the handler dynamically AFTER seeding Deno.env so the
+    // handler reads its secrets via the normal Deno.env.get(...) API. env
+    // permission is scoped to exactly the whitelisted keys (least privilege);
+    // when there are no secrets, env stays disabled.
     const workerSource = `
-      import handler from "file://${codePath}";
+      const __secrets = ${JSON.stringify(secrets)};
+      for (const [k, v] of Object.entries(__secrets)) {
+        try { Deno.env.set(k, v); } catch (_) { /* env not permitted */ }
+      }
+      const { default: handler } = await import("file://${codePath}");
       self.onmessage = async (ev) => {
         try {
           const out = await handler(ev.data);
@@ -225,7 +276,8 @@ function invokeInWorker(codePath: string, input: InvokeInput): Promise<InvokeRes
         permissions: {
           read: [codePath],
           net: "inherit",
-          env: false,
+          // Scope env to exactly the whitelisted secret keys, else disable.
+          env: secretKeys.length > 0 ? secretKeys : false,
           run: false,
           write: false,
           ffi: false,
