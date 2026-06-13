@@ -38,21 +38,24 @@ export const COMPETITORS: Competitor[] = [
 	{
 		id: 'pocketbase',
 		name: 'PocketBase',
-		verdict: 'Same one-binary footprint. None of the dead end.',
+		verdict: 'Everything it does, in 1/5th the binary — measured, gated, faster under load.',
 		intro:
-			'PocketBase made the single-file backend famous. Grobase Nano matches the shape — one static binary, embedded SQLite, ~$2/mo — and removes its ceiling: when your app outgrows SQLite, you graduate tiers instead of migrating off.',
+			'PocketBase made the single-file backend famous. Grobase ships TWO answers: Nano (5.2 MB, headless data plane) and One (6.4 MB) — accounts with the full OAuth2 matrix, TOTP MFA, email flows, file storage with thumbnails, filtered realtime, and an embedded admin dashboard. Feature parity is gate-proven (m40–m45), and when your app outgrows SQLite you graduate tiers instead of migrating off.',
 		rows: [
-			{ axis: 'Single binary, ~$2/mo', grobase: 'Yes — 5.1 MB binary, 2.0 MiB idle (measured)', them: 'Yes — 30.1 MB binary, ~12 MiB idle (measured)', win: 'us' },
-			{ axis: 'SQLite implementation', grobase: 'Real C SQLite + Rust, no GC — sub-ms reads', them: 'Pure-Go SQLite (slower; TrailBase proved the gap)', win: 'us' },
-			{ axis: 'Engine-agnostic', grobase: 'Same app on SQLite or external Postgres/MySQL', them: 'SQLite-only, forever', win: 'us' },
-			{ axis: 'Authorization', grobase: 'ABAC + field-level masking (hide/redact per column)', them: 'Row rules only', win: 'us' },
-			{ axis: 'Graph / relationship traversal', grobase: 'Obsidian-style subgraph endpoint, shipped', them: 'Not available', win: 'us' },
-			{ axis: 'Multi-tenant DNA', grobase: 'Owner-stamping, scopes, capability masks built-in', them: 'Single-tenant by design', win: 'us' },
-			{ axis: 'When you outgrow it', grobase: 'Graduate Nano → Basic → … → Max; same SDK, zero rewrites', them: 'Migrate to a different platform', win: 'us' },
-			{ axis: 'Admin UI & JS hooks', grobase: 'Headless today (API + curl admin)', them: 'Polished embedded UI + goja JS hooks', win: 'them' },
+			{ axis: 'Single binary, ~$2/mo', grobase: 'One: 6.4 MB binary, 2.2 MiB idle (measured)', them: '30.1 MB binary, ~12 MiB idle (measured)', win: 'us' },
+			{ axis: 'Writes under load (c=64, oha)', grobase: '9,283 RPS insert — 3.8×; 100k rows in ~11 s', them: '2,463 RPS; 406 MiB RSS while doing it (26× ours)', win: 'us' },
+			{ axis: 'Auth surface', grobase: 'Password + any-OIDC OAuth matrix + OTP + TOTP MFA + recovery codes', them: 'Comparable (30+ presets over the same flow)', win: 'tie' },
+			{ axis: 'Files', grobase: 'Multipart, thumbnails, signed protected links', them: 'Comparable (plus S3 in-binary; ours is cloud-tier)', win: 'tie' },
+			{ axis: 'Admin dashboard', grobase: 'Embedded at /_/ — collections, data grid, users, keys, files, live SSE tail', them: 'Polished Svelte UI', win: 'tie' },
+			{ axis: 'Server-side aggregation', grobase: 'count/sum/avg/min/max + group_by (op=aggregate)', them: 'None — N queries or client-side', win: 'us' },
+			{ axis: 'Engine-agnostic', grobase: 'Same app on SQLite or Postgres/MySQL/Mongo tiers', them: 'SQLite-only, forever', win: 'us' },
+			{ axis: 'Authorization', grobase: 'Per-user owner-scoping + ABAC field masking', them: 'Row rules only', win: 'us' },
+			{ axis: 'Graph / relationship traversal', grobase: 'Subgraph endpoint, shipped', them: 'Not available', win: 'us' },
+			{ axis: 'When you outgrow it', grobase: 'Graduate One → Basic → … → Max; same SDK, zero rewrites', them: 'Migrate to a different platform', win: 'us' },
+			{ axis: 'JS hooks / list throughput', grobase: 'No embedded JS VM yet; PB also serves ~1.3× more list RPS at c=64 (our p99 is 3.6× better)', them: 'goja JS hooks + cron; faster bulk lists', win: 'them' },
 		],
 		honesty:
-			'Choose PocketBase if you want the most polished single-binary experience right now — its admin UI and JS hooks are genuinely great, and TrailBase already proved the Rust+C-SQLite speed class we build on. Choose Grobase Nano when you want that footprint with cloud-grade authorization, graph queries, and a backend you will never have to migrate off.',
+			'Choose PocketBase if you need embedded JS hooks today or squeeze every list-RPS from one box — both are real advantages and we say so. Choose Grobase One for the same product surface at 1/5th the binary and 1/26th the working-set, with aggregation, graph queries, field masking, and a graduation path PocketBase structurally cannot offer. Numbers: wiki/nano-vs-pocketbase.md, reproducible via scripts/bench/nano-one-pb-load.sh.',
 	},
 	{
 		id: 'firebase',
@@ -76,7 +79,7 @@ export const COMPETITORS: Competitor[] = [
 // Cross-cutting summary table (landing + compare page).
 export const SUMMARY_AXES = [
 	{ axis: 'Engines', grobase: '8', supabase: '1 (Postgres)', pocketbase: '1 (SQLite)', firebase: 'proprietary' },
-	{ axis: 'Self-host floor', grobase: '5.1 MB binary, 2 MiB RAM', supabase: 'multi-GB stack', pocketbase: '30 MB binary, ~12 MiB', firebase: 'n/a (cloud only)' },
+	{ axis: 'Self-host floor', grobase: '5.2 MB headless / 6.4 MB full-app binary, 2 MiB RAM', supabase: 'multi-GB stack', pocketbase: '30 MB binary, ~12 MiB', firebase: 'n/a (cloud only)' },
 	{ axis: 'Isolation models', grobase: '4 per mount', supabase: 'RLS', pocketbase: 'single-tenant', firebase: 'security rules' },
 	{ axis: 'Field-level masking', grobase: 'yes (ABAC)', supabase: 'via RLS/views', pocketbase: 'no', firebase: 'no' },
 	{ axis: 'Graph endpoint', grobase: 'yes', supabase: 'no', pocketbase: 'no', firebase: 'no' },
