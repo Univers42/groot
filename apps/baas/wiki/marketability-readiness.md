@@ -93,15 +93,15 @@ This doc is the **gate**. For per-feature competitive detail see [`competitive-m
 |------|--------|------------------------|-------------|---------------|
 | 10K tenants → 1 pool, 0× 5xx | `[v]` | Proven on all 7 engines | shipped | gate **m46** (`scripts/verify/m46-share-pools-isolation.sh`) |
 | Share-pools / 100K lever | `[v]` | Pool count independent of tenant count, proven | shipped | gate **m46**; `pools_shared` in `data-plane-pool/src/lib.rs` |
-| Read throughput / latency baseline | `[~]` | ~400 rps/pool, p95<2ms **observed in the m46 share-pools run** (not a re-runnable SLO artifact); the vs-Supabase comparison has **never been run** | Phase 0 | gate **m46** run notes in master-plan; vs-Supabase = gate **m54** |
+| Read throughput / latency baseline | `[~]` | ~400 rps/pool, p95<2ms (m46 run notes). **vs-Supabase read latency MEASURED 2026-06-13** (same probe, both PostgREST, 500-row seeded): Grobase **p50 1.45 / p95 2.40 ms** vs Supabase **p50 1.58 / p95 2.66 ms** — parity (same PostgREST). RPS/p99 still TODO | Phase 0 ✓ | gate **m46**; vs-Supabase = **m54** |
 | Data-path footprint advantage | `[v]` | 3.3 MiB Rust vs 127 MiB Node (~38×) | shipped | gate **m32** (`scripts/verify/m32-footprint.sh`) |
-| **vs-Supabase benchmark RUN + published** | `[~]` | Harness **exists but has NEVER been run** — placeholders in master-plan | **Phase 0** | gate **m54** — `scripts/bench/grobase-vs-supabase.sh` (must produce p50/p95/p99+RPS) |
+| **vs-Supabase benchmark RUN + published** | `[v]` | **RUN 2026-06-13.** Footprint **Supabase 2827 MiB / 13 containers** vs Grobase **~660 MiB essential / ~1.4 GiB pro** (~4.3×/2× lighter); read latency at parity. RPS + p99 still TODO | **Phase 0 ✓** | gate **m54** — `scripts/bench/grobase-vs-supabase.sh` (now seeds bench_items, remaps ports, probes both sides) |
 | 100K-tenant run measured | `[x]` | Currently **projected, not measured** | C4 | re-run → publish SLO |
 | Horizontal data-plane scale-out | `[~]` | Multi-instance **rate-limit correctness is proven** (gate **m51**); only **throughput scale-out (~800 rps)** remains unmeasured (supavisor opt-in, not wired to Rust DP) | C1 | gate **m51** (multi-instance rate-limit); target ~800 rps |
 | Production HA topology | `[~]` | Multi-instance rate-limiting proven (m51); single-node otherwise — **full HA topology unmeasured** (Helm chart is eval-only stub; HA = swap `DATABASE_URL` to managed PG) | C2/C3 | gate **m51**; `product-plan/07-scale-ha-helm-deployment.md` |
 | Published uptime SLA target | `[x]` | No SLA / status page yet | Cloud GTM | — |
 
-**Bar 2 read:** the *dense-tenancy* scale story is genuinely proven (m46). What is missing for a marketable SLO is (1) actually **running** `grobase-vs-supabase.sh` and publishing the numbers — a Phase-0 task — and (2) the measured 100K run + horizontal/HA topology for a cloud SLO (Track C).
+**Bar 2 read:** the *dense-tenancy* scale story is proven (m46), and the **vs-Supabase head-to-head is now run** (2026-06-13): **~4.3× lighter** footprint at the essential tier (660 MiB vs 2827 MiB) and read latency at **parity**. What remains for a marketable cloud SLO is (1) write-throughput/RPS + p99 numbers, and (2) the measured 100K run + horizontal/HA topology (Track C).
 
 ---
 
@@ -163,7 +163,7 @@ This doc is the **gate**. For per-feature competitive detail see [`competitive-m
 | Bar | % ready now | Blocking items | Gates which launch |
 |-----|-------------|----------------|--------------------|
 | **1 — Parity-matrix green** | ~60% | Storage DX (A1), functions DX (A2), SDK fluency+OpenAPI commit+multi-lang (A3/A4), GraphQL+broadcast/presence (A5), tenant dashboard (B4) | **OSS** (table-stakes subset) + **Cloud** |
-| **2 — Proven scale SLO** | ~50% | Run `grobase-vs-supabase.sh` + publish p50/p95/p99 (Phase 0); measured 100K run (C4); horizontal scale-out + HA (C1–C3) | **Cloud** |
+| **2 — Proven scale SLO** | ~60% | vs-Supabase RUN — footprint + read latency (Phase 0 ✓); still need write-RPS/p99, measured 100K run (C4), horizontal scale-out + HA (C1–C3) | **Cloud** |
 | **3 — Security audit-ready** | ~60% | Secret-scan CI gate (Phase 0); RS256 issuer + per-deployment keys, Vault enforce, CI sec-gates, ASVS-lite map (A6); plane isolation, header HMAC, read audit, per-tenant QoS (A6/C) | **OSS** (subset: Phase 0 + A6) + **Cloud** (full) |
 | **4 — Live demo + signup** | ~15% | Metering (B1), enforcement-on (B2), Stripe billing (B3), tenant self-service + dashboard (B4), per-tenant observability (B5), per-tenant backup (B6) | **Cloud** only |
 

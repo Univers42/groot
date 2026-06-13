@@ -39,18 +39,22 @@ Work executed this session (verified):
   + cross-user isolation (404) + forged-header rejection (401). **Open item:**
   fine-grained ABAC (`bucket:read/write`) is still **not** wired — owner-prefix is
   the only isolation today (the README's ABAC claims were aspirational).
-- **P0.2 vs-Supabase benchmark — harness fixed, clean run deferred.** Fixed three
-  harness bugs: seed `bench_items` (stock Supabase has none → the read probe was
-  timing 404s); narrow the footprint grep to supabase-only (the old
-  `kong|realtime|gotrue` alternation also matched our containers); remap Supabase
-  ports (kong→8100, analytics→4500, db→5532) to dodge the local dev HTTPS proxy on
-  8000/4000. Supabase booted partially (db/vector/imgproxy healthy; ~13 containers
-  created) but a clean **co-resident** measurement did not complete — Supabase's 13
-  containers on top of our full 32-container stack is too heavy for this box, and
-  Docker was taken down for a disk migration mid-run. Next step: the **sequential**
-  run the harness was designed for (our stack down, Supabase alone). Expectation
-  unchanged: Supabase self-host ≈ 13 containers / multiple GB (its docs recommend
-  ~4 GB) vs our essential ~660 MiB / 13 svc.
+- **P0.2 vs-Supabase benchmark — RUN 2026-06-13 ✅.** Fixed four harness bugs (seed
+  `bench_items` — stock Supabase has none, so the read probe was timing 404s;
+  narrow the footprint grep to supabase-only — the old `kong|realtime|gotrue`
+  alternation also matched our containers; remap Supabase ports kong→8100,
+  analytics→4500, db→5532 to dodge the local dev HTTPS proxy on 8000/4000; use the
+  absolute `SCRIPT_DIR` for the our-side path), and forced the work dir onto the
+  **big data disk** (`BENCH_WORK_BASE=/mnt/storage/bench`) so Supabase's
+  bind-mounted volumes never touch the small system disk. **Results** (same curl
+  probe, both PostgREST, 500-row seeded `bench_items`, same box):
+  - **Footprint:** Supabase **2827 MiB / 13 containers** vs Grobase **~660 MiB
+    essential / ~1.4 GiB pro** → **~4.3× / ~2× lighter** for a comparable
+    pg+auth+REST+realtime+storage surface.
+  - **Read latency:** Grobase **p50 1.45 / p95 2.40 ms** vs Supabase **p50 1.58 /
+    p95 2.66 ms** → **parity** (both are the same PostgREST; the edge is footprint
+    + multi-engine + dense multi-tenancy, not raw read speed).
+  - Still TODO for a full SLO: write-throughput/RPS + p99, and the 100K run (Track C).
 
 Supporting context (read the code, then these):
 [grobase-master-plan.md](grobase-master-plan.md) ·
