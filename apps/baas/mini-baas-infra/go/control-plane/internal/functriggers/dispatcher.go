@@ -231,6 +231,14 @@ func (d *Dispatcher) handleEvent(ctx context.Context, aggregate string, msg redi
 
 // lookupMatching reads the enabled trigger set for the tenant and filters
 // in-Go (same approach as webhooks).
+//
+// The `tenant_id = $1` predicate is the AUTHORITATIVE tenant scope: this
+// dispatcher connects to the system Postgres as the table-owning `postgres`
+// superuser, so the per-tenant RLS policy on function_triggers is silently
+// bypassed (owner + ENABLE-not-FORCE). Relying on TenantTx's GUC alone would
+// return EVERY tenant's enabled triggers and fire them on this event — a
+// cross-tenant compute + data-exfiltration breach. We scope explicitly in SQL
+// and never depend on RLS being enforced here.
 func (d *Dispatcher) lookupMatching(ctx context.Context, tenantID, aggregate, eventType string) ([]Trigger, error) {
 	if tenantID == "" {
 		return nil, nil
@@ -241,7 +249,7 @@ func (d *Dispatcher) lookupMatching(ctx context.Context, tenantID, aggregate, ev
 			SELECT id::text, tenant_id, name, function_name, event_types, aggregates,
 			       enabled, max_attempts, timeout_ms, created_at::text, updated_at::text
 			  FROM public.function_triggers
-			 WHERE enabled = true`)
+			 WHERE enabled = true AND tenant_id = $1`, tenantID)
 		if err != nil {
 			return err
 		}

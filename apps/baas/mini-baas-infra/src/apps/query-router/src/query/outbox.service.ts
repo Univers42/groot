@@ -39,6 +39,13 @@ interface QueryOutboxInput {
   filter?: Record<string, unknown>;
   requestId?: string;
   actorId?: string;
+  /**
+   * The AUTHORITATIVE tenant (slug) of the write, taken from the verified
+   * request identity — NOT from any user-writable row column. Stamped as a
+   * top-level `tenant_id` on the payload so the function-trigger / webhook
+   * dispatchers can scope delivery to the owning tenant (cross-tenant safe).
+   */
+  tenantId?: string;
   idempotencyKey?: string;
 }
 
@@ -74,6 +81,10 @@ export class OutboxService implements OnModuleDestroy {
       compensationPayload: this.compensationPayload(input.data),
       idempotencyKey: input.idempotencyKey,
       payload: {
+        // Top-level authoritative tenant (slug) so the outbox consumers
+        // (function-trigger + webhook dispatchers) can tenant-scope delivery.
+        // Server-derived; never read from a user-writable row column.
+        tenant_id: input.tenantId ?? null,
         engine: input.engine,
         resource: input.resource,
         op: input.op,

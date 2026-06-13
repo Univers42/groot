@@ -63,7 +63,7 @@ Work executed this session (verified):
   A4 generated **Python + Dart** clients from that spec; A6 security CI gates
   (cargo-audit, govulncheck) + ASVS map + adapter-registry HMAC; A7 migrate-from-Supabase
   / migrate-from-Firebase guides + quickstart fix + wiki market index.
-- **A2 Functions DX + A5 GraphQL/realtime — BUILT, TESTED, INTEGRATED (rc.3 wave).**
+- **A2 Functions DX + A5 GraphQL/realtime — LIVE (gates m56 + m59 PASS, v1.1.0 wave).**
   Built on background-agent worktrees, then cherry-picked onto `feat/baas-scale-program`
   (the worktrees had branched off the pb-total base; cherry-pick isolated exactly the
   feature deltas — 4 A5 + 6 A2 commits — and skipped the unrelated PocketBase program).
@@ -76,9 +76,10 @@ Work executed this session (verified):
   - **A5:** realtime **broadcast** (`ClientMessage::Broadcast` → EventBus → subscribers,
     `SourceKind::Api` stamped from claims) + **presence** (`PresenceTracker`, single-node
     authoritative; cross-node merge deferred) + a top-level `client.realtime`; **GraphQL**
-    Kong `/graphql/v1` route + SDK `client.graphql` + availability-gated `pg_graphql`
-    migration. **Honest:** the vendored `postgres:16-alpine` does NOT ship `pg_graphql`,
-    so GraphQL is "route wired, pending the extension."
+    Kong `/graphql/v1 → /rpc/graphql` route + SDK `client.graphql` + a `graphql_public.graphql()`
+    SECURITY-INVOKER wrapper (`035`). **Now LIVE** in the opt-in Debian-glibc `postgres-graphql`
+    edition (`docker-compose.graphql.yml`); the lean alpine default still 5xxs the route until that
+    image is used.
   - **Integration verification (this session):** Go build+vet + 5 pkgs green; Rust
     realtime `cargo test --workspace` (engine 34 / e2e 27, all crates 0-fail) + clippy
     `-D warnings` green (fixed one pre-existing `doc_markdown` lint in `writer.rs`); SDK
@@ -94,8 +95,15 @@ Work executed this session (verified):
     Also fixed: WS publish/broadcast payload caps (65 KB, matching REST) + presence-meta cap
     (16 KB) against DoS, and a `baas functions deploy` path-traversal. The review working is
     itself the audit-ready posture in action (see [security-audit.md](security-audit.md)).
-    **Residual for full `[v]`:** live-stack e2e gates (m56 functions-DX, m59 GraphQL+realtime)
-    + a pg_graphql-capable Postgres image.
+  - **v1.1.0 live-gate wave (this session):** **m56** (functions DX e2e) + **m59** (GraphQL + RLS
+    isolation) both PASS. A 5-agent adversarial review of the firing path caught a **CRITICAL
+    cross-tenant fan-out** — the trigger/webhook dispatchers matched on RLS that was bypassed by their
+    superuser connection, so one tenant's write fired every tenant's trigger and POSTed its payload to
+    every tenant's webhook. Fixed with an explicit `WHERE tenant_id=$1` in both dispatchers (proven by
+    a cross-tenant no-fire control in m56) + a `039` migration locking down the anon-readable
+    `outbox_events`/`schema_migrations` (the GraphQL-edition CDC leak the review also found). See
+    [`.claude/memory/decisions.md`](../.claude/memory/decisions.md) D-010/D-011.
+    **Residual for full `[v]`:** ship pg_graphql in the default image; take the cron runner out of shadow.
 
 Supporting context (read the code, then these):
 [grobase-master-plan.md](grobase-master-plan.md) ·
