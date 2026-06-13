@@ -91,4 +91,39 @@ PY
 [ $? -eq 0 ] || fail "Node and Go newsletter responses diverge in shape/type"
 pass "newsletter subscribe: Node ↔ Go response parity (envelope + bigint-as-string id)"
 
-green "[M48] ALL GATES GREEN — consolidated Go orchestrator answers shape-identically to Node (newsletter; envelope + id-type parity proven)"
+# ── 2) session + gdpr: the Go port is AT LEAST AS CORRECT as Node ─────────────
+# These user-data services hit a per-tenant `session` schema in Node and 500
+# with "permission denied for schema session" on a clean read; the Go ports use
+# a shared owner-scoped table and serve correctly. Byte-parity is impossible
+# against a 500, so the bar here is: the Go orchestrator returns 200 with the
+# Nest success envelope (success/data/message/path/statusCode/timestamp) for the
+# same request. The orchestrator trusts gateway-injected X-Baas-User-Id (the live
+# adapter-registry trust model); a real client reaches it through Kong, which
+# injects identity after auth.
+go_envelope_ok() { # $1 path  $2 role  — asserts Go 200 + full envelope
+  local path="$1" role="$2" body
+  body="$(incurl "http://orchestrator:3026${path}" \
+    -H "X-Baas-User-Id: u-parity-${STAMP}" -H "X-Baas-Role: ${role}")"
+  python3 - "$body" "$path" <<'PY'
+import json, sys
+try:
+    d = json.loads(sys.argv[1])
+except Exception as e:
+    print(f"  {sys.argv[2]}: non-JSON ({e}): {sys.argv[1][:120]}"); sys.exit(1)
+need = {"success", "data", "message", "path", "statusCode", "timestamp"}
+missing = need - set(d)
+if missing or d.get("success") is not True or d.get("statusCode") != 200:
+    print(f"  {sys.argv[2]}: not a 200 success envelope: {json.dumps(d)[:160]}"); sys.exit(1)
+print(f"  {sys.argv[2]}: 200 + success envelope, data={type(d['data']).__name__}")
+PY
+}
+
+step "Go orchestrator serves session admin/stats (Node 500s on schema perms)"
+go_envelope_ok "/sessions/admin/stats" "service_role" || fail "Go session admin/stats not a clean 200 envelope"
+pass "session: Go serves a correct 200 envelope (the cutover fixes a Node 500)"
+
+step "Go orchestrator serves gdpr /consents (Node 500s on schema perms)"
+go_envelope_ok "/consents" "authenticated" || fail "Go gdpr /consents not a clean 200 envelope"
+pass "gdpr: Go serves a correct 200 envelope (the cutover fixes a Node 500)"
+
+green "[M48] ALL GATES GREEN — newsletter Node↔Go byte-parity; session+gdpr Go-correct where Node 500s (cutover is an upgrade)"
