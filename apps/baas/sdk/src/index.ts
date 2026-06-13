@@ -23,6 +23,7 @@ import { FunctionsClient } from './domains/functions.js';
 import { GraphqlClient } from './domains/graphql.js';
 import { RealtimeClient } from './domains/realtime-client.js';
 import { HttpClient } from './core/http.js';
+import { routes } from './core/routes.js';
 import { makeEngineClient } from './domains/engine-clients.js';
 import { ENGINE_IDS, type EngineId, type EnginesResponse } from './generated/engines.js';
 import type { EngineClient } from './domains/engine-clients.js';
@@ -273,7 +274,7 @@ export class MiniBaasClient {
    * server-side descriptor; throws if any engine drifts.
    */
   async introspectEngines(): Promise<EnginesResponse> {
-    const response = await this.http.request<EnginesResponse>('/query/v1/engines', { method: 'GET' });
+    const response = await this.http.request<EnginesResponse>(routes.query.engines, { method: 'GET' });
     const liveIds = new Set(response.engines);
     const staticIds = new Set(ENGINE_IDS);
     for (const id of liveIds) {
