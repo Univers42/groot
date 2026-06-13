@@ -316,6 +316,14 @@ func (s *Service) RevokeKey(ctx context.Context, slug, keyID string) error {
 	// Drop the verify fast-path cache so the revoked key stops authenticating
 	// immediately instead of lingering until its TTL expires.
 	s.verifyC.flush()
+	// Same for the DATA PLANE's verify cache (B3) — it caches verified
+	// identities independently and would keep honoring the revoked key for up
+	// to its TTL (~30s). Best-effort: on failure the TTL still bounds exposure.
+	if s.dataPlane != nil {
+		if err := s.dataPlane.evictVerify(ctx); err != nil {
+			s.log.Warn("data-plane evict-verify after key revoke failed", "err", err)
+		}
+	}
 	return nil
 }
 
