@@ -86,9 +86,14 @@ npm install git+https://github.com/Univers42/groot.git#main:apps/baas/sdk
 
 ```ts
 import { createClient } from '@mini-baas/js';
-const client = createClient('http://localhost:8000', { apikey: process.env.BAAS_ANON_KEY });
-const { data } = await client.from('todos').select().limit(10);
+const client = createClient({ url: 'http://localhost:8000', anonKey: process.env.BAAS_ANON_KEY });
+const data = await client.from('todos').query().select('*').limit(10);
 ```
+
+> Coming from Supabase? The SDK is Supabase-shaped — see
+> **[migrate-from-supabase](../wiki/migrate-from-supabase.md)** (mostly a
+> dependency swap). From Firebase? See
+> **[migrate-from-firebase](../wiki/migrate-from-firebase.md)**.
 
 ### Choosing your size
 
