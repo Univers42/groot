@@ -19,7 +19,10 @@ import { TxnClient } from './domains/txn.js';
 import { WebhooksClient } from './domains/webhooks.js';
 import { AdminClient } from './domains/admin.js';
 import { FunctionsClient } from './domains/functions.js';
+import { GraphqlClient } from './domains/graphql.js';
+import { RealtimeClient } from './domains/realtime-client.js';
 import { HttpClient } from './core/http.js';
+import { routes } from './core/routes.js';
 import { makeEngineClient } from './domains/engine-clients.js';
 import { ENGINE_IDS } from './generated/engines.js';
 import { createBrowserStorageAdapter, createMemoryStorageAdapter, } from './core/storage.js';
@@ -32,6 +35,8 @@ export { FunctionsClient } from './domains/functions.js';
 export { StorageClient, StorageBucketClient } from './domains/storage.js';
 export { RestClient, RestResourceBuilder, RestQueryBuilder } from './domains/rest.js';
 export { AuthClient, AuthAdminClient, AuthMfaClient } from './domains/auth.js';
+export { GraphqlClient } from './domains/graphql.js';
+export { RealtimeClient } from './domains/realtime-client.js';
 export class MiniBaasClient {
     auth;
     query;
@@ -44,6 +49,16 @@ export class MiniBaasClient {
     schema;
     /** Edge functions (`/functions/v1`). */
     functions;
+    /**
+     * GraphQL passthrough to PostgREST's pg_graphql endpoint (`/graphql/v1`).
+     * Requires the `pg_graphql` extension in Postgres (see route docs).
+     */
+    graphql;
+    /**
+     * Realtime WebSocket client — DB change streams, ephemeral broadcast
+     * (client→client), and presence (who's online). See {@link RealtimeClient}.
+     */
+    realtime;
     /**
      * Webhook subscription registry. **Admin-only / server-side**: requires
      * `serviceRoleKey`; the gateway route is internal-only.
@@ -79,7 +94,9 @@ export class MiniBaasClient {
         this.analytics = new AnalyticsClient(this.http);
         this.txn = new TxnClient(this.http);
         this.schema = new SchemaClient(this.http);
-        this.functions = new FunctionsClient(this.http);
+        this.functions = new FunctionsClient(this.http, options.serviceRoleKey);
+        this.graphql = new GraphqlClient(this.http);
+        this.realtime = new RealtimeClient(this.http);
         this.webhooks = new WebhooksClient(this.http, options.serviceRoleKey);
         this.admin = new AdminClient(this.http, options.serviceRoleKey);
     }
@@ -112,7 +129,7 @@ export class MiniBaasClient {
      * server-side descriptor; throws if any engine drifts.
      */
     async introspectEngines() {
-        const response = await this.http.request('/query/v1/engines', { method: 'GET' });
+        const response = await this.http.request(routes.query.engines, { method: 'GET' });
         const liveIds = new Set(response.engines);
         const staticIds = new Set(ENGINE_IDS);
         for (const id of liveIds) {

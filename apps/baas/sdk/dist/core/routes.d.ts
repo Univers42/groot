@@ -23,8 +23,12 @@ export declare const routes: {
     readonly query: {
         readonly execute: "/query/v1/execute";
         readonly txn: "/query/v1/txn";
+        readonly engines: "/query/v1/engines";
         readonly schema: (dbId: string) => string;
         readonly schemaDdl: (dbId: string) => string;
+    };
+    readonly graphql: {
+        readonly root: "/graphql/v1";
     };
     readonly webhooks: {
         readonly root: "/admin/v1/webhooks";
@@ -44,6 +48,12 @@ export declare const routes: {
         readonly root: "/functions/v1";
         readonly one: (name: string) => string;
         readonly invoke: (name: string) => string;
+        readonly triggers: "/admin/v1/function-triggers";
+        readonly trigger: (id: string) => string;
+        readonly schedules: "/admin/v1/function-schedules";
+        readonly schedule: (id: string) => string;
+        readonly secrets: "/admin/v1/function-secrets";
+        readonly secret: (key: string) => string;
     };
     readonly storage: {
         readonly sign: (bucket: string, key: string) => string;

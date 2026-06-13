@@ -8,6 +8,8 @@ import { TxnClient } from './domains/txn.js';
 import { WebhooksClient } from './domains/webhooks.js';
 import { AdminClient } from './domains/admin.js';
 import { FunctionsClient } from './domains/functions.js';
+import { GraphqlClient } from './domains/graphql.js';
+import { RealtimeClient } from './domains/realtime-client.js';
 import { type EngineId, type EnginesResponse } from './generated/engines.js';
 import type { EngineClient } from './domains/engine-clients.js';
 import { type SessionStorageAdapter } from './core/storage.js';
@@ -16,7 +18,7 @@ import type { RestRequestOptions } from './types.js';
 export type { AuthSession, ClientSession, SessionInput, User, } from './core/session.js';
 export type { SessionStorageAdapter } from './core/storage.js';
 export { MiniBaasError, MiniBaasTimeoutError } from './core/errors.js';
-export type { AnalyticsTrackInput, PresignInput, QueryRunInput, QueryRunResponse, RecoverInput, FilterPrimitive, RestFilterOperator, RestMutationOptions, RestOrderOptions, RestQueryBuilder as RestQueryBuilderApi, RestQueryOptions, RestRequestOptions, RestResourceBuilder as RestResourceBuilderApi, SignInWithPasswordInput, SignUpInput, UpdateUserInput, VerifyInput, OAuthProvider, SignInWithOAuthInput, SignInWithOAuthResult, MfaFactorType, MfaEnrollInput, MfaEnrollResult, MfaChallengeInput, MfaChallengeResult, MfaVerifyInput, TxnExecuteInput, TxnOp, TxnOperation, TxnOpResult, TxnResult, WebhookCreateInput, WebhookDelivery, WebhookSubscription, WebhookUpdateInput, Tenant, TenantApiKey, TenantApiKeyIssued, TenantBootstrapInput, TenantBootstrapResult, TenantCreateInput, TenantUpdateInput, ProvisionInput, ProvisionMountResult, ProvisionMountSpec, ProvisionResult, MigrateCredentialRef, MigrateIdentity, MigrateInput, MigrateMount, FunctionDeployInput, FunctionDeployResult, FunctionInvokeOptions, FunctionSource, FunctionSummary, ColumnSchema, DdlColumnDef, DdlColumnType, NormalizedSchema, NormalizedType, SchemaDdlAddColumnInput, SchemaDdlAlterColumnTypeInput, SchemaDdlCreateTableInput, SchemaDdlDropColumnInput, SchemaDdlDropTableInput, SchemaDdlInput, SchemaDdlOp, SchemaDdlResult, SchemaEngineCapabilities, TableSchema, } from './types.js';
+export type { AnalyticsTrackInput, PresignInput, QueryRunInput, QueryRunResponse, RecoverInput, FilterPrimitive, RestFilterOperator, RestMutationOptions, RestOrderOptions, RestQueryBuilder as RestQueryBuilderApi, RestQueryOptions, RestRequestOptions, RestResourceBuilder as RestResourceBuilderApi, SignInWithPasswordInput, SignUpInput, UpdateUserInput, VerifyInput, OAuthProvider, SignInWithOAuthInput, SignInWithOAuthResult, MfaFactorType, MfaEnrollInput, MfaEnrollResult, MfaChallengeInput, MfaChallengeResult, MfaVerifyInput, TxnExecuteInput, TxnOp, TxnOperation, TxnOpResult, TxnResult, WebhookCreateInput, WebhookDelivery, WebhookSubscription, WebhookUpdateInput, Tenant, TenantApiKey, TenantApiKeyIssued, TenantBootstrapInput, TenantBootstrapResult, TenantCreateInput, TenantUpdateInput, ProvisionInput, ProvisionMountResult, ProvisionMountSpec, ProvisionResult, MigrateCredentialRef, MigrateIdentity, MigrateInput, MigrateMount, FunctionDeployInput, FunctionDeployResult, FunctionInvokeOptions, FunctionSource, FunctionSummary, FunctionTrigger, FunctionTriggerCreateInput, FunctionSchedule, FunctionScheduleCreateInput, FunctionSecretMeta, FunctionSecretSetInput, ColumnSchema, DdlColumnDef, DdlColumnType, NormalizedSchema, NormalizedType, SchemaDdlAddColumnInput, SchemaDdlAlterColumnTypeInput, SchemaDdlCreateTableInput, SchemaDdlDropColumnInput, SchemaDdlDropTableInput, SchemaDdlInput, SchemaDdlOp, SchemaDdlResult, SchemaEngineCapabilities, TableSchema, GraphqlError, GraphqlQueryOptions, GraphqlRequest, GraphqlResponse, } from './types.js';
 export { SchemaClient } from './domains/schema.js';
 export { TxnClient } from './domains/txn.js';
 export { WebhooksClient } from './domains/webhooks.js';
@@ -26,6 +28,9 @@ export { StorageClient, StorageBucketClient } from './domains/storage.js';
 export { RestClient, RestResourceBuilder, RestQueryBuilder } from './domains/rest.js';
 export { AuthClient, AuthAdminClient, AuthMfaClient } from './domains/auth.js';
 export type { StorageObject, BucketInfo, UploadResult, UploadOptions, UploadBody } from './domains/storage.js';
+export { GraphqlClient } from './domains/graphql.js';
+export { RealtimeClient } from './domains/realtime-client.js';
+export type { PresenceMember, RealtimeEvent, RealtimeSubscribeOptions, RealtimeSubscription, } from './domains/realtime-client.js';
 export interface RetryOptions {
     attempts?: number;
     delayMs?: number;
@@ -57,6 +62,16 @@ export declare class MiniBaasClient {
     readonly schema: SchemaClient;
     /** Edge functions (`/functions/v1`). */
     readonly functions: FunctionsClient;
+    /**
+     * GraphQL passthrough to PostgREST's pg_graphql endpoint (`/graphql/v1`).
+     * Requires the `pg_graphql` extension in Postgres (see route docs).
+     */
+    readonly graphql: GraphqlClient;
+    /**
+     * Realtime WebSocket client — DB change streams, ephemeral broadcast
+     * (client→client), and presence (who's online). See {@link RealtimeClient}.
+     */
+    readonly realtime: RealtimeClient;
     /**
      * Webhook subscription registry. **Admin-only / server-side**: requires
      * `serviceRoleKey`; the gateway route is internal-only.

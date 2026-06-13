@@ -34,8 +34,13 @@ export const routes = {
     query: {
         execute: '/query/v1/execute',
         txn: '/query/v1/txn',
+        engines: '/query/v1/engines',
         schema: (dbId) => `/query/v1/${encodeURIComponent(dbId)}/schema`,
         schemaDdl: (dbId) => `/query/v1/${encodeURIComponent(dbId)}/schema/ddl`,
+    },
+    graphql: {
+        // PostgREST's pg_graphql endpoint, fronted by Kong (strip_path → /graphql).
+        root: '/graphql/v1',
     },
     webhooks: {
         root: '/admin/v1/webhooks',
@@ -55,6 +60,13 @@ export const routes = {
         root: '/functions/v1',
         one: (name) => `/functions/v1/${encodeURIComponent(name)}`,
         invoke: (name) => `/functions/v1/${encodeURIComponent(name)}/invoke`,
+        // ── A2 Functions DX: triggers / schedules / secrets (admin surface) ───────
+        triggers: '/admin/v1/function-triggers',
+        trigger: (id) => `/admin/v1/function-triggers/${encodeURIComponent(id)}`,
+        schedules: '/admin/v1/function-schedules',
+        schedule: (id) => `/admin/v1/function-schedules/${encodeURIComponent(id)}`,
+        secrets: '/admin/v1/function-secrets',
+        secret: (key) => `/admin/v1/function-secrets/${encodeURIComponent(key)}`,
     },
     storage: {
         sign: (bucket, key) => `/storage/v1/sign/${encodeURIComponent(bucket)}/${encodePath(key)}`,
