@@ -33,7 +33,7 @@
 import { parseArgs } from 'node:util';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve, relative, isAbsolute } from 'node:path';
 import { createClient } from '../index.js';
 
 export interface CliConfig {
@@ -163,7 +163,14 @@ async function run(argv: string[]): Promise<number> {
     if (action === 'deploy') {
       const file = rest[0];
       if (!file) throw new Error('usage: baas functions deploy <file> [--name <n>]');
-      const code = readFileSync(file, 'utf8');
+      // Confine reads to the working-directory tree so a stray `..` (or a
+      // tricked invocation on a shared box) can't upload ~/.ssh/id_rsa etc.
+      const resolved = resolve(file);
+      const rel = relative(process.cwd(), resolved);
+      if (rel.startsWith('..') || isAbsolute(rel)) {
+        throw new Error(`refusing to read outside the working directory: ${file}`);
+      }
+      const code = readFileSync(resolved, 'utf8');
       const name = (values.name as string) ?? file.split('/').pop()!.replace(/\.[^.]+$/, '');
       out(await c.functions.deploy({ name, code }));
       return 0;

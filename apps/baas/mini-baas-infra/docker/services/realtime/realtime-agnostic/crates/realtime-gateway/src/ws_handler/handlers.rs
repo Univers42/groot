@@ -26,6 +26,14 @@ use super::reader::{Action, AuthState};
 use super::util::{parse_sub_config, send_ctrl};
 use super::AppState;
 
+/// Max serialized payload for a client PUBLISH/BROADCAST frame — matches the
+/// REST publish limit (`rest_api.rs`) and the protocol's documented ≤64 KB, so
+/// the WebSocket path can't bypass the size cap the REST path enforces.
+const MAX_WS_PAYLOAD_BYTES: usize = 65_536;
+/// Max serialized presence metadata per member — keeps a single TRACK from
+/// fanning an oversized blob out to every subscriber on the topic.
+const MAX_PRESENCE_META_BYTES: usize = 16_384;
+
 pub(super) async fn handle_auth(
     token: String,
     conn_id: ConnectionId,
@@ -170,6 +178,17 @@ pub(super) async fn handle_publish(
         warn!(conn_id = %conn_id, "Publish before auth");
         return Action::Continue;
     }
+    if let Some(ref c) = auth.claims {
+        if state
+            .auth_provider
+            .authorize_publish(c, &TopicPath::new(&topic))
+            .await
+            .is_err()
+        {
+            warn!(conn_id = %conn_id, topic = %topic, "Publish denied (namespace)");
+            return Action::Continue;
+        }
+    }
     debug!(conn_id = %conn_id, topic = %topic, event_type = %event_type, "PUBLISH received");
     let payload_bytes = match serde_json::to_vec(&payload) {
         Ok(b) => b,
@@ -178,6 +197,10 @@ pub(super) async fn handle_publish(
             return Action::Continue;
         }
     };
+    if payload_bytes.len() > MAX_WS_PAYLOAD_BYTES {
+        warn!(conn_id = %conn_id, len = payload_bytes.len(), "Publish payload too large");
+        return Action::Continue;
+    }
     let mut envelope = EventEnvelope::new(
         TopicPath::new(&topic),
         &event_type,
@@ -241,6 +264,17 @@ pub(super) async fn handle_broadcast(
         warn!(conn_id = %conn_id, "Broadcast before auth");
         return Action::Continue;
     }
+    if let Some(ref c) = auth.claims {
+        if state
+            .auth_provider
+            .authorize_publish(c, &TopicPath::new(&topic))
+            .await
+            .is_err()
+        {
+            warn!(conn_id = %conn_id, topic = %topic, "Broadcast denied (namespace)");
+            return Action::Continue;
+        }
+    }
     debug!(conn_id = %conn_id, topic = %topic, event = %event, "BROADCAST received");
     // Wrap the caller payload so receivers can read both the app event label
     // and the body under a stable shape.
@@ -252,6 +286,10 @@ pub(super) async fn handle_broadcast(
             return Action::Continue;
         }
     };
+    if payload_bytes.len() > MAX_WS_PAYLOAD_BYTES {
+        warn!(conn_id = %conn_id, len = payload_bytes.len(), "Broadcast payload too large");
+        return Action::Continue;
+    }
     let mut envelope =
         EventEnvelope::new(TopicPath::new(&topic), "broadcast", Bytes::from(payload_bytes));
     envelope.source = api_source(auth);
@@ -275,6 +313,7 @@ pub(super) async fn handle_broadcast(
 ///
 /// [`EventBus`]: realtime_core::EventBus
 /// [`PresenceTracker`]: realtime_engine::PresenceTracker
+#[allow(clippy::cognitive_complexity)]
 pub(super) async fn handle_track(
     topic: String,
     meta: serde_json::Value,
@@ -284,6 +323,26 @@ pub(super) async fn handle_track(
 ) -> Action {
     if !auth.authenticated {
         warn!(conn_id = %conn_id, "Track before auth");
+        return Action::Continue;
+    }
+    // Presence is publish-like: a TRACK announces this member to every
+    // subscriber of `topic`, so gate it on publish authorization — otherwise a
+    // client could inject its identity into another tenant's presence set.
+    if let Some(ref c) = auth.claims {
+        if state
+            .auth_provider
+            .authorize_publish(c, &TopicPath::new(&topic))
+            .await
+            .is_err()
+        {
+            warn!(conn_id = %conn_id, topic = %topic, "Track denied (namespace)");
+            return Action::Continue;
+        }
+    }
+    // Bound the metadata so a single TRACK can't fan an oversized blob to every
+    // subscriber on the topic.
+    if serde_json::to_vec(&meta).map_or(usize::MAX, |b| b.len()) > MAX_PRESENCE_META_BYTES {
+        warn!(conn_id = %conn_id, topic = %topic, "Track meta too large");
         return Action::Continue;
     }
     let member = PresenceMember {

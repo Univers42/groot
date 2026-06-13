@@ -22,7 +22,7 @@
 // IMPORTANT (honest status): the vendored `postgres:16-alpine` image does NOT
 // ship pg_graphql. This client + the Kong route are wired and correct, but the
 // endpoint returns an error until Postgres has the extension (see
-// `scripts/migrations/postgresql/0006_pg_graphql.sql`, gated on availability).
+// `scripts/migrations/postgresql/035_pg_graphql.sql`, gated on availability).
 
 import { routes } from '../core/routes.js';
 import type { HttpClient } from '../core/http.js';

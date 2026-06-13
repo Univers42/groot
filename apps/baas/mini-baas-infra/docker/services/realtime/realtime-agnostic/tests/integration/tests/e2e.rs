@@ -697,6 +697,58 @@ async fn test_jwt_auth_provider() {
     assert_eq!(auth_claims.sub, "user-123");
 }
 
+/// Regression for the rc.3 authz fix: a token scoped to one namespace must be
+/// DENIED publish to another namespace. `handle_publish`/`handle_broadcast`/
+/// `handle_track` all gate on `authorize_publish`, so this is the primitive that
+/// keeps a tenant from broadcasting / injecting presence into another tenant's
+/// topics. (Before the fix those handlers checked only authentication.)
+#[tokio::test]
+async fn test_jwt_authorize_publish_is_namespace_scoped() {
+    use jsonwebtoken::{encode, EncodingKey, Header};
+    use realtime_auth::{JwtAuthProvider, JwtConfig};
+    use realtime_core::{AuthContext, AuthProvider};
+
+    let secret = "test-secret-key-for-jwt-testing-2024";
+    let config = JwtConfig::hmac(secret);
+    let provider = JwtAuthProvider::new(&config).unwrap();
+
+    let claims = json!({
+        "sub": "user-a",
+        "exp": chrono::Utc::now().timestamp() + 3600,
+        "iat": chrono::Utc::now().timestamp(),
+        "can_publish": true,
+        "namespaces": ["tenant_a"]
+    });
+    let token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(secret.as_bytes()),
+    )
+    .unwrap();
+    let ctx = AuthContext {
+        peer_addr: "127.0.0.1:0".parse().unwrap(),
+        transport: "websocket".to_string(),
+    };
+    let auth_claims = provider.verify(&token, &ctx).await.unwrap();
+
+    // Allowed inside its own namespace …
+    assert!(
+        provider
+            .authorize_publish(&auth_claims, &TopicPath::new("tenant_a/orders"))
+            .await
+            .is_ok(),
+        "publish to own namespace must be allowed"
+    );
+    // … denied to another tenant's namespace (the isolation guarantee).
+    assert!(
+        provider
+            .authorize_publish(&auth_claims, &TopicPath::new("tenant_b/orders"))
+            .await
+            .is_err(),
+        "publish to another namespace must be DENIED"
+    );
+}
+
 #[tokio::test]
 async fn test_jwt_auth_rejects_invalid_token() {
     use realtime_auth::{JwtAuthProvider, JwtConfig};
