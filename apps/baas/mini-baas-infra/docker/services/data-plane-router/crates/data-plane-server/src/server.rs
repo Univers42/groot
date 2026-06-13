@@ -29,11 +29,16 @@ pub async fn run(config: ServerConfig) -> anyhow::Result<()> {
         }
     });
 
+    // Keep a handle for the post-serve flush (the router consumes `state`).
+    let shutdown_state = state.clone();
     let app = routes::router(state);
 
     tracing::info!(address = %addr, "Rust data-plane-router listening");
     axum::serve(listener, app)
         .with_graceful_shutdown(signal::shutdown_signal())
         .await?;
+    // Track-B metering (B1a): flush the last pending usage window on graceful
+    // shutdown (no-op when metering is OFF → parity).
+    shutdown_state.flush_usage();
     Ok(())
 }

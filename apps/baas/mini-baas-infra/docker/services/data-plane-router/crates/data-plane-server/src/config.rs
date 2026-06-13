@@ -93,6 +93,21 @@ pub struct ServerConfig {
     /// audit event (tenant/engine/op/resource/returned_rows) per served read,
     /// at the cost of audit-log volume. Mutations are audited unconditionally.
     pub audit_reads: bool,
+    /// Track-B metering (B1a) — per-tenant usage counters in the data plane.
+    /// OFF by default → byte-parity: the read/write hot path takes ZERO extra
+    /// branches, increments ZERO counters, emits ZERO usage events. Requires
+    /// BOTH the master `METERING_ENABLED` AND `DATA_PLANE_METERING` to be truthy
+    /// (master + per-emitter sub-flag, mirroring the plan's flag ladder). When
+    /// ON, the read arm records `query.count`/`query.rows` and the mutation arm
+    /// records `write.rows` into an in-memory aggregate drained by a background
+    /// flusher that emits one structured `usage` tracing event per
+    /// (tenant, metric) window.
+    pub metering: bool,
+    /// Track-B metering flush cadence (ms) — how often the background flusher
+    /// drains non-zero `(tenant, metric)` aggregates and emits one `usage` event
+    /// each. From `DATA_PLANE_METERING_FLUSH_MS` (default 60000); a gate can set
+    /// it low to force a fast flush. Only consulted when `metering` is ON.
+    pub metering_flush_ms: u64,
 }
 
 impl ServerConfig {
@@ -163,6 +178,20 @@ impl ServerConfig {
                 read_env("DATA_PLANE_AUDIT_READS", "false").to_lowercase().as_str(),
                 "1" | "true" | "on"
             ),
+            // Track-B metering (B1a): ON only when BOTH the master flag AND the
+            // per-emitter sub-flag are truthy — so the master can gate the whole
+            // pipeline while the data-plane emitter is still independently
+            // toggleable for an isolated gate. BOTH default `false` → byte-parity.
+            metering: matches!(
+                read_env("METERING_ENABLED", "false").to_lowercase().as_str(),
+                "1" | "true" | "on"
+            ) && matches!(
+                read_env("DATA_PLANE_METERING", "false").to_lowercase().as_str(),
+                "1" | "true" | "on"
+            ),
+            metering_flush_ms: read_env("DATA_PLANE_METERING_FLUSH_MS", "60000")
+                .parse()
+                .unwrap_or(60000),
         }
     }
 }
@@ -196,6 +225,8 @@ impl std::fmt::Debug for ServerConfig {
             .field("tenant_control_url", &self.tenant_control_url)
             .field("internal_service_token", &redact(&self.internal_service_token))
             .field("bypass_enabled", &self.bypass_enabled)
+            .field("metering", &self.metering)
+            .field("metering_flush_ms", &self.metering_flush_ms)
             .finish()
     }
 }

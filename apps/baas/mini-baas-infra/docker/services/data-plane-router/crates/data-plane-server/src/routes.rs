@@ -14,6 +14,7 @@ use axum::middleware::Next;
 use axum::response::Response;
 use crate::metrics::{escape_label, Metrics};
 use crate::ratelimit::{tier_max_rows, tier_rate, RateLimiter};
+use crate::usage::Usage;
 use data_plane_core::{
     CredentialRef, DataOperation, DataOperationKind, DataPlaneError, DatabaseMount, EngineAdapter,
     EngineCapabilities, MigrationRequest, Plan, PoolPolicy, PoolRegistry, RawStatement,
@@ -158,6 +159,11 @@ pub struct AppState {
     /// request in the mount's tier mask (`capability_overrides`); a tenant with
     /// no mask is unlimited, so this is a no-op until packages are assigned.
     ratelimiter: Arc<RateLimiter>,
+    /// Track-B metering (B1a): per-tenant usage aggregate. The read/write hot
+    /// path calls `record` ONLY when `config.metering` is ON (a flag short-
+    /// circuit before any extra field access), so at parity this stays empty and
+    /// its background flusher is never spawned — byte-parity with today.
+    usage: Arc<Usage>,
     /// Shared HTTP client for the Phase-7 bypass front door (`/data/v1`): calls
     /// tenant-control `/v1/keys/verify` + adapter-registry `/connect`. Cheap to
     /// clone (Arc inside); only used when the bypass is enabled.
@@ -267,6 +273,16 @@ impl AppState {
         // metrics is built first: the background outbox worker (D-write-tail)
         // records enqueue/write/drop counters onto it.
         let metrics = Arc::new(Metrics::default());
+        // Track-B metering (B1a): build the aggregate, and spawn its background
+        // flusher ONLY when metering is ON. OFF → the flusher is never spawned
+        // (not even an idle timer) and the request path never calls `record`, so
+        // this is observably byte-parity with today. The flusher drains the
+        // aggregate every `metering_flush_ms` and emits one `usage` event per
+        // (tenant, metric) window (the B1a sink).
+        let usage = Arc::new(Usage::new());
+        if config.metering {
+            usage.spawn_flusher(config.metering_flush_ms);
+        }
         Self {
             config: Arc::new(config),
             engines: Arc::new(default_engines()),
@@ -278,6 +294,7 @@ impl AppState {
             // `metrics` again, and that field is only present under control-pg.
             metrics: metrics.clone(),
             ratelimiter: Arc::new(RateLimiter::from_env()),
+            usage,
             http_client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(10))
                 .build()
@@ -347,6 +364,16 @@ impl AppState {
     #[must_use]
     pub fn registry(&self) -> Arc<DefaultPoolRegistry> {
         self.registry.clone()
+    }
+
+    /// Track-B metering (B1a): flush any pending usage window on graceful
+    /// shutdown so the last partial window isn't silently dropped. No-op when
+    /// metering is OFF (the aggregate stays empty, so `flush_now` emits nothing —
+    /// parity). Called from `server::run` after the serve future returns.
+    pub fn flush_usage(&self) {
+        if self.config.metering {
+            self.usage.flush_now(self.config.metering_flush_ms);
+        }
     }
 
     /// One reaper tick: drop idle pools past their `idle_ttl`, then roll back +
@@ -887,6 +914,19 @@ async fn run_query(
                     "data mutation committed"
                 );
             }
+            // Track-B metering (B1a) — mutation arm. OFF by default
+            // (`config.metering` requires METERING_ENABLED AND DATA_PLANE_METERING)
+            // → byte-parity: the flag short-circuits BEFORE any extra field access,
+            // so the write hot path is untouched at parity. When ON, record the
+            // work done (`write.rows` = affected_rows) into the in-memory aggregate
+            // (cheap, non-blocking); the background flusher emits the `usage`
+            // event. Engine-agnostic — reuses the already-bound `audit_tenant` /
+            // `result.affected_rows`, no adapter code.
+            if state.config.metering && is_mutation {
+                state
+                    .usage
+                    .record(&audit_tenant, "write.rows", result.affected_rows);
+            }
             // G-ReadAudit (A6): optionally audit successful READS too. OFF by
             // default (volume); when `DATA_PLANE_AUDIT_READS` is on, emit a
             // sibling `read` event. The flag short-circuits BEFORE any field
@@ -903,6 +943,19 @@ async fn run_query(
                     returned_rows = result.rows.len(),
                     "data read served"
                 );
+            }
+            // Track-B metering (B1a) — read arm. Sibling to the read-audit emit:
+            // OFF by default (`config.metering`) → byte-parity, the flag short-
+            // circuits BEFORE `result.rows.len()` is touched, so the read hot path
+            // is untouched at parity. When ON, record one query (`query.count`)
+            // plus the rows returned (`query.rows` = pre-projection row count,
+            // the honest read-cost signal) into the in-memory aggregate. Cheap,
+            // non-blocking; the background flusher emits the `usage` events.
+            if state.config.metering && !is_mutation {
+                state.usage.record(&audit_tenant, "query.count", 1);
+                state
+                    .usage
+                    .record(&audit_tenant, "query.rows", result.rows.len() as u64);
             }
             // Phase 7d: on the bypass write path, emit the row-change event the
             // query-router would have — best-effort, never fails the (committed)
