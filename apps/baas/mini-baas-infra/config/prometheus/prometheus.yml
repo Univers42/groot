@@ -65,6 +65,16 @@ scrape_configs:
       - targets: ["postgres:5432"]
     metrics_path: /metrics
 
+  # Realtime gateway — dependency-free /metrics (Track-2 C4):
+  # baas_realtime_events_dropped_total{reason}, _dispatched_total,
+  # _slow_consumers_disconnected_total. Opt-in service (profile realtime); a
+  # "down" target is expected when realtime isn't deployed.
+  - job_name: "realtime"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["realtime:4000"]
+        labels: { plane: "realtime", service: "realtime" }
+
   - job_name: "prometheus"
     static_configs:
       - targets: ["localhost:9090"]

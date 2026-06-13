@@ -177,3 +177,16 @@ pub async fn health_check(State(state): State<AppState>) -> impl IntoResponse {
     };
     (StatusCode::OK, Json(resp))
 }
+
+/// `GET /metrics` — Prometheus exposition of fan-out drop/dispatch counters.
+///
+/// Track-2 C4. No state: the counters are a process-global singleton the
+/// fan-out workers bump. Scraped by the suite's Prometheus (job `realtime`).
+#[allow(clippy::unused_async)] // axum handlers must be async to satisfy Handler
+pub async fn prometheus() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        [("content-type", "text/plain; version=0.0.4; charset=utf-8")],
+        crate::metrics::render_prometheus(),
+    )
+}

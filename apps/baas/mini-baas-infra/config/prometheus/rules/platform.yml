@@ -65,6 +65,16 @@ groups:
           summary: "Webhook deliveries dead-lettering"
           description: "{{ $value }} delivery(ies) gave up after max attempts in 15m on {{ $labels.service }}."
 
+      - alert: RealtimeEventsDropped
+        # Slow-consumer overflow = clients silently losing realtime updates
+        # (the C4 counter; was a bare debug! before).
+        expr: increase(baas_realtime_events_dropped_total{reason="overflow"}[10m]) > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Realtime gateway dropping events to slow consumers"
+          description: "{{ $value }} event(s) dropped (overflow) in 10m — subscribers are missing updates."
+
   # ── capacity ────────────────────────────────────────────────────────────────
   - name: platform-capacity
     rules:

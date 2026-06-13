@@ -124,16 +124,23 @@ async fn run_worker(
 
 fn handle_dispatch(worker_id: usize, dispatch: LocalDispatch, conn_manager: &ConnectionManager) {
     let conn_id = dispatch.conn_id;
+    let m = crate::metrics::metrics();
     match conn_manager.try_send(conn_id, dispatch.sub_id.to_string(), dispatch.event) {
-        SendResult::Sent => {}
+        SendResult::Sent => {
+            m.inc_dispatched();
+        }
         SendResult::DroppedNewest | SendResult::DroppedOldest => {
+            // Real event loss to a slow consumer — was a silent debug! before C4.
+            m.inc_dropped_overflow();
             debug!(worker = worker_id, conn_id = %conn_id, "Event dropped due to overflow");
         }
         SendResult::Disconnect => {
+            m.inc_slow_disconnected();
             warn!(worker = worker_id, conn_id = %conn_id, "Disconnecting slow consumer");
             conn_manager.remove(conn_id);
         }
         SendResult::ConnectionGone => {
+            m.inc_connection_gone();
             debug!(worker = worker_id, conn_id = %conn_id, "Connection gone");
         }
     }

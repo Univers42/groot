@@ -220,6 +220,7 @@ fn build_http_router(
         .route("/v1/publish", post(rest_api::publish_event))
         .route("/v1/publish/batch", post(rest_api::publish_batch))
         .route("/v1/health", get(rest_api::health_check))
+        .route("/metrics", get(rest_api::prometheus))
         .fallback_service(tower_http::services::ServeDir::new(static_dir))
         .layer(CorsLayer::permissive())
         .with_state(state)
