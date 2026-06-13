@@ -36,6 +36,7 @@ type Service struct {
 	project   projector
 	client    *http.Client
 	redisURL  string
+	mongoURL  string
 
 	pollEvery     time.Duration
 	batchSize     int
@@ -58,6 +59,7 @@ func New(log *slog.Logger, pg *shared.Postgres) *Service {
 		project:      noopProjector{log: log},
 		client:       &http.Client{},
 		redisURL:     env("OUTBOX_REDIS_URL", env("REDIS_URL", "redis://redis:6379")),
+		mongoURL:     os.Getenv("OUTBOX_MONGO_URL"),
 		pollEvery:    time.Duration(envInt("OUTBOX_RELAY_POLL_MS", 500)) * time.Millisecond,
 		batchSize:    envInt("OUTBOX_RELAY_BATCH_SIZE", 25),
 		maxAttempts:  envInt("OUTBOX_RELAY_MAX_ATTEMPTS", 5),
@@ -83,6 +85,14 @@ func (s *Service) Init(ctx context.Context) error {
 		return err
 	}
 	s.log.Info("outbox relay redis connected")
+	// Mongo is a SOFT dependency (parity with MONGO_OPTIONAL): select the
+	// driver-backed projector only when OUTBOX_MONGO_URL is set AND a connection
+	// succeeds; otherwise keep the no-op so a deployment without Mongo (lean /
+	// single-tenant CRUD tiers) boots degraded and skips projections loudly. A
+	// connect failure never blocks Init.
+	if p, ok := newMongoProjector(ctx, s.log, s.mongoURL); ok {
+		s.project = p
+	}
 	return nil
 }
 
@@ -102,6 +112,9 @@ func (s *Service) Run(ctx context.Context) {
 		case <-ctx.Done():
 			if s.rdb != nil {
 				_ = s.rdb.Close()
+			}
+			if mp, ok := s.project.(*mongoProjector); ok {
+				mp.close(context.Background())
 			}
 			return
 		case <-ticker.C:
