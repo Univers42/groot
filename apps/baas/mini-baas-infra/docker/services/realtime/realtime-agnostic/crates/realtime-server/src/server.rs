@@ -29,7 +29,7 @@ use realtime_bus_irc::{IrcBus, IrcBusConfig};
 use realtime_core::{AuthProvider, DatabaseProducer, EventBus, EventBusPublisher};
 use realtime_engine::{
     registry::SubscriptionRegistry, router::EventRouter, sequence::SequenceGenerator,
-    ProducerRegistry,
+    PresenceTracker, ProducerRegistry,
 };
 use realtime_gateway::{
     connection::ConnectionManager,
@@ -214,6 +214,7 @@ fn build_http_router(
         registry,
         auth_provider,
         bus_publisher,
+        presence: Arc::new(PresenceTracker::new()),
     };
     Router::new()
         .route("/ws", get(ws_handler::ws_upgrade))

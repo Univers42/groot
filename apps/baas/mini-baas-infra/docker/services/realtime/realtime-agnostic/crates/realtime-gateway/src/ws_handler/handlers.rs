@@ -15,8 +15,8 @@ use std::net::SocketAddr;
 use bytes::Bytes;
 use chrono::Utc;
 use realtime_core::{
-    filter::FilterExpr, AuthContext, ConnectionId, EventEnvelope, EventSource, ServerMessage,
-    SourceKind, SubscribeItem, Subscription, SubscriptionId, TopicPath, TopicPattern,
+    filter::FilterExpr, AuthContext, ConnectionId, EventEnvelope, EventSource, PresenceMember,
+    ServerMessage, SourceKind, SubscribeItem, Subscription, SubscriptionId, TopicPath, TopicPattern,
 };
 use smol_str::SmolStr;
 use tokio::sync::mpsc;
@@ -185,23 +185,7 @@ pub(super) async fn handle_publish(
     );
     // Stamp the originating platform user so identity-aware buses (e.g. the IRC
     // bridge) can attribute the event to that user rather than a service nick.
-    if let Some(claims) = &auth.claims {
-        let mut metadata = std::collections::HashMap::new();
-        if let Some(handle) = claims
-            .metadata
-            .get("handle")
-            .or_else(|| claims.metadata.get("name"))
-            .or_else(|| claims.metadata.get("preferred_username"))
-            .and_then(serde_json::Value::as_str)
-        {
-            metadata.insert("handle".to_string(), handle.to_string());
-        }
-        envelope.source = Some(EventSource {
-            kind: SourceKind::Api,
-            id: claims.sub.clone(),
-            metadata,
-        });
-    }
+    envelope.source = api_source(auth);
     if let Err(e) = state
         .bus_publisher
         .publish(envelope.topic.as_str(), &envelope)
@@ -210,4 +194,148 @@ pub(super) async fn handle_publish(
         error!(conn_id = %conn_id, "Failed to publish event: {}", e);
     }
     Action::Continue
+}
+
+/// Build an [`EventSource`] from the connection's auth claims so identity-aware
+/// buses (e.g. the IRC bridge) can attribute the event to the platform user.
+fn api_source(auth: &AuthState) -> Option<EventSource> {
+    let claims = auth.claims.as_ref()?;
+    let mut metadata = std::collections::HashMap::new();
+    if let Some(handle) = claims
+        .metadata
+        .get("handle")
+        .or_else(|| claims.metadata.get("name"))
+        .or_else(|| claims.metadata.get("preferred_username"))
+        .and_then(serde_json::Value::as_str)
+    {
+        metadata.insert("handle".to_string(), handle.to_string());
+    }
+    Some(EventSource {
+        kind: SourceKind::Api,
+        id: claims.sub.clone(),
+        metadata,
+    })
+}
+
+/// Handle a `BROADCAST` client message.
+///
+/// Broadcast is an ephemeral client→client message: it carries a fixed
+/// `event_type` of `"broadcast"`, nests the application `event` label inside
+/// the payload, and is published to the [`EventBus`] so every subscriber of
+/// `topic` receives it as a normal [`ServerMessage::Event`]. No database is
+/// involved. Because it flows over the bus, a multi-node bus delivers it to
+/// subscribers on other nodes too.
+///
+/// [`EventBus`]: realtime_core::EventBus
+/// [`ServerMessage::Event`]: realtime_core::ServerMessage
+#[allow(clippy::cognitive_complexity)]
+pub(super) async fn handle_broadcast(
+    topic: String,
+    event: String,
+    payload: serde_json::Value,
+    conn_id: ConnectionId,
+    auth: &AuthState,
+    state: &AppState,
+) -> Action {
+    if !auth.authenticated {
+        warn!(conn_id = %conn_id, "Broadcast before auth");
+        return Action::Continue;
+    }
+    debug!(conn_id = %conn_id, topic = %topic, event = %event, "BROADCAST received");
+    // Wrap the caller payload so receivers can read both the app event label
+    // and the body under a stable shape.
+    let body = serde_json::json!({ "event": event, "payload": payload });
+    let payload_bytes = match serde_json::to_vec(&body) {
+        Ok(b) => b,
+        Err(e) => {
+            warn!(conn_id = %conn_id, "Invalid broadcast payload: {}", e);
+            return Action::Continue;
+        }
+    };
+    let mut envelope =
+        EventEnvelope::new(TopicPath::new(&topic), "broadcast", Bytes::from(payload_bytes));
+    envelope.source = api_source(auth);
+    if let Err(e) = state
+        .bus_publisher
+        .publish(envelope.topic.as_str(), &envelope)
+        .await
+    {
+        error!(conn_id = %conn_id, "Failed to publish broadcast: {}", e);
+    }
+    Action::Continue
+}
+
+/// Handle a `TRACK` client message — join (or refresh) a topic's presence set.
+///
+/// Records this connection as present on `topic`, then publishes the updated
+/// member list over the [`EventBus`] (`event_type` `"presence"`) so every
+/// subscriber of `topic` receives the change as a normal `EVENT`. The list
+/// reflects this node's local membership — see [`PresenceTracker`] for the
+/// multi-node caveat.
+///
+/// [`EventBus`]: realtime_core::EventBus
+/// [`PresenceTracker`]: realtime_engine::PresenceTracker
+pub(super) async fn handle_track(
+    topic: String,
+    meta: serde_json::Value,
+    conn_id: ConnectionId,
+    auth: &AuthState,
+    state: &AppState,
+) -> Action {
+    if !auth.authenticated {
+        warn!(conn_id = %conn_id, "Track before auth");
+        return Action::Continue;
+    }
+    let member = PresenceMember {
+        conn_id: conn_id.to_string(),
+        user_id: auth.claims.as_ref().map(|c| c.sub.clone()),
+        meta,
+    };
+    let members = state.presence.track(&topic, conn_id, member);
+    debug!(conn_id = %conn_id, topic = %topic, count = members.len(), "TRACK (presence join)");
+    publish_presence(&topic, members, auth, state, conn_id).await;
+    Action::Continue
+}
+
+/// Handle an `UNTRACK` client message — leave a topic's presence set.
+pub(super) async fn handle_untrack(
+    topic: String,
+    conn_id: ConnectionId,
+    auth: &AuthState,
+    state: &AppState,
+) -> Action {
+    if let Some(members) = state.presence.untrack(&topic, conn_id) {
+        debug!(conn_id = %conn_id, topic = %topic, count = members.len(), "UNTRACK (presence leave)");
+        publish_presence(&topic, members, auth, state, conn_id).await;
+    }
+    Action::Continue
+}
+
+/// Publish a presence snapshot for `topic` over the bus so all subscribers
+/// (local and, on a multi-node bus, remote) receive the change.
+async fn publish_presence(
+    topic: &str,
+    members: Vec<PresenceMember>,
+    auth: &AuthState,
+    state: &AppState,
+    conn_id: ConnectionId,
+) {
+    let body = serde_json::json!({ "topic": topic, "members": members });
+    let payload_bytes = match serde_json::to_vec(&body) {
+        Ok(b) => b,
+        Err(e) => {
+            warn!(conn_id = %conn_id, "Failed to serialize presence payload: {}", e);
+            return;
+        }
+    };
+    let mut envelope =
+        EventEnvelope::new(TopicPath::new(topic), "presence", Bytes::from(payload_bytes));
+    envelope.source = api_source(auth);
+    if let Err(e) = state
+        .bus_publisher
+        .publish(envelope.topic.as_str(), &envelope)
+        .await
+    {
+        error!(conn_id = %conn_id, "Failed to publish presence: {}", e);
+    }
 }

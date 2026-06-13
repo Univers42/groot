@@ -86,6 +86,51 @@ pub enum ClientMessage {
         payload: serde_json::Value,
     },
 
+    /// Broadcast an ephemeral client→client message to every subscriber of a
+    /// topic. Unlike [`ClientMessage::Publish`], a broadcast carries a fixed
+    /// `event_type` of `"broadcast"` and an application-chosen `event` label
+    /// nested inside the payload, mirroring the Supabase "broadcast channel"
+    /// surface. No database is involved — the message flows over the `EventBus`
+    /// and is delivered to topic subscribers as a normal [`ServerMessage::Event`].
+    ///
+    /// Because it travels over the bus, broadcast is multi-node-capable by
+    /// construction: a client connected to node A reaches subscribers on node B
+    /// whenever the bus is a multi-node implementation (e.g. the IRC bus).
+    #[serde(rename = "BROADCAST")]
+    Broadcast {
+        /// Target topic path (subscribers of this topic receive the message).
+        topic: String,
+        /// Application-defined event label, surfaced under `payload.event`.
+        event: String,
+        /// JSON payload (must be ≤64 KB when serialized).
+        payload: serde_json::Value,
+    },
+
+    /// Begin (or refresh) presence tracking for a topic.
+    ///
+    /// The connection is recorded as a member of the topic's presence set;
+    /// the server emits a [`ServerMessage::Presence`] snapshot to every
+    /// presence-tracking subscriber whenever the membership changes, and a
+    /// `LEAVE` is emitted automatically when the connection unsubscribes or
+    /// disconnects. `meta` is opaque application state (e.g. cursor color,
+    /// display name) echoed back to other members.
+    #[serde(rename = "TRACK")]
+    Track {
+        /// Topic whose presence set this connection joins.
+        topic: String,
+        /// Opaque per-member metadata echoed to other members.
+        #[serde(default)]
+        meta: serde_json::Value,
+    },
+
+    /// Stop presence tracking for a topic (explicit leave). A subsequent
+    /// disconnect is idempotent.
+    #[serde(rename = "UNTRACK")]
+    Untrack {
+        /// Topic whose presence set this connection leaves.
+        topic: String,
+    },
+
     /// Keepalive ping. Server responds with [`ServerMessage::Pong`].
     #[serde(rename = "PING")]
     Ping,
@@ -155,6 +200,17 @@ pub enum ServerMessage {
         event: EventPayload,
     },
 
+    /// A presence snapshot for a topic, emitted whenever the topic's presence
+    /// set changes (a member joins, leaves, or disconnects). The `members`
+    /// list is the **current** authoritative set as seen by this node.
+    #[serde(rename = "PRESENCE")]
+    Presence {
+        /// Topic the presence set belongs to.
+        topic: String,
+        /// Current members of the topic's presence set.
+        members: Vec<PresenceMember>,
+    },
+
     /// Keepalive response to a client `PING`.
     #[serde(rename = "PONG")]
     Pong {
@@ -211,6 +267,27 @@ impl EventPayload {
             payload,
         }
     }
+}
+
+/// A single member of a topic's presence set.
+///
+/// Identifies the underlying connection plus the authenticated user (when the
+/// auth provider supplied a subject) and any opaque application metadata the
+/// member supplied via [`ClientMessage::Track`].
+// `Eq` is intentionally NOT derived: the `meta` field is a `serde_json::Value`,
+// which is only `PartialEq` (it can hold floats). `PartialEq` is enough for the
+// presence-set tests.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PresenceMember {
+    /// Stable per-connection identifier (string form of `ConnectionId`).
+    pub conn_id: String,
+    /// Authenticated subject (JWT `sub`) when known, else `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
+    /// Opaque per-member metadata supplied at track time.
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    pub meta: serde_json::Value,
 }
 
 /// REST API request body for publishing a single event.

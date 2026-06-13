@@ -35,6 +35,7 @@ use axum::extract::State;
 use axum::response::IntoResponse;
 use realtime_core::AuthProvider;
 use realtime_engine::registry::SubscriptionRegistry;
+use realtime_engine::PresenceTracker;
 
 use crate::connection::ConnectionManager;
 
@@ -45,6 +46,10 @@ pub struct AppState {
     pub registry: Arc<SubscriptionRegistry>,
     pub auth_provider: Arc<dyn AuthProvider>,
     pub bus_publisher: Arc<dyn realtime_core::EventBusPublisher>,
+    /// Per-topic presence ("who's online") tracker. Single-node authoritative;
+    /// changes are also published over the bus so a multi-node bus delivers the
+    /// notification cluster-wide.
+    pub presence: Arc<PresenceTracker>,
 }
 
 /// Axum handler for WebSocket upgrade requests (`GET /ws`).

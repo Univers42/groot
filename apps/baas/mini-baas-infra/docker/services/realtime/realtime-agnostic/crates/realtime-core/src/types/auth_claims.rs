@@ -47,7 +47,7 @@ pub struct AuthClaims {
     pub sub: String,
     /// Allowed namespaces. DENY-BY-DEFAULT: an EMPTY list grants NO access
     /// (Phase 5 security baseline). All-access is expressed EXPLICITLY as
-    /// `["*"]` (the NoAuth provider, or the JWT provider's one-release
+    /// `["*"]` (the `NoAuth` provider, or the JWT provider's one-release
     /// permissive fallback). This closes the hole where a namespace-less token
     /// could subscribe/publish to every tenant's channels.
     pub namespaces: Vec<String>,

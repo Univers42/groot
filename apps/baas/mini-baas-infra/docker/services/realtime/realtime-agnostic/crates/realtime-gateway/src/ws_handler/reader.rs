@@ -100,6 +100,17 @@ async fn dispatch_text(
             event_type,
             payload,
         } => handlers::handle_publish(topic, event_type, payload, conn_id, auth, state).await,
+        ClientMessage::Broadcast {
+            topic,
+            event,
+            payload,
+        } => handlers::handle_broadcast(topic, event, payload, conn_id, auth, state).await,
+        ClientMessage::Track { topic, meta } => {
+            handlers::handle_track(topic, meta, conn_id, auth, state).await
+        }
+        ClientMessage::Untrack { topic } => {
+            handlers::handle_untrack(topic, conn_id, auth, state).await
+        }
         ClientMessage::Ping => handle_ping(conn_id, ctrl_tx).await,
     }
 }

@@ -73,20 +73,19 @@ fn namespace_fallback_permissive() -> bool {
 
 fn build_auth_claims(claims: JwtClaims) -> AuthClaims {
     let mut namespaces = claims.namespaces;
-    if namespaces.is_empty() {
-        if namespace_fallback_permissive() {
-            // DEPRECATED (Phase 5→6): a namespace-less token is being granted
-            // all-access. Set SECURITY_MODE=max or REALTIME_NAMESPACE_FALLBACK=deny
-            // to deny instead; mint tokens with explicit `namespaces`.
-            warn!(
-                sub = %claims.sub,
-                "namespace-less token granted ALL-access via permissive fallback (deprecated; \
-                 set REALTIME_NAMESPACE_FALLBACK=deny / SECURITY_MODE=max to deny)"
-            );
-            namespaces = vec!["*".to_string()];
-        }
-        // deny mode: leave namespaces empty → can_subscribe_to/can_publish_to
-        // deny by default (the secure posture).
+    // `&&` short-circuits identically to the previous nested `if`s; deny mode
+    // (or a non-empty namespace list) leaves `namespaces` untouched so
+    // can_subscribe_to/can_publish_to deny by default — the secure posture.
+    if namespaces.is_empty() && namespace_fallback_permissive() {
+        // DEPRECATED (Phase 5→6): a namespace-less token is being granted
+        // all-access. Set SECURITY_MODE=max or REALTIME_NAMESPACE_FALLBACK=deny
+        // to deny instead; mint tokens with explicit `namespaces`.
+        warn!(
+            sub = %claims.sub,
+            "namespace-less token granted ALL-access via permissive fallback (deprecated; \
+             set REALTIME_NAMESPACE_FALLBACK=deny / SECURITY_MODE=max to deny)"
+        );
+        namespaces = vec!["*".to_string()];
     }
     AuthClaims {
         sub: claims.sub,
