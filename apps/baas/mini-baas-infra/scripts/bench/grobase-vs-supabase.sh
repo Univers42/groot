@@ -31,7 +31,17 @@ red(){ printf '\033[0;31m%s\033[0m\n' "$*"; }
 SUPABASE_REF="${SUPABASE_REF:-v1.24.09}"   # pinned supabase/supabase tag
 MIN_AVAIL_MB="${MIN_AVAIL_MB:-2500}"
 N="${N:-100}"
-WORK="$(mktemp -d)"
+# IMPORTANT: the clone + Supabase's bind-mounted volumes (./volumes/db,storage,…)
+# MUST live on the big data disk, NEVER the small system disk. /tmp is on / (the
+# system SSD), so we refuse to fall back to it — fail loudly instead.
+BENCH_WORK_BASE="${BENCH_WORK_BASE:-/mnt/storage/bench}"
+if [[ ! -d "${BENCH_WORK_BASE}" || ! -w "${BENCH_WORK_BASE}" ]]; then
+	red "[vs-supabase] ${BENCH_WORK_BASE} is missing or not writable."
+	red "   Supabase bind-mounts its DB/storage data into the clone dir; that must NOT land on the system disk."
+	red "   Create it once:  sudo install -d -o \"\$USER\" -g \"\$USER\" ${BENCH_WORK_BASE}"
+	exit 1
+fi
+WORK="$(mktemp -d -p "${BENCH_WORK_BASE}")"
 SB_DIR="${WORK}/supabase"
 
 cleanup() {
@@ -57,11 +67,19 @@ git clone --depth 1 --branch "${SUPABASE_REF}" https://github.com/supabase/supab
 	|| { red "clone failed — check the pinned ref ${SUPABASE_REF}, or run on-demand with network access"; exit 1; }
 cd "${SB_DIR}/docker"
 cp .env.example .env
-cyan "[vs-supabase] booting the Supabase stack (this pulls ~13 images)…"
-docker compose up -d >/dev/null 2>&1 || { red "supabase compose up failed"; exit 1; }
+# Remap host ports so Supabase runs ALONGSIDE other stacks without conflict
+# (our mini-baas uses 8002/55432; a local dev HTTPS proxy may hold 8000/4000).
+# kong->8100, kong-https->8543, db->5532, analytics->4500.
+SB_HTTP_PORT="${SB_HTTP_PORT:-8100}"
+sed -i "s/^KONG_HTTP_PORT=.*/KONG_HTTP_PORT=${SB_HTTP_PORT}/" .env
+sed -i 's/^KONG_HTTPS_PORT=.*/KONG_HTTPS_PORT=8543/' .env
+sed -i 's/^POSTGRES_PORT=.*/POSTGRES_PORT=5532/' .env
+sed -i 's/- 4000:4000/- 4500:4000/' docker-compose.yml
+cyan "[vs-supabase] booting the Supabase stack (cached images; kong:${SB_HTTP_PORT})…"
+docker compose up -d 2>&1 | tail -3 || { red "supabase compose up failed"; exit 1; }
 
 # Wait for Kong (the Supabase gateway) to answer.
-SB_KONG="http://127.0.0.1:8000"
+SB_KONG="http://127.0.0.1:${SB_HTTP_PORT}"
 for _ in $(seq 1 60); do
 	curl -s -o /dev/null "${SB_KONG}/rest/v1/" && break || sleep 5
 done
@@ -94,33 +112,53 @@ SB_RAM="$(docker stats --no-stream --format '{{.Name}} {{.MemUsage}}' \
 SB_RAM="${SB_RAM:-0}"
 cyan "[vs-supabase] Supabase total RSS ≈ ${SB_RAM} MiB"
 
-# ── identical CRUD workload via k6 against PostgREST ────────────────────────
-# Supabase seeds an anon apikey in .env; create the bench table via the SQL
-# endpoint (meta) or assume the example schema. For a clean comparison we hit
-# the public schema's REST surface with the service key.
+# ── latency probe: the SAME curl probe against Supabase PostgREST AND ours ──
+# Fair same-box, same-method comparison (both PostgREST + seeded bench_items).
 SB_ANON="$(grep -E '^ANON_KEY=' .env | cut -d= -f2-)"
-cyan "[vs-supabase] running ${N}-sample CRUD latency probe via PostgREST…"
-# Reuse the same logical mix the k6 crud.js runs, but against PostgREST's REST
-# shape (see METHOD.md equivalence map). A lightweight curl-timed probe keeps
-# this dependency-free and matches the nano-vs-pocketbase method.
-sb_probe() { # $1 method $2 path $3 body
-	curl -s -o /dev/null -w '%{time_total}' -X "$1" "${SB_KONG}/rest/v1/$2" \
-		-H "apikey: ${SB_ANON}" -H "Authorization: Bearer ${SB_ANON}" \
-		-H 'Content-Type: application/json' ${3:+-d "$3"}
+probe() { # $1 base-url  $2 apikey
+	curl -s -o /dev/null -w '%{time_total}' "$1/rest/v1/bench_items?limit=30" \
+		-H "apikey: $2" -H "Authorization: Bearer $2"
 }
-read_ms=(); for _ in $(seq 1 "${N}"); do
-	t="$(sb_probe GET 'bench_items?limit=30' '')"; read_ms+=("$(awk -v t="${t}" 'BEGIN{printf "%.2f", t*1000}')")
-done
-P95="$(printf '%s\n' "${read_ms[@]}" | sort -n | awk '{a[NR]=$1} END{print a[int(NR*0.95)]}')"
-P50="$(printf '%s\n' "${read_ms[@]}" | sort -n | awk '{a[NR]=$1} END{print a[int(NR*0.5)]}')"
+cyan "[vs-supabase] ${N}-sample read probe — Supabase…"
+sb=(); for _ in $(seq 1 "${N}"); do sb+=("$(awk -v t="$(probe "${SB_KONG}" "${SB_ANON}")" 'BEGIN{printf "%.2f",t*1000}')"); done
+SBP50="$(printf '%s\n' "${sb[@]}"|sort -n|awk '{a[NR]=$1}END{print a[int(NR*0.5)]}')"
+SBP95="$(printf '%s\n' "${sb[@]}"|sort -n|awk '{a[NR]=$1}END{print a[int(NR*0.95)]}')"
+cyan "[vs-supabase] Supabase read p50 ${SBP50}ms / p95 ${SBP95}ms"
+
+# Our side: seed bench_items in our postgres + probe our PostgREST via Kong (8002),
+# using the IDENTICAL probe so the latency numbers are directly comparable.
+OUR_KONG="${OUR_KONG:-http://127.0.0.1:8002}"
+OUR_INFRA="$(cd "${SCRIPT_DIR}/../.." && pwd)"   # SCRIPT_DIR is absolute (set at top, before any cd)
+OUR_ANON="$(grep -E '^ANON_KEY=' "${OUR_INFRA}/.env" 2>/dev/null | cut -d= -f2-)"
+OURP50="0"; OURP95="0"
+if [[ -n "${OUR_ANON}" ]] && docker ps --format '{{.Names}}' | grep -q '^mini-baas-postgres$'; then
+	PGU="$(grep -E '^POSTGRES_USER=' "${OUR_INFRA}/.env"|cut -d= -f2-)"; PGU="${PGU:-postgres}"
+	PGD="$(grep -E '^POSTGRES_DB=' "${OUR_INFRA}/.env"|cut -d= -f2-)"; PGD="${PGD:-postgres}"
+	docker exec -i mini-baas-postgres psql -U "${PGU}" -d "${PGD}" -v ON_ERROR_STOP=1 >/dev/null 2>&1 <<SQL || true
+CREATE TABLE IF NOT EXISTS public.bench_items (id text primary key, name text, grp text, val int);
+TRUNCATE public.bench_items;
+INSERT INTO public.bench_items SELECT 'r'||g,'name'||g,'grp'||(g%10),g FROM generate_series(1,500) g;
+GRANT SELECT,INSERT,UPDATE,DELETE ON public.bench_items TO anon,authenticated,service_role;
+ALTER TABLE public.bench_items DISABLE ROW LEVEL SECURITY;
+NOTIFY pgrst,'reload schema';
+SQL
+	sleep 2
+	cyan "[vs-supabase] ${N}-sample read probe — Grobase PostgREST…"
+	our=(); for _ in $(seq 1 "${N}"); do our+=("$(awk -v t="$(probe "${OUR_KONG}" "${OUR_ANON}")" 'BEGIN{printf "%.2f",t*1000}')"); done
+	OURP50="$(printf '%s\n' "${our[@]}"|sort -n|awk '{a[NR]=$1}END{print a[int(NR*0.5)]}')"
+	OURP95="$(printf '%s\n' "${our[@]}"|sort -n|awk '{a[NR]=$1}END{print a[int(NR*0.95)]}')"
+else
+	red "[vs-supabase] our stack not reachable on ${OUR_KONG} — skipping our-side probe (run 'make up' first)"
+fi
 
 FINAL="${BENCH_OUT_DIR}/grobase-vs-supabase.json"
 jq -n --arg ref "${SUPABASE_REF}" --argjson n "${N}" --argjson ram "${SB_RAM}" \
-	--argjson p50 "${P50:-0}" --argjson p95 "${P95:-0}" --argjson env "$(bench_env_json)" '
-	{ supabase: { ref:$ref, total_rss_mib:$ram, read_p50_ms:$p50, read_p95_ms:$p95, n:$n },
-	  grobase_artifacts: { latency:"load-essential-crud.json", footprint:"../footprint-pro.json" },
-	  note:"Compare supabase.total_rss_mib vs our footprint-*.json; supabase.read_p95_ms vs load-essential-crud.json .median.ops.list.p95",
+	--argjson sbp50 "${SBP50:-0}" --argjson sbp95 "${SBP95:-0}" \
+	--argjson op50 "${OURP50:-0}" --argjson op95 "${OURP95:-0}" --argjson env "$(bench_env_json)" '
+	{ supabase: { ref:$ref, total_rss_mib:$ram, read_p50_ms:$sbp50, read_p95_ms:$sbp95, n:$n },
+	  grobase_postgrest: { read_p50_ms:$op50, read_p95_ms:$op95, via:"kong:8002/rest/v1", n:$n },
+	  method:"same curl GET /rest/v1/bench_items?limit=30 against both PostgREST instances; 500-row seeded bench_items; supabase ports remapped to run alongside; footprint=sum docker stats RSS of supabase-* containers",
 	  env:$env }' > "${FINAL}"
 
-green "[vs-supabase] Supabase: ${SB_RAM} MiB RSS, read p50 ${P50}ms / p95 ${P95}ms → ${FINAL#${BENCH_ROOT}/}"
-green "[vs-supabase] compare against our load-essential-crud.json (read p95 2.4ms) + footprint-*.json"
+green "[vs-supabase] Supabase: ${SB_RAM} MiB RSS / read p50 ${SBP50}ms / p95 ${SBP95}ms"
+green "[vs-supabase] Grobase PostgREST: read p50 ${OURP50}ms / p95 ${OURP95}ms → ${FINAL#${BENCH_ROOT}/}"
