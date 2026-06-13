@@ -235,6 +235,75 @@ jobs:
           sarif_file: gitleaks.sarif
           category: gitleaks
 
+  # ── 5c. SCA — cargo-audit (Rust workspaces, blocking) ──────────────────────
+  sca-cargo-audit:
+    name: SCA · cargo-audit (${{ matrix.ws }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        ws:
+          - apps/baas/mini-baas-infra/docker/services/data-plane-router
+          - apps/baas/mini-baas-infra/docker/services/realtime/realtime-agnostic
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install cargo-audit
+        run: |
+          set -euo pipefail
+          cargo install cargo-audit --locked
+          cargo audit --version
+
+      - name: cargo audit (blocking)
+        run: |
+          set -euo pipefail
+          # The 3 rustls-webpki advisories arrive solely via tiberius 0.12.3
+          # (MSSQL adapter, its rustls 0.21 chain); 0.12.3 IS the latest release
+          # and no upstream fix exists yet — they are reachable only for EXTERNAL
+          # TLS mssql mounts. They are --ignored (mirroring scripts/security/
+          # audit-deps.sh and wiki/security-audit.md's accepted-with-remediation
+          # posture) so a NEW advisory still fails the gate. Remediation: drop the
+          # --ignore flags when a rustls-0.2x tiberius release lands.
+          cd "${{ matrix.ws }}"
+          cargo audit \
+            --ignore RUSTSEC-2026-0098 \
+            --ignore RUSTSEC-2026-0099 \
+            --ignore RUSTSEC-2026-0104
+
+  # ── 5d. SCA — govulncheck (Go control plane, blocking) ─────────────────────
+  sca-govulncheck:
+    name: SCA · govulncheck
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: apps/baas/mini-baas-infra/go/control-plane/go.sum
+
+      - name: Install govulncheck
+        run: |
+          set -euo pipefail
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/govulncheck" -version
+
+      - name: govulncheck (reachability-based, blocking)
+        run: |
+          set -euo pipefail
+          cd apps/baas/mini-baas-infra/go/control-plane
+          "$(go env GOPATH)/bin/govulncheck" ./...
+
   # ── 6. DAST — ZAP baseline on main only (heavy) ────────────────────────────
   dast-zap:
     name: DAST · ZAP baseline
@@ -294,7 +363,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    needs: [sast-semgrep, sca-npm-audit, container-trivy, secret-trufflehog, secret-gitleaks]
+    needs: [sast-semgrep, sca-npm-audit, container-trivy, secret-trufflehog, secret-gitleaks, sca-cargo-audit, sca-govulncheck]
     if: always()
     steps:
       - name: Aggregate verdict
@@ -305,7 +374,9 @@ jobs:
                      "${{ needs.sca-npm-audit.result }}" \
                      "${{ needs.container-trivy.result }}" \
                      "${{ needs.secret-trufflehog.result }}" \
-                     "${{ needs.secret-gitleaks.result }}"; do
+                     "${{ needs.secret-gitleaks.result }}" \
+                     "${{ needs.sca-cargo-audit.result }}" \
+                     "${{ needs.sca-govulncheck.result }}"; do
             if [[ "${need}" != "success" && "${need}" != "skipped" ]]; then
               fail=1
             fi

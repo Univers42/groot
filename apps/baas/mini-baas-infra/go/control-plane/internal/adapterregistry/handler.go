@@ -32,7 +32,7 @@ func Mount(mux *http.ServeMux, svc *Service, serviceToken string) {
 }
 
 func (rt *routes) register(w http.ResponseWriter, r *http.Request) {
-	userID, ok := requireUser(w, r)
+	userID, ok := rt.requireUser(w, r)
 	if !ok {
 		return
 	}
@@ -68,7 +68,7 @@ func (rt *routes) register(w http.ResponseWriter, r *http.Request) {
 }
 
 func (rt *routes) list(w http.ResponseWriter, r *http.Request) {
-	userID, ok := requireUser(w, r)
+	userID, ok := rt.requireUser(w, r)
 	if !ok {
 		return
 	}
@@ -81,7 +81,7 @@ func (rt *routes) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (rt *routes) findOne(w http.ResponseWriter, r *http.Request) {
-	userID, ok := requireUser(w, r)
+	userID, ok := rt.requireUser(w, r)
 	if !ok {
 		return
 	}
@@ -97,7 +97,7 @@ func (rt *routes) connect(w http.ResponseWriter, r *http.Request) {
 		shared.WriteError(w, http.StatusUnauthorized, "unauthorized", "service token required")
 		return
 	}
-	userID, ok := requireUser(w, r)
+	userID, ok := rt.requireUser(w, r)
 	if !ok {
 		return
 	}
@@ -133,24 +133,48 @@ func (rt *routes) handleLookupError(w http.ResponseWriter, err error) bool {
 	return true
 }
 
-func requireUser(w http.ResponseWriter, r *http.Request) (string, bool) {
+func (rt *routes) requireUser(w http.ResponseWriter, r *http.Request) (string, bool) {
 	// Header precedence (post-M11 signed-envelope migration):
 	//   1. X-Baas-User-Id   — signed envelope user id
 	//   2. X-Baas-Tenant-Id — signed envelope tenant id (rows are keyed by tenant)
 	//   3. X-User-Id        — legacy raw header (compat mode only)
 	//   4. X-Tenant-Id      — legacy raw tenant header
-	// The TS service did full HMAC verification on the X-Baas-* headers; the
-	// Go service currently TRUSTS them (the data plane and adapter-registry
-	// sit on a private docker network, and write paths additionally require
-	// X-Service-Token). Adding HMAC verification here is a follow-up slice.
-	for _, h := range []string{"X-Baas-User-Id", "X-Baas-Tenant-Id", "X-User-Id", "X-Tenant-Id"} {
+	// The TS service did full HMAC verification on the X-Baas-* headers; the Go
+	// service TRUSTS them by default (the data plane and adapter-registry sit on
+	// a private docker network, and write paths additionally require the service
+	// token). Audit residual O6: set ADAPTER_REGISTRY_IDENTITY_HMAC=1 to require
+	// an X-Baas-Identity-Auth signature over the asserted identity (see
+	// identity.go) so a peer on a flat bridge can no longer spoof identity.
+	userID, tenantID := "", ""
+	for _, h := range []string{"X-Baas-User-Id", "X-User-Id"} {
 		if v := r.Header.Get(h); v != "" {
-			return v, true
+			userID = v
+			break
 		}
 	}
-	shared.WriteError(w, http.StatusUnauthorized, "unauthorized",
-		"missing user/tenant header (X-Baas-User-Id, X-Baas-Tenant-Id, X-User-Id or X-Tenant-Id)")
-	return "", false
+	for _, h := range []string{"X-Baas-Tenant-Id", "X-Tenant-Id"} {
+		if v := r.Header.Get(h); v != "" {
+			tenantID = v
+			break
+		}
+	}
+	// Preserve the original fallback semantics: tenant header alone identifies
+	// the row owner when no explicit user id is present.
+	resolved := userID
+	if resolved == "" {
+		resolved = tenantID
+	}
+	if resolved == "" {
+		shared.WriteError(w, http.StatusUnauthorized, "unauthorized",
+			"missing user/tenant header (X-Baas-User-Id, X-Baas-Tenant-Id, X-User-Id or X-Tenant-Id)")
+		return "", false
+	}
+	if identityHMACEnabled() && !verifyIdentitySignature(r, rt.serviceToken, userID, tenantID) {
+		shared.WriteError(w, http.StatusUnauthorized, "unauthorized",
+			"invalid or missing identity signature ("+identityAuthHeader+")")
+		return "", false
+	}
+	return resolved, true
 }
 
 func validServiceToken(r *http.Request, expected string) bool {

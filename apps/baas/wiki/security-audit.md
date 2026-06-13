@@ -91,3 +91,9 @@ make verify-m32                  # per-tier resource budgets (DoS-floor regressi
 make verify-m33                  # basic tier: Node-free + scope-gate (write/ddl 403 for read-only)
 make verify-m34                  # graph parity (incl. the new node-cap + rate-limit)
 ```
+
+---
+
+**Control map:** the shipped controls above are mapped to OWASP ASVS (L1/L2) and a
+SOC2-lite control list, with the open residuals (O1–O8) carried forward as honest
+gaps, in [security-audit-asvs.md](security-audit-asvs.md) (Bar 3 / A6 m60).
