@@ -367,6 +367,10 @@ func (d *Dispatcher) deliver(ctx context.Context, sub Subscription, secret, even
 	return resp.StatusCode, fmt.Errorf("non-2xx response: %d", resp.StatusCode)
 }
 
+// deliveryOutcomeHelp documents the baas_webhook_deliveries_total counter:
+// every delivery attempt resolves to exactly one outcome label.
+const deliveryOutcomeHelp = "Webhook delivery attempts by terminal outcome (success|retry|dead)"
+
 func (d *Dispatcher) recordAttempt(ctx context.Context,
 	subscriptionID, eventID string, attempts, maxAttempts, statusCode int, attemptErr error) {
 	if attemptErr == nil {
@@ -376,6 +380,7 @@ func (d *Dispatcher) recordAttempt(ctx context.Context,
 			       last_error = NULL, delivered_at = now()
 			 WHERE subscription_id = $1::uuid AND event_id = $2`,
 			subscriptionID, eventID, attempts, statusCode)
+		shared.IncCounter("baas_webhook_deliveries_total", deliveryOutcomeHelp, "outcome", "success")
 		return
 	}
 	errMsg := attemptErr.Error()
@@ -386,9 +391,11 @@ func (d *Dispatcher) recordAttempt(ctx context.Context,
 			       last_error = $5
 			 WHERE subscription_id = $1::uuid AND event_id = $2`,
 			subscriptionID, eventID, attempts, nullInt(statusCode), errMsg)
+		shared.IncCounter("baas_webhook_deliveries_total", deliveryOutcomeHelp, "outcome", "dead")
 		d.log.Warn("delivery moved to DLQ", "sub", subscriptionID, "event", eventID, "attempts", attempts)
 		return
 	}
+	shared.IncCounter("baas_webhook_deliveries_total", deliveryOutcomeHelp, "outcome", "retry")
 	next := time.Now().Add(backoff(attempts))
 	_ = d.db.AdminExec(ctx, `
 		UPDATE public.webhook_deliveries
