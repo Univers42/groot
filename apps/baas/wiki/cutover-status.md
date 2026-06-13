@@ -35,6 +35,18 @@ both caches so no stale view survives: rotation (`/v1/admin/rotate`) drops
 at tenant-control calls `/v1/admin/evict-verify` so a revoked key is rejected on
 its **next** request, not after the 30 s TTL (Track-2 B3, gate `m50-rotate-revoke`).
 
+## Field masks (Track-2 B2) — logic ready, flip gated on the app cutover
+
+The Rust data plane applies ABAC field masks to user-identity responses
+(`apply_field_mask`, abac.rs — 9 unit tests; api-key callers are scope-based and
+unmasked, matching the query-router). It is behind `DATA_PLANE_APPLY_MASKS`
+(default **false**) ON PURPOSE: the query-router still masks, and the app still
+calls `/query/v1`, so the legacy door is the single masker during the transition.
+Flipping it to `1` is part of the SAME app-side cutover below — when the app
+moves to `/data/v1`, the query-router is bypassed and the Rust plane becomes the
+masker, so the flip lands with the base-path flip (not before, or both doors mask
+redundantly). m36 (api-key path) is unaffected by the flag either way.
+
 ## The remaining step (app-side, deliberately not done here)
 
 The osionos app calls `/query/v1/<dbId>/tables/<table>` with a `{op, …}` body in
