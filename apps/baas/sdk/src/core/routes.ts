@@ -60,6 +60,13 @@ export const routes = {
     root: '/functions/v1',
     one: (name: string) => `/functions/v1/${encodeURIComponent(name)}`,
     invoke: (name: string) => `/functions/v1/${encodeURIComponent(name)}/invoke`,
+    // ── A2 Functions DX: triggers / schedules / secrets (admin surface) ───────
+    triggers: '/admin/v1/function-triggers',
+    trigger: (id: string) => `/admin/v1/function-triggers/${encodeURIComponent(id)}`,
+    schedules: '/admin/v1/function-schedules',
+    schedule: (id: string) => `/admin/v1/function-schedules/${encodeURIComponent(id)}`,
+    secrets: '/admin/v1/function-secrets',
+    secret: (key: string) => `/admin/v1/function-secrets/${encodeURIComponent(key)}`,
   },
   storage: {
     sign: (bucket: string, key: string) =>

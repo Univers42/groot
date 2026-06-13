@@ -100,6 +100,13 @@ export type {
   FunctionInvokeOptions,
   FunctionSource,
   FunctionSummary,
+  // ── A2: function triggers / schedules / secrets ──────────────────────────
+  FunctionTrigger,
+  FunctionTriggerCreateInput,
+  FunctionSchedule,
+  FunctionScheduleCreateInput,
+  FunctionSecretMeta,
+  FunctionSecretSetInput,
   // ── M22: schema introspection + DDL ──────────────────────────────────────
   ColumnSchema,
   DdlColumnDef,
@@ -223,7 +230,7 @@ export class MiniBaasClient {
     this.analytics = new AnalyticsClient(this.http);
     this.txn = new TxnClient(this.http);
     this.schema = new SchemaClient(this.http);
-    this.functions = new FunctionsClient(this.http);
+    this.functions = new FunctionsClient(this.http, options.serviceRoleKey);
     this.graphql = new GraphqlClient(this.http);
     this.realtime = new RealtimeClient(this.http);
     this.webhooks = new WebhooksClient(this.http, options.serviceRoleKey);

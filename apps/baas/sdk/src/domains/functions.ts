@@ -11,13 +11,20 @@
 /* ************************************************************************** */
 
 import { routes } from '../core/routes.js';
+import { requireAdminKey } from '../core/admin.js';
 import type { HttpClient } from '../core/http.js';
 import type {
   FunctionDeployInput,
   FunctionDeployResult,
   FunctionInvokeOptions,
+  FunctionScheduleCreateInput,
+  FunctionSchedule,
+  FunctionSecretMeta,
+  FunctionSecretSetInput,
   FunctionSource,
   FunctionSummary,
+  FunctionTrigger,
+  FunctionTriggerCreateInput,
 } from '../types.js';
 
 /**
@@ -33,7 +40,15 @@ import type {
  * rejected (401).
  */
 export class FunctionsClient {
-  constructor(private readonly http: HttpClient) {}
+  constructor(
+    private readonly http: HttpClient,
+    /**
+     * Service-role key for the admin-only A2 surfaces (triggers / schedules /
+     * secrets). The deploy/invoke/list/get/delete methods do NOT need it; only
+     * the `/admin/v1/function-*` operations do (internal-only at the gateway).
+     */
+    private readonly serviceRoleKey?: string,
+  ) {}
 
   /** List the calling tenant's deployed functions. */
   list(): Promise<FunctionSummary[]> {
@@ -73,5 +88,69 @@ export class FunctionsClient {
       headers: options.headers,
       body: payload,
     });
+  }
+
+  // ── A2: DB-event -> function triggers (admin-only) ──────────────────────────
+
+  /** Register a DB-event -> function trigger. **Requires `serviceRoleKey`.** */
+  createTrigger(input: FunctionTriggerCreateInput): Promise<FunctionTrigger> {
+    return this.admin<FunctionTrigger>(routes.functions.triggers, 'POST', input);
+  }
+
+  /** List the calling tenant's function triggers. **Requires `serviceRoleKey`.** */
+  listTriggers(): Promise<FunctionTrigger[]> {
+    return this.admin<FunctionTrigger[]>(routes.functions.triggers, 'GET');
+  }
+
+  /** Delete a function trigger by id. **Requires `serviceRoleKey`.** */
+  deleteTrigger(id: string): Promise<{ deleted: boolean }> {
+    return this.admin<{ deleted: boolean }>(routes.functions.trigger(id), 'DELETE');
+  }
+
+  // ── A2: scheduled (cron) invocation (admin-only) ────────────────────────────
+
+  /** Register a scheduled function invocation. **Requires `serviceRoleKey`.** */
+  createSchedule(input: FunctionScheduleCreateInput): Promise<FunctionSchedule> {
+    return this.admin<FunctionSchedule>(routes.functions.schedules, 'POST', input);
+  }
+
+  /** List the calling tenant's function schedules. **Requires `serviceRoleKey`.** */
+  listSchedules(): Promise<FunctionSchedule[]> {
+    return this.admin<FunctionSchedule[]>(routes.functions.schedules, 'GET');
+  }
+
+  /** Delete a function schedule by id. **Requires `serviceRoleKey`.** */
+  deleteSchedule(id: string): Promise<{ deleted: boolean }> {
+    return this.admin<{ deleted: boolean }>(routes.functions.schedule(id), 'DELETE');
+  }
+
+  // ── A2: per-function secrets (admin-only) ───────────────────────────────────
+
+  /** Set (upsert) a function secret. **Requires `serviceRoleKey`.** */
+  setSecret(input: FunctionSecretSetInput): Promise<FunctionSecretMeta> {
+    return this.admin<FunctionSecretMeta>(routes.functions.secrets, 'POST', input);
+  }
+
+  /** List secret metadata (never plaintext). **Requires `serviceRoleKey`.** */
+  listSecrets(): Promise<FunctionSecretMeta[]> {
+    return this.admin<FunctionSecretMeta[]>(routes.functions.secrets, 'GET');
+  }
+
+  /**
+   * Delete a function secret by key. Pass `functionName` to delete a
+   * function-scoped secret; omit it for a tenant-wide one.
+   * **Requires `serviceRoleKey`.**
+   */
+  deleteSecret(key: string, functionName?: string): Promise<{ deleted: boolean }> {
+    const path = functionName
+      ? `${routes.functions.secret(key)}?function_name=${encodeURIComponent(functionName)}`
+      : routes.functions.secret(key);
+    return this.admin<{ deleted: boolean }>(path, 'DELETE');
+  }
+
+  /** Shared request path for the admin-only A2 surfaces. */
+  private admin<TResult>(path: string, method: string, body?: unknown): Promise<TResult> {
+    const key = requireAdminKey(this.serviceRoleKey, 'functions');
+    return this.http.request<TResult>(path, { method, body, apiKey: key, bearerToken: key });
   }
 }

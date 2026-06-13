@@ -743,3 +743,96 @@ export interface GraphqlQueryOptions {
   /** Extra request headers. */
   headers?: HeadersInit;
 }
+
+// ── A2: DB-event -> function triggers (/admin/v1/function-triggers) ───────────
+
+/** Body for creating a DB-event -> function trigger. */
+export interface FunctionTriggerCreateInput {
+  /** Unique (per tenant) trigger name. */
+  name: string;
+  /** The deployed function to invoke when an event matches. */
+  function_name: string;
+  /** Event types to match (e.g. `['created','updated']`). `['*']` = all. */
+  event_types?: string[];
+  /** Aggregates/tables to match (e.g. `['orders']`). `['*']` = all. */
+  aggregates?: string[];
+  /** Whether the trigger fires (default true). */
+  enabled?: boolean;
+  /** Max delivery attempts before DLQ (default 8). */
+  max_attempts?: number;
+  /** Per-invoke timeout in ms (default 5000). */
+  timeout_ms?: number;
+}
+
+/** A registered function trigger. */
+export interface FunctionTrigger {
+  id: string;
+  tenant_id: string;
+  name: string;
+  function_name: string;
+  event_types: string[];
+  aggregates: string[];
+  enabled: boolean;
+  max_attempts: number;
+  timeout_ms: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// ── A2: scheduled (cron) invocation (/admin/v1/function-schedules) ────────────
+
+/** Body for creating a scheduled function invocation. */
+export interface FunctionScheduleCreateInput {
+  /** Unique (per tenant) schedule name. */
+  name: string;
+  /** The deployed function to invoke. */
+  function_name: string;
+  /**
+   * Schedule expression. Supported grammar (zero-dep interval dialect):
+   * `@every 30s` | `@every 5m` | `@every 1h` | `@hourly` | `@daily` |
+   * `@weekly`, or a bare Go duration like `5m` (a bare integer = seconds).
+   */
+  schedule_expr: string;
+  /** Optional JSON payload handed to the function as the invoke body. */
+  payload?: unknown;
+  /** Whether the schedule fires (default true). */
+  enabled?: boolean;
+  /** Per-invoke timeout in ms (default 5000). */
+  timeout_ms?: number;
+}
+
+/** A registered function schedule. */
+export interface FunctionSchedule {
+  id: string;
+  tenant_id: string;
+  name: string;
+  function_name: string;
+  schedule_expr: string;
+  payload: string;
+  enabled: boolean;
+  timeout_ms: number;
+  last_run: string;
+  next_run: string;
+  last_status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// ── A2: per-function secrets (/admin/v1/function-secrets) ─────────────────────
+
+/** Body for setting a function secret. */
+export interface FunctionSecretSetInput {
+  /** Env var name injected into the worker (`[A-Za-z_][A-Za-z0-9_]{0,127}`). */
+  key: string;
+  /** Secret value (write-only; never returned by list). */
+  value: string;
+  /** Scope to one function; omit for a tenant-wide secret. */
+  function_name?: string;
+}
+
+/** Function secret metadata (NEVER includes the plaintext value). */
+export interface FunctionSecretMeta {
+  key: string;
+  function_name: string;
+  updated_at: string;
+}
