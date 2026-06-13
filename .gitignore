@@ -49,3 +49,6 @@ wiki/security/retrieve_fly_seed_admin_right.md
 # generated seeder state (uuids/emails from seed_agency_people.sh)
 tools/seeds/.agency-people.env
 tools/seeds/.gourmand-people.env
+
+# m58-gate root-owned SDK-generator debris (regenerated; never track)
+apps/baas/sdk-*.rootowned-stale/
