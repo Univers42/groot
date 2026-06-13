@@ -1215,8 +1215,12 @@ services:
       GDPR_EXPORT_WEBHOOK_URL: ${GDPR_EXPORT_WEBHOOK_URL:-}
       GDPR_DELETION_WEBHOOK_URL: ${GDPR_DELETION_WEBHOOK_URL:-}
       # outbox-relay sub-service (pg outbox → redis streams + realtime fan-out).
-      # Mongo projection is a soft dependency (no-op when no projector wired).
+      # Mongo projection is a soft dependency (A3): the driver-backed
+      # mongoProjector activates when OUTBOX_MONGO_URL resolves + connects, else
+      # degrades to the no-op (a pg write is never failed for a missing sink).
       OUTBOX_REDIS_URL: ${OUTBOX_REDIS_URL:-redis://redis:6379}
+      OUTBOX_MONGO_URL: ${OUTBOX_MONGO_URL:-mongodb://${MONGO_INITDB_ROOT_USERNAME:-mongo}:${MONGO_INITDB_ROOT_PASSWORD:-mongo}@mongo:27017/mini_baas?authSource=admin}
+      MONGO_DB_NAME: ${OUTBOX_MONGO_DB_NAME:-mini_baas}
       OUTBOX_RELAY_POLL_MS: ${OUTBOX_RELAY_POLL_MS:-500}
       OUTBOX_RELAY_BATCH_SIZE: ${OUTBOX_RELAY_BATCH_SIZE:-25}
       OUTBOX_RELAY_MAX_ATTEMPTS: ${OUTBOX_RELAY_MAX_ATTEMPTS:-5}
