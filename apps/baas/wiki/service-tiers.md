@@ -10,11 +10,15 @@ regression gate `make verify-m32` keeps each tier inside its budget.
 | Tier | RAM (running) | Images | Services | Engines | Security | Best for |
 |---|---|---|---|---|---|---|
 | **basic** | **~380 MiB** | ~0.9 GB | 11 (0 Node) | SQLite, PostgreSQL | baseline | A private app on your machine / prototyping — Pi or $5 VPS |
-| **essential** | **~0.96 GB** | ~3.2 GB | 19 | pg/SQLite OLTP + the Node orchestration (graph, masks, automations) — **no mongo/mysql containers** (outbox-relay runs mongo-optional) | baseline | A single small product with the full feature set, under 1 GB |
+| **essential** | **~660 MiB** | ~3.2 GB | 13 | pg/SQLite OLTP + the Go orchestrator (graph, masks, automations) — **no mongo/mysql containers** (outbox-relay runs mongo-optional) | baseline | A single small product with the full feature set, under 1 GB |
 | **pro** | ~1.38 GB | ~5.6 GB | 28 | + MySQL/MariaDB/Mongo/Redis/CockroachDB, realtime, storage | baseline | A multi-engine SaaS with realtime + object storage |
 | **max** | ~2.9 GB | ~11 GB | 41 | + MSSQL/HTTP, analytics (Trino/Iceberg), AI, functions, observability | **max** (TLS verify-full, audit, Vault-eligible) | A multi-tenant cloud platform |
 
 Budgets enforced by `m32`: basic ≤512, essential ≤1024, pro ≤1500, max ≤3200 MiB.
+
+`essential` was re-baselined post Node→Go orchestrator cutover (commit `4325a24`):
+~950 MiB / 19 svc → **~660 MiB / 13 svc** (the 6 Node services retired for one
+~9 MiB Go binary). The m32 budget ceiling is unchanged — essential ≤1024 MiB still holds.
 
 ### Why basic is so much smaller
 

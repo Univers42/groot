@@ -66,10 +66,30 @@ for _ in $(seq 1 60); do
 	curl -s -o /dev/null "${SB_KONG}/rest/v1/" && break || sleep 5
 done
 
+# ── seed an identical bench table (fairness fix) ────────────────────────────
+# Stock Supabase ships no bench_items; without this the read probe below would
+# time 404s instead of real CRUD. Mirror our side's bench_items (500 rows) and
+# grant anon SELECT so PostgREST serves it (our bench_items table is RLS-less
+# too, so this is apples-to-apples for the read probe).
+cyan "[vs-supabase] seeding bench_items (500 rows) on the Supabase side…"
+docker compose exec -T db psql -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL' >/dev/null 2>&1 \
+	|| red "[vs-supabase] seed warning — read probe may be less accurate"
+CREATE TABLE IF NOT EXISTS public.bench_items (id text primary key, name text, grp text, val int);
+TRUNCATE public.bench_items;
+INSERT INTO public.bench_items SELECT 'r'||g, 'name'||g, 'grp'||(g%10), g FROM generate_series(1,500) g;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.bench_items TO anon, authenticated, service_role;
+ALTER TABLE public.bench_items DISABLE ROW LEVEL SECURITY;
+NOTIFY pgrst, 'reload schema';
+SQL
+sleep 2
+
 # ── footprint: sum docker stats RAM of the supabase-* containers ────────────
+# Match ONLY supabase containers (their names all contain "supabase"), so this
+# stays correct when our stack runs alongside (ours are "mini-baas-*"; the old
+# kong|realtime|gotrue alternation also matched our containers).
 cyan "[vs-supabase] measuring Supabase footprint…"
 SB_RAM="$(docker stats --no-stream --format '{{.Name}} {{.MemUsage}}' \
-	| grep -E 'supabase|realtime|storage|kong|postgrest|gotrue|studio|imgproxy|meta|vector|analytics' \
+	| grep -E 'supabase' \
 	| awk '{print $2}' | sed 's/MiB//;s/GiB/*1024/' | paste -sd+ | bc 2>/dev/null | cut -d. -f1)"
 SB_RAM="${SB_RAM:-0}"
 cyan "[vs-supabase] Supabase total RSS ≈ ${SB_RAM} MiB"

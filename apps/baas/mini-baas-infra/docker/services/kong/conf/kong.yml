@@ -95,6 +95,13 @@ plugins:
     config:
       access:
         - |
+          -- Strip any client-supplied identity headers up front; only a
+          -- verified JWT below may set them. Without this, a request on the
+          -- anonymous path (or with no/invalid bearer) could forge X-User-*
+          -- and impersonate a user at any compat-mode upstream.
+          kong.service.request.clear_header("X-User-Id")
+          kong.service.request.clear_header("X-User-Email")
+          kong.service.request.clear_header("X-User-Role")
           local auth = kong.request.get_header("authorization")
           if not auth then return end
           local token = auth:match("^[Bb]earer%s+(.+)$")
@@ -598,8 +605,14 @@ services:
     url: http://storage-router:3040
     routes:
       - name: storage-sign-routes
-        paths: [/storage/v1/sign]
-        strip_path: true
+        # strip_path:false — storage-router controllers are mounted at the full
+        # public path (@Controller('storage/v1')); forward the path verbatim.
+        # (Previously strip_path:true on [/storage/v1/sign] 404'd: Kong stripped
+        # the whole prefix, leaving /<bucket>/<key> which the controller never
+        # matched.) These op-paths are more specific than the minio /storage/v1
+        # route, so they win for the storage-router API surface.
+        paths: [/storage/v1/sign, /storage/v1/object, /storage/v1/list, /storage/v1/bucket]
+        strip_path: false
         plugins:
           - name: key-auth
             config:

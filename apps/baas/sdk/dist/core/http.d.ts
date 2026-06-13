@@ -43,6 +43,17 @@ export declare class HttpClient {
     createRealtimeWsUrl(): URL;
     getRealtimeAuthToken(): string;
     request<T = unknown>(path: string, init?: RequestOptions): Promise<T>;
+    /**
+     * Raw fetch for binary payloads (storage upload/download). Bypasses the JSON
+     * (de)serialization of `request()`: the body is sent verbatim and the raw
+     * `Response` is returned for the caller to read as blob/arrayBuffer/text.
+     * Auth headers (apikey + bearer) are still applied.
+     */
+    rawFetch(path: string, init?: {
+        method?: string;
+        body?: BodyInit | null;
+        headers?: HeadersInit;
+    }): Promise<Response>;
     private fetchOnce;
     private buildHeaders;
     private shouldRetry;

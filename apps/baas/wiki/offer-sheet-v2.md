@@ -54,7 +54,7 @@ _(rps/burst columns filled from `artifacts/bench/capacity-*.json`; tenancy from
 |---|---|---|---|---|---|---|---|---|
 | **nano** | sqlite | CRUD + graph + masks | 50 / 100 | 1 | 2.0 MiB / 1 binary | $2 | Free / $5 | 1 app |
 | **basic** | sqlite, postgresql | CRUD | 100 / 200 | 1 | ~460 MiB / 11 svc | $6 | Free / $9 | 1 app |
-| **essential** | postgresql, sqlite | CRUD + **aggregate** | 200 / 400 | 2 | ~950 MiB / 19 svc | $13 | $25–39 | 1 product |
+| **essential** | postgresql, sqlite | CRUD + **aggregate** | 200 / 400 | 2 | ~660 MiB / 13 svc | $13 | $25–39 | 1 product |
 | **pro** | +mysql/mongo/redis/cockroach | +batch +transactions | 400 / 800 | 10 | ~1.4 GiB / 28 svc | $21 | $59–99 | < $1/tenant amortized |
 | **max** | +mssql/http | +DDL (all) | 800† / 1600 | 50 | ~3.1 GiB / 41 svc | $41 | $149–299 | < $1/tenant amortized |
 

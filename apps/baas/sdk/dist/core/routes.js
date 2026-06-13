@@ -53,6 +53,10 @@ export const routes = {
     },
     storage: {
         sign: (bucket, key) => `/storage/v1/sign/${encodeURIComponent(bucket)}/${encodePath(key)}`,
+        object: (bucket, key) => `/storage/v1/object/${encodeURIComponent(bucket)}/${encodePath(key)}`,
+        list: (bucket, prefix) => `/storage/v1/list/${encodeURIComponent(bucket)}${prefix ? `?prefix=${encodeURIComponent(prefix)}` : ''}`,
+        buckets: '/storage/v1/bucket',
+        bucket: (name) => `/storage/v1/bucket/${encodeURIComponent(name)}`,
     },
     analytics: {
         events: '/analytics/v1/events',
