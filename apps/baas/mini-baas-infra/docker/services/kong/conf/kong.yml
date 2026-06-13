@@ -175,6 +175,38 @@ services:
               minute: 180
               hour: 5000
 
+  # GraphQL — PostgREST's native GraphQL endpoint (powered by the pg_graphql
+  # Postgres extension). /graphql/v1 → upstream /graphql (strip_path). Same
+  # auth/rate-limit posture as the REST route since it executes over the same
+  # PostgREST role + RLS. NOTE: requires `CREATE EXTENSION pg_graphql;` in
+  # Postgres — see scripts/migrations/postgresql/0006_pg_graphql.sql. The
+  # vendored `postgres:16-alpine` image does NOT ship the extension, so this
+  # route returns an error until an image that bundles pg_graphql is used.
+  - name: graphql
+    url: http://postgrest:3000/graphql
+    routes:
+      - name: graphql-routes
+        paths: [/graphql/v1]
+        strip_path: true
+        plugins:
+          - name: key-auth
+            config:
+              key_names: [apikey]
+              hide_credentials: false
+          - name: jwt
+            config:
+              header_names: [authorization]
+              key_claim_name: iss
+              claims_to_verify: [exp]
+              run_on_preflight: false
+              anonymous: __KONG_ANON_UUID__
+          - name: rate-limiting
+            config:
+              policy: local
+              limit_by: ip
+              minute: 180
+              hour: 5000
+
   # Realtime — custom WebSocket CDC server.
   # The upstream exposes / (dashboard) and /ws (WebSocket endpoint).
   # The API route maps /realtime/v1 → upstream /ws.
