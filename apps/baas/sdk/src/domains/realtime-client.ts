@@ -46,9 +46,34 @@ export interface RealtimeEvent<Row = Record<string, unknown>> {
   readonly ts?: string;
 }
 
-/** Handle returned by `subscribe()` — call `.unsubscribe()` to close cleanly. */
+/** A single member of a topic's presence set (mirrors the wire `PresenceMember`). */
+export interface PresenceMember<Meta = Record<string, unknown>> {
+  /** Stable per-connection id (string form of the server `ConnectionId`). */
+  readonly connId: string;
+  /** Authenticated subject (JWT `sub`) when the server knew one. */
+  readonly userId?: string;
+  /** Opaque per-member metadata supplied at `track()` time. */
+  readonly meta: Meta;
+}
+
+/**
+ * Handle returned by `subscribe()` — call `.unsubscribe()` to close cleanly.
+ *
+ * A5 adds ephemeral **broadcast** (client→client) and **presence** (who's
+ * online) over the same connection:
+ * - `broadcast(event, payload)` sends a `BROADCAST` frame; other subscribers of
+ *   the same topic receive it via `onEvent` with `event === 'broadcast'`.
+ * - `track(meta)` / `untrack()` join / leave the topic's presence set; changes
+ *   are surfaced to `onPresence` (when provided).
+ */
 export interface RealtimeSubscription {
   unsubscribe(): Promise<void>;
+  /** Send an ephemeral broadcast to every subscriber of this topic. */
+  broadcast(event: string, payload?: unknown): void;
+  /** Join (or refresh) the topic's presence set with optional metadata. */
+  track(meta?: Record<string, unknown>): void;
+  /** Leave the topic's presence set. */
+  untrack(): void;
 }
 
 export interface RealtimeSubscribeOptions<Row> {
@@ -70,6 +95,20 @@ export interface RealtimeSubscribeOptions<Row> {
   onEvent: (event: RealtimeEvent<Row>) => void;
   /** Optional handler for parse / transport errors (default: console.warn). */
   onError?: (error: Error) => void;
+  /**
+   * When `true` (or when `presenceMeta` is set), the client emits a `TRACK`
+   * frame right after `SUBSCRIBED`, joining the topic's presence set. Presence
+   * changes are delivered to {@link RealtimeSubscribeOptions.onPresence}.
+   */
+  presence?: boolean;
+  /** Opaque metadata to publish for this member (implies `presence: true`). */
+  presenceMeta?: Record<string, unknown>;
+  /**
+   * Handler invoked with the current member list whenever the topic's presence
+   * set changes. Presence is single-node authoritative on the server; the list
+   * reflects the emitting node's local members. See the realtime engine docs.
+   */
+  onPresence?: (members: PresenceMember[]) => void;
 }
 
 type ServerMessage =
@@ -116,6 +155,7 @@ export class RealtimeClient {
     const topic = options.topic ?? defaultTopic(options.adapter, options.channel);
     const subId = options.subscriptionId ?? `${options.adapter}:${options.channel}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2)}`;
     const onError = options.onError ?? ((err) => console.warn('[mini-baas/realtime]', err.message));
+    const wantsPresence = options.presence === true || options.presenceMeta !== undefined;
 
     await new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -155,11 +195,20 @@ export class RealtimeClient {
         }
 
         if (frame.type === 'SUBSCRIBED' && frame.sub_id === subId) {
+          if (wantsPresence) {
+            send(ws, { type: 'TRACK', topic, meta: options.presenceMeta ?? {} });
+          }
           resolveReady();
           return;
         }
 
         if (frame.type === 'EVENT' && frame.sub_id === subId) {
+          // Presence and broadcast both arrive as EVENT frames; route by the
+          // engine-stamped event_type so callers get typed callbacks.
+          if (frame.event?.event_type === 'presence') {
+            options.onPresence?.(parsePresence(frame.event.payload));
+            return;
+          }
           options.onEvent(normalizeEvent<Row>(frame.event));
           return;
         }
@@ -184,11 +233,27 @@ export class RealtimeClient {
     });
 
     let closed = false;
+    let tracked = wantsPresence;
     return {
+      broadcast: (event: string, payload: unknown = {}) => {
+        if (closed || ws.readyState !== 1) return;
+        send(ws, { type: 'BROADCAST', topic, event, payload });
+      },
+      track: (meta: Record<string, unknown> = {}) => {
+        if (closed || ws.readyState !== 1) return;
+        tracked = true;
+        send(ws, { type: 'TRACK', topic, meta });
+      },
+      untrack: () => {
+        if (closed || ws.readyState !== 1) return;
+        tracked = false;
+        send(ws, { type: 'UNTRACK', topic });
+      },
       unsubscribe: async () => {
         if (closed) return;
         closed = true;
         if (ws.readyState === 1) {
+          if (tracked) send(ws, { type: 'UNTRACK', topic });
           send(ws, { type: 'UNSUBSCRIBE', sub_id: subId });
         }
         tryClose(ws);
@@ -223,6 +288,20 @@ function messageText(data: unknown): string | undefined {
   if (data instanceof ArrayBuffer) return new TextDecoder().decode(data);
   if (ArrayBuffer.isView(data)) return new TextDecoder().decode(data);
   return undefined;
+}
+
+/**
+ * Parse a `presence` EVENT payload (`{ topic, members: [...] }`) into the
+ * SDK's {@link PresenceMember} shape, tolerating absent fields.
+ */
+function parsePresence(payload: unknown): PresenceMember[] {
+  const body = isRecord(payload) ? payload : {};
+  const members = Array.isArray(body['members']) ? body['members'] : [];
+  return members.filter(isRecord).map((m) => ({
+    connId: stringValue(m['conn_id']) ?? '',
+    userId: stringValue(m['user_id']),
+    meta: (isRecord(m['meta']) ? m['meta'] : {}) as Record<string, unknown>,
+  }));
 }
 
 function normalizeEvent<Row>(event: WireEvent): RealtimeEvent<Row> {
