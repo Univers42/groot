@@ -25,6 +25,7 @@ import (
 	"github.com/dlesieur/mini-baas/control-plane/internal/abuseguard"
 	"github.com/dlesieur/mini-baas/control-plane/internal/audit"
 	"github.com/dlesieur/mini-baas/control-plane/internal/backup"
+	"github.com/dlesieur/mini-baas/control-plane/internal/branching"
 	"github.com/dlesieur/mini-baas/control-plane/internal/compliance"
 	"github.com/dlesieur/mini-baas/control-plane/internal/erase"
 	"github.com/dlesieur/mini-baas/control-plane/internal/export"
@@ -34,6 +35,7 @@ import (
 	"github.com/dlesieur/mini-baas/control-plane/internal/packages"
 	"github.com/dlesieur/mini-baas/control-plane/internal/passkeys"
 	"github.com/dlesieur/mini-baas/control-plane/internal/provision"
+	"github.com/dlesieur/mini-baas/control-plane/internal/push"
 	"github.com/dlesieur/mini-baas/control-plane/internal/scim"
 	"github.com/dlesieur/mini-baas/control-plane/internal/shared"
 	"github.com/dlesieur/mini-baas/control-plane/internal/sso"
@@ -588,6 +590,65 @@ func main() {
 		log.Info("trust center disabled (TRUST_CENTER_ENABLED off) — /v1/trust* not mounted")
 	}
 	// ─── end D4.6 ─────────────────────────────────────────────────────────────────
+
+	// ─── Track-E: DB BRANCHING (Supabase-parity "branches") ─────────────────────
+	// A tenant can fork a schema_per_tenant mount into a named, isolated SCHEMA-CLONE
+	// (parent tables + a full row copy) for preview/staging — list and drop them.
+	// Unlike B6 backup (a restore COPY artifact) or D4.3 export (a portable JSON
+	// bundle), a branch is a LIVE schema sitting next to the parent in the SAME
+	// control-plane Postgres: CREATE SCHEMA + per-table `CREATE TABLE (LIKE … INCLUDING
+	// ALL)` + `INSERT … SELECT *`, all over the existing pgx pool (NO pg_dump).
+	//   admin: POST /v1/tenants/{id}/branches · GET .../branches · DELETE .../branches/{branchId}
+	// Branch names are validated to a safe [a-z0-9_] identifier (the SQL-identifier
+	// injection wall, since the name flows into CREATE SCHEMA DDL). Only
+	// schema_per_tenant is branchable; shared_rls / db_per_tenant / tenant_owned are
+	// DEFERRED (400 "deferred"). Migration 055 backs the tenant_branches ledger.
+	//
+	// FLAG-GATED OFF = PARITY: branching.Mount is called ONLY when DB_BRANCHING_ENABLED
+	// is truthy. When OFF (the default) Mount is never called, so the branch routes are
+	// not registered (404) and no tenant_branches row is ever written — byte-identical
+	// to today, the same discipline as TENANT_EXPORT_ENABLED / HARD_ERASE_ENABLED.
+	if envBool("DB_BRANCHING_ENABLED") {
+		branching.Mount(mux, branching.NewService(db, log), cfg.ServiceToken)
+		log.Info("DB branching enabled (POST/GET /v1/tenants/{id}/branches, DELETE .../{branchId}) — DB_BRANCHING_ENABLED")
+	} else {
+		log.Info("DB branching disabled (DB_BRANCHING_ENABLED off) — /v1/tenants/{id}/branches* not mounted")
+	}
+	// ─── end Track-E DB branching ────────────────────────────────────────────────
+
+	// ─── Track-E: PUSH / MESSAGING (Firebase FCM-parity) ───────────────────────
+	// Net-new capability: a tenant registers delivery SUBSCRIPTIONS (channel
+	// 'webhook' or 'fcm' — both are an outbound HTTP POST to a configured
+	// target_url, so 'fcm' is a pluggable FCM-compatible endpoint, NO real FCM SDK
+	// required) and SENDS a notification that fans out to every matching live
+	// subscription. It reuses internal/webhooks' outbound-HTTP delivery discipline
+	// (per-request timeout + an SSRF guard that REFUSES to POST to any private/
+	// loopback/link-local/unspecified address — incl. 169.254.169.254, the cloud
+	// metadata endpoint, and the in-cluster Postgres). A narrow operator allowlist
+	// (PUSH_SSRF_ALLOW_HOSTS, default empty = nothing private allowed) permits naming
+	// specific internal webhook targets for in-cluster delivery. A provider token
+	// (for the fcm path) is stored AES-256-GCM SEALED (PUSH_SECRET_KEY; nil-safe).
+	// Migration 056 backs public.push_subscriptions.
+	//   admin: POST/GET /v1/tenants/{id}/push/subscriptions ·
+	//          DELETE /v1/tenants/{id}/push/subscriptions/{subId} ·
+	//          POST /v1/tenants/{id}/push/send {title,body}
+	//
+	// CONTROL-PLANE ONLY: push never enters RequestIdentity, the data-plane RLS GUCs,
+	// or the data plane — tenant_id is bound in EVERY store query (the wall), so a
+	// send in one tenant can never deliver to another tenant's subscriptions, and
+	// per-request isolation + SHARE_POOLS (24,887 tenants -> 1 pool) stay untouched.
+	//
+	// FLAG-GATED OFF = PARITY: push.Mount is called ONLY when PUSH_ENABLED is truthy.
+	// When OFF (the default) Mount is never called, so none of the /v1/tenants/{id}/
+	// push/* routes are registered (404) and push_subscriptions is never written —
+	// byte-identical to today, the same discipline as the blocks above.
+	if envBool("PUSH_ENABLED") {
+		push.Mount(mux, push.NewService(db, log), cfg.ServiceToken)
+		log.Info("push / messaging enabled (/v1/tenants/{id}/push/subscriptions|send) — PUSH_ENABLED")
+	} else {
+		log.Info("push / messaging disabled (PUSH_ENABLED off) — /v1/tenants/{id}/push/* not mounted")
+	}
+	// ─── end Track-E push ─────────────────────────────────────────────────────────
 
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr(),

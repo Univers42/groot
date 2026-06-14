@@ -199,6 +199,10 @@ export interface RestRequestOptions {
   apiKey?: string;
   bearerToken?: string;
   headers?: HeadersInit;
+  /** Per-call timeout override (ms); falls back to the client default. */
+  timeoutMs?: number;
+  /** External abort signal — composed with the per-call timeout. */
+  signal?: AbortSignal;
 }
 
 export interface RestQueryOptions<Row = Record<string, unknown>> extends RestRequestOptions {
@@ -217,6 +221,40 @@ export interface RestMutationOptions extends RestRequestOptions {
   returning?: 'representation' | 'minimal';
 }
 
+/**
+ * Cursor for keyset (offline-sync) pagination. The cursor is the value of the
+ * ordering column on the last row returned — pass it back to fetch the next
+ * page. `null`/`undefined` starts from the beginning.
+ */
+export type ChangesCursor = string | number | null;
+
+export interface ChangesSinceOptions<Row = Record<string, unknown>> extends RestRequestOptions {
+  /**
+   * Column to page on — must be monotonically increasing (e.g. `updated_at`,
+   * a serial `id`, or a logical sequence). Defaults to `updated_at`.
+   */
+  cursorColumn?: keyof Row | string;
+  /** Page size. Default 100. */
+  limit?: number;
+  /** Columns to select (PostgREST `select=`). Default all. */
+  columns?: string;
+  /**
+   * `gt` (strictly after the cursor — default) or `gte` (inclusive). Use `gt`
+   * for strictly-increasing keys; `gte` only with a de-dup strategy.
+   */
+  comparator?: 'gt' | 'gte';
+}
+
+/** One page of {@link RestResourceBuilder.changesSince}. */
+export interface ChangesPage<Row = Record<string, unknown>> {
+  /** Rows in this page, ordered ascending by the cursor column. */
+  rows: Row[];
+  /** Cursor to pass to the next `changesSince` call, or `null` when drained. */
+  nextCursor: ChangesCursor;
+  /** True when this page filled `limit` (more rows may remain). */
+  hasMore: boolean;
+}
+
 export interface RestResourceBuilder<Row = Record<string, unknown>> {
   select<TResult = Row[]>(options?: RestQueryOptions<Row>): Promise<TResult>;
   exists(options?: RestQueryOptions<Row>): Promise<boolean>;
@@ -229,6 +267,13 @@ export interface RestResourceBuilder<Row = Record<string, unknown>> {
    *   await client.from('users').query().select('id,name').eq('active', true).single()
    */
   query(options?: RestRequestOptions): RestQueryBuilder<Row>;
+  /**
+   * Keyset-paginated "changes since a cursor" — an offline-sync foundation.
+   * Returns one page of rows strictly after `cursor` (ordered by the cursor
+   * column) plus a `nextCursor`. Built entirely from existing PostgREST query
+   * primitives (`order` + `gt`/`gte` + `limit`) — no server change.
+   */
+  changesSince(cursor?: ChangesCursor, options?: ChangesSinceOptions<Row>): Promise<ChangesPage<Row>>;
 }
 
 export interface PresignInput {

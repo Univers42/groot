@@ -27,7 +27,7 @@ import { routes } from './core/routes.js';
 import { makeEngineClient } from './domains/engine-clients.js';
 import { ENGINE_IDS } from './generated/engines.js';
 import { createBrowserStorageAdapter, createMemoryStorageAdapter, } from './core/storage.js';
-export { MiniBaasError, MiniBaasTimeoutError } from './core/errors.js';
+export { MiniBaasError, MiniBaasTimeoutError, MiniBaasNetworkError, MiniBaasClientError, MiniBaasBadRequestError, MiniBaasUnauthorizedError, MiniBaasForbiddenError, MiniBaasNotFoundError, MiniBaasConflictError, MiniBaasRateLimitError, MiniBaasServerError, } from './core/errors.js';
 export { SchemaClient } from './domains/schema.js';
 export { TxnClient } from './domains/txn.js';
 export { WebhooksClient } from './domains/webhooks.js';
