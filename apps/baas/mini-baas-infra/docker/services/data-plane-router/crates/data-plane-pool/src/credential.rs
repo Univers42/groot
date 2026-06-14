@@ -233,6 +233,18 @@ fn validate_ref_segment(s: &str) -> Result<(), ()> {
     Ok(())
 }
 
+/// Precondition for building a Vault KV path from a credential_ref. The
+/// `reference` is mandatory and must be a single safe path segment. The
+/// `version` is OPTIONAL — an empty string means "use the latest secret version"
+/// (version is not required in the credential_ref DTO), so it must pass; a
+/// NON-empty version is validated as a safe segment (fail-closed on a hostile
+/// pinned value). Extracted as a pure fn so the empty-version-allowed contract is
+/// unit-pinned without standing up a live Vault. `version` is expected trimmed.
+fn credential_path_ok(reference: &str, version: &str) -> bool {
+    validate_ref_segment(reference).is_ok()
+        && (version.is_empty() || validate_ref_segment(version).is_ok())
+}
+
 /// Build the shared outbound client. One per provider (object-pool); reused for
 /// every resolve so we never spin a fresh TCP/TLS stack per request.
 fn build_client() -> DataPlaneResult<Client> {
@@ -389,16 +401,12 @@ impl CredentialProvider for VaultProvider {
 
     async fn resolve_dsn(&self, mount: &DatabaseMount) -> DataPlaneResult<String> {
         let reference = &mount.credential_ref.reference;
-        // S1 fail-closed gate: `reference` (and the raw `version` string) come
-        // straight from the request body and are interpolated into the Vault KV
-        // path. Validate BEFORE building the URL so a `../other-tenant/dsn` (or
-        // any `/`-bearing) reference can never pivot to a different secret. The
-        // version is validated too — even though only a clean integer is ever
-        // appended below, we reject a malformed version up front (fail-closed,
-        // no silent latest-read on a hostile value).
-        if validate_ref_segment(reference).is_err()
-            || validate_ref_segment(mount.credential_ref.version.trim()).is_err()
-        {
+        let version = mount.credential_ref.version.trim();
+        // S1 fail-closed gate: `reference` (and a PINNED `version`) come straight
+        // from the request body and are interpolated into the Vault KV path.
+        // Validate BEFORE building the URL so a `../other-tenant/dsn` reference can
+        // never pivot to a different secret. See `credential_path_ok`.
+        if !credential_path_ok(reference, version) {
             return Err(Self::fail(&mount.id));
         }
         let mut url = format!("{}/v1/secret/data/{}/{}", self.addr, self.prefix, reference);
@@ -409,7 +417,7 @@ impl CredentialProvider for VaultProvider {
         // distinct pool regardless of whether Vault pinned a numeric version.)
         // The validated version is appended as a pure integer, so no
         // caller-controlled raw text reaches the query string either.
-        if let Ok(v) = mount.credential_ref.version.trim().parse::<u64>() {
+        if let Ok(v) = version.parse::<u64>() {
             url.push_str(&format!("?version={v}"));
         }
         let resp = self
@@ -561,6 +569,26 @@ mod tests {
                 "validator must accept clean segment {ok:?}"
             );
         }
+    }
+
+    // S2 — the credential-path precondition: an EMPTY version is the common
+    // "use latest" case and MUST pass (regression for the m121 502 where an
+    // unpinned credential_ref could never resolve); a pinned version is still
+    // validated, and the reference is always validated.
+    #[test]
+    fn s2_credential_path_allows_empty_version_rejects_hostile_inputs() {
+        // clean reference + unpinned version (the common case) is allowed
+        assert!(credential_path_ok("m121-tenant-max-dsn", ""));
+        // clean reference + clean pinned version is allowed
+        assert!(credential_path_ok("dsn", "5"));
+        // hostile reference is rejected regardless of version
+        assert!(!credential_path_ok("../other-tenant/dsn", ""));
+        assert!(!credential_path_ok("a/b", ""));
+        // empty reference is rejected (reference is mandatory)
+        assert!(!credential_path_ok("", ""));
+        // a NON-empty malformed version is rejected even with a clean reference
+        assert!(!credential_path_ok("dsn", "../9"));
+        assert!(!credential_path_ok("dsn", "a/b"));
     }
 
     // S1 — end-to-end at the provider: a "../"-bearing reference yields

@@ -50,6 +50,12 @@ func (rt *routes) register(w http.ResponseWriter, r *http.Request) {
 		shared.WriteError(w, http.StatusConflict, "conflict", "database \""+req.Name+"\" already registered")
 		return
 	}
+	// S2 / G-Vault: a max-security tenant supplying an inline plaintext DSN is a
+	// policy denial (403) — register a credential_ref instead.
+	if errors.Is(err, ErrPlaintextDsnForbidden) {
+		shared.WriteError(w, http.StatusForbidden, "plaintext_dsn_forbidden", err.Error())
+		return
+	}
 	// Phase 4 tiering: an engine outside the tenant's package, or a mount past
 	// its quota, is an authorization/quota denial (403) — upgrade the package.
 	if errors.Is(err, ErrEngineNotInPackage) {
