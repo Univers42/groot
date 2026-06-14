@@ -40,6 +40,19 @@ export interface UploadOptions {
 export type UploadBody = Blob | ArrayBuffer | ArrayBufferView | string;
 
 /**
+ * A1 image-transform options for `download`/`transformUrl`. Server-side resize +
+ * reformat (sharp), served from the SAME owner-scoped object GET. When the server
+ * has STORAGE_TRANSFORMS_ENABLED OFF (the default), these are ignored and the
+ * original object bytes are returned byte-identical.
+ */
+export interface TransformOptions {
+  width?: number;
+  height?: number;
+  format?: 'webp' | 'jpeg' | 'jpg' | 'png' | 'avif';
+  quality?: number;
+}
+
+/**
  * Per-bucket client, Supabase-shaped:
  *   client.storage.from('avatars').upload('me.png', file)
  * Upload/download proxy through storage-router (so they work with the internal
@@ -62,6 +75,22 @@ export class StorageBucketClient {
 
   async download(path: string): Promise<Blob> {
     const res = await this.http.rawFetch(routes.storage.object(this.bucket, path), { method: 'GET' });
+    if (!res.ok) throw await toError(res);
+    return res.blob();
+  }
+
+  /**
+   * A1: download a server-derived image variant (resize/reformat) of an object,
+   * owner-scoped exactly like `download`. Requires the server to have
+   * STORAGE_TRANSFORMS_ENABLED ON; when OFF the original bytes are returned
+   * (byte-identical) so this is a safe superset of `download`.
+   *   client.storage.from('avatars').transform('me.png', { width: 64, height: 64, format: 'webp' })
+   */
+  async transform(path: string, opts: TransformOptions): Promise<Blob> {
+    const res = await this.http.rawFetch(
+      routes.storage.transform(this.bucket, path, transformQuery(opts)),
+      { method: 'GET' },
+    );
     if (!res.ok) throw await toError(res);
     return res.blob();
   }
@@ -128,6 +157,17 @@ const CONTENT_TYPES: Record<string, string> = {
 function guessContentType(path: string): string {
   const ext = path.split('.').pop()?.toLowerCase() ?? '';
   return CONTENT_TYPES[ext] ?? 'application/octet-stream';
+}
+
+/** Build the `?width=&height=&format=&quality=` query for an image transform,
+ *  emitting only the set keys (so a bare/empty spec yields the original-bytes URL). */
+function transformQuery(opts: TransformOptions): string {
+  const params = new URLSearchParams();
+  if (opts.width !== undefined) params.set('width', String(opts.width));
+  if (opts.height !== undefined) params.set('height', String(opts.height));
+  if (opts.format !== undefined) params.set('format', opts.format);
+  if (opts.quality !== undefined) params.set('quality', String(opts.quality));
+  return params.toString();
 }
 
 async function toError(res: Response): Promise<MiniBaasError> {

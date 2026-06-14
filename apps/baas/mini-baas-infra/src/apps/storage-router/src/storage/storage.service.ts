@@ -12,7 +12,7 @@
 
 import {
   Injectable, Logger, OnModuleInit, OnApplicationShutdown,
-  BadRequestException, NotFoundException,
+  BadRequestException, NotFoundException, ForbiddenException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -29,6 +29,8 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { PresignDto } from './dto/presign.dto';
 import { UsageMeter } from './usage-meter';
+import { BucketPolicy, type BucketAction, type PolicyPrincipal } from './bucket-policy';
+import { applyTransform, isTransformableType, type TransformSpec } from './image-transform';
 
 export interface StorageObject {
   key: string;
@@ -52,13 +54,18 @@ export class StorageService implements OnModuleInit, OnApplicationShutdown {
   // Track-B B1d-storage usage meter. `undefined` when STORAGE_METERING is OFF
   // (the default) — see UsageMeter.fromConfig — so the write path is byte-parity.
   private meter?: UsageMeter;
+  // A1 bucket-level ABAC policy. `undefined` when STORAGE_BUCKET_POLICY_ENABLED is
+  // OFF (the default) — see BucketPolicy.fromConfig — so no rule is ever consulted
+  // and the read/write paths are byte-parity (owner-scope governs alone).
+  private policy?: BucketPolicy;
 
   constructor(private readonly config: ConfigService) {}
 
   onModuleInit(): void {
-    // Sub-flag OFF (default) ⇒ fromConfig returns undefined ⇒ no meter, no
-    // interval, no Redis client created. Parity is preserved before any I/O.
+    // Sub-flags OFF (default) ⇒ fromConfig returns undefined ⇒ no meter / no
+    // policy, no interval, no Redis client created. Parity is preserved before I/O.
     this.meter = UsageMeter.fromConfig(process.env);
+    this.policy = BucketPolicy.fromConfig(process.env);
     this.s3 = new S3Client({
       endpoint: this.config.getOrThrow<string>('S3_ENDPOINT'),
       region: this.config.get<string>('S3_REGION', 'us-east-1'),
@@ -95,6 +102,20 @@ export class StorageService implements OnModuleInit, OnApplicationShutdown {
     const clean = objectPath.replace(/^\/+/, '');
     if (!clean) throw new BadRequestException('object path required');
     return `${userId}/${clean}`;
+  }
+
+  /**
+   * Consult the bucket-level ABAC policy (A1) — a no-op when the policy flag is
+   * OFF (policy === undefined ⇒ byte-parity). When ON, a policy-denied action
+   * throws Forbidden (403) and the S3 op is never reached, so a denied principal
+   * never learns whether the object exists (no leak beyond the deny decision).
+   * The owner-prefix isolation is independent and always applies on top.
+   */
+  private assertBucketAllowed(bucket: string, action: BucketAction, principal?: PolicyPrincipal): void {
+    if (!this.policy || !principal) return;
+    if (!this.policy.allows(bucket, action, principal)) {
+      throw new ForbiddenException(`bucket policy denies ${action} on ${bucket}`);
+    }
   }
 
   async presign(bucket: string, objectPath: string, userId: string, dto: PresignDto) {
@@ -148,10 +169,12 @@ export class StorageService implements OnModuleInit, OnApplicationShutdown {
     body: Buffer,
     contentType?: string,
     tenantId?: string,
+    principal?: PolicyPrincipal,
   ) {
     if (body.byteLength > this.maxUploadBytes) {
       throw new BadRequestException(`object exceeds max upload size (${this.maxUploadBytes} bytes)`);
     }
+    this.assertBucketAllowed(bucket, 'write', principal);
     const key = this.ownedKey(userId, objectPath);
     await this.s3.send(
       new PutObjectCommand({
@@ -168,32 +191,52 @@ export class StorageService implements OnModuleInit, OnApplicationShutdown {
     return { bucket, key, size: body.byteLength };
   }
 
-  /** Server-side download (proxied) — returns bytes + content type. */
-  async getObject(bucket: string, objectPath: string, userId: string) {
+  /**
+   * Server-side download (proxied) — returns bytes + content type. When a
+   * `transform` spec is supplied (A1, only ever non-undefined while
+   * STORAGE_TRANSFORMS_ENABLED is ON) and the object is an image, the bytes are
+   * resized/reformatted with sharp BEFORE returning; otherwise the ORIGINAL bytes
+   * are returned verbatim (byte-parity). Bucket policy (A1) is consulted first.
+   */
+  async getObject(
+    bucket: string,
+    objectPath: string,
+    userId: string,
+    principal?: PolicyPrincipal,
+    transform?: TransformSpec,
+  ) {
+    this.assertBucketAllowed(bucket, 'read', principal);
     const key = this.ownedKey(userId, objectPath);
     try {
       const out = await this.s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
       const body = out.Body as { transformToByteArray?: () => Promise<Uint8Array> } | undefined;
       if (!body?.transformToByteArray) throw new NotFoundException('object not found');
       const bytes = await body.transformToByteArray();
-      return {
-        body: Buffer.from(bytes),
-        contentType: out.ContentType ?? 'application/octet-stream',
-        size: out.ContentLength ?? bytes.byteLength,
-      };
+      const original = Buffer.from(bytes);
+      const contentType = out.ContentType ?? 'application/octet-stream';
+
+      if (transform && isTransformableType(contentType)) {
+        const variant = await applyTransform(original, transform, contentType);
+        return { body: variant.body, contentType: variant.contentType, size: variant.body.byteLength };
+      }
+      // No transform (or non-image) → original bytes, byte-identical to the
+      // pre-transform path.
+      return { body: original, contentType, size: out.ContentLength ?? bytes.byteLength };
     } catch (err) {
       throw this.mapS3Error(err, 'object');
     }
   }
 
-  async deleteObject(bucket: string, objectPath: string, userId: string) {
+  async deleteObject(bucket: string, objectPath: string, userId: string, principal?: PolicyPrincipal) {
+    this.assertBucketAllowed(bucket, 'write', principal);
     const key = this.ownedKey(userId, objectPath);
     await this.s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
     return { bucket, key, deleted: true };
   }
 
   /** List objects the caller owns under bucket/prefix (owner-prefix stripped). */
-  async listObjects(bucket: string, userId: string, prefix = ''): Promise<StorageObject[]> {
+  async listObjects(bucket: string, userId: string, prefix = '', principal?: PolicyPrincipal): Promise<StorageObject[]> {
+    this.assertBucketAllowed(bucket, 'read', principal);
     const ownerPrefix = `${userId}/`;
     const cleanPrefix = prefix.replace(/^\/+/, '');
     try {

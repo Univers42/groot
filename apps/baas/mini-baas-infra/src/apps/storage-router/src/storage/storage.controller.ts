@@ -18,6 +18,8 @@ import { ApiTags, ApiOperation, ApiParam } from '@nestjs/swagger';
 import { AuthGuard, CurrentUser, UserContext } from '@mini-baas/common';
 import { StorageService } from './storage.service';
 import { PresignDto } from './dto/presign.dto';
+import { parseTransform } from './image-transform';
+import type { PolicyPrincipal } from './bucket-policy';
 import type { Request, Response } from 'express';
 
 // NOTE on routing: the controller base path is the FULL public path
@@ -61,18 +63,28 @@ export class StorageController {
     const contentType = (req.headers['content-type'] as string) || 'application/octet-stream';
     // Pass the authenticated tenant so the write is metered on the tenant
     // dimension (Track-B B1d storage.bytes); falls back to user.id server-side.
-    return this.service.putObject(bucket, this.wildcard(req), user.id, body, contentType, user.tenantId);
+    // The principal (A1) is consulted by the bucket-policy ONLY when that flag is
+    // ON — otherwise it is inert and the call is byte-parity.
+    return this.service.putObject(
+      bucket, this.wildcard(req), user.id, body, contentType, user.tenantId, principalOf(user),
+    );
   }
 
   @Get('object/:bucket/*')
-  @ApiOperation({ summary: 'Download an object (owner-scoped)' })
+  @ApiOperation({ summary: 'Download an object (owner-scoped; ?width=&height=&format= for image variants)' })
   async download(
     @CurrentUser() user: UserContext,
     @Param('bucket') bucket: string,
     @Req() req: Request,
     @Res() res: Response,
   ) {
-    const obj = await this.service.getObject(bucket, this.wildcard(req), user.id);
+    // parseTransform returns undefined when STORAGE_TRANSFORMS_ENABLED is OFF (so
+    // the original bytes are served, byte-identical) OR when ON with no transform
+    // params. A bounded TransformSpec only when at least one valid param is present.
+    const transform = parseTransform(req.query as Record<string, unknown>);
+    const obj = await this.service.getObject(
+      bucket, this.wildcard(req), user.id, principalOf(user), transform,
+    );
     res.setHeader('Content-Type', obj.contentType);
     res.setHeader('Content-Length', String(obj.size));
     res.send(obj.body);
@@ -85,7 +97,7 @@ export class StorageController {
     @Param('bucket') bucket: string,
     @Req() req: Request,
   ) {
-    return this.service.deleteObject(bucket, this.wildcard(req), user.id);
+    return this.service.deleteObject(bucket, this.wildcard(req), user.id, principalOf(user));
   }
 
   @Get('list/:bucket')
@@ -95,7 +107,7 @@ export class StorageController {
     @Param('bucket') bucket: string,
     @Query('prefix') prefix?: string,
   ) {
-    return { objects: await this.service.listObjects(bucket, user.id, prefix ?? '') };
+    return { objects: await this.service.listObjects(bucket, user.id, prefix ?? '', principalOf(user)) };
   }
 
   // ── bucket management ────────────────────────────────────────────────────
@@ -146,4 +158,10 @@ function safeDecode(segment: string): string {
   } catch {
     return segment;
   }
+}
+
+/** The authz subject the A1 bucket-policy is evaluated against (userId + role).
+ *  Inert unless STORAGE_BUCKET_POLICY_ENABLED is ON (policy is then undefined). */
+function principalOf(user: UserContext): PolicyPrincipal {
+  return { userId: user.id, role: user.role ?? 'authenticated' };
 }

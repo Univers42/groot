@@ -20,6 +20,18 @@ export interface UploadOptions {
 }
 export type UploadBody = Blob | ArrayBuffer | ArrayBufferView | string;
 /**
+ * A1 image-transform options for `download`/`transformUrl`. Server-side resize +
+ * reformat (sharp), served from the SAME owner-scoped object GET. When the server
+ * has STORAGE_TRANSFORMS_ENABLED OFF (the default), these are ignored and the
+ * original object bytes are returned byte-identical.
+ */
+export interface TransformOptions {
+    width?: number;
+    height?: number;
+    format?: 'webp' | 'jpeg' | 'jpg' | 'png' | 'avif';
+    quality?: number;
+}
+/**
  * Per-bucket client, Supabase-shaped:
  *   client.storage.from('avatars').upload('me.png', file)
  * Upload/download proxy through storage-router (so they work with the internal
@@ -33,6 +45,14 @@ export declare class StorageBucketClient {
     constructor(http: HttpClient, bucket: string);
     upload(path: string, body: UploadBody, opts?: UploadOptions): Promise<UploadResult>;
     download(path: string): Promise<Blob>;
+    /**
+     * A1: download a server-derived image variant (resize/reformat) of an object,
+     * owner-scoped exactly like `download`. Requires the server to have
+     * STORAGE_TRANSFORMS_ENABLED ON; when OFF the original bytes are returned
+     * (byte-identical) so this is a safe superset of `download`.
+     *   client.storage.from('avatars').transform('me.png', { width: 64, height: 64, format: 'webp' })
+     */
+    transform(path: string, opts: TransformOptions): Promise<Blob>;
     list(prefix?: string): Promise<StorageObject[]>;
     remove(paths: string[]): Promise<Array<{
         key: string;
