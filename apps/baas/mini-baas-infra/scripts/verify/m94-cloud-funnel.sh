@@ -69,6 +69,7 @@ GO_DIR="${INFRA_DIR}/go/control-plane"
 MIG_DIR="${INFRA_DIR}/scripts/migrations/postgresql"
 MIGRATION_005="${MIG_DIR}/005_add_tenant_table.sql"
 MIGRATION_032="${MIG_DIR}/032_tenants.sql"
+MIGRATION_035="${MIG_DIR}/035_widen_tenant_plan_check.sql"
 MIGRATION_040="${MIG_DIR}/040_tenant_usage.sql"
 MIGRATION_041="${MIG_DIR}/041_tenant_billing.sql"
 MIGRATION_045="${MIG_DIR}/045_tenant_safety.sql"
@@ -267,6 +268,7 @@ SQL
   for i in $(seq 1 20); do prelude && break; [[ $i -eq 20 ]] && return 1; sleep 0.5; done
   apply_migration "${PGC}" "${MIGRATION_005}" || return 1
   apply_migration "${PGC}" "${MIGRATION_032}" || return 1
+  apply_migration "${PGC}" "${MIGRATION_035}" || return 1
   apply_migration "${PGC}" "${MIGRATION_040}" || return 1
   apply_migration "${PGC}" "${MIGRATION_041}" || return 1
   apply_migration "${PGC}" "${MIGRATION_045}" || return 1
@@ -319,9 +321,15 @@ REDIS_INNET="redis://${REDIS}:6379"
 step "2/14 [ENABLED] seed INDEPENDENT ground truth: over-quota usage, budgets+usage, a verified abuse tenant, the funnel Stripe customer"
 WINDOW_NOW="$(date -u +%Y-%m-01)"
 pg_q "${PG}" >/dev/null 2>&1 <<SQL || fail "ground-truth seed failed"
--- R1: an OVER-quota usage row for T_OVERQ (qty > nano cap) so the QuotaGuard sets quota:over.
---     A minimal plan map so the guard resolves the nano cap for the over tenant.
-ALTER TABLE public.tenants ADD COLUMN IF NOT EXISTS plan text;
+-- R1: a real tenants row for T_OVERQ on the nano tier (slug = tenant_id, the public
+--     identity the data plane stamps) + an OVER-quota usage row (qty > nano cap). The
+--     QuotaGuard joins tenants.slug = tenant_usage.tenant_id (see quotaguard.go) to
+--     resolve the nano cap and publish quota:over. WITHOUT the tenants row the slug
+--     join falls back to the essential default cap (2,000,000) and never enforces —
+--     the m94-R1 bug this seed fixes. Migration 035 widens the plan CHECK to accept 'nano'.
+INSERT INTO public.tenants(id, name, slug, plan) VALUES
+  (gen_random_uuid(), '${T_OVERQ}', '${T_OVERQ}', 'nano')
+  ON CONFLICT (slug) DO UPDATE SET plan = EXCLUDED.plan;
 INSERT INTO public.tenant_usage(tenant_id, metric, window_start, qty, idempotency_key) VALUES
   ('${T_OVERQ}', 'query.count', '${WINDOW_NOW}T00:00:00Z', ${OVER_QTY}, 'm94-overq-${RUNID}')
   ON CONFLICT (idempotency_key) DO NOTHING;
