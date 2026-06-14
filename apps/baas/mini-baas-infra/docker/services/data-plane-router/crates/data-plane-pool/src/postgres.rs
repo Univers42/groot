@@ -11,7 +11,9 @@ use data_plane_core::{
     SchemaDdlStatus, SchemaDescriptor, TableSchema, TxBeginRequest, TxHandle,
 };
 use bytes::BytesMut;
-use deadpool_postgres::{Config as DeadpoolConfig, Object, PoolConfig, Runtime};
+use deadpool_postgres::{
+    Config as DeadpoolConfig, ManagerConfig, Object, PoolConfig, RecyclingMethod, Runtime,
+};
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -48,6 +50,89 @@ pub(crate) fn effective_tls_mode(dsn: &str, max_security: bool) -> Option<TlsMod
         (Some(TlsMode::Require), true) => Some(TlsMode::Verify),
         (other, _) => other,
     }
+}
+
+/// Track C / C1: the connection-pooler endpoint to dial, from
+/// `DATA_PLANE_POOLER_URL`. `None` (unset/blank) is the default → the direct
+/// path, byte-parity. A set value is a full DSN whose host:port is the pooler
+/// (e.g. `postgres://…@supavisor:6543/…`); only its host:port is consumed (see
+/// [`repoint_dsn_host`]). The env is fixed at process start, so reading it at
+/// `open_pool` (per-pool, not per-request) is correct.
+pub(crate) fn pooler_url() -> Option<String> {
+    match std::env::var("DATA_PLANE_POOLER_URL") {
+        Ok(v) if !v.trim().is_empty() => Some(v),
+        _ => None,
+    }
+}
+
+/// Track C / C1: whether client-side prepared-statement/session reuse across
+/// pooled checkouts is DISABLED (`DATA_PLANE_STATEMENT_CACHE=off`). Required
+/// under a transaction-mode pooler. Default (unset / any non-`off` value, e.g.
+/// `on`) → `false`, the direct path with no connection recycle query.
+pub(crate) fn statement_cache_off() -> bool {
+    std::env::var("DATA_PLANE_STATEMENT_CACHE")
+        .map(|v| v.trim().eq_ignore_ascii_case("off"))
+        .unwrap_or(false)
+}
+
+/// Repoint a URL-form Postgres DSN's host:port to the pooler's, preserving the
+/// original DSN's scheme, userinfo (user:password), database path and query
+/// (`?sslmode=…&…`). The pooler authenticates the SAME role to the SAME upstream
+/// database, so only the transport endpoint changes — the resolved credentials
+/// and TLS posture are unchanged.
+///
+/// Conservative by construction:
+/// * Only `postgres://` / `postgresql://` URL-form DSNs are rewritten. A keyword
+///   DSN (`host=… port=… user=…`) or any unrecognized shape is returned
+///   **unchanged** — never a silent half-rewrite that could point at the wrong
+///   target. (The local stack + every gate use the URL form.)
+/// * If the pooler URL has no parseable host:port, the original `dsn` is returned
+///   unchanged (fail-safe: keep the proven direct target rather than dial a
+///   malformed endpoint).
+///
+/// Pure (no env, no I/O) → unit-tested without a DB.
+pub(crate) fn repoint_dsn_host(dsn: &str, pooler_url: &str) -> String {
+    let Some(authority) = pooler_authority(pooler_url) else {
+        return dsn.to_string();
+    };
+    // Split the URL-form DSN into scheme://, the authority (userinfo@host:port),
+    // and the remainder (/db?query). Only the host:port portion is replaced.
+    for scheme in ["postgresql://", "postgres://"] {
+        if let Some(rest) = dsn.strip_prefix(scheme) {
+            // rest = [userinfo@]host[:port][/db][?query]. The authority ends at
+            // the first '/' or '?'; everything from there is the tail.
+            let tail_at = rest.find(['/', '?']).unwrap_or(rest.len());
+            let (auth, tail) = rest.split_at(tail_at);
+            // Preserve userinfo (user:password@) if present; replace only host:port.
+            let userinfo = match auth.rfind('@') {
+                Some(at) => &auth[..=at], // includes the trailing '@'
+                None => "",
+            };
+            return format!("{scheme}{userinfo}{authority}{tail}");
+        }
+    }
+    // Not a URL-form DSN (keyword form / unknown) → leave it exactly as resolved.
+    dsn.to_string()
+}
+
+/// Extract `host:port` (the authority) from the pooler URL. Handles the URL form
+/// (`postgres://[user:pass@]host:port/db?…`); returns `None` for anything without
+/// a parseable host so the caller can fall back to the direct DSN.
+fn pooler_authority(pooler_url: &str) -> Option<String> {
+    let rest = pooler_url
+        .strip_prefix("postgresql://")
+        .or_else(|| pooler_url.strip_prefix("postgres://"))?;
+    let auth_end = rest.find(['/', '?']).unwrap_or(rest.len());
+    let auth = &rest[..auth_end];
+    // Drop any userinfo from the pooler URL — only its host:port is used.
+    let host_port = match auth.rfind('@') {
+        Some(at) => &auth[at + 1..],
+        None => auth,
+    };
+    if host_port.is_empty() {
+        return None;
+    }
+    Some(host_port.to_string())
 }
 
 /// Build the rustls connector for the given TLS mode.
@@ -214,6 +299,22 @@ impl EngineAdapter for PostgresEngineAdapter {
     async fn open_pool(&self, mount: DatabaseMount) -> DataPlaneResult<Box<dyn EnginePool>> {
         let dsn = self.resolver.resolve_dsn(&mount).await?;
 
+        // Track C / C1: when a connection pooler is wired (`DATA_PLANE_POOLER_URL`
+        // set), dial the pooler endpoint instead of the resolved DSN's direct
+        // host:port — keeping the resolved DSN's database/user/password/sslmode
+        // (the pooler authenticates the same role to the same upstream DB). UNSET
+        // (the default) → `dsn` is returned UNCHANGED, so the connection target is
+        // byte-identical to the pre-C1 direct path. Isolation is unaffected: the
+        // RLS GUCs + owner_id predicate are re-stamped per request INSIDE each
+        // request's transaction (`apply_rls_context`), so a transaction-mode
+        // pooler that hands a different backend to the next request never leaks
+        // tenant state — the SAME invariant that lets shared_rls pools serve many
+        // tenants. See scripts/scale/POOLER.md.
+        let dsn = match pooler_url() {
+            Some(pooler) => repoint_dsn_host(&dsn, &pooler),
+            None => dsn,
+        };
+
         // Phase 6: the effective TLS posture. `require` keeps libpq parity
         // (encrypt, don't verify); `verify-*` (or `require` under
         // SECURITY_MODE=max) verifies the chain + hostname. None → NoTls (local).
@@ -224,6 +325,22 @@ impl EngineAdapter for PostgresEngineAdapter {
         let mut cfg = DeadpoolConfig::new();
         cfg.url = Some(dsn);
         cfg.pool = Some(PoolConfig::new(mount.pool_policy.max.max(1) as usize));
+        // Track C / C1: under a transaction-mode pooler, client-side
+        // prepared-statement/session reuse across pooled checkouts is unsafe (a
+        // checkout can land on a different upstream backend), so
+        // `DATA_PLANE_STATEMENT_CACHE=off` recycles each connection with
+        // `RecyclingMethod::Clean` — `DISCARD TEMP/SEQUENCES/…` (deliberately NOT
+        // `DEALLOCATE ALL`/`DISCARD PLAN`, which a txn-mode pooler rejects), wiping
+        // any session state on return to the pool. UNSET/`on` (the default) keeps
+        // `RecyclingMethod::Fast` — no recycle query — so the direct path is
+        // byte-identical. (The CRUD path already binds via tokio-postgres' UNNAMED
+        // prepared statement, never persisted across checkouts, so this is a
+        // forward-safety guard, not a correctness fix for today's queries.)
+        if statement_cache_off() {
+            cfg.manager = Some(ManagerConfig {
+                recycling_method: RecyclingMethod::Clean,
+            });
+        }
 
         // External mounts (a client's Supabase project) REQUIRE TLS; the DSN
         // opts in via sslmode=require/verify-*. Everything else keeps the
@@ -2185,6 +2302,57 @@ mod tests {
         assert!(sql.contains(" AND \"owner_id\" = $3"), "owner predicate missing: {sql}");
         assert!(sql.contains("RETURNING to_jsonb(t)"), "{sql}");
         assert_eq!(params.len(), 3); // name, filter id, owner
+    }
+
+    // ── Track C / C1: pooler DSN repoint (pure) ──────────────────────────────
+    #[test]
+    fn repoint_dsn_host_replaces_only_host_port() {
+        use super::repoint_dsn_host;
+        // Direct DSN's db/user/password/sslmode are preserved; only host:port moves.
+        assert_eq!(
+            repoint_dsn_host(
+                "postgres://postgres:pw@postgres:5432/commerce?sslmode=require",
+                "postgres://ignored:ignored@supavisor:6543/postgres"
+            ),
+            "postgres://postgres:pw@supavisor:6543/commerce?sslmode=require"
+        );
+        // postgresql:// scheme + no userinfo on the source DSN.
+        assert_eq!(
+            repoint_dsn_host("postgresql://db:5432/app", "postgres://pooler:6543/x"),
+            "postgresql://pooler:6543/app"
+        );
+        // No path/query on the source DSN.
+        assert_eq!(
+            repoint_dsn_host("postgres://u:p@h:5432", "postgres://pgbouncer:6432/db"),
+            "postgres://u:p@pgbouncer:6432"
+        );
+    }
+
+    #[test]
+    fn repoint_dsn_host_leaves_keyword_and_malformed_unchanged() {
+        use super::repoint_dsn_host;
+        // Keyword-form DSN is NOT URL-form → returned unchanged (never a half-rewrite).
+        let kw = "host=db.x.supabase.co port=5432 user=u password=p sslmode=verify-full";
+        assert_eq!(repoint_dsn_host(kw, "postgres://supavisor:6543/db"), kw);
+        // A pooler URL with no parseable host → fall back to the direct DSN.
+        let direct = "postgres://u:p@h:5432/db";
+        assert_eq!(repoint_dsn_host(direct, "postgres:///onlydb"), direct);
+        assert_eq!(repoint_dsn_host(direct, "not-a-url"), direct);
+    }
+
+    #[test]
+    fn pooler_authority_extracts_host_port() {
+        use super::pooler_authority;
+        assert_eq!(
+            pooler_authority("postgres://u:p@supavisor:6543/db?x=1").as_deref(),
+            Some("supavisor:6543")
+        );
+        assert_eq!(
+            pooler_authority("postgresql://pgbouncer:6432").as_deref(),
+            Some("pgbouncer:6432")
+        );
+        assert_eq!(pooler_authority("postgres:///db").as_deref(), None);
+        assert_eq!(pooler_authority("redis://x:6379").as_deref(), None);
     }
 
     #[test]
