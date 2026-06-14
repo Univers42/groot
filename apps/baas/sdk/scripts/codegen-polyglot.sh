@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # **************************************************************************** #
-#   codegen-polyglot.sh — regenerate the Python + Dart client SDKs           #
+#   codegen-polyglot.sh — regenerate the Python/Dart/Swift/Kotlin SDKs        #
 # **************************************************************************** #
 #
 # A4: polyglot SDKs generated from the canonical OpenAPI 3.1 spec
@@ -8,6 +8,8 @@
 # into committed, regenerable packages:
 #   apps/baas/sdk-python   (urllib3-based)
 #   apps/baas/sdk-dart     (http-based)
+#   apps/baas/sdk-swift    (urlsession + async/await)
+#   apps/baas/sdk-kotlin   (jvm + gradle)
 #
 # The hand-written TypeScript SDK (apps/baas/sdk) is the reference client and is
 # NOT generated. Docker-first: openapi-generator runs in a container, so its
@@ -40,4 +42,19 @@ gen python sdk-python "packageName=grobase,projectName=grobase-sdk,packageVersio
 echo "[codegen-polyglot] Dart -> sdk-dart"
 gen dart sdk-dart "pubName=grobase,pubVersion=${VERSION}"
 
-echo "[codegen-polyglot] done — regenerated sdk-python + sdk-dart from ${SPEC}"
+# A4-swift: Swift client (urlsession + async/await), package "Grobase". SPM
+# layout with path:"." so all sources live at the package root; the m62 gate
+# builds it in swift:5.9 (parse-fallback on Linux because the swift5 networking
+# helper imports the Apple-only MobileCoreServices framework).
+echo "[codegen-polyglot] Swift -> sdk-swift"
+gen swift5 sdk-swift "projectName=Grobase,library=urlsession,responseAs=AsyncAwait,useSPMFileStructure=true,swiftPackagePath=."
+
+# A4-kotlin: Kotlin client (jvm + gradle), package "grobase", artifactId
+# grobase-sdk (group com.grobase). The m63 gate builds it with `gradle build` in
+# gradle:8-jdk17 (kotlinc -parse fallback for air-gapped CI). NOTE: the committed
+# sdk-kotlin/ was first generated at version 1.1.0; this recipe standardizes the
+# whole suite on ${VERSION}, so a regen restamps it to match python/dart/swift.
+echo "[codegen-polyglot] Kotlin -> sdk-kotlin"
+gen kotlin sdk-kotlin "packageName=grobase,groupId=com.grobase,artifactId=grobase-sdk,artifactVersion=${VERSION}"
+
+echo "[codegen-polyglot] done — regenerated sdk-python + sdk-dart + sdk-swift + sdk-kotlin from ${SPEC}"
