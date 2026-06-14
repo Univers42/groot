@@ -29,6 +29,22 @@ var ErrEngineNotInPackage = errors.New("engine not included in tenant package")
 // max_mounts cap (Phase 4).
 var ErrMountQuotaExceeded = errors.New("tenant has reached its package mount quota")
 
+// ErrPlaintextDsnForbidden is returned when a tenant whose package's
+// security_mode is "max" tries to register a mount with an INLINE plaintext
+// connection_string (S2 / G-Vault). Such tenants must register a Vault
+// credential_ref instead, so no plaintext DSN is ever encrypted-at-rest for
+// them. A no-op when tiering is disabled or the tenant's tier is not max.
+var ErrPlaintextDsnForbidden = errors.New("security_mode=max forbids an inline plaintext connection_string; register a credential_ref instead")
+
+// derefStr returns the pointed-to string, or "" for a nil pointer (a NULL
+// column). Used to flatten the nullable cred_* columns into the wire struct.
+func derefStr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
 // Service implements the adapter-registry control-plane logic.
 type Service struct {
 	db   *shared.Postgres
@@ -143,6 +159,27 @@ ALTER TABLE public.tenant_databases ADD CONSTRAINT tenant_databases_isolation_ch
 ALTER TABLE public.tenant_databases DROP CONSTRAINT IF EXISTS tenant_databases_engine_check;
 ALTER TABLE public.tenant_databases ADD CONSTRAINT tenant_databases_engine_check
   CHECK (engine IN ('postgresql','cockroachdb','mongodb','mysql','mariadb','redis','sqlite','mssql','http','jdbc','cassandra','neo4j','elasticsearch','qdrant','influx'));
+-- S2 / G-Vault (migration 060, mirrored here so a FRESH EnsureSchema install
+-- converges with a migrated one): a mount may carry a Vault credential REFERENCE
+-- instead of an inline encrypted DSN. Add the three nullable cred_* columns,
+-- make the inline-encrypted columns nullable, and enforce EXACTLY ONE of
+-- {inline-encrypted, cred-ref} per row. All idempotent; existing inline rows are
+-- untouched (they remain inline_complete).
+ALTER TABLE public.tenant_databases ADD COLUMN IF NOT EXISTS cred_provider  TEXT;
+ALTER TABLE public.tenant_databases ADD COLUMN IF NOT EXISTS cred_reference TEXT;
+ALTER TABLE public.tenant_databases ADD COLUMN IF NOT EXISTS cred_version   TEXT;
+ALTER TABLE public.tenant_databases ALTER COLUMN connection_enc DROP NOT NULL;
+ALTER TABLE public.tenant_databases ALTER COLUMN connection_iv  DROP NOT NULL;
+ALTER TABLE public.tenant_databases ALTER COLUMN connection_tag DROP NOT NULL;
+ALTER TABLE public.tenant_databases DROP CONSTRAINT IF EXISTS tenant_databases_credential_xor_check;
+ALTER TABLE public.tenant_databases ADD CONSTRAINT tenant_databases_credential_xor_check CHECK (
+  (connection_enc IS NOT NULL AND connection_iv IS NOT NULL AND connection_tag IS NOT NULL
+     AND cred_provider IS NULL AND cred_reference IS NULL AND cred_version IS NULL)
+  OR
+  (cred_provider IS NOT NULL AND cred_reference IS NOT NULL
+     AND connection_enc IS NULL AND connection_iv IS NULL AND connection_tag IS NULL
+     AND connection_salt IS NULL)
+);
 ALTER TABLE public.tenant_databases ENABLE ROW LEVEL SECURITY;
 -- Retire the pre-M12 broken policy on upgrade.
 DROP POLICY IF EXISTS tenant_isolation ON public.tenant_databases;
@@ -158,13 +195,11 @@ END $$;`
 	return s.db.AdminExec(ctx, ddl)
 }
 
-// Register encrypts the connection string and inserts the row under tenant RLS.
+// Register stores a mount under tenant RLS. An INLINE mount encrypts the
+// connection string at rest (today's path, byte-for-byte). A cred-ref mount (S2)
+// stores cred_provider/cred_reference/cred_version with NO encryption — the data
+// plane resolves the real DSN at query time via its CredentialProvider registry.
 func (s *Service) Register(ctx context.Context, userID string, req RegisterDatabaseRequest) (RegisterResult, error) {
-	payload, err := s.enc.Encrypt(req.ConnectionString)
-	if err != nil {
-		return RegisterResult{}, err
-	}
-
 	isolation := req.Isolation
 	if isolation == "" {
 		isolation = "shared_rls"
@@ -178,8 +213,29 @@ func (s *Service) Register(ctx context.Context, userID string, req RegisterDatab
 		return RegisterResult{}, fmt.Errorf("%w: %q (package allows %v)", ErrEngineNotInPackage, req.Engine, pkg.Engines)
 	}
 
+	usingRef := req.CredentialRef.set()
+
+	// S2 / G-Vault: a tenant whose tier's security_mode is "max" may NOT register
+	// an inline plaintext DSN — it must use a credential_ref so no plaintext is
+	// encrypted-at-rest for it. Gated on the resolved tier; a no-op when tiering
+	// is disabled or the tier is not max (parity for every non-max tenant).
+	if tiered && !usingRef && pkg.SecurityMode == "max" {
+		return RegisterResult{}, ErrPlaintextDsnForbidden
+	}
+
+	// Encrypt ONLY for the inline path. A cred-ref mount stores no ciphertext, so
+	// it never pays (nor risks) the scrypt KDF / AES-GCM seal.
+	var payload EncryptedPayload
+	if !usingRef {
+		var err error
+		payload, err = s.enc.Encrypt(req.ConnectionString)
+		if err != nil {
+			return RegisterResult{}, err
+		}
+	}
+
 	var out RegisterResult
-	err = s.db.TenantTx(ctx, userID, func(tx pgx.Tx) error {
+	err := s.db.TenantTx(ctx, userID, func(tx pgx.Tx) error {
 		// Mount-quota check INSIDE the tx so the count is consistent with the
 		// insert (no TOCTOU under concurrent registrations).
 		if tiered && pkg.PoolPolicy.MaxMounts > 0 {
@@ -191,6 +247,23 @@ func (s *Service) Register(ctx context.Context, userID string, req RegisterDatab
 			if count >= pkg.PoolPolicy.MaxMounts {
 				return ErrMountQuotaExceeded
 			}
+		}
+		if usingRef {
+			// Cred-ref row: NULL inline-encrypted columns, populated cred_*.
+			// version may be empty (NULL) — the data plane treats absent as latest.
+			var version any
+			if req.CredentialRef.Version != "" {
+				version = req.CredentialRef.Version
+			}
+			row := tx.QueryRow(ctx,
+				`INSERT INTO public.tenant_databases
+				   (tenant_id, engine, name, cred_provider, cred_reference, cred_version, isolation)
+				 VALUES ($1,$2,$3,$4,$5,$6,$7)
+				 RETURNING id, engine, name, created_at::text`,
+				userID, req.Engine, req.Name,
+				req.CredentialRef.Provider, req.CredentialRef.Reference, version, isolation,
+			)
+			return row.Scan(&out.ID, &out.Engine, &out.Name, &out.CreatedAt)
 		}
 		row := tx.QueryRow(ctx,
 			`INSERT INTO public.tenant_databases
@@ -255,12 +328,19 @@ func (s *Service) FindOne(ctx context.Context, userID, id string) (TenantDatabas
 	return d, err
 }
 
-// GetConnection decrypts and returns the connection string for the data plane.
+// GetConnection returns the connection info for the data plane. For an INLINE
+// mount it decrypts and returns the DSN (today's path, byte-for-byte). For a
+// cred-ref mount (S2) it returns the credential_ref so the data plane resolves
+// the real DSN itself via its CredentialProvider registry — no plaintext DSN
+// ever travels back through the control plane for a Vault-backed mount.
 func (s *Service) GetConnection(ctx context.Context, userID, id string) (ConnectionResult, error) {
 	var (
 		engine    string
 		isolation string
 		payload   EncryptedPayload
+		provider  *string
+		reference *string
+		version   *string
 	)
 	err := s.db.TenantTx(ctx, userID, func(tx pgx.Tx) error {
 		// EXPLICIT tenant scope (not just the RLS policy): the control-plane DB
@@ -271,9 +351,11 @@ func (s *Service) GetConnection(ctx context.Context, userID, id string) (Connect
 		// caller==owner check at resolve time. `userID` is the caller tenant
 		// the query-router forwards as X-Tenant-Id.
 		row := tx.QueryRow(ctx,
-			`SELECT engine, isolation, connection_enc, connection_iv, connection_tag, connection_salt
+			`SELECT engine, isolation, connection_enc, connection_iv, connection_tag, connection_salt,
+			        cred_provider, cred_reference, cred_version
 			   FROM public.tenant_databases WHERE id = $1 AND tenant_id = $2`, id, userID)
-		err := row.Scan(&engine, &isolation, &payload.Encrypted, &payload.IV, &payload.Tag, &payload.Salt)
+		err := row.Scan(&engine, &isolation, &payload.Encrypted, &payload.IV, &payload.Tag, &payload.Salt,
+			&provider, &reference, &version)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -286,6 +368,26 @@ func (s *Service) GetConnection(ctx context.Context, userID, id string) (Connect
 	})
 	if err != nil {
 		return ConnectionResult{}, err
+	}
+
+	// Cred-ref mount: surface provider+reference (NO decrypt — there is no
+	// ciphertext). The DB XOR check guarantees an inline row never reaches here
+	// with cred_* set, so a populated cred_provider is unambiguously a ref mount.
+	if provider != nil && *provider != "" {
+		result := ConnectionResult{
+			Engine:    engine,
+			Isolation: isolation,
+			CredentialRef: &CredentialRefInput{
+				Provider:  *provider,
+				Reference: derefStr(reference),
+				Version:   derefStr(version),
+			},
+		}
+		if name, pkg, ok := s.packageForTenant(ctx, userID); ok {
+			result.Package = name
+			result.CapabilityOverrides = pkg.CapabilityOverrides()
+		}
+		return result, nil
 	}
 
 	// scrypt-decrypt only when the ciphertext changed since the last call (the

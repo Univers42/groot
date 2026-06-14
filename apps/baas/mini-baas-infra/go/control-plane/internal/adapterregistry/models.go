@@ -33,6 +33,26 @@ var allowedIsolation = map[string]bool{
 	"tenant_owned": true,
 }
 
+// CredentialRefInput is the optional Vault-credential reference a tenant may
+// register INSTEAD of an inline plaintext connection_string (S2 / G-Vault).
+// When present, the row stores provider/reference/version (no encryption) and
+// the Rust data plane resolves the real DSN at query time via its
+// CredentialProvider registry (credential.rs). `Provider` is the provider name
+// the data plane keys on (e.g. "vault"); `Reference` is the provider-scoped
+// secret reference (e.g. a Vault KV v2 path); `Version` is an optional pin.
+type CredentialRefInput struct {
+	Provider  string `json:"provider"`
+	Reference string `json:"reference"`
+	Version   string `json:"version"`
+}
+
+// set reports whether the caller supplied a credential reference at all (any of
+// the three fields non-empty). A wholly-empty struct means "no cred-ref" so the
+// inline connection_string path is taken (parity).
+func (c CredentialRefInput) set() bool {
+	return c.Provider != "" || c.Reference != "" || c.Version != ""
+}
+
 // RegisterDatabaseRequest is the JSON body for POST /databases.
 type RegisterDatabaseRequest struct {
 	Engine           string `json:"engine"`
@@ -40,9 +60,13 @@ type RegisterDatabaseRequest struct {
 	ConnectionString string `json:"connection_string"`
 	// Isolation is optional; empty defaults to "shared_rls" at store time.
 	Isolation string `json:"isolation"`
+	// CredentialRef is the optional Vault-credential reference (S2 / G-Vault).
+	// EXACTLY ONE of {ConnectionString, CredentialRef} must be supplied.
+	CredentialRef CredentialRefInput `json:"credential_ref"`
 }
 
-// Validate enforces the same constraints as the Node DTO + DB check.
+// Validate enforces the same constraints as the Node DTO + DB check, plus the
+// S2 EXACTLY-ONE-OF {connection_string, credential_ref} rule.
 func (r RegisterDatabaseRequest) Validate() error {
 	if !allowedEngines[r.Engine] {
 		return fmt.Errorf("unsupported engine %q", r.Engine)
@@ -50,8 +74,24 @@ func (r RegisterDatabaseRequest) Validate() error {
 	if l := len(r.Name); l < 1 || l > 64 {
 		return fmt.Errorf("name must be 1..64 chars")
 	}
-	if r.ConnectionString == "" {
-		return fmt.Errorf("connection_string is required")
+	// S2: exactly one credential source. Both-set and neither-set are rejected
+	// so a row is never ambiguous (and never silently inline when a ref was
+	// intended). The DB CHECK (migration 060) mirrors this as a backstop.
+	hasInline := r.ConnectionString != ""
+	hasRef := r.CredentialRef.set()
+	switch {
+	case hasInline && hasRef:
+		return fmt.Errorf("provide exactly one of connection_string or credential_ref, not both")
+	case !hasInline && !hasRef:
+		return fmt.Errorf("connection_string or credential_ref is required")
+	}
+	if hasRef {
+		if r.CredentialRef.Provider == "" {
+			return fmt.Errorf("credential_ref.provider is required")
+		}
+		if r.CredentialRef.Reference == "" {
+			return fmt.Errorf("credential_ref.reference is required")
+		}
 	}
 	if r.Isolation != "" && !allowedIsolation[r.Isolation] {
 		return fmt.Errorf("unsupported isolation %q", r.Isolation)
@@ -79,8 +119,16 @@ type RegisterResult struct {
 
 // ConnectionResult is the internal decrypt response for the data plane.
 type ConnectionResult struct {
-	Engine           string `json:"engine"`
+	Engine string `json:"engine"`
+	// ConnectionString is the resolved inline DSN for an INLINE-credential mount.
+	// EMPTY for a cred-ref mount — the data plane must then resolve the DSN itself
+	// via its CredentialProvider registry using CredentialRef below (so a
+	// Vault-backed DSN never travels back through the control plane in plaintext).
 	ConnectionString string `json:"connection_string"`
+	// CredentialRef is set ONLY for a cred-ref (Vault-backed) mount (S2). It tells
+	// the data plane which provider + reference to resolve the real DSN from at
+	// query time. Nil/omitted for an inline mount (parity).
+	CredentialRef *CredentialRefInput `json:"credential_ref,omitempty"`
 	// Isolation tells the data plane how to scope this mount (shared_rls |
 	// schema_per_tenant | db_per_tenant).
 	Isolation string `json:"isolation"`
