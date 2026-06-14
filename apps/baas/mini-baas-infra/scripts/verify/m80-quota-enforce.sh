@@ -185,12 +185,14 @@ step "2/7 seed tenants(${TENANT_OVER},${TENANT_UNDER} both nano) + tenant_usage 
 WINDOW_NOW="$(date -u +%Y-%m-01)"   # current month start = the period the guard sums over
 seed() {
   psql_q >/dev/null 2>&1 <<SQL
--- Minimal tenants table: the guard LEFT JOINs tenant_usage→tenants for the plan.
--- id is text here (the real column is uuid::text in the JOIN); both tenants nano.
-CREATE TABLE IF NOT EXISTS public.tenants (id text PRIMARY KEY, plan text);
-INSERT INTO public.tenants(id, plan) VALUES
-  ('${TENANT_OVER}','nano'),('${TENANT_UNDER}','nano')
-  ON CONFLICT (id) DO UPDATE SET plan = EXCLUDED.plan;
+-- Minimal tenants table: the guard LEFT JOINs tenant_usage→tenants for the plan
+-- on tenants.slug = tenant_usage.tenant_id (the slug is the public identity the
+-- data plane stamps; see quotaguard.usageByTenantSQL). This smoke arm keeps
+-- slug == id == tenant_id; the real UUID-id/slug split is exercised by m101.
+CREATE TABLE IF NOT EXISTS public.tenants (id text PRIMARY KEY, slug text UNIQUE, plan text);
+INSERT INTO public.tenants(id, slug, plan) VALUES
+  ('${TENANT_OVER}','${TENANT_OVER}','nano'),('${TENANT_UNDER}','${TENANT_UNDER}','nano')
+  ON CONFLICT (id) DO UPDATE SET plan = EXCLUDED.plan, slug = EXCLUDED.slug;
 -- Independent ground truth: OVER exceeds the nano query.count cap, UNDER is below.
 -- One window row each (current month). idempotency_key is just a unique PK here.
 INSERT INTO public.tenant_usage(tenant_id, metric, window_start, qty, idempotency_key) VALUES
