@@ -29,20 +29,22 @@ pub async fn run(config: ServerConfig) -> anyhow::Result<()> {
         }
     });
 
-    // Track-B quota enforcement (B2): a DEDICATED snapshot-refresh loop, separate
-    // from the 15s pool reaper, so enforcement reacts at `quota_refresh_ms` (default
-    // 15s) rather than being coupled to pool reaping. Spawned ONLY when enforcement
-    // is ON — at parity this task never exists (no Redis traffic, no timer). The
-    // refresh runs OFF the request path; the hot path only reads the in-memory
-    // snapshot it maintains.
-    if state.quota_enforcement_enabled() {
-        let quota_state = state.clone();
+    // Track-B honor sets (B2 quota + spend-cap + suspend): a DEDICATED
+    // snapshot-refresh loop, separate from the 15s pool reaper, so enforcement
+    // reacts at `quota_refresh_ms` (default 15s, REUSED by all three sets) rather
+    // than being coupled to pool reaping. Spawned ONLY when ANY honor set is ON —
+    // at parity this task never exists (no Redis traffic, no timer). The refresh
+    // runs OFF the request path; the hot path only reads the in-memory snapshots it
+    // maintains. `refresh_honor_sets` refreshes every ENABLED set (each disabled
+    // one is a `None` no-op).
+    if state.honor_sets_enabled() {
+        let honor_state = state.clone();
         let refresh_ms = state.quota_refresh_ms().max(1);
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_millis(refresh_ms));
             loop {
                 interval.tick().await;
-                quota_state.refresh_quota().await;
+                honor_state.refresh_honor_sets().await;
             }
         });
     }

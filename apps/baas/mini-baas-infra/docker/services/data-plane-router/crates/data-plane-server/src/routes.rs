@@ -177,6 +177,26 @@ pub struct AppState {
     /// when `config.quota_enforcement` is ON; the reaper calls `refresh` each tick.
     /// `None` at parity → no refresh task touches Redis.
     quota_refresher: Option<Arc<crate::quota::QuotaRefresher>>,
+    /// Track-B spend-cap enforcement: in-memory snapshot of the over-spend tenant
+    /// ids the control-plane spend-cap guard published to Redis (`spend:over`).
+    /// Mirrors `quota_over` exactly — consulted on the hot path ONLY when
+    /// `config.spend_caps` is ON (a `bool` short-circuit before any field access),
+    /// so at parity it stays empty and is never touched (byte-parity).
+    spend_over: Arc<crate::quota::QuotaSet>,
+    /// Track-B spend-cap enforcement: the Redis snapshot refresher for `spend:over`.
+    /// `Some` only when `config.spend_caps` is ON; `None` at parity → no refresh
+    /// task touches Redis for it.
+    spend_refresher: Option<Arc<crate::quota::QuotaRefresher>>,
+    /// Track-B abuse/KYC suspension: in-memory snapshot of the suspended tenant ids
+    /// the control-plane abuse guard published to Redis (`tenant:suspended`).
+    /// Mirrors `quota_over` exactly — consulted on the hot path ONLY when
+    /// `config.suspend_reader` is ON (a `bool` short-circuit before any field
+    /// access), so at parity it stays empty and is never touched (byte-parity).
+    suspended: Arc<crate::quota::QuotaSet>,
+    /// Track-B abuse/KYC suspension: the Redis snapshot refresher for
+    /// `tenant:suspended`. `Some` only when `config.suspend_reader` is ON; `None`
+    /// at parity → no refresh task touches Redis for it.
+    suspend_refresher: Option<Arc<crate::quota::QuotaRefresher>>,
     /// Shared HTTP client for the Phase-7 bypass front door (`/data/v1`): calls
     /// tenant-control `/v1/keys/verify` + adapter-registry `/connect`. Cheap to
     /// clone (Arc inside); only used when the bypass is enabled.
@@ -315,6 +335,31 @@ impl AppState {
         } else {
             None
         };
+        // Track-B spend-cap + abuse/KYC suspension: the SAME honor-set machinery as
+        // B2 quota, for two MORE control-plane Redis sets (`spend:over` /
+        // `tenant:suspended`). Each refresher is built ONLY when its own flag is ON
+        // (reusing the shared quota Redis URL — all three sets live in one
+        // control-plane Redis), so OFF → no snapshot work, no Redis traffic, and the
+        // hot-path checks short-circuit on the bool before any field access
+        // (byte-parity). They are refreshed on the SAME reaper/refresh tick as quota.
+        let spend_over = Arc::new(crate::quota::QuotaSet::new());
+        let spend_refresher = if config.spend_caps {
+            Some(Arc::new(crate::quota::QuotaRefresher::new_for(
+                config.quota_redis_url.clone(),
+                crate::quota::SPEND_OVER_SET,
+            )))
+        } else {
+            None
+        };
+        let suspended = Arc::new(crate::quota::QuotaSet::new());
+        let suspend_refresher = if config.suspend_reader {
+            Some(Arc::new(crate::quota::QuotaRefresher::new_for(
+                config.quota_redis_url.clone(),
+                crate::quota::SUSPENDED_SET,
+            )))
+        } else {
+            None
+        };
         Self {
             config: Arc::new(config),
             engines: Arc::new(default_engines()),
@@ -329,6 +374,10 @@ impl AppState {
             usage,
             quota_over,
             quota_refresher,
+            spend_over,
+            spend_refresher,
+            suspended,
+            suspend_refresher,
             http_client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(10))
                 .build()
@@ -418,6 +467,30 @@ impl AppState {
         self.config.quota_enforcement
     }
 
+    /// Track-B spend-cap enforcement: whether the spend-cap honor set is active.
+    /// Read by `server::run` (private `config`) to decide whether to spawn the
+    /// snapshot-refresh loop — mirrors `quota_enforcement_enabled`.
+    #[must_use]
+    pub fn spend_caps_enabled(&self) -> bool {
+        self.config.spend_caps
+    }
+
+    /// Track-B abuse/KYC suspension: whether the suspend honor set is active. Read
+    /// by `server::run` (private `config`) to decide whether to spawn the
+    /// snapshot-refresh loop — mirrors `quota_enforcement_enabled`.
+    #[must_use]
+    pub fn suspend_reader_enabled(&self) -> bool {
+        self.config.suspend_reader
+    }
+
+    /// Whether ANY honor set (quota / spend / suspend) is active, i.e. whether the
+    /// dedicated snapshot-refresh loop must be spawned at all. `server::run` reads
+    /// this single accessor so the loop fires when any of the three is ON.
+    #[must_use]
+    pub fn honor_sets_enabled(&self) -> bool {
+        self.config.quota_enforcement || self.config.spend_caps || self.config.suspend_reader
+    }
+
     /// Track-B quota enforcement (B2): the refresh cadence (ms) for the snapshot
     /// loop. Read by `server::run` through this accessor (private `config` field).
     #[must_use]
@@ -443,17 +516,25 @@ impl AppState {
         // bounded under N-tenant fan-out (a full idle bucket re-creates on access).
         self.ratelimiter
             .evict_idle(std::time::Duration::from_secs(300));
-        // Track-B quota enforcement (B2): refresh the over-quota snapshot from
-        // Redis OFF the request path. `None` (enforcement off) → no-op = parity.
-        self.refresh_quota().await;
+        // Track-B honor sets (B2 quota + spend-cap + suspend): refresh every
+        // ENABLED snapshot from Redis OFF the request path. Each refresher is
+        // `None` when its flag is off → no-op = parity.
+        self.refresh_honor_sets().await;
     }
 
-    /// Track-B quota enforcement (B2): refresh the over-quota snapshot from Redis.
-    /// A no-op when enforcement is off (`quota_refresher` is `None`), so it never
-    /// touches Redis at parity. Called from the reaper tick (off the request path).
-    pub async fn refresh_quota(&self) {
+    /// Track-B honor sets: refresh every enabled snapshot (quota / spend / suspend)
+    /// from Redis. Each arm is a no-op when its refresher is `None` (its flag off),
+    /// so it never touches Redis at parity. Called from the reaper tick AND the
+    /// dedicated refresh loop (off the request path).
+    pub async fn refresh_honor_sets(&self) {
         if let Some(refresher) = &self.quota_refresher {
             refresher.refresh(&self.quota_over).await;
+        }
+        if let Some(refresher) = &self.spend_refresher {
+            refresher.refresh(&self.spend_over).await;
+        }
+        if let Some(refresher) = &self.suspend_refresher {
+            refresher.refresh(&self.suspended).await;
         }
     }
 }
@@ -954,6 +1035,46 @@ async fn run_query_inner(
             "tenant exceeded package usage quota (402)"
         );
         return payment_required();
+    }
+
+    // Track-B spend-cap enforcement — ABSOLUTE per-tenant spend budget. The
+    // control-plane spend-cap guard publishes the over-spend tenant set to Redis
+    // (`spend:over`); the data plane keeps a cheap in-memory snapshot (refreshed
+    // off the request path, mirroring quota) and rejects an over-spend tenant with
+    // 402 (`spend_capped`) here. DISTINCT signal from the quota 402 above (usage
+    // quota vs. money cap). OFF by default (`config.spend_caps`) → the snapshot is
+    // empty and this branch's flag short-circuits BEFORE any lookup, so it is
+    // byte-parity (the check is unreachable with the flag off).
+    if state.config.spend_caps && state.spend_over.is_over(&request.identity.tenant_id) {
+        tracing::warn!(
+            target: "audit",
+            event = "spend_capped",
+            tenant = %request.identity.tenant_id,
+            engine = %request.mount.engine,
+            op = ?request.operation.op,
+            "tenant exceeded spend cap (402)"
+        );
+        return spend_capped();
+    }
+
+    // Track-B abuse/KYC suspension — administrative block. The control-plane abuse
+    // guard publishes the suspended tenant set to Redis (`tenant:suspended`); the
+    // data plane keeps a cheap in-memory snapshot (refreshed off the request path,
+    // mirroring quota) and rejects a suspended tenant with 403 (`tenant_suspended`)
+    // here — a 403 (account blocked), NOT a 402 (which says "pay/upgrade"). OFF by
+    // default (`config.suspend_reader`) → the snapshot is empty and this branch's
+    // flag short-circuits BEFORE any lookup, so it is byte-parity (the check is
+    // unreachable with the flag off).
+    if state.config.suspend_reader && state.suspended.is_over(&request.identity.tenant_id) {
+        tracing::warn!(
+            target: "audit",
+            event = "tenant_suspended",
+            tenant = %request.identity.tenant_id,
+            engine = %request.mount.engine,
+            op = ?request.operation.op,
+            "suspended tenant request rejected (403)"
+        );
+        return forbidden_suspended();
     }
 
     // Capability-aware planner (G6, two-phase). Phase 1 rejects an impossible
@@ -2371,6 +2492,36 @@ fn payment_required() -> axum::response::Response {
         Json(ApiError {
             error: "quota_exceeded".to_string(),
             message: "tenant exceeded package usage quota for the current period".to_string(),
+        }),
+    )
+        .into_response()
+}
+
+/// Track-B spend-cap enforcement: the 402 a tenant over its ABSOLUTE spend cap
+/// receives. Same 402 status as `payment_required` (both are "metered allowance"
+/// signals) but a DISTINCT `spend_capped` error code, so a client can tell a
+/// usage-quota exhaustion from a money-cap trip.
+fn spend_capped() -> axum::response::Response {
+    (
+        StatusCode::PAYMENT_REQUIRED,
+        Json(ApiError {
+            error: "spend_capped".to_string(),
+            message: "tenant exceeded its spend cap".to_string(),
+        }),
+    )
+        .into_response()
+}
+
+/// Track-B abuse/KYC suspension: the 403 a suspended tenant receives. 403
+/// Forbidden (account administratively blocked), DISTINCT from the 402 spend/quota
+/// signals (which say "pay or upgrade") — a suspended account cannot un-block by
+/// paying.
+fn forbidden_suspended() -> axum::response::Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(ApiError {
+            error: "tenant_suspended".to_string(),
+            message: "tenant is suspended".to_string(),
         }),
     )
         .into_response()

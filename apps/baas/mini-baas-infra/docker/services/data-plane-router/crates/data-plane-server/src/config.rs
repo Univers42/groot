@@ -137,8 +137,31 @@ pub struct ServerConfig {
     /// `quota:over` from. From `DATA_PLANE_QUOTA_REDIS_URL`, falling back to the
     /// shared `REDIS_URL` (the same convention the rate limiter + metering use).
     /// Empty → the refresher never connects (set stays empty = fail-open). Only
-    /// consulted when `quota_enforcement` is ON.
+    /// consulted when `quota_enforcement` is ON. REUSED by spend-cap + suspend
+    /// (all three honor sets live in the same control-plane Redis), so they add no
+    /// new Redis-URL env var.
     pub quota_redis_url: String,
+    /// Track-B spend-cap enforcement — honor the control-plane spend-cap guard's
+    /// over-spend decision on the request path. OFF by default → byte-parity: the
+    /// hot path takes ZERO extra branches (a `bool` short-circuit before any spend
+    /// state is touched), no Redis snapshot is built, and the refresh tick is never
+    /// scheduled for it. Requires BOTH the master `METERING_ENABLED` AND
+    /// `DATA_PLANE_SPEND_CAPS` to be truthy (master + per-honor sub-flag, mirroring
+    /// `quota_enforcement`). When ON, a tenant the spend-cap guard listed in the
+    /// `spend:over` Redis set is rejected with 402 (`spend_capped`); a tenant absent
+    /// from the set is served normally. Reuses `quota_refresh_ms` / `quota_redis_url`.
+    pub spend_caps: bool,
+    /// Track-B abuse/KYC suspension — honor the control-plane abuse guard's
+    /// suspension decision on the request path. OFF by default → byte-parity: the
+    /// hot path takes ZERO extra branches (a `bool` short-circuit before any suspend
+    /// state is touched), no Redis snapshot is built, and the refresh tick is never
+    /// scheduled for it. Requires BOTH the master `METERING_ENABLED` AND
+    /// `DATA_PLANE_SUSPEND_READER` to be truthy (master + per-honor sub-flag,
+    /// mirroring `quota_enforcement`). When ON, a tenant the abuse guard listed in
+    /// the `tenant:suspended` Redis set is rejected with 403 (`tenant_suspended`); a
+    /// tenant absent from the set is served normally. Reuses `quota_refresh_ms` /
+    /// `quota_redis_url`.
+    pub suspend_reader: bool,
 
     /// B5 per-tenant observability (Pillar 1) — emit `tenant_id` as a STRUCTURED
     /// TRACING/LOG FIELD on the per-request span. OFF by default → byte-parity:
@@ -272,6 +295,7 @@ impl ServerConfig {
                 .unwrap_or(15000),
             // Track-B quota enforcement (B2): the snapshot source URL. Own var,
             // then the shared `REDIS_URL` — mirrors metering_redis_url exactly.
+            // REUSED by spend-cap + suspend (same control-plane Redis).
             quota_redis_url: {
                 let url = read_env("DATA_PLANE_QUOTA_REDIS_URL", "");
                 if url.trim().is_empty() {
@@ -280,6 +304,26 @@ impl ServerConfig {
                     url
                 }
             },
+            // Track-B spend-cap enforcement: ON only when BOTH the master flag
+            // AND the per-honor sub-flag are truthy — EXACTLY like quota_enforcement.
+            // BOTH default `false` → byte-parity.
+            spend_caps: matches!(
+                read_env("METERING_ENABLED", "false").to_lowercase().as_str(),
+                "1" | "true" | "on"
+            ) && matches!(
+                read_env("DATA_PLANE_SPEND_CAPS", "false").to_lowercase().as_str(),
+                "1" | "true" | "on"
+            ),
+            // Track-B abuse/KYC suspension: ON only when BOTH the master flag AND
+            // the per-honor sub-flag are truthy — EXACTLY like quota_enforcement.
+            // BOTH default `false` → byte-parity.
+            suspend_reader: matches!(
+                read_env("METERING_ENABLED", "false").to_lowercase().as_str(),
+                "1" | "true" | "on"
+            ) && matches!(
+                read_env("DATA_PLANE_SUSPEND_READER", "false").to_lowercase().as_str(),
+                "1" | "true" | "on"
+            ),
             // B5 per-tenant observability (Pillar 1): the parent log-field flag.
             // Default `false` → byte-parity (the request span is never entered).
             tenant_obs: matches!(
@@ -340,6 +384,8 @@ impl std::fmt::Debug for ServerConfig {
             .field("quota_enforcement", &self.quota_enforcement)
             .field("quota_refresh_ms", &self.quota_refresh_ms)
             .field("quota_redis_url", &redact(&self.quota_redis_url))
+            .field("spend_caps", &self.spend_caps)
+            .field("suspend_reader", &self.suspend_reader)
             .field("tenant_obs", &self.tenant_obs)
             .field("tenant_obs_counter", &self.tenant_obs_counter)
             .finish()
