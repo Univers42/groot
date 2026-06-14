@@ -31,3 +31,6 @@
 [submodule "apps/opposite-osiris"]
 	path = apps/opposite-osiris
 	url = git@github.com:Univers42/prismatica.git
+[submodule "apps/odysseus"]
+	path = apps/odysseus
+	url = https://github.com/pewdiepie-archdaemon/odysseus.git
