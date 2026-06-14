@@ -24,6 +24,14 @@ import (
 // legacy svc.Provision path (backward-compat). When set, /v1/provision routes
 // through the declarative reconciler. Route ownership stays HERE (one mux
 // registration) — see provision.Mount for the standalone seam.
+//
+// The TENANT SELF-SERVICE surface (/v1/tenants/me, /me/usage, /me/keys[/{id}],
+// PATCH /me — Track-B B4a) lives in selfserve.go and is mounted SEPARATELY via
+// MountSelfServe, gated on TENANT_SELFSERVE_ENABLED (off by default = no routes
+// = byte-parity). It is mounted from main.go alongside metering.Mount rather
+// than here, so the env flag + manifest load stay at the composition root; the
+// static "me*" literals out-rank the {id} wildcards registered below, so the two
+// route sets never conflict.
 func Mount(mux *http.ServeMux, svc *Service, serviceToken string, jwtVerifier *JWTVerifier, reconciler *provision.Reconciler) {
 	rt := &routes{svc: svc, serviceToken: serviceToken, jwt: jwtVerifier, reconciler: reconciler}
 

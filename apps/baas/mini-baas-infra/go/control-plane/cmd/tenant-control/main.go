@@ -1,15 +1,16 @@
 // Package main boots the tenant-control service.
 //
 // Owns:
-//   POST /v1/tenants              create a tenant row
-//   GET  /v1/tenants              list tenants (admin)
-//   GET  /v1/tenants/:id          fetch (self or admin)
-//   PATCH/DELETE /v1/tenants/:id  admin
-//   POST /v1/tenants/:id/bootstrap   tenant + default role + first key
-//   POST /v1/tenants/:id/keys     issue API key
-//   GET  /v1/tenants/:id/keys     list keys (redacted)
-//   DELETE /v1/tenants/:id/keys/:keyId   revoke
-//   POST /v1/keys/verify          gateway-internal: cleartext key -> identity
+//
+//	POST /v1/tenants              create a tenant row
+//	GET  /v1/tenants              list tenants (admin)
+//	GET  /v1/tenants/:id          fetch (self or admin)
+//	PATCH/DELETE /v1/tenants/:id  admin
+//	POST /v1/tenants/:id/bootstrap   tenant + default role + first key
+//	POST /v1/tenants/:id/keys     issue API key
+//	GET  /v1/tenants/:id/keys     list keys (redacted)
+//	DELETE /v1/tenants/:id/keys/:keyId   revoke
+//	POST /v1/keys/verify          gateway-internal: cleartext key -> identity
 package main
 
 import (
@@ -22,6 +23,7 @@ import (
 	"time"
 
 	"github.com/dlesieur/mini-baas/control-plane/internal/metering"
+	"github.com/dlesieur/mini-baas/control-plane/internal/packages"
 	"github.com/dlesieur/mini-baas/control-plane/internal/provision"
 	"github.com/dlesieur/mini-baas/control-plane/internal/shared"
 	"github.com/dlesieur/mini-baas/control-plane/internal/tenants"
@@ -116,6 +118,28 @@ func main() {
 	// so this route changes no existing path (that IS the parity story).
 	metering.Mount(mux, db, cfg.ServiceToken)
 
+	// Tenant self-service API (Track-B B4a): /v1/tenants/me* — a caller
+	// authenticated AS a tenant (API key OR GoTrue JWT) manages its OWN tenant
+	// (read tenant+entitlements, read usage, list/issue/revoke keys, change plan).
+	// There is no path id, so cross-tenant access is impossible by construction.
+	//
+	// FLAG-GATED OFF = PARITY: the /me routes are mounted ONLY when
+	// TENANT_SELFSERVE_ENABLED is truthy. When OFF (the default) MountSelfServe is
+	// never called, so those routes do not exist and a request 404s — byte-
+	// identical to today. A malformed manifest fails fast (tiering is a security
+	// boundary) but only along this opt-in path; the baseline is untouched.
+	if envBool("TENANT_SELFSERVE_ENABLED") {
+		manifest, err := packages.Load()
+		if err != nil {
+			log.Error("tenant self-serve: package manifest load failed", "err", err)
+			os.Exit(1)
+		}
+		tenants.MountSelfServe(mux, svc, jwtVerifier, manifest, envBool("BILLING_ENABLED"))
+		log.Info("tenant self-service API enabled (/v1/tenants/me*)", "billing", envBool("BILLING_ENABLED"))
+	} else {
+		log.Info("tenant self-service API disabled (TENANT_SELFSERVE_ENABLED off) — /v1/tenants/me* not mounted")
+	}
+
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr(),
 		Handler:           shared.WithMiddleware(mux, log),
@@ -148,6 +172,18 @@ func envFirst(keys ...string) string {
 		}
 	}
 	return ""
+}
+
+// envBool reads a truthy env flag (mirrors metering.envBool). Default (unset or
+// anything not truthy) is false — so a flag-gated path stays OFF unless
+// explicitly enabled, which is the parity default.
+func envBool(key string) bool {
+	switch os.Getenv(key) {
+	case "1", "true", "on", "TRUE", "True", "ON":
+		return true
+	default:
+		return false
+	}
 }
 
 func healthcheck(cfg shared.Config) int {

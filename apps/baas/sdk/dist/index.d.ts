@@ -7,6 +7,7 @@ import { StorageClient } from './domains/storage.js';
 import { TxnClient } from './domains/txn.js';
 import { WebhooksClient } from './domains/webhooks.js';
 import { AdminClient } from './domains/admin.js';
+import { AccountClient } from './domains/account.js';
 import { FunctionsClient } from './domains/functions.js';
 import { GraphqlClient } from './domains/graphql.js';
 import { RealtimeClient } from './domains/realtime-client.js';
@@ -18,11 +19,13 @@ import type { RestRequestOptions } from './types.js';
 export type { AuthSession, ClientSession, SessionInput, User, } from './core/session.js';
 export type { SessionStorageAdapter } from './core/storage.js';
 export { MiniBaasError, MiniBaasTimeoutError } from './core/errors.js';
-export type { AnalyticsTrackInput, PresignInput, QueryRunInput, QueryRunResponse, RecoverInput, FilterPrimitive, RestFilterOperator, RestMutationOptions, RestOrderOptions, RestQueryBuilder as RestQueryBuilderApi, RestQueryOptions, RestRequestOptions, RestResourceBuilder as RestResourceBuilderApi, SignInWithPasswordInput, SignUpInput, UpdateUserInput, VerifyInput, OAuthProvider, SignInWithOAuthInput, SignInWithOAuthResult, MfaFactorType, MfaEnrollInput, MfaEnrollResult, MfaChallengeInput, MfaChallengeResult, MfaVerifyInput, TxnExecuteInput, TxnOp, TxnOperation, TxnOpResult, TxnResult, WebhookCreateInput, WebhookDelivery, WebhookSubscription, WebhookUpdateInput, Tenant, TenantApiKey, TenantApiKeyIssued, TenantBootstrapInput, TenantBootstrapResult, TenantCreateInput, TenantUpdateInput, ProvisionInput, ProvisionMountResult, ProvisionMountSpec, ProvisionResult, MigrateCredentialRef, MigrateIdentity, MigrateInput, MigrateMount, FunctionDeployInput, FunctionDeployResult, FunctionInvokeOptions, FunctionSource, FunctionSummary, FunctionTrigger, FunctionTriggerCreateInput, FunctionSchedule, FunctionScheduleCreateInput, FunctionSecretMeta, FunctionSecretSetInput, ColumnSchema, DdlColumnDef, DdlColumnType, NormalizedSchema, NormalizedType, SchemaDdlAddColumnInput, SchemaDdlAlterColumnTypeInput, SchemaDdlCreateTableInput, SchemaDdlDropColumnInput, SchemaDdlDropTableInput, SchemaDdlInput, SchemaDdlOp, SchemaDdlResult, SchemaEngineCapabilities, TableSchema, GraphqlError, GraphqlQueryOptions, GraphqlRequest, GraphqlResponse, } from './types.js';
+export type { AnalyticsTrackInput, PresignInput, QueryRunInput, QueryRunResponse, RecoverInput, FilterPrimitive, RestFilterOperator, RestMutationOptions, RestOrderOptions, RestQueryBuilder as RestQueryBuilderApi, RestQueryOptions, RestRequestOptions, RestResourceBuilder as RestResourceBuilderApi, SignInWithPasswordInput, SignUpInput, UpdateUserInput, VerifyInput, OAuthProvider, SignInWithOAuthInput, SignInWithOAuthResult, MfaFactorType, MfaEnrollInput, MfaEnrollResult, MfaChallengeInput, MfaChallengeResult, MfaVerifyInput, TxnExecuteInput, TxnOp, TxnOperation, TxnOpResult, TxnResult, WebhookCreateInput, WebhookDelivery, WebhookSubscription, WebhookUpdateInput, Tenant, TenantApiKey, TenantApiKeyIssued, TenantBootstrapInput, TenantBootstrapResult, TenantCreateInput, TenantUpdateInput, ProvisionInput, ProvisionMountResult, ProvisionMountSpec, ProvisionResult, MigrateCredentialRef, MigrateIdentity, MigrateInput, MigrateMount, FunctionDeployInput, FunctionDeployResult, FunctionInvokeOptions, FunctionSource, FunctionSummary, FunctionTrigger, FunctionTriggerCreateInput, FunctionSchedule, FunctionScheduleCreateInput, FunctionSecretMeta, FunctionSecretSetInput, TenantSelf, TenantSelfResult, TenantEntitlements, TenantUsage, TenantSelfKeyCreateInput, ColumnSchema, DdlColumnDef, DdlColumnType, NormalizedSchema, NormalizedType, SchemaDdlAddColumnInput, SchemaDdlAlterColumnTypeInput, SchemaDdlCreateTableInput, SchemaDdlDropColumnInput, SchemaDdlDropTableInput, SchemaDdlInput, SchemaDdlOp, SchemaDdlResult, SchemaEngineCapabilities, TableSchema, GraphqlError, GraphqlQueryOptions, GraphqlRequest, GraphqlResponse, } from './types.js';
 export { SchemaClient } from './domains/schema.js';
 export { TxnClient } from './domains/txn.js';
 export { WebhooksClient } from './domains/webhooks.js';
 export { AdminClient, MigrateClient, TenantsClient } from './domains/admin.js';
+export { AccountClient } from './domains/account.js';
+export type { AccountClientOptions } from './domains/account.js';
 export { FunctionsClient } from './domains/functions.js';
 export { StorageClient, StorageBucketClient } from './domains/storage.js';
 export { RestClient, RestResourceBuilder, RestQueryBuilder } from './domains/rest.js';
@@ -82,6 +85,13 @@ export declare class MiniBaasClient {
      * server-side**: requires `serviceRoleKey`; routes are internal-only.
      */
     readonly admin: AdminClient;
+    /**
+     * Tenant **self-service** control (`/v1/tenants/me*`) — read your plan,
+     * entitlements & usage, manage your own API keys, change plan. Works with the
+     * session JWT or a tenant API key (no service-role key needed). See
+     * {@link AccountClient}.
+     */
+    readonly account: AccountClient;
     private readonly http;
     private readonly anonKey;
     constructor(options: MiniBaasClientOptions);

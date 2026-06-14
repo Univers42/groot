@@ -48,10 +48,24 @@ export const routes = {
         deliveries: (id) => `/admin/v1/webhooks/${encodeURIComponent(id)}/deliveries`,
     },
     tenants: {
+        // NOTE (pre-existing mismatch, do NOT fix here): these admin routes are
+        // prefixed `/admin/v1/*`, but the Go control-plane server actually serves
+        // the tenant registry under `/v1/*`. The admin client still points here for
+        // back-compat — flag as a separate cleanup. The self-service surface below
+        // (`tenantsSelf`) uses the REAL server paths (`/v1/tenants/me*`).
         root: '/admin/v1/tenants',
         one: (id) => `/admin/v1/tenants/${encodeURIComponent(id)}`,
         bootstrap: (id) => `/admin/v1/tenants/${encodeURIComponent(id)}/bootstrap`,
         provision: '/admin/v1/provision',
+    },
+    // B4a — tenant self-service control plane. Real server paths under `/v1/*`.
+    // Callable with a tenant API key OR a GoTrue user JWT; the server resolves
+    // "me" from the bearer credential.
+    tenantsSelf: {
+        me: '/v1/tenants/me',
+        usage: (period) => `/v1/tenants/me/usage${period ? `?period=${encodeURIComponent(period)}` : ''}`,
+        keys: '/v1/tenants/me/keys',
+        key: (keyId) => `/v1/tenants/me/keys/${encodeURIComponent(keyId)}`,
     },
     migrate: {
         run: '/admin/v1/migrate',

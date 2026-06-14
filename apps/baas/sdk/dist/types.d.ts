@@ -695,3 +695,40 @@ export interface FunctionSecretMeta {
     function_name: string;
     updated_at: string;
 }
+/** Minimal tenant projection returned by the self-service surface. */
+export interface TenantSelf {
+    id: string;
+    slug: string;
+    name: string;
+    plan: string;
+    status: string;
+}
+/** What the calling tenant's current plan grants (measured, not invented). */
+export interface TenantEntitlements {
+    /** Engine ids the plan enables (e.g. `["postgresql"]`). */
+    engines: string[];
+    /** Capability flags the plan unlocks (e.g. `["realtime","functions"]`). */
+    capabilities: string[];
+    /** Hard ceilings (rps, mounts, storage, etc.) keyed by limit name. */
+    limits: Record<string, number>;
+    /** Soft consumption budgets keyed by quota name. */
+    quota: Record<string, number>;
+}
+/** Response of `account.getSelf()` — the tenant plus its entitlements. */
+export interface TenantSelfResult {
+    tenant: TenantSelf;
+    entitlements: TenantEntitlements;
+}
+/** Response of `account.getUsage()` — metered usage for a billing period. */
+export interface TenantUsage {
+    /** The period this usage covers (e.g. `"2026-06"`); echoes the query arg. */
+    period: string;
+    /** Metered counters keyed by metric name (requests, storage_bytes, …). */
+    metrics: Record<string, number>;
+}
+/** Body for `account.createKey()`. */
+export interface TenantSelfKeyCreateInput {
+    name: string;
+    /** Optional scope grant; defaults to the plan's default scopes server-side. */
+    scopes?: string[];
+}

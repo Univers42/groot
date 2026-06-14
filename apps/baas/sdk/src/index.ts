@@ -19,6 +19,7 @@ import { StorageClient } from './domains/storage.js';
 import { TxnClient } from './domains/txn.js';
 import { WebhooksClient } from './domains/webhooks.js';
 import { AdminClient } from './domains/admin.js';
+import { AccountClient } from './domains/account.js';
 import { FunctionsClient } from './domains/functions.js';
 import { GraphqlClient } from './domains/graphql.js';
 import { RealtimeClient } from './domains/realtime-client.js';
@@ -108,6 +109,12 @@ export type {
   FunctionScheduleCreateInput,
   FunctionSecretMeta,
   FunctionSecretSetInput,
+  // ── B4a: tenant self-service control (/v1/tenants/me*) ────────────────────
+  TenantSelf,
+  TenantSelfResult,
+  TenantEntitlements,
+  TenantUsage,
+  TenantSelfKeyCreateInput,
   // ── M22: schema introspection + DDL ──────────────────────────────────────
   ColumnSchema,
   DdlColumnDef,
@@ -135,6 +142,8 @@ export { SchemaClient } from './domains/schema.js';
 export { TxnClient } from './domains/txn.js';
 export { WebhooksClient } from './domains/webhooks.js';
 export { AdminClient, MigrateClient, TenantsClient } from './domains/admin.js';
+export { AccountClient } from './domains/account.js';
+export type { AccountClientOptions } from './domains/account.js';
 export { FunctionsClient } from './domains/functions.js';
 export { StorageClient, StorageBucketClient } from './domains/storage.js';
 export { RestClient, RestResourceBuilder, RestQueryBuilder } from './domains/rest.js';
@@ -202,6 +211,13 @@ export class MiniBaasClient {
    * server-side**: requires `serviceRoleKey`; routes are internal-only.
    */
   readonly admin: AdminClient;
+  /**
+   * Tenant **self-service** control (`/v1/tenants/me*`) — read your plan,
+   * entitlements & usage, manage your own API keys, change plan. Works with the
+   * session JWT or a tenant API key (no service-role key needed). See
+   * {@link AccountClient}.
+   */
+  readonly account: AccountClient;
 
   private readonly http: HttpClient;
   private readonly anonKey: string;
@@ -236,6 +252,7 @@ export class MiniBaasClient {
     this.realtime = new RealtimeClient(this.http);
     this.webhooks = new WebhooksClient(this.http, options.serviceRoleKey);
     this.admin = new AdminClient(this.http, options.serviceRoleKey);
+    this.account = new AccountClient(this.http);
   }
 
   from<Row = Record<string, unknown>>(resource: string): RestResourceBuilder<Row> {

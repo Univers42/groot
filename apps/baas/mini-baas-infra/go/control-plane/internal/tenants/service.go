@@ -550,6 +550,25 @@ func (s *Service) BootstrapForUser(ctx context.Context, userID, email, defaultKe
 	}, nil
 }
 
+// findForUser resolves the tenant owned by userID WITHOUT creating one. It
+// returns ErrNotFound when the user owns no tenant yet — tenant creation is the
+// explicit job of POST /v1/tenants/me/bootstrap, never a side effect of a /me
+// read. (Self-serve reads use this; the bootstrap path keeps findOrCreateForUser.)
+func (s *Service) findForUser(ctx context.Context, userID string) (Tenant, error) {
+	row, err := s.queryOne(ctx, selectTenant+` WHERE owner_user_id = $1 LIMIT 1`, userID)
+	if err != nil {
+		return Tenant{}, err
+	}
+	var t Tenant
+	if err := scanTenant(row, &t); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Tenant{}, ErrNotFound
+		}
+		return Tenant{}, err
+	}
+	return t, nil
+}
+
 func (s *Service) findOrCreateForUser(ctx context.Context, userID, email string) (Tenant, bool, error) {
 	row, err := s.queryOne(ctx, selectTenant+` WHERE owner_user_id = $1 LIMIT 1`, userID)
 	if err != nil {

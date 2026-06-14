@@ -41,6 +41,12 @@ export declare const routes: {
         readonly bootstrap: (id: string) => string;
         readonly provision: "/admin/v1/provision";
     };
+    readonly tenantsSelf: {
+        readonly me: "/v1/tenants/me";
+        readonly usage: (period?: string) => string;
+        readonly keys: "/v1/tenants/me/keys";
+        readonly key: (keyId: string) => string;
+    };
     readonly migrate: {
         readonly run: "/admin/v1/migrate";
     };
