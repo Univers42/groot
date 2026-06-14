@@ -33,6 +33,7 @@ import (
 	"github.com/dlesieur/mini-baas/control-plane/internal/orchestrator/sessionsvc"
 	"github.com/dlesieur/mini-baas/control-plane/internal/shared"
 	"github.com/dlesieur/mini-baas/control-plane/internal/spendcap"
+	"github.com/dlesieur/mini-baas/control-plane/internal/telemetryexport"
 )
 
 // SubService is one consolidated orchestrator module. Mount registers its HTTP
@@ -108,6 +109,18 @@ func main() {
 		// same snapshot pattern as B2's quota:over) to HALT billable service before
 		// a free-tier cost runaway, and fires a once-per-period 80% budget alert.
 		"spend-cap": spendcap.NewGuard(log, db),
+		// per-tenant telemetry export (Track-C C9): guarded internally by
+		// TENANT_TELEMETRY_EXPORT_ENABLED (default OFF). Like metering/quota/billing/
+		// spend-cap, registered unconditionally is safe — when the flag is off
+		// Init/Run are no-ops (no tenant_telemetry_targets read, no outbound HTTP
+		// connection ever opened, no cursor advanced), so the orchestrator is
+		// byte-parity with today. Consumes B1 tenant_usage + the 046
+		// tenant_telemetry_targets table; forwards each opted-in tenant's OWN
+		// telemetry to that tenant's own customer-configured OTLP/log-drain collector,
+		// attributed with tenant_id — cross-tenant export is impossible by
+		// construction (each batch is scoped to one tenant_id and sent only to that
+		// tenant's endpoint). The BYO-collector complement to B5 per-tenant obs.
+		"telemetry-export": telemetryexport.New(log, db),
 	}
 	enabled := selectServices(available, os.Getenv("ORCHESTRATOR_SERVICES"))
 	if len(enabled) == 0 {
