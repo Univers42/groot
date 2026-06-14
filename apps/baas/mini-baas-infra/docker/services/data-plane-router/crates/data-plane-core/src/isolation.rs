@@ -256,6 +256,8 @@ mod tests {
             capability_overrides: None,
             inline_dsn: None,
             isolation: isolation.map(str::to_string),
+            replica_inline_dsn: None,
+            read_replica_route: false,
         }
     }
 

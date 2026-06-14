@@ -1862,6 +1862,8 @@ mod tests {
             capability_overrides: None,
             inline_dsn: None,
             isolation: iso.map(str::to_string),
+            replica_inline_dsn: None,
+            read_replica_route: false,
         };
         assert_eq!(resolve_namespace(&mk(None)), None);
         assert_eq!(resolve_namespace(&mk(Some("shared_rls"))), None);

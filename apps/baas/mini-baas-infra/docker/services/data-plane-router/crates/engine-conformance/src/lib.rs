@@ -449,6 +449,8 @@ pub fn mount_for(engine: &str, tenant: &str, dsn: &str) -> DatabaseMount {
         capability_overrides: None,
         inline_dsn: Some(dsn.to_string()),
         isolation: None,
+        replica_inline_dsn: None,
+        read_replica_route: false,
     }
 }
 
