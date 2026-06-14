@@ -162,9 +162,10 @@ type UsageResponse struct {
 // tenant_usage): the read can NEVER see another tenant's rows even if RLS were
 // ever misconfigured or the caller is the BYPASSRLS service role. The metric /
 // from / to params are nullable — a NULL means "no filter on that dimension":
-//   ($2 IS NULL OR metric       =  $2)
-//   ($3 IS NULL OR window_start >= $3)
-//   ($4 IS NULL OR window_start <  $4)   -- half-open [from,to)
+//
+//	($2 IS NULL OR metric       =  $2)
+//	($3 IS NULL OR window_start >= $3)
+//	($4 IS NULL OR window_start <  $4)   -- half-open [from,to)
 const aggregateSQL = `
 SELECT metric, COALESCE(SUM(qty), 0)::bigint AS qty, COUNT(*)::bigint AS window_count
   FROM public.tenant_usage

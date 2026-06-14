@@ -20,15 +20,15 @@ func TestForResolvesPlansAndAliases(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := map[string]string{
-		"nano":       "nano",       // v2 first-class package
-		"basic":      "basic",      // direct package key
-		"essential":  "essential",  // direct package key
-		"pro":        "pro",        // direct (also a legacy plan value)
-		"max":        "max",        // direct
-		"free":       "nano",       // v2 alias (was essential — pointed free at the $13/mo tier)
-		"enterprise": "max",        // legacy alias
-		"":           "essential",  // empty → default
-		"bogus":      "essential",  // unknown → default
+		"nano":       "nano",      // v2 first-class package
+		"basic":      "basic",     // direct package key
+		"essential":  "essential", // direct package key
+		"pro":        "pro",       // direct (also a legacy plan value)
+		"max":        "max",       // direct
+		"free":       "nano",      // v2 alias (was essential — pointed free at the $13/mo tier)
+		"enterprise": "max",       // legacy alias
+		"":           "essential", // empty → default
+		"bogus":      "essential", // unknown → default
 	}
 	for plan, wantName := range cases {
 		name, _ := m.For(plan)
