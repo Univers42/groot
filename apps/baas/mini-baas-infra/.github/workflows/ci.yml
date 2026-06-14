@@ -7,6 +7,12 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Manual trigger for the full enterprise + data-plane gate battery (gates-full).
+  workflow_dispatch:
+  # Nightly regression sweep of the full battery (02:30 UTC). The per-PR path
+  # stays fast; the heavy m103..m122 suite runs once a day + on demand.
+  schedule:
+    - cron: '30 2 * * *'
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -184,7 +190,7 @@ jobs:
   # enforcement, spend caps, abuse guard, the API-version contract and the cloud
   # funnel, not just the smoke phases.
   cloud-gates:
-    name: Cloud gates (m101 m89 m90 m91 m94)
+    name: Cloud gates (m101 m89 m90 m91 m94 + fast m120)
     runs-on: ubuntu-latest
     needs: [shellcheck]
     timeout-minutes: 50
@@ -207,3 +213,52 @@ jobs:
           done
           [ "$rc_all" -eq 0 ] || { echo "✗ Some cloud gates failed"; exit 1; }
           echo "✓ All cloud gates passed"
+
+      # Curated FAST per-PR addition: the data-plane spend-cap + abuse-suspend
+      # enforcement gate (m120). It is self-contained like the gates above and
+      # reuses the data-plane-router layer cache the m101 build already warmed,
+      # so it adds high-signal regression protection (the cloud edition's
+      # request-path money/abuse guard) at low marginal cost — without dragging
+      # the full enterprise battery onto every PR. m101 (above) + m102 (in the
+      # integration-tests job) + m120 (here) are the per-PR fast subset.
+      - name: Fast data-plane enforcement gate (m120)
+        run: bash scripts/verify/run-gate-battery.sh m120
+
+  # ─── Job 5: Full enterprise + data-plane gate battery (nightly + manual) ───────
+  # Until now the entire enterprise + data-plane suite (m101, m103..m112,
+  # m120..m122) had ZERO automated regression protection — each was proven once
+  # locally. Each gate is HEAVY (builds tenant-control / data-plane-router from
+  # source + boots scratch postgres/redis on a private $$-suffixed network with
+  # an EXIT-trap, minutes apiece), so the full battery does NOT belong on the
+  # per-PR path (it would push a PR past an hour). Instead it runs:
+  #   • nightly  (schedule cron 02:30 UTC) — catches regressions within 24h
+  #   • on demand (workflow_dispatch)      — before a GA cut / after a risky merge
+  # The cheap high-signal subset (m101, m102, m120) stays on every PR via the
+  # cloud-gates + integration-tests jobs above. This job is purely ADDITIVE and
+  # never blocks a PR.
+  gates-full:
+    name: Full gate battery (m101..m122)
+    runs-on: ubuntu-latest
+    # Only the nightly schedule + the manual button — NEVER on push / PR.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: [shellcheck]
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+
+      # The battery runs every gate in order, fails fast on the first failure
+      # (continue-on-error stays false — a single red gate fails the job), and
+      # tees per-gate stdout/stderr to artifacts/gate-battery/<gate>.log so the
+      # next step can upload them even when an earlier gate already failed.
+      - name: Run full enterprise + data-plane battery (m101..m122)
+        run: bash scripts/verify/run-gate-battery.sh --enterprise
+
+      - name: Upload per-gate logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-battery-logs-${{ github.run_id }}
+          path: artifacts/gate-battery/
+          retention-days: 14
