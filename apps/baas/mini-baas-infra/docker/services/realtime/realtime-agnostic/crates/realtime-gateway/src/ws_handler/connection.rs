@@ -58,6 +58,7 @@ pub async fn handle_websocket(socket: WebSocket, state: AppState) {
     let registry = Arc::clone(&state.registry);
     let conn_manager = Arc::clone(&state.conn_manager);
     let presence = Arc::clone(&state.presence);
+    let presence_shared = state.presence_shared.clone();
     let bus_publisher = Arc::clone(&state.bus_publisher);
     let usage = state.usage.clone();
     // The reader stamps the authenticated platform user/tenant here on AUTH; the
@@ -74,6 +75,12 @@ pub async fn handle_websocket(socket: WebSocket, state: AppState) {
     tokio::select! {
         _ = writer => {}
         _ = reader => {}
+    }
+    // A5: drop this connection from the shared (Redis) store too, so a presence
+    // query on ANOTHER node stops listing it the moment this node sees the
+    // disconnect. `None` at parity ⇒ skipped (byte-identical).
+    if let Some(shared) = presence_shared.as_ref() {
+        shared.remove_connection(&conn_id.to_string()).await;
     }
     // Emit a presence LEAVE for every topic this connection was tracking, then
     // tear down its subscriptions. Done before `remove_connection` so the

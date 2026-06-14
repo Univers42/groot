@@ -215,6 +215,7 @@ fn build_http_router(
         auth_provider,
         bus_publisher,
         presence: Arc::new(PresenceTracker::new()),
+        presence_shared: build_presence_shared(),
         usage: build_usage(),
     };
     Router::new()
@@ -222,10 +223,46 @@ fn build_http_router(
         .route("/v1/publish", post(rest_api::publish_event))
         .route("/v1/publish/batch", post(rest_api::publish_batch))
         .route("/v1/health", get(rest_api::health_check))
+        .route("/v1/presence", get(rest_api::presence_query))
         .route("/metrics", get(rest_api::prometheus))
         .fallback_service(tower_http::services::ServeDir::new(static_dir))
         .layer(CorsLayer::permissive())
         .with_state(state)
+}
+
+/// Build the A5 cross-node presence backend IFF the `REALTIME_PRESENCE_SHARED`
+/// sub-flag is ON (default OFF = byte-parity). When ON, wires a Redis-backed
+/// shared store from `REALTIME_PRESENCE_REDIS_URL` (the `presence:*` namespace,
+/// overridable via `REALTIME_PRESENCE_PREFIX`) so a member tracked on one node
+/// is visible to a presence query served by another. When OFF returns `None`:
+/// no shared store, no Redis connection, `TRACK`/`UNTRACK` only touch the local
+/// in-process tracker and the presence query answers from the local set — the
+/// connect/track/query path is byte-identical to today's single node.
+fn build_presence_shared() -> Option<realtime_gateway::presence_shared::SharedPresence> {
+    if !env_flag_on("REALTIME_PRESENCE_SHARED") {
+        return None;
+    }
+    let redis_url = std::env::var("REALTIME_PRESENCE_REDIS_URL")
+        .ok()
+        .filter(|u| !u.trim().is_empty())
+        .or_else(|| std::env::var("REDIS_URL").ok())
+        .unwrap_or_default();
+    if redis_url.trim().is_empty() {
+        error!(
+            "REALTIME_PRESENCE_SHARED=1 but no REALTIME_PRESENCE_REDIS_URL/REDIS_URL — \
+             shared presence disabled (falling back to single-node, no cross-node merge)"
+        );
+        return None;
+    }
+    let mut shared = realtime_gateway::presence_shared::SharedPresence::new(&redis_url);
+    if let Ok(prefix) = std::env::var("REALTIME_PRESENCE_PREFIX") {
+        shared = shared.with_prefix(&prefix);
+    }
+    info!(
+        "realtime cross-node presence ON (REALTIME_PRESENCE_SHARED) — shared Redis store at {}",
+        redis_url
+    );
+    Some(shared)
 }
 
 /// Build the B1d metering handle (`realtime.connection.seconds`) IFF the
