@@ -517,6 +517,12 @@ backup-now: ## Take a one-off Postgres backup right now (pg-backup `once` → Mi
 restore-verify: ## Prove a backup restores (dump→drop→restore→checksum, scratch DB; tenant data untouched)
 	@bash scripts/verify/m47-backup-restore.sh
 
+cloud-flags-print: ## Print the managed-cloud flag manifest (B7.1 single flip point — OPT-IN, no behaviour)
+	@cat config/cloud/flags.env.example
+	@echo ""
+	@echo -e "$(_D)Opt-in: the default stack ignores this manifest (all flags default OFF in code = byte-parity).$(_0)"
+	@echo -e "$(_D)Promotion ladder (staging→canary→prod): config/cloud/README.md$(_0)"
+
 # ========================================================================== #
 ##@ Release
 # ========================================================================== #
@@ -589,5 +595,5 @@ help: ## Show this help
         rust-realtime-check rust-realtime-test rust-realtime-build _rust-toolchain \
         go-control-plane-build preflight hooks update help \
         quickstart release-binaries release-images release-check _require-version \
-        backup-now restore-verify \
+        backup-now restore-verify cloud-flags-print \
         _require-docker _require-compose _rm-stale

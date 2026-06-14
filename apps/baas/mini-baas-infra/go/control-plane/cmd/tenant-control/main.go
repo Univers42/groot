@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dlesieur/mini-baas/control-plane/internal/abuseguard"
 	"github.com/dlesieur/mini-baas/control-plane/internal/backup"
 	"github.com/dlesieur/mini-baas/control-plane/internal/metering"
 	"github.com/dlesieur/mini-baas/control-plane/internal/packages"
@@ -179,6 +180,31 @@ func main() {
 		log.Info("per-tenant backup/restore API enabled (/v1/tenants/{id}/backup|backups|restore)")
 	} else {
 		log.Info("per-tenant backup/restore API disabled (TENANT_BACKUP_ENABLED off) — routes not mounted")
+	}
+
+	// Abuse / free-tier KYC-lite guard (Track-B B7.9): internal service-token
+	// routes the control plane consults before a sensitive action —
+	//   POST /v1/abuse/admit · POST /v1/abuse/suspend|unsuspend · GET /v1/abuse/state/{tenantId}
+	// — plus a Redis `tenant:suspended` set the data plane reads cheaply (the same
+	// snapshot pattern as B2 quota:over / B7.8 spend:over).
+	//
+	// FLAG-GATED OFF = PARITY: abuseguard.Mount is called ONLY when
+	// ABUSE_GUARD_ENABLED is truthy. When OFF (the default) Init/Mount are no-ops
+	// (no Redis connect, no routes, no principal_events row ever written), so a
+	// request to any /v1/abuse/* route 404s — byte-identical to today, the same
+	// discipline as TENANT_SELFSERVE_ENABLED / TENANT_BACKUP_ENABLED above. Init's
+	// Redis failure is non-fatal (admission still enforced off the DB), so an
+	// enabled guard never wedges boot on a transient Redis blip.
+	ag := abuseguard.NewGuard(log, db, cfg.ServiceToken)
+	if ag.Enabled() {
+		if err := ag.Init(ctx); err != nil {
+			log.Error("abuse guard init failed", "err", err)
+			os.Exit(1)
+		}
+		abuseguard.Mount(mux, ag)
+		log.Info("abuse guard enabled (/v1/abuse/admit|suspend|unsuspend|state)")
+	} else {
+		log.Info("abuse guard disabled (ABUSE_GUARD_ENABLED off) — /v1/abuse/* not mounted")
 	}
 
 	srv := &http.Server{
