@@ -31,6 +31,8 @@
 mod capability_honesty;
 mod credential;
 pub mod service_auth;
+#[cfg(feature = "dynamodb")]
+mod dynamodb;
 #[cfg(feature = "http")]
 mod http;
 mod ident;
@@ -50,6 +52,8 @@ mod resolver;
 mod sqlite;
 mod tls;
 
+#[cfg(feature = "dynamodb")]
+pub use dynamodb::DynamoEngineAdapter;
 #[cfg(feature = "http")]
 pub use http::{guard_and_resolve, HttpEngineAdapter};
 #[cfg(feature = "mongodb")]

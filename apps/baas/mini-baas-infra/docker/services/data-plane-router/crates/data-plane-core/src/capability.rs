@@ -319,6 +319,61 @@ impl EngineCapabilities {
         }
     }
 
+    /// DynamoDB-compatible engine (8th adapter, OFF by default) — AWS DynamoDB /
+    /// DynamoDB-Local / ScyllaDB Alternator, all reached by the same
+    /// `aws-sdk-dynamodb` client with only an endpoint override. Sibling to
+    /// `redis()` (KV/document, owner-prefixed keys, no joins, no aggregate) with
+    /// one genuine addition the Redis adapter never had: native transactions.
+    ///
+    /// Honesty call-outs (every flag is a claim the capability-honesty gate and
+    /// the m88 live gate must survive — see `wiki/dynamodb-htap-engine.md` §4):
+    /// * `aggregate: false` — DynamoDB has NO server-side grouped aggregation;
+    ///   `op=aggregate` is served OUTSIDE this engine by the OLAP export bridge
+    ///   (Trino federation), so claiming it here would be a lie. This is the
+    ///   single CRUD-family op excluded, exactly like Redis.
+    /// * `transactions: true` — `TransactWriteItems` is an all-or-nothing write
+    ///   across up to 100 items; the adapter's `begin()` returns a real
+    ///   buffer-then-commit `TxHandle`.
+    /// * `two_phase_commit: true` — justified by ATOMIC MULTI-ITEM all-or-nothing
+    ///   (`TransactWriteItems`), NOT a wire-level XA/2PC handshake. (Same care the
+    ///   postgres/mongo comments take so a reader doesn't assume distributed-XA.)
+    /// * `native_idempotency: true` — the ONLY adapter that can honestly set this:
+    ///   `ClientRequestToken` makes the service de-duplicate a re-sent transact,
+    ///   so exactly-once is engine-guaranteed, not app-emulated.
+    /// * `introspect`/`schema_ddl: true` — `DescribeTable`/`ListTables` give a
+    ///   real (key-only) `SchemaDescriptor`; `CreateTable`/`DeleteTable` are a
+    ///   genuine single-op DDL surface. Both are ROUTE capabilities (like `ddl`)
+    ///   and never leak into `supports_op`. `ddl: false` — there is no
+    ///   transactional multi-statement `apply_migration` (mirrors mongo).
+    /// * `stream: false` for the MVP — DynamoDB Streams CDC is designed but
+    ///   DEFERRED until the producer exists (capability-honesty forbids
+    ///   advertising it early).
+    #[must_use]
+    pub fn dynamodb() -> Self {
+        Self {
+            read: true,          // GetItem / Query / Scan
+            write: true,         // PutItem / UpdateItem / DeleteItem
+            upsert: true,        // PutItem (no condition) = last-writer-wins
+            batch: true,         // BatchWriteItem (NON-atomic, max 25)
+            aggregate: false,    // no server-side GROUP BY/SUM — OLAP is the bridge
+            introspect: false,   // describe_schema NOT implemented in the MVP (DescribeTable/ListTables→SchemaDescriptor deferred); advertising it would be a route-cap lie
+            schema_ddl: false,   // apply_schema_ddl NOT implemented in the MVP (CreateTable/DeleteTable deferred); keep the descriptor honest vs the adapter
+            stream: false,       // DynamoDB Streams CDC DESIGNED but DEFERRED (MVP)
+            ddl: false,          // no apply_migration batch (mirrors mongo)
+            transactions: true,  // TransactWriteItems (buffer-then-commit TxHandle)
+            savepoints: false,   // no nested savepoint in a single transact call
+            isolation_levels: vec![IsolationLevel::Serializable],
+            two_phase_commit: true,   // all-or-nothing across items (NOT wire 2PC)
+            native_idempotency: true, // ClientRequestToken de-dupes a transact
+            max_batch_size: 25,       // BatchWriteItem hard limit (NOT the 100-item transact limit)
+            cost: CostCapabilities {
+                latency_class: LatencyClass::Native, // first-class driver, not an FDW
+                pattern_search: PatternSearchCapability::Indexed, // Query indexed; Scan fallback
+                joins: JoinCapability::None,         // KV/document — no joins (like redis/http)
+            },
+        }
+    }
+
     #[must_use]
     pub fn http() -> Self {
         Self {
@@ -432,6 +487,57 @@ mod tests {
         assert!(!parsed.schema_ddl, "absent schema_ddl defaults to false");
         // Everything else survives untouched.
         assert!(parsed.read && parsed.ddl && parsed.introspect && parsed.transactions);
+    }
+
+    #[test]
+    fn dynamodb_descriptor_is_internally_consistent() {
+        // The 8th adapter (OFF by default). supports_op() must agree with the
+        // flags exactly — the same invariant the capability-honesty gate pins —
+        // and the honest call-outs from the design must hold.
+        let caps = EngineCapabilities::dynamodb();
+        // CRUD + upsert + batch served; aggregate is the ONLY excluded op (like
+        // redis), because DynamoDB has no server-side grouped aggregation.
+        assert!(caps.supports_op(&DataOperationKind::Get));
+        assert!(caps.supports_op(&DataOperationKind::List));
+        assert!(caps.supports_op(&DataOperationKind::Insert));
+        assert!(caps.supports_op(&DataOperationKind::Update));
+        assert!(caps.supports_op(&DataOperationKind::Delete));
+        assert!(caps.supports_op(&DataOperationKind::Upsert));
+        assert!(caps.supports_op(&DataOperationKind::Batch));
+        assert!(
+            !caps.supports_op(&DataOperationKind::Aggregate),
+            "DynamoDB has no server-side aggregate — OLAP is the export bridge"
+        );
+        // The headline capabilities the design justifies.
+        assert!(caps.transactions, "TransactWriteItems backs begin()");
+        assert!(caps.two_phase_commit, "all-or-nothing across items");
+        assert!(
+            caps.native_idempotency,
+            "ClientRequestToken — the only adapter that can honestly set this"
+        );
+        // Route capabilities introspect/schema_ddl are honestly FALSE in the
+        // MVP: the adapter overrides neither describe_schema nor
+        // apply_schema_ddl, so advertising either would be a route-cap lie.
+        assert!(!caps.introspect && !caps.schema_ddl);
+        assert!(!caps.ddl, "no apply_migration batch (mirrors mongo)");
+        assert!(!caps.stream, "Streams CDC deferred in the MVP");
+        assert!(!caps.aggregate);
+        assert_eq!(caps.max_batch_size, 25, "BatchWriteItem hard limit");
+        assert_eq!(caps.isolation_levels, vec![IsolationLevel::Serializable]);
+        // Route capabilities never leak into supports_op (same precedent as the
+        // introspect/schema_ddl leak tests above).
+        let mut probe = caps.clone();
+        let before: Vec<bool> = DataOperationKind::ALL
+            .iter()
+            .map(|k| probe.supports_op(k))
+            .collect();
+        probe.introspect = !probe.introspect;
+        probe.schema_ddl = !probe.schema_ddl;
+        let after: Vec<bool> = DataOperationKind::ALL
+            .iter()
+            .map(|k| probe.supports_op(k))
+            .collect();
+        assert_eq!(before, after, "route caps must not change supports_op");
     }
 
     #[test]
