@@ -42,6 +42,19 @@ export class StorageBucketClient {
             throw await toError(res);
         return res.blob();
     }
+    /**
+     * A1: download a server-derived image variant (resize/reformat) of an object,
+     * owner-scoped exactly like `download`. Requires the server to have
+     * STORAGE_TRANSFORMS_ENABLED ON; when OFF the original bytes are returned
+     * (byte-identical) so this is a safe superset of `download`.
+     *   client.storage.from('avatars').transform('me.png', { width: 64, height: 64, format: 'webp' })
+     */
+    async transform(path, opts) {
+        const res = await this.http.rawFetch(routes.storage.transform(this.bucket, path, transformQuery(opts)), { method: 'GET' });
+        if (!res.ok)
+            throw await toError(res);
+        return res.blob();
+    }
     async list(prefix) {
         const out = await this.http.request(routes.storage.list(this.bucket, prefix));
         return out.objects;
@@ -92,6 +105,20 @@ const CONTENT_TYPES = {
 function guessContentType(path) {
     const ext = path.split('.').pop()?.toLowerCase() ?? '';
     return CONTENT_TYPES[ext] ?? 'application/octet-stream';
+}
+/** Build the `?width=&height=&format=&quality=` query for an image transform,
+ *  emitting only the set keys (so a bare/empty spec yields the original-bytes URL). */
+function transformQuery(opts) {
+    const params = new URLSearchParams();
+    if (opts.width !== undefined)
+        params.set('width', String(opts.width));
+    if (opts.height !== undefined)
+        params.set('height', String(opts.height));
+    if (opts.format !== undefined)
+        params.set('format', opts.format);
+    if (opts.quality !== undefined)
+        params.set('quality', String(opts.quality));
+    return params.toString();
 }
 async function toError(res) {
     let detail;

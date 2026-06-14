@@ -89,6 +89,11 @@ export const routes = {
       `/storage/v1/sign/${encodeURIComponent(bucket)}/${encodePath(key)}`,
     object: (bucket: string, key: string) =>
       `/storage/v1/object/${encodeURIComponent(bucket)}/${encodePath(key)}`,
+    // A1 transforms: same owner-scoped object GET with a ?width=&height=&format=
+    // query. The server returns the original bytes verbatim when
+    // STORAGE_TRANSFORMS_ENABLED is OFF or no transform param is present.
+    transform: (bucket: string, key: string, q: string) =>
+      `/storage/v1/object/${encodeURIComponent(bucket)}/${encodePath(key)}${q ? `?${q}` : ''}`,
     list: (bucket: string, prefix?: string) =>
       `/storage/v1/list/${encodeURIComponent(bucket)}${prefix ? `?prefix=${encodeURIComponent(prefix)}` : ''}`,
     buckets: '/storage/v1/bucket',
