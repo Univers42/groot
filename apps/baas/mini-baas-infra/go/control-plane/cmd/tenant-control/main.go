@@ -34,8 +34,11 @@ import (
 	"github.com/dlesieur/mini-baas/control-plane/internal/packages"
 	"github.com/dlesieur/mini-baas/control-plane/internal/passkeys"
 	"github.com/dlesieur/mini-baas/control-plane/internal/provision"
+	"github.com/dlesieur/mini-baas/control-plane/internal/scim"
 	"github.com/dlesieur/mini-baas/control-plane/internal/shared"
+	"github.com/dlesieur/mini-baas/control-plane/internal/sso"
 	"github.com/dlesieur/mini-baas/control-plane/internal/tenants"
+	"github.com/dlesieur/mini-baas/control-plane/internal/trust"
 )
 
 func main() {
@@ -467,6 +470,124 @@ func main() {
 		log.Info("passkeys / WebAuthn disabled (PASSKEYS_ENABLED off) — /v1/auth/passkeys/* not mounted")
 	}
 	// ─── end D2c ────────────────────────────────────────────────────────────────
+
+	// ─── Track-D D2a: ENTERPRISE OIDC SSO (org-level) ──────────────────────────
+	// Net-new enterprise auth: gotrue has NO org-level SSO. D2a adds an OIDC
+	// authorization-code login driven by per-tenant IdP connections (migration
+	// 053). begin -> the IdP authenticates the user -> callback exchanges the code,
+	// VERIFIES the returned id_token (HS256 shared-secret OR RS256 via the IdP's
+	// jwks_url), and mints a GoTrue-shaped session JWT — the SAME HS256 secret/claim
+	// shape the existing tenants.JWTVerifier accepts, so an SSO session == a password
+	// session. The client secret is stored AES-256-GCM SEALED (SSO_SECRET_KEY).
+	// Routes: POST /v1/auth/sso/begin, GET|POST /v1/auth/sso/callback,
+	// POST|GET /v1/tenants/{id}/sso/connections (service token).
+	//
+	// FLAG-GATED OFF = PARITY: sso.Mount is called ONLY when SSO_ENABLED is truthy.
+	// When OFF (the default) Mount is never called, so none of the /v1/auth/sso/*
+	// routes are registered (404) and sso_connections is never consulted — byte-
+	// identical to today, the same discipline as PASSKEYS_ENABLED / TENANT_AUDIT_ENABLED
+	// above. The session mint REQUIRES the shared GoTrue secret; if unset, boot fails
+	// fast on this opt-in path (an SSO login that cannot issue a session is a
+	// misconfiguration). SSO_SECRET_KEY seals the client secret; required when enabled.
+	if envBool("SSO_ENABLED") {
+		if jwtSecret == "" {
+			log.Error("sso: SSO_ENABLED requires GOTRUE_JWT_SECRET/JWT_SECRET to mint a session")
+			os.Exit(1)
+		}
+		sealer, err := sso.NewSecretSealerFromEnv()
+		if err != nil {
+			log.Error("sso: SSO_SECRET_KEY required when SSO_ENABLED", "err", err)
+			os.Exit(1)
+		}
+		ssoSvc := sso.NewService(sso.NewStore(db, sealer),
+			sso.NewSessionMinter(jwtSecret, os.Getenv("GOTRUE_JWT_ISSUER"), 0), log)
+		sso.Mount(mux, ssoSvc, cfg.ServiceToken)
+		log.Info("enterprise OIDC SSO enabled (/v1/auth/sso/*, /v1/tenants/{id}/sso/connections) — SSO_ENABLED")
+	} else {
+		log.Info("enterprise OIDC SSO disabled (SSO_ENABLED off) — /v1/auth/sso/* not mounted")
+	}
+	// ─── end D2a ──────────────────────────────────────────────────────────────
+
+	// ─── Track-D D2b: SCIM 2.0 PROVISIONING (RFC 7644) ─────────────────────────
+	// Net-new enterprise auth: gotrue has NO SCIM support. An enterprise IdP
+	// (Okta / Entra / OneLogin) drives user lifecycle into Grobase over a BEARER
+	// credential: POST/GET/PUT/PATCH/DELETE /scim/v2/Users. SCIM provisions ORG
+	// MEMBERS — the humans above a project — so every provisioning op REUSES the
+	// existing internal/orgs membership API (Add/Remove member); active:false
+	// soft-deactivates (org_members.active=false), DELETE deprovisions. The bearer
+	// token binds a tenant_id (+org_id) — that binding IS the per-tenant wall: a T1
+	// token can never read or modify a user provisioned under T2.
+	//
+	// THE LOAD-BEARING CONSTRAINT (D-026): SCIM is a CONTROL-PLANE operation. It
+	// NEVER enters RequestIdentity, the RLS GUCs, or the data plane. Per-request
+	// isolation + SHARE_POOLS (24,887 tenants -> 1 pool) stay untouched. Migration
+	// 054 backs the scim_tokens (sha256-hashed bearers) + scim_users mapping.
+	//
+	// FLAG-GATED OFF = PARITY: scim.Mount is called ONLY when SCIM_ENABLED is
+	// truthy AND the org model is enabled (SCIM has no org to provision into
+	// otherwise — orgs is its membership backend). When OFF (the default) Mount is
+	// never called, so none of the /scim/v2/* routes are registered (404) and no
+	// scim_tokens/scim_users row is ever written — byte-identical to today, the
+	// same discipline as ORG_MODEL_ENABLED / PASSKEYS_ENABLED above.
+	if envBool("SCIM_ENABLED") {
+		if !envBool("ORG_MODEL_ENABLED") {
+			log.Error("scim: SCIM_ENABLED requires ORG_MODEL_ENABLED (SCIM provisions org members)")
+			os.Exit(1)
+		}
+		scimSvc := scim.NewService(db, orgs.NewService(db, log), log)
+		scim.Mount(mux, scimSvc, cfg.ServiceToken)
+		log.Info("SCIM 2.0 provisioning enabled (/scim/v2/Users + admin /v1/tenants/{id}/scim/tokens) — SCIM_ENABLED")
+	} else {
+		log.Info("SCIM 2.0 provisioning disabled (SCIM_ENABLED off) — /scim/v2/* not mounted")
+	}
+	// ─── end D2b ────────────────────────────────────────────────────────────────
+
+	// ─── Track-D D4.6: TRUST CENTER (read-only public security posture) ─────────
+	// A public-readable, FILE-BACKED security & compliance posture. The single
+	// source is config/trust/posture.json (mounted RO via TRUST_MANIFEST, or the
+	// byte-identical embedded copy when unset) — an array of controls each tagged
+	// implemented|partial|planned with an evidence pointer (a gate mNN or a wiki/
+	// doc). It is the machine-readable half of wiki/trust-center.md. NO database, NO
+	// migration, NO secrets — the posture is the PUBLIC half of the security story,
+	// so the routes need no auth (like a status page):
+	//   GET /v1/trust            the full manifest (envelope + controls)
+	//   GET /v1/trust/controls   {count, controls[]}
+	//
+	// HONESTY IS LOAD-BEARING: LoadManifest/EmbeddedManifest REJECT a control that
+	// claims status=implemented with an empty evidence pointer (an unproven claim
+	// must be partial/planned), so a malformed/dishonest manifest fails boot fast on
+	// this opt-in path rather than serving an "all green" lie. The m112 gate proves
+	// the served count == config/trust/posture.json's count (endpoint reflects the
+	// file, not a stub) and the no-implemented-without-evidence rule.
+	//
+	// FLAG-GATED OFF = PARITY: trust.Mount is called ONLY when TRUST_CENTER_ENABLED
+	// is truthy. When OFF (the default) Mount is never called, so /v1/trust* 404s —
+	// byte-identical to today, the same discipline as SOC2_EVIDENCE_ENABLED /
+	// TENANT_EXPORT_ENABLED / PASSKEYS_ENABLED above.
+	if envBool("TRUST_CENTER_ENABLED") {
+		var trustManifest *trust.Manifest
+		if mp := envOr("TRUST_MANIFEST", ""); mp != "" {
+			m, err := trust.LoadManifest(mp)
+			if err != nil {
+				log.Error("trust: posture manifest load failed", "path", mp, "err", err)
+				os.Exit(1)
+			}
+			trustManifest = m
+			log.Info("trust center enabled (/v1/trust, /v1/trust/controls) — TRUST_CENTER_ENABLED", "manifest", mp, "controls", len(m.Controls))
+		} else {
+			m, err := trust.EmbeddedManifest()
+			if err != nil {
+				log.Error("trust: embedded posture manifest invalid", "err", err)
+				os.Exit(1)
+			}
+			trustManifest = m
+			log.Info("trust center enabled (/v1/trust, /v1/trust/controls) — TRUST_CENTER_ENABLED (embedded manifest)", "controls", len(m.Controls))
+		}
+		trust.Mount(mux, trustManifest)
+	} else {
+		log.Info("trust center disabled (TRUST_CENTER_ENABLED off) — /v1/trust* not mounted")
+	}
+	// ─── end D4.6 ─────────────────────────────────────────────────────────────────
 
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr(),

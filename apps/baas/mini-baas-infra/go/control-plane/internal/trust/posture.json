@@ -1,0 +1,144 @@
+{
+  "product": "Grobase",
+  "version": "trust-center-1",
+  "note": "Public security & compliance posture. Each control's status is honest: implemented controls cite a numbered gate (mNN) or a wiki/ doc that proves them; partial/planned controls say what is missing. This file is the SINGLE SOURCE served by GET /v1/trust and the spine of wiki/trust-center.md — they must agree. Flag-gated OFF (TRUST_CENTER_ENABLED) by default.",
+  "generated": "2026-06-15",
+  "controls": [
+    {
+      "id": "tamper-evident-audit",
+      "name": "Tamper-evident tenant audit log",
+      "category": "audit-and-logging",
+      "status": "implemented",
+      "evidence": "m104",
+      "detail": "Hash-chained per-tenant audit entries; the chain is recomputable so any insertion/edit/deletion is detectable. Gate m104 (audit-chain) proves chain integrity end-to-end and that a tampered row breaks verification."
+    },
+    {
+      "id": "hard-erase",
+      "name": "GDPR hard-erase (right to erasure)",
+      "category": "data-protection",
+      "status": "implemented",
+      "evidence": "m105",
+      "detail": "Per-tenant scoped hard delete of a subject's data with a verifiable erasure record (migration 048). Gate m105 (hard-erase) proves the data is gone and that another tenant's data is never touched."
+    },
+    {
+      "id": "data-portability-export",
+      "name": "Data export / portability (GDPR Art. 20)",
+      "category": "data-protection",
+      "status": "implemented",
+      "evidence": "m109",
+      "detail": "Engine-neutral JSON bundle of ONE tenant's data with a manifest (tables, row counts, sha256). Strictly tenant-scoped (own schema or WHERE tenant_id = caller). Gate m109 (tenant-export)."
+    },
+    {
+      "id": "soc2-lite-evidence",
+      "name": "SOC2-lite continuous evidence collector",
+      "category": "compliance",
+      "status": "partial",
+      "evidence": "m108",
+      "detail": "Automated evidence collector seals signed snapshots of CI gate results, access posture, and change-management trail (migration 051). Gate m108 (soc2-evidence) proves collect/verify integrity. PARTIAL: this is internal evidence collection, NOT a formal SOC 2 Type II report — see formal-soc2-type2."
+    },
+    {
+      "id": "formal-soc2-type2",
+      "name": "Formal SOC 2 Type II report",
+      "category": "compliance",
+      "status": "planned",
+      "evidence": "wiki/trust-center.md",
+      "detail": "Requires an independent external auditor over a multi-month observation window. Not yet engaged. The m108 evidence collector is the input that shortens that audit; it is not a substitute for it."
+    },
+    {
+      "id": "per-tenant-isolation",
+      "name": "Per-tenant data isolation (per-request RLS / owner-scope)",
+      "category": "isolation",
+      "status": "implemented",
+      "evidence": "m46",
+      "detail": "Isolation is enforced per REQUEST (app.current_tenant_id + owner predicate re-stamped on every request), not by pool state — which is why 10K tenants collapse onto 1 pool with byte-identical results to per-tenant pools. Gate m46 (share-pools-isolation) proves cross-engine isolation at density."
+    },
+    {
+      "id": "encryption-in-transit",
+      "name": "Encryption in transit (TLS to engines + edge)",
+      "category": "encryption",
+      "status": "partial",
+      "evidence": "wiki/security-audit-asvs.md",
+      "detail": "Under SECURITY_MODE=max, MSSQL verifies TLS by default and refuses insecure DSNs; mongo/redis insecure DSN params are rejected; CA-pin via DATA_PLANE_TLS_CA_FILE. PARTIAL: Postgres sslmode=require is accept-any OUTSIDE max (audit O4) — run max for multi-tenant. Edge TLS is operator-provided."
+    },
+    {
+      "id": "encryption-at-rest",
+      "name": "Encryption at rest (per-tenant)",
+      "category": "encryption",
+      "status": "planned",
+      "detail": "Disk/volume encryption is an operator/host responsibility today. Per-tenant encrypted-at-rest backups are a roadmap follow-up (B6 / audit solution #11). Not yet a Grobase-enforced control.",
+      "evidence": "wiki/security-audit-asvs.md"
+    },
+    {
+      "id": "secrets-management",
+      "name": "Secrets management (Vault, dynamic DB creds)",
+      "category": "encryption",
+      "status": "partial",
+      "evidence": "wiki/security-audit.md",
+      "detail": "Vault-backed secrets with credential_ref{provider:vault}; dynamic short-lived DB credentials reduce blast radius. PARTIAL: plaintext DATA_PLANE_MOUNTS are not yet forbidden outside max (audit O5) — enforce Vault refs in prod."
+    },
+    {
+      "id": "abac-pdp",
+      "name": "ABAC policy decision point + owner-scoped writes",
+      "category": "access-control",
+      "status": "implemented",
+      "evidence": "wiki/orgs-rbac-design.md",
+      "detail": "Attribute-based access with per-request owner-scoping on every engine; RLS as defense-in-depth on tenant tables. Org/RBAC scoping stays in the control plane (preserves the shared-pool density story)."
+    },
+    {
+      "id": "network-access-control",
+      "name": "Network access control / IP allowlist",
+      "category": "network",
+      "status": "implemented",
+      "evidence": "m106",
+      "detail": "Per-tenant IP allowlist enforced at the control plane. Gate m106 (ip-allowlist) proves enforcement and flag-off parity. This is access control, NOT a full L7 WAF — see waf."
+    },
+    {
+      "id": "waf",
+      "name": "Web Application Firewall (L7)",
+      "category": "network",
+      "status": "planned",
+      "evidence": "wiki/operations-runbook.md",
+      "detail": "A managed L7 WAF (rule sets, rate-based rules, bot mitigation) is provided by the hosting edge in the managed-cloud offering; it is operator-supplied for self-host. Not yet a Grobase-enforced, gate-proven control."
+    },
+    {
+      "id": "enterprise-passkeys",
+      "name": "Phishing-resistant auth (WebAuthn passkeys)",
+      "category": "access-control",
+      "status": "implemented",
+      "evidence": "m107",
+      "detail": "Server-side WebAuthn registration + authentication ceremonies (migration 050), minting a GoTrue-shaped session. Gate m107 (passkeys) drives the full ceremony with a virtual authenticator and proves wrong-key/replay/cross-user rejection."
+    },
+    {
+      "id": "organizations-rbac",
+      "name": "Organizations / teams / members / RBAC",
+      "category": "access-control",
+      "status": "implemented",
+      "evidence": "m103",
+      "detail": "Control-plane org model with members, invites and role-based access. Gate m103 (orgs-rbac). Org scoping is control-plane only by design, preserving SHARE_POOLS multi-tenant density."
+    },
+    {
+      "id": "vulnerability-disclosure",
+      "name": "Vulnerability disclosure (security.txt)",
+      "category": "compliance",
+      "status": "partial",
+      "evidence": "wiki/status-sla.md",
+      "detail": "A security.txt + disclosure contact is part of the trust-center / status-page scaffold (D4.6). PARTIAL: the public status page + disclosure endpoint are on-demand infra not yet stood up; the policy and contact are defined."
+    },
+    {
+      "id": "sla-uptime",
+      "name": "Uptime SLA + status page",
+      "category": "operations",
+      "status": "planned",
+      "evidence": "wiki/status-sla.md",
+      "detail": "Per-tier uptime targets (basic 99.5%, essential/pro 99.9%, max 99.95%) are TARGETS pending the C7 uptime probe. Until a probe writes durable availability samples, the SLA is not enforceable — stated honestly, not advertised as live."
+    },
+    {
+      "id": "supply-chain",
+      "name": "Supply-chain hardening (frozen lockfiles, SCA)",
+      "category": "compliance",
+      "status": "implemented",
+      "evidence": "wiki/security-audit.md",
+      "detail": "Frozen lockfiles everywhere; npm ci --ignore-scripts; pnpm minimum-release-age + onlyBuiltDependencies allowlist; cargo-audit on both Rust workspaces; SEMGREP + npm audit via make baas-security-scan."
+    }
+  ]
+}
