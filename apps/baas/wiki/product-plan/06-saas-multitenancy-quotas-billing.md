@@ -70,3 +70,36 @@ A lightweight, async meter (don't slow the hot path):
 - **Hot-path cost** — quota checks must be O(1) Redis ops with cached limits; benchmark under load.
 - **Metering accuracy vs availability** — exact billing wants no double-count and no loss; the outbox gives at-least-once → the consumer must dedupe (idempotency key per event).
 - **Multi-service consistency** — every entry point (query-router, mongo-api, storage, functions, realtime) must emit usage + honor quotas; centralise in `@mini-baas/common` so it's one implementation.
+
+## Status & live-flip readiness (as of v1.2.0, 2026-06-14)
+
+All three pipeline stages are **landed, gate-backed, and flag-gated OFF = byte-parity** (nothing
+meters/enforces/bills until the operator flips the flags). The implementations live in the Go
+control plane's `internal/metering` package (sub-services on the orchestrator, like the ported Node
+services), consuming the FROZEN B1 envelope (`store.go`) and the `public.tenant_usage` aggregate
+(migration 040).
+
+| Stage | What landed | Flag(s), default OFF | Gate |
+|---|---|---|---|
+| **B1 metering** (S3) | counters → `usage.events` Redis stream → idempotent UPSERT into `tenant_usage`; `GET /v1/tenants/{id}/usage`; emitters for storage/realtime/functions | `DATA_PLANE_METERING` · `METERING_INGEST` (+ per-plane) | m74–m79 |
+| **B2 quota enforce** (S4) | `QuotaGuard` sums `tenant_usage` vs the tier `limits.quota` (packages.json) → Redis `quota:over`; data plane returns **402** off a cheap snapshot (no hot-path DB/Redis) | `QUOTA_ENFORCEMENT` · `DATA_PLANE_QUOTA_ENFORCEMENT` | m80 |
+| **B3 billing** (S5) | `BillingReporter` pushes one Stripe **meter event per un-reported usage window** (value = window qty, identifier = window idempotency_key), idempotent via the `billing_reported` sent-ledger; tenant→customer map in `tenant_billing` (migration 041) | `BILLING_ENABLED` | m82 |
+
+**To flip B3 billing live** (after B1 is ingesting), set on the orchestrator and onboard tenants:
+
+```
+METERING_ENABLED=1
+BILLING_ENABLED=1
+STRIPE_API_KEY=sk_live_…                      # or sk_test_… in test mode
+STRIPE_API_BASE=https://api.stripe.com        # default; the m82 gate points this at a mock
+BILLING_METER_QUERY_COUNT=<your meter event_name>   # one BILLING_METER_<METRIC> per billed dimension
+# optional: BILLING_REPORT_INTERVAL_MS (default 3600000), BILLING_PERIOD (default month)
+```
+
+Then, per paying tenant, insert a `public.tenant_billing` row mapping `tenant_id →
+stripe_customer_id` (a tenant with no row, or an empty customer, is simply not billed). The reporter
+sends **only** windows of billable metrics for tenants with a customer; Stripe meters must exist with
+matching `event_name`s. The `billing_reported` ledger makes re-ticks no-ops, and the Stripe
+`identifier` is belt-and-suspenders. **Open (B4):** a self-serve plan-change/dashboard surface that
+writes `tenant_billing.plan` + updates the Stripe subscription — B3 is the metering→meter-event half;
+the interactive upgrade flow is B4.
