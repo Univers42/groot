@@ -1,5 +1,5 @@
 import type { HttpClient } from '../core/http.js';
-import type { FilterPrimitive, RestMutationOptions, RestOrderOptions, RestQueryBuilder as RestQueryBuilderApi, RestQueryOptions, RestRequestOptions, RestResourceBuilder as RestResourceBuilderApi } from '../types.js';
+import type { ChangesCursor, ChangesPage, ChangesSinceOptions, FilterPrimitive, RestMutationOptions, RestOrderOptions, RestQueryBuilder as RestQueryBuilderApi, RestQueryOptions, RestRequestOptions, RestResourceBuilder as RestResourceBuilderApi } from '../types.js';
 export declare class RestClient {
     private readonly http;
     constructor(http: HttpClient);
@@ -17,6 +17,17 @@ export declare class RestResourceBuilder<Row = Record<string, unknown>> implemen
     update<TResult = Row[]>(values: Partial<Row>, options?: RestQueryOptions<Row> & RestMutationOptions): Promise<TResult>;
     delete<TResult = Row[]>(options?: RestQueryOptions<Row> & RestMutationOptions): Promise<TResult>;
     query(options?: RestRequestOptions): RestQueryBuilder<Row>;
+    /**
+     * Keyset-paginated "changes since a cursor" — an offline-sync foundation.
+     *
+     * Built entirely from existing PostgREST primitives (no server change):
+     *   GET /rest/v1/<resource>?<cursorColumn>=gt.<cursor>&order=<cursorColumn>.asc&limit=<n>
+     *
+     * Returns one ascending page plus `nextCursor` (the cursor column value of the
+     * last row). Drive a full sync by looping while `hasMore`, feeding `nextCursor`
+     * back in. The cursor column must be monotonically increasing.
+     */
+    changesSince(cursor?: ChangesCursor, options?: ChangesSinceOptions<Row>): Promise<ChangesPage<Row>>;
 }
 /**
  * Supabase-js-style fluent REST builder. Every filter/order/range method

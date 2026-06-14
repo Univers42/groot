@@ -17,6 +17,25 @@ export interface RequestOptions {
     auth?: boolean;
     apiKey?: string;
     bearerToken?: string;
+    /** Per-call timeout override (ms). Falls back to the client default. */
+    timeoutMs?: number;
+    /** External abort signal — composed with the per-call timeout. */
+    signal?: AbortSignal;
+    /**
+     * Force the retry decision for this call:
+     *  - `true`  — treat as idempotent (retry on retryable status / network).
+     *  - `false` — never retry (e.g. a non-idempotent POST create).
+     * When unset, idempotency is inferred from the HTTP method (GET/HEAD/PUT/
+     * DELETE are idempotent; POST/PATCH are not).
+     */
+    idempotent?: boolean;
+}
+/** Required, fully-resolved retry policy. */
+export interface ResolvedRetry {
+    attempts: number;
+    delayMs: number;
+    maxDelayMs: number;
+    retryOn: number[];
 }
 export declare class HttpClient {
     private readonly baseUrl;
@@ -54,15 +73,30 @@ export declare class HttpClient {
      * Raw fetch for binary payloads (storage upload/download). Bypasses the JSON
      * (de)serialization of `request()`: the body is sent verbatim and the raw
      * `Response` is returned for the caller to read as blob/arrayBuffer/text.
-     * Auth headers (apikey + bearer) are still applied.
+     * Auth headers (apikey + bearer) are still applied. Supports a per-call
+     * timeout + external signal but does NOT auto-retry (the body may not be
+     * re-readable).
      */
     rawFetch(path: string, init?: {
         method?: string;
         body?: BodyInit | null;
         headers?: HeadersInit;
+        timeoutMs?: number;
+        signal?: AbortSignal;
     }): Promise<Response>;
     private fetchOnce;
     private buildHeaders;
-    private shouldRetry;
+    /** Whether this call may be auto-retried (idempotency, explicit or inferred). */
+    private isIdempotent;
+    /**
+     * Returns the backoff delay (ms) before the next attempt, or `undefined` to
+     * stop and rethrow. Non-idempotent calls never retry. Honors a server
+     * `Retry-After` when present; otherwise exponential backoff + full jitter,
+     * capped at `maxDelayMs`.
+     */
+    private retryDelay;
+    private isRetryable;
+    /** Convert a thrown transport error into a typed MiniBaas error. */
+    private normalizeTransportError;
 }
 export {};

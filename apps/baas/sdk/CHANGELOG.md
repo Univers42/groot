@@ -4,6 +4,29 @@ All notable changes to the Grobase product SDK (and the bundled `baas` CLI) are 
 This package follows [semantic versioning](https://semver.org). Releases publish to npm only on an
 explicit `baas-cli-v<semver>` tag (see `.github/workflows/baas-cli-publish.yml`).
 
+## Unreleased — Track-E SDK hardening
+
+### Added
+- **Idempotency-aware retry** — GET/HEAD/PUT/DELETE (and explicit `idempotent: true`)
+  auto-retry on `429/500/502/503/504` + network errors with exponential backoff + jitter,
+  a `maxDelayMs` cap, and `Retry-After` honoring. **POST creates do not auto-retry** by
+  default (set `idempotent: true` to opt in). Tune via `retry: { attempts, delayMs, maxDelayMs, retryOn }`.
+- **Typed error hierarchy** — `MiniBaasError` now has subclasses so callers can branch on
+  type: `MiniBaasBadRequestError (400)`, `MiniBaasUnauthorizedError (401)`,
+  `MiniBaasForbiddenError (403)`, `MiniBaasNotFoundError (404)`, `MiniBaasConflictError (409)`,
+  `MiniBaasRateLimitError (402/429, carries `retryAfterMs`)`, `MiniBaasServerError (5xx)`,
+  `MiniBaasNetworkError (transport)`. Each carries `status` + the server `body`; all remain
+  `instanceof MiniBaasError` (back-compat).
+- **Per-call timeout + AbortSignal** — `timeoutMs` and an external `signal` on REST request
+  options; the external signal composes with the per-call timeout. Aborts surface as
+  `MiniBaasTimeoutError` (`.external` distinguishes timeout vs caller-cancel).
+- **`from(t).changesSince(cursor, { cursorColumn, limit })`** — keyset (offline-sync)
+  pagination built from existing PostgREST primitives (no server change); returns
+  `{ rows, nextCursor, hasMore }`.
+
+### Notes
+- All additive and back-compatible — existing call sites keep working with defaults.
+
 ## 0.2.0 — initial public release
 
 First release intended for the public npm registry. The SDK is the **public product API**: gateway

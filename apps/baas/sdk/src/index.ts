@@ -43,13 +43,28 @@ export type {
   User,
 } from './core/session.js';
 export type { SessionStorageAdapter } from './core/storage.js';
-export { MiniBaasError, MiniBaasTimeoutError } from './core/errors.js';
+export {
+  MiniBaasError,
+  MiniBaasTimeoutError,
+  MiniBaasNetworkError,
+  MiniBaasClientError,
+  MiniBaasBadRequestError,
+  MiniBaasUnauthorizedError,
+  MiniBaasForbiddenError,
+  MiniBaasNotFoundError,
+  MiniBaasConflictError,
+  MiniBaasRateLimitError,
+  MiniBaasServerError,
+} from './core/errors.js';
 export type {
   AnalyticsTrackInput,
   PresignInput,
   QueryRunInput,
   QueryRunResponse,
   RecoverInput,
+  ChangesCursor,
+  ChangesPage,
+  ChangesSinceOptions,
   FilterPrimitive,
   RestFilterOperator,
   RestMutationOptions,
@@ -159,8 +174,13 @@ export type {
 } from './domains/realtime-client.js';
 
 export interface RetryOptions {
+  /** Max total attempts (first try + retries). Default 3. */
   attempts?: number;
+  /** Base backoff before the first retry, in ms (grows exponentially). Default 250. */
   delayMs?: number;
+  /** Upper bound on any single backoff wait, in ms. Default 10_000. */
+  maxDelayMs?: number;
+  /** HTTP statuses eligible for retry on idempotent requests. */
   retryOn?: number[];
 }
 

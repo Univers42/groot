@@ -72,6 +72,37 @@ export class RestResourceBuilder {
     query(options = {}) {
         return new RestQueryBuilder(this.http, this.resource, options);
     }
+    /**
+     * Keyset-paginated "changes since a cursor" — an offline-sync foundation.
+     *
+     * Built entirely from existing PostgREST primitives (no server change):
+     *   GET /rest/v1/<resource>?<cursorColumn>=gt.<cursor>&order=<cursorColumn>.asc&limit=<n>
+     *
+     * Returns one ascending page plus `nextCursor` (the cursor column value of the
+     * last row). Drive a full sync by looping while `hasMore`, feeding `nextCursor`
+     * back in. The cursor column must be monotonically increasing.
+     */
+    async changesSince(cursor = null, options = {}) {
+        const cursorColumn = String(options.cursorColumn ?? 'updated_at');
+        const limit = options.limit ?? 100;
+        const comparator = options.comparator ?? 'gt';
+        const params = new URLSearchParams();
+        if (options.columns)
+            params.set('select', options.columns);
+        params.set('order', `${cursorColumn}.asc`);
+        params.set('limit', String(limit));
+        if (cursor !== null && cursor !== undefined) {
+            params.append(cursorColumn, `${comparator}.${encodeFilterValue(cursor)}`);
+        }
+        const rows = await this.http.request(`${routes.rest.resource(this.resource)}?${params.toString()}`, { ...requestOptions(options), method: 'GET' });
+        const list = Array.isArray(rows) ? rows : [];
+        const hasMore = list.length >= limit;
+        const last = list[list.length - 1];
+        const nextCursor = last && cursorColumn in last
+            ? last[cursorColumn]
+            : cursor ?? null;
+        return { rows: list, nextCursor: hasMore ? nextCursor : null, hasMore };
+    }
 }
 /**
  * Supabase-js-style fluent REST builder. Every filter/order/range method
@@ -194,6 +225,8 @@ function requestOptions(options) {
         apiKey: options.apiKey,
         bearerToken: options.bearerToken,
         headers: options.headers,
+        timeoutMs: options.timeoutMs,
+        signal: options.signal,
     };
 }
 function mutationHeaders(options) {
