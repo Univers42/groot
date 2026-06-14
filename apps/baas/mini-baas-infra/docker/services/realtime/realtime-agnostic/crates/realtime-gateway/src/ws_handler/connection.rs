@@ -11,7 +11,7 @@
 /* ************************************************************************** */
 
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use axum::extract::ws::WebSocket;
 use bytes::Bytes;
@@ -28,6 +28,7 @@ use tracing::{error, info};
 use super::reader::reader_loop;
 use super::writer::writer_loop;
 use super::AppState;
+use crate::usage::{Usage, CONNECTION_SECONDS};
 
 fn default_peer_addr() -> SocketAddr {
     SocketAddr::from(([0, 0, 0, 0], 0))
@@ -46,6 +47,9 @@ fn create_connection_meta(conn_id: ConnectionId) -> ConnectionMeta {
 pub async fn handle_websocket(socket: WebSocket, state: AppState) {
     let conn_id = state.conn_manager.next_connection_id();
     let meta = create_connection_meta(conn_id);
+    // Stamp the open instant locally so the close path computes the lifetime even
+    // if the registry's `connected_at` is unavailable later.
+    let connected_at = meta.connected_at;
     let (_, send_rx) = state
         .conn_manager
         .register(meta, OverflowPolicy::DropNewest);
@@ -55,8 +59,18 @@ pub async fn handle_websocket(socket: WebSocket, state: AppState) {
     let conn_manager = Arc::clone(&state.conn_manager);
     let presence = Arc::clone(&state.presence);
     let bus_publisher = Arc::clone(&state.bus_publisher);
+    let usage = state.usage.clone();
+    // The reader stamps the authenticated platform user/tenant here on AUTH; the
+    // close path below reads it to attribute the connection-lifetime metric.
+    let tenant_slot: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let writer = tokio::spawn(writer_loop(ws_sink, send_rx, ctrl_rx, conn_id));
-    let reader = tokio::spawn(reader_loop(ws_stream, conn_id, state, ctrl_tx));
+    let reader = tokio::spawn(reader_loop(
+        ws_stream,
+        conn_id,
+        state,
+        ctrl_tx,
+        Arc::clone(&tenant_slot),
+    ));
     tokio::select! {
         _ = writer => {}
         _ = reader => {}
@@ -67,7 +81,43 @@ pub async fn handle_websocket(socket: WebSocket, state: AppState) {
     cleanup_presence(conn_id, &presence, bus_publisher.as_ref()).await;
     registry.remove_connection(conn_id);
     conn_manager.remove(conn_id);
+    // B1d metering — record the connection lifetime in whole seconds for the
+    // authenticated tenant. Only when metering is ON (`usage` is `Some`) AND the
+    // connection actually authenticated (an unauthenticated probe has no tenant
+    // and is not billable). At parity (`usage` is `None`) this whole block is
+    // skipped, byte-identical to before.
+    if let Some(usage) = usage.as_ref() {
+        meter_connection_lifetime(usage, &tenant_slot, connected_at, conn_id);
+    }
     info!(conn_id = %conn_id, "WebSocket connection closed");
+}
+
+/// Compute the connection lifetime in WHOLE seconds and record it against the
+/// authenticated tenant. Unauthenticated connections (empty slot) are skipped —
+/// the metric is per platform user/tenant, matching the `EventSource` identity.
+fn meter_connection_lifetime(
+    usage: &Usage,
+    tenant_slot: &Arc<Mutex<Option<String>>>,
+    connected_at: chrono::DateTime<Utc>,
+    conn_id: ConnectionId,
+) {
+    let tenant = match tenant_slot.lock() {
+        Ok(slot) => slot.clone(),
+        Err(p) => p.into_inner().clone(),
+    };
+    let Some(tenant) = tenant else {
+        return; // never authenticated → no tenant → nothing to meter
+    };
+    // Whole seconds of lifetime; clamp negatives (clock skew) to 0.
+    let secs = (Utc::now() - connected_at).num_seconds().max(0);
+    let secs = u64::try_from(secs).unwrap_or(0);
+    usage.record(&tenant, CONNECTION_SECONDS, secs);
+    info!(
+        conn_id = %conn_id,
+        tenant = %tenant,
+        seconds = secs,
+        "metered realtime.connection.seconds"
+    );
 }
 
 /// On disconnect, drop the connection from every presence set it joined and

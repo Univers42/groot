@@ -11,11 +11,44 @@
 
 import { dirname, join } from "https://deno.land/std@0.224.0/path/mod.ts";
 import { ensureDir } from "https://deno.land/std@0.224.0/fs/ensure_dir.ts";
+import { FUNCTION_INVOCATIONS_METRIC, UsageMeter } from "./usage-meter.ts";
 
 const PORT = Number(Deno.env.get("FUNCTIONS_PORT") ?? "3060");
 const HOST = Deno.env.get("FUNCTIONS_HOST") ?? "0.0.0.0";
 const DATA_DIR = Deno.env.get("FUNCTIONS_DATA_DIR") ?? "/data";
 const TIMEOUT_MS = Number(Deno.env.get("FUNCTIONS_INVOKE_TIMEOUT_MS") ?? "5000");
+
+// B1d metering — sub-flag, DEFAULT OFF (byte-parity). When OFF the meter is
+// never constructed, so no aggregator, no background flusher (not even an idle
+// timer), and the invoke path never records — observably identical to today.
+// When ON, each SUCCESSFUL invocation adds 1 to a per-(tenant, metric) windowed
+// aggregator; the flusher XADDs the CUMULATIVE window total to the frozen
+// `usage.events` stream every FUNCTION_METERING_FLUSH_MS (default 60000).
+function envBool(v: string | undefined): boolean {
+  return v === "1" || v === "true" || v === "on" ||
+    v === "TRUE" || v === "True" || v === "ON";
+}
+const FUNCTION_METERING = envBool(Deno.env.get("FUNCTION_METERING"));
+const FUNCTION_METERING_FLUSH_MS = Number(
+  Deno.env.get("FUNCTION_METERING_FLUSH_MS") ?? "60000",
+);
+// Reuse the established Redis URL convention (the data plane / outbox use the
+// same fallbacks); only read when the flag is ON.
+const FUNCTION_METERING_REDIS_URL = Deno.env.get("FUNCTION_METERING_REDIS_URL") ??
+  Deno.env.get("REDIS_URL") ?? "redis://redis:6379";
+
+const usageMeter: UsageMeter | null = FUNCTION_METERING
+  ? new UsageMeter({
+    flushMs: FUNCTION_METERING_FLUSH_MS,
+    redisUrl: FUNCTION_METERING_REDIS_URL,
+  })
+  : null;
+if (usageMeter) {
+  usageMeter.start();
+  console.log(
+    `[functions] metering ON (flush=${FUNCTION_METERING_FLUSH_MS}ms, metric=${FUNCTION_INVOCATIONS_METRIC})`,
+  );
+}
 
 // A2 Functions DX — per-function secrets. When FUNCTION_SECRETS_URL is set, the
 // runtime resolves the tenant+function's whitelisted secrets from the Go
@@ -192,6 +225,12 @@ async function invokeFn(req: Request, m: RegExpMatchArray): Promise<Response> {
   if (result.error) {
     return json(500, { error: "function_error", message: result.error });
   }
+  // B1d metering — count this SUCCESSFUL invocation (qty 1) for the caller's
+  // authenticated tenant. `tenant` is taken from the same identity the rest of
+  // the handler used (X-Baas-Tenant-Id, post-M11; the runtime's caller). The
+  // record is a cheap non-blocking += into the windowed aggregator; the flusher
+  // emits the cumulative window total. Guarded on the flag so OFF == parity.
+  usageMeter?.record(tenant, FUNCTION_INVOCATIONS_METRIC, 1);
   return new Response(typeof result.body === "string" ? result.body : JSON.stringify(result.body), {
     status: result.status ?? 200,
     headers: { "content-type": result.contentType ?? "application/json" },

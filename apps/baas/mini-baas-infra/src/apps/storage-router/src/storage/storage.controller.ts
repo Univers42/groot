@@ -59,7 +59,9 @@ export class StorageController {
   ) {
     const body = await this.readRawBody(req);
     const contentType = (req.headers['content-type'] as string) || 'application/octet-stream';
-    return this.service.putObject(bucket, this.wildcard(req), user.id, body, contentType);
+    // Pass the authenticated tenant so the write is metered on the tenant
+    // dimension (Track-B B1d storage.bytes); falls back to user.id server-side.
+    return this.service.putObject(bucket, this.wildcard(req), user.id, body, contentType, user.tenantId);
   }
 
   @Get('object/:bucket/*')

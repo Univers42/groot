@@ -81,6 +81,7 @@ async fn start_test_server() -> (String, Arc<dyn EventBusPublisher>, Arc<dyn Eve
         auth_provider,
         bus_publisher: Arc::clone(&publisher),
         presence: Arc::new(PresenceTracker::new()),
+        usage: None,
     };
 
     let app = Router::new()

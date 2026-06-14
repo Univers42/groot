@@ -50,6 +50,10 @@ pub struct AppState {
     /// changes are also published over the bus so a multi-node bus delivers the
     /// notification cluster-wide.
     pub presence: Arc<PresenceTracker>,
+    /// B1d metering handle (`realtime.connection.seconds`). `Some` ONLY when the
+    /// `REALTIME_METERING` sub-flag is ON; `None` at parity — the close path then
+    /// records nothing, no flusher runs, no Redis connection is opened.
+    pub usage: Option<crate::usage::Usage>,
 }
 
 /// Axum handler for WebSocket upgrade requests (`GET /ws`).

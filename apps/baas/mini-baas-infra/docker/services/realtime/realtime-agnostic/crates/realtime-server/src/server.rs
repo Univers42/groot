@@ -215,6 +215,7 @@ fn build_http_router(
         auth_provider,
         bus_publisher,
         presence: Arc::new(PresenceTracker::new()),
+        usage: build_usage(),
     };
     Router::new()
         .route("/ws", get(ws_handler::ws_upgrade))
@@ -225,6 +226,40 @@ fn build_http_router(
         .fallback_service(tower_http::services::ServeDir::new(static_dir))
         .layer(CorsLayer::permissive())
         .with_state(state)
+}
+
+/// Build the B1d metering handle (`realtime.connection.seconds`) IFF the
+/// `REALTIME_METERING` sub-flag is ON (default OFF = byte-parity). When ON, wires
+/// the durable `usage.events` Redis sink from `REALTIME_METERING_REDIS_URL` and
+/// spawns the background flusher every `REALTIME_METERING_FLUSH_MS` (default
+/// 60000). When OFF returns `None`: no handle, no flusher (not even an idle
+/// timer), no Redis connection — the connect/close path is unchanged.
+fn build_usage() -> Option<realtime_gateway::usage::Usage> {
+    if !env_flag_on("REALTIME_METERING") {
+        return None;
+    }
+    let redis_url = std::env::var("REALTIME_METERING_REDIS_URL").unwrap_or_default();
+    let flush_ms = std::env::var("REALTIME_METERING_FLUSH_MS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(60_000);
+    let usage = realtime_gateway::usage::Usage::new().with_stream_url(&redis_url);
+    usage.spawn_flusher(flush_ms);
+    info!(
+        "realtime metering ON (REALTIME_METERING) — flushing realtime.connection.seconds every {}ms to usage.events",
+        flush_ms
+    );
+    Some(usage)
+}
+
+/// A boolean env flag is ON for `1`/`true`/`yes`/`on` (case-insensitive); any
+/// other value, or absence, is OFF. Mirrors the data-plane / Go consumer
+/// convention so the same `1` turns the whole metering pipeline on.
+fn env_flag_on(key: &str) -> bool {
+    matches!(
+        std::env::var(key).unwrap_or_default().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
 }
 
 /// Build the default [`ProducerRegistry`] with built-in adapters.

@@ -39,6 +39,7 @@ pub mod connection;
 pub mod fanout;
 pub mod metrics;
 pub mod rest_api;
+pub mod usage;
 pub mod ws_handler;
 
 pub use connection::ConnectionManager;

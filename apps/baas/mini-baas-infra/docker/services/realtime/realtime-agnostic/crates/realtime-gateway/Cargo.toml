@@ -24,6 +24,11 @@ smol_str = { workspace = true }
 uuid = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
+# B1d metering: sha256 idempotency_key (already in the workspace lockfile, no new
+# lockfile entry) + the Redis durable XADD sink for `usage.events`. Pinned to the
+# SAME redis 0.27 the data-plane producer uses so the frozen envelope is shared.
+sha2 = "0.10"
+redis = { version = "0.27", default-features = false, features = ["tokio-comp", "connection-manager"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

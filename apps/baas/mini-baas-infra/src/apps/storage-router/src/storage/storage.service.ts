@@ -10,7 +10,10 @@
 /*                                                                            */
 /* ************************************************************************** */
 
-import { Injectable, Logger, OnModuleInit, BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable, Logger, OnModuleInit, OnApplicationShutdown,
+  BadRequestException, NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   S3Client,
@@ -25,6 +28,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { PresignDto } from './dto/presign.dto';
+import { UsageMeter } from './usage-meter';
 
 export interface StorageObject {
   key: string;
@@ -39,16 +43,22 @@ export interface BucketInfo {
 }
 
 @Injectable()
-export class StorageService implements OnModuleInit {
+export class StorageService implements OnModuleInit, OnApplicationShutdown {
   private readonly logger = new Logger(StorageService.name);
   private s3!: S3Client;
   private defaultExpires!: number;
   private publicEndpoint?: string;
   private maxUploadBytes!: number;
+  // Track-B B1d-storage usage meter. `undefined` when STORAGE_METERING is OFF
+  // (the default) — see UsageMeter.fromConfig — so the write path is byte-parity.
+  private meter?: UsageMeter;
 
   constructor(private readonly config: ConfigService) {}
 
   onModuleInit(): void {
+    // Sub-flag OFF (default) ⇒ fromConfig returns undefined ⇒ no meter, no
+    // interval, no Redis client created. Parity is preserved before any I/O.
+    this.meter = UsageMeter.fromConfig(process.env);
     this.s3 = new S3Client({
       endpoint: this.config.getOrThrow<string>('S3_ENDPOINT'),
       region: this.config.get<string>('S3_REGION', 'us-east-1'),
@@ -125,8 +135,20 @@ export class StorageService implements OnModuleInit {
     };
   }
 
-  /** Server-side upload (proxied) — works even with an internal S3 endpoint. */
-  async putObject(bucket: string, objectPath: string, userId: string, body: Buffer, contentType?: string) {
+  /** Server-side upload (proxied) — works even with an internal S3 endpoint. On
+   *  a SUCCESSFUL write the object's byte size is added to the per-tenant
+   *  `storage.bytes` usage meter (Track-B B1d) — recorded AFTER the S3 PutObject
+   *  resolves, so a failed/rejected upload is never metered. `tenantId` is the
+   *  authenticated tenant the router resolved (UserContext.tenantId); the meter
+   *  is `undefined` (and this is a no-op) when STORAGE_METERING is OFF. */
+  async putObject(
+    bucket: string,
+    objectPath: string,
+    userId: string,
+    body: Buffer,
+    contentType?: string,
+    tenantId?: string,
+  ) {
     if (body.byteLength > this.maxUploadBytes) {
       throw new BadRequestException(`object exceeds max upload size (${this.maxUploadBytes} bytes)`);
     }
@@ -140,6 +162,9 @@ export class StorageService implements OnModuleInit {
         Metadata: { 'owner-id': userId },
       }),
     );
+    // SUCCESS path only — meter the bytes written for this tenant. The fallback
+    // to userId keeps single-tenant deployments (tenantId == userId) metered.
+    this.meter?.record(tenantId ?? userId, body.byteLength);
     return { bucket, key, size: body.byteLength };
   }
 
@@ -219,5 +244,11 @@ export class StorageService implements OnModuleInit {
       }
     }
     return err;
+  }
+
+  /** Flush the last partial usage window + close the meter's Redis client on
+   *  graceful shutdown (no-op when metering is OFF). */
+  async onApplicationShutdown(): Promise<void> {
+    await this.meter?.stop();
   }
 }

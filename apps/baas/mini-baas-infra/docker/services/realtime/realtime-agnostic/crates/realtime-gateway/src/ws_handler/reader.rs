@@ -10,6 +10,8 @@
 /*                                                                            */
 /* ************************************************************************** */
 
+use std::sync::{Arc, Mutex};
+
 use axum::extract::ws::{Message, WebSocket};
 use chrono::Utc;
 use futures::stream::SplitStream;
@@ -22,6 +24,13 @@ use super::util::send_ctrl;
 
 use super::handlers;
 use super::AppState;
+
+/// Shared slot the reader stamps with the authenticated platform user/tenant
+/// (`AuthClaims::sub`) on a successful AUTH, so the close path in
+/// `handle_websocket` can attribute the connection-lifetime metric to the SAME
+/// identity the gateway stamps as `EventSource.id` on publishes. `None` until
+/// (or unless) the connection authenticates.
+pub(super) type TenantSlot = Arc<Mutex<Option<String>>>;
 
 #[derive(Default)]
 pub(super) struct AuthState {
@@ -40,12 +49,25 @@ pub(super) async fn reader_loop(
     conn_id: ConnectionId,
     state: AppState,
     ctrl_tx: mpsc::Sender<String>,
+    tenant_slot: TenantSlot,
 ) {
     let mut auth = AuthState::default();
     while let Some(result) = ws_stream.next().await {
         match result {
             Ok(Message::Text(text)) => {
                 let action = dispatch_text(&text, conn_id, &state, &ctrl_tx, &mut auth).await;
+                // Publish the authenticated identity so the close path can meter
+                // the connection lifetime against the right tenant. Cheap; only
+                // taken when metering is ON (the slot is otherwise unread).
+                if auth.authenticated {
+                    if let Some(c) = auth.claims.as_ref() {
+                        if let Ok(mut slot) = tenant_slot.lock() {
+                            if slot.as_deref() != Some(c.sub.as_str()) {
+                                *slot = Some(c.sub.clone());
+                            }
+                        }
+                    }
+                }
                 if action == Action::Close {
                     return;
                 }
