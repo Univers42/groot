@@ -358,6 +358,8 @@ impl<'a> GraphEngine<'a> {
             capability_overrides: cm.overrides.clone(),
             inline_dsn: Some(cm.dsn.clone()),
             isolation: cm.isolation.clone(),
+            replica_inline_dsn: None,
+            read_replica_route: false,
         };
         let op = DataOperation {
             op: DataOperationKind::List,

@@ -1176,7 +1176,33 @@ async fn run_query_inner(
             Some(request.operation.limit.map_or(cap, |l| l.min(cap)));
     }
 
-    let pool = match state.registry.get_or_create(request.mount).await {
+    // S8 read-replica routing (DATA_PLANE_READ_REPLICA, default OFF). A pure READ
+    // (!is_mutation: List/Get/Aggregate) on a mount carrying a replica DSN is
+    // served from the replica's OWN pool (the variant routes inline_dsn ← replica
+    // and keys to a distinct `/ro` pool); writes/tx/Batch + flag-OFF stay on the
+    // primary, where read-after-write consistency lives by construction. Flag OFF
+    // or no replica DSN ⇒ `request.mount` is used UNCHANGED = byte-parity.
+    //
+    // `read_replica_variant` consumes self, so we GUARD on the replica's presence
+    // FIRST and only move `request.mount` when we will actually use the variant —
+    // the `else` arm hands the ORIGINAL mount straight through (no clone, no
+    // variant), preserving today's exact path at parity.
+    let mount_to_open = if state.config.read_replica
+        && !is_mutation
+        && request
+            .mount
+            .replica_inline_dsn
+            .as_deref()
+            .is_some_and(|d| !d.trim().is_empty())
+    {
+        request
+            .mount
+            .read_replica_variant()
+            .expect("replica dsn checked present")
+    } else {
+        request.mount
+    };
+    let pool = match state.registry.get_or_create(mount_to_open).await {
         Ok(pool) => pool,
         Err(err) => return map_data_plane_error(&err),
     };
@@ -1609,6 +1635,8 @@ pub(crate) fn bypass_envelope(
             capability_overrides: mount_info.capability_overrides,
             inline_dsn: Some(mount_info.connection_string),
             isolation: mount_info.isolation,
+            replica_inline_dsn: None,
+            read_replica_route: false,
         },
     )
 }

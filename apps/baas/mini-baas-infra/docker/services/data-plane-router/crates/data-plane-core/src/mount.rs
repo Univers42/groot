@@ -52,6 +52,17 @@ pub struct DatabaseMount {
     ///   * `db_per_tenant`       — a distinct DSN; no execution change.
     #[serde(default)]
     pub isolation: Option<String>,
+    /// S8 read-replica: optional read-replica DSN for this mount. When set AND
+    /// DATA_PLANE_READ_REPLICA is ON, pure reads (List/Get/Aggregate) are served
+    /// from the replica's own pool; writes/tx/Batch stay on the primary. Absent
+    /// (the default) ⇒ reads use the primary = byte-parity.
+    #[serde(default)]
+    pub replica_inline_dsn: Option<String>,
+    /// Internal routing marker — NEVER serialized. Set ONLY on the read-replica
+    /// VARIANT of a mount (see read_replica_variant) so its pool keys distinctly
+    /// from the primary. Always false on a deserialized request ⇒ wire parity.
+    #[serde(skip)]
+    pub read_replica_route: bool,
 }
 
 impl DatabaseMount {
@@ -65,6 +76,23 @@ impl DatabaseMount {
             self.engine,
             self.credential_ref.version,
         )
+    }
+
+    /// Derive the read-replica VARIANT of this mount: inline_dsn ← the replica DSN,
+    /// route marker set so the pool keys distinctly. Returns None when no replica
+    /// DSN is configured (caller then uses the primary mount unchanged = parity).
+    #[must_use]
+    pub fn read_replica_variant(self) -> Option<DatabaseMount> {
+        let replica = self
+            .replica_inline_dsn
+            .as_deref()
+            .filter(|d| !d.trim().is_empty())?
+            .to_string();
+        Some(DatabaseMount {
+            inline_dsn: Some(replica),
+            read_replica_route: true,
+            ..self
+        })
     }
 
     /// B4-pools: the pool key to actually use, honoring the registry's
@@ -83,7 +111,7 @@ impl DatabaseMount {
     /// pool (parity with `pool_key`'s rotation behavior).
     #[must_use]
     pub fn effective_pool_key(&self, share_shared_rls: bool) -> String {
-        if share_shared_rls && matches!(self.isolation(), Isolation::SharedRls) {
+        let base = if share_shared_rls && matches!(self.isolation(), Isolation::SharedRls) {
             let target = match self.inline_dsn.as_deref() {
                 Some(dsn) if !dsn.is_empty() => format!("dsn:{:016x}", stable_hash(dsn)),
                 _ => format!(
@@ -96,6 +124,15 @@ impl DatabaseMount {
             format!("shared/{}/{}", self.engine, target)
         } else {
             self.pool_key()
+        };
+        // S8 read-replica: the replica VARIANT (read_replica_route set) keys to a
+        // distinct `/ro` pool so it NEVER collides with the primary pool — in BOTH
+        // the share and non-share branches. On a deserialized request the marker
+        // is always false (`#[serde(skip)]`), so the key is byte-parity with today.
+        if self.read_replica_route {
+            format!("{base}/ro")
+        } else {
+            base
         }
     }
 
@@ -160,6 +197,8 @@ mod tests {
             capability_overrides: None,
             inline_dsn: None,
             isolation: isolation.map(str::to_string),
+            replica_inline_dsn: None,
+            read_replica_route: false,
         }
     }
 
@@ -281,5 +320,77 @@ mod tests {
         );
         // Both still resolve to a schema (neither sanitizes to empty).
         assert!(a.tenant_schema().is_some() && b.tenant_schema().is_some());
+    }
+
+    // ---- S8 read-replica routing (gate m122) -------------------------------
+
+    #[test]
+    fn read_replica_variant_none_when_no_replica_dsn() {
+        // (a) No replica DSN configured ⇒ no variant; the caller uses the primary
+        // mount unchanged = parity. Whitespace-only is treated as absent too.
+        assert_eq!(mount("acme", Some("shared_rls")).read_replica_variant(), None);
+        let mut blank = mount("acme", Some("shared_rls"));
+        blank.replica_inline_dsn = Some("   ".into());
+        assert_eq!(blank.read_replica_variant(), None);
+    }
+
+    #[test]
+    fn read_replica_variant_sets_inline_dsn_and_route_marker() {
+        // (b) A configured replica DSN ⇒ the variant routes inline_dsn ← replica
+        // and flips the route marker on.
+        let mut m = mount("acme", Some("shared_rls"));
+        m.replica_inline_dsn = Some("postgres://replica/db".into());
+        let v = m.read_replica_variant().expect("variant present");
+        assert_eq!(v.inline_dsn.as_deref(), Some("postgres://replica/db"));
+        assert!(v.read_replica_route);
+    }
+
+    #[test]
+    fn read_replica_variant_pool_key_distinct_in_both_share_modes() {
+        // (c) The variant's effective_pool_key ENDS WITH "/ro" and DIFFERS from
+        // the primary's effective_pool_key in BOTH share=true and share=false, so
+        // the replica pool can never collide with the primary pool.
+        for share in [true, false] {
+            let mut primary = mount("acme", Some("shared_rls"));
+            primary.inline_dsn = Some("postgres://primary/db".into());
+            primary.replica_inline_dsn = Some("postgres://replica/db".into());
+            let variant = primary.clone().read_replica_variant().expect("variant present");
+            let pk = variant.effective_pool_key(share);
+            assert!(pk.ends_with("/ro"), "share={share}: replica key must end with /ro: {pk}");
+            assert_ne!(
+                primary.effective_pool_key(share),
+                pk,
+                "share={share}: replica pool key must differ from the primary"
+            );
+        }
+    }
+
+    #[test]
+    fn replica_dsn_round_trips_and_route_marker_never_serializes() {
+        // (d) serde: replica_inline_dsn round-trips; read_replica_route is NEVER
+        // serialized (the variant's JSON has no "read_replica_route" key) and
+        // defaults false on deserialize ⇒ wire parity for an arriving request.
+        let mut m = mount("acme", Some("shared_rls"));
+        m.replica_inline_dsn = Some("postgres://replica/db".into());
+        // clone for the variant so the ORIGINAL `m` survives for the round-trip
+        // assertion below (read_replica_variant consumes self).
+        let variant = m.clone().read_replica_variant().expect("variant present");
+        assert!(variant.read_replica_route, "the variant carries the marker in-memory");
+        let json = serde_json::to_string(&variant).unwrap();
+        assert!(
+            !json.contains("read_replica_route"),
+            "the internal route marker must never serialize: {json}"
+        );
+        // replica_inline_dsn round-trips and the deserialized marker defaults false.
+        let back: DatabaseMount = serde_json::from_str(&json).unwrap();
+        assert!(!back.read_replica_route, "marker defaults false on the wire");
+        let primary_json = serde_json::to_string(&m).unwrap();
+        let back2: DatabaseMount = serde_json::from_str(&primary_json).unwrap();
+        assert_eq!(
+            back2.replica_inline_dsn.as_deref(),
+            Some("postgres://replica/db"),
+            "replica_inline_dsn round-trips on the wire"
+        );
+        assert!(!back2.read_replica_route);
     }
 }

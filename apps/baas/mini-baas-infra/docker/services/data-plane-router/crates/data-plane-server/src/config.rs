@@ -183,6 +183,16 @@ pub struct ServerConfig {
     /// histogram or to the cache/pool/outbox counters. OFF → `/metrics` is
     /// byte-identical to today.
     pub tenant_obs_counter: bool,
+
+    /// S8 read-replica routing — serve pure reads (List/Get/Aggregate) on a mount
+    /// carrying a `replica_inline_dsn` from the REPLICA's own pool. OFF by default
+    /// → byte-parity: the request path takes ZERO extra branches (a `bool`
+    /// short-circuit before the mount is even inspected), so `request.mount`
+    /// reaches `get_or_create` UNCHANGED and writes/tx/Batch always stay on the
+    /// primary. Unlike the metering family this is a routing CAPABILITY, not a
+    /// metering feature, so it is STANDALONE (no `METERING_ENABLED` master gate).
+    /// From `DATA_PLANE_READ_REPLICA` (`1`/`true`/`on`).
+    pub read_replica: bool,
 }
 
 impl ServerConfig {
@@ -343,6 +353,14 @@ impl ServerConfig {
                     .as_str(),
                 "1" | "true" | "on"
             ),
+            // S8 read-replica routing: a STANDALONE routing capability (no
+            // METERING_ENABLED master gate), so it is a single-flag bool just like
+            // share_pools / bypass_enabled. Default `false` → byte-parity (reads
+            // stay on the primary, request.mount reaches get_or_create unchanged).
+            read_replica: matches!(
+                read_env("DATA_PLANE_READ_REPLICA", "false").to_lowercase().as_str(),
+                "1" | "true" | "on"
+            ),
         }
     }
 }
@@ -388,6 +406,7 @@ impl std::fmt::Debug for ServerConfig {
             .field("suspend_reader", &self.suspend_reader)
             .field("tenant_obs", &self.tenant_obs)
             .field("tenant_obs_counter", &self.tenant_obs_counter)
+            .field("read_replica", &self.read_replica)
             .finish()
     }
 }
@@ -441,5 +460,22 @@ mod tests {
         cfg.adapter_registry_token = String::new();
         let dbg = format!("{cfg:?}");
         assert!(dbg.contains("vault_token: \"\""), "empty vault_token shows empty: {dbg}");
+    }
+
+    // S8 — DATA_PLANE_READ_REPLICA is a standalone routing-capability flag: unset
+    // ⇒ false (byte-parity, reads stay on the primary); "1" ⇒ true.
+    #[test]
+    fn read_replica_flag_defaults_off_and_parses_on() {
+        std::env::remove_var("DATA_PLANE_READ_REPLICA");
+        assert!(
+            !ServerConfig::from_env().read_replica,
+            "unset DATA_PLANE_READ_REPLICA must default OFF (byte-parity)"
+        );
+        std::env::set_var("DATA_PLANE_READ_REPLICA", "1");
+        assert!(
+            ServerConfig::from_env().read_replica,
+            "DATA_PLANE_READ_REPLICA=1 must enable read-replica routing"
+        );
+        std::env::remove_var("DATA_PLANE_READ_REPLICA");
     }
 }
