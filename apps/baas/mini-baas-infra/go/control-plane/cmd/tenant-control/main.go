@@ -25,6 +25,8 @@ import (
 	"github.com/dlesieur/mini-baas/control-plane/internal/abuseguard"
 	"github.com/dlesieur/mini-baas/control-plane/internal/audit"
 	"github.com/dlesieur/mini-baas/control-plane/internal/backup"
+	"github.com/dlesieur/mini-baas/control-plane/internal/erase"
+	"github.com/dlesieur/mini-baas/control-plane/internal/ipguard"
 	"github.com/dlesieur/mini-baas/control-plane/internal/metering"
 	"github.com/dlesieur/mini-baas/control-plane/internal/orgs"
 	"github.com/dlesieur/mini-baas/control-plane/internal/packages"
@@ -232,6 +234,34 @@ func main() {
 	}
 	// ─── end D3 ───────────────────────────────────────────────────────────────
 
+	// ─── Track-D D4.4: HARD-ERASE / tenant teardown ────────────────────────────
+	// PROVABLE destruction of a tenant's data (today a teardown is SOFT-DELETE
+	// only — DELETE /v1/tenants/{id} flips status='deleted' and the rows stay).
+	// HARD-erase DROPs the per-tenant schema CASCADE (schema_per_tenant) or DELETEs
+	// the tenant's rows from the shared tables (shared_rls), revokes+deletes the
+	// tenant's API keys, then writes a TAMPER-EVIDENT D3 audit receipt
+	// (audit.Append onto the per-tenant hash chain — proof the erase happened that
+	// survives the data going away) AND an erasure_receipts row (migration 048).
+	//
+	// FLAG-GATED OFF = PARITY: erase.Mount is called ONLY when HARD_ERASE_ENABLED
+	// is truthy. When OFF (the default) Mount is never called, so POST
+	// /v1/tenants/{id}/erase is not registered and a request 404s — byte-identical
+	// to today's soft-delete-only baseline, the same discipline as the audit /
+	// backup blocks above. The erase service REUSES the D3 audit service (the
+	// receipt is sealed on the same chain D3 exposes), so the proof is verifiable
+	// through the existing /v1/audit/tenants/{id}/verify route.
+	if envBool("HARD_ERASE_ENABLED") {
+		erSvc := erase.NewService(db, audit.NewService(db), log)
+		// After an erase deletes the tenant's API keys, flush the verify fast-path
+		// cache so the credential dies immediately (not at the cache TTL).
+		erSvc.SetKeyCacheFlusher(svc.FlushVerifyCache)
+		erase.Mount(mux, erSvc, cfg.ServiceToken)
+		log.Info("hard-erase enabled (POST /v1/tenants/{id}/erase) — HARD_ERASE_ENABLED")
+	} else {
+		log.Info("hard-erase disabled (HARD_ERASE_ENABLED off) — /v1/tenants/{id}/erase not mounted; teardown is soft-delete only")
+	}
+	// ─── end D4.4 ───────────────────────────────────────────────────────────────
+
 	// ─── Track-D D1: ORGANIZATIONS / TEAMS / MEMBERS / INVITES / RBAC ──────────
 	// The keystone control-plane layer BETWEEN a human and a project(=tenant).
 	// Orgs sit ABOVE tenants; an org's RBAC matrix gates CONTROL-PLANE actions
@@ -273,6 +303,42 @@ func main() {
 		log.Info("organizations API disabled (ORG_MODEL_ENABLED off) — /v1/orgs* not mounted")
 	}
 	// ─── end D1 ───────────────────────────────────────────────────────────────
+
+	// ─── Track-D D2e: TENANT-CONFIGURABLE IP ALLOWLIST on the API edge ─────────
+	// A tenant restricts which source IPs/CIDRs may call its API. The decision is
+	// an EDGE check: an edge auth-request plugin (Kong) calls POST /v1/ipguard/check
+	// {tenant_id, ip} before forwarding a request; a tenant with NO allowlist rule
+	// is UNRESTRICTED (allow → opt-in), a tenant WITH ≥1 rule is restricted to the
+	// union of its CIDRs (an out-of-range IP → allow=false → the edge returns 403).
+	// The CIDR containment match runs IN GO (engine-agnostic), and the CRUD lives
+	// in the control plane (admin /v1/tenants/{id}/ip-allowlist + self-serve
+	// /v1/tenants/me/ip-allowlist). Migration 049 backs it.
+	//
+	// THE LOAD-BEARING CONSTRAINT (same as D1): enforcement lives ENTIRELY here in
+	// the control plane (an edge decision). It NEVER enters RequestIdentity, the
+	// RLS GUCs, or the data plane — so per-request isolation + SHARE_POOLS stay
+	// byte-untouched.
+	//
+	// FLAG-GATED OFF = PARITY: ipguard.Mount is called ONLY when
+	// TENANT_IP_ALLOWLIST_ENABLED is truthy. When OFF (the default) Mount is never
+	// called, none of the /v1/ipguard* or /v1/tenants/{id|me}/ip-allowlist routes
+	// are registered (404), and no allowlist is ever consulted — byte-identical to
+	// today, the same discipline as TENANT_SELFSERVE_ENABLED / TENANT_AUDIT_ENABLED
+	// / HARD_ERASE_ENABLED above. The self-serve CRUD is mounted only when ALSO
+	// TENANT_SELFSERVE_ENABLED (the tenants Service is the key→tenant resolver),
+	// exactly as backup narrows its self-serve surface.
+	if envBool("TENANT_IP_ALLOWLIST_ENABLED") {
+		ipsvc := ipguard.NewService(db)
+		ipguard.Mount(mux, ipsvc, cfg.ServiceToken)
+		if envBool("TENANT_SELFSERVE_ENABLED") {
+			ipguard.MountSelfServe(mux, ipsvc, svc)
+			log.Info("ip-allowlist self-serve enabled (/v1/tenants/me/ip-allowlist, API-key)")
+		}
+		log.Info("tenant IP allowlist enabled (POST /v1/ipguard/check + /v1/tenants/{id}/ip-allowlist) — TENANT_IP_ALLOWLIST_ENABLED")
+	} else {
+		log.Info("tenant IP allowlist disabled (TENANT_IP_ALLOWLIST_ENABLED off) — /v1/ipguard* + ip-allowlist routes not mounted")
+	}
+	// ─── end D2e ────────────────────────────────────────────────────────────────
 
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr(),

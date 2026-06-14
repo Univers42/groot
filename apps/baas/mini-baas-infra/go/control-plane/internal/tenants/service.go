@@ -345,6 +345,18 @@ func (s *Service) RevokeKey(ctx context.Context, slug, keyID string) error {
 	return nil
 }
 
+// FlushVerifyCache drops the local key-verify fast-path cache (and best-effort the
+// data plane's) so a credential invalidated out-of-band — e.g. a hard-erased tenant
+// (D4.4) — stops authenticating immediately instead of lingering until its TTL.
+func (s *Service) FlushVerifyCache() {
+	s.verifyC.flush()
+	if s.dataPlane != nil {
+		if err := s.dataPlane.evictVerify(context.Background()); err != nil {
+			s.log.Warn("flush verify cache: data-plane evict failed", "err", err)
+		}
+	}
+}
+
 // VerifyKey resolves a cleartext key to a tenant slug + scopes if valid.
 // Updates last_used_at on success. Constant-time hash compare.
 func (s *Service) VerifyKey(ctx context.Context, full string) (VerifyKeyResponse, error) {
