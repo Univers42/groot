@@ -12,18 +12,25 @@
 
 //! REST API handlers for event publishing and health checks.
 //!
-//! | Method | Path                | Description                    |
-//! |--------|---------------------|--------------------------------|
-//! | `POST` | `/v1/publish`       | Publish a single event         |
-//! | `POST` | `/v1/publish/batch` | Publish up to 1000 events      |
-//! | `GET`  | `/v1/health`        | Health check + connection stats|
+//! | Method | Path                | Description                       |
+//! |--------|---------------------|-----------------------------------|
+//! | `POST` | `/v1/publish`       | Publish a single event            |
+//! | `POST` | `/v1/publish/batch` | Publish up to 1000 events         |
+//! | `GET`  | `/v1/health`        | Health check + connection stats   |
+//! | `GET`  | `/v1/presence`      | List a topic's presence members   |
 
-use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
+use axum::{
+    extract::{Query, State},
+    http::StatusCode,
+    response::IntoResponse,
+    Json,
+};
 use bytes::Bytes;
 use realtime_core::{
-    BatchPublishRequest, BatchPublishResponse, EventEnvelope, HealthResponse, PublishRequest,
-    PublishResponse, TopicPath,
+    BatchPublishRequest, BatchPublishResponse, EventEnvelope, HealthResponse, PresenceMember,
+    PublishRequest, PublishResponse, TopicPath,
 };
+use serde::Deserialize;
 use tracing::{debug, error};
 
 use crate::ws_handler::AppState;
@@ -188,5 +195,56 @@ pub async fn prometheus() -> impl IntoResponse {
         StatusCode::OK,
         [("content-type", "text/plain; version=0.0.4; charset=utf-8")],
         crate::metrics::render_prometheus(),
+    )
+}
+
+/// Query string for `GET /v1/presence?topic=<topic>`.
+#[derive(Debug, Deserialize)]
+pub struct PresenceQuery {
+    /// The topic whose presence set is requested.
+    pub topic: String,
+}
+
+/// The presence query response: the topic and its current member list.
+#[derive(Debug, serde::Serialize)]
+pub struct PresenceResponse {
+    pub topic: String,
+    pub members: Vec<PresenceMember>,
+}
+
+/// `GET /v1/presence?topic=<topic>` — list a topic's presence members.
+///
+/// A5 cross-node merge: when the shared store is ON (`presence_shared` is
+/// `Some`, set by `REALTIME_PRESENCE_SHARED`) the list is read from Redis, so a
+/// member that joined on ANOTHER node is included — node B answers for a member
+/// that tracked on node A. When OFF (`None`, the parity default) it answers from
+/// this node's LOCAL in-process tracker exactly as a single node always has — so
+/// a second node simply does not see the first.
+///
+/// A topic only ever reads back its OWN key, so a member in channel X can never
+/// appear in a query for channel Y (no cross-channel leak by construction).
+pub async fn presence_query(
+    State(state): State<AppState>,
+    Query(q): Query<PresenceQuery>,
+) -> impl IntoResponse {
+    if q.topic.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "topic query parameter is required" })),
+        );
+    }
+    let members = match state.presence_shared.as_ref() {
+        // Cross-node: the MERGED set across all nodes (read from Redis).
+        Some(shared) => shared.members(&q.topic).await,
+        // Parity: this node's local view only — single-node behaviour.
+        None => state.presence.members(&q.topic),
+    };
+    debug!(topic = %q.topic, count = members.len(), "presence query");
+    (
+        StatusCode::OK,
+        Json(serde_json::json!(PresenceResponse {
+            topic: q.topic,
+            members,
+        })),
     )
 }

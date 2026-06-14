@@ -350,6 +350,12 @@ pub(super) async fn handle_track(
         user_id: auth.claims.as_ref().map(|c| c.sub.clone()),
         meta,
     };
+    // A5: mirror into the shared (Redis) store BEFORE the local track when the
+    // cross-node flag is ON, so a presence query on ANOTHER node sees this member.
+    // `None` at parity ⇒ this is skipped entirely (no Redis, byte-identical).
+    if let Some(shared) = state.presence_shared.as_ref() {
+        shared.track(&topic, &member).await;
+    }
     let members = state.presence.track(&topic, conn_id, member);
     debug!(conn_id = %conn_id, topic = %topic, count = members.len(), "TRACK (presence join)");
     publish_presence(&topic, members, auth, state, conn_id).await;
@@ -363,6 +369,11 @@ pub(super) async fn handle_untrack(
     auth: &AuthState,
     state: &AppState,
 ) -> Action {
+    // A5: drop from the shared store too so a presence query on ANOTHER node no
+    // longer lists this member. `None` at parity ⇒ skipped (byte-identical).
+    if let Some(shared) = state.presence_shared.as_ref() {
+        shared.untrack(&topic, &conn_id.to_string()).await;
+    }
     if let Some(members) = state.presence.untrack(&topic, conn_id) {
         debug!(conn_id = %conn_id, topic = %topic, count = members.len(), "UNTRACK (presence leave)");
         publish_presence(&topic, members, auth, state, conn_id).await;

@@ -50,6 +50,12 @@ pub struct AppState {
     /// changes are also published over the bus so a multi-node bus delivers the
     /// notification cluster-wide.
     pub presence: Arc<PresenceTracker>,
+    /// A5 cross-node presence backend (Redis). `Some` ONLY when the
+    /// `REALTIME_PRESENCE_SHARED` sub-flag is ON; `None` at parity — `TRACK`/
+    /// `UNTRACK` then only touch the local tracker, the presence query answers
+    /// from the local set, and no Redis connection is opened. Turning it ON makes
+    /// a member that joined on node A visible to a query served by node B.
+    pub presence_shared: Option<crate::presence_shared::SharedPresence>,
     /// B1d metering handle (`realtime.connection.seconds`). `Some` ONLY when the
     /// `REALTIME_METERING` sub-flag is ON; `None` at parity — the close path then
     /// records nothing, no flusher runs, no Redis connection is opened.
