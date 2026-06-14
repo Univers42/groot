@@ -82,13 +82,23 @@ func main() {
 		}
 	}()
 
-	go func() {
-		log.Info("scheduler runner starting", "tick", tick)
-		if err := runner.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			log.Error("runner ended", "err", err)
-			stop()
-		}
-	}()
+	// LIVE CRON (m96) — flag-gated OFF by default. The runner is the only part
+	// that AUTONOMOUSLY invokes functions; gating it OFF keeps the default stack
+	// byte-parity (no background invocation fires unless a human opts in). The
+	// HTTP CRUD surface above is unaffected, so schedule create/list/delete
+	// (exercised by m56 with enabled=false) is unchanged. Set
+	// FUNCTIONS_CRON_ENABLED=1 to fire due, enabled schedules.
+	if cronEnabled() {
+		go func() {
+			log.Info("scheduler runner starting (FUNCTIONS_CRON_ENABLED=1)", "tick", tick)
+			if err := runner.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				log.Error("runner ended", "err", err)
+				stop()
+			}
+		}()
+	} else {
+		log.Info("scheduler runner DISABLED (FUNCTIONS_CRON_ENABLED unset) — CRUD only, no autonomous firing")
+	}
 
 	<-ctx.Done()
 	log.Info("shutdown signal received")
@@ -106,6 +116,17 @@ func envDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// cronEnabled reports whether the autonomous schedule runner should start.
+// DEFAULT OFF (byte-parity): no background invocation fires unless opted in.
+func cronEnabled() bool {
+	switch os.Getenv("FUNCTIONS_CRON_ENABLED") {
+	case "1", "true", "TRUE", "True", "on", "ON", "yes":
+		return true
+	default:
+		return false
+	}
 }
 
 func healthcheck(cfg shared.Config) int {
