@@ -21,6 +21,8 @@ use data_plane_core::{
     RequestIdentity, SchemaDdlRequest, TxBeginRequest, TxHandle, WorkloadContext,
 };
 use data_plane_pool::{DefaultPoolRegistry, EnvMountResolver, ProviderConfig};
+#[cfg(feature = "dynamodb")]
+use data_plane_pool::DynamoEngineAdapter;
 #[cfg(feature = "http")]
 use data_plane_pool::HttpEngineAdapter;
 #[cfg(feature = "mongodb")]
@@ -267,6 +269,11 @@ impl AppState {
         }
         #[cfg(feature = "redis")]
         adapters.push(Arc::new(RedisEngineAdapter::new(resolver.clone())));
+        // 8th adapter (OFF by default): DynamoDB-compatible engine (AWS DynamoDB
+        // / DynamoDB-Local / ScyllaDB Alternator). cfg-gated so the default
+        // adapter set is byte-identical to today.
+        #[cfg(feature = "dynamodb")]
+        adapters.push(Arc::new(DynamoEngineAdapter::new(resolver.clone())));
         #[cfg(feature = "sqlite")]
         adapters.push(Arc::new(SqliteEngineAdapter::new(resolver.clone())));
         #[cfg(feature = "mssql")]
@@ -891,6 +898,11 @@ async fn run_query_inner(
         "mssql",
         #[cfg(feature = "http")]
         "http",
+        // 8th engine (OFF by default): DynamoDB-compatible adapter. cfg-gated so
+        // the default executable-engine allowlist is byte-identical; a `dynamodb`
+        // mount is dispatchable only in a `--features dynamodb` build.
+        #[cfg(feature = "dynamodb")]
+        "dynamodb",
     ];
     if !executable_engines.contains(&request.mount.engine.as_str()) {
         return not_implemented(
@@ -2421,6 +2433,15 @@ fn default_engines() -> Vec<EngineDescriptor> {
             engine: "http".to_string(),
             phase: "pool_v2_active".to_string(),
             capabilities: EngineCapabilities::http(),
+        },
+        // 8th engine (OFF by default): DynamoDB-compatible adapter. cfg-gated so
+        // the default `/v1/capabilities` descriptor is byte-identical to the
+        // 7-engine build; it appears ONLY when built `--features dynamodb`.
+        #[cfg(feature = "dynamodb")]
+        EngineDescriptor {
+            engine: "dynamodb".to_string(),
+            phase: "pool_v2_active".to_string(),
+            capabilities: EngineCapabilities::dynamodb(),
         },
     ]
 }

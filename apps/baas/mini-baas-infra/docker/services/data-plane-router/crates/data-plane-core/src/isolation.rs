@@ -148,7 +148,16 @@ impl EngineClass {
     fn of(engine: &str) -> Self {
         match engine {
             "postgresql" => Self::SearchPath,
-            "mysql" | "mongodb" | "redis" => Self::Namespace,
+            // DynamoDB joins the Namespace family (same owner/key-prefix model as
+            // redis): schema_per_tenant produces a UseNamespace the adapter
+            // consumes as a partition-key prefix segment `<namespace>:<owner>`.
+            // PARITY: the `_ => Unscoped` arm means an unknown engine already
+            // degrades to a no-op, so adding "dynamodb" changes behaviour ONLY
+            // for a mount whose engine is literally "dynamodb" AND isolation is
+            // schema_per_tenant — which cannot exist until the dynamodb feature
+            // is built and such a mount is provisioned. Every mount today is
+            // byte-identical.
+            "mysql" | "mongodb" | "redis" | "dynamodb" => Self::Namespace,
             // Unknown engines (and http) get no per-request scoping, which is
             // the safe (no-op) behaviour.
             _ => Self::Unscoped,
@@ -346,8 +355,9 @@ mod tests {
             ScopeDirective::SetSearchPath { schema: expected.clone() },
             "postgresql"
         );
-        // mysql + mongodb + redis → UseNamespace (per-tenant database / prefix)
-        for engine in ["mysql", "mongodb", "redis"] {
+        // mysql + mongodb + redis + dynamodb → UseNamespace (per-tenant
+        // database / key-prefix segment)
+        for engine in ["mysql", "mongodb", "redis", "dynamodb"] {
             let m = mount(engine, "acme", Some("schema_per_tenant"));
             assert_eq!(
                 Isolation::SchemaPerTenant.scope(&m, &id),

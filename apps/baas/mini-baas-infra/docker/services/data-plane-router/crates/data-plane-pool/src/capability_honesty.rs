@@ -91,3 +91,31 @@ fn transaction_flag_matches_begin_implementation() {
     assert!(!descriptor("redis").transactions, "redis begin() returns NotImplemented");
     assert!(!descriptor("http").transactions, "http begin() returns NotImplemented");
 }
+
+// The 8th adapter (OFF by default). This block compiles ONLY under
+// `--features dynamodb`, so the default test battery is byte-identical to the
+// 9-engine matrix above. The descriptor↔SUPPORTED_OPS binding for dynamodb is
+// read from the SAME `crate::dynamodb::SUPPORTED_OPS` const the dispatch gate
+// uses (no parallel hand-copy), and the runtime boot-time honesty check in
+// `data-plane-server::routes::assert_capability_honesty` additionally covers it
+// once the adapter is in the live adapter list.
+#[cfg(feature = "dynamodb")]
+#[test]
+fn dynamodb_descriptor_advertises_exactly_what_dispatch_implements() {
+    use data_plane_core::EngineCapabilities;
+    let caps = EngineCapabilities::dynamodb();
+    let real = crate::dynamodb::SUPPORTED_OPS;
+    for kind in &DataOperationKind::ALL {
+        assert_eq!(
+            caps.supports_op(kind),
+            real.contains(kind),
+            "dynamodb: descriptor.supports_op({kind:?})={} but dispatch implements={} — the capability descriptor must not lie",
+            caps.supports_op(kind),
+            real.contains(kind),
+        );
+    }
+    // The honest headline + the single excluded op (aggregate).
+    assert!(caps.transactions, "dynamodb begin() returns a real TransactWriteItems-backed TxHandle");
+    assert!(caps.native_idempotency, "ClientRequestToken — engine-guaranteed exactly-once");
+    assert!(!caps.aggregate, "DynamoDB has no server-side aggregate (OLAP = export bridge)");
+}

@@ -29,6 +29,12 @@ redis = ["data-plane-pool/redis"]
 sqlite = ["data-plane-pool/sqlite"]
 mssql = ["data-plane-pool/mssql"]
 http = ["data-plane-pool/http"]
+# 8th engine (OFF by default — NOT in `default` or `engines-full`, so the
+# shipped router image is byte-identical): DynamoDB-compatible adapter (AWS
+# DynamoDB / DynamoDB-Local / ScyllaDB Alternator). Forwards to the pool crate's
+# optional `dynamodb` feature; the AWS SDK is never compiled or fetched unless
+# this is explicitly enabled.
+dynamodb = ["data-plane-pool/dynamodb"]
 # Outbox emission + server-backed automations (both talk to the control
 # Postgres; the automations webhook action reuses the http engine's SSRF
 # guard, hence the pool/http requirement).
