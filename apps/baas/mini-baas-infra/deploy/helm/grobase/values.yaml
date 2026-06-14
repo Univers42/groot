@@ -87,6 +87,39 @@ networkPolicy:
   # CIDR/namespace the ingress controller lives in (so kong can be reached).
   ingressControllerNamespace: ingress-nginx
 
+# ── Zero-downtime app deploys (Track-C / C1) ────────────────────────────────
+# Rollout strategy for the STATELESS Deployment planes (data/control/realtime/
+# kong). The safe default is a surge-then-drain RollingUpdate that never lets the
+# old ReplicaSet shrink below full capacity:
+#   maxUnavailable: 0  → never take a Ready pod out before its replacement is Ready
+#   maxSurge: 1        → bring exactly one extra pod up first
+# Combined with the readiness probes already declared per plane (a pod only joins
+# the Service Endpoints once Ready), a `helm upgrade` rolls pods one-at-a-time
+# with continuous capacity — i.e. zero-downtime for app (image/env) changes.
+# This applies ONLY to kind=Deployment planes; StatefulSets keep K8s's ordered,
+# one-at-a-time default updateStrategy (changing that needs an operator — C4).
+#
+# Proof: documented in deploy/ha/README.md (zero-downtime row); the rendered
+# strategy is visible in `helm template`. Per-plane override: set
+# planes.<name>.strategy to a full Deployment.spec.strategy object.
+deployStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 0
+    maxSurge: 1
+
+# ── PodDisruptionBudget (Track-C / C1) ──────────────────────────────────────
+# Protects availability during VOLUNTARY disruptions (node drain / cluster
+# upgrade / autoscaler eviction) by capping how many pods of a stateless plane
+# can be down at once. minAvailable: 1 means a drain can never evict the last
+# replica of a plane — the kubelet waits. Rendered only for kind=Deployment
+# planes with replicas>1 (or HPA minReplicas>1); a single-replica plane gets no
+# PDB (one would make a drain hang forever). OFF by default to keep the baseline
+# byte-parity; turn on for HA clusters.
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1            # integer or a percentage string like "50%"
+
 # ── Planes ──────────────────────────────────────────────────────────────────
 # Each plane: workload kind, replicas/autoscaling, image, ports, resources,
 # probe, and (for stateful) a PVC. Disabling a plane drops all its manifests.

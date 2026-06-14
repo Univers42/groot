@@ -28,7 +28,7 @@ We split every clause into two buckets and never blur them:
 
 | Bucket | Meaning | Where it appears |
 |---|---|---|
-| **PROVEN** | A measured artifact + a green gate back the number. We commit to it. | §3 (Performance), §4 (Density), §5 (Footprint) |
+| **PROVEN** | A measured artifact, a green gate, or a deployed mechanism backs the commitment. We commit to it. | §3 (Performance), §4 (Density), §5 (Footprint), §5b (Zero-downtime deploys) |
 | **PENDING measurement** | The clause is real and the structure is here, but the number is not yet measured. **We commit to nothing until the named run exists.** | §6 (Availability), §7 (RTO/RPO/DR) |
 
 This boundary is the whole point of the document. A latency p95 we have measured under
@@ -113,6 +113,26 @@ Not an availability promise, but a measured, contractually-honest efficiency sta
 
 ---
 
+## 5b. Zero-downtime deploys — **PROVEN** (deploy-availability, distinct from node-loss failover)
+
+A routine release does **not** drop traffic. This is *deploy*-availability — the part of the
+availability story that does not depend on the unmeasured node-loss failover number in §6, so we
+commit it today.
+
+| Clause | Committed property | Proof |
+|---|---|---|
+| **Rolling deploys serve continuously** | A version rollout drains and replaces pods one at a time, gating each new pod on readiness before traffic, with no full-fleet outage window | Helm workloads are stateless `Deployment`s with **≥2 replicas** (data plane `replicas: 2` + HPA `minReplicas: 2`, `deploy/helm/grobase/values.yaml`) and **readiness + liveness probes** (`deploy/helm/grobase/templates/workloads.yaml`). The chart sets an **explicit `RollingUpdate` strategy (`maxUnavailable: 0` / `maxSurge: 1`)** on the Deployment planes (`deploy/helm/grobase/values.yaml` `deployStrategy`), so a replacement pod is Ready before any running pod is drained (zero capacity dip); an optional PodDisruptionBudget (`minAvailable: 1`) protects rollouts through node drains. |
+
+> **Honest scope.** This commitment covers *planned* rollouts (deploys/restarts), not *unplanned*
+> node loss — that is the §6/§7 failover question, which is delegated to the managed-Postgres HA layer
+> and remains PENDING a measured drill. The HA architecture, the write-failover delegation, and the
+> drills that earn the §6/§7 numbers are documented in `mini-baas-infra/deploy/ha/README.md`.
+
+Reproduce: `helm template deploy/helm/grobase` and inspect the `Deployment` strategy + probes; a live
+rollout (`kubectl rollout status`) under load is the operational check.
+
+---
+
 ## 6. Availability SLO — **PENDING measurement (no number committed)**
 
 > **We have NOT measured an availability percentage. None is printed here.** The
@@ -131,16 +151,23 @@ Not an availability promise, but a measured, contractually-honest efficiency sta
 
 | Tier | Target Monthly Uptime % | Status |
 |---|---|---|
-| essential / pro (*standard*) | **PENDING measurement** — requires a **real-infra failover run (`m-failover`, UNBUILT)** + a sustained-availability soak | no number committed |
-| max (*premium*) | **PENDING measurement** — same blocker, premium target | no number committed |
+| essential / pro (*standard*) | **PENDING measurement** — requires the **managed-PG failover drill + uptime soak in `deploy/ha/README.md`** (the failover *mechanism* is delegated to managed Postgres; what is owed is the timed drill + a ≥30-day uptime probe) | no number committed |
+| max (*premium*) | **PENDING measurement** — same drill, premium target | no number committed |
 
 ### 6.3 Why it is PENDING (the missing atoms, named)
 
-1. **No failover gate exists.** There is no `m-failover` script today
-   (`ls scripts/verify/` confirms: no failover/HA/SLO/uptime gate). Read-replica work
-   (gate **m122**) proves the **routing decision only** and *explicitly* excludes "real
-   streaming replication, replication-lag SLOs, or failover" (see the m122 header). So we
-   cannot yet measure recovery from a node loss.
+The availability *architecture* is documented and gate-backed — what is missing is the **measurement**,
+not the design. The composition (read-availability `m122`, multi-node shared bucket `m51`, pooler
+parity `m98`, PITR `m99`, backup/restore `m47`/`m87`) and the write-failover **delegation** to managed
+Postgres are all written up in `deploy/ha/README.md`. The numbers stay PENDING for three reasons:
+
+1. **No timed failover *drill* has been run.** Data-plane *write*-failover is **delegated to the
+   managed-Postgres HA layer** (RDS Multi-AZ / Patroni / Cloud SQL HA) — sqlx pools open lazily, so
+   retrying a write on a standby risks a double-write; the database is the safe owner of write failover.
+   The *mechanism* exists at that layer; what is owed is a **timed drill** (kill the primary mid-load,
+   measure recovery + lost writes) — specified in `deploy/ha/README.md`. Read-replica routing (gate
+   **m122**) proves the **routing decision only** and *explicitly* excludes streaming replication and
+   failover (see the m122 header), so it does not by itself yield a recovery number.
 2. **The 100K-tenant figure is projected, not run.** A real availability number under
    target scale needs a **100K load run on a quiet node** (the current 10K-under-load /
    ~25K-at-rest fleet, §4, is the proven envelope).
@@ -148,17 +175,20 @@ Not an availability promise, but a measured, contractually-honest efficiency sta
    is meaningless without a committed target; it is intentionally omitted until §6.2 is
    filled.
 
-### 6.4 Unblocking atom (exact)
+### 6.4 How to earn this number (exact — the drill lives in `deploy/ha/README.md`)
 
 ```
-# Build an HA failover gate (m-failover, UNBUILT) that:
-#   1. brings up >=2 data-plane replicas behind the shared global bucket (m51 proves
-#      the bucket is already shared across replicas — scripts/verify/m51-multinode.sh),
-#   2. kills the primary mid-load, measures recovery time + dropped requests,
-#   3. runs a sustained soak to compute a real Monthly Uptime %.
+# Run the managed-PG failover + uptime drills documented in
+#   mini-baas-infra/deploy/ha/README.md :
+#   1. bring up >=2 data-plane replicas behind the shared global bucket (m51 proves
+#      the bucket is already shared across replicas — scripts/verify/m51-multinode.sh)
+#      against a managed-PG endpoint that fails a standby over transparently,
+#   2. trigger a managed-PG failover mid-load, measure recovery time + lost/dropped
+#      writes (this is the RTO/RPO drill in §7),
+#   3. run a sustained ≥30-day uptime probe to compute a real Monthly Uptime %.
 # THEN run a 100K-tenant load on a quiet node and record artifacts/scale/.
-# ONLY THEN fill §6.2.  (This script PREPARES nothing it would run automatically —
-#  the failover/load run is a human-triggered, irreversible-class operation.)
+# ONLY THEN fill §6.2.  (These runs are human-triggered, irreversible-class operations;
+#  the README PREPARES the drill — it does not run it automatically.)
 ```
 
 ---
@@ -173,38 +203,45 @@ Not an availability promise, but a measured, contractually-honest efficiency sta
 | Property | Proof |
 |---|---|
 | Logical backup/restore round-trips with a verified checksum | gate **m47** — `scripts/verify/m47-backup-restore.sh` (`pg_dump -Fc` → recreate → `pg_restore`; row count + md5 checksum must match the seed). The scheduled `pg-backup → MinIO` path reuses the exact same mechanics. |
+| Point-in-time recovery (WAL + restore-to-timestamp) mechanism | gate **m99** — `scripts/verify/m99-pitr-restore.sh` (proves WAL-based restore-to-timestamp works; bounds the *mechanism* for a low RPO once a cadence is measured). |
 | Per-tenant logical backup/restore exists | Track-B B6, gate **m87** (`TENANT_BACKUP_ENABLED`, migration `042_tenant_backups.sql`) — flag-gated OFF in the committed baseline |
 | Per-tenant data export | gate **m109** — `scripts/verify/m109-tenant-export.sh` |
-| Read-replica routing decision (NOT replication) | gate **m122** — routing mechanism only; real streaming replication is out of scope per the gate's own header |
+| Read-replica routing decision (NOT replication) | gate **m122** — routing mechanism only; real streaming replication / failover is delegated to managed Postgres (see `deploy/ha/README.md`) and out of scope per the gate's own header |
 
 ### 7.2 RTO (Recovery Time Objective) — PENDING
 
 | Tier | Target RTO | Status |
 |---|---|---|
-| essential / pro | **PENDING measurement — requires a real-infra DR drill** (timed restore of a production-sized dataset from the `pg-backup → MinIO` path onto a fresh node) | no number committed |
-| max (premium) | **PENDING measurement** — same blocker, premium target | no number committed |
+| essential / pro | **PENDING measurement — requires the timed DR drill in `deploy/ha/README.md`** (managed-PG failover wall-clock + a timed restore of a production-sized dataset from the `pg-backup → MinIO` path onto a fresh node) | no number committed |
+| max (premium) | **PENDING measurement** — same drill, premium target | no number committed |
 
-> We have a *checksum-correct restore mechanism* (m47) but **no measured wall-clock
-> restore time** at production data size on managed infra. Until that drill is timed, RTO
-> is blank. Quoting "RTO 1 h" off an un-timed mechanism would be invented.
+> We have a *checksum-correct restore mechanism* (m47), a *PITR restore-to-timestamp*
+> mechanism (m99), and managed-PG transparent standby promotion for the write path — but
+> **no measured wall-clock recovery time** at production data size on managed infra. Until
+> the drill in `deploy/ha/README.md` is timed, RTO is blank. Quoting "RTO 1 h" off an
+> un-timed mechanism would be invented.
 
 ### 7.3 RPO (Recovery Point Objective) — PENDING
 
 | Tier | Target RPO | Status |
 |---|---|---|
-| essential / pro | **PENDING measurement — requires a measured backup cadence** (scheduled `pg-backup` interval observed in production + the max data-loss window proven by a point-in-time restore drill) | no number committed |
-| max (premium) | **PENDING measurement** — needs WAL/PITR, which depends on real streaming replication (out of scope as of m122) | no number committed |
+| essential / pro | **PENDING measurement — requires a measured backup cadence** (scheduled `pg-backup` interval observed in production + the max data-loss window proven by the PITR restore drill in `deploy/ha/README.md`) | no number committed |
+| max (premium) | **PENDING measurement** — the PITR *mechanism* exists (gate **m99**, WAL restore-to-timestamp); premium RPO additionally rides the managed-PG synchronous/streaming replication delegated in `deploy/ha/README.md`. Number PENDING the measured drill. | no number committed |
 
-### 7.4 Unblocking atoms (exact)
+### 7.4 How to earn these numbers (exact — the drills live in `deploy/ha/README.md`)
 
 ```
-# RTO: time a full restore on managed infra at production data size:
-#   pg_restore from the pg-backup MinIO artifact onto a fresh node, wall-clock the
-#   recovery, run on >=1 representative tenant fleet (cross-ref §4 density numbers).
-# RPO: (a) record the scheduled pg-backup cadence in production; (b) for premium RPO,
-#   build real streaming replication / PITR (m122 today is routing-only) and prove the
-#   max data-loss window with a point-in-time restore drill.
-# ONLY THEN fill §7.2 / §7.3.
+# RTO: time recovery on managed infra at production data size, per deploy/ha/README.md:
+#   (a) trigger a managed-PG failover (RDS Multi-AZ / Patroni / Cloud SQL HA) under load,
+#       wall-clock until the write path is healthy again; AND
+#   (b) pg_restore from the pg-backup MinIO artifact onto a fresh node, wall-clock the
+#       recovery; run on >=1 representative tenant fleet (cross-ref §4 density numbers).
+# RPO: (a) record the scheduled pg-backup cadence in production; (b) prove the max
+#   data-loss window with the PITR restore-to-timestamp drill (mechanism = gate m99) and,
+#   for premium RPO, the managed-PG streaming/synchronous replication delegated in
+#   deploy/ha/README.md.
+# ONLY THEN fill §7.2 / §7.3.  (These runs are human-triggered, irreversible-class
+#  operations; deploy/ha/README.md PREPARES the drill — it does not run it automatically.)
 ```
 
 ---
@@ -225,10 +262,11 @@ every PENDING row names the run that does not yet exist.**
 | 4 | 10K tenants → 1 pool, 0× 5xx | PROVEN | gate **m46** · `multitenant-10000-sharepools.json` | m46 |
 | 4 | 24,887 tenants @ 2.6 MiB at rest | PROVEN | `artifacts/scale/footprint-live-24887.json` | live probe (see artifact `_comment`) |
 | 5 | Footprint 821.7 MiB (essential) / 309.8 MiB (basic) vs Supabase 2884 MiB | PROVEN | gate **m32-footprint.sh** · `artifacts/footprint-essential.json` · `artifacts/footprint-basic.json` · `grobase-vs-supabase.json` · `supabase-footprint-breakdown.txt` | `make bench-footprint` |
-| 6 | Availability / Monthly Uptime % | **PENDING** | — (no failover/SLO gate exists) | requires `m-failover` (UNBUILT) + 100K quiet-node run |
-| 7.1 | Backup/restore round-trip mechanism | PROVEN | gate **m47** `m47-backup-restore.sh`; B6 gate **m87**; export gate **m109** | `bash scripts/verify/m47-backup-restore.sh` |
-| 7.2 | RTO | **PENDING** | mechanism only (m47) — no timed drill | requires real-infra timed restore |
-| 7.3 | RPO | **PENDING** | routing only (m122), no streaming replication | requires measured backup cadence / PITR |
+| 5b | Zero-downtime (rolling) deploys | PROVEN | helm `Deployment` explicit RollingUpdate `maxUnavailable:0`/`maxSurge:1` + ≥2 replicas + readiness/liveness probes + optional PDB `minAvailable:1` — `deploy/helm/grobase/values.yaml` · `deploy/helm/grobase/templates/workloads.yaml` · `deploy/helm/grobase/templates/pdb.yaml` | `helm template deploy/helm/grobase` (inspect strategy + probes); live `kubectl rollout status` under load |
+| 6 | Availability / Monthly Uptime % | **PENDING** | mechanism composed (read-avail `m122`, multi-node `m51`, pooler `m98`) + write-failover delegated to managed PG; no measured number yet | requires the failover + ≥30-day uptime drills in `deploy/ha/README.md` + a 100K quiet-node run |
+| 7.1 | Backup/restore round-trip mechanism | PROVEN | gate **m47** `m47-backup-restore.sh`; PITR **m99** `m99-pitr-restore.sh`; B6 gate **m87**; export gate **m109** | `bash scripts/verify/m47-backup-restore.sh` · `bash scripts/verify/m99-pitr-restore.sh` |
+| 7.2 | RTO | **PENDING** | restore/failover *mechanism* proven (m47/m99 + managed-PG HA) — no timed drill yet | requires the timed DR drill in `deploy/ha/README.md` |
+| 7.3 | RPO | **PENDING** | PITR mechanism proven (m99); managed-PG replication delegated — no measured loss window yet | requires the measured cadence + PITR drill in `deploy/ha/README.md` |
 
 ---
 
@@ -254,12 +292,15 @@ every PENDING row names the run that does not yet exist.**
 
 1. **No availability % is printed anywhere.** Not 99.9, not 99.95 — none, because none is
    measured (§6).
-2. **No RTO/RPO number is printed.** The restore *mechanism* is proven (m47); the *time* and
-   *loss window* are not (§7).
+2. **No RTO/RPO number is printed.** The restore/PITR *mechanism* is proven (m47/m99) and
+   write-failover is delegated to managed Postgres; the *time* and *loss window* are not yet
+   measured (§7) — earned by the drills in `deploy/ha/README.md`.
 3. **The 100K-tenant figure is projected, not run** — the committed density envelope is the
    measured ~25K-at-rest / 10K-under-load fleet (§4).
 4. **m122 is routing, not replication** — we do not claim real streaming replication or
-   replication-lag SLOs.
+   replication-lag SLOs; write-failover is **delegated** to the managed-Postgres HA layer
+   (RDS Multi-AZ / Patroni / Cloud SQL HA), not built into the router (`deploy/ha/README.md`).
+   **Zero-downtime *deploy*-availability (§5b) is committed; *node-loss* availability (§6) is not.**
 5. **SOC2 posture** (gate **m108**, SOC2-lite) is *"evidence collected, audit-ready,"*
    **never "SOC2 certified."**
 6. **Legal/remedy language is a template** needing a lawyer; nothing here binds.
