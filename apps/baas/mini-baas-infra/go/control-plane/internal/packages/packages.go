@@ -36,6 +36,44 @@ type Limits struct {
 	// stamped onto capability_overrides when present, so absent tiers behave
 	// exactly as today.
 	MaxRows *uint32 `json:"max_rows,omitempty"`
+	// Quota (Track-B B2) is the optional CUMULATIVE per-period usage cap the
+	// control-plane QuotaGuard enforces against public.tenant_usage (B1). A nil
+	// pointer / omitted key means "unlimited" — the byte-parity pre-B2 path (no
+	// tenant is ever over quota). Distinct from rps/burst (per-request rate, m51)
+	// and max_rows (per-query rows, A6): quota is the period-cumulative budget.
+	Quota *Quota `json:"quota,omitempty"`
+}
+
+// Quota is one tier's cumulative usage budget per rolling period (Track-B B2).
+// The QuotaGuard sums public.tenant_usage for the metered metric over the
+// current period and rejects (via the data plane, 402) a tenant whose summed
+// qty exceeds the cap. ONLY the dimensions packages.json actually caps are
+// enforced; a zero/absent cap on a metric is "unlimited" for that metric.
+type Quota struct {
+	// Period is the rolling window the cap applies to: "month" (default),
+	// "day", or "hour". The QuotaGuard derives the window start from this.
+	Period string `json:"period"`
+	// QueryCount caps metered read-requests (B1 `query.count`) per period. 0 /
+	// omitted = unlimited for this metric. This is the dimension packages.json
+	// caps today; adding storage.bytes / function.invocations is one field each.
+	QueryCount uint64 `json:"query.count,omitempty"`
+}
+
+// QueryCountCap returns the per-period query.count cap and whether it is set
+// (a positive cap). A nil Quota or a zero cap means "unlimited" (parity).
+func (p Package) QueryCountCap() (uint64, bool) {
+	if p.Limits.Quota == nil || p.Limits.Quota.QueryCount == 0 {
+		return 0, false
+	}
+	return p.Limits.Quota.QueryCount, true
+}
+
+// QuotaPeriod returns the configured period, defaulting to "month".
+func (p Package) QuotaPeriod() string {
+	if p.Limits.Quota == nil || p.Limits.Quota.Period == "" {
+		return "month"
+	}
+	return p.Limits.Quota.Period
 }
 
 // PoolPolicy bounds a tenant's footprint: connection-pool size + how many
@@ -64,8 +102,8 @@ type Addon struct {
 
 // Manifest is the whole tier catalog.
 type Manifest struct {
-	Version        int                `json:"version"`
-	DefaultPackage string             `json:"default_package"`
+	Version        int    `json:"version"`
+	DefaultPackage string `json:"default_package"`
 	// Aliases maps legacy tenants.plan values (free/pro/enterprise — the live
 	// CHECK constraint) onto tier names, so tiering needs no destructive plan
 	// migration: free→essential, enterprise→max.

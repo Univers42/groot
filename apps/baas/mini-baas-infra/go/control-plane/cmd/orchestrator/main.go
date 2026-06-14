@@ -86,6 +86,11 @@ func main() {
 		// orchestrator is byte-parity with today. The default-all selection thus
 		// stays parity until the flag flips.
 		"metering": metering.New(log, db),
+		// quota enforcement (Track-B B2): guarded internally by QUOTA_ENFORCEMENT
+		// (default OFF). Like metering, registered unconditionally is safe — when
+		// the flag is off Init/Run are no-ops (no Redis, no evaluation, no
+		// `quota:over` set written), so the orchestrator is byte-parity with today.
+		"quota-guard": metering.NewQuotaGuard(log, db),
 	}
 	enabled := selectServices(available, os.Getenv("ORCHESTRATOR_SERVICES"))
 	if len(enabled) == 0 {

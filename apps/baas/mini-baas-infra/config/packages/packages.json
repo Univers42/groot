@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "_comment": "Source of truth for BaaS service tiers. The control plane embeds a byte-identical copy at go/control-plane/internal/packages/packages.json (m28 asserts they match). 'capabilities' is a NARROWING mask: a false flag removes a capability the engine otherwise has; the Rust planner (apply_capability_overrides) can never widen past the engine descriptor. 'engines' gates mount registration. 'limits' feeds the per-tenant token bucket. 'pool_policy.max_mounts' caps how many databases a tenant may register. Addons map 1:1 to compose planes.",
+  "_comment": "Source of truth for BaaS service tiers. The control plane embeds a byte-identical copy at go/control-plane/internal/packages/packages.json (m28 asserts they match). 'capabilities' is a NARROWING mask: a false flag removes a capability the engine otherwise has; the Rust planner (apply_capability_overrides) can never widen past the engine descriptor. 'engines' gates mount registration. 'limits' feeds the per-tenant token bucket. 'pool_policy.max_mounts' caps how many databases a tenant may register. Addons map 1:1 to compose planes. 'limits.quota' (Track-B B2) is the CUMULATIVE per-period usage cap the control-plane QuotaGuard enforces against public.tenant_usage (B1): {period:'month', 'query.count':N} caps metered read-requests per rolling period; the data plane rejects an over-quota tenant with 402. ABSENT quota = unlimited (parity — the byte-identical pre-B2 path); rps/burst (m51) and max_rows (A6) remain the per-request caps, quota is the cumulative one.",
   "_measured": "v2 rps/burst are derived from bench-capacity (artifacts/bench/capacity-essential.json, 2026-06-11): a single mount sustains ~400 rps of reads at p95 < 2 ms before the connection-pool cliff (500+ rps → p99 10s + 5xx). Advertised rps = floor(measured_ceiling × fair_share × 0.5), burst = 2×rps, so a single tenant never alone saturates its pool. max's 800 rps assumes the per-tier DATA_PLANE_MAX_POOLS policy + supavisor multiplexing (B4); horizontal scale lifts it further. See wiki/offer-sheet-v2.md.",
   "default_package": "essential",
   "_aliases_comment": "free→nano (the cheapest shape — v1 mapped free onto essential, the ~$13/mo tier, which was upside down). enterprise→max. 'pro'/'basic'/'essential' resolve directly. An additive migration widens the tenants.plan CHECK so nano/basic become assignable.",
@@ -25,7 +25,7 @@
         "ddl": false,
         "introspect": true
       },
-      "limits": { "rps": 50, "burst": 100, "max_rows": 1000 },
+      "limits": { "rps": 50, "burst": 100, "max_rows": 1000, "quota": { "period": "month", "query.count": 100000 } },
       "pool_policy": { "max_conn": 1, "max_mounts": 1 },
       "security_mode": "baseline",
       "addons": []
@@ -46,7 +46,7 @@
         "ddl": false,
         "introspect": true
       },
-      "limits": { "rps": 100, "burst": 200, "max_rows": 5000 },
+      "limits": { "rps": 100, "burst": 200, "max_rows": 5000, "quota": { "period": "month", "query.count": 500000 } },
       "pool_policy": { "max_conn": 4, "max_mounts": 1 },
       "security_mode": "baseline",
       "addons": []
@@ -67,7 +67,7 @@
         "ddl": false,
         "introspect": true
       },
-      "limits": { "rps": 200, "burst": 400, "max_rows": 20000 },
+      "limits": { "rps": 200, "burst": 400, "max_rows": 20000, "quota": { "period": "month", "query.count": 2000000 } },
       "pool_policy": { "max_conn": 6, "max_mounts": 2 },
       "security_mode": "baseline",
       "addons": []
@@ -88,7 +88,7 @@
         "ddl": true,
         "introspect": true
       },
-      "limits": { "rps": 400, "burst": 800, "max_rows": 50000 },
+      "limits": { "rps": 400, "burst": 800, "max_rows": 50000, "quota": { "period": "month", "query.count": 10000000 } },
       "pool_policy": { "max_conn": 10, "max_mounts": 10 },
       "security_mode": "baseline",
       "addons": ["realtime", "analytics"]
