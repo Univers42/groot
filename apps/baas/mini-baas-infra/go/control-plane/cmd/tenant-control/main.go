@@ -23,8 +23,10 @@ import (
 	"time"
 
 	"github.com/dlesieur/mini-baas/control-plane/internal/abuseguard"
+	"github.com/dlesieur/mini-baas/control-plane/internal/audit"
 	"github.com/dlesieur/mini-baas/control-plane/internal/backup"
 	"github.com/dlesieur/mini-baas/control-plane/internal/metering"
+	"github.com/dlesieur/mini-baas/control-plane/internal/orgs"
 	"github.com/dlesieur/mini-baas/control-plane/internal/packages"
 	"github.com/dlesieur/mini-baas/control-plane/internal/provision"
 	"github.com/dlesieur/mini-baas/control-plane/internal/shared"
@@ -206,6 +208,71 @@ func main() {
 	} else {
 		log.Info("abuse guard disabled (ABUSE_GUARD_ENABLED off) — /v1/abuse/* not mounted")
 	}
+
+	// ─── Track-D D3: tenant-facing TAMPER-EVIDENT audit logs ──────────────────
+	// A hash-chained, engine-agnostic audit trail (migration 047) + a tenant-
+	// facing query/export/verify API. Each event seals a per-tenant chain link
+	// hash = sha256(prev_hash || canonical(row)); a tamper (edited payload,
+	// deleted/reordered row) breaks the chain at exactly that link, which the
+	// verify route reports. The chain is computed IN GO over the stored rows, so
+	// it is independent of the data engine.
+	//
+	// FLAG-GATED OFF = PARITY: audit.Mount is called ONLY when
+	// TENANT_AUDIT_ENABLED is truthy. When OFF (the default) Mount is never
+	// called, so none of the /v1/audit* routes are registered and a request 404s,
+	// and no audit row is ever written — byte-identical to today, the same
+	// discipline as TENANT_SELFSERVE_ENABLED / TENANT_BACKUP_ENABLED /
+	// ABUSE_GUARD_ENABLED above. The {id} in every route is re-bound in the SQL
+	// WHERE, so a tenant can never read or verify another tenant's chain.
+	if envBool("TENANT_AUDIT_ENABLED") {
+		audit.Mount(mux, audit.NewService(db), cfg.ServiceToken)
+		log.Info("tenant audit log enabled (/v1/audit/tenants/{id}/events|export|verify)")
+	} else {
+		log.Info("tenant audit log disabled (TENANT_AUDIT_ENABLED off) — /v1/audit* not mounted")
+	}
+	// ─── end D3 ───────────────────────────────────────────────────────────────
+
+	// ─── Track-D D1: ORGANIZATIONS / TEAMS / MEMBERS / INVITES / RBAC ──────────
+	// The keystone control-plane layer BETWEEN a human and a project(=tenant).
+	// Orgs sit ABOVE tenants; an org's RBAC matrix gates CONTROL-PLANE actions
+	// (provision a project, invite a member, change plan), and org-scoped project
+	// creation DELEGATES to the EXISTING reconciler verbatim (a capability gate
+	// before, an org_id stamp after — the reconcile itself is byte-identical to
+	// /v1/provision). Migrations 043 (orgs/org_members/org_invites + nullable
+	// tenants.org_id) + 044 (per-org billing rollup) back it.
+	//
+	// THE LOAD-BEARING CONSTRAINT (D-026): org-scoping lives ENTIRELY here in the
+	// control plane. It NEVER enters RequestIdentity, the RLS GUCs, or the data
+	// plane in any way — so per-request isolation + SHARE_POOLS stay byte-
+	// untouched. The org RBAC gate is a control-plane decision; it never consults
+	// or modifies the data-plane ABAC PDP.
+	//
+	// FLAG-GATED OFF = PARITY: orgs.Mount is called ONLY when ORG_MODEL_ENABLED is
+	// truthy. When OFF (the default) Mount is never called, so none of the
+	// /v1/orgs* routes are registered (404) and no orgs/org_members/org_invites
+	// row is ever written — byte-identical to today, the same discipline as
+	// TENANT_SELFSERVE_ENABLED / TENANT_BACKUP_ENABLED / ABUSE_GUARD_ENABLED /
+	// TENANT_AUDIT_ENABLED above. The org handlers REUSE the existing reconciler +
+	// tenant service + jwtVerifier — no new data path, just a new authorization
+	// gate above the existing provision call. A nil jwtVerifier (no
+	// GOTRUE_JWT_SECRET) leaves the org routes mounted but every call 501s, since
+	// an org decision is always a human (JWT) decision.
+	if envBool("ORG_MODEL_ENABLED") {
+		osvc := orgs.NewService(db, log)
+		// Pass the org JWT seam ONLY when a verifier is configured. A typed-nil
+		// *tenants.JWTVerifier boxed into the interface is non-nil (the classic Go
+		// nil-interface trap), which would make authJWT call Verify on a nil
+		// pointer; passing an untyped nil keeps the rt.jwt == nil guard honest.
+		if jwtVerifier != nil {
+			orgs.Mount(mux, osvc, svc, reconciler, jwtVerifier, cfg.ServiceToken)
+		} else {
+			orgs.Mount(mux, osvc, svc, reconciler, nil, cfg.ServiceToken)
+		}
+		log.Info("organizations API enabled (/v1/orgs*) — ORG_MODEL_ENABLED", "jwt", jwtVerifier != nil)
+	} else {
+		log.Info("organizations API disabled (ORG_MODEL_ENABLED off) — /v1/orgs* not mounted")
+	}
+	// ─── end D1 ───────────────────────────────────────────────────────────────
 
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr(),

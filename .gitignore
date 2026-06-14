@@ -12,6 +12,9 @@ audit/
 # `audit/` (report-output dirs) accidentally swallowed the BaaS audit MODULE
 # source — CI builds failed on imports a local tree resolved fine (rc.2).
 !apps/baas/mini-baas-infra/src/libs/common/src/audit/
+# Same trap for the Go control-plane audit MODULE (D3 tamper-evident audit chain):
+!apps/baas/mini-baas-infra/go/control-plane/internal/audit/
+!apps/baas/mini-baas-infra/go/control-plane/internal/audit/**
 vendor/sdk/
 *.secret
 docker-compose.override.yml

@@ -52,6 +52,16 @@ func (p *Postgres) AdminQuery(ctx context.Context, sql string, args ...any) (pgx
 	return p.pool.Query(ctx, sql, args...)
 }
 
+// Begin starts a transaction on a pooled connection. The returned pgx.Tx owns
+// its connection until Commit/Rollback — used where a read-then-write must be
+// atomic under a lock (e.g. the audit chain's read-tip / append-link, which
+// takes a per-tenant pg_advisory_xact_lock inside the tx). Privileged
+// (BYPASSRLS) like AdminExec/AdminQuery: it does NOT set tenant GUCs (that is
+// TenantTx's job); a caller needing RLS scoping uses TenantTx instead.
+func (p *Postgres) Begin(ctx context.Context) (pgx.Tx, error) {
+	return p.pool.Begin(ctx)
+}
+
 // AcquireConn checks out ONE dedicated connection from the pool. The caller owns
 // it until Release(). This is the only way to get connection affinity, which a
 // session-scoped Postgres advisory lock (pg_advisory_lock / pg_advisory_unlock)
