@@ -43,7 +43,7 @@ Competitor cells use the audited source glyphs: `v` = first-class, `~` = partial
 | 7 | Vector / embeddings | v | v | **[x]** | No pgvector / vector search | L | P2 | planning only |
 | 8 | Geospatial | v | ~ | **[x]** | No PostGIS / geo op | L | P2 | planning only |
 | 9 | Schema migrations | v | ~ | **[v]** | — two surfaces: **migration batch** (`/v1/admin/migrate`) on **PG + MySQL only**, vs **single-op schema DDL** (`/data/v1/schema/ddl`) on **PG / MySQL / Mongo / SQLite** | — | — | `data-plane-pool` migrate + schema-ddl paths |
-| 10 | DB branching / preview DBs | v | x | **[x]** | No branching | L | P2 | — |
+| 10 | DB branching / preview DBs | v | x | **[~]** | LIVE schema-clone branches (create/list/drop) for schema_per_tenant mounts, flag-gated `DB_BRANCHING_ENABLED`, **gate m113** (branch≠parent isolation + cross-tenant zero-clone + SQL-identifier-injection wall); shared_rls/db_per_tenant deferred | L | P2 | gate m113 |
 | 11 | Read replicas / PITR / backups | v | ~ | **[~]** | Whole-cluster only: `pg_dump -Fc` daily 14d→MinIO + optional WAL/PITR (gate m47). No per-tenant restore, no read replicas | M | P1 | `services/pg-backup`; gate m47 |
 | 12 | Foreign data wrappers / external sources | v | x | **[+]** | — Grobase goes further: `tenant_owned` wraps a customer's **existing** DB as a native mount | — | P2 | `isolation.rs` (TenantOwned) |
 
@@ -56,11 +56,11 @@ Competitor cells use the audited source glyphs: `v` = first-class, `~` = partial
 | 15 | Phone / SMS OTP | v | v | **[~]** | gotrue supports it but no SMS provider wired by default (roadmap A2 will own the wiring) | S | P1 | gotrue config |
 | 16 | Anonymous sign-in | v | v | **[~]** | gotrue supports it but it is **not enabled by default** — needs `GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED` | S | P1 | gotrue config |
 | 17 | Social OAuth | v | v | **[~]** | Built in **binocle-one** (11 OAuth2-PKCE presets + any-OIDC), **not surfaced in the `@mini-baas/js` SDK**; default vendored gotrue wires only Google/GitHub/FortyTwo and all are config-gated (a client-id is required — not literally on-by-default), with every `GOTRUE_EXTERNAL_*_ENABLED` defaulting to false | M | P0 | binocle-one OAuth matrix; vendored gotrue |
-| 18 | SAML enterprise SSO | ~ | ~ | **[x]** | No SAML | L | P2 | — |
+| 18 | SAML enterprise SSO | ~ | ~ | **[~]** | **OIDC** enterprise SSO shipped (org-level authorization-code, id_token HS256/RS256-via-JWKS, AES-GCM-sealed client secret), flag `SSO_ENABLED`, **gate m110**; **SCIM 2.0** provisioning into org members over sha256 bearers, flag `SCIM_ENABLED`, **gate m111**. SAML 2.0 specifically deferred (needs a mock SAML IdP + XML-dsig — task #33) | L | P2 | gate m110/m111 |
 | 19 | OIDC generic provider | v | ~ | **[v]** | — any-OIDC, but only in the **binocle-one** binary (`cargo build --features one`), not the default multi-engine stack | — | — | binocle-one |
 | 20 | MFA TOTP | v | ~ | **[~]** | gotrue MFA is **enabled by default** (`GOTRUE_MFA_ENABLED=true`) but **unexposed in the SDK**; **binocle-one** has its own TOTP + recovery codes (separate `--features one` build), also unsurfaced in container tiers/SDK | M | P1 | binocle-one MFA; gotrue config |
 | 21 | MFA SMS | v | ~ | **[x]** | No SMS MFA | M | P2 | — |
-| 22 | Passkeys / WebAuthn | v | ~ | **[x]** | No passkeys | L | P2 | — |
+| 22 | Passkeys / WebAuthn | v | ~ | **[v]** | Server-side WebAuthn register+login ceremonies (gotrue has none) via go-webauthn; a passkey login mints the GoTrue-shaped session JWT the existing verifier accepts. Flag `PASSKEYS_ENABLED`, **gate m107** (real ES256 software authenticator + wrong-key/replay/cross-user rejects) | L | P2 | gate m107 |
 | 23 | Auth↔DB authz wiring | v | v | **[v]** | — JWT → GUC (`app.current_tenant_id`/`current_user_id`) + owner predicate; ABAC + field masks | — | — | `postgres.rs` (`apply_rls_context`), control-plane `jwt.go` |
 | 24 | Act as OAuth provider | v | x | **[~]** | **binocle-one** (the `--features one` build) is an OAuth *client* (PKCE), not a full OAuth2.1 *server*; the default gotrue stack is not an OAuth server either | L | P2 | binocle-one |
 | 91 | Email deliverability / SMTP provider | v | v | **[~]** | gotrue + Mailpit, **dev-only** (no prod SMTP wired) | M | P1 | gotrue; Mailpit → Track A2/A6 |
@@ -121,7 +121,7 @@ Competitor cells use the audited source glyphs: `v` = first-class, `~` = partial
 
 | # | Capability | Supabase | Firebase | Grobase | Gap | Effort | Pri | Notes / anchor |
 |---|-----------|:--------:|:--------:|:-------:|-----|:------:|:---:|----------------|
-| 45 | Managed push (mobile/web) | x | v | **[x]** | No push/messaging (parity with Supabase; clear Firebase win) | L | P2 | — |
+| 45 | Managed push (mobile/web) | x | v | **[~]** | Push/messaging: per-tenant `webhook`/`fcm` subscriptions + fan-out send, SSRF-guarded (refuses RFC1918/link-local/metadata/in-cluster), flag `PUSH_ENABLED`, **gate m114**. FCM-pluggable (any FCM-compatible endpoint; real FCM = provider config) — narrows the Firebase gap | L | P2 | gate m114 |
 
 ### SDKs / Client
 
@@ -155,7 +155,7 @@ Competitor cells use the audited source glyphs: `v` = first-class, `~` = partial
 | 59 | CLI | v | v | **[~]** | A2 (rc.3): zero-dep `baas` CLI (`login`, `functions deploy/invoke/list`, `secrets`, `triggers`) shipped as the SDK `bin`. **Live-proven (gate m61)**: built from source in node:20, dispatches real argv subcommands (genuine routing, not a banner — unknown command exits 1). KNOWN-OPEN (why still `[~]`): not yet published as a standalone npm/binary; no GitHub Action wrapping `baas deploy` | L | P0 | `sdk/src/bin/baas.ts`; `scripts/verify/m61-packaging.sh` · gate m61 |
 | 60 | Local dev full parity | v | ~ | **[~]** | Full Docker Compose stack runs locally; **one-command Makefile bring-up live-proven (gate m61)** (`make all` = build+start, `make up` = selected edition). Residual: no dedicated emulator/CLI ergonomics | M | P1 | root Makefile, editions; `scripts/verify/m61-packaging.sh` · gate m61 |
 | 61 | Type generation from schema | v | x | **[x]** | No schema→types gen (only engine catalog gen) | M | P0 | SDK codegen |
-| 62 | Branching / preview envs | v | ~ | **[x]** | None | L | P2 | — |
+| 62 | Branching / preview envs | v | ~ | **[~]** | Per-tenant LIVE schema-clone branches (see row 10), flag `DB_BRANCHING_ENABLED`, **gate m113**; schema_per_tenant MVP (shared_rls/db_per_tenant deferred) | L | P2 | gate m113 |
 | 63 | CI/CD integration | v | v | **[~]** | CI gates exist (m-series, security scans); no first-class deploy integration | S | P1 | `scripts/verify/*` |
 
 ### Observability
@@ -175,11 +175,11 @@ Competitor cells use the audited source glyphs: `v` = first-class, `~` = partial
 |---|-----------|:--------:|:--------:|:-------:|-----|:------:|:---:|----------------|
 | 70 | Row / record-level authz | v | v | **[v]** | — RLS GUC + owner predicate on PG; owner-scoped writes on all engines; ABAC + field masks. **Live-proven (gate m60)**: anon→internal tables 401/42501 · forged alg=none/wrong-sig JWT 401 · cross-tenant mount 404 (with a positive own-mount-read control proving the 404 is selective) | — | — | `postgres.rs`, `mongo.rs` (identity-stamped `owner_id`/`tenant_id`); `scripts/verify/m60-security-gate.sh` · gate m60 |
 | 71 | App attestation / anti-abuse | x | v | **[x]** | No App Check equivalent (Firebase-unique) | L | P2 | — |
-| 72 | SOC 2 | v | v | **[x]** | No SOC2 (audit-ready posture planned, not done; formal SOC2 deferred) | L | P2 | [security-audit.md](./security-audit.md) |
+| 72 | SOC 2 | v | v | **[~]** | **SOC2-lite evidence collector** shipped (hash-sealed CI-gate/access/change-mgmt snapshots that reflect reality + detect tamper), flag `SOC2_EVIDENCE_ENABLED`, **gate m108**; + a file-backed **trust center** (gate m112) + 6 legal TEMPLATE docs (D4.2). Formal SOC 2 Type II still needs an external auditor (task #33) | L | P2 | gate m108/m112 |
 | 73 | HIPAA | v | v | **[x]** | No HIPAA. Both competitors are **BAA-gated HIPAA-eligible** (BAA required) — not on by default | L | P2 | — |
 | 74 | ISO27001 / GDPR | v / v | v / v | **[x]** | No certs; GDPR-shaped controls exist but not attested. (Supabase is now **fully ISO/IEC 27001:2022 certified**, Apr 2026 — supabase.com/blog/supabase-is-now-iso-27001-certified) | L | P2 | — |
 | 75 | Network restrictions / PrivateLink | v | ~ | **[~]** | WAF ip-restricts admin; single flat bridge network (no plane isolation/NetworkPolicy) | M | P1 | residual in security-audit |
-| 76 | Audit logs | ~ | ~ | **[~]** | Writes traceable; **reads not audited**; no tenant-scoped audit log. (gate m60 wires CI security gates — gitleaks·cargo-audit·govulncheck·trivy·semgrep·trufflehog·zap — + an ASVS/SOC2-lite map; this residual stays KNOWN-OPEN) | M | P1 | residual; gate m60 |
+| 76 | Audit logs | ~ | ~ | **[v]** | **Tamper-evident hash-chained per-tenant audit log** (recomputable chain → any insert/edit/delete is detectable), flag `TENANT_AUDIT_ENABLED`, **gate m104**; + GDPR **hard-erase** with an erasure receipt (m105) and portable **data export** (m109). CI security gates (m60) remain (gitleaks·cargo-audit·govulncheck·trivy·semgrep·trufflehog·zap) + ASVS/SOC2-lite map | M | P1 | gate m104/m105/m109 |
 | 89 | Data residency / region selection | v | v | **[x]** | No region/residency selection | L | P1 | → Track C3 |
 | 90 | Rate-limiting / DDoS / abuse protection | ~ | ~ | **[~]** | WAF CRS (`owasp/modsecurity-crs:4-nginx-202604040104`) + per-tenant token bucket | M | P1 | gate m51 (multi-instance rate-limit) |
 
@@ -203,7 +203,7 @@ Competitor cells use the audited source glyphs: `v` = first-class, `~` = partial
 | 79 | Many tenants on shared infra (product) | x | x | **[+]** | — **NEITHER competitor does this.** SHARE_POOLS: **~10K (9,775 seeded) tenants → 1 pool, 0× 5xx**, ~30 MiB RSS. Postgres SHARE_POOLS on/off is **byte-identical** (neutrality probe); cross-engine (mysql/mongo) isolation is proven by **owner-scoped no-leak** (gate m46) — note the bench table has no RLS | — | P0 | gate m46 (`scripts/verify/m46-share-pools-isolation.sh`); `mount.rs::effective_pool_key`, `lib.rs::pools_shared` |
 | 80 | One-backend-per-tenant pattern | ~ | ~ | **[v]** | — `tenant_owned` (distinct DSN) + `schema_per_tenant` + `db_per_tenant` (declared) | — | — | `isolation.rs` |
 | 81 | Auth-level multi-tenancy | ~ | ~ | **[v]** | — per-request isolation via JWT→GUC, not per-pool | — | — | `isolation.rs`, `postgres.rs` |
-| 88 | Organizations / teams / members / invites | v | v | **[x]** | ABAC per-principal exists, but **no org / membership / invite model** | L | P1 | → Track B4 |
+| 88 | Organizations / teams / members / invites | v | v | **[v]** | Full org/teams/members/invites + RBAC, control-plane only (never enters RLS GUCs, so SHARE_POOLS stays intact), flag `ORG_MODEL_ENABLED`, **gate m103**; SCIM (m111) provisions into this membership model; + tenant IP-allowlist (m106) | L | P1 | gate m103 |
 
 ### Pricing
 
