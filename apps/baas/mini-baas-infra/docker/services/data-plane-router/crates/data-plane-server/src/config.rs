@@ -108,6 +108,14 @@ pub struct ServerConfig {
     /// each. From `DATA_PLANE_METERING_FLUSH_MS` (default 60000); a gate can set
     /// it low to force a fast flush. Only consulted when `metering` is ON.
     pub metering_flush_ms: u64,
+    /// Track-B metering (B1b) — the Redis URL the background flusher XADDs the
+    /// durable `usage.events` stream entries to, IN ADDITION to the B1a tracing
+    /// event. From `DATA_PLANE_METERING_REDIS_URL`, falling back to `REDIS_URL`
+    /// (the same fallback the rate limiter's Redis backend uses). Empty → the
+    /// XADD is skipped entirely and B1a's tracing event is the only sink, so the
+    /// durable path is opt-in via a configured URL on top of the metering flag.
+    /// Only consulted when `metering` is ON.
+    pub metering_redis_url: String,
 }
 
 impl ServerConfig {
@@ -192,6 +200,18 @@ impl ServerConfig {
             metering_flush_ms: read_env("DATA_PLANE_METERING_FLUSH_MS", "60000")
                 .parse()
                 .unwrap_or(60000),
+            // Track-B metering (B1b): the durable sink URL. Falls back to the
+            // shared `REDIS_URL` so the standard stack needs no extra var; empty
+            // → no XADD (B1a tracing-only). Mirrors the ratelimit-redis URL
+            // resolution (its own var, then `REDIS_URL`).
+            metering_redis_url: {
+                let url = read_env("DATA_PLANE_METERING_REDIS_URL", "");
+                if url.trim().is_empty() {
+                    read_env("REDIS_URL", "")
+                } else {
+                    url
+                }
+            },
         }
     }
 }
@@ -227,6 +247,9 @@ impl std::fmt::Debug for ServerConfig {
             .field("bypass_enabled", &self.bypass_enabled)
             .field("metering", &self.metering)
             .field("metering_flush_ms", &self.metering_flush_ms)
+            // A Redis URL can embed credentials (redis://user:pass@host) — redact
+            // it like the other secret-bearing fields (presence stays observable).
+            .field("metering_redis_url", &redact(&self.metering_redis_url))
             .finish()
     }
 }

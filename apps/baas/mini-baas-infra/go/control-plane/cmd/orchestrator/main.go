@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dlesieur/mini-baas/control-plane/internal/metering"
 	"github.com/dlesieur/mini-baas/control-plane/internal/orchestrator/emailsvc"
 	"github.com/dlesieur/mini-baas/control-plane/internal/orchestrator/envelope"
 	"github.com/dlesieur/mini-baas/control-plane/internal/orchestrator/gdprsvc"
@@ -73,12 +74,18 @@ func main() {
 	// The registry of ported sub-services. Adding one is a single line here
 	// plus its package — no new binary, no new container.
 	available := map[string]SubService{
-		"log":        logsvc.New(log),
-		"email":      emailsvc.New(log),
-		"session":    sessionsvc.New(log, db),
+		"log":          logsvc.New(log),
+		"email":        emailsvc.New(log),
+		"session":      sessionsvc.New(log, db),
 		"newsletter":   newslettersvc.New(log, db),
 		"gdpr":         gdprsvc.New(log, db),
 		"outbox-relay": outboxrelay.New(log, db),
+		// metering ingest (Track-B B1b): guarded internally by METERING_INGEST
+		// (default OFF). Registered unconditionally is safe — when the flag is
+		// off Init/Run are no-ops (no Redis subscribe, no consumer group), so the
+		// orchestrator is byte-parity with today. The default-all selection thus
+		// stays parity until the flag flips.
+		"metering": metering.New(log, db),
 	}
 	enabled := selectServices(available, os.Getenv("ORCHESTRATOR_SERVICES"))
 	if len(enabled) == 0 {
