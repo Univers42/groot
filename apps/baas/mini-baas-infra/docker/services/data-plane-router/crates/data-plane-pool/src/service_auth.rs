@@ -20,6 +20,54 @@ pub fn hmac_mode() -> bool {
         .unwrap_or(false)
 }
 
+/// Optional rotation-window previous token (`INTERNAL_SERVICE_TOKEN_PREV`).
+/// Empty (the default) means single-key behavior — byte-identical to before.
+/// Mirrors the Go `prevServiceToken()` so a dual-key verify is symmetric across
+/// the planes (G-Rotate, in-repo half).
+#[must_use]
+pub fn prev_service_token() -> String {
+    std::env::var("INTERNAL_SERVICE_TOKEN_PREV").unwrap_or_default()
+}
+
+/// Constant-time compare (no early-out on the first mismatch) so verify timing
+/// does not leak how many bytes matched.
+fn ct_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
+/// Dual-key verify of a presented `X-Service-Auth` value against the current
+/// token and, if a rotation window is open (`prev` non-empty), the previous one.
+/// `ts` is the timestamp parsed from the header. Returns true if EITHER arm
+/// matches. With `prev` empty the second arm is never taken — single-key parity.
+#[must_use]
+pub fn verify_service_auth_at(
+    header_value: &str,
+    current: &str,
+    prev: &str,
+    method: &str,
+    path: &str,
+    body: &[u8],
+    ts: i64,
+) -> bool {
+    let want_cur = compute_service_auth_at(current, method, path, body, ts);
+    let cur_ok = ct_eq(header_value, &want_cur);
+    let prev_ok = if prev.is_empty() {
+        false
+    } else {
+        let want_prev = compute_service_auth_at(prev, method, path, body, ts);
+        ct_eq(header_value, &want_prev)
+    };
+    cur_ok || prev_ok
+}
+
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -79,5 +127,25 @@ mod tests {
             ),
             "v1.1700000000.d53d261c30ba227cb3ab770a0a3c936e0fc0cd7385855339ba60b1a172b21b6b"
         );
+    }
+
+    /// G-Rotate dual-key verify (Rust mirror of the Go test): during a window
+    /// both the current and previous tokens verify; an unrelated key is
+    /// rejected; with no window (prev empty) only the current key verifies.
+    #[test]
+    fn dual_key_rotation_window() {
+        let (ts, method, path, body) = (1_700_000_000, "POST", "/v1/keys/verify", b"{}".as_slice());
+        let sig_a = compute_service_auth_at("key-A-old", method, path, body, ts);
+        let sig_b = compute_service_auth_at("key-B-new", method, path, body, ts);
+        let sig_c = compute_service_auth_at("key-C-other", method, path, body, ts);
+
+        // Window open: primary=B, prev=A → both A and B verify, C rejected.
+        assert!(verify_service_auth_at(&sig_b, "key-B-new", "key-A-old", method, path, body, ts));
+        assert!(verify_service_auth_at(&sig_a, "key-B-new", "key-A-old", method, path, body, ts));
+        assert!(!verify_service_auth_at(&sig_c, "key-B-new", "key-A-old", method, path, body, ts));
+
+        // Window closed (prev empty): only B verifies, A rejected (load-bearing).
+        assert!(verify_service_auth_at(&sig_b, "key-B-new", "", method, path, body, ts));
+        assert!(!verify_service_auth_at(&sig_a, "key-B-new", "", method, path, body, ts));
     }
 }

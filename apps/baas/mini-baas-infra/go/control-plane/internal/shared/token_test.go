@@ -2,6 +2,7 @@ package shared
 
 import (
 	"bytes"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -32,6 +33,89 @@ func TestVerifyServiceRequestStaticDefault(t *testing.T) {
 	r.Header.Set("X-Service-Token", "wrong")
 	if VerifyServiceRequest(r, "secret") {
 		t.Fatal("static mode must reject a wrong token")
+	}
+}
+
+// TestVerifyServiceRequestRotateStatic proves the in-repo G-Rotate half in
+// static mode: during the window (PREV set) BOTH the current and previous tokens
+// verify; an unrelated third token is rejected; after the window (PREV cleared)
+// the old token is REJECTED — the load-bearing arm.
+func TestVerifyServiceRequestRotateStatic(t *testing.T) {
+	t.Setenv("SERVICE_TOKEN_MODE", "")
+	const keyA = "key-A-old"
+	const keyB = "key-B-new"
+
+	req := func(tok string) *http.Request {
+		r := httptest.NewRequest("POST", "/v1/keys/verify", bytes.NewReader([]byte(`{}`)))
+		r.Header.Set("X-Service-Token", tok)
+		return r
+	}
+
+	// Default (single key, PREV empty): only the current token works.
+	t.Setenv("INTERNAL_SERVICE_TOKEN_PREV", "")
+	if !VerifyServiceRequest(req(keyA), keyA) {
+		t.Fatal("single-key: current token must verify")
+	}
+	if VerifyServiceRequest(req(keyB), keyA) {
+		t.Fatal("single-key: a different token must be rejected")
+	}
+
+	// Rotation window: primary=keyB, PREV=keyA. BOTH verify; a third is rejected.
+	t.Setenv("INTERNAL_SERVICE_TOKEN_PREV", keyA)
+	if !VerifyServiceRequest(req(keyB), keyB) {
+		t.Fatal("window: newly issued (current) token must verify")
+	}
+	if !VerifyServiceRequest(req(keyA), keyB) {
+		t.Fatal("window: in-flight previous token must STILL verify (no mid-rotation outage)")
+	}
+	if VerifyServiceRequest(req("key-C-unrelated"), keyB) {
+		t.Fatal("window: an unrelated third token must be rejected")
+	}
+
+	// Window closed (PREV cleared): only keyB works, keyA is REJECTED.
+	t.Setenv("INTERNAL_SERVICE_TOKEN_PREV", "")
+	if !VerifyServiceRequest(req(keyB), keyB) {
+		t.Fatal("post-window: current token must verify")
+	}
+	if VerifyServiceRequest(req(keyA), keyB) {
+		t.Fatal("post-window: previous token MUST be rejected (load-bearing)")
+	}
+}
+
+// TestVerifyServiceRequestRotateHMAC proves the same dual-key window in hmac
+// mode, where the signature itself is keyed by the token.
+func TestVerifyServiceRequestRotateHMAC(t *testing.T) {
+	t.Setenv("SERVICE_TOKEN_MODE", "hmac")
+	const keyA = "key-A-old"
+	const keyB = "key-B-new"
+	body := []byte(`{"key":"abc"}`)
+
+	signed := func(tok string) *http.Request {
+		ts := time.Now().Unix()
+		r := httptest.NewRequest("POST", "/v1/keys/verify", bytes.NewReader(body))
+		r.Header.Set("X-Service-Auth", ComputeServiceSignature(tok, "POST", "/v1/keys/verify", body, ts))
+		return r
+	}
+
+	// Rotation window: primary=keyB, PREV=keyA.
+	t.Setenv("INTERNAL_SERVICE_TOKEN_PREV", keyA)
+	if !VerifyServiceRequest(signed(keyB), keyB) {
+		t.Fatal("hmac window: signature under current token must verify")
+	}
+	if !VerifyServiceRequest(signed(keyA), keyB) {
+		t.Fatal("hmac window: in-flight signature under previous token must STILL verify")
+	}
+	if VerifyServiceRequest(signed("key-C-unrelated"), keyB) {
+		t.Fatal("hmac window: unrelated-key signature must be rejected")
+	}
+
+	// Window closed.
+	t.Setenv("INTERNAL_SERVICE_TOKEN_PREV", "")
+	if VerifyServiceRequest(signed(keyA), keyB) {
+		t.Fatal("hmac post-window: previous-key signature MUST be rejected (load-bearing)")
+	}
+	if !VerifyServiceRequest(signed(keyB), keyB) {
+		t.Fatal("hmac post-window: current-key signature must verify")
 	}
 }
 

@@ -49,17 +49,42 @@ func ComputeServiceSignature(token, method, path string, body []byte, ts int64) 
 	return fmt.Sprintf("v1.%d.%s", ts, hex.EncodeToString(mac.Sum(nil)))
 }
 
+// prevServiceToken returns the optional rotation-window previous token
+// (INTERNAL_SERVICE_TOKEN_PREV). Empty (the default) means single-key behavior:
+// only `expected` is accepted, byte-identical to before this hook existed.
+//
+// Rotation discipline (G-Rotate, in-repo half): set PREV = the current token,
+// set the primary = the new token, roll the peers one at a time (each peer now
+// ACCEPTS both, so an in-flight request signed under either is honored), then
+// clear PREV after the grace window — after which the old token is REJECTED.
+func prevServiceToken() string {
+	return os.Getenv("INTERNAL_SERVICE_TOKEN_PREV")
+}
+
 // VerifyServiceRequest authenticates an internal service-to-service request.
 // static mode (default): constant-time X-Service-Token compare — exactly the
 // pre-existing behavior. hmac mode: requires a valid X-Service-Auth signature
 // within ±SERVICE_AUTH_SKEW_SECS (default 120). Reads and RESTORES r.Body so
 // handlers can still decode it.
+//
+// During a rotation window (INTERNAL_SERVICE_TOKEN_PREV non-empty) the request
+// is accepted if it verifies under EITHER the current token OR the previous one,
+// so a peer that has not yet rotated — or an in-flight token minted before the
+// flip — is not rejected mid-rotation. With PREV empty the second arm is never
+// taken and the path is byte-identical to single-key behavior.
 func VerifyServiceRequest(r *http.Request, expected string) bool {
 	if expected == "" {
 		return false
 	}
+	prev := prevServiceToken()
 	if !ServiceAuthHMAC() {
-		return SecureCompare(r.Header.Get("X-Service-Token"), expected)
+		got := r.Header.Get("X-Service-Token")
+		// Evaluate BOTH arms unconditionally (no `||` short-circuit) so the
+		// timing of a verify does not leak which key matched. SecureCompare is
+		// already constant-time per-arm; an empty prev returns false.
+		curOK := SecureCompare(got, expected)
+		prevOK := prev != "" && SecureCompare(got, prev)
+		return curOK || prevOK
 	}
 	hdr := r.Header.Get("X-Service-Auth")
 	parts := strings.Split(hdr, ".")
@@ -87,5 +112,11 @@ func VerifyServiceRequest(r *http.Request, expected string) bool {
 		r.Body = io.NopCloser(bytes.NewReader(body))
 	}
 	want := ComputeServiceSignature(expected, r.Method, r.URL.Path, body, ts)
-	return subtle.ConstantTimeCompare([]byte(hdr), []byte(want)) == 1
+	curOK := subtle.ConstantTimeCompare([]byte(hdr), []byte(want)) == 1
+	prevOK := false
+	if prev != "" {
+		wantPrev := ComputeServiceSignature(prev, r.Method, r.URL.Path, body, ts)
+		prevOK = subtle.ConstantTimeCompare([]byte(hdr), []byte(wantPrev)) == 1
+	}
+	return curOK || prevOK
 }
