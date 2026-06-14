@@ -2,10 +2,14 @@
 # pg-backup container entrypoint.
 #
 # Modes:
-#   loop          - default; install cron, run scheduled backups
-#   once          - run a single backup now and exit
-#   restore <key> - download a backup artifact from MinIO to /restore
-#   liveness      - exit 0 if config is sane (used by healthchecks)
+#   loop                       - default; install cron, run scheduled backups
+#   once                       - run a single backup now and exit
+#   restore <key>              - download a backup artifact from MinIO to /restore
+#   archive-wal <%p> <%f>      - PITR (C4b): ship one WAL segment to the store
+#                                (postgres archive_command target; needs PG_BACKUP_PITR=1)
+#   pitr-restore <base> <time> - PITR (C4b): rebuild a PGDATA from a base + replay
+#                                WAL to recovery_target_time (needs PG_BACKUP_PITR=1)
+#   liveness                   - exit 0 if config is sane (used by healthchecks)
 set -euo pipefail
 
 MODE="${1:-loop}"
@@ -48,6 +52,27 @@ case "$MODE" in
     exec /opt/pg-backup/restore.sh "$key"
     ;;
 
+  archive-wal)
+    # PITR WAL shipping — postgres archive_command target. Flag-gated: refuse
+    # unless PITR is explicitly enabled so the OFF baseline never ships WAL.
+    shift || true
+    [ "${PG_BACKUP_PITR:-0}" = "1" ] || { echo "archive-wal requires PG_BACKUP_PITR=1"; exit 1; }
+    mc_alias
+    exec /opt/pg-backup/wal-archive.sh "$@"
+    ;;
+
+  pitr-restore)
+    # PITR base+WAL replay to a target time. Flag-gated for symmetry with the
+    # archive path; the OFF baseline keeps the plain logical restore only.
+    shift || true
+    [ "${PG_BACKUP_PITR:-0}" = "1" ] || { echo "pitr-restore requires PG_BACKUP_PITR=1"; exit 1; }
+    # MinIO alias is only needed for the MinIO transport. A local store
+    # (PITR_LOCAL_STORE) is self-contained — calling mc_alias without a reachable
+    # MinIO would fail under set -e and kill the restore before pitr-restore.sh runs.
+    [ -n "${PITR_LOCAL_STORE:-}" ] || mc_alias
+    exec /opt/pg-backup/pitr-restore.sh "$@"
+    ;;
+
   loop)
     mc_alias
     ensure_bucket
@@ -75,7 +100,7 @@ case "$MODE" in
 
   *)
     echo "Unknown mode: $MODE"
-    echo "Modes: loop | once | restore <key> | liveness"
+    echo "Modes: loop | once | restore <key> | archive-wal <%p> <%f> | pitr-restore <base> <time> | liveness"
     exit 1
     ;;
 esac
