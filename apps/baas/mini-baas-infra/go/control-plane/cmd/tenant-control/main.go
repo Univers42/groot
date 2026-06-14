@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dlesieur/mini-baas/control-plane/internal/backup"
 	"github.com/dlesieur/mini-baas/control-plane/internal/metering"
 	"github.com/dlesieur/mini-baas/control-plane/internal/packages"
 	"github.com/dlesieur/mini-baas/control-plane/internal/provision"
@@ -138,6 +139,46 @@ func main() {
 		log.Info("tenant self-service API enabled (/v1/tenants/me*)", "billing", envBool("BILLING_ENABLED"))
 	} else {
 		log.Info("tenant self-service API disabled (TENANT_SELFSERVE_ENABLED off) — /v1/tenants/me* not mounted")
+	}
+
+	// Per-tenant backup/restore API (Track-B B6): admin POST/GET
+	// /v1/tenants/{id}/backup|backups + POST /v1/tenants/{id}/restore/{backupId},
+	// plus an OPTIONAL read-only self-serve GET /v1/tenants/me/backups.
+	//
+	// FLAG-GATED OFF = PARITY: backup.Mount is called ONLY when
+	// TENANT_BACKUP_ENABLED is truthy. When OFF (the default) Mount is never
+	// called, so none of the routes are registered and a request 404s — byte-
+	// identical to today, the same discipline as TENANT_SELFSERVE_ENABLED above.
+	// The artifact store init fails fast (a misconfigured store is a data-safety
+	// boundary) but only along this opt-in path; the baseline is untouched.
+	//
+	// The self-serve READ route is narrowed by a SECOND flag,
+	// TENANT_BACKUP_SELFSERVE_ENABLED (also default OFF), exactly as
+	// BILLING_ENABLED narrows the tenant self-service surface.
+	if envBool("TENANT_BACKUP_ENABLED") {
+		store, err := backup.NewStoreFromEnv()
+		if err != nil {
+			log.Error("backup: artifact store init failed", "err", err)
+			os.Exit(1)
+		}
+		bsvc := backup.NewService(db, store, log)
+		// NOTE: the db_per_tenant DSN resolver (bsvc.WithResolver) is intentionally
+		// NOT wired yet — the B6 MVP supports schema_per_tenant only (guardIsolation
+		// rejects db_per_tenant as deferred, 400). B6b wires the adapter-registry
+		// resolver here, re-enables db_per_tenant in guardIsolation + the 042 CHECK,
+		// and adds a db_per_tenant round-trip arm to m87.
+		backup.Mount(mux, bsvc, cfg.ServiceToken)
+		if envBool("TENANT_BACKUP_SELFSERVE_ENABLED") {
+			// The tenants Service is the credential resolver (its exported VerifyKey
+			// maps an API key -> owning tenant). JWT-bearer backup listing is a B6b
+			// deferral (tenants' user->tenant resolver is unexported); an API-key
+			// self-serve call covers the primary programmatic case.
+			backup.MountSelfServe(mux, bsvc, svc)
+			log.Info("tenant backup self-serve read enabled (/v1/tenants/me/backups, API-key)")
+		}
+		log.Info("per-tenant backup/restore API enabled (/v1/tenants/{id}/backup|backups|restore)")
+	} else {
+		log.Info("per-tenant backup/restore API disabled (TENANT_BACKUP_ENABLED off) — routes not mounted")
 	}
 
 	srv := &http.Server{
