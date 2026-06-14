@@ -30,9 +30,12 @@ Verify before trusting this doc (a flag with no consumer is a parity lie):
 grep -rn 'METERING_ENABLED\|QUOTA_ENFORCEMENT\|BILLING_ENABLED\|TENANT_SELFSERVE_ENABLED\|TENANT_OBS_ENABLED\|TENANT_BACKUP_ENABLED' go/control-plane
 ```
 
-Flags labelled **(SCAFFOLD)** in the manifest (`SPEND_CAPS_ENABLED`,
-`ABUSE_GUARD_ENABLED`) have **no consumer yet** (B7.8 / B7.9 are unbuilt). They
-are reserved so the ladder is complete; flipping them ON today is a no-op.
+`SPEND_CAPS_ENABLED` and `ABUSE_GUARD_ENABLED` are **fully built and
+gate-proven** (B7.8 → `internal/spendcap` wired in `cmd/orchestrator`, gate m89;
+B7.9 → `internal/abuseguard` mounted in `cmd/tenant-control`, gate m90).
+Flipping either ON enables real behaviour (a `spend:over` set / a `/v1/abuse/*`
+surface + `tenant:suspended` set); they are not no-ops. The all-cloud-ON rung is
+captured in `config/cloud/flags.env.cloud`.
 
 ## How to turn a feature ON for an environment
 
@@ -69,7 +72,7 @@ Promote **one rung at a time, in this order**. Never enable enforcement
 | **R4 · quota warn** | `QUOTA_STAGE=warn` | warn | shadow | warn header / soft signal, still **no 402** |
 | **R5 · quota enforce** | `QUOTA_STAGE=enforce` + `QUOTA_ENFORCEMENT=1` | enforce | warn→enforce | the first rung that can return **402** |
 | **R6 · billing** | `BILLING_ENABLED=1` (Stripe TEST key) | TEST key | LIVE key | Stripe meter events; requires `STRIPE_API_KEY` + `BILLING_METER_*` |
-| **R7 · spend caps / abuse** *(SCAFFOLD)* | `SPEND_CAPS_ENABLED=1`, `ABUSE_GUARD_ENABLED=1` | — | — | **no consumer yet** — reserved for B7.8/B7.9 (GO-LIVE gates public signup) |
+| **R7 · spend caps / abuse** | `SPEND_CAPS_ENABLED=1` (+`SPEND_RATE_*`), `ABUSE_GUARD_ENABLED=1` (+`ABUSE_VELOCITY_MAX`) | canary | prod | the cost-runaway + signup-abuse GO-LIVE gates (B7.8/B7.9, gates m89/m90); the control-plane sets `spend:over`/`tenant:suspended` |
 
 ### Invariants the ladder must keep congruent
 
@@ -86,8 +89,12 @@ Promote **one rung at a time, in this order**. Never enable enforcement
   reporter errors loudly (by design — see `metering/billing.go`). Set the secrets
   via your secrets tool, never in a committed file.
 - **GO-LIVE gate (plan critic):** public signup (B7.7) MUST NOT ship before R7
-  spend caps + abuse guard + the API-version contract (B7.11). Until R7 has a
-  consumer, prod stays at R6 max for internal/invited tenants only.
+  spend caps + abuse guard + the API-version contract (B7.11). R7's control-plane
+  halves are built + gate-proven (m89/m90); the data-plane reject halves
+  (`DATA_PLANE_SPEND_CAPS` / a suspend reader) are a separate slice, so prod stays
+  at R6 + the control-plane R7 guards for internal/invited tenants until the
+  data-plane halves land. The full all-ON local rung is `flags.env.cloud` (proven
+  end-to-end by m94).
 
 ## Parity statement
 
