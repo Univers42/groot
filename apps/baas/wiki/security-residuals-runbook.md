@@ -57,6 +57,70 @@ isolated gate + a coordinated cross-repo flip remain.
    `jwt_secrets`.
 7. **ROLLBACK:** revert env to HS256 + restore Kong HS256 `jwt_secrets` + revert the gotrue image.
 
+### G-RS256 — LIVE-FLIP READINESS (PROVE-FIRST step 1 is DONE)
+
+> Status update 2026-06-14. Step 1 ("PROVE-FIRST, isolated") is **DONE and GREEN**. m64 proved
+> only the tenant-control *verifier* against a stub; the new gate proves a **real RS256 ISSUER
+> end-to-end** — a service that genuinely *signs* RS256 + serves a JWKS, validated *through Kong's
+> RS256 jwt-plugin on a protected route* and then tenant-control's JWKS verifier. The live issuer
+> cutover (steps 2–6) is now a **known, low-risk operation**. Gate:
+> [`scripts/verify/m81-rs256-issuer.sh`](../mini-baas-infra/scripts/verify/m81-rs256-issuer.sh)
+> (`bash scripts/verify/m81-rs256-issuer.sh`, exit 0 = PASS; scratch-only, never touches the live
+> stack). Logged `m81=PASS` (PROVE).
+
+**What m81 proves (off the wire, on $$-scratch):**
+
+| Arm | Token (minted by the REAL issuer) | Through Kong RS256 → tenant-control | Result |
+|---|---|---|---|
+| ACCEPT | `alg=RS256`, `kid` in the served JWKS, signed by the issuing key | verified twice (Kong `rsa_public_key`, then tenant-control JWKS) | **201** + minted API key; Kong forwards a trusted `X-User-Id` = the verified `sub` |
+| REJECT | RS→HS confusion (HS256 signed with the RSA modulus) | Kong RS256 plugin | **401** |
+| REJECT | RS256 signed by an unrelated key (sig mismatch) | Kong RS256 plugin | **401** |
+| REJECT | RS256 with a `kid` absent from the JWKS | Kong RS256 plugin | **401** |
+| REJECT | `alg=none` downgrade | Kong RS256 plugin | **401** |
+| REJECT | no bearer (negative control) | Kong jwt plugin | **401** (route is genuinely protected) |
+
+**EXACT config the live cutover needs (proven by m81):**
+
+1. **ISSUER (pick ONE):**
+   - **(a) bump vendored gotrue** — `docker/services/gotrue/Dockerfile` `FROM supabase/gotrue:v2.188.1`
+     is **HS256-only**. Asymmetric signing landed in supabase-auth's **"JWT signing keys" release
+     (2025-07-17)**; a self-hosted gotrue at/after that tag signs RS256 when given a JWK *signing-key
+     set* via **`GOTRUE_JWT_KEYS`** (a JSON array of JWKs incl. the RSA private key) +
+     **`GOTRUE_JWT_VALID_METHODS`** including `RS256`, and serves the public half at
+     `GET <issuer>/auth/v1/.well-known/jwks.json`. Note the documented self-host default is **ES256
+     (EC P-256)**, not RS256 — request RS256 explicitly in the key set. Supply the private JWK via
+     Vault (`GOTRUE_JWT_KEYS` from a Vault secret, never committed). **DB caveat:** bumping gotrue
+     across the signing-keys release runs **auth-schema migrations on the gotrue auth DB** — stage it,
+     back up `auth.*`, and confirm `GET .well-known/jwks.json` returns an RSA `sig` key with a stable
+     `kid` before flipping consumers. This is the in-product, single-service path.
+   - **(b) front-signer** — if the gotrue bump is undesirable, put a tiny JWKS-publishing RS256 signer
+     in front (the shape m81 uses: real RSA-2048 key, `/.well-known/jwks.json`, SPKI PEM). This is the
+     lower-coupling option but adds a service to operate + secure (its private key is the kingdom).
+2. **KONG (`docker/services/kong/conf/kong.yml`):** in the `authenticated` consumer's `jwt_secrets`,
+   change the two `algorithm: HS256 / secret: __JWT_SECRET__` entries to `algorithm: RS256` +
+   `rsa_public_key: |` `<SPKI PEM>` (one per `iss` key — the GoTrue `iss` and `supabase`). Add a
+   `__JWT_RS256_PUBKEY__` substitution token and teach the entrypoint `sed` block
+   (`docker-compose.yml` Kong `command:`, the `-e "s|__…__|…|g"` list) to substitute the PEM
+   (multi-line PEM via a file include or a `\n`-flattened token). `key_claim_name: iss` is unchanged,
+   so Kong selects the RS256 credential by the token's `iss` — no indefinite dual-alg.
+   **Required Kong env (already live):** `KONG_UNTRUSTED_LUA_SANDBOX_REQUIRES: "cjson.safe"` — the
+   identity `pre-function` decodes claims with `require('cjson.safe')`, which the default Lua sandbox
+   blocks (m81 reproduced the 500 without it). No change needed; just don't drop it.
+3. **VERIFIER (tenant-control, in-repo, NO code change):** set `JWT_ALG=RS256` +
+   `JWKS_URL=<issuer>/auth/v1/.well-known/jwks.json` (`docker-compose.yml` tenant-control env). The
+   seam (`internal/tenants/jwt.go` + `jwks.go`) is committed and unit- + m64- + m81-proven; OFF
+   (no `JWT_ALG`) stays byte-parity HS256.
+4. **COORDINATION:** the three move together in one window (issue + Kong-validate + tenant-control-verify
+   share the `iss`-keyed RS256 credential). Keep the HS256 `jwt_secrets` + `JWT_SECRET` env in place for
+   one full token TTL (`GOTRUE_JWT_EXP`, default 3600s) for instant rollback, then remove HS256.
+
+> Build/run note: m81 builds tenant-control **from current source**; if the working tree is broken by
+> *unrelated* in-flight work (it was at 2026-06-14 — a half-landed Track-B quota change in
+> `internal/packages|metering` references `p.Quota` where the field lives on `p.Limits.Quota`, so
+> `cmd/tenant-control` won't compile), the gate falls back to a **clean `git archive HEAD` export** of
+> `go/control-plane` (the RS256 seam is committed + byte-identical) and **reports the fallback**. Fix
+> that quota typo to restore the working-tree build; it is NOT part of G-RS256.
+
 ## G-Vault — enforce Vault-backed credentials at `SECURITY_MODE=max`
 
 **Why deferred:** not purely additive — it changes the mount-register request contract **and** the DB
