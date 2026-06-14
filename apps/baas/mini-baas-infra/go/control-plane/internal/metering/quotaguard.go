@@ -143,10 +143,13 @@ func (g *QuotaGuard) Run(ctx context.Context) {
 }
 
 // usageByTenantSQL sums the capped metric over the current period per tenant,
-// joining tenant_usage to tenants for the plan. A tenant_id present in usage but
-// absent from tenants resolves to NULL plan → the manifest's default_package (the
-// safe baseline tier), matching packages.Manifest.For. window_start >= $2 scopes
-// to the current period; $1 is the capped metric.
+// joining tenant_usage to tenants for the plan. tenant_usage.tenant_id holds the
+// tenant SLUG (the public identity the data plane stamps from the signed
+// envelope — see migration 032), NOT the tenants.id UUID, so the join is
+// slug→slug (tenants.slug). A tenant_id present in usage but absent from tenants
+// resolves to NULL plan → the manifest's default_package (the safe baseline
+// tier), matching packages.Manifest.For. window_start >= $2 scopes to the
+// current period; $1 is the capped metric.
 //
 // The guard reads tenant_usage as the privileged control-plane role (BYPASSRLS),
 // exactly like the B1c read-API and the ingest consumer — it must see EVERY
@@ -155,7 +158,7 @@ func (g *QuotaGuard) Run(ctx context.Context) {
 const usageByTenantSQL = `
 SELECT u.tenant_id, COALESCE(t.plan, '') AS plan, COALESCE(SUM(u.qty), 0)::bigint AS qty
   FROM public.tenant_usage u
-  LEFT JOIN public.tenants t ON t.id::text = u.tenant_id
+  LEFT JOIN public.tenants t ON t.slug = u.tenant_id
  WHERE u.metric = $1
    AND u.window_start >= $2
  GROUP BY u.tenant_id, t.plan`

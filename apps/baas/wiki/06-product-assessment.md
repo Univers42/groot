@@ -1,5 +1,7 @@
 # 06 — Product assessment: is this a *good* BaaS product yet?
 
+> **⚠️ Correction (2026-06-14):** this is a *point-in-time* snapshot and several of its load-bearing gaps have since been closed. Most importantly, **Postgres has full CRUD** — `crates/data-plane-pool/src/postgres.rs` implements `run_update`, `run_delete`, `run_upsert` (with `ON CONFLICT … DO UPDATE`, owner-scoped predicates and full-table-write guards), plus `run_batch` (atomic) and `run_aggregate` (COUNT/SUM/AVG/MIN/MAX + GROUP BY). The only `NotImplemented` is two-phase commit, which the capability descriptor honestly declares `two_phase_commit: false`. The per-engine matrix in §1.1 is therefore **not the source of truth** — the live capability surface is proven by the `engine-conformance` crate and the `scripts/verify/m*` gates. Treat any un-corrected cell below (e.g. other engines' batch/aggregate) as "verify against the conformance gate," not as fact.
+
 > Honest, evidence-based evaluation against the stated vision: an **engine-agnostic** BaaS (à la DreamFactory) that does **all operations, not just CRUD**, lets visualization-only users lean on **Trino**, and can **connect/disconnect layers** to run as an **OLAP** or **OLTP** model with different resource footprints.
 
 **Bottom line up front:** This is an *excellent architectural foundation and an impressive engineering demonstrator* — but it is **not yet a good product** by the bar of DreamFactory / Supabase / Hasura, and it falls short of *its own vision* in concrete, verifiable ways. The good news: almost every gap is a *missing implementation on a correct foundation*, not a design dead-end. The bad news: the gaps are in the **core value proposition** (the operations and the OLAP/OLTP intelligence), not the periphery.
@@ -14,15 +16,15 @@ The Rust adapters' actual operation dispatch (`crates/data-plane-pool/src/*.rs`)
 
 | Engine | list | get | insert | update | delete | upsert | batch | aggregate/join |
 |---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
-| **postgresql** | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **postgresql** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |  *(corrected 2026-06-14 — see banner)*
 | mongodb | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
 | mysql | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
 | redis | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
 | http | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
 
-- **Postgres — the flagship OLTP engine — cannot UPDATE or DELETE** through the unified query plane (`postgres.rs` `dispatch_op` handles only List/Get/Insert; everything else → `NotImplemented`). That is a showstopper for a product.
-- **The capability descriptors lie.** `EngineCapabilities::postgresql()` advertises `write: true, upsert: true, transactions: true` — none of update/delete/upsert are implemented. The new capability *planner* I added (good) validates against the **advertised** caps, so it happily lets an `update` through to an adapter that then 501s. Advertised ≠ implemented is a trust problem.
-- **No `batch` on any engine.** `max_batch_size` is advertised and even enforced by the planner, but no adapter implements batch.
+- ~~**Postgres — the flagship OLTP engine — cannot UPDATE or DELETE**~~ **[corrected 2026-06-14]** Postgres has full CRUD: `postgres.rs` `dispatch_single` routes Update/Delete/Upsert/Aggregate/Batch (not just List/Get/Insert). The original claim was true at the time of writing but the operations have since been implemented.
+- ~~**The capability descriptors lie.**~~ **[corrected 2026-06-14]** `EngineCapabilities::postgresql()` advertising `write/upsert/transactions` now matches the implementation. (The one honest exception: `two_phase_commit: false`, which is genuinely not exposed.) The capability *planner* validating against advertised caps is now sound for these ops.
+- ~~**No `batch` on any engine.**~~ **[corrected 2026-06-14]** Postgres implements atomic `run_batch`; verify other engines against the `engine-conformance` gate rather than this snapshot.
 
 ### 1.2 "All operations, not just CRUD" — mostly aspirational
 
@@ -77,7 +79,7 @@ This is well above "toy." It's a credible *platform skeleton*.
 ## 3. The gaps that keep it from "good product"
 
 **Core value (must-fix):**
-1. **Complete CRUD on every advertised engine** — especially Postgres update/delete/upsert. Until then the capability descriptors are dishonest.
+1. **Complete CRUD on every advertised engine.** *(2026-06-14: Postgres CRUD + aggregate + batch is done; the remaining work is confirming other engines' batch/aggregate parity against the `engine-conformance` gate.)*
 2. **Beyond-CRUD as first-class tenant ops**: filtering operators, sort, pagination cursors, **aggregations**, **relationships/joins**, search — driven by the cost model.
 3. **Unified OLAP/OLTP query plane**: fold Trino into `/query/v1` + the SDK; route by `cost` (joins/scan → federation; point ops → pools); make "OLAP context" vs "OLTP context" a real per-tenant/project mode.
 
@@ -100,7 +102,7 @@ This is well above "toy." It's a credible *platform skeleton*.
 
 ## 4. What it would take to be a "real good product" (prioritized)
 
-1. **Finish the operations** — full CRUD on all engines (Postgres U/D/upsert first), then aggregations/joins/search/sort/cursor pagination, wired to the `cost` model. *This is the product.*
+1. **Finish the operations** — *(2026-06-14: Postgres U/D/upsert/aggregate/batch landed.)* remaining: search/sort/cursor pagination and OLAP/OLTP cost-model routing. *This is the product.*
 2. **Unify OLAP/OLTP** — one query plane that routes OLTP↔Trino by cost; make OLAP/OLTP a first-class, switchable **context** (not just an edition). Tier OLTP→Iceberg for analytics.
 3. **Tenant SaaS layer** — quotas, per-tenant rate limits, usage metering, plan enforcement, billing hooks.
 4. **HA + scale** — Helm/K8s from the edition manifest, horizontal scaling, pool ceilings.
@@ -113,7 +115,7 @@ This is well above "toy." It's a credible *platform skeleton*.
 ## 5. Verdict
 
 - **As an architecture / platform skeleton:** genuinely strong, thoughtfully layered, and — uniquely — its layer/edition model already delivers the *deployment-shape* half of the OLAP/OLTP vision.
-- **As a product a customer could rely on today:** **not yet.** The core promise — "any engine, all operations, OLAP *or* OLTP" — is only partially true: it's *partial CRUD on 5 engines*, Postgres can't update/delete, "beyond CRUD" is an admin escape hatch, and OLAP is a separate bolted-on endpoint rather than an intelligent, switchable context.
+- **As a product a customer could rely on today:** *(2026-06-14 update)* the original "not yet" rested partly on gaps since closed — Postgres now has full CRUD + aggregate + batch. The core promise — "any engine, all operations, OLAP *or* OLTP" — is closer but still partial: "beyond CRUD" search/sort/cursor pagination is thin, and OLAP is still a separate bolted-on endpoint rather than an intelligent, switchable, cost-routed context (the genuine remaining product gap).
 - **Distance to "good product":** medium-large, but **on the right foundation** — the capability/cost model and the pluggable planes are exactly what the missing pieces need. The work is *implementation and integration*, not redesign.
 
 The most honest one-liner: **it's a beautifully engineered chassis with the engine half-built — finish the operations and make OLAP/OLTP a real runtime choice, and it becomes the product you're describing.**
