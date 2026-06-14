@@ -164,6 +164,17 @@ pub struct AppState {
     /// circuit before any extra field access), so at parity this stays empty and
     /// its background flusher is never spawned — byte-parity with today.
     usage: Arc<Usage>,
+    /// Track-B quota enforcement (B2): in-memory snapshot of the over-quota tenant
+    /// ids the control-plane QuotaGuard published to Redis (`quota:over`). The hot
+    /// path consults it ONLY when `config.quota_enforcement` is ON (a flag short-
+    /// circuit before any field access), so at parity this stays empty and is never
+    /// touched — byte-parity with today. Refreshed off the request path on the
+    /// reaper tick via [`quota::QuotaRefresher`].
+    quota_over: Arc<crate::quota::QuotaSet>,
+    /// Track-B quota enforcement (B2): the Redis snapshot refresher. `Some` only
+    /// when `config.quota_enforcement` is ON; the reaper calls `refresh` each tick.
+    /// `None` at parity → no refresh task touches Redis.
+    quota_refresher: Option<Arc<crate::quota::QuotaRefresher>>,
     /// Shared HTTP client for the Phase-7 bypass front door (`/data/v1`): calls
     /// tenant-control `/v1/keys/verify` + adapter-registry `/connect`. Cheap to
     /// clone (Arc inside); only used when the bypass is enabled.
@@ -285,6 +296,18 @@ impl AppState {
         if config.metering {
             usage.spawn_flusher(config.metering_flush_ms);
         }
+        // Track-B quota enforcement (B2): build the snapshot + (only when ON) its
+        // Redis refresher. OFF → no refresher is built (the reaper's refresh arm is
+        // a no-op `None` match), the snapshot stays empty, and the hot-path check is
+        // skipped by the `config.quota_enforcement` flag — observably byte-parity.
+        let quota_over = Arc::new(crate::quota::QuotaSet::new());
+        let quota_refresher = if config.quota_enforcement {
+            Some(Arc::new(crate::quota::QuotaRefresher::new(
+                config.quota_redis_url.clone(),
+            )))
+        } else {
+            None
+        };
         Self {
             config: Arc::new(config),
             engines: Arc::new(default_engines()),
@@ -297,6 +320,8 @@ impl AppState {
             metrics: metrics.clone(),
             ratelimiter: Arc::new(RateLimiter::from_env()),
             usage,
+            quota_over,
+            quota_refresher,
             http_client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(10))
                 .build()
@@ -378,6 +403,21 @@ impl AppState {
         }
     }
 
+    /// Track-B quota enforcement (B2): whether the dedicated snapshot-refresh loop
+    /// should be spawned. `config` is private to this module, so `server::run`
+    /// reads the flag through this accessor (mirroring `flush_usage`).
+    #[must_use]
+    pub fn quota_enforcement_enabled(&self) -> bool {
+        self.config.quota_enforcement
+    }
+
+    /// Track-B quota enforcement (B2): the refresh cadence (ms) for the snapshot
+    /// loop. Read by `server::run` through this accessor (private `config` field).
+    #[must_use]
+    pub fn quota_refresh_ms(&self) -> u64 {
+        self.config.quota_refresh_ms
+    }
+
     /// One reaper tick: drop idle pools past their `idle_ttl`, then roll back +
     /// unpin any transaction past its TTL (so an abandoned tx can't pin its pool
     /// forever). Best-effort; a single failing rollback never aborts the tick.
@@ -396,6 +436,18 @@ impl AppState {
         // bounded under N-tenant fan-out (a full idle bucket re-creates on access).
         self.ratelimiter
             .evict_idle(std::time::Duration::from_secs(300));
+        // Track-B quota enforcement (B2): refresh the over-quota snapshot from
+        // Redis OFF the request path. `None` (enforcement off) → no-op = parity.
+        self.refresh_quota().await;
+    }
+
+    /// Track-B quota enforcement (B2): refresh the over-quota snapshot from Redis.
+    /// A no-op when enforcement is off (`quota_refresher` is `None`), so it never
+    /// touches Redis at parity. Called from the reaper tick (off the request path).
+    pub async fn refresh_quota(&self) {
+        if let Some(refresher) = &self.quota_refresher {
+            refresher.refresh(&self.quota_over).await;
+        }
     }
 }
 
@@ -794,6 +846,28 @@ async fn run_query(
             );
             return too_many_requests(rps);
         }
+    }
+
+    // Track-B quota enforcement (B2) — CUMULATIVE per-period usage quota. The
+    // control-plane QuotaGuard (which CONSUMES B1's tenant_usage, never re-meters)
+    // publishes the over-quota tenant set to Redis; the data plane keeps a cheap
+    // in-memory snapshot (refreshed off the request path) and rejects an over-quota
+    // tenant with 402 here. Distinct from the 429 rate cap above (per-request) and
+    // the max_rows clamp below (per-query): this is the period-cumulative budget.
+    // OFF by default (`config.quota_enforcement`) → the snapshot is empty, this
+    // branch's flag short-circuits before any lookup, so it is byte-parity.
+    if state.config.quota_enforcement
+        && state.quota_over.is_over(&request.identity.tenant_id)
+    {
+        tracing::warn!(
+            target: "audit",
+            event = "quota_exceeded",
+            tenant = %request.identity.tenant_id,
+            engine = %request.mount.engine,
+            op = ?request.operation.op,
+            "tenant exceeded package usage quota (402)"
+        );
+        return payment_required();
     }
 
     // Capability-aware planner (G6, two-phase). Phase 1 rejects an impossible
@@ -2195,6 +2269,22 @@ fn too_many_requests(rps: u32) -> axum::response::Response {
         Json(ApiError {
             error: "rate_limited".to_string(),
             message: format!("tenant exceeded package rate limit of {rps} req/s"),
+        }),
+    )
+        .into_response()
+}
+
+/// Track-B quota enforcement (B2): the 402 a tenant over its tier's cumulative
+/// per-period usage quota receives. 402 Payment Required is the canonical "you've
+/// hit your plan's metered allowance — upgrade or wait for the period to roll"
+/// signal, DISTINCT from the 429 rate cap (slow down) and the 403 capability gate
+/// (upgrade your tier for this feature).
+fn payment_required() -> axum::response::Response {
+    (
+        StatusCode::PAYMENT_REQUIRED,
+        Json(ApiError {
+            error: "quota_exceeded".to_string(),
+            message: "tenant exceeded package usage quota for the current period".to_string(),
         }),
     )
         .into_response()

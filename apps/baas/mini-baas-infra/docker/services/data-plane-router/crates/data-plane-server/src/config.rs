@@ -116,6 +116,29 @@ pub struct ServerConfig {
     /// durable path is opt-in via a configured URL on top of the metering flag.
     /// Only consulted when `metering` is ON.
     pub metering_redis_url: String,
+    /// Track-B quota enforcement (B2) — honor the control-plane QuotaGuard's
+    /// over-quota decision on the request path. OFF by default → byte-parity: the
+    /// hot path takes ZERO extra branches (an `Option::is_none` short-circuit
+    /// before any quota state is touched), no Redis snapshot is built, and the
+    /// refresh tick is never scheduled. Requires BOTH the master `METERING_ENABLED`
+    /// AND `DATA_PLANE_QUOTA_ENFORCEMENT` to be truthy (master + per-honor sub-flag,
+    /// mirroring the metering flag ladder). When ON, a tenant the QuotaGuard listed
+    /// in the `quota:over` Redis set is rejected with 402 (quota exceeded); a tenant
+    /// absent from the set is served normally. CONSUMES B1's data (tenant_usage via
+    /// the guard) — it never re-meters.
+    pub quota_enforcement: bool,
+    /// Track-B quota enforcement (B2) — how often the data plane refreshes its
+    /// in-memory snapshot of the `quota:over` set from Redis (one `SMEMBERS` per
+    /// refresh, NOT per request). From `DATA_PLANE_QUOTA_REFRESH_MS` (default
+    /// 15000, matching the reaper cadence); a gate can set it low for a fast
+    /// first refresh. Only consulted when `quota_enforcement` is ON.
+    pub quota_refresh_ms: u64,
+    /// Track-B quota enforcement (B2) — the Redis URL the snapshot refresher reads
+    /// `quota:over` from. From `DATA_PLANE_QUOTA_REDIS_URL`, falling back to the
+    /// shared `REDIS_URL` (the same convention the rate limiter + metering use).
+    /// Empty → the refresher never connects (set stays empty = fail-open). Only
+    /// consulted when `quota_enforcement` is ON.
+    pub quota_redis_url: String,
 }
 
 impl ServerConfig {
@@ -212,6 +235,30 @@ impl ServerConfig {
                     url
                 }
             },
+            // Track-B quota enforcement (B2): ON only when BOTH the master flag
+            // AND the per-honor sub-flag are truthy — so the master gates the whole
+            // pipeline while the data-plane honor is independently toggleable for an
+            // isolated gate. BOTH default `false` → byte-parity.
+            quota_enforcement: matches!(
+                read_env("METERING_ENABLED", "false").to_lowercase().as_str(),
+                "1" | "true" | "on"
+            ) && matches!(
+                read_env("DATA_PLANE_QUOTA_ENFORCEMENT", "false").to_lowercase().as_str(),
+                "1" | "true" | "on"
+            ),
+            quota_refresh_ms: read_env("DATA_PLANE_QUOTA_REFRESH_MS", "15000")
+                .parse()
+                .unwrap_or(15000),
+            // Track-B quota enforcement (B2): the snapshot source URL. Own var,
+            // then the shared `REDIS_URL` — mirrors metering_redis_url exactly.
+            quota_redis_url: {
+                let url = read_env("DATA_PLANE_QUOTA_REDIS_URL", "");
+                if url.trim().is_empty() {
+                    read_env("REDIS_URL", "")
+                } else {
+                    url
+                }
+            },
         }
     }
 }
@@ -250,6 +297,9 @@ impl std::fmt::Debug for ServerConfig {
             // A Redis URL can embed credentials (redis://user:pass@host) — redact
             // it like the other secret-bearing fields (presence stays observable).
             .field("metering_redis_url", &redact(&self.metering_redis_url))
+            .field("quota_enforcement", &self.quota_enforcement)
+            .field("quota_refresh_ms", &self.quota_refresh_ms)
+            .field("quota_redis_url", &redact(&self.quota_redis_url))
             .finish()
     }
 }

@@ -33,6 +33,7 @@ pub mod one_oauth;
 pub mod one_totp;
 #[cfg(feature = "control-pg")]
 pub mod outbox;
+pub mod quota;
 pub mod ratelimit;
 pub mod routes;
 pub mod server;
