@@ -25,11 +25,14 @@ import (
 	"github.com/dlesieur/mini-baas/control-plane/internal/abuseguard"
 	"github.com/dlesieur/mini-baas/control-plane/internal/audit"
 	"github.com/dlesieur/mini-baas/control-plane/internal/backup"
+	"github.com/dlesieur/mini-baas/control-plane/internal/compliance"
 	"github.com/dlesieur/mini-baas/control-plane/internal/erase"
+	"github.com/dlesieur/mini-baas/control-plane/internal/export"
 	"github.com/dlesieur/mini-baas/control-plane/internal/ipguard"
 	"github.com/dlesieur/mini-baas/control-plane/internal/metering"
 	"github.com/dlesieur/mini-baas/control-plane/internal/orgs"
 	"github.com/dlesieur/mini-baas/control-plane/internal/packages"
+	"github.com/dlesieur/mini-baas/control-plane/internal/passkeys"
 	"github.com/dlesieur/mini-baas/control-plane/internal/provision"
 	"github.com/dlesieur/mini-baas/control-plane/internal/shared"
 	"github.com/dlesieur/mini-baas/control-plane/internal/tenants"
@@ -340,6 +343,131 @@ func main() {
 	}
 	// ─── end D2e ────────────────────────────────────────────────────────────────
 
+	// ─── Track-D D4.1: SOC2-LITE COMPLIANCE EVIDENCE COLLECTOR ─────────────────
+	// Snapshots compliance evidence — the CI/gate posture (which mNN gates + CI
+	// jobs exist/passed), a platform ACCESS REVIEW (role grants on the control
+	// tables), and a git CHANGE-MANAGEMENT trail (recent commits + authors) — into
+	// the durable, HASH-SEALED public.compliance_evidence (migration 051). Each of
+	// the three section rows is sealed hash = sha256(canonical(section,
+	// collected_at, payload)), computed IN GO; a tamper (edited payload/section)
+	// breaks that row's seal, which the verify route reports. The collector reads
+	// REALITY (a failing/missing control is recorded as failing, never green), and
+	// a read API returns the sealed evidence + its verify summary.
+	//
+	// PLATFORM-LEVEL, ADMIN-ONLY: this evidence is about the platform, not a
+	// tenant — every route requires a control-plane SERVICE TOKEN (no tenant-self
+	// path), and the 051 table is service-role-only at the RLS layer.
+	//
+	// FLAG-GATED OFF = PARITY: compliance.Mount is called ONLY when
+	// SOC2_EVIDENCE_ENABLED is truthy. When OFF (the default) Mount is never
+	// called, so none of the /v1/compliance* routes are registered (404) and the
+	// collector never runs, so no compliance_evidence row is ever written — byte-
+	// identical to today, the same discipline as TENANT_AUDIT_ENABLED /
+	// HARD_ERASE_ENABLED / ORG_MODEL_ENABLED above.
+	if envBool("SOC2_EVIDENCE_ENABLED") {
+		compliance.Mount(mux, compliance.NewService(db), cfg.ServiceToken)
+		log.Info("SOC2-lite compliance evidence collector enabled (/v1/compliance/collect|evidence|verify) — SOC2_EVIDENCE_ENABLED")
+	} else {
+		log.Info("SOC2-lite compliance evidence collector disabled (SOC2_EVIDENCE_ENABLED off) — /v1/compliance* not mounted")
+	}
+	// ─── end D4.1 ───────────────────────────────────────────────────────────────
+
+	// ─── Track-D D4.3: TENANT DATA EXPORT (GDPR data portability) ──────────────
+	// A PORTABLE bundle of ONE tenant's data — a single self-describing JSON
+	// document (per-table rows + a manifest{tables, row counts, sha256}) the tenant
+	// can take ELSEWHERE (GDPR Art. 20). It builds on B6 backup's data-SCOPING but
+	// the OUTPUT differs in kind: B6 produces a restore-oriented COPY artifact;
+	// D4.3 produces a portable, engine-neutral JSON bundle (no restore lifecycle).
+	//   admin:  POST /v1/tenants/{id}/export · GET .../exports · GET .../export/{exportId}
+	//   self:   POST/GET /v1/tenants/me/export(s) · GET /v1/tenants/me/export/{exportId}
+	//
+	// SCOPED STRICTLY TO ONE TENANT (reusing the D4.4 erase resolution):
+	// schema_per_tenant => that tenant's OWN schema (tenants.TenantSchema); every
+	// BASE TABLE. shared_rls => the shared data tables, each filtered WHERE
+	// tenant_id = the caller's slug (never a bare scan of a shared table). So the
+	// bundle can NEVER contain another tenant's rows. db_per_tenant + tenant_owned
+	// are DEFERRED (400). Migration 052 backs the tenant_exports ledger.
+	//
+	// FLAG-GATED OFF = PARITY: export.Mount is called ONLY when TENANT_EXPORT_ENABLED
+	// is truthy. When OFF (the default) Mount is never called, so none of the export
+	// routes are registered (404) and no tenant_exports row is ever written — byte-
+	// identical to today, the same discipline as TENANT_BACKUP_ENABLED /
+	// HARD_ERASE_ENABLED above. The artifact store init fails fast (a misconfigured
+	// store is a data-safety boundary) but only along this opt-in path. The
+	// self-serve surface is narrowed by a SECOND flag, TENANT_SELFSERVE_ENABLED
+	// (the tenants Service is the key->tenant resolver), exactly as backup narrows
+	// its self-serve surface.
+	if envBool("TENANT_EXPORT_ENABLED") {
+		estore, err := export.NewStoreFromEnv()
+		if err != nil {
+			log.Error("export: artifact store init failed", "err", err)
+			os.Exit(1)
+		}
+		esvc := export.NewService(db, estore, log)
+		export.Mount(mux, esvc, cfg.ServiceToken)
+		if envBool("TENANT_SELFSERVE_ENABLED") {
+			export.MountSelfServe(mux, esvc.WithTenants(svc), esvc)
+			log.Info("tenant data-export self-serve enabled (/v1/tenants/me/export(s), API-key)")
+		}
+		log.Info("tenant data-export API enabled (/v1/tenants/{id}/export|exports) — TENANT_EXPORT_ENABLED")
+	} else {
+		log.Info("tenant data-export disabled (TENANT_EXPORT_ENABLED off) — /v1/tenants/{id}/export* not mounted")
+	}
+	// ─── end D4.3 ───────────────────────────────────────────────────────────────
+
+	// ─── Track-D D2c: PASSKEYS / WebAuthn (server-side ceremonies) ─────────────
+	// Net-new enterprise auth: gotrue has NO passkey support. A server-side
+	// WebAuthn relying party drives a registration ceremony (BeginRegistration ->
+	// authenticator -> FinishRegistration, store the credential) and an
+	// authentication ceremony (BeginLogin -> authenticator signs the challenge ->
+	// FinishLogin, verify the assertion against the stored COSE public key, bump
+	// the sign_count, mint a GoTrue-shaped session JWT). The cryptography is the
+	// maintained github.com/go-webauthn/webauthn library's; the control plane owns
+	// the durable credential store (migration 050), the short-TTL server-side
+	// challenge state, and the session mint (the SAME HS256 secret/claim shape the
+	// existing tenants.JWTVerifier accepts, so a passkey session == a password
+	// session). Routes: POST /v1/auth/passkeys/{register,login}/{begin,finish}.
+	//
+	// FLAG-GATED OFF = PARITY: passkeys.Mount is called ONLY when PASSKEYS_ENABLED
+	// is truthy. When OFF (the default) Mount is never called, so none of the
+	// /v1/auth/passkeys/* routes are registered (404) and the webauthn_credentials
+	// table is never consulted — byte-identical to today, the same discipline as
+	// TENANT_AUDIT_ENABLED / HARD_ERASE_ENABLED / ORG_MODEL_ENABLED above.
+	//
+	// The session mint REQUIRES the shared GoTrue secret (a passkey login issues a
+	// real session); if no GOTRUE_JWT_SECRET/JWT_SECRET is set the API cannot mint
+	// and boot fails fast on this opt-in path (a passkey login that cannot issue a
+	// session is a misconfiguration, not a silent no-op). PASSKEYS_RP_ID /
+	// PASSKEYS_RP_ORIGINS configure the relying party (the origin bind is part of
+	// why a stolen assertion cannot be replayed against another site).
+	if envBool("PASSKEYS_ENABLED") {
+		if jwtSecret == "" {
+			log.Error("passkeys: PASSKEYS_ENABLED requires GOTRUE_JWT_SECRET/JWT_SECRET to mint a session")
+			os.Exit(1)
+		}
+		rpID := envFirst("PASSKEYS_RP_ID", "WEBAUTHN_RP_ID")
+		rpOrigins := splitCSV(envFirst("PASSKEYS_RP_ORIGINS", "WEBAUTHN_RP_ORIGINS"))
+		if rpID == "" || len(rpOrigins) == 0 {
+			log.Error("passkeys: PASSKEYS_RP_ID and PASSKEYS_RP_ORIGINS are required when PASSKEYS_ENABLED")
+			os.Exit(1)
+		}
+		minter := passkeys.NewSessionMinter(jwtSecret, os.Getenv("GOTRUE_JWT_ISSUER"), 0)
+		pkSvc, err := passkeys.NewService(db, passkeys.Config{
+			RPID:          rpID,
+			RPDisplayName: envOr("PASSKEYS_RP_DISPLAY_NAME", "Grobase"),
+			RPOrigins:     rpOrigins,
+		}, minter, log)
+		if err != nil {
+			log.Error("passkeys: relying-party init failed", "err", err)
+			os.Exit(1)
+		}
+		passkeys.Mount(mux, pkSvc, cfg.ServiceToken)
+		log.Info("passkeys / WebAuthn enabled (/v1/auth/passkeys/{register,login}/{begin,finish}) — PASSKEYS_ENABLED", "rp_id", rpID)
+	} else {
+		log.Info("passkeys / WebAuthn disabled (PASSKEYS_ENABLED off) — /v1/auth/passkeys/* not mounted")
+	}
+	// ─── end D2c ────────────────────────────────────────────────────────────────
+
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr(),
 		Handler:           shared.WithMiddleware(mux, log),
@@ -384,6 +512,45 @@ func envBool(key string) bool {
 	default:
 		return false
 	}
+}
+
+// envOr returns the env value for key, or def when unset/empty.
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+// splitCSV splits a comma-separated env value into trimmed, non-empty fields
+// (e.g. PASSKEYS_RP_ORIGINS="https://app.example.com,https://example.com"). It
+// avoids the strings import to keep main.go's import set untouched.
+func splitCSV(s string) []string {
+	out := []string{}
+	cur := []rune{}
+	flush := func() {
+		// trim leading/trailing ASCII space from the field.
+		start, end := 0, len(cur)
+		for start < end && (cur[start] == ' ' || cur[start] == '\t') {
+			start++
+		}
+		for end > start && (cur[end-1] == ' ' || cur[end-1] == '\t') {
+			end--
+		}
+		if end > start {
+			out = append(out, string(cur[start:end]))
+		}
+		cur = cur[:0]
+	}
+	for _, r := range s {
+		if r == ',' {
+			flush()
+			continue
+		}
+		cur = append(cur, r)
+	}
+	flush()
+	return out
 }
 
 func healthcheck(cfg shared.Config) int {
