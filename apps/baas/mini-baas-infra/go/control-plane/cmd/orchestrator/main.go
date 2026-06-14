@@ -91,6 +91,13 @@ func main() {
 		// the flag is off Init/Run are no-ops (no Redis, no evaluation, no
 		// `quota:over` set written), so the orchestrator is byte-parity with today.
 		"quota-guard": metering.NewQuotaGuard(log, db),
+		// billing reporter (Track-B B3): guarded internally by BILLING_ENABLED
+		// (default OFF). Like metering/quota, registered unconditionally is safe —
+		// when the flag is off Init/Run are no-ops (no catalog, no Stripe client, no
+		// meter event ever sent, billing_reported stays empty), so the orchestrator
+		// is byte-parity with today. Consumes B1 tenant_usage + the 041
+		// tenant_billing map; pushes per-window usage to Stripe billing meters.
+		"billing": metering.NewBillingReporter(log, db),
 	}
 	enabled := selectServices(available, os.Getenv("ORCHESTRATOR_SERVICES"))
 	if len(enabled) == 0 {
