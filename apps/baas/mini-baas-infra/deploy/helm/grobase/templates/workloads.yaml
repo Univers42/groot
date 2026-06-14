@@ -24,6 +24,15 @@ spec:
   {{- if not (and $plane.autoscaling $plane.autoscaling.enabled) }}
   replicas: {{ $plane.replicas | default 1 }}
   {{- end }}
+  {{- /* Zero-downtime rollout for stateless Deployments (C1): surge-then-drain.
+         A per-plane $plane.strategy wins; otherwise the chart-wide default.
+         StatefulSets keep their ordered default updateStrategy. */ -}}
+  {{- if not $isSts }}
+  {{- with ($plane.strategy | default $root.Values.deployStrategy) }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "grobase.selectorLabels" (dict "root" $root "name" $name) | nindent 6 }}
