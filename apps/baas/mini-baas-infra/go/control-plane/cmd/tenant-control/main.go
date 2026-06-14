@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dlesieur/mini-baas/control-plane/internal/metering"
 	"github.com/dlesieur/mini-baas/control-plane/internal/provision"
 	"github.com/dlesieur/mini-baas/control-plane/internal/shared"
 	"github.com/dlesieur/mini-baas/control-plane/internal/tenants"
@@ -107,6 +108,13 @@ func main() {
 
 	mux := shared.NewRouter("tenant-control", db)
 	tenants.Mount(mux, svc, cfg.ServiceToken, jwtVerifier, reconciler)
+
+	// Metering read-back API (Track-B B1c): GET /v1/tenants/{id}/usage. Purely
+	// additive read over public.tenant_usage (migration 040), same admin/self
+	// auth + tenant-scoping as GET /v1/tenants/{id}. No flag gates the READ path
+	// — when metering is OFF the table is empty and it returns empty aggregates,
+	// so this route changes no existing path (that IS the parity story).
+	metering.Mount(mux, db, cfg.ServiceToken)
 
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr(),
