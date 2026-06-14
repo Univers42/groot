@@ -79,17 +79,30 @@ func WithMiddleware(next http.Handler, log *slog.Logger) http.Handler {
 		sw.Header().Set(HeaderRequestID, requestID)
 		r = r.WithContext(WithCorrelation(r.Context(), requestID, traceparent))
 
+		// B5 Pillar 1: tenant_id, when known on the request, becomes a STRUCTURED
+		// LOG FIELD on the one per-request log line below — gated by
+		// TENANT_OBS_ENABLED inside WithTenant. When the flag is OFF (default),
+		// WithTenant returns `log` unchanged, so the log line is byte-identical to
+		// the pre-B5 baseline. tenant_id stays a Loki FIELD (promtail expression),
+		// never a Loki label, so it adds zero label streams.
+		tenantID := tenantIDFromRequest(r)
+		reqLog := WithTenant(log, tenantID)
+
 		defer func() {
 			if rec := recover(); rec != nil {
-				log.Error("panic recovered", "err", rec, "path", r.URL.Path, "request_id", requestID)
+				reqLog.Error("panic recovered", "err", rec, "path", r.URL.Path, "request_id", requestID)
 				WriteError(sw, http.StatusInternalServerError, "internal_error", "unexpected error")
 			}
 			// Record request metrics, but skip the probe/scrape paths so the
 			// counters reflect real API traffic rather than health-check noise.
 			if !strings.HasPrefix(r.URL.Path, "/health") && r.URL.Path != "/metrics" {
 				procMetrics.observe(r.Method, sw.status, time.Since(start))
+				// B5 Pillar 3 (optional, default OFF): bump the BOUNDED per-tenant
+				// request counter. No-op unless TENANT_OBS_COUNTER &&
+				// TENANT_OBS_ENABLED; hard-capped so 10K+ tenants stay cardinality-safe.
+				procMetrics.observeTenant(sw.status, tenantID)
 			}
-			log.Info("request",
+			reqLog.Info("request",
 				"method", r.Method,
 				"path", r.URL.Path,
 				"status", sw.status,
@@ -101,6 +114,20 @@ func WithMiddleware(next http.Handler, log *slog.Logger) http.Handler {
 
 		next.ServeHTTP(sw, r)
 	})
+}
+
+// tenantIDFromRequest extracts the tenant id carried on an inbound request, or
+// "" when none is present. The control plane's tenant-scoped routes accept the
+// tenant on X-Baas-Tenant-Id (preferred) / X-Tenant-Id headers — the SAME
+// signal tokenOrSelf authorises against — so the per-request log field and the
+// bounded counter use the same source of truth. Returns "" for untenanted
+// (admin/service-token) requests, which keeps WithTenant an identity no-op for
+// them even when the flag is on.
+func tenantIDFromRequest(r *http.Request) string {
+	if v := r.Header.Get("X-Baas-Tenant-Id"); v != "" {
+		return v
+	}
+	return r.Header.Get("X-Tenant-Id")
 }
 
 type statusWriter struct {

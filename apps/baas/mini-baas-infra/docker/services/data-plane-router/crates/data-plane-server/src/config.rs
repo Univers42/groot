@@ -139,6 +139,27 @@ pub struct ServerConfig {
     /// Empty → the refresher never connects (set stays empty = fail-open). Only
     /// consulted when `quota_enforcement` is ON.
     pub quota_redis_url: String,
+
+    /// B5 per-tenant observability (Pillar 1) — emit `tenant_id` as a STRUCTURED
+    /// TRACING/LOG FIELD on the per-request span. OFF by default → byte-parity:
+    /// the span is never entered, so the log output carries no `tenant_id` field
+    /// and is byte-identical to today. From `DATA_PLANE_TENANT_OBS`
+    /// (`1`/`true`/`on`). `tenant_id` is a Loki FIELD (promtail extracts it under
+    /// `expressions:` for `| json | tenant_id="X"`), NEVER a Loki label and NEVER a
+    /// Prometheus label here — so it adds ZERO label-series cardinality at 10K+
+    /// tenants. The handler reads this cheap bool, never the env, per request.
+    pub tenant_obs: bool,
+    /// B5 per-tenant observability (Pillar 3, OPTIONAL) — additionally emit a
+    /// `tenant_id` label on EXACTLY ONE counter (`baas_http_requests_total`),
+    /// behind a HARD in-process cap (N=512 distinct tenants + one `_over_cap`
+    /// sentinel → ceiling N+1 series, independent of tenant count). OFF by default
+    /// EVEN WHEN `tenant_obs` is ON, because the counter path is the only place a
+    /// mistake can cost cardinality. Requires BOTH `tenant_obs` AND
+    /// `DATA_PLANE_TENANT_OBS_COUNTER` (`1`/`true`/`on`) — only consulted when
+    /// `tenant_obs` is also true (the parent log-field flag). NEVER applied to any
+    /// histogram or to the cache/pool/outbox counters. OFF → `/metrics` is
+    /// byte-identical to today.
+    pub tenant_obs_counter: bool,
 }
 
 impl ServerConfig {
@@ -259,6 +280,25 @@ impl ServerConfig {
                     url
                 }
             },
+            // B5 per-tenant observability (Pillar 1): the parent log-field flag.
+            // Default `false` → byte-parity (the request span is never entered).
+            tenant_obs: matches!(
+                read_env("DATA_PLANE_TENANT_OBS", "false").to_lowercase().as_str(),
+                "1" | "true" | "on"
+            ),
+            // B5 per-tenant observability (Pillar 3): the optional bounded counter
+            // sub-flag. AND-gated with `tenant_obs` so the counter path can NEVER
+            // be on without the parent — read once here, never the env per request.
+            // BOTH default `false` → `/metrics` byte-identical to today.
+            tenant_obs_counter: matches!(
+                read_env("DATA_PLANE_TENANT_OBS", "false").to_lowercase().as_str(),
+                "1" | "true" | "on"
+            ) && matches!(
+                read_env("DATA_PLANE_TENANT_OBS_COUNTER", "false")
+                    .to_lowercase()
+                    .as_str(),
+                "1" | "true" | "on"
+            ),
         }
     }
 }
@@ -300,6 +340,8 @@ impl std::fmt::Debug for ServerConfig {
             .field("quota_enforcement", &self.quota_enforcement)
             .field("quota_refresh_ms", &self.quota_refresh_ms)
             .field("quota_redis_url", &redact(&self.quota_redis_url))
+            .field("tenant_obs", &self.tenant_obs)
+            .field("tenant_obs_counter", &self.tenant_obs_counter)
             .finish()
     }
 }

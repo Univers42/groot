@@ -46,6 +46,12 @@ scrape_configs:
             level: level
             service: service
             msg: msg
+            # B5 per-tenant observability: tenant_id is a field-only query target
+            # (| json | tenant_id="X"); NEVER promote to a label — that would
+            # create one Loki stream per tenant and defeat B5's cardinality safety.
+            # When neither plane emits the field (TENANT_OBS flags OFF) this
+            # expression matches nothing — inert, baseline-safe.
+            tenant_id: tenant_id
       - labels:
           stream:
           level:

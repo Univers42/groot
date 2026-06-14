@@ -614,6 +614,21 @@ async fn metrics_handler(State(state): State<AppState>) -> Response {
             "baas_http_requests_total{{service=\"data-plane-router\",status=\"{class}\"}} {n}\n"
         ));
     }
+    // B5 per-tenant observability (Pillar 3, OPTIONAL) — additionally emit a
+    // tenant_id-labeled line on THIS counter ONLY (never a histogram, never the
+    // cache/pool/outbox counters). The set is HARD-CAPPED at N+1 distinct tenants
+    // (the over-cap fold is the `tenant_id="_over_cap"` sentinel), so this adds at
+    // most N+1 series regardless of tenant count. The snapshot is EMPTY at parity
+    // (the counter is only written when `tenant_obs_counter` is ON), so when the
+    // flag is OFF this loop emits ZERO lines and `/metrics` is byte-identical to
+    // today. The labels are already `escape_label`-sanitized (they are the stored
+    // keys), so they are emitted verbatim inside the quotes. No `status` label on
+    // these lines (one series per tenant) keeps the ceiling at exactly N+1.
+    for (tenant_id, n) in state.metrics.tenant_requests_snapshot() {
+        out.push_str(&format!(
+            "baas_http_requests_total{{service=\"data-plane-router\",tenant_id=\"{tenant_id}\"}} {n}\n"
+        ));
+    }
     // Scale counters (B3): pool lifecycle, cache effectiveness, limiter map —
     // the signals the 10K-tenant experiments watch. evicted_total climbing at
     // steady state == the mount working set exceeds DATA_PLANE_MAX_POOLS.
@@ -782,11 +797,70 @@ fn mask_action_for(op: &DataOperationKind) -> &'static str {
     }
 }
 
+/// B5 per-tenant observability (Pillar 1) — thin span wrapper around the real
+/// handler body ([`run_query_inner`]). When `config.tenant_obs` is ON, build a
+/// per-request span carrying `tenant_id` as a STRUCTURED FIELD and `.instrument`
+/// the whole `run_query_inner` future with it, so every event emitted while
+/// serving this request (the per-request log line, the audit `mutation`/`read`
+/// events, the planner/limit warns) carries the tenant as a log FIELD — exactly
+/// what promtail's expressions-only extraction (slice O) reads with
+/// `| json | tenant_id="X"`. `.instrument` is the async-correct way to attach a
+/// span to a future (an `.entered()` guard held across `.await` would leak the
+/// current-span across task boundaries on the multi-thread runtime). When OFF the
+/// span is `Span::none()` — instrumenting with it is a no-op, so the tracing path
+/// and log output are BYTE-IDENTICAL to baseline (kernel rule #5). `tenant_id` is
+/// a FIELD only: never promoted to a Loki label or a Prometheus label here, so it
+/// adds ZERO label-series cardinality. Both the internal `/v1/query` and the
+/// bypass `/data/v1/query` paths funnel through here, so this single site covers
+/// a read AND a write.
 async fn run_query(
+    state: AppState,
+    request: QueryRequest,
+    emit_outbox: bool,
+) -> axum::response::Response {
+    use tracing::Instrument;
+    let span = if state.config.tenant_obs {
+        tracing::info_span!("request", tenant_id = %request.identity.tenant_id)
+    } else {
+        tracing::Span::none()
+    };
+    run_query_inner(state, request, emit_outbox)
+        .instrument(span)
+        .await
+}
+
+async fn run_query_inner(
     state: AppState,
     mut request: QueryRequest,
     emit_outbox: bool,
 ) -> axum::response::Response {
+    // B5 per-tenant observability (Pillar 3, OPTIONAL) — record ONE request for
+    // this tenant into the BOUNDED per-tenant counter. AND-gated: only when BOTH
+    // the parent log-field flag AND the counter sub-flag are ON (`tenant_obs_counter`
+    // is already AND(tenant_obs, DATA_PLANE_TENANT_OBS_COUNTER) from config). The
+    // flag short-circuits BEFORE any work, so at parity this branch is a single
+    // `bool` test that takes nothing — `/metrics` stays byte-identical. The
+    // counter is hard-capped at N+1 series inside `record_tenant_request`, so it
+    // can never explode at 10K+ tenants. Recorded at handler entry (off the global
+    // status buckets) so it covers a read AND a write on both doors.
+    if state.config.tenant_obs_counter {
+        state
+            .metrics
+            .record_tenant_request(&request.identity.tenant_id);
+    }
+    // B5 per-tenant observability (Pillar 1) — emit ONE per-request log event
+    // carrying tenant_id as a STRUCTURED FIELD, gated by config.tenant_obs
+    // (DATA_PLANE_TENANT_OBS, default OFF). The `.instrument(span)` wrapper alone
+    // is NOT enough: a span only surfaces its fields when an event fires *inside*
+    // it, and the success path's usage signal drains in a background task (outside
+    // this span), so without an explicit event no request log line would carry the
+    // tenant. This event is the field promtail extracts (`| json | tenant_id="X"`).
+    // When the flag is OFF this branch is skipped entirely → zero new log lines =
+    // byte-parity with the pre-B5 baseline (kernel rule #5). tenant_id is a FIELD
+    // only — never a Loki label or a Prometheus label — so it adds no cardinality.
+    if state.config.tenant_obs {
+        tracing::info!(tenant_id = %request.identity.tenant_id, "data-plane request");
+    }
     if let Err(message) = validate_identity_mount(&state, &request.identity, &request.mount) {
         return bad_request(message);
     }
