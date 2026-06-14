@@ -523,6 +523,28 @@ cloud-flags-print: ## Print the managed-cloud flag manifest (B7.1 single flip po
 	@echo -e "$(_D)Opt-in: the default stack ignores this manifest (all flags default OFF in code = byte-parity).$(_0)"
 	@echo -e "$(_D)Promotion ladder (staging→canary→prod): config/cloud/README.md$(_0)"
 
+# ── Cloud edition (managed-cloud, all flags ON, mock Stripe) ─────────────────
+# The env-only overlay docker-compose.cloud.yml + config/cloud/flags.env.cloud
+# layered onto the default compose with the EDITION=prod planes + the `cloud`
+# profile (stripe-mock). OPT-IN: a non-cloud `make up` never passes these `-f`s,
+# so the default stack stays byte-parity (kernel #5). Design: wiki/cloud-edition-design.md.
+CLOUD_FILES     := -f $(COMPOSE_FILE) -f docker-compose.cloud.yml
+CLOUD_PROFILES  := --profile control-plane --profile go-control-plane \
+                   --profile rust-data-plane --profile adapter-plane \
+                   --profile background --profile storage --profile realtime \
+                   --profile observability --profile ops --profile backups \
+                   --profile cloud
+
+cloud-up: _require-compose _rm-stale ## Boot the FULL managed-cloud stack locally (all cloud flags ON, mock Stripe)
+	@echo -e "$(_B)Starting CLOUD edition (all managed-cloud flags ON, mock Stripe) → prod planes + cloud profile$(_0)"
+	@eval "$$(bash scripts/resolve-ports.sh 2>/dev/null || true)"; \
+	  docker compose $(CLOUD_FILES) $(CLOUD_PROFILES) up -d $(SERVICE)
+	@echo -e "$(_G)✓ Cloud edition up (config/cloud/flags.env.cloud layered; stripe-mock in the cloud profile)$(_0)"
+
+cloud-down: _require-compose ## Stop the cloud edition (overlay + cloud profile)
+	@docker compose $(CLOUD_FILES) $(CLOUD_PROFILES) down
+	@echo -e "$(_G)✓ Cloud edition down$(_0)"
+
 # ========================================================================== #
 ##@ Release
 # ========================================================================== #
@@ -595,5 +617,5 @@ help: ## Show this help
         rust-realtime-check rust-realtime-test rust-realtime-build _rust-toolchain \
         go-control-plane-build preflight hooks update help \
         quickstart release-binaries release-images release-check _require-version \
-        backup-now restore-verify cloud-flags-print \
+        backup-now restore-verify cloud-flags-print cloud-up cloud-down \
         _require-docker _require-compose _rm-stale

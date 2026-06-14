@@ -173,6 +173,36 @@ baas-verify-all: baas-verify-m10
 ## Run every milestone gate currently shipped.
 	@echo "[baas-verify] M1 + M2 + M3 + M4 + M5 + M6 + M7 + M8 + M9 + M10 OK."
 
+# ── Higher milestone gates (m11+) — one self-contained script each ─────────────
+# Every milestone beyond the m1-m10 foundation ships a self-contained gate at
+# apps/baas/mini-baas-infra/scripts/verify/m<NN>-*.sh (currently through m94). The
+# generic pattern rule below maps `make baas-verify-mNN` to the matching script by
+# glob, so a new gate is runnable the moment its script lands — no per-target edit.
+#
+# Milestone map (Track-B managed-cloud, the recent ones):
+#   m80  quota enforce (B2 · 402 on the data path)   m87  per-tenant backup (B6)
+#   m82  billing reporter (B3 · Stripe meter events) m89  spend caps (B7.8)
+#   m83  tenant self-service (B4a · /v1/tenants/me*)  m90  abuse guard (B7.9)
+#   m84  console route (B4b · Kong /me)               m94  CLOUD EDITION funnel
+#   m85  per-tenant observability (B5)                     (all cloud flags ON,
+#                                                            end-to-end bar-4 proof)
+.PHONY: baas-verify-m% baas-verify-m94
+
+baas-verify-m%:
+## Run a single higher milestone gate by number (e.g. make baas-verify-m94).
+	@script=$$(ls $(BAAS_VERIFY_DIR)/m$*-*.sh 2>/dev/null | head -1); \
+	if [ -z "$$script" ]; then echo "no gate script for milestone m$* under $(BAAS_VERIFY_DIR)"; exit 1; fi; \
+	echo "[baas-verify] running $$script"; \
+	$(BAAS_PORT_OVERRIDES) bash "$$script" $(BAAS_VERIFY_FLAGS)
+
+baas-verify-m94:
+## Verify M94 — Grobase CLOUD EDITION end-to-end funnel (bar 4: usable, runnable
+## on local docker). All cloud flags ON on one isolated stack: provision→key→CRUD
+## →usage (B1)→/me/usage (B4a)→Stripe meter event (B3)→Kong /me (B4b); rejects
+## quota-402 (B2, data path) / spend:over (B7.8, control plane) / abuse-suspend
+## (B7.9); a flag-OFF second stack proves byte-parity.
+	@$(BAAS_PORT_OVERRIDES) bash $(BAAS_VERIFY_DIR)/m94-cloud-funnel.sh $(BAAS_VERIFY_FLAGS)
+
 # ── Productization gates (M11+) — secure-baas roadmap ────────────────────────
 # These are independent of the M1-M10 foundation gates and may pass selectively.
 
