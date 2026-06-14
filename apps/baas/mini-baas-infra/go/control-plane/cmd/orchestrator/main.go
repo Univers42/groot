@@ -32,6 +32,7 @@ import (
 	"github.com/dlesieur/mini-baas/control-plane/internal/orchestrator/outboxrelay"
 	"github.com/dlesieur/mini-baas/control-plane/internal/orchestrator/sessionsvc"
 	"github.com/dlesieur/mini-baas/control-plane/internal/shared"
+	"github.com/dlesieur/mini-baas/control-plane/internal/spendcap"
 )
 
 // SubService is one consolidated orchestrator module. Mount registers its HTTP
@@ -98,6 +99,15 @@ func main() {
 		// is byte-parity with today. Consumes B1 tenant_usage + the 041
 		// tenant_billing map; pushes per-window usage to Stripe billing meters.
 		"billing": metering.NewBillingReporter(log, db),
+		// spend-cap guard (Track-B B7.8): guarded internally by SPEND_CAPS_ENABLED
+		// (default OFF). Like metering/quota/billing, registered unconditionally is
+		// safe — when the flag is off Init/Run are no-ops (no Redis, no evaluation,
+		// no `spend:over` set written, no alert fired), so the orchestrator is
+		// byte-parity with today. Consumes B1 tenant_usage + the 045 tenant_budgets
+		// table; publishes the over-budget set the data plane consults cheaply (the
+		// same snapshot pattern as B2's quota:over) to HALT billable service before
+		// a free-tier cost runaway, and fires a once-per-period 80% budget alert.
+		"spend-cap": spendcap.NewGuard(log, db),
 	}
 	enabled := selectServices(available, os.Getenv("ORCHESTRATOR_SERVICES"))
 	if len(enabled) == 0 {
