@@ -273,13 +273,15 @@ impl AppState {
         // metrics is built first: the background outbox worker (D-write-tail)
         // records enqueue/write/drop counters onto it.
         let metrics = Arc::new(Metrics::default());
-        // Track-B metering (B1a): build the aggregate, and spawn its background
-        // flusher ONLY when metering is ON. OFF → the flusher is never spawned
-        // (not even an idle timer) and the request path never calls `record`, so
-        // this is observably byte-parity with today. The flusher drains the
-        // aggregate every `metering_flush_ms` and emits one `usage` event per
-        // (tenant, metric) window (the B1a sink).
-        let usage = Arc::new(Usage::new());
+        // Track-B metering (B1a + B1b): build the aggregate, wiring the durable
+        // Redis `usage.events` stream sink (B1b) from the configured URL (empty →
+        // tracing-only, B1a), then spawn its background flusher ONLY when metering
+        // is ON. OFF → the flusher is never spawned (not even an idle timer) and
+        // the request path never calls `record`, so this is observably byte-parity
+        // with today. The flusher drains the aggregate every `metering_flush_ms`
+        // and per (tenant, metric) window emits one `usage` tracing event (B1a)
+        // AND XADDs the frozen envelope to `usage.events` when a URL is set (B1b).
+        let usage = Arc::new(Usage::new().with_stream_url(&config.metering_redis_url));
         if config.metering {
             usage.spawn_flusher(config.metering_flush_ms);
         }
