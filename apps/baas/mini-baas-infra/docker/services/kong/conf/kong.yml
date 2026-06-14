@@ -406,6 +406,59 @@ services:
           - name: rate-limiting
             config: { policy: local, limit_by: ip, minute: 60, hour: 1000 }
 
+  # ── B4b-2: tenant self-service console surface (Track-B B4a, /v1/tenants/me*).
+  # PUBLIC by design: the app authenticates ITSELF (Authorization: Bearer mbk_… /
+  # X-API-Key / GoTrue JWT) and Kong forwards that header unchanged — so NO key-auth
+  # and NO ip-restriction here (unlike the INTERNAL /admin/v1/tenants route, which is
+  # service_role apikey + ip-restricted). tenant-control's selfAuth resolves the
+  # caller's OWN tenant (no path id) → cross-tenant impossible by construction.
+  #
+  # PATH SAFETY (two independent guarantees, belt-and-suspenders):
+  #   1. REGEX-TIGHT at the gate: the paths are regex (Kong 3.x: a leading `~` makes
+  #      the value a PCRE, start-anchored). `~/v1/tenants/me$` matches ONLY the bare
+  #      endpoint; `~/v1/tenants/me/.*` matches ONLY the /me/ subtree. Neither
+  #      matches /v1/tenants/members or /v1/tenants/mexico (prefix over-match is
+  #      rejected at Kong — those 404 at the gateway, never reaching the upstream).
+  #      (NB: do NOT add a literal `^` after the `~` — Kong already start-anchors the
+  #      regex, so `~/^/…` makes the `^` a mid-pattern anchor that never matches;
+  #      proven by m84 arm 4 returning 404 with the `^` form.)
+  #   2. UPSTREAM-SAFE even if (1) regressed: tenant-control's {id} handler (findOne)
+  #      requires a service token OR a matching X-Tenant-Id header — a public request
+  #      carries neither, so an over-matched /v1/tenants/{id} returns 401/404, NEVER
+  #      another tenant's body.
+  #
+  # PATH MAPPING — bare url + strip_path:false → the request path is forwarded
+  # VERBATIM (the data-plane-direct / storage-sign precedent), NOT the admin-tenants
+  # url-carries-path + strip_path:true form. WHY: with a REGEX path, strip_path strips
+  # the ENTIRE regex match; the greedy `~/v1/tenants/me/.*` would match all of
+  # /v1/tenants/me/keys and strip it to "" → the sub-route would be LOST. strip_path
+  # :false forwards the path untouched, so the upstream sees the full path:
+  #   /v1/tenants/me            → upstream /v1/tenants/me
+  #   /v1/tenants/me/usage      → upstream /v1/tenants/me/usage
+  #   /v1/tenants/me/keys       → upstream /v1/tenants/me/keys
+  #   /v1/tenants/me/keys/{id}  → upstream /v1/tenants/me/keys/{id}
+  #   (DELETE …/keys/{id} and PATCH /me ride the same two regexes — method is
+  #    orthogonal to path matching.) Proven by scripts/verify/m84-console-route.sh.
+  #
+  # CORS is inherited from the global cors plugin (already allows Authorization +
+  # the osionos origins http://localhost:3001 / http://127.0.0.1:3001) — no per-route
+  # cors needed. The /me handlers mount at the upstream ONLY when
+  # TENANT_SELFSERVE_ENABLED is truthy on tenant-control; OFF → upstream 404/401 =
+  # byte-parity (this Kong route is harmless when the feature is off).
+  - name: tenant-selfserve
+    url: http://tenant-control:3022
+    routes:
+      - name: tenant-selfserve
+        paths:
+          - ~/v1/tenants/me$
+          - ~/v1/tenants/me/.*
+        strip_path: false
+        plugins:
+          - name: request-size-limiting
+            config: { allowed_payload_size: 64, size_unit: kilobytes }
+          - name: rate-limiting
+            config: { policy: local, limit_by: ip, minute: 120, hour: 3000 }
+
   - name: admin-keys
     url: http://tenant-control:3022/v1/keys
     routes:

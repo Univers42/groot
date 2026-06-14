@@ -1109,6 +1109,14 @@ services:
       # revocation/expiry staleness (revoke also flushes); 0 disables (parity).
       TENANT_CONTROL_VERIFY_CACHE_TTL_MS: ${TENANT_CONTROL_VERIFY_CACHE_TTL_MS:-60000}
       TENANT_CONTROL_VERIFY_CACHE_MAX: ${TENANT_CONTROL_VERIFY_CACHE_MAX:-16384}
+      # Track-B B4b: tenant self-service console surface (/v1/tenants/me*). The Go
+      # source defaults this OFF (main.go envBool → MountSelfServe skipped = no /me
+      # routes = byte-parity with the pre-B4a {id}-wildcard baseline). We default it
+      # ON here (:-1) so the osionos BaaS Console is wired LIVE out-of-the-box, with a
+      # one-token kill switch: set TENANT_SELFSERVE_ENABLED=0 in .env to revert to the
+      # exact pre-B4a behavior (the public Kong route then 404/401s at the upstream =
+      # harmless). Gate: scripts/verify/m84-selfserve-kong.sh (ON + OFF parity arms).
+      TENANT_SELFSERVE_ENABLED: ${TENANT_SELFSERVE_ENABLED:-1}
     ports:
       - "127.0.0.1:${TENANT_CONTROL_PORT:-3022}:3022"
     depends_on:
