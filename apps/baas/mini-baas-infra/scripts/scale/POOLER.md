@@ -19,14 +19,20 @@ data-plane-router-rust ──(system/outbox DSN)──► supavisor:6543 (txn mo
     (prepared statements are not preserved across pooled checkouts).
 - Adds `depends_on: supavisor (service_healthy)` so the data plane waits.
 
-> **Honest status:** the Rust data plane does **not yet read** these two vars
-> (verify: `grep -r DATA_PLANE_POOLER_URL docker/services/data-plane-router/src`
-> returns nothing today). Applying this overlay brings up a real, health-gated
-> Supavisor and stamps the intended config, but does **not** silently reroute
-> traffic. The consuming change (config.rs: prefer `DATA_PLANE_POOLER_URL` over
-> `DATA_PLANE_OUTBOX_DSN`; gate statement caching on `DATA_PLANE_STATEMENT_CACHE`)
-> is a separate one-line-behind-a-flag edit owned by the data-plane slice. This
-> file + the overlay are the reviewable, lint-clean seam.
+> **Status (C1 LIVE):** the Rust PG adapter now **consumes** both vars
+> (`crates/data-plane-pool/src/postgres.rs` — `pooler_url()` /
+> `statement_cache_off()` / `repoint_dsn_host()`, wired in `open_pool`). When
+> `DATA_PLANE_POOLER_URL` is set, the adapter repoints the resolved DSN's
+> host:port to the pooler endpoint (db/user/password/sslmode preserved) and dials
+> the pooler instead of the direct DSN; `DATA_PLANE_STATEMENT_CACHE=off` recycles
+> each pooled connection with `RecyclingMethod::Clean` (`DISCARD TEMP/SEQUENCES`,
+> NOT `DEALLOCATE ALL` — txn-mode-safe). **Both UNSET (the default) → the EXACT
+> direct path, byte-parity.** Proven by `scripts/verify/m98-pooler-parity.sh`
+> (pooled CRUD row-for-row identical to direct; cross-owner RLS GUC survives the
+> txn-mode pooled checkout). The overlay above wires the **Supavisor** flavour;
+> the gate proves the same invariant with **pgbouncer** (a lighter throwaway
+> transaction-mode pooler) — both are transaction-mode poolers, the only property
+> that matters for the seam.
 
 ## Run
 
@@ -72,14 +78,25 @@ lets 24,887 tenants share one pool (`wiki/scale-slo.md`). If a future change
 ever moves isolation to a *session*-level `SET` outside the request txn, txn-mode
 pooling would break it — that is the one thing the parity gate must guard.
 
-## Parity gate (to author when the seam goes live — C1 gate)
+## Parity gate — C1 (AUTHORED + GREEN)
 
-`scripts/verify/m<NN>-pooler-parity.sh` (not yet authored — depends on the
-data-plane consuming the vars): run the same request set against the **direct**
-stack and the **pooled** stack, diff the response bodies, assert:
-- `diff` of normalized bodies is empty (byte-parity), and
-- `baas_data_plane_pg_connections` (pooled) ≤ direct under identical fan-out.
+`scripts/verify/m98-pooler-parity.sh` (throwaway containers only — fully
+locally-runnable): builds the data-plane-router FROM CURRENT source, boots a
+scratch postgres + pgbouncer (transaction mode) on a private `$$`-suffixed
+network, then runs the SAME CRUD set (list/get/aggregate) against a **direct**
+router (`DATA_PLANE_POOLER_URL` unset) and a **pooled** router
+(`DATA_PLANE_POOLER_URL`→pgbouncer + `DATA_PLANE_STATEMENT_CACHE=off`), and
+asserts three arms:
+- **POSITIVE** — `diff` of the normalized pooled vs direct responses is EMPTY
+  (row-for-row byte-parity: a pooler is a transport optimization, not a semantic
+  one).
+- **REJECT (load-bearing)** — through the pooled router, owner B sees ONLY its own
+  row and back-to-back A→B→A each sees only its own rows: the per-request RLS GUC
+  (`app.current_user_id`) SURVIVES the transaction-mode pooled checkout (the one
+  invariant a txn-mode pooler could break). RLS is real here — a FORCE'd policy +
+  a non-superuser role, so the policy actually bites.
+- **PARITY** — `DATA_PLANE_POOLER_URL` unset → the direct path is the baseline the
+  POSITIVE arm diffs against (flag-OFF = byte-identical).
 
-Until that gate exists this is **scaffold** (kernel rule #5): the overlay is
-real and validated (`docker compose config` merges clean), but pooled traffic
-parity is **not yet measured**.
+An EXIT trap removes every container/network/image; it never touches a
+`mini-baas-*` container or the live `docker-compose.yml`.
