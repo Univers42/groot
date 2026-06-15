@@ -21,7 +21,7 @@
 |---|--------|:---:|---|
 | 1 | **Buyable managed cloud** (a stranger signs up → project → key → CRUD/realtime → usage → billed) | **7 / 10** | The funnel is proven against a *mock* Stripe; 10/10 needs the live Stripe account + a public domain/TLS — both **[HUMAN]**. |
 | 2 | **SLA-backable GA** (we can sign an availability/latency SLA and mean it) | **6 / 10** | The HA architecture is now **composed of gate-backed parts** (read-availability m122, PITR m99, multi-node m51/m98) and **deploy-availability is real** (zero-downtime helm RollingUpdate, ≥2 replicas) — write-failover is correctly **delegated to managed Postgres** (RDS Multi-AZ / Patroni / Cloud SQL HA). Caps remain honest: write-failover RTO/RPO + 100K load + uptime % are **PENDING the drills in `deploy/ha/README.md`** — the SLA number is still a `(TARGET)`, not a measurement. |
-| 3 | **Enterprise-procurable** (orgs/RBAC, SSO/SCIM, audit, hard-erase, trust posture) | **7 / 10** | The whole control surface is gate-green (m103–m112); 10/10 needs a real IdP wired end-to-end **[HUMAN]**, a SOC2 *audit* **[LEGAL]**, and lawyer-reviewed legal docs **[LEGAL]**. |
+| 3 | **Enterprise-procurable** (orgs/RBAC, SSO/SCIM, audit, hard-erase, trust posture, CMEK/BYOK) | **7.5 / 10** | The whole control surface is gate-green (m103–m112) and **CMEK/BYOK + crypto-shred** now landed (m123) — the last enterprise *code* gap is closed. 10/10 needs a real IdP wired end-to-end **[HUMAN]**, a SOC2 *audit* **[LEGAL]**, and lawyer-reviewed legal docs **[LEGAL]** — all human/legal, zero engineering. |
 
 The three targets share two structural walls: **failover RTO/RPO + 100K load + uptime % are not yet
 measured** (caps Target 2 — the *architecture* is now documented and gate-backed in `deploy/ha/README.md`;
@@ -140,6 +140,11 @@ best-effort SLA backed by a documented HA architecture, not a signed-and-measure
   `m108-soc2-evidence.sh` — evidence is *collected and audit-ready*, **NOT** "SOC2 certified".
 - **Credential-reference via Vault** (no raw secrets in tenant config): `m121-credref-vault-enforce.sh`
   (PACKAGE_ENFORCEMENT arm).
+- **CMEK / BYOK (customer-managed encryption keys)**: `m123-cmek-envelope.sh` — per-mount DSN
+  envelope-encrypted (random DEK → AES-256-GCM; DEK wrapped by an external-KMS KEK the customer
+  controls). The gate proves a **real** Vault-Transit unwrap round-trip AND **crypto-shred** (delete
+  the KMS key → the platform can no longer decrypt). Control-plane only (data plane / RLS / pool key
+  untouched); flag-OFF = byte-parity. Migration 061 / 3-way secret-mode CHECK.
 
 **Exact remainder to 10/10:**
 - **[HUMAN]** Wire a *real* enterprise IdP (Okta/Entra/etc.) end-to-end — gates prove the SSO/SCIM
@@ -150,6 +155,10 @@ best-effort SLA backed by a documented HA architecture, not a signed-and-measure
 - **[LEGAL]** Legal docs are **TEMPLATES** (`wiki/legal/{terms-of-service,privacy-policy,
   data-processing-addendum,subprocessors,acceptable-use-policy,sla}.md`), each marked *TEMPLATE — not
   legal advice*. **PENDING counsel review.**
+- **[HUMAN]** A *cloud* KMS provider (AWS KMS / GCP KMS) for CMEK if a customer requires it — the CMEK
+  envelope + crypto-shred are gate-green TODAY via **Vault Transit** (`m123`), and per-tenant distinct
+  KEKs are schema-supported (`cmek_kms_key_id` per row); wiring a specific cloud-KMS backend + each
+  tenant's own key is configuration, not new envelope code.
 
 **What stands between us and 10/10:** connect one real IdP **[HUMAN]**, engage a SOC2 audit firm and
 a lawyer **[LEGAL]** — the entire engineering surface is already gate-green.
