@@ -907,6 +907,104 @@ export interface TenantEntitlements {
   limits: Record<string, number>;
   /** Soft consumption budgets keyed by quota name. */
   quota: Record<string, number>;
+  /**
+   * The privilege CEILING the tenant may compose within (its paid plan or an
+   * operator-minted custom ceiling). The effective entitlement above is the
+   * named tier overlaid by the tenant's custom row, CLAMPED to this. Present
+   * only when the server runs the builder (`BUILDER_ENABLED`).
+   */
+  ceiling?: TenantEntitlements;
+  /**
+   * `true` when a per-tenant custom entitlement is overlaid on the named tier
+   * (a self-composed backend or an operator deal); `false`/absent for a plain
+   * named tier.
+   */
+  custom?: boolean;
+}
+
+// ── B7/builder: per-tenant dynamic builder (/v1/tenants/me/{mounts,entitlements,builder}) ──
+// Self-serve composition WITHIN a ceiling. All caller-scoped (tenant from the
+// bearer; no `{id}`). The builder is a control-plane resolver swap — these
+// types describe the wire shape only.
+
+/** One data mount the calling tenant owns (its composed backend, per-mount). */
+export interface TenantMount {
+  id: string;
+  tenant_id: string;
+  engine: string;
+  name: string;
+  /** "shared_rls" (default), "schema_per_tenant", or "db_per_tenant". */
+  isolation: string;
+  status: string;
+  created_at: string;
+}
+
+/**
+ * Body for `account.createMount()` — register a mount on the calling tenant.
+ * The engine must be within the tenant's ceiling (else a clean 403). Supply
+ * EITHER an inline `connection_string` OR a stored `credential_ref`.
+ */
+export interface TenantMountCreateInput {
+  engine: string;
+  name: string;
+  /** "shared_rls" (default), "schema_per_tenant", or "db_per_tenant". */
+  isolation?: string;
+  /** Inline DSN for the mount (alternative to `credential_ref`). */
+  connection_string?: string;
+  /** Reference to a stored credential (alternative to `connection_string`). */
+  credential_ref?: string;
+}
+
+/**
+ * Body for `account.patchEntitlements()` — narrow/customize the tenant's
+ * effective entitlement WITHIN its ceiling. Every field is optional and a
+ * partial overlay: capabilities may be turned OFF freely but never ON past the
+ * ceiling; engines must be a subset; limits/quota must be ≤ the ceiling. The
+ * server validates (clean 403 on violation) and clamps on every resolve.
+ */
+export interface TenantEntitlementPatch {
+  /** Engine ids to allow — must be a subset of the ceiling's engines. */
+  engines?: string[];
+  /** Capability flags keyed by name; `true` requires the ceiling to allow it. */
+  capabilities?: Record<string, boolean>;
+  /** Hard limits keyed by name (rps, burst, max_rows, max_mounts, …) ≤ ceiling. */
+  limits?: Record<string, number>;
+  /** Soft quota budgets keyed by name (e.g. `quota.query.count`) ≤ ceiling. */
+  quota?: Record<string, number>;
+  /** Addons to enable — must be a subset of the ceiling's addons. */
+  addons?: string[];
+}
+
+/**
+ * Body for `account.previewBuilder()` — a dry-run validation of a proposed
+ * entitlement patch + mount set against the ceiling, WITHOUT persisting.
+ */
+export interface BuilderPreviewInput {
+  /** The entitlement overlay to validate (same shape as `patchEntitlements`). */
+  entitlements?: TenantEntitlementPatch;
+  /** Mounts the tenant intends to register (counted against the mount budget). */
+  mounts?: TenantMountCreateInput[];
+}
+
+/**
+ * Result of `account.previewBuilder()` — what the composition would resolve to.
+ * `valid` is false (with `violations`) when the proposal exceeds the ceiling;
+ * `clamped` reflects the backstop the server would apply at resolve time.
+ */
+export interface BuilderPreviewResult {
+  /** `true` when the proposal is wholly within the ceiling (no clamping). */
+  valid: boolean;
+  /** The effective entitlement after clamping to the ceiling. */
+  clamped: TenantEntitlements;
+  /** Human-readable reasons the proposal exceeds the ceiling (empty when valid). */
+  violations: string[];
+  /**
+   * The opaque per-mount capability mask the data plane would stamp — the same
+   * shape the control plane synthesizes from the resolved package.
+   */
+  effectiveCapabilityOverrides: Record<string, unknown>;
+  /** Mount accounting: how many mounts are used vs. the ceiling's max. */
+  mountBudget: { used: number; max: number };
 }
 
 /** Response of `account.getSelf()` — the tenant plus its entitlements. */

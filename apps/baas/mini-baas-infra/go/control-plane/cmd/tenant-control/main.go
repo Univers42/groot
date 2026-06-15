@@ -27,6 +27,7 @@ import (
 	"github.com/dlesieur/mini-baas/control-plane/internal/backup"
 	"github.com/dlesieur/mini-baas/control-plane/internal/branching"
 	"github.com/dlesieur/mini-baas/control-plane/internal/compliance"
+	"github.com/dlesieur/mini-baas/control-plane/internal/entitlements"
 	"github.com/dlesieur/mini-baas/control-plane/internal/erase"
 	"github.com/dlesieur/mini-baas/control-plane/internal/export"
 	"github.com/dlesieur/mini-baas/control-plane/internal/ipguard"
@@ -150,6 +151,44 @@ func main() {
 		}
 		tenants.MountSelfServe(mux, svc, jwtVerifier, manifest, envBool("BILLING_ENABLED"))
 		log.Info("tenant self-service API enabled (/v1/tenants/me*)", "billing", envBool("BILLING_ENABLED"))
+
+		// ─── Dynamic builder (BUILDER) — per-tenant + operator customization ──────
+		// A tenant COMPOSES its own backend (N mounts of any allowed engine, a
+		// narrowed custom entitlement, a preview) WITHIN a CEILING; an operator mints
+		// a custom entitlement + raises a per-tenant ceiling (a sales deal) without a
+		// rebuild. The whole feature is a control-plane RESOLVER SWAP: the EFFECTIVE
+		// package (named tier overlaid by the custom entitlement, CLAMPED to the
+		// ceiling) is what the adapter-registry stamps as capability_overrides and the
+		// quota guard enforces — so the stamp, the engine allowlist, max_mounts, and
+		// the rate limiter all work UNCHANGED. ZERO Rust changes. Migration 062 backs
+		// public.tenant_entitlements.
+		//
+		// THE CEILING IS A PRIVILEGE BOUNDARY, enforced at TWO points: ValidateWithin
+		// at COMPOSE time (PATCH /me/entitlements → 403 entitlement_exceeds_ceiling)
+		// and Clamp at RESOLVE time (the BACKSTOP — a stale over-ceiling row is clamped
+		// DOWN on EVERY resolve, never trusted). The self-serve surface has no path id
+		// (tenant from credential → no cross-tenant); mount DELETE is caller-scoped
+		// (AND tenant_id=$caller — a mount UUID is never a bearer capability). The
+		// operator routes ({id}, service-token) are the ceiling authority and bypass
+		// the self-serve clamp on WRITE — the resolve-time Clamp still bounds the READ.
+		//
+		// FLAG-GATED OFF = PARITY: MountBuilder is called ONLY when BUILDER_ENABLED is
+		// truthy (AND inside the TENANT_SELFSERVE_ENABLED block — the builder reuses
+		// selfAuth). When OFF the routes do not exist (404), the tenant_entitlements
+		// table is empty/unread, and resolution is manifest.For verbatim — byte-
+		// identical to today, the same discipline as the blocks above. The
+		// adapter-registry client (set above when ADAPTER_REGISTRY_URL is present) is
+		// REUSED for caller-scoped mount CRUD; a nil client makes only the mount routes
+		// 503 (the entitlement routes still work).
+		if envBool("BUILDER_ENABLED") {
+			builderStore := entitlements.NewStore(db)
+			tenants.MountBuilder(mux, svc, jwtVerifier, builderStore, manifest, svc.AdapterClient(), cfg.ServiceToken)
+			log.Info("dynamic builder enabled (/v1/tenants/me/{mounts,entitlements,builder} + operator /v1/tenants/{id}/{ceiling,entitlement}) — BUILDER_ENABLED",
+				"adapter", svc.AdapterClient() != nil)
+		} else {
+			log.Info("dynamic builder disabled (BUILDER_ENABLED off) — builder routes not mounted; resolution is the named tier verbatim (byte-parity)")
+		}
+		// ─── end dynamic builder ──────────────────────────────────────────────────
 	} else {
 		log.Info("tenant self-service API disabled (TENANT_SELFSERVE_ENABLED off) — /v1/tenants/me* not mounted")
 	}

@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dlesieur/mini-baas/control-plane/internal/entitlements"
 	"github.com/dlesieur/mini-baas/control-plane/internal/metering"
 	"github.com/dlesieur/mini-baas/control-plane/internal/orchestrator/emailsvc"
 	"github.com/dlesieur/mini-baas/control-plane/internal/orchestrator/envelope"
@@ -31,6 +32,7 @@ import (
 	"github.com/dlesieur/mini-baas/control-plane/internal/orchestrator/newslettersvc"
 	"github.com/dlesieur/mini-baas/control-plane/internal/orchestrator/outboxrelay"
 	"github.com/dlesieur/mini-baas/control-plane/internal/orchestrator/sessionsvc"
+	"github.com/dlesieur/mini-baas/control-plane/internal/packages"
 	"github.com/dlesieur/mini-baas/control-plane/internal/shared"
 	"github.com/dlesieur/mini-baas/control-plane/internal/spendcap"
 	"github.com/dlesieur/mini-baas/control-plane/internal/telemetryexport"
@@ -73,6 +75,28 @@ func main() {
 	}
 	defer db.Close()
 
+	// quota-guard (Track-B B2) instance, so the dynamic builder (BUILDER_ENABLED)
+	// resolver can be wired onto it before it is registered. Default (flag OFF) is
+	// byte-parity: no resolver, the guard resolves the named tier via manifest.For
+	// exactly as today.
+	quotaGuard := metering.NewQuotaGuard(log, db)
+	// Dynamic builder (BUILDER_ENABLED) — FLAG-GATED OFF = PARITY. When set, the
+	// quota guard enforces against the EFFECTIVE per-tenant cap (custom entitlement
+	// clamped to its ceiling) instead of the named tier's cap, matching what the
+	// adapter-registry stamps. When unset (default) SetResolver is never called and
+	// the over-quota decision is byte-identical to pre-builder. The whole guard is
+	// ALSO gated by QUOTA_ENFORCEMENT (default OFF), so the builder bites only when
+	// both flags are on. Reads public.tenant_entitlements (migration 062).
+	if envBool("BUILDER_ENABLED") {
+		manifest, mErr := packages.Load()
+		if mErr != nil {
+			log.Error("builder: package manifest load failed", "err", mErr)
+			os.Exit(1)
+		}
+		quotaGuard.SetResolver(entitlements.NewResolver(manifest, entitlements.NewStore(db), true, log))
+		log.Info("dynamic builder enabled for quota-guard (effective per-tenant cap) — BUILDER_ENABLED")
+	}
+
 	// The registry of ported sub-services. Adding one is a single line here
 	// plus its package — no new binary, no new container.
 	available := map[string]SubService{
@@ -92,7 +116,7 @@ func main() {
 		// (default OFF). Like metering, registered unconditionally is safe — when
 		// the flag is off Init/Run are no-ops (no Redis, no evaluation, no
 		// `quota:over` set written), so the orchestrator is byte-parity with today.
-		"quota-guard": metering.NewQuotaGuard(log, db),
+		"quota-guard": quotaGuard,
 		// billing reporter (Track-B B3): guarded internally by BILLING_ENABLED
 		// (default OFF). Like metering/quota, registered unconditionally is safe —
 		// when the flag is off Init/Run are no-ops (no catalog, no Stripe client, no
@@ -186,6 +210,17 @@ func selectServices(available map[string]SubService, csv string) []SubService {
 		}
 	}
 	return out
+}
+
+// envBool reads a truthy env flag (default OFF = parity), mirroring the
+// tenant-control / adapter-registry main.go helpers.
+func envBool(key string) bool {
+	switch os.Getenv(key) {
+	case "1", "true", "on", "TRUE", "True", "ON":
+		return true
+	default:
+		return false
+	}
 }
 
 func healthcheck(cfg shared.Config) int {

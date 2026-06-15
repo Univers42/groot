@@ -65,6 +65,12 @@ func (s *Service) SetDataPlane(dp *DataPlane) {
 	s.dataPlane = dp
 }
 
+// AdapterClient returns the wired adapter-registry client (or nil if none). The
+// dynamic-builder API (MountBuilder) reuses it for caller-scoped mount CRUD,
+// rather than constructing a second client — one source of the adapter-registry
+// URL + service token.
+func (s *Service) AdapterClient() *AdapterRegistry { return s.adapter }
+
 // EnsureSchema checks migration 032 has been applied, then idempotently widens
 // the plan CHECK constraint to the current package manifest (migration 035 /
 // F1) — self-healing at boot, the same pattern adapter-registry uses for the

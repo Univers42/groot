@@ -68,6 +68,14 @@ export const routes = {
       `/v1/tenants/me/usage${period ? `?period=${encodeURIComponent(period)}` : ''}`,
     keys: '/v1/tenants/me/keys',
     key: (keyId: string) => `/v1/tenants/me/keys/${encodeURIComponent(keyId)}`,
+    // B7/builder — per-tenant DYNAMIC BUILDER (flag BUILDER_ENABLED on the
+    // server; routes 404 when OFF). Tenant resolved from the caller credential
+    // (no `{id}` → no cross-tenant by construction). `mount(id)` DELETE is
+    // caller-scoped server-side (`AND tenant_id = $caller`).
+    mounts: '/v1/tenants/me/mounts',
+    mount: (id: string) => `/v1/tenants/me/mounts/${encodeURIComponent(id)}`,
+    entitlements: '/v1/tenants/me/entitlements',
+    builder: '/v1/tenants/me/builder',
   },
   migrate: {
     run: '/admin/v1/migrate',

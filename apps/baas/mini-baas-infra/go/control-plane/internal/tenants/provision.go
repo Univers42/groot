@@ -124,6 +124,79 @@ func (ar *AdapterRegistry) findMountID(ctx context.Context, tenantScope, name st
 	return "", fmt.Errorf("mount %q not found in list", name)
 }
 
+// MountView is one mount row as the self-serve builder surfaces it (no secret
+// material — exactly the adapter-registry's public TenantDatabase projection).
+type MountView struct {
+	ID            string  `json:"id"`
+	TenantID      string  `json:"tenant_id"`
+	Engine        string  `json:"engine"`
+	Name          string  `json:"name"`
+	CreatedAt     string  `json:"created_at"`
+	LastHealthyAt *string `json:"last_healthy_at"`
+}
+
+// listMounts GETs /databases scoped to tenantScope (the SAME X-Baas-Tenant-Id the
+// query path uses), returning the caller's OWN mounts only. Cross-tenant
+// isolation is by construction: the adapter-registry's GET /databases is RLS-
+// scoped to the asserted tenant, so a caller can never list another tenant's
+// mounts.
+func (ar *AdapterRegistry) listMounts(ctx context.Context, tenantScope string) ([]MountView, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ar.baseURL+"/databases", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Baas-Tenant-Id", tenantScope)
+	if ar.serviceToken != "" {
+		req.Header.Set("X-Service-Token", ar.serviceToken)
+	}
+	shared.PropagateHeaders(ctx, req)
+	resp, err := ar.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("list databases: %d: %s", resp.StatusCode, shared.RedactDSN(strings.TrimSpace(string(b))))
+	}
+	out := make([]MountView, 0)
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// deleteMount DELETEs a mount by id, CALLER-SCOPED. It calls the adapter-registry's
+// caller-scoped delete (DELETE /databases/{id}/self) which binds `AND tenant_id =
+// $caller` in the SQL, so a mount UUID is NEVER a bearer capability: tenant A
+// cannot delete tenant B's mount even if it guessed the uuid. Returns
+// (deleted bool, err). A 404 (no such mount FOR THIS CALLER) maps to deleted=false.
+func (ar *AdapterRegistry) deleteMount(ctx context.Context, tenantScope, id string) (bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, ar.baseURL+"/databases/"+id+"/self", nil)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("X-Baas-Tenant-Id", tenantScope)
+	if ar.serviceToken != "" {
+		req.Header.Set("X-Service-Token", ar.serviceToken)
+	}
+	shared.PropagateHeaders(ctx, req)
+	resp, err := ar.http.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return true, nil
+	case http.StatusNotFound:
+		return false, nil
+	default:
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return false, fmt.Errorf("delete database: %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+}
+
 // DataPlane is a minimal client for the Rust data-plane-router's admin migrate
 // endpoint, used to create a per-tenant schema for schema_per_tenant mounts.
 type DataPlane struct {

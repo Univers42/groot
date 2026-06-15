@@ -18,6 +18,8 @@ import (
 
 	"github.com/dlesieur/mini-baas/control-plane/internal/adapterregistry"
 	"github.com/dlesieur/mini-baas/control-plane/internal/cmek"
+	"github.com/dlesieur/mini-baas/control-plane/internal/entitlements"
+	"github.com/dlesieur/mini-baas/control-plane/internal/packages"
 	"github.com/dlesieur/mini-baas/control-plane/internal/shared"
 )
 
@@ -79,6 +81,28 @@ func main() {
 	if err := svc.EnsureSchema(ctx); err != nil {
 		log.Error("ensure schema failed", "err", err)
 		os.Exit(1)
+	}
+
+	// Dynamic builder (BUILDER_ENABLED) — FLAG-GATED OFF = PARITY. When unset (the
+	// default) SetResolver is never called, so packageForTenant resolves the
+	// tenant's plan via the embedded manifest verbatim and the /connect stamp +
+	// engine allowlist + max_mounts are byte-identical to today. When ON, the
+	// EFFECTIVE per-tenant package (the custom entitlement clamped to its ceiling)
+	// is what gets stamped/enforced — a pure control-plane resolver swap, ZERO
+	// Rust changes. The resolver reads public.tenant_entitlements (migration 062);
+	// requires the same table tenant-control's builder API writes. Resolve CLAMPS
+	// on every read, so even a stale over-ceiling row can never widen the stamp.
+	if envBool("BUILDER_ENABLED") {
+		manifest, mErr := packages.Load()
+		if mErr != nil {
+			log.Error("builder: package manifest load failed", "err", mErr)
+			os.Exit(1)
+		}
+		resolver := entitlements.NewResolver(manifest, entitlements.NewStore(db), true, log)
+		svc.SetResolver(resolver)
+		log.Info("dynamic builder enabled (per-tenant entitlement resolver) — BUILDER_ENABLED; /connect stamps the EFFECTIVE clamped package")
+	} else {
+		log.Info("dynamic builder disabled (BUILDER_ENABLED off) — /connect stamps the named tier verbatim (byte-parity)")
 	}
 
 	mux := shared.NewRouter("adapter-registry", db)
