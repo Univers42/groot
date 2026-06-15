@@ -1,5 +1,7 @@
 // Self-hosted fonts (public/fonts, latin subsets from Fontsource).
-// Only sora-700 + inter-400 are preloaded in Layout.astro.
+// Only sora-700 + inter-400 are preloaded in Layout.astro. The DOPAMINE
+// personality comes from colour/pattern/shadow/scale/animation — NOT a new
+// typeface — so we keep exactly these faces and push Sora hard on display.
 @font-face {
 	font-family: Sora;
 	font-style: normal;
@@ -32,26 +34,39 @@
 	src: url('/fonts/ibm-plex-mono-400.woff2') format('woff2');
 }
 
+// ── Headings: UPPERCASE, tight tracking, near-1 leading, ALWAYS shadowed ─────
 h1,
 h2,
 h3 {
 	font-family: var(--gb-font-display);
 	font-weight: 700;
-	line-height: 1.12;
+	line-height: 0.95;
 	letter-spacing: -0.02em;
+	text-transform: uppercase;
 	text-wrap: balance;
 }
 
+// hero gets a triple stacked shadow by default (rotating accents)
 h1 {
 	font-size: var(--gb-text-hero);
+	text-shadow:
+		2px 2px 0 var(--gb-a5),
+		4px 4px 0 var(--gb-a1),
+		6px 6px 0 var(--gb-a2);
 }
 
+// subheads get a double stacked shadow
 h2 {
 	font-size: var(--gb-text-2xl);
+	text-shadow:
+		2px 2px 0 var(--gb-a5),
+		4px 4px 0 var(--gb-a1);
 }
 
+// card titles get a single stacked shadow
 h3 {
 	font-size: var(--gb-text-xl);
+	text-shadow: 2px 2px 0 var(--gb-a5);
 }
 
 p {
@@ -69,22 +84,87 @@ pre {
 	overflow-x: auto;
 	padding: var(--gb-space-4) var(--gb-space-6);
 	background: var(--gb-bg-raised);
-	border: 1px solid var(--gb-line);
+	border: 3px dashed var(--gb-a2);
 	border-radius: var(--gb-radius);
 	line-height: 1.55;
 }
 
+// the lede stays readable WHITE — no shadow, no transform
 .gb-lede {
 	font-size: var(--gb-text-lg);
 	color: var(--gb-text-muted);
 	max-width: 58ch;
 	text-wrap: pretty;
+	text-transform: none;
 }
 
 .gb-kicker {
 	font-family: var(--gb-font-mono);
 	font-size: var(--gb-text-sm);
-	letter-spacing: 0.14em;
+	letter-spacing: 0.18em; // tracking-widest on labels
 	text-transform: uppercase;
-	color: var(--gb-primary);
+	font-weight: 600;
+	color: var(--gb-a3); // yellow label by default
+}
+
+// ── Stacked text-shadow utilities (always-on, rotating accents, 2px steps) ───
+// These OVERRIDE the per-tag defaults when you want a specific intensity.
+.tshadow-1 {
+	text-shadow: 2px 2px 0 var(--gb-a5);
+}
+
+.tshadow-2 {
+	text-shadow:
+		2px 2px 0 var(--gb-a5),
+		4px 4px 0 var(--gb-a1);
+}
+
+.tshadow-3 {
+	text-shadow:
+		2px 2px 0 var(--gb-a5),
+		4px 4px 0 var(--gb-a1),
+		6px 6px 0 var(--gb-a2);
+}
+
+.tshadow-mega {
+	text-shadow:
+		2px 2px 0 var(--gb-a5),
+		4px 4px 0 var(--gb-a1),
+		6px 6px 0 var(--gb-a2),
+		8px 8px 0 var(--gb-a4);
+}
+
+// ── Animated gradient text: clip a moving multi-accent gradient to glyphs. ───
+// Behind the reduced-motion guard — falls back to a static gradient fill.
+// -webkit-background-clip / -webkit-text-fill-color are REQUIRED for text
+// clipping in Safari + WebKit/Blink — the prefix is intentional here.
+.gradient-text {
+	background-image: linear-gradient(
+		100deg,
+		var(--gb-a1),
+		var(--gb-a3),
+		var(--gb-a2),
+		var(--gb-a5),
+		var(--gb-a1)
+	);
+	background-size: 250% 100%;
+	background-position: 0% 50%;
+	background-clip: text;
+
+	/* stylelint-disable-next-line property-no-vendor-prefix */
+	-webkit-background-clip: text;
+	color: transparent;
+
+	/* stylelint-disable-next-line property-no-vendor-prefix */
+	-webkit-text-fill-color: transparent;
+
+	// a gradient-filled glyph cannot carry a text-shadow (it would paint over the
+	// clip), so its "depth" comes from a soft drop-shadow filter instead.
+	filter: drop-shadow(2px 2px 0 rgb(13 13 26 / 65%));
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.gradient-text {
+		animation: gb-gradient-shift 4s linear infinite;
+	}
 }

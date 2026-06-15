@@ -47,7 +47,14 @@ const jsonLd = [
 	<div class="gb-shell">
 		<Header />
 		<main id="main-content">
-			<section class="gb-section" aria-labelledby="pricing-title">
+			<section class="gb-section gb-section--mesh gb-pricing-hero has-pat-dots has-pat-stripes" aria-labelledby="pricing-title">
+				<p class="bgword bgword--top accent-1" aria-hidden="true">PRICE</p>
+				<span class="floater floater--lg floater--tl accent-1 animate-float" aria-hidden="true"></span>
+				<span class="floater floater--diamond floater--tr accent-3 animate-float-reverse" aria-hidden="true"></span>
+				<span class="floater floater--sm floater--ml accent-2" aria-hidden="true"></span>
+				<span class="floater floater--ring floater--mr accent-5 animate-spin-slow" aria-hidden="true"></span>
+				<span class="floater floater--square floater--bl accent-4 animate-float" aria-hidden="true"></span>
+				<span class="floater floater--br accent-2 animate-float-reverse" aria-hidden="true"></span>
 				<div class="gb-container">
 					<SectionHeading
 						kicker="Choose your plan"
@@ -56,7 +63,7 @@ const jsonLd = [
 						id="pricing-title"
 					/>
 					<div class="gb-plan-suite">
-						<fieldset class="gb-plans">
+						<fieldset class="gb-plans stagger">
 							<legend class="visually-hidden">Select a plan to compare</legend>
 							{TIERS.map((tier) => <PlanCard tier={tier} recommended={tier.id === 'pro'} />)}
 						</fieldset>
@@ -75,7 +82,11 @@ const jsonLd = [
 				</div>
 			</section>
 
-			<section class="gb-section" aria-labelledby="transparency-title">
+			<section class="gb-section gb-section--dim has-pat-checker" aria-labelledby="transparency-title">
+				<p class="bgword bgword--right accent-2" aria-hidden="true">COST</p>
+				<span class="floater floater--lg floater--tr accent-2 animate-float" aria-hidden="true"></span>
+				<span class="floater floater--diamond floater--bl accent-5 animate-float-reverse" aria-hidden="true"></span>
+				<span class="floater floater--sm floater--ml accent-3" aria-hidden="true"></span>
 				<div class="gb-container">
 					<SectionHeading
 						kicker="The full matrix"
@@ -86,7 +97,11 @@ const jsonLd = [
 				</div>
 			</section>
 
-			<section class="gb-section" aria-labelledby="math-title">
+			<section class="gb-section has-pat-dots" aria-labelledby="math-title">
+				<p class="bgword bgword--left accent-3" aria-hidden="true">MATH</p>
+				<span class="floater floater--lg floater--tl accent-3 animate-float-reverse" aria-hidden="true"></span>
+				<span class="floater floater--ring floater--mr accent-1 animate-spin-slow" aria-hidden="true"></span>
+				<span class="floater floater--square floater--br accent-2 animate-float" aria-hidden="true"></span>
 				<div class="gb-container">
 					<SectionHeading
 						kicker="Here's the math"
@@ -98,7 +113,11 @@ const jsonLd = [
 				</div>
 			</section>
 
-			<section class="gb-section" aria-labelledby="amortization-title">
+			<section class="gb-section gb-section--mesh has-pat-stripes" aria-labelledby="amortization-title">
+				<p class="bgword bgword--right accent-5" aria-hidden="true">SCALE</p>
+				<span class="floater floater--lg floater--tr accent-5 animate-float" aria-hidden="true"></span>
+				<span class="floater floater--diamond floater--bl accent-4 animate-float-reverse" aria-hidden="true"></span>
+				<span class="floater floater--sm floater--c1 accent-1" aria-hidden="true"></span>
 				<div class="gb-container">
 					<SectionHeading
 						kicker="Where the margin lives"
@@ -109,7 +128,11 @@ const jsonLd = [
 				</div>
 			</section>
 
-			<section class="gb-section" aria-labelledby="faq-title">
+			<section class="gb-section gb-section--dim has-pat-dots has-pat-checker" aria-labelledby="faq-title">
+				<p class="bgword bgword--bottom accent-4" aria-hidden="true">ASK</p>
+				<span class="floater floater--lg floater--tl accent-4 animate-float" aria-hidden="true"></span>
+				<span class="floater floater--ring floater--tr accent-3 animate-spin-slow" aria-hidden="true"></span>
+				<span class="floater floater--sm floater--br accent-1 animate-float-reverse" aria-hidden="true"></span>
 				<div class="gb-container">
 					<SectionHeading kicker="Questions" title="Pricing FAQ" id="faq-title" />
 					<Faq items={PRICING_FAQ} />

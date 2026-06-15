@@ -1,6 +1,9 @@
 .gb-shell {
 	position: relative;
 	z-index: 1; // content sits above the fixed galaxy canvas (z-index 0)
+	// The GLOBAL pattern base (dot-grid + diagonal stripes) is layered here via
+	// .gb-shell::before/::after in utilities/_patterns.scss — `isolation: isolate`
+	// there scopes those z-index:-1 pseudos above the galaxy but below content.
 }
 
 .gb-container {
@@ -13,7 +16,23 @@
 }
 
 .gb-section--dim {
-	background: linear-gradient(rgb(5 7 13 / 0%), rgb(5 7 13 / 72%) 18%, rgb(5 7 13 / 72%) 82%, rgb(5 7 13 / 0%));
+	background: linear-gradient(rgb(13 13 26 / 0%), rgb(26 19 48 / 78%) 18%, rgb(26 19 48 / 78%) 82%, rgb(13 13 26 / 0%));
+}
+
+// Opt-in radial gradient-mesh overlay for a major section (pattern-on-pattern).
+.gb-section--mesh {
+	position: relative;
+	isolation: isolate;
+}
+
+.gb-section--mesh::before {
+	content: '';
+	position: absolute;
+	inset: 0;
+	z-index: -1;
+	background-image: var(--pat-mesh);
+	opacity: 0.14;
+	pointer-events: none;
 }
 
 .gb-section__head {

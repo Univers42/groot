@@ -1,11 +1,15 @@
 ---
 type Props = {
 	title: string;
+	/** Tint for the fat left bar + glow (1–5). Decoration only. */
+	accent?: 1 | 2 | 3 | 4 | 5;
 };
-const { title } = Astro.props;
+const { title, accent = 3 } = Astro.props;
+const accClass = `accent-${accent}`;
 ---
 
-<div class="gb-honesty">
+<div class={`gb-honesty ${accClass}`}>
+	<span class="gb-honesty__badge animate-wiggle" aria-hidden="true">⚡</span>
 	<p><strong>{title}</strong></p>
 	<p><slot /></p>
 </div>

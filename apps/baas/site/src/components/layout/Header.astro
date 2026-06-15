@@ -6,14 +6,15 @@ const isCurrent = (href: string) => (href === '/' ? current === '/' : current.st
 ---
 
 <header class="gb-header">
+	<span class="floater floater--sm floater--tr accent-2 gb-header__floater" aria-hidden="true"></span>
 	<div class="gb-container gb-header__inner">
 		<a class="gb-header__brand" href="/" aria-label={`${SITE.name} — home`}>
-			<svg viewBox="0 0 64 64" aria-hidden="true" fill="none">
-				<path d="M46.5 21.5A17 17 0 1 0 49 32h-15" stroke="#34d399" stroke-width="4" stroke-linecap="round" />
-				<circle cx="46.5" cy="21.5" r="4.5" fill="#34d399" />
-				<circle cx="49" cy="32" r="3.5" fill="#fbbf24" />
+			<svg class="gb-header__mark" viewBox="0 0 64 64" aria-hidden="true" fill="none">
+				<path d="M46.5 21.5A17 17 0 1 0 49 32h-15" stroke="var(--gb-a2)" stroke-width="5" stroke-linecap="round" />
+				<circle cx="46.5" cy="21.5" r="4.5" fill="var(--gb-a1)" />
+				<circle cx="49" cy="32" r="3.5" fill="var(--gb-a3)" />
 			</svg>
-			{SITE.name}
+			<span class="gb-header__name">{SITE.name}</span>
 		</a>
 		<nav class="gb-header__nav" aria-label="Main">
 			{NAV.map((item) => (
@@ -21,7 +22,9 @@ const isCurrent = (href: string) => (href === '/' ? current === '/' : current.st
 					{item.label}
 				</a>
 			))}
-			<a class="gb-btn gb-btn--primary gb-header__cta" href="/pricing/">Start free</a>
+			<a class="gb-btn gb-btn--primary gb-header__cta" href="/pricing/">
+				<span class="gb-header__cta-spark" aria-hidden="true">✦</span>Start free
+			</a>
 		</nav>
 	</div>
 </header>

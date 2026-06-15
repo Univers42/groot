@@ -4,13 +4,18 @@ const year = new Date().getFullYear();
 ---
 
 <footer class="gb-footer">
-	<div class="gb-container">
+	<p class="bgword gb-footer__bgword" aria-hidden="true">SHIP IT</p>
+	<span class="floater floater--lg floater--bl accent-5 gb-footer__floater" aria-hidden="true"></span>
+	<span class="floater floater--sm floater--tr accent-3 gb-footer__floater" aria-hidden="true"></span>
+	<div class="gb-container gb-footer__body">
 		<div class="gb-footer__inner">
 			<div>
-				<p class="gb-header__brand">{SITE.name}</p>
+				<p class="gb-footer__brand">
+					<span class="gb-footer__spark" aria-hidden="true">✦</span>{SITE.name}
+				</p>
 				<p class="gb-footer__tag">{SITE.tagline} Self-hosted, engine-agnostic, honestly priced.</p>
 			</div>
-			<nav aria-label="Footer">
+			<nav class="gb-footer__nav" aria-label="Footer">
 				{NAV.map((item) => <a href={item.href}>{item.label}</a>)}
 			</nav>
 		</div>

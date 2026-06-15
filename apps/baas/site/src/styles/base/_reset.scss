@@ -52,11 +52,13 @@ a:hover {
 }
 
 :focus-visible {
-	outline: none;
+	outline: 3px solid var(--gb-a3); // outline CHANGE (yellow) in addition to the ring
+	outline-offset: 2px;
 	box-shadow: var(--gb-focus-ring);
 	border-radius: var(--gb-radius-sm);
 }
 
 ::selection {
-	background: rgb(52 211 153 / 30%);
+	background: rgb(255 58 242 / 40%);
+	color: #fff;
 }

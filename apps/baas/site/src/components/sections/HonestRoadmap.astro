@@ -4,13 +4,14 @@ import SectionHeading from '../ui/SectionHeading.astro';
 // A real roadmap: three phases left-to-right (shipped → building → next), each
 // with a status and an honest checklist. Items move left ONLY when they pass the
 // same shadow → parity → cutover gates — nothing is listed as done that isn't.
-type Phase = { key: string; label: string; tag: string; items: string[] };
+type Phase = { key: string; label: string; tag: string; emoji: string; items: string[] };
 
 const PHASES: Phase[] = [
 	{
 		key: 'shipped',
 		label: 'Shipped',
 		tag: 'live today',
+		emoji: '✅',
 		items: [
 			'8 engines behind one API — list, get, insert, filter, aggregate',
 			'Auth, realtime, object storage, functions and GraphQL',
@@ -23,6 +24,7 @@ const PHASES: Phase[] = [
 		key: 'building',
 		label: 'Building now',
 		tag: 'in flight, gated',
+		emoji: '🔨',
 		items: [
 			'Full update/delete parity on the Rust plane (Postgres write verbs)',
 			'Metering → quotas → Stripe billing — built & gate-proven, flag-gated, going live in the cloud',
@@ -33,6 +35,7 @@ const PHASES: Phase[] = [
 		key: 'next',
 		label: 'Next',
 		tag: 'planned, not yet',
+		emoji: '🛰️',
 		items: [
 			'Unified OLAP/OLTP cost-routing — point-reads hit the engine, analytics hit the lakehouse, automatically',
 			'HA + horizontal scale (Helm/K8s, multi-region) — most tiers genuinely don’t need it yet',
@@ -42,7 +45,17 @@ const PHASES: Phase[] = [
 ];
 ---
 
-<section class="gb-section gb-section--dim" aria-labelledby="roadmap-title">
+<section class="gb-section gb-section--dim gb-section--roadmap has-pat-stripes has-pat-dots" aria-labelledby="roadmap-title">
+	<!-- ONE massive background word, bleeding off-edge (decorative). -->
+	<p class="bgword bgword--bottom" aria-hidden="true">ROADMAP</p>
+	<!-- Floating decorative shapes — rotate the accents, animated, aria-hidden. -->
+	<span class="floater floater--lg floater--tl accent-2 floater--ring animate-spin-slow" aria-hidden="true"></span>
+	<span class="floater floater--tr accent-3 floater--diamond" aria-hidden="true"></span>
+	<span class="floater floater--sm floater--ml accent-5 floater--square" aria-hidden="true"></span>
+	<span class="floater floater--mr accent-1" aria-hidden="true"></span>
+	<span class="floater floater--sm floater--bl accent-2 floater--diamond" aria-hidden="true"></span>
+	<span class="floater floater--br accent-3 floater--ring" aria-hidden="true"></span>
+
 	<div class="gb-container">
 		<SectionHeading
 			kicker="What we won't pretend"
@@ -56,6 +69,7 @@ const PHASES: Phase[] = [
 					<div class="gb-rm__head">
 						<span class="gb-rm__dot" aria-hidden="true"></span>
 						<h3 class="gb-rm__label">{p.label}</h3>
+						<span class="gb-rm__emoji" aria-hidden="true">{p.emoji}</span>
 						<span class="gb-rm__tag">{p.tag}</span>
 					</div>
 					<ul class="gb-rm__items" role="list">
