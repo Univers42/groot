@@ -63,6 +63,13 @@ type RegisterDatabaseRequest struct {
 	// CredentialRef is the optional Vault-credential reference (S2 / G-Vault).
 	// EXACTLY ONE of {ConnectionString, CredentialRef} must be supplied.
 	CredentialRef CredentialRefInput `json:"credential_ref"`
+	// KMSKeyID is the optional CMEK / BYOK key id (D4.8). When CMEK_ENABLED is on
+	// AND the caller supplies an INLINE connection_string, a non-empty KMSKeyID
+	// (or the env default) routes registration through the CMEK envelope: the DSN
+	// is sealed under a fresh DEK that is WRAPPED by this external KMS KEK, so the
+	// platform stores only the wrapped DEK + ciphertext and cannot decrypt without
+	// the KMS. Ignored (parity) when CMEK is disabled or a credential_ref is used.
+	KMSKeyID string `json:"kms_key_id"`
 }
 
 // Validate enforces the same constraints as the Node DTO + DB check, plus the
