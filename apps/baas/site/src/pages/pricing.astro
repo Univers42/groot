@@ -8,10 +8,12 @@ import PlanMatrix from '../components/pricing/PlanMatrix.astro';
 import PlanTradeoffs from '../components/pricing/PlanTradeoffs.astro';
 import TransparencyTable from '../components/pricing/TransparencyTable.astro';
 import MathBreakdown from '../components/pricing/MathBreakdown.astro';
+import CostSimulator from '../components/pricing/CostSimulator.astro';
 import AmortizationStory from '../components/pricing/AmortizationStory.astro';
 import Faq from '../components/pricing/Faq.astro';
 import { SITE } from '../data/site';
 import { TIERS } from '../data/tiers';
+import { AS_OF } from '../data/cost-model';
 import { PRICING_FAQ } from '../data/faq';
 
 const title = `Pricing — ${SITE.name}`;
@@ -110,6 +112,26 @@ const jsonLd = [
 						id="math-title"
 					/>
 					<MathBreakdown />
+				</div>
+			</section>
+
+			<section class="gb-section gb-section--mesh has-pat-checker" aria-labelledby="simulator-title">
+				<p class="bgword bgword--left accent-4" aria-hidden="true">SIM</p>
+				<span class="floater floater--lg floater--tr accent-4 animate-float" aria-hidden="true"></span>
+				<span class="floater floater--diamond floater--bl accent-2 animate-float-reverse" aria-hidden="true"></span>
+				<span class="floater floater--ring floater--mr accent-3 animate-spin-slow" aria-hidden="true"></span>
+				<div class="gb-container">
+					<SectionHeading
+						kicker="Run the numbers yourself"
+						title="A live cost simulator — see the components counted."
+						lede="Pick a tier, a hoster and a deployment model. The component RAM is summed in front of you, the per-tenant math recomputes live, and you see exactly what an offer costs us, what we'd charge, and the margin between them."
+						id="simulator-title"
+					/>
+					<p class="gb-sim__caveat">
+						A live <strong>simulation</strong> from measured RAM × dated hoster prices (read {AS_OF}) — not a quote.
+						Cost ≠ price ≠ margin; human/support is a separate line. Prices drift — re-fetch before relying on them.
+					</p>
+					<CostSimulator />
 				</div>
 			</section>
 

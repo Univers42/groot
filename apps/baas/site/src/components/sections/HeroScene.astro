@@ -10,6 +10,12 @@
 // by src/scripts/hero/scene.ts via setAttribute (cross-browser, Firefox-safe) +
 // CSS opacity for star twinkle. Decorative → aria-hidden. Reduced-motion → calm
 // static night (the JS rests; the CSS twinkle is gated).
+//
+// Pixel-art layer (original sprites, CSP-clean): distant traffic on the city
+// highway + a mouse and a person walking the foreground — all moved/frame-swapped
+// by scene.ts. See src/data/pixel-sprites.ts + PixelSprite.astro.
+import PixelSprite from './PixelSprite.astro';
+import { MOUSE_A, MOUSE_B, MOUSE_PAL, PERSON_A, PERSON_B, PERSON_PAL, CAR, CAR_PALETTES } from '../../data/pixel-sprites';
 
 function mulberry32(a: number) {
 	return function () {
@@ -21,10 +27,12 @@ function mulberry32(a: number) {
 	};
 }
 const rand = mulberry32(42);
-// stars in the upper sky band; a handful are "hero" stars (bigger, with a glow)
-const stars = Array.from({ length: 110 }, (_, i) => {
+// stars cover a band WIDER than the viewport so the slow celestial rotation
+// (scene.ts spins this whole group around a pole, like the night sky turning)
+// never reveals a hard edge. A handful are "hero" stars (bigger, with a glow).
+const stars = Array.from({ length: 180 }, (_, i) => {
 	const r = +(0.4 + rand() * 1.9).toFixed(2);
-	return { x: Math.round(rand() * 1440), y: Math.round(rand() * 520), r, b: i % 5, hero: r > 1.9 };
+	return { x: Math.round(-360 + rand() * 2160), y: Math.round(-360 + rand() * 1000), r, b: i % 5, hero: r > 1.95 };
 });
 // a soft diagonal Milky-Way cluster of faint dust stars
 const dust = Array.from({ length: 90 }, () => {
@@ -219,8 +227,43 @@ const rays = [-46, -32, -18, -4, 10, 24, 40];
 			</g>
 		</g>
 
-		<!-- foreground ground bloom + cinematic vignette -->
+		<!-- foreground ground bloom -->
 		<rect x="0" y="792" width="1440" height="108" fill="#7b2fff" fill-opacity="0.10" />
+
+		<!-- ── foreground STREET + neon lighting + pixel-art life (JS-driven) ──
+		     Kept on the front-hill crest (~y744-776) so it stays within the visible
+		     viewBox — the very bottom of the scene is cropped on short viewports. -->
+		<rect x="0" y="746" width="1440" height="42" fill="#130b24" />
+		<rect x="0" y="744" width="1440" height="2.5" fill="#00f5d4" fill-opacity="0.65" />
+		<rect x="0" y="748" width="1440" height="7" fill="#211238" opacity="0.6" />
+		<line x1="0" y1="768" x2="1440" y2="768" stroke="#ff3af2" stroke-width="2.5" stroke-dasharray="32 26" stroke-opacity="0.6" />
+
+		<!-- streetlamps cast neon pools so the characters are lit + readable -->
+		<g class="gb-scene__lamps">
+			<g transform="translate(150 0)"><ellipse cx="0" cy="764" rx="140" ry="34" fill="#00f5d4" fill-opacity="0.12" filter="url(#gb-glow)" /><rect x="-2" y="710" width="4" height="40" fill="#2a1c3e" /><circle cx="0" cy="710" r="5" fill="#00f5d4" filter="url(#gb-glow-sm)" /></g>
+			<g transform="translate(560 0)"><ellipse cx="0" cy="764" rx="140" ry="34" fill="#ff3af2" fill-opacity="0.12" filter="url(#gb-glow)" /><rect x="-2" y="710" width="4" height="40" fill="#2a1c3e" /><circle cx="0" cy="710" r="5" fill="#ff3af2" filter="url(#gb-glow-sm)" /></g>
+			<g transform="translate(1300 0)"><ellipse cx="0" cy="764" rx="140" ry="34" fill="#00f5d4" fill-opacity="0.12" filter="url(#gb-glow)" /><rect x="-2" y="710" width="4" height="40" fill="#2a1c3e" /><circle cx="0" cy="710" r="5" fill="#00f5d4" filter="url(#gb-glow-sm)" /></g>
+		</g>
+
+		<!-- traffic: cars cruise the street rightward and loop -->
+		<g class="gb-scene__traffic">
+			<g class="gb-scene__car" transform="translate(120 748)"><PixelSprite grid={CAR} palette={CAR_PALETTES[0]} cell={2.6} /></g>
+			<g class="gb-scene__car" transform="translate(470 752)"><PixelSprite grid={CAR} palette={CAR_PALETTES[1]} cell={2.6} /></g>
+			<g class="gb-scene__car" transform="translate(820 748)"><PixelSprite grid={CAR} palette={CAR_PALETTES[2]} cell={2.6} /></g>
+			<g class="gb-scene__car" transform="translate(1150 752)"><PixelSprite grid={CAR} palette={CAR_PALETTES[3]} cell={2.6} /></g>
+		</g>
+
+		<!-- a person strolling + a mouse scurrying along the curb -->
+		<g class="gb-scene__person" transform="translate(300 724)">
+			<g class="px-frame" data-frame="a"><PixelSprite grid={PERSON_A} palette={PERSON_PAL} cell={4} /></g>
+			<g class="px-frame" data-frame="b" display="none"><PixelSprite grid={PERSON_B} palette={PERSON_PAL} cell={4} /></g>
+		</g>
+		<g class="gb-scene__mouse" transform="translate(660 747)">
+			<g class="px-frame" data-frame="a"><PixelSprite grid={MOUSE_A} palette={MOUSE_PAL} cell={3} /></g>
+			<g class="px-frame" data-frame="b" display="none"><PixelSprite grid={MOUSE_B} palette={MOUSE_PAL} cell={3} /></g>
+		</g>
+
+		<!-- cinematic vignette -->
 		<rect class="gb-scene__vignette" x="0" y="0" width="1440" height="900" fill="url(#gb-vignette)" />
 	</svg>
 </div>
