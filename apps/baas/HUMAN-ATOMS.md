@@ -39,7 +39,7 @@
 | 10 | SOC2 external auditor | enterprise | Compliance / "SOC2 Type II report" | 🔵 💰 |
 | 11 | Lawyer review of legal templates | cloud + ent | Procurement / "TOS·DPA·SLA·privacy executable" | 🔵 💰 |
 | 12 | Live IdP for SSO (OIDC) + SCIM | enterprise | Enterprise auth / "real-IdP SSO+SCIM" | 🔵 💰 |
-| 13 | KMS for CMEK / customer-managed keys | enterprise | Compliance / "customer-managed encryption" | 🔵 💰 |
+| 13 | Cloud KMS backend for CMEK (Vault Transit works today; m123 ✅) | enterprise | Compliance / "customer-managed encryption" | ✅ code · 🔵 💰 cloud-KMS optional |
 | 14 | Remove the two `*.rootowned-stale` dirs | housekeeping | Repo hygiene / "no dead duplicates" | ⚪ (sudo) |
 
 > "PENDING measurement" = honestly **not yet measured** (the 100K is *projected*;
@@ -288,15 +288,20 @@ fields + an uptime number that must come from the **measured** SLA (atom 8/9), n
 
 **Irreversible?** No.
 
-## 13 · KMS for CMEK / customer-managed keys  💰
+## 13 · Cloud KMS backend for CMEK (optional — Vault Transit works today)  💰
 
-**Unblocks:** Compliance / *"customer-managed encryption keys"*. **No CMEK/KMS code exists
-yet** (`grep -ri cmek|kms` over wiki + gates returns nothing) — this is a future enterprise
-slice that needs an external KMS as its root of trust.
+**Unblocks:** *"customer-managed encryption keys"* against a **cloud** KMS. **The CMEK
+envelope-encryption seam now EXISTS and is gate-green** (`internal/cmek/`, migration 061,
+`m123-cmek-envelope.sh`): per-mount DSN envelope-encrypted (random DEK → AES-256-GCM; DEK wrapped
+by an external KMS KEK), with **crypto-shred proven** (delete the KMS key → undecryptable),
+flag-gated OFF = byte-parity. It runs TODAY against **Vault Transit** (already in-stack). Per-tenant
+distinct KEKs are schema-supported (`cmek_kms_key_id` per row).
 
-- 🔵 **a.** A managed KMS (AWS KMS / GCP KMS / Vault Transit). 💰
-- design **b.** Build the CMEK envelope-encryption seam (separate slice) keyed by the KMS,
-  flag-gated OFF (parity discipline). Today: secrets live in Vault (`121-credref-vault-enforce`, m121).
+- ✅ **done.** CMEK envelope + Vault-Transit provider + crypto-shred + flag-OFF parity (m123).
+- 🔵 **a.** *(optional)* Provision a cloud KMS (AWS KMS / GCP KMS) and add its `KMSProvider`
+  implementation if a customer requires that backend instead of Vault Transit. 💰
+- 🔵 **b.** *(optional)* Per customer: set `CMEK_ENABLED=1` + their `cmek_kms_key_id` so each tenant's
+  DSN is wrapped under their own key.
 
 **Irreversible?** No.
 
