@@ -232,20 +232,38 @@ function lineChart(curve, contenders) {
   const xMax = Math.max(...lines.flatMap((l) => l.pts.map((p) => p.x)));
   const yMaxRaw = Math.max(...lines.flatMap((l) => l.pts.map((p) => p.y)));
   const yMax = yMaxRaw <= 0 ? 1 : yMaxRaw * 1.15;
+  // Opt-in log-y (curve.yLog) for curves whose series span many orders of magnitude
+  // (e.g. RAM-to-host-N-tenants: ~3 MiB vs ~1.3 TiB). Default OFF = linear (unchanged).
+  const yLog = curve.yLog === true;
+  const yPos = lines.flatMap((l) => l.pts.map((p) => p.y)).filter((v) => v > 0);
+  const yMinPos = yPos.length ? Math.min(...yPos) : 1;
+  const lyMin = yLog ? Math.floor(Math.log10(yMinPos)) : 0;
+  const lyMax = yLog ? Math.max(lyMin + 1, Math.ceil(Math.log10(yMaxRaw > 0 ? yMaxRaw : 1))) : 0;
   // log-x scale (counts span 200..100000)
   const lxMin = Math.log10(xMin);
   const lxMax = Math.log10(xMax === xMin ? xMin * 10 : xMax);
   const px = (x) => ML + ((Math.log10(x) - lxMin) / (lxMax - lxMin || 1)) * plotW;
-  const py = (y) => MT + plotH - (y / yMax) * plotH;
+  const py = (y) => yLog
+    ? MT + plotH - ((Math.log10(Math.max(y, yMinPos)) - lyMin) / ((lyMax - lyMin) || 1)) * plotH
+    : MT + plotH - (y / yMax) * plotH;
 
   let parts = "";
-  // y gridlines
-  const ticks = 5;
-  for (let t = 0; t <= ticks; t++) {
-    const v = (yMax / ticks) * t;
-    const yy = py(v);
-    parts += `  <line x1="${ML}" y1="${yy.toFixed(1)}" x2="${ML + plotW}" y2="${yy.toFixed(1)}" stroke="#e2e8f0" stroke-width="1"/>\n`;
-    parts += `  <text x="${ML - 8}" y="${(yy + 4).toFixed(1)}" text-anchor="end" font-family="sans-serif" font-size="11" fill="#64748b">${esc(fmtNum(v))}</text>\n`;
+  // y gridlines (decade ticks when log-y, else 5 linear ticks)
+  if (yLog) {
+    for (let d = lyMin; d <= lyMax; d++) {
+      const v = Math.pow(10, d);
+      const yy = py(v);
+      parts += `  <line x1="${ML}" y1="${yy.toFixed(1)}" x2="${ML + plotW}" y2="${yy.toFixed(1)}" stroke="#e2e8f0" stroke-width="1"/>\n`;
+      parts += `  <text x="${ML - 8}" y="${(yy + 4).toFixed(1)}" text-anchor="end" font-family="sans-serif" font-size="11" fill="#64748b">${esc(fmtNum(v))}</text>\n`;
+    }
+  } else {
+    const ticks = 5;
+    for (let t = 0; t <= ticks; t++) {
+      const v = (yMax / ticks) * t;
+      const yy = py(v);
+      parts += `  <line x1="${ML}" y1="${yy.toFixed(1)}" x2="${ML + plotW}" y2="${yy.toFixed(1)}" stroke="#e2e8f0" stroke-width="1"/>\n`;
+      parts += `  <text x="${ML - 8}" y="${(yy + 4).toFixed(1)}" text-anchor="end" font-family="sans-serif" font-size="11" fill="#64748b">${esc(fmtNum(v))}</text>\n`;
+    }
   }
   // x gridlines + labels (use the declared x points)
   const xticks = (curve.x || []).map(Number).filter((v) => Number.isFinite(v) && v > 0);
@@ -258,8 +276,9 @@ function lineChart(curve, contenders) {
   // axes
   parts += `  <line x1="${ML}" y1="${MT}" x2="${ML}" y2="${MT + plotH}" stroke="#94a3b8" stroke-width="1.5"/>\n`;
   parts += `  <line x1="${ML}" y1="${MT + plotH}" x2="${ML + plotW}" y2="${MT + plotH}" stroke="#94a3b8" stroke-width="1.5"/>\n`;
-  parts += `  <text x="${ML + plotW / 2}" y="${MT + plotH + 44}" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#475569">tenant count (log scale)</text>\n`;
-  parts += `  <text x="${ML - 56}" y="${MT + plotH / 2}" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#475569" transform="rotate(-90 ${ML - 56} ${MT + plotH / 2})">${esc(unit)}</text>\n`;
+  const xLabel = (curve.xUnit && curve.xUnit !== "tenants") ? curve.xUnit : "tenant count";
+  parts += `  <text x="${ML + plotW / 2}" y="${MT + plotH + 44}" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#475569">${esc(xLabel)} (log scale)</text>\n`;
+  parts += `  <text x="${ML - 56}" y="${MT + plotH / 2}" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#475569" transform="rotate(-90 ${ML - 56} ${MT + plotH / 2})">${esc(unit)}${yLog ? " (log)" : ""}</text>\n`;
 
   lines.forEach((l, i) => {
     const st = SOURCE_STYLE[l.source] || SOURCE_STYLE.measured;
@@ -563,6 +582,9 @@ function normalize(data) {
       key: c.key,
       label: c.label || c.key,
       unit: c.unit || c.yUnit || "",
+      xUnit: c.xUnit || "",
+      yLog: c.yLog === true,
+      yLowerIsBetter: c.yLowerIsBetter !== false,
       context: c.context || c.description || "",
       x,
       series,
