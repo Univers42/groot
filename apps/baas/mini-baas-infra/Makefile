@@ -221,6 +221,17 @@ bench-mem: _require-compose ## RSS under sustained load: peak + drift slope (PAC
 	@PACKAGE="$(if $(PACKAGE),$(PACKAGE),essential)" DURATION="$(if $(DURATION),$(DURATION),30m)" \
 		RATE="$(RATE)" bash scripts/bench/mem-under-load.sh
 
+bench-compare: ## Competitive graph report from scripts/bench/compare-data.json → artifacts/bench/compare/ (zero-dep SVG, no host node) (DATA= OUT=)
+	@mkdir -p artifacts/bench/compare
+	@docker run --rm -u "$(shell id -u):$(shell id -g)" \
+		-v "$(CURDIR)/scripts/bench":/b \
+		-v "$(CURDIR)/artifacts":/b/artifacts \
+		-w /b public.ecr.aws/docker/library/node:22-bookworm \
+		node compare-report.mjs \
+			--data "$(if $(DATA),$(DATA),/b/compare-data.json)" \
+			--out "$(if $(OUT),$(OUT),/b/artifacts/bench/compare)"
+	@echo -e "$(_G)$(_W)✓ compare report → artifacts/bench/compare/{index.html,report.md,charts/}$(_0)"
+
 scale-seed: _require-compose ## Provision SCALE= bench tenants (+keys+mounts) → artifacts/scale/tenants-<N>.jsonl (MOUNTS= ISOLATION= CONCURRENCY=)
 	@SCALE="$(if $(SCALE),$(SCALE),1000)"; \
 	TC_PORT="$$(docker port mini-baas-tenant-control 3022/tcp 2>/dev/null | head -1 | sed 's/.*://')"; \
@@ -609,7 +620,7 @@ help: ## Show this help
 	@echo ""
 
 .PHONY: all all-full clean fclean re up down restart ps logs pull build health \
-        bench-startup bench-load bench-capacity bench-mem scale-seed scale-teardown observe planes editions doctor tests test-postgres \
+        bench-startup bench-load bench-capacity bench-mem bench-compare scale-seed scale-teardown observe planes editions doctor tests test-postgres \
         verify-all parity waf-test migrate migrate-mongo migrate-mysql migrate-all \
         migrate-status seed-mongo seed-live-demo secrets secrets-validate secrets-rotate \
         check-secrets env vault-init vault-status vault-rotate nestjs-ci \
