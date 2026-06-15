@@ -66,6 +66,13 @@ struct KeyInfo {
 /// sub-millisecond and never held across an await, so a std Mutex is right.
 struct KeyStore {
     conn: std::sync::Mutex<rusqlite::Connection>,
+    // Positive verify cache (digest -> (name, scopes)). Without it EVERY request
+    // locked `conn` + ran a SELECT to authenticate, so one mutex + one connection
+    // serialised all concurrent requests (the per-request tax PocketBase's
+    // stateless token avoids). A repeat verify is now a lock-free RwLock read.
+    // Cleared wholesale on revoke so a revoked key is rejected immediately —
+    // stricter than the cloud's LRU staleness window.
+    verify_cache: std::sync::RwLock<std::collections::HashMap<String, (String, Vec<String>)>>,
 }
 
 impl KeyStore {
@@ -84,6 +91,7 @@ impl KeyStore {
         )?;
         Ok(Self {
             conn: std::sync::Mutex::new(conn),
+            verify_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
         })
     }
 
@@ -130,27 +138,45 @@ impl KeyStore {
     /// its shape — the digest of the FULL key string must match either way, so
     /// the fallback can only ever match the one key it stores.
     fn verify(&self, key: &str) -> Option<(String, Vec<String>)> {
+        let digest = sha256_hex(key);
+        // Fast path: a previously-verified key is a lock-free RwLock read — no
+        // SQLite round-trip, no exclusive lock — so concurrent requests no longer
+        // serialise on the key store. (sha256 of a 160-bit key is still computed
+        // every call; only the DB lookup + lock are cached.)
+        if let Some(hit) = self
+            .verify_cache
+            .read()
+            .ok()
+            .and_then(|c| c.get(&digest).cloned())
+        {
+            return Some(hit);
+        }
         let embedded_id = key
             .strip_prefix("nbk_")
             .and_then(|rest| rest.split_once('.'))
             .map(|(id, _)| id.to_string());
-        let digest = sha256_hex(key);
-        let conn = self.conn.lock().expect("key store poisoned");
-        let lookup = |id: &str| -> Option<(String, String, String)> {
-            conn.query_row(
-                "SELECT name, digest, scopes FROM nano_keys WHERE id = ?1 AND revoked = 0",
-                [id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )
-            .ok()
-        };
-        let verified = embedded_id
-            .and_then(|id| lookup(&id))
-            .filter(|(_, d, _)| ct_eq(&digest, d))
-            .or_else(|| lookup("env-admin").filter(|(_, d, _)| ct_eq(&digest, d)))?;
+        let verified = {
+            let conn = self.conn.lock().expect("key store poisoned");
+            let lookup = |id: &str| -> Option<(String, String, String)> {
+                conn.query_row(
+                    "SELECT name, digest, scopes FROM nano_keys WHERE id = ?1 AND revoked = 0",
+                    [id],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .ok()
+            };
+            embedded_id
+                .and_then(|id| lookup(&id))
+                .filter(|(_, d, _)| ct_eq(&digest, d))
+                .or_else(|| lookup("env-admin").filter(|(_, d, _)| ct_eq(&digest, d)))
+        }?;
         let (name, _, scopes_json) = verified;
         let scopes: Vec<String> = serde_json::from_str(&scopes_json).unwrap_or_default();
-        Some((name, scopes))
+        let out = (name, scopes);
+        if let Ok(mut c) = self.verify_cache.write() {
+            c.insert(digest, out.clone());
+        }
+        Some(out)
     }
 
     fn list(&self) -> anyhow::Result<Vec<KeyInfo>> {
@@ -171,8 +197,17 @@ impl KeyStore {
     }
 
     fn revoke(&self, id: &str) -> anyhow::Result<bool> {
-        let conn = self.conn.lock().expect("key store poisoned");
-        let n = conn.execute("UPDATE nano_keys SET revoked = 1 WHERE id = ?1", [id])?;
+        let n = {
+            let conn = self.conn.lock().expect("key store poisoned");
+            conn.execute("UPDATE nano_keys SET revoked = 1 WHERE id = ?1", [id])?
+        };
+        if n > 0 {
+            // Invalidate the positive verify cache so the revoked key is rejected
+            // on its very next request (revocation is rare; a full clear is fine).
+            if let Ok(mut c) = self.verify_cache.write() {
+                c.clear();
+            }
+        }
         Ok(n > 0)
     }
 }

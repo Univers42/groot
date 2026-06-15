@@ -90,6 +90,11 @@ done
 for base in "${NANO}" "${ONE}"; do
   curl -s -X POST "${base}/nano/v1/raw" -H "X-Baas-Api-Key: ${NK}" -H "Content-Type: application/json" \
     -d '{"db_id":"main","statement":"CREATE TABLE IF NOT EXISTS bench (owner_id TEXT NOT NULL, title TEXT)"}' >/dev/null
+  # FAIRNESS: index owner_id so the per-request owner-scope predicate is not an
+  # unindexed scan — PocketBase's collection is indexed by default, so without
+  # this the list comparison penalised binocle on an avoidable table scan.
+  curl -s -X POST "${base}/nano/v1/raw" -H "X-Baas-Api-Key: ${NK}" -H "Content-Type: application/json" \
+    -d '{"db_id":"main","statement":"CREATE INDEX IF NOT EXISTS bench_owner ON bench(owner_id)"}' >/dev/null
 done
 docker exec g-pb /pb/pocketbase superuser upsert bench@local.dev super-secret-pw-123 --dir /pb/pb_data >/dev/null 2>&1
 PB_TOKEN=$(curl -s -X POST "${PB}/api/collections/_superusers/auth-with-password" \
@@ -112,6 +117,24 @@ run_list(){ # base c
   oha -z "${DUR}" -c "$2" -m POST -H "X-Baas-Api-Key: ${NK}" -H "Content-Type: application/json" \
     -d "${LIST_BODY}" "$1/data/v1/query" | parse
 }
+
+# ── warmup (discarded) — prime statement cache + page cache + seed a few rows
+#    equally so the measured list sweep is warm + fair for all three, per
+#    scripts/bench/METHOD.md rule #3 (warmup excluded from the measurement).
+cyan "[G] warmup (discarded)"
+for base in "${NANO}" "${ONE}"; do
+  for _ in $(seq 1 60); do
+    curl -s -X POST "${base}/data/v1/query" -H "X-Baas-Api-Key: ${NK}" \
+      -H "Content-Type: application/json" -d "${INS_BODY}" >/dev/null
+  done
+  curl -s -X POST "${base}/data/v1/query" -H "X-Baas-Api-Key: ${NK}" \
+    -H "Content-Type: application/json" -d "${LIST_BODY}" >/dev/null
+done
+for _ in $(seq 1 60); do
+  curl -s -X POST "${PB}/api/collections/bench/records" -H "Authorization: ${PB_TOKEN}" \
+    -H "Content-Type: application/json" -d "${PB_INS_BODY}" >/dev/null
+done
+curl -s "${PB}/api/collections/bench/records?perPage=30&skipTotal=1" -H "Authorization: ${PB_TOKEN}" >/dev/null
 
 # ── concurrency sweep ────────────────────────────────────────────────────────
 declare -A R
