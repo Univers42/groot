@@ -1,0 +1,178 @@
+---
+// ── HeroScene — a dreamy, looping CYBERPUNK NIGHT scene (pure SVG + CSS).
+//
+// A lone figure sits on a neon hilltop swinging one leg, watching a twinkling
+// starfield over a synthwave moon and a distant cyberpunk skyline. It loops
+// forever, weighs a few KB, needs zero network, and is fully original — so it
+// keeps the strict CSP (no external media), the LH-100 budget, and the licence
+// clean while giving the hero a cinematic, "video-like" backdrop.
+//
+// CSP/icon-safety: inline SVG with NO xmlns, NO <script>, NO external href/src —
+// only geometry, internal url(#…) gradient/filter refs, and CSS-driven motion
+// (no SMIL). Decorative → aria-hidden. ALL animation is reduced-motion-gated in
+// _hero.scss; with motion reduced the scene is a calm, static night.
+
+// Deterministic starfield (seed 42 → stable build, testable). Stars live in the
+// upper sky band only (y < 560) so none land on the hills.
+function mulberry32(a: number) {
+	return function () {
+		a |= 0;
+		a = (a + 0x6d2b79f5) | 0;
+		let t = Math.imul(a ^ (a >>> 15), 1 | a);
+		t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+		return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+	};
+}
+const rand = mulberry32(42);
+const stars = Array.from({ length: 90 }, (_, i) => ({
+	x: Math.round(rand() * 1440),
+	y: Math.round(rand() * 540),
+	r: +(0.5 + rand() * 1.9).toFixed(2),
+	b: i % 5, // twinkle-delay bucket → .gb-star--b{0..4}
+}));
+---
+
+<div class="gb-scene" aria-hidden="true">
+	<svg class="gb-scene__svg" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" fill="none" role="presentation">
+		<defs>
+			<linearGradient id="gb-sky" x1="0" y1="0" x2="0" y2="1">
+				<stop offset="0" stop-color="#05030f" />
+				<stop offset="0.45" stop-color="#150a2e" />
+				<stop offset="0.72" stop-color="#3a1247" />
+				<stop offset="0.86" stop-color="#7a1b56" />
+				<stop offset="1" stop-color="#23103f" />
+			</linearGradient>
+			<radialGradient id="gb-moonglow" cx="0.5" cy="0.5" r="0.5">
+				<stop offset="0" stop-color="#ff3af2" stop-opacity="0.55" />
+				<stop offset="0.45" stop-color="#7b2fff" stop-opacity="0.28" />
+				<stop offset="1" stop-color="#7b2fff" stop-opacity="0" />
+			</radialGradient>
+			<linearGradient id="gb-moon" x1="0" y1="0" x2="0" y2="1">
+				<stop offset="0" stop-color="#fff4fb" />
+				<stop offset="0.5" stop-color="#ffd9f4" />
+				<stop offset="1" stop-color="#ff8fd6" />
+			</linearGradient>
+			<linearGradient id="gb-hill-back" x1="0" y1="0" x2="0" y2="1">
+				<stop offset="0" stop-color="#3a1659" />
+				<stop offset="1" stop-color="#24103f" />
+			</linearGradient>
+			<linearGradient id="gb-hill-mid" x1="0" y1="0" x2="0" y2="1">
+				<stop offset="0" stop-color="#1f0c35" />
+				<stop offset="1" stop-color="#160826" />
+			</linearGradient>
+			<linearGradient id="gb-hill-front" x1="0" y1="0" x2="0" y2="1">
+				<stop offset="0" stop-color="#0d0518" />
+				<stop offset="1" stop-color="#070310" />
+			</linearGradient>
+			<filter id="gb-glow" x="-60%" y="-60%" width="220%" height="220%">
+				<feGaussianBlur stdDeviation="9" />
+			</filter>
+			<filter id="gb-glow-sm" x="-80%" y="-80%" width="260%" height="260%">
+				<feGaussianBlur stdDeviation="3" />
+			</filter>
+		</defs>
+
+		<!-- sky -->
+		<rect x="0" y="0" width="1440" height="900" fill="url(#gb-sky)" />
+
+		<!-- moon: glow halo + disc + synthwave scan-cuts + neon rim -->
+		<circle cx="1050" cy="265" r="260" fill="url(#gb-moonglow)" />
+		<circle class="gb-scene__moon" cx="1050" cy="265" r="118" fill="url(#gb-moon)" />
+		<g class="gb-scene__moon-rim">
+			<circle cx="1050" cy="265" r="118" fill="none" stroke="#00f5d4" stroke-width="2" stroke-opacity="0.5" />
+		</g>
+		<g fill="#150a2e">
+			<rect x="932" y="300" width="236" height="6" rx="3" />
+			<rect x="940" y="318" width="220" height="8" rx="4" />
+			<rect x="952" y="338" width="196" height="10" rx="5" />
+			<rect x="968" y="360" width="164" height="12" rx="6" />
+		</g>
+
+		<!-- stars (twinkle via CSS; positions are deterministic) -->
+		<g class="gb-scene__stars" fill="#ffffff">
+			{stars.map((s) => <circle class={`gb-star gb-star--${s.b}`} cx={s.x} cy={s.y} r={s.r} />)}
+		</g>
+
+		<!-- a slow shooting star -->
+		<g class="gb-scene__shoot">
+			<line x1="120" y1="120" x2="190" y2="150" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" />
+			<circle cx="190" cy="150" r="2.6" fill="#ffffff" />
+		</g>
+
+		<!-- synthwave horizon glow line -->
+		<rect x="0" y="600" width="1440" height="2" fill="#ff3af2" fill-opacity="0.55" filter="url(#gb-glow-sm)" />
+
+		<!-- distant cyberpunk skyline (behind the hills) -->
+		<g class="gb-scene__city" fill="#1a0b30">
+			<rect x="150" y="540" width="34" height="62" />
+			<rect x="196" y="512" width="26" height="90" />
+			<rect x="232" y="556" width="40" height="46" />
+			<rect x="286" y="498" width="22" height="104" />
+			<rect x="320" y="544" width="30" height="58" />
+			<rect x="690" y="548" width="30" height="54" />
+			<rect x="732" y="520" width="24" height="82" />
+			<rect x="766" y="556" width="36" height="46" />
+			<rect x="1180" y="556" width="30" height="46" />
+			<rect x="1222" y="528" width="22" height="74" />
+		</g>
+		<g class="gb-scene__windows" fill="#00f5d4" fill-opacity="0.85">
+			<rect x="204" y="524" width="3" height="3" /><rect x="212" y="524" width="3" height="3" />
+			<rect x="204" y="536" width="3" height="3" /><rect x="212" y="548" width="3" height="3" />
+			<rect x="294" y="512" width="3" height="3" /><rect x="300" y="524" width="3" height="3" />
+			<rect x="294" y="540" width="3" height="3" /><rect x="300" y="556" width="3" height="3" />
+			<rect x="740" y="532" width="3" height="3" /><rect x="748" y="544" width="3" height="3" />
+			<rect x="1230" y="540" width="3" height="3" /><rect x="1230" y="556" width="3" height="3" />
+		</g>
+
+		<!-- layered neon hills (back → front), drifting subtly for parallax depth -->
+		<path class="gb-scene__hill gb-scene__hill--back" fill="url(#gb-hill-back)"
+			d="M-40 640 C 240 560, 460 596, 720 568 C 1000 540, 1240 612, 1480 576 L1480 900 L-40 900 Z" />
+		<path class="gb-scene__hill gb-scene__hill--mid" fill="url(#gb-hill-mid)"
+			d="M-40 712 C 300 656, 560 700, 880 676 C 1120 658, 1320 706, 1480 686 L1480 900 L-40 900 Z" />
+		<path class="gb-scene__hill gb-scene__hill--front" fill="url(#gb-hill-front)"
+			d="M-40 800 C 260 752, 520 786, 760 772 C 1040 756, 1280 800, 1480 782 L1480 900 L-40 900 Z" />
+
+		<!-- the figure: a realistic seated silhouette on the front hill below the
+		     moon (right side, clear of the headline) — leaning back on one hand,
+		     gazing up, with the near leg dangling over the edge and SWINGING. -->
+		<g class="gb-scene__figure" transform="translate(992 742) scale(1.5)">
+			<!-- seat shadow + magenta back-glow so the silhouette reads on the hill -->
+			<ellipse cx="6" cy="6" rx="42" ry="8" fill="#000008" fill-opacity="0.45" />
+			<circle cx="-6" cy="-30" r="56" fill="#ff3af2" fill-opacity="0.22" filter="url(#gb-glow)" />
+			<g stroke-linecap="round" stroke-linejoin="round">
+				<!-- back arm propping on the hill (behind the torso) -->
+				<path d="M-13 -33 L-26 -16 L-38 3" fill="none" stroke="#05030d" stroke-width="6.5" />
+				<!-- FAR leg (static, behind): thigh → calf -->
+				<path d="M2 -3 L27 -7" fill="none" stroke="#0a0617" stroke-width="8.5" />
+				<path d="M27 -7 L29 33" fill="none" stroke="#0a0617" stroke-width="7.5" />
+				<!-- torso (leaning back), filled -->
+				<path d="M3 -1 C -7 -13, -14 -24, -16 -35 C -10 -38, -3 -34, 0 -27 C 4 -16, 9 -7, 13 -1 Z" fill="#05030d" />
+				<!-- neck -->
+				<path d="M-13 -33 L-19 -43" fill="none" stroke="#05030d" stroke-width="6.5" />
+				<!-- head, tilted up to the sky (smaller → realistic proportion) -->
+				<ellipse cx="-23" cy="-49" rx="7.6" ry="9.2" fill="#05030d" transform="rotate(-15 -23 -49)" />
+				<!-- hair tuft + lo-fi neon headphone (moon-side) -->
+				<path d="M-30 -53 C -33 -49, -32 -43, -28 -41 L-24 -44 Z" fill="#05030d" />
+				<path d="M-30 -55 A 9.5 9.5 0 0 1 -15 -53" fill="none" stroke="#00f5d4" stroke-width="2" stroke-opacity="0.9" filter="url(#gb-glow-sm)" />
+				<circle cx="-15" cy="-48" r="2.2" fill="#00f5d4" filter="url(#gb-glow-sm)" />
+				<!-- NEAR thigh to the knee at the hill edge -->
+				<path d="M5 -3 L30 -6" fill="none" stroke="#05030d" stroke-width="10" />
+				<!-- SWINGING near lower leg + foot (pivots at the knee). The bright cyan
+				     rim sweeps WITH the leg so the swing is unmistakable. -->
+				<g class="gb-scene__leg">
+					<path d="M30 -6 L34 34" fill="none" stroke="#05030d" stroke-width="9" />
+					<path d="M34 34 L45 37" fill="none" stroke="#05030d" stroke-width="6.5" />
+					<path d="M28 -5 L32 33" fill="none" stroke="#00f5d4" stroke-width="2.3" stroke-opacity="0.85" filter="url(#gb-glow-sm)" />
+					<circle cx="44.5" cy="36.5" r="2" fill="#00f5d4" filter="url(#gb-glow-sm)" />
+				</g>
+				<!-- RIM LIGHTS on the moon-facing edges (chest, back, far shin) -->
+				<path d="M-1 -28 C 3 -17, 8 -8, 12 -2" fill="none" stroke="#00f5d4" stroke-width="1.7" stroke-opacity="0.7" />
+				<path d="M-15 -36 C -13 -28, -10 -20, -6 -14" fill="none" stroke="#ff3af2" stroke-width="1.4" stroke-opacity="0.45" />
+				<path d="M27.5 -5 L29.5 32" fill="none" stroke="#00f5d4" stroke-width="1.3" stroke-opacity="0.35" />
+			</g>
+		</g>
+
+		<!-- foreground neon ground bloom -->
+		<rect x="0" y="792" width="1440" height="108" fill="#7b2fff" fill-opacity="0.10" />
+	</svg>
+</div>

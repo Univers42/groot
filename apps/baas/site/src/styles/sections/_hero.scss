@@ -1,135 +1,172 @@
-// ── HERO — maximalist: giant gradient-clipped headline, pill kicker, glowing
-// CTAs, tilted accent stat cards, floating shapes + one giant BUILD bgword.
-// All variety via classes (CSP forbids inline style=); motion behind the global
-// reduced-motion guard; decorations are absolute → zero CLS.
+// ── HERO — minimal · dreamy · cyberpunk.
+//
+// A short title + one CTA float over HeroScene (a looping SVG/CSS cyberpunk
+// night: starfield, synthwave moon, neon hills, a figure swinging its leg).
+// Premium-minimal: the scene carries the mood, the words stay out of the way.
+//
+// CSP-safe: every colour/offset is a class (no inline style=); ALL motion is
+// behind the reduced-motion guard; the scene is absolute → zero CLS.
+
 .gb-hero {
 	position: relative;
-	isolation: isolate; // contain the absolute floaters + bgword behind content
+	isolation: isolate;
 	min-height: calc(100dvh - 4rem);
 	display: grid;
 	align-content: center;
-	gap: var(--gb-space-6);
-	padding-block: var(--gb-space-16);
-	overflow: hidden; // bgword bleeds off-edge without scrolling the page
+	overflow: hidden;
 }
 
-// keep the headline/lede/CTAs above every decorative layer
+// ── The scene: a full-bleed backdrop that covers the hero box. ────────────────
+.gb-scene {
+	position: absolute;
+	inset: 0;
+	z-index: 0;
+}
+
+.gb-scene__svg {
+	display: block;
+	width: 100%;
+	height: 100%;
+}
+
+// A soft scrim so the white headline stays AAA-legible over the bright moon side.
+.gb-hero::before {
+	content: '';
+	position: absolute;
+	inset: 0;
+	z-index: 1;
+	pointer-events: none;
+	background:
+		linear-gradient(90deg, rgb(5 3 15 / 82%) 0%, rgb(5 3 15 / 45%) 38%, rgb(5 3 15 / 0%) 66%),
+		linear-gradient(0deg, rgb(7 3 16 / 70%) 0%, rgb(7 3 16 / 0%) 40%);
+}
+
+// ── Content column ────────────────────────────────────────────────────────────
 .gb-hero__inner {
 	position: relative;
 	z-index: 2;
 	display: grid;
-	gap: var(--gb-space-6);
+	justify-items: start;
+	gap: var(--gb-space-7);
+	max-width: 42rem;
 }
 
-// The big BUILD word sits behind content, bleeding off the left edge.
-.gb-hero__bgword {
-	z-index: 0;
-	opacity: 0.09;
-}
-
-// ── Kicker as a bold uppercase tracking-widest LABEL PILL ────────────────────
-.gb-hero__kicker {
-	justify-self: start;
-	display: inline-flex;
-	align-items: center;
-	gap: 0.5rem;
-	padding: 0.45rem 1.05rem;
-	border: 2px dashed var(--gb-a2); // cyan dashed clashes with the dark fill
-	border-radius: var(--gb-radius-pill);
-	background: rgb(45 27 78 / 60%);
-	color: var(--gb-a3); // yellow label text — AA on the dark pill
-	box-shadow:
-		0 0 16px rgb(0 245 212 / 30%),
-		4px 4px 0 var(--gb-a5);
-}
-
-// ── Massive H1 — mega stacked shadow comes from .tshadow-mega on the element ──
 .gb-hero__title {
-	max-width: 14ch;
+	max-width: 16ch;
 	font-size: var(--gb-text-hero);
-	line-height: 0.92;
+	line-height: 0.98;
+	text-shadow: 0 2px 30px rgb(5 3 15 / 80%); // lift off the scene, no slab
 }
 
-// the highlighted word carries the animated gradient-text fill (.gradient-text);
-// reset its inherited italic so it reads as one continuous headline.
-.gb-hero__title em {
-	font-style: normal;
+// The serif-italic accent — the one premium signal; stays white (AAA), nudged up
+// to match the surrounding x-height, with a soft cyan dream-glow.
+.gb-hero__accent {
+	color: var(--gb-text);
+	font-size: 1.08em;
+	text-shadow: 0 0 26px rgb(0 245 212 / 45%);
 }
 
 .gb-hero__ctas {
 	display: flex;
 	flex-wrap: wrap;
-	gap: var(--gb-space-4);
-	margin-top: var(--gb-space-2);
+	align-items: center;
+	gap: var(--gb-space-5);
 }
 
-// ── Stat row — fat tilted accent cards with hard-stacked shadows ─────────────
-.gb-hero__stats {
-	display: flex;
-	flex-wrap: wrap;
-	gap: var(--gb-space-6);
-	margin-top: var(--gb-space-8);
-}
+// ════════════════════════════ THE SCENE ANIMATIONS ════════════════════════════
+// Every animation is reduced-motion-gated. With motion reduced the scene is a
+// calm, static night — fully legible, no movement.
 
-// Upgrade the base .gb-stat into a bolder hero card: 4px border, fatter pad,
-// glow + hard double-stack tinted by the card's own --acc (set by .accent-N).
-.gb-hero__stats .gb-stat {
-	padding: var(--gb-space-6) var(--gb-space-6);
-	border-width: 4px;
-	border-radius: var(--gb-radius-lg);
-	box-shadow:
-		0 0 20px color-mix(in srgb, var(--acc) 40%, transparent),
-		6px 6px 0 var(--gb-a5),
-		12px 12px 0 color-mix(in srgb, var(--acc) 70%, transparent);
-	transition:
-		transform var(--gb-dur-fast) var(--gb-ease-bounce),
-		box-shadow var(--gb-dur-fast) var(--gb-ease-out);
-}
-
-.gb-hero__stats .gb-stat__value {
-	font-size: var(--gb-text-xl);
-}
-
-// Asymmetric rhythm: alternate slight rotation + vertical nudge per chip.
-.gb-stat--tilt-a { transform: rotate(-2deg) translateY(-0.5rem); }
-.gb-stat--tilt-b { transform: rotate(1deg) translateY(0.75rem); }
-.gb-stat--tilt-c { transform: rotate(2deg) translateY(-0.75rem); }
-.gb-stat--tilt-d { transform: rotate(-1deg) translateY(0.5rem); }
+// stars twinkle (deterministic positions; 5 delay buckets for an organic shimmer)
+.gb-star { opacity: 0.85; }
 
 @media (prefers-reduced-motion: no-preference) {
-	.gb-hero__stats .gb-stat:hover {
-		transform: scale(1.05) rotate(0deg) translateY(-0.25rem);
-		box-shadow:
-			0 0 30px color-mix(in srgb, var(--acc) 55%, transparent),
-			8px 8px 0 var(--gb-a5),
-			16px 16px 0 color-mix(in srgb, var(--acc) 70%, transparent);
+	.gb-star {
+		animation: gb-twinkle 4.5s ease-in-out infinite;
 	}
+
+	.gb-star--0 { animation-delay: 0s; }
+	.gb-star--1 { animation-delay: 0.9s; }
+	.gb-star--2 { animation-delay: 1.8s; }
+	.gb-star--3 { animation-delay: 2.7s; }
+	.gb-star--4 { animation-delay: 3.6s; }
+
+	// the figure's near leg swings from the knee (top-LEFT of its bbox = the knee
+	// joint, where the lower-leg path begins)
+	.gb-scene__leg {
+		transform-box: fill-box;
+		transform-origin: left top;
+		animation: gb-legswing 2.3s ease-in-out infinite;
+	}
+
+	// a shooting star streaks across, occasionally
+	.gb-scene__shoot {
+		opacity: 0;
+		animation: gb-shoot 9s ease-in infinite;
+	}
+
+	// slow parallax drift of the hill layers (kept within the 40px overscan)
+	.gb-scene__hill--back { animation: gb-drift-a 26s ease-in-out infinite; }
+	.gb-scene__hill--mid { animation: gb-drift-b 32s ease-in-out infinite; }
+
+	// the moon rim breathes a faint neon pulse
+	.gb-scene__moon-rim { animation: gb-moonpulse 6s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
 }
 
-// ── Emoji decorations (aria-hidden) — absolute, animated, zero CLS ───────────
-.gb-hero__emoji {
-	position: absolute;
-	z-index: 1;
-	font-size: clamp(1.8rem, 1rem + 2.5vw, 3rem);
-	line-height: 1;
-	pointer-events: none;
-	user-select: none;
-	filter: drop-shadow(0 0 10px rgb(255 58 242 / 45%));
+@keyframes gb-twinkle {
+	0%, 100% { opacity: 0.2; }
+	50% { opacity: 1; }
 }
 
-.gb-hero__emoji--rocket {
-	top: 14%;
-	right: 12%;
+@keyframes gb-legswing {
+	0%, 100% { transform: rotate(-13deg); }
+	50% { transform: rotate(24deg); }
 }
 
-.gb-hero__emoji--spark {
-	bottom: 16%;
-	left: 7%;
+@keyframes gb-shoot {
+	0% { opacity: 0; transform: translate(0, 0); }
+	3% { opacity: 0.9; }
+	14% { opacity: 0; transform: translate(260px, 140px); }
+	100% { opacity: 0; transform: translate(260px, 140px); }
 }
 
-.gb-hero__hint {
-	margin-top: var(--gb-space-6);
-	color: var(--gb-text-faint);
-	font-size: var(--gb-text-xs);
-	font-family: var(--gb-font-mono);
+@keyframes gb-drift-a {
+	0%, 100% { transform: translateX(0); }
+	50% { transform: translateX(-14px); }
+}
+
+@keyframes gb-drift-b {
+	0%, 100% { transform: translateX(0); }
+	50% { transform: translateX(10px); }
+}
+
+@keyframes gb-moonpulse {
+	0%, 100% { opacity: 0.4; }
+	50% { opacity: 0.85; }
+}
+
+// ── Entrance stagger — title → CTA (transform/opacity only, motion-gated). ─────
+@media (prefers-reduced-motion: no-preference) {
+	.gb-hero__rise {
+		opacity: 0;
+		transform: translateY(18px);
+		animation: gb-rise var(--gb-dur-slow) var(--gb-ease-out) both;
+	}
+
+	.gb-hero__rise--1 { animation-delay: 120ms; }
+	.gb-hero__rise--2 { animation-delay: 320ms; }
+}
+
+// ── Responsive ────────────────────────────────────────────────────────────────
+@media (width <= 48rem) {
+	.gb-hero__inner {
+		gap: var(--gb-space-5);
+	}
+
+	.gb-hero::before {
+		// on phones the figure/moon sit tighter — darken a touch more for legibility
+		background:
+			linear-gradient(0deg, rgb(7 3 16 / 78%) 0%, rgb(7 3 16 / 10%) 55%),
+			linear-gradient(90deg, rgb(5 3 15 / 70%) 0%, rgb(5 3 15 / 0%) 80%);
+	}
 }

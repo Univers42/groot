@@ -29,13 +29,6 @@
 	gap: var(--gb-space-12);
 }
 
-// emoji decorations (aria-hidden, wiggle/bounce) injected via ::before/::after
-// on the suite sub-heads — pure decoration, no copy change.
-.gb-plan-suite__h::after {
-	content: ' ✨';
-	font-size: 0.7em;
-}
-
 // ── The plan grid — broken / alternating rhythm, generous gaps. ──────────────
 .gb-plans {
 	min-inline-size: 0;

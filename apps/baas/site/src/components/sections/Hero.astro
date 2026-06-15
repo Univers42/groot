@@ -1,42 +1,26 @@
 ---
-import StatChip from '../ui/StatChip.astro';
+// ── HERO — minimal · dreamy · cyberpunk.
+// The least information possible: a short title (one Instrument-Serif italic
+// accent word) + one primary CTA, over a looping cyberpunk night scene
+// (HeroScene — pure SVG/CSS, CSP-safe, LH-friendly). No pill, no description,
+// no stat chips — the scene carries the mood; the words stay out of the way.
+import Icon from '../ui/Icon.astro';
+import HeroScene from './HeroScene.astro';
 ---
 
-<section
-	class="gb-section gb-hero has-pat-dots has-pat-stripes"
-	aria-labelledby="hero-title"
->
-	{/* ── decorative layer: one giant bg word + floating shapes (aria-hidden) ── */}
-	<p class="bgword bgword--left gb-hero__bgword" aria-hidden="true">BUILD</p>
-
-	<span class="floater floater--lg floater--ring accent-1 floater--tl animate-float" aria-hidden="true"></span>
-	<span class="floater floater--square accent-3 floater--tr animate-spin-slow" aria-hidden="true"></span>
-	<span class="floater floater--sm accent-2 floater--ml animate-float-reverse" aria-hidden="true"></span>
-	<span class="floater floater--diamond accent-4 floater--mr animate-float" aria-hidden="true"></span>
-	<span class="floater accent-5 floater--bl animate-float-reverse" aria-hidden="true"></span>
-	<span class="floater floater--sm floater--ring accent-2 floater--br animate-float" aria-hidden="true"></span>
-	<span class="gb-hero__emoji gb-hero__emoji--rocket animate-wiggle" aria-hidden="true">🚀</span>
-	<span class="gb-hero__emoji gb-hero__emoji--spark animate-bounce-subtle" aria-hidden="true">⚡</span>
+<section class="gb-section gb-hero" aria-labelledby="hero-title" data-hero>
+	<HeroScene />
 
 	<div class="gb-container gb-hero__inner">
-		<p class="gb-kicker gb-hero__kicker">Open-source backend · self-host or cloud</p>
-		<h1 id="hero-title" class="gb-hero__title tshadow-mega">
-			One backend for <em class="gradient-text">everything</em> you build.
+		<h1 id="hero-title" class="gb-hero__title gb-hero__rise gb-hero__rise--1">
+			One backend, <em class="serif-italic gb-hero__accent">any frontend</em>.
 		</h1>
-		<p class="gb-lede">
-			Accounts, database, realtime, files, search and functions — over any database engine.
-			Start on a 5 MB binary on a spare machine, grow to thousands of customers on one stack,
-			and never rewrite to get there.
-		</p>
-		<div class="gb-hero__ctas">
-			<a class="gb-btn gb-btn--primary is-pulsing" href="/pricing/">Start free</a>
-			<a class="gb-btn gb-btn--ghost" href="#usecases">What are you building?</a>
-		</div>
-		<div class="gb-hero__stats">
-			<StatChip value="5 MB" label="single binary to start" accent={1} tilt="a" />
-			<StatChip value="8 engines" label="one simple API" accent={2} tilt="b" />
-			<StatChip value="10K+ tenants" label="on one stack" accent={3} tilt="c" />
-			<StatChip value="$0 idle" label="open-source, self-host" accent={4} tilt="d" />
+
+		<div class="gb-hero__ctas gb-hero__rise gb-hero__rise--2">
+			<a class="gb-btn gb-btn--primary" href="/pricing/">
+				Start free
+				<Icon name="arrow-right" size={18} />
+			</a>
 		</div>
 	</div>
 </section>
