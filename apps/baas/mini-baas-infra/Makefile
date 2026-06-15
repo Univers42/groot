@@ -243,7 +243,7 @@ master-report: ## ONE detailed HTML comparison report (perf + offers + matrix + 
 # styled, graphics-rich (inline SVG), zero-dep, CSP-safe. `make reports` regenerates
 # the whole wiki/reports/ suite + the portal index — the reproducible single command.
 # arg-less generators (each resolves its own data/out paths from import.meta.url)
-REPORT_GENS := supabase-verdict-report security-wins-report network-controls-report compliance-posture-report
+REPORT_GENS := supabase-verdict-report security-wins-report network-controls-report compliance-posture-report edge-reliability-report benchmark-resources-report allmetrics-verdict-report
 reports: master-report ## Regenerate EVERY HTML report (comparison + supabase-verdict + security/network/compliance wins) + portal (zero-dep, no host node)
 	@for g in $(REPORT_GENS); do \
 		echo "  → $$g"; \

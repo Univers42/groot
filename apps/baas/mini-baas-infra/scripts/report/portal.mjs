@@ -166,6 +166,21 @@ function reportsNav(args) {
       desc: "The four just-landed, gate-backed wins — full-text (m101), vector k-NN (m102), network/WAF (m140), compliance (m141) — as evidence cards + GAP→WIN tone shifts + control-coverage donut + perimeter diagram.",
     },
     {
+      href: "edge-reliability.html",
+      title: "★ Edge-case reliability (visual)",
+      desc: "1,381 distinct edge vectors (9 families) under an invariant model: assertion pass-rate gauge, failure-category donut, and the 2 real 5xx bugs the suite found + we fixed (oversize→413, malformed-op→400) with the honest load-tail split (gate m142).",
+    },
+    {
+      href: "benchmark-resources.html",
+      title: "★ Benchmark + resources (visual)",
+      desc: "Measured same-box Grobase vs Supabase: read latency p50+p95, total RSS 822 vs 2,884 MiB (3.5× lighter) + Supabase's 13-container breakdown + the Grobase tier ladder, and a functional-parity matrix proving it's apples-to-apples.",
+    },
+    {
+      href: "grobase-vs-supabase-allmetrics.html",
+      title: "★ All-metrics scorecard (visual)",
+      desc: "The honest verdict: Grobase wins 10 of 11 measured metrics vs Supabase (footprint, read p95, density, engines, FTS m101, vector m102, WAF m140, audit m141) — one near-tie (read p50, Supabase +0.12 ms), zero measured Supabase wins.",
+    },
+    {
       href: "network-controls.html",
       title: "Network controls + Cloudflare (visual)",
       desc: "Perimeter-layers diagram (Cloudflare → in-stack OWASP-CRS WAF → Kong → segmented planes), WAF block matrix (CRS rule-IDs, gate m140), segmentation matrix, and the copy-paste Cloudflare recipe.",
