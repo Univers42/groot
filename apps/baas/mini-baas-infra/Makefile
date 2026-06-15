@@ -335,6 +335,9 @@ test-postgres: ## Run the PostgreSQL MVP happy-path flow
 test-offers: ## Postman/newman offer-capability proof vs the LIVE stack → artifacts/test/postman-offers-report.html (NEWMAN_IMAGE=)
 	@bash scripts/test/run-postman.sh
 
+test-edge: ## Data-driven edge corpus (1500+ vectors, one newman iteration each) vs the LIVE data plane → artifacts/test/edge-report.html
+	@bash scripts/test/run-edge-postman.sh
+
 verify-%: ## Run a milestone gate (e.g. make verify-m18)
 	@s=$$(ls scripts/verify/$*-*.sh 2>/dev/null | head -1); \
 	[ -n "$$s" ] || { echo -e "$(_R)No verify gate '$*'$(_0)"; exit 1; }; \
@@ -623,7 +626,7 @@ help: ## Show this help
 	@echo ""
 
 .PHONY: all all-full clean fclean re up down restart ps logs pull build health \
-        bench-startup bench-load bench-capacity bench-mem bench-compare scale-seed scale-teardown observe planes editions doctor tests test-postgres \
+        bench-startup bench-load bench-capacity bench-mem bench-compare scale-seed scale-teardown observe planes editions doctor tests test-postgres test-offers test-edge \
         verify-all parity waf-test migrate migrate-mongo migrate-mysql migrate-all \
         migrate-status seed-mongo seed-live-demo secrets secrets-validate secrets-rotate \
         check-secrets env vault-init vault-status vault-rotate nestjs-ci \
