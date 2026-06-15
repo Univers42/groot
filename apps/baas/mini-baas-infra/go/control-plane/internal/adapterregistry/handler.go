@@ -29,6 +29,12 @@ func Mount(mux *http.ServeMux, svc *Service, serviceToken string) {
 	mux.HandleFunc("GET /databases/{id}", rt.findOne)
 	mux.HandleFunc("GET /databases/{id}/connect", rt.connect)
 	mux.HandleFunc("DELETE /databases/{id}", rt.remove)
+	// Caller-scoped delete for the self-serve dynamic builder (BUILDER): unlike the
+	// admin DELETE /databases/{id} (which bypasses RLS for operator teardown), this
+	// route binds `AND tenant_id = $caller` in the SQL, so a mount UUID is NEVER a
+	// bearer capability — a tenant can only delete its OWN mount. Service-token
+	// gated like /connect (the trust boundary forwards the asserted tenant header).
+	mux.HandleFunc("DELETE /databases/{id}/self", rt.removeScoped)
 }
 
 func (rt *routes) register(w http.ResponseWriter, r *http.Request) {
@@ -120,6 +126,26 @@ func (rt *routes) remove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if rt.handleLookupError(w, rt.svc.Remove(r.Context(), r.PathValue("id"))) {
+		return
+	}
+	shared.WriteJSON(w, http.StatusOK, map[string]bool{"deleted": true})
+}
+
+// removeScoped is the CALLER-SCOPED delete for the self-serve builder. It
+// requires the service token (the internal trust boundary) AND resolves the
+// caller tenant from the asserted identity header, then deletes ONLY a mount
+// owned by that caller (the service binds `AND tenant_id = $caller`). A mount
+// UUID is therefore not a bearer capability across tenants.
+func (rt *routes) removeScoped(w http.ResponseWriter, r *http.Request) {
+	if !validServiceToken(r, rt.serviceToken) {
+		shared.WriteError(w, http.StatusUnauthorized, "unauthorized", "service token required")
+		return
+	}
+	userID, ok := rt.requireUser(w, r)
+	if !ok {
+		return
+	}
+	if rt.handleLookupError(w, rt.svc.RemoveScoped(r.Context(), userID, r.PathValue("id"))) {
 		return
 	}
 	shared.WriteJSON(w, http.StatusOK, map[string]bool{"deleted": true})

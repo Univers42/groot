@@ -130,6 +130,12 @@ export type {
   TenantEntitlements,
   TenantUsage,
   TenantSelfKeyCreateInput,
+  // ── B7/builder: per-tenant dynamic builder (mounts/entitlements/builder) ──
+  TenantMount,
+  TenantMountCreateInput,
+  TenantEntitlementPatch,
+  BuilderPreviewInput,
+  BuilderPreviewResult,
   // ── M22: schema introspection + DDL ──────────────────────────────────────
   ColumnSchema,
   DdlColumnDef,

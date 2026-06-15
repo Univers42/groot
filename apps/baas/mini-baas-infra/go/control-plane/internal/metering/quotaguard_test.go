@@ -1,6 +1,7 @@
 package metering
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -43,7 +44,9 @@ func TestIsOverQuota(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := g.isOverQuota(c.plan, c.qty); got != c.over {
+			// nil resolver → manifest.For path (byte-parity); slug is unused on that
+			// path, so an empty slug exercises exactly the pre-builder decision.
+			if got := g.isOverQuota(context.Background(), "", c.plan, c.qty); got != c.over {
 				t.Fatalf("isOverQuota(%q, %d) = %v, want %v", c.plan, c.qty, got, c.over)
 			}
 		})

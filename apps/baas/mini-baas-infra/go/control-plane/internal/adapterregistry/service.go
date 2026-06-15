@@ -86,7 +86,30 @@ type Service struct {
 	cmekEnabled      bool
 	kms              cmek.KMSProvider
 	cmekDefaultKeyID string
+	// resolver is the OPTIONAL dynamic-builder resolver (BUILDER_ENABLED). When
+	// nil (the default) packageForTenant resolves the tenant's plan through
+	// s.pkgs.For verbatim — byte-parity with the pre-builder baseline. When set
+	// (wired from main.go under BUILDER_ENABLED), packageForTenant routes through
+	// it so the EFFECTIVE (custom-overlaid, ceiling-clamped) package is what gets
+	// stamped as capability_overrides + enforced for the engine allowlist /
+	// max_mounts. The resolver returns the SAME packages.Package type, so the
+	// stamp, the AllowsEngine gate, and the MaxMounts cap all work UNCHANGED.
+	resolver packageResolver
 }
+
+// packageResolver is the minimal resolve seam the service needs (the dynamic
+// builder's *entitlements.Resolver satisfies it). Kept as a local interface so
+// the adapter-registry has NO hard dependency on the builder package and the nil
+// default is a trivial byte-parity path.
+type packageResolver interface {
+	Resolve(ctx context.Context, slug, plan string) (string, packages.Package)
+}
+
+// SetResolver wires the dynamic-builder resolver (BUILDER_ENABLED). A no-op
+// contract: pass nil (the default) to keep packageForTenant resolving the tenant
+// plan via s.pkgs.For verbatim (parity). When set, the EFFECTIVE per-tenant
+// package (custom entitlement clamped to its ceiling) is what is stamped/enforced.
+func (s *Service) SetResolver(r packageResolver) { s.resolver = r }
 
 // SetCMEK enables CMEK / BYOK envelope encryption for inline mounts (D4.8). A no-
 // op contract: pass enabled=false (or kms=nil) to keep the existing inline /
@@ -138,6 +161,15 @@ func (s *Service) packageForTenant(ctx context.Context, tenantSlug string) (stri
 		}
 	} else {
 		s.log.Warn("package lookup failed; treating as default tier", "tenant", tenantSlug, "error", err)
+	}
+	// Dynamic builder (BUILDER_ENABLED): when a resolver is wired, the EFFECTIVE
+	// package is the tenant's custom entitlement clamped to its ceiling. When nil
+	// (the default), resolve the plan via the manifest verbatim — byte-parity.
+	// Both return a packages.Package, so the AllowsEngine gate, the MaxMounts cap,
+	// and the CapabilityOverrides stamp are identical downstream.
+	if s.resolver != nil {
+		name, pkg := s.resolver.Resolve(ctx, tenantSlug, plan)
+		return name, pkg, true
 	}
 	name, pkg := s.pkgs.For(plan)
 	return name, pkg, true
@@ -390,10 +422,14 @@ func (s *Service) Register(ctx context.Context, userID string, req RegisterDatab
 func (s *Service) List(ctx context.Context, userID string) ([]TenantDatabase, error) {
 	out := make([]TenantDatabase, 0)
 	err := s.db.TenantTx(ctx, userID, func(tx pgx.Tx) error {
+		// Defense-in-depth: bind tenant_id EXPLICITLY (atop RLS), so isolation never
+		// depends on the DB role / RLS being active — a self-serve /me/mounts caller
+		// must only ever see its OWN mounts even if the connection bypasses RLS.
 		rows, err := tx.Query(ctx,
 			`SELECT id::text, tenant_id::text, engine, name, created_at::text, last_healthy_at::text
 			   FROM public.tenant_databases
-			  ORDER BY created_at DESC`)
+			  WHERE tenant_id = $1
+			  ORDER BY created_at DESC`, userID)
 		if err != nil {
 			return err
 		}
@@ -416,7 +452,7 @@ func (s *Service) FindOne(ctx context.Context, userID, id string) (TenantDatabas
 	err := s.db.TenantTx(ctx, userID, func(tx pgx.Tx) error {
 		row := tx.QueryRow(ctx,
 			`SELECT id::text, tenant_id::text, engine, name, created_at::text, last_healthy_at::text
-			   FROM public.tenant_databases WHERE id = $1`, id)
+			   FROM public.tenant_databases WHERE id = $1 AND tenant_id = $2`, id, userID)
 		err := row.Scan(&d.ID, &d.TenantID, &d.Engine, &d.Name, &d.CreatedAt, &d.LastHealthyAt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
@@ -572,5 +608,27 @@ func (s *Service) Remove(ctx context.Context, id string) error {
 	if !rows.Next() {
 		return ErrNotFound
 	}
+	return nil
+}
+
+// RemoveScoped deletes a mount by id, CALLER-SCOPED — the SQL binds BOTH the id
+// AND the caller's tenant_id, so a mount UUID is NEVER a bearer capability: a
+// caller can only ever delete its OWN mount, even if it guessed another tenant's
+// uuid. This is the self-serve builder's delete (DELETE /databases/{id}/self),
+// distinct from the admin Remove (DELETE /databases/{id}) which bypasses RLS for
+// operator teardown. `userID` is the caller tenant the query-router forwards as
+// X-Baas-Tenant-Id (the same scope GetConnection/List use). The connCache entry
+// for the id is invalidated so a stale decrypted DSN cannot survive the delete.
+func (s *Service) RemoveScoped(ctx context.Context, userID, id string) error {
+	rows, err := s.db.AdminQuery(ctx,
+		`DELETE FROM public.tenant_databases WHERE id = $1 AND tenant_id = $2 RETURNING id`, id, userID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return ErrNotFound
+	}
+	s.connCache.Delete(id)
 	return nil
 }

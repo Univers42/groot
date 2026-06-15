@@ -15,8 +15,14 @@ import { HttpClient } from '../core/http.js';
 import { createMemoryStorageAdapter } from '../core/storage.js';
 import type { RequestOptions } from '../core/http.js';
 import type {
+  BuilderPreviewInput,
+  BuilderPreviewResult,
   TenantApiKey,
   TenantApiKeyIssued,
+  TenantEntitlementPatch,
+  TenantEntitlements,
+  TenantMount,
+  TenantMountCreateInput,
   TenantSelfKeyCreateInput,
   TenantSelfResult,
   TenantUsage,
@@ -111,6 +117,55 @@ export class AccountClient {
   /** PATCH /v1/tenants/me {plan} — request a plan change for the tenant. */
   changePlan(plan: string): Promise<TenantSelfResult> {
     return this.request<TenantSelfResult>(routes.tenantsSelf.me, 'PATCH', { plan });
+  }
+
+  // ── B7/builder: per-tenant dynamic builder (server flag BUILDER_ENABLED) ────
+  // Compose your own backend WITHIN your ceiling. All caller-scoped (tenant
+  // from the bearer; mount DELETE is `AND tenant_id = $caller` server-side).
+
+  /** GET /v1/tenants/me/mounts — the calling tenant's data mounts. */
+  listMounts(): Promise<TenantMount[]> {
+    return this.request<TenantMount[]>(routes.tenantsSelf.mounts, 'GET');
+  }
+
+  /**
+   * POST /v1/tenants/me/mounts — register a mount on the calling tenant. The
+   * engine/isolation must be within the tenant's ceiling (clean 403 otherwise).
+   */
+  createMount(input: TenantMountCreateInput): Promise<TenantMount> {
+    return this.request<TenantMount>(routes.tenantsSelf.mounts, 'POST', input);
+  }
+
+  /** DELETE /v1/tenants/me/mounts/{id} — remove one of the tenant's mounts. */
+  deleteMount(id: string): Promise<{ deleted: boolean }> {
+    return this.request<{ deleted: boolean }>(routes.tenantsSelf.mount(id), 'DELETE');
+  }
+
+  /**
+   * GET /v1/tenants/me/entitlements — the calling tenant's effective
+   * entitlement (named tier overlaid by its custom row, clamped to the ceiling)
+   * plus the ceiling and a `custom` flag.
+   */
+  getEntitlements(): Promise<TenantEntitlements> {
+    return this.request<TenantEntitlements>(routes.tenantsSelf.entitlements, 'GET');
+  }
+
+  /**
+   * PATCH /v1/tenants/me/entitlements — narrow/customize the entitlement WITHIN
+   * the ceiling (capabilities OFF freely, never ON past the ceiling). The
+   * server validates at compose time and clamps on every resolve.
+   */
+  patchEntitlements(patch: TenantEntitlementPatch): Promise<TenantEntitlements> {
+    return this.request<TenantEntitlements>(routes.tenantsSelf.entitlements, 'PATCH', patch);
+  }
+
+  /**
+   * POST /v1/tenants/me/builder — dry-run a proposed entitlement + mount set
+   * against the ceiling WITHOUT persisting (`valid` + `violations` + the
+   * `clamped` result and `mountBudget`).
+   */
+  previewBuilder(input: BuilderPreviewInput): Promise<BuilderPreviewResult> {
+    return this.request<BuilderPreviewResult>(routes.tenantsSelf.builder, 'POST', input);
   }
 
   private request<TResult>(path: string, method: string, body?: unknown): Promise<TResult> {
