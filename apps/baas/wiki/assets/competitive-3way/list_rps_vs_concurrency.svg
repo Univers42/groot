@@ -14,15 +14,15 @@
   <line x1="74" y1="410.0" x2="670" y2="410.0" stroke="#e2e8f0" stroke-width="1"/>
   <text x="66" y="414.0" text-anchor="end" font-family="sans-serif" font-size="11" fill="#64748b">0</text>
   <line x1="74" y1="340.8" x2="670" y2="340.8" stroke="#e2e8f0" stroke-width="1"/>
-  <text x="66" y="344.8" text-anchor="end" font-family="sans-serif" font-size="11" fill="#64748b">6,460</text>
+  <text x="66" y="344.8" text-anchor="end" font-family="sans-serif" font-size="11" fill="#64748b">5,875</text>
   <line x1="74" y1="271.6" x2="670" y2="271.6" stroke="#e2e8f0" stroke-width="1"/>
-  <text x="66" y="275.6" text-anchor="end" font-family="sans-serif" font-size="11" fill="#64748b">12,920</text>
+  <text x="66" y="275.6" text-anchor="end" font-family="sans-serif" font-size="11" fill="#64748b">11,750</text>
   <line x1="74" y1="202.4" x2="670" y2="202.4" stroke="#e2e8f0" stroke-width="1"/>
-  <text x="66" y="206.4" text-anchor="end" font-family="sans-serif" font-size="11" fill="#64748b">19,381</text>
+  <text x="66" y="206.4" text-anchor="end" font-family="sans-serif" font-size="11" fill="#64748b">17,625</text>
   <line x1="74" y1="133.2" x2="670" y2="133.2" stroke="#e2e8f0" stroke-width="1"/>
-  <text x="66" y="137.2" text-anchor="end" font-family="sans-serif" font-size="11" fill="#64748b">25,841</text>
+  <text x="66" y="137.2" text-anchor="end" font-family="sans-serif" font-size="11" fill="#64748b">23,500</text>
   <line x1="74" y1="64.0" x2="670" y2="64.0" stroke="#e2e8f0" stroke-width="1"/>
-  <text x="66" y="68.0" text-anchor="end" font-family="sans-serif" font-size="11" fill="#64748b">32,301</text>
+  <text x="66" y="68.0" text-anchor="end" font-family="sans-serif" font-size="11" fill="#64748b">29,376</text>
   <line x1="74.0" y1="64" x2="74.0" y2="410" stroke="#f1f5f9" stroke-width="1"/>
   <text x="74.0" y="428" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#475569">1</text>
   <line x1="471.3" y1="64" x2="471.3" y2="410" stroke="#f1f5f9" stroke-width="1"/>
@@ -33,21 +33,21 @@
   <line x1="74" y1="410" x2="670" y2="410" stroke="#94a3b8" stroke-width="1.5"/>
   <text x="372" y="454" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#475569">concurrency (log scale)</text>
   <text x="18" y="237" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#475569" transform="rotate(-90 18 237)">rps</text>
-  <polyline points="74.0,333.9 471.3,273.0 670.0,257.0" fill="none" stroke="#475569" stroke-width="2.5"  stroke-linejoin="round"/>
-  <circle cx="74.0" cy="333.9" r="3.5" fill="#475569" fill-opacity="1" stroke="#fff" stroke-width="1"/>
-  <circle cx="471.3" cy="273.0" r="3.5" fill="#475569" fill-opacity="1" stroke="#fff" stroke-width="1"/>
-  <circle cx="670.0" cy="257.0" r="3.5" fill="#475569" fill-opacity="1" stroke="#fff" stroke-width="1"/>
-  <text x="676.0" y="260.0" font-family="sans-serif" font-size="10" fill="#475569">14,279</text>
-  <polyline points="74.0,330.1 471.3,284.3 670.0,260.7" fill="none" stroke="#be123c" stroke-width="2.5"  stroke-linejoin="round"/>
-  <circle cx="74.0" cy="330.1" r="3.5" fill="#be123c" fill-opacity="1" stroke="#fff" stroke-width="1"/>
-  <circle cx="471.3" cy="284.3" r="3.5" fill="#be123c" fill-opacity="1" stroke="#fff" stroke-width="1"/>
-  <circle cx="670.0" cy="260.7" r="3.5" fill="#be123c" fill-opacity="1" stroke="#fff" stroke-width="1"/>
-  <text x="676.0" y="263.7" font-family="sans-serif" font-size="10" fill="#be123c">13,939</text>
-  <polyline points="74.0,374.4 471.3,109.1 670.0,183.7" fill="none" stroke="#f59e0b" stroke-width="2.5"  stroke-linejoin="round"/>
-  <circle cx="74.0" cy="374.4" r="3.5" fill="#f59e0b" fill-opacity="1" stroke="#fff" stroke-width="1"/>
+  <polyline points="74.0,331.6 471.3,272.9 670.0,244.9" fill="none" stroke="#475569" stroke-width="2.5"  stroke-linejoin="round"/>
+  <circle cx="74.0" cy="331.6" r="3.5" fill="#475569" fill-opacity="1" stroke="#fff" stroke-width="1"/>
+  <circle cx="471.3" cy="272.9" r="3.5" fill="#475569" fill-opacity="1" stroke="#fff" stroke-width="1"/>
+  <circle cx="670.0" cy="244.9" r="3.5" fill="#475569" fill-opacity="1" stroke="#fff" stroke-width="1"/>
+  <text x="676.0" y="247.9" font-family="sans-serif" font-size="10" fill="#475569">14,020</text>
+  <polyline points="74.0,334.8 471.3,274.2 670.0,240.4" fill="none" stroke="#be123c" stroke-width="2.5"  stroke-linejoin="round"/>
+  <circle cx="74.0" cy="334.8" r="3.5" fill="#be123c" fill-opacity="1" stroke="#fff" stroke-width="1"/>
+  <circle cx="471.3" cy="274.2" r="3.5" fill="#be123c" fill-opacity="1" stroke="#fff" stroke-width="1"/>
+  <circle cx="670.0" cy="240.4" r="3.5" fill="#be123c" fill-opacity="1" stroke="#fff" stroke-width="1"/>
+  <text x="676.0" y="243.4" font-family="sans-serif" font-size="10" fill="#be123c">14,399</text>
+  <polyline points="74.0,375.8 471.3,109.1 670.0,183.8" fill="none" stroke="#f59e0b" stroke-width="2.5"  stroke-linejoin="round"/>
+  <circle cx="74.0" cy="375.8" r="3.5" fill="#f59e0b" fill-opacity="1" stroke="#fff" stroke-width="1"/>
   <circle cx="471.3" cy="109.1" r="3.5" fill="#f59e0b" fill-opacity="1" stroke="#fff" stroke-width="1"/>
-  <circle cx="670.0" cy="183.7" r="3.5" fill="#f59e0b" fill-opacity="1" stroke="#fff" stroke-width="1"/>
-  <text x="676.0" y="186.7" font-family="sans-serif" font-size="10" fill="#f59e0b">21,125</text>
+  <circle cx="670.0" cy="183.8" r="3.5" fill="#f59e0b" fill-opacity="1" stroke="#fff" stroke-width="1"/>
+  <text x="676.0" y="186.8" font-family="sans-serif" font-size="10" fill="#f59e0b">19,206</text>
   <line x1="688" y1="70" x2="714" y2="70" stroke="#475569" stroke-width="2.5" />
   <text x="720" y="74" font-family="sans-serif" font-size="11" fill="#334155">binocle-nano</text>
   <line x1="688" y1="90" x2="714" y2="90" stroke="#be123c" stroke-width="2.5" />

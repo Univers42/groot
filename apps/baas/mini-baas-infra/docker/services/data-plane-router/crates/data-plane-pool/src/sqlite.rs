@@ -833,7 +833,11 @@ fn run_batch_in_savepoint(
 }
 
 fn query_rows(conn: &Connection, sql: &str, params: &[SqlValue]) -> DataPlaneResult<Vec<Value>> {
-    let mut stmt = conn.prepare(sql).map_err(backend)?;
+    // prepare_cached reuses the compiled VDBE program for a fixed query shape
+    // (the per-connection cache is sized in `tune_read_conn`), removing a SQL
+    // parse + recompile from every read — what PocketBase already amortizes.
+    // Results are byte-identical to `prepare`.
+    let mut stmt = conn.prepare_cached(sql).map_err(backend)?;
     let col_names: Vec<String> = stmt.column_names().into_iter().map(String::from).collect();
     let mapped = stmt
         .query_map(params_from_iter(params.iter()), move |row| {

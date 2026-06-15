@@ -332,6 +332,9 @@ test-phase%: ## Run one phase (e.g. make test-phase3)
 test-postgres: ## Run the PostgreSQL MVP happy-path flow
 	@FORCE_COLORS=1 bash ./scripts/postgres-mvp-flow.sh
 
+test-offers: ## Postman/newman offer-capability proof vs the LIVE stack → artifacts/test/postman-offers-report.html (NEWMAN_IMAGE=)
+	@bash scripts/test/run-postman.sh
+
 verify-%: ## Run a milestone gate (e.g. make verify-m18)
 	@s=$$(ls scripts/verify/$*-*.sh 2>/dev/null | head -1); \
 	[ -n "$$s" ] || { echo -e "$(_R)No verify gate '$*'$(_0)"; exit 1; }; \

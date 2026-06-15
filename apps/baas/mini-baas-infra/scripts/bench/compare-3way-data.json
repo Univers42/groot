@@ -17,7 +17,7 @@
     "caveats": [
       "SINGLE-NODE rows are apples-to-apples: three single-binary app backends, same box, same workload.",
       "MULTI-TENANCY IS NOT APPLES-TO-APPLES. PocketBase has NO native multi-tenancy (one app per process). binocle-nano/one are single-tenant-by-default SKUs built on the multi-tenant data plane — they GROW into the platform (the 10K/50K/100K density) on the same SDK; PocketBase cannot. So 'PocketBase at N tenants' is modeled as N instances (N x per-instance footprint) — see rss_vs_tenants.",
-      "Single-node numbers are a FRESH run (nano-one-pb-load.json, 2026-06-15T01:12:33.186525Z, PocketBase v0.39.3, oha 8s/run, BIG_N=100000); the box is shared so absolute rps is indicative, ratios are the signal."
+      "Single-node numbers are a FRESH run (nano-one-pb-load.json, 2026-06-15T02:27:26.661305Z, PocketBase v0.39.3, oha 8s/run, BIG_N=100000); the box is shared so absolute rps is indicative, ratios are the signal."
     ]
   },
   "contenders": [
@@ -79,17 +79,17 @@
       "context": "resources",
       "values": {
         "binocle-nano": {
-          "value": 14.03,
+          "value": 14.94,
           "source": "measured",
           "artifact": "artifacts/nano-one-pb-load.json .rss_under_load"
         },
         "binocle-one": {
-          "value": 16.35,
+          "value": 18.63,
           "source": "measured",
           "artifact": "artifacts/nano-one-pb-load.json .rss_under_load"
         },
         "pocketbase": {
-          "value": 496,
+          "value": 461.5,
           "source": "measured",
           "artifact": "artifacts/nano-one-pb-load.json .rss_under_load"
         }
@@ -102,17 +102,17 @@
       "context": "resources",
       "values": {
         "binocle-nano": {
-          "value": 18.9,
+          "value": 31.2,
           "source": "measured",
           "artifact": "artifacts/nano-one-pb-load.json .disk_after_big"
         },
         "binocle-one": {
-          "value": 18,
+          "value": 30.5,
           "source": "measured",
           "artifact": "artifacts/nano-one-pb-load.json .disk_after_big"
         },
         "pocketbase": {
-          "value": 303.1,
+          "value": 283.8,
           "source": "measured",
           "artifact": "artifacts/nano-one-pb-load.json .disk_after_big"
         }
@@ -135,7 +135,7 @@
           "artifact": "artifacts/nano-one-pb-load.json .boot_ms"
         },
         "pocketbase": {
-          "value": 379,
+          "value": 131,
           "source": "measured",
           "artifact": "artifacts/nano-one-pb-load.json .boot_ms"
         }
@@ -159,17 +159,17 @@
           "points": [
             {
               "x": 1,
-              "y": 8525,
+              "y": 7064,
               "source": "measured"
             },
             {
               "x": 16,
-              "y": 17441,
+              "y": 17197,
               "source": "measured"
             },
             {
               "x": 64,
-              "y": 19852,
+              "y": 18240,
               "source": "measured"
             }
           ]
@@ -179,17 +179,17 @@
           "points": [
             {
               "x": 1,
-              "y": 7036,
+              "y": 7040,
               "source": "measured"
             },
             {
               "x": 16,
-              "y": 16983,
+              "y": 15924,
               "source": "measured"
             },
             {
               "x": 64,
-              "y": 17654,
+              "y": 17869,
               "source": "measured"
             }
           ]
@@ -199,17 +199,17 @@
           "points": [
             {
               "x": 1,
-              "y": 2593,
+              "y": 2539,
               "source": "measured"
             },
             {
               "x": 16,
-              "y": 2469,
+              "y": 3408,
               "source": "measured"
             },
             {
               "x": 64,
-              "y": 3410,
+              "y": 2612,
               "source": "measured"
             }
           ],
@@ -233,17 +233,17 @@
           "points": [
             {
               "x": 1,
-              "y": 0.2,
+              "y": 0.3,
               "source": "measured"
             },
             {
               "x": 16,
-              "y": 1.9,
+              "y": 5.6,
               "source": "measured"
             },
             {
               "x": 64,
-              "y": 9.9,
+              "y": 9.4,
               "source": "measured"
             }
           ]
@@ -253,17 +253,17 @@
           "points": [
             {
               "x": 1,
-              "y": 0.2,
+              "y": 0.3,
               "source": "measured"
             },
             {
               "x": 16,
-              "y": 2.1,
+              "y": 5.6,
               "source": "measured"
             },
             {
               "x": 64,
-              "y": 9.8,
+              "y": 9.4,
               "source": "measured"
             }
           ]
@@ -278,12 +278,12 @@
             },
             {
               "x": 16,
-              "y": 87.4,
+              "y": 82.9,
               "source": "measured"
             },
             {
               "x": 64,
-              "y": 123.3,
+              "y": 148,
               "source": "measured"
             }
           ],
@@ -307,17 +307,17 @@
           "points": [
             {
               "x": 1,
-              "y": 7105,
+              "y": 6659,
               "source": "measured"
             },
             {
               "x": 16,
-              "y": 12794,
+              "y": 11637,
               "source": "measured"
             },
             {
               "x": 64,
-              "y": 14279,
+              "y": 14020,
               "source": "measured"
             }
           ]
@@ -327,17 +327,17 @@
           "points": [
             {
               "x": 1,
-              "y": 7460,
+              "y": 6386,
               "source": "measured"
             },
             {
               "x": 16,
-              "y": 11739,
+              "y": 11530,
               "source": "measured"
             },
             {
               "x": 64,
-              "y": 13939,
+              "y": 14399,
               "source": "measured"
             }
           ]
@@ -347,17 +347,17 @@
           "points": [
             {
               "x": 1,
-              "y": 3327,
+              "y": 2905,
               "source": "measured"
             },
             {
               "x": 16,
-              "y": 28088,
+              "y": 25544,
               "source": "measured"
             },
             {
               "x": 64,
-              "y": 21125,
+              "y": 19206,
               "source": "measured"
             }
           ],
@@ -386,7 +386,7 @@
             },
             {
               "x": 16,
-              "y": 1.7,
+              "y": 2,
               "source": "measured"
             },
             {
@@ -401,17 +401,17 @@
           "points": [
             {
               "x": 1,
-              "y": 0.2,
+              "y": 0.3,
               "source": "measured"
             },
             {
               "x": 16,
-              "y": 1.9,
+              "y": 2,
               "source": "measured"
             },
             {
               "x": 64,
-              "y": 7.9,
+              "y": 7.6,
               "source": "measured"
             }
           ]
@@ -421,17 +421,17 @@
           "points": [
             {
               "x": 1,
-              "y": 0.7,
+              "y": 0.8,
               "source": "measured"
             },
             {
               "x": 16,
-              "y": 2.4,
+              "y": 2.6,
               "source": "measured"
             },
             {
               "x": 64,
-              "y": 26.4,
+              "y": 27.3,
               "source": "measured"
             }
           ]

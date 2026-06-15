@@ -359,6 +359,120 @@ function sourceRows(contenders, lookup) {
   return rows;
 }
 
+// ── winner computation + summary (per-index + overall scoreboard) ────────────
+// "in each index" the report declares a winner: the best value on that axis
+// (lower- or higher-is-better as the metric/curve labels it), among contenders
+// that have an honest number. The winner's source tag is surfaced so a published
+// competitor figure can never masquerade as a measured win.
+function labelFor(key, data) {
+  return (data && data.meta && data.meta.labels && data.meta.labels[key]) || key;
+}
+const isOurs = (key) => /grobase|binocle/i.test(String(key || ""));
+
+function metricWinner(metric, contenders) {
+  const lowerIsBetter = metric.lowerIsBetter !== false;
+  const pts = [];
+  for (const key of contenders) {
+    const dp = (metric.data || {})[key];
+    if (!dp || dp.source === "na" || dp.value == null || !Number.isFinite(Number(dp.value))) continue;
+    pts.push({ key, value: Number(dp.value), source: dp.source || "measured" });
+  }
+  if (!pts.length) return null;
+  pts.sort((a, b) => (lowerIsBetter ? a.value - b.value : b.value - a.value));
+  const winner = pts[0];
+  const runner = pts[1] || null;
+  let ratio = null, marginPct = null;
+  if (runner && winner.value > 0 && runner.value > 0) {
+    ratio = lowerIsBetter ? runner.value / winner.value : winner.value / runner.value;
+    marginPct = lowerIsBetter
+      ? ((runner.value - winner.value) / runner.value) * 100
+      : ((winner.value - runner.value) / runner.value) * 100;
+  }
+  const tie = !!(runner && winner.value === runner.value);
+  return { lowerIsBetter, winner, runner, ratio, marginPct, tie, unit: metric.unit || "" };
+}
+
+function curveWinner(curve) {
+  const yLowerIsBetter = curve.yLowerIsBetter !== false;
+  const xs = (curve.x || []).map(Number);
+  const xMax = Math.max(...xs.filter(Number.isFinite));
+  const i = xs.indexOf(xMax);
+  if (i < 0) return null;
+  const pts = [];
+  for (const [key, ser] of Object.entries(curve.series || {})) {
+    if (!ser || ser.source === "na" || !Array.isArray(ser.y)) continue;
+    const v = ser.y[i];
+    if (v == null || !Number.isFinite(Number(v))) continue;
+    pts.push({ key, value: Number(v), source: (ser.pointSources && ser.pointSources[i]) || ser.source || "measured" });
+  }
+  if (!pts.length) return null;
+  pts.sort((a, b) => (yLowerIsBetter ? a.value - b.value : b.value - a.value));
+  const winner = pts[0];
+  const runner = pts[1] || null;
+  let ratio = null;
+  if (runner && winner.value > 0 && runner.value > 0) ratio = yLowerIsBetter ? runner.value / winner.value : winner.value / runner.value;
+  return { lowerIsBetter: yLowerIsBetter, winner, runner, ratio, marginPct: null, tie: false, unit: curve.unit || "", atX: xMax };
+}
+
+function ratioText(w) {
+  if (!w) return "";
+  if (!w.runner) return "only contender with an honest number on this axis";
+  if (w.tie) return "tie";
+  const cmp = w.lowerIsBetter ? "lower" : "higher";
+  if (w.ratio && w.ratio >= 1.15) return `${fmtNum(w.ratio)}× ${cmp} than runner-up`;
+  if (w.marginPct != null) return `${fmtNum(Math.abs(w.marginPct))}% ${cmp} than runner-up`;
+  return `${cmp} than runner-up`;
+}
+
+function winnerBannerHtml(w, data) {
+  if (!w) return "";
+  const wl = labelFor(w.winner.key, data);
+  const rl = w.runner ? labelFor(w.runner.key, data) : null;
+  const cls = isOurs(w.winner.key) ? "winner" : "winner rival";
+  const srcTag = w.winner.source && w.winner.source !== "measured" ? ` <span class="wtag">(${esc(w.winner.source)})</span>` : "";
+  const vs = rl ? ` — ${esc(ratioText(w))} <span class="wtag">vs ${esc(rl)}</span>` : "";
+  return `<div class="${cls}">&#127942; <b>Winner: ${esc(wl)}</b> — ${esc(fmtNum(w.winner.value))} ${esc(w.unit)}${srcTag}${vs}</div>`;
+}
+
+function scoreboard(metricCharts, curveCharts, data) {
+  const tally = {};
+  let contests = 0;
+  const record = (w) => {
+    if (!w || !w.winner) return;
+    contests++;
+    const k = w.winner.key;
+    tally[k] = (tally[k] || 0) + 1;
+  };
+  for (const mc of metricCharts) record(mc.winner);
+  for (const cc of curveCharts) record(cc.winner);
+  const rows = Object.entries(tally)
+    .map(([key, wins]) => ({ key, wins, label: labelFor(key, data), ours: isOurs(key) }))
+    .sort((a, b) => b.wins - a.wins);
+  return { rows, contests, top: rows[0] || null };
+}
+
+function scoreboardHtml(sb) {
+  if (!sb || !sb.rows.length) return "";
+  const maxWins = sb.top.wins || 1;
+  const bars = sb.rows
+    .map((r) => {
+      const pct = Math.round((r.wins / maxWins) * 100);
+      const col = r.ours ? "#16a34a" : "#f59e0b";
+      return `      <div class="sb-row"><span class="sb-name">${esc(r.label)}</span><span class="sb-bar"><span class="sb-fill" style="width:${pct}%;background:${col}"></span></span><span class="sb-val">${r.wins} / ${sb.contests}</span></div>`;
+    })
+    .join("\n");
+  const headline = sb.top.ours
+    ? `<b>${esc(sb.top.label)}</b> wins <b>${sb.top.wins} of ${sb.contests}</b> indexes — the overall winner.`
+    : `<b>${esc(sb.top.label)}</b> leads with ${sb.top.wins} of ${sb.contests} indexes.`;
+  return `  <section id="scoreboard" style="border-left:4px solid #16a34a">
+    <h2>&#127942; Scoreboard — who wins each index</h2>
+    <p class="ctx">${headline} One point per metric / scale-curve; the winner is the best value on that axis (lower- or higher-is-better as labelled). Bars scaled to the leader.</p>
+    <div class="scoreboard">
+${bars}
+    </div>
+  </section>`;
+}
+
 // ── HTML / MD assembly ───────────────────────────────────────────────────────
 function buildHtml(data, metricCharts, curveCharts) {
   const css = `body{font-family:system-ui,sans-serif;margin:0;background:#f8fafc;color:#0f172a;line-height:1.5}
@@ -376,7 +490,16 @@ th{background:#f1f5f9}
 .legend{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:#475569;margin:8px 0 0}
 .legend b{color:#0f172a}
 code{background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:12px}
-.note{font-size:12px;color:#64748b;margin-top:8px}`;
+.note{font-size:12px;color:#64748b;margin-top:8px}
+.winner{background:#f0fdf4;border:1px solid #bbf7d0;border-left:4px solid #16a34a;border-radius:8px;padding:9px 13px;margin:10px 0 2px;font-size:14px;color:#14532d}
+.winner.rival{background:#fff7ed;border-color:#fed7aa;border-left-color:#d97706;color:#7c2d12}
+.wtag{color:#64748b;font-weight:400;font-size:12px}
+.scoreboard{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.sb-row{display:flex;align-items:center;gap:10px;font-size:13px}
+.sb-name{width:170px;flex:none;text-align:right;color:#334155;font-weight:600}
+.sb-bar{flex:1;background:#f1f5f9;border-radius:5px;height:16px;overflow:hidden}
+.sb-fill{display:block;height:100%}
+.sb-val{width:64px;flex:none;color:#475569;font-variant-numeric:tabular-nums}`;
 
   const legendHtml = `<div class="legend">
     <span><b>measured</b> — solid/filled, cites an artifact under <code>artifacts/</code></span>
@@ -391,6 +514,7 @@ code{background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:12px}
     <h2>${esc(mc.label)}</h2>
     <p class="ctx">${esc(mc.context || "")}${mc.unit ? `  ·  ${esc(mc.unit)}` : ""} — ${mc.lowerIsBetter ? "lower is better" : "higher is better"}</p>
     ${mc.svg}
+    ${winnerBannerHtml(mc.winner, data)}
     ${tableHtml(mc.rows)}
   </section>`
     )
@@ -402,12 +526,14 @@ code{background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:12px}
     <h2>${esc(cc.label)}</h2>
     <p class="ctx">${esc(cc.context || "")}${cc.unit ? `  ·  ${esc(cc.unit)}` : ""} — x = tenant count (log scale)</p>
     ${cc.svg}
+    ${winnerBannerHtml(cc.winner, data)}
     ${tableHtml(cc.rows)}
   </section>`
     )
     .join("\n");
 
   const m = data.meta || {};
+  const sb = scoreboard(metricCharts, curveCharts, data);
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(m.title || "Grobase — Competitive Benchmark")}</title>
@@ -419,6 +545,7 @@ code{background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:12px}
   <p>Generated ${esc(new Date().toISOString())}${m.generatedFrom ? `  ·  data: <code style="color:#cbd5e1">${esc(m.generatedFrom)}</code>` : ""}</p>
 </header>
 <main>
+${scoreboardHtml(sb)}
   <section>
     <h2>How to read these charts</h2>
     ${legendHtml}
@@ -448,6 +575,25 @@ ${body}
     </table>`;
 }
 
+function winnerLineMd(w, data) {
+  if (!w) return "";
+  const wl = labelFor(w.winner.key, data);
+  const tag = w.winner.source && w.winner.source !== "measured" ? ` _(${w.winner.source})_` : "";
+  const vs = w.runner ? ` — ${ratioText(w)} vs ${labelFor(w.runner.key, data)}` : "";
+  return `**🏆 Winner: ${wl}** — ${fmtNum(w.winner.value)} ${w.unit}${tag}${vs}\n\n`;
+}
+
+function scoreboardMd(sb) {
+  if (!sb || !sb.rows.length) return "";
+  let s = `## 🏆 Scoreboard — who wins each index\n\n`;
+  s += sb.top.ours
+    ? `**${sb.top.label}** wins **${sb.top.wins} of ${sb.contests}** indexes — the overall winner.\n\n`
+    : `**${sb.top.label}** leads with ${sb.top.wins} of ${sb.contests} indexes.\n\n`;
+  s += `| contender | indexes won |\n|---|---|\n`;
+  for (const r of sb.rows) s += `| ${r.label} | ${r.wins} / ${sb.contests} |\n`;
+  return s + `\n`;
+}
+
 function buildMarkdown(data, metricCharts, curveCharts, relCharts) {
   const m = data.meta || {};
   let md = `# ${m.title || "Grobase — Competitive Benchmark"}\n\n`;
@@ -461,11 +607,14 @@ function buildMarkdown(data, metricCharts, curveCharts, relCharts) {
   md += `| n/a | omitted | no honest number (e.g. Firebase has no self-host footprint) |\n\n`;
   if (m.honestyNote) md += `> ${m.honestyNote}\n\n`;
 
+  md += scoreboardMd(scoreboard(metricCharts, curveCharts, data));
+
   md += `## Single-metric comparisons\n\n`;
   for (const mc of metricCharts) {
     md += `### ${mc.label}\n\n`;
     md += `${mc.context || ""}${mc.unit ? ` · ${mc.unit}` : ""} — ${mc.lowerIsBetter ? "lower is better" : "higher is better"}\n\n`;
     md += `![${mc.label}](${relCharts}/${mc.key}.svg)\n\n`;
+    md += winnerLineMd(mc.winner, data);
     md += mdTable(mc.rows);
     md += `\n`;
   }
@@ -474,6 +623,7 @@ function buildMarkdown(data, metricCharts, curveCharts, relCharts) {
     md += `### ${cc.label}\n\n`;
     md += `${cc.context || ""}${cc.unit ? ` · ${cc.unit}` : ""} — x = tenant count (log scale)\n\n`;
     md += `![${cc.label}](${relCharts}/${cc.key}.svg)\n\n`;
+    md += winnerLineMd(cc.winner, data);
     md += mdTable(cc.rows);
     md += `\n`;
   }
@@ -632,6 +782,7 @@ function main() {
       unit: metric.unit || "",
       lowerIsBetter: metric.lowerIsBetter !== false,
       svg,
+      winner: metricWinner(metric, contenders),
       rows: sourceRows(contenders, (k) => (metric.data || {})[k]),
     });
   }
@@ -650,6 +801,7 @@ function main() {
       context: curve.context || "",
       unit: curve.unit || "",
       svg,
+      winner: curveWinner(curve),
       rows: sourceRows(curveKeys, (k) => (curve.series || {})[k]),
     });
   }
