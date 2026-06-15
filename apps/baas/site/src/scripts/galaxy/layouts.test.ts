@@ -17,6 +17,11 @@ test('seed is deterministic', () => {
 		assert.equal(a[i]!.name, b[i]!.name);
 		assert.equal(a[i]!.tier, b[i]!.tier);
 		assert.deepEqual(a[i]!.engines, b[i]!.engines);
+		// Pin the full visual fingerprint: r/phase are drawn in the population loop,
+		// spin after it — all must stay byte-identical across calls.
+		assert.equal(a[i]!.r, b[i]!.r);
+		assert.equal(a[i]!.phase, b[i]!.phase);
+		assert.equal(a[i]!.spin, b[i]!.spin);
 	}
 });
 
@@ -80,5 +85,43 @@ test('cta layout pulls the constellation tight (scale 0.5)', () => {
 		const y = layout.targets[2 * i + 1]!;
 		assert.ok(Math.abs(x - W / 2) < W * 0.3, 'x converges');
 		assert.ok(Math.abs(y - H / 2) < H * 0.36, 'y converges');
+	}
+});
+
+test('every layout produces finite per-node depth (tzs)', () => {
+	const nodes = seedTenants();
+	for (const state of ALL_STATES) {
+		const { tzs } = computeLayout(state, nodes, W, H);
+		assert.equal(tzs.length, nodes.length, `${state}: tz count`);
+		for (let i = 0; i < tzs.length; i += 1) {
+			assert.ok(Number.isFinite(tzs[i]!), `${state}: tz ${i} is finite`);
+		}
+	}
+});
+
+test('genesis collapses ≥90% of nodes into a tight central cluster', () => {
+	const nodes = seedTenants();
+	const { targets } = computeLayout('genesis', nodes, W, H);
+	let inside = 0;
+	for (let i = 0; i < nodes.length; i += 1) {
+		const dx = targets[2 * i]! - W / 2;
+		const dy = targets[2 * i + 1]! - H / 2;
+		if (Math.hypot(dx, dy) < W * 0.22) inside += 1;
+	}
+	assert.ok(inside >= nodes.length * 0.9, `≥90% within central radius (${inside}/${nodes.length})`);
+});
+
+test('growth spreads cubes across ≥2 distinct depth planes', () => {
+	const nodes = seedTenants();
+	const { tzs } = computeLayout('growth', nodes, W, H);
+	const planes = new Set(Array.from(tzs));
+	assert.ok(planes.size >= 2, `≥2 distinct tz planes (got ${planes.size})`);
+});
+
+test('bigbang-armed converges into a tight core like cta', () => {
+	const nodes = seedTenants();
+	const { targets } = computeLayout('bigbang-armed', nodes, W, H);
+	for (let i = 0; i < nodes.length; i += 1) {
+		assert.ok(Math.abs(targets[2 * i]! - W / 2) < W * 0.25, 'x converges tight');
 	}
 });

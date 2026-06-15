@@ -28,7 +28,6 @@ const palette = ['#34d399', '#7dd3fc', '#a78bfa', '#fbbf24', '#f472b6'];
 <div class="gb-galaxy" aria-hidden="true">
 	<canvas id="galaxy-canvas"></canvas>
 </div>
-<div class="gb-galaxy-card" id="galaxy-card" hidden></div>
 <noscript>
 	<svg class="gb-galaxy__fallback" viewBox="0 0 1200 800" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
 		{stars.map((s, i) => <circle cx={s.cx} cy={s.cy} r={s.r} opacity={s.o} fill={palette[i % palette.length]} />)}

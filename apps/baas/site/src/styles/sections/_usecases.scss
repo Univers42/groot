@@ -1,0 +1,191 @@
+// "What are you building?" use-case cards + the "what you get" value grid.
+// Condensed, branded by tier colour, calm hover motion (transform/opacity only).
+
+.gb-usecases {
+	list-style: none;
+	margin: clamp(2rem, 5vh, 3.25rem) 0 0;
+	padding: 0;
+	display: grid;
+	gap: 1rem;
+	grid-template-columns: repeat(auto-fit, minmax(15.5rem, 1fr));
+}
+
+.gb-uc {
+	// per-tier accent — set by the tier-* class below
+	--uc: var(--gb-primary);
+	display: flex;
+}
+
+.gb-uc.tier-nano { --uc: var(--gb-tier-nano); }
+.gb-uc.tier-basic { --uc: var(--gb-tier-basic); }
+.gb-uc.tier-essential { --uc: var(--gb-tier-essential); }
+.gb-uc.tier-pro { --uc: var(--gb-tier-pro); }
+.gb-uc.tier-max { --uc: var(--gb-tier-max); }
+
+.gb-uc__link {
+	display: flex;
+	flex-direction: column;
+	gap: 0.6rem;
+	width: 100%;
+	padding: 1.4rem 1.4rem 1.15rem;
+	border: 1px solid var(--gb-line);
+	border-top: 3px solid var(--uc);
+	border-radius: var(--gb-radius);
+	background: var(--gb-surface);
+	color: var(--gb-text);
+	text-decoration: none;
+	transition:
+		transform var(--gb-dur-fast) var(--gb-ease-out),
+		border-color var(--gb-dur-fast) var(--gb-ease-out),
+		box-shadow var(--gb-dur-fast) var(--gb-ease-out);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.gb-uc__link:hover,
+	.gb-uc__link:focus-visible {
+		transform: translateY(-4px);
+	}
+}
+
+.gb-uc__link:hover,
+.gb-uc__link:focus-visible {
+	border-color: var(--uc);
+	box-shadow: var(--gb-glow-card);
+}
+
+.gb-uc__icon {
+	display: inline-flex;
+	width: 2.5rem;
+	height: 2.5rem;
+	align-items: center;
+	justify-content: center;
+	border-radius: var(--gb-radius-sm);
+	color: var(--uc);
+	background: color-mix(in srgb, var(--uc) 14%, transparent);
+}
+
+.gb-uc__icon svg { width: 1.4rem; height: 1.4rem; }
+
+.gb-uc__title {
+	margin: 0;
+	font-size: 1.12rem;
+	line-height: 1.25;
+	font-family: var(--gb-font-display);
+}
+
+.gb-uc__blurb {
+	margin: 0;
+	color: var(--gb-text-muted);
+	font-size: 0.95rem;
+	line-height: 1.5;
+}
+
+.gb-uc__points {
+	list-style: none;
+	margin: 0.15rem 0 0;
+	padding: 0;
+	display: grid;
+	gap: 0.35rem;
+}
+
+.gb-uc__points li {
+	position: relative;
+	padding-left: 1.1rem;
+	color: var(--gb-text-faint);
+	font-size: 0.85rem;
+	line-height: 1.45;
+}
+
+.gb-uc__points li::before {
+	content: '';
+	position: absolute;
+	left: 0;
+	top: 0.5em;
+	width: 0.4rem;
+	height: 0.4rem;
+	border-radius: 50%;
+	background: var(--uc);
+}
+
+.gb-uc__foot {
+	margin-top: auto;
+	padding-top: 0.85rem;
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+}
+
+.gb-uc__badge {
+	font-family: var(--gb-font-mono);
+	font-size: 0.72rem;
+	letter-spacing: 0.03em;
+	text-transform: uppercase;
+	padding: 0.2rem 0.55rem;
+	border-radius: 999px;
+	color: var(--uc);
+	background: color-mix(in srgb, var(--uc) 16%, transparent);
+}
+
+.gb-uc__price {
+	color: var(--gb-text-muted);
+	font-size: 0.82rem;
+}
+
+.gb-uc__go {
+	margin-left: auto;
+	color: var(--uc);
+	font-size: 1.1rem;
+	transition: transform var(--gb-dur-fast) var(--gb-ease-out);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.gb-uc__link:hover .gb-uc__go,
+	.gb-uc__link:focus-visible .gb-uc__go {
+		transform: translateX(3px);
+	}
+}
+
+// ── "What you get" value grid ───────────────────────────────────────────────
+.gb-values {
+	list-style: none;
+	margin: clamp(2rem, 5vh, 3.25rem) 0 0;
+	padding: 0;
+	display: grid;
+	gap: 1rem;
+	grid-template-columns: repeat(auto-fit, minmax(15.5rem, 1fr));
+}
+
+.gb-value {
+	padding: 1.4rem;
+	border: 1px solid var(--gb-line);
+	border-radius: var(--gb-radius);
+	background: var(--gb-surface);
+}
+
+.gb-value__icon {
+	display: inline-flex;
+	width: 2.5rem;
+	height: 2.5rem;
+	align-items: center;
+	justify-content: center;
+	border-radius: var(--gb-radius-sm);
+	color: var(--gb-primary);
+	background: color-mix(in srgb, var(--gb-primary) 14%, transparent);
+	margin-bottom: 0.7rem;
+}
+
+.gb-value__icon svg { width: 1.4rem; height: 1.4rem; }
+
+.gb-value__title {
+	margin: 0 0 0.35rem;
+	font-size: 1.08rem;
+	line-height: 1.25;
+	font-family: var(--gb-font-display);
+}
+
+.gb-value__body {
+	margin: 0;
+	color: var(--gb-text-muted);
+	font-size: 0.92rem;
+	line-height: 1.55;
+}

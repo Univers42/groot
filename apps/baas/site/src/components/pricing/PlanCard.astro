@@ -1,0 +1,35 @@
+---
+// Selectable pricing card. A visually-hidden radio drives the selected state via
+// CSS (:has / :checked) — no JS, CSP-clean. The whole card is clickable through
+// an absolutely-positioned <label> overlay (valid HTML: the rich content lives in
+// a sibling, not inside the label). The CTA sits above the overlay so it links.
+import type { Tier } from '../../data/tiers';
+import { SITE } from '../../data/site';
+
+type Props = { tier: Tier; recommended?: boolean };
+const { tier, recommended = false } = Astro.props;
+const id = `plan-${tier.id}`;
+const engineLabel = tier.engines.length > 2 ? `${tier.engines.length} engine families` : tier.engines.join(' + ');
+const badge = recommended ? 'Most popular' : tier.flag;
+---
+
+<div class={`gb-plan tier--${tier.id}${recommended ? ' gb-plan--rec' : ''}`}>
+	<input type="radio" id={id} name="plan" value={tier.id} class="gb-plan__radio" checked={recommended} />
+	<label for={id} class="gb-plan__hit"><span class="visually-hidden">Select the {tier.name} plan</span></label>
+	<div class="gb-plan__body">
+		<div class="gb-plan__head">
+			<span class="gb-plan__name">{tier.name}</span>
+			{badge && <span class="gb-badge gb-badge--dot gb-plan__badge">{badge}</span>}
+		</div>
+		<p class="gb-plan__price">{tier.retail}<small>{tier.retailNote}</small></p>
+		<p class="gb-plan__cost">runs on {tier.ram} · costs us {tier.allIn}{tier.idleNote ? ` · ${tier.idleNote}` : ''}</p>
+		<p class="gb-plan__audience">{tier.audience}</p>
+		<ul class="gb-plan__features" role="list">
+			<li>{tier.services} · {engineLabel}</li>
+			{tier.rateLimit && <li>{tier.rateLimit} · {tier.maxMounts}</li>}
+			{tier.features.slice(0, 3).map((f) => <li>{f}</li>)}
+		</ul>
+		<span class="gb-plan__check" aria-hidden="true">Selected</span>
+	</div>
+	<a class="gb-btn gb-btn--primary gb-plan__cta" href={SITE.repoUrl} rel="noopener">Start with {tier.name}</a>
+</div>

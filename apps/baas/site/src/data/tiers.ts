@@ -55,13 +55,13 @@ export const TIERS: Tier[] = [
 		retailNote: 'per month',
 		engines: ['SQLite (in-process)', 'external PostgreSQL (optional)'],
 		features: [
-			'One 5.1 MB static Rust binary (scratch image)',
-			'CRUD + schema + graph + scoped keys + SSE',
-			'6× smaller and ~6× lighter than PocketBase (measured)',
+			'One 5.1 MB static binary (scratch image)',
+			'CRUD + schema + graph + scoped keys + live updates',
+			'Tiny: ~2 MiB of RAM at idle (measured)',
 			'Graduates to Basic with zero rewrites',
 		],
 		audience: 'Landing pages, prototypes, one tiny app',
-		flag: 'The PocketBase-killer',
+		flag: 'Start free',
 	},
 	{
 		id: 'basic',
