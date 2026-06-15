@@ -1133,6 +1133,23 @@ async fn run_query_inner(
         }
     }
 
+    // FTS / vector search are Postgres-native ops (to_tsvector + ts_rank / pgvector
+    // distance operators). Any other engine rejects with a clean 422 rather than
+    // silently ignoring the clause and returning unfiltered rows — engine-agnostic
+    // by construction (capability honestly declared, only Postgres serves it).
+    if (request.operation.search.is_some() || request.operation.vector.is_some())
+        && request.mount.engine != "postgresql"
+    {
+        return map_data_plane_error(&data_plane_core::DataPlaneError::UnsupportedCapability {
+            engine: request.mount.engine.clone(),
+            capability: if request.operation.search.is_some() {
+                "fulltext_search".to_string()
+            } else {
+                "vector_search".to_string()
+            },
+        });
+    }
+
     // Capture audit + outbox fields before the request is consumed by the pool.
     let audit_tenant = request.identity.tenant_id.clone();
     let audit_engine = request.mount.engine.clone();

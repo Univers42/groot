@@ -114,6 +114,46 @@ pub struct DataOperation {
     /// full rows, so the existing wire shape is unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fields: Option<Vec<String>>,
+    /// Full-text search (used with `op = List`): rank rows by `ts_rank` over the
+    /// `to_tsvector` of the listed columns matched against `query` via
+    /// `websearch_to_tsquery`. Capability-gated to engines that advertise it
+    /// (Postgres); others reject with 422. Owner-scoping (RLS) still applies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search: Option<SearchSpec>,
+    /// Vector k-NN search (used with `op = List`): order rows by distance from
+    /// `query` on a pgvector column, limited to `k`. Capability-gated
+    /// (Postgres + pgvector); others reject with 422. Owner-scoping applies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vector: Option<VectorSpec>,
+}
+
+/// Full-text search request (engine-neutral; lowered per adapter).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SearchSpec {
+    /// The user's search string (parsed by `websearch_to_tsquery` — supports
+    /// `"quoted phrases"`, `-exclude`, `or`). Bound as a parameter, never inlined.
+    pub query: String,
+    /// Columns to search (their text is concatenated). Empty is rejected.
+    #[serde(default)]
+    pub columns: Vec<String>,
+    /// Text-search config (`english`, `simple`, …). Allowlisted; default `english`.
+    #[serde(default)]
+    pub language: Option<String>,
+}
+
+/// Vector k-NN request (engine-neutral; lowered to pgvector on Postgres).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VectorSpec {
+    /// The pgvector column to rank against.
+    pub column: String,
+    /// The query embedding. Bound as a parameter (`'[…]'::vector`), never inlined.
+    pub query: Vec<f64>,
+    /// How many nearest neighbours to return (default 10, capped at 1000).
+    #[serde(default)]
+    pub k: Option<u32>,
+    /// Distance metric: `cosine` (`<=>`, default), `l2` (`<->`), `ip` (`<#>`).
+    #[serde(default)]
+    pub metric: Option<String>,
 }
 
 impl DataOperation {

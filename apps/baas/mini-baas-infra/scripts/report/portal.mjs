@@ -136,6 +136,11 @@ footer li{margin:2px 0}
 function reportsNav(args) {
   const items = [
     {
+      href: "comparison-report.html",
+      title: "★ Full comparison report",
+      desc: "The detailed all-in-one: performance benchmarks + offers + the 91-row matrix + edge reliability + verdicts, with every chart.",
+    },
+    {
       href: args.bench3,
       title: "3-way deep benchmark",
       desc: "Grobase nano / one vs PocketBase — fresh images, latency by concurrency, multi-tenant scaling.",

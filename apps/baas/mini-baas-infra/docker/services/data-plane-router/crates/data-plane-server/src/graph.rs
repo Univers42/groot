@@ -374,6 +374,8 @@ impl<'a> GraphEngine<'a> {
             returning: None,
             aggregate: None,
             fields: None,
+            search: None,
+            vector: None,
         };
         self.state
             .execute_read(identity, mount, op)

@@ -468,6 +468,8 @@ fn op(kind: DataOperationKind, filter: Value) -> DataOperation {
         returning: Some(ReturningMode::Full),
         aggregate: None,
         fields: None,
+        search: None,
+        vector: None,
     }
 }
 

@@ -232,6 +232,13 @@ bench-compare: ## Competitive graph report from scripts/bench/compare-data.json 
 			--out "$(if $(OUT),$(OUT),/b/artifacts/bench/compare)"
 	@echo -e "$(_G)$(_W)✓ compare report → artifacts/bench/compare/{index.html,report.md,charts/}$(_0)"
 
+master-report: ## ONE detailed HTML comparison report (perf + offers + matrix + edge) → wiki/reports/comparison-report.html (zero-dep, no host node)
+	@docker run --rm -u "$(shell id -u):$(shell id -g)" \
+		-v "$(CURDIR)/..":/b -w /b public.ecr.aws/docker/library/node:22-bookworm \
+		node /b/mini-baas-infra/scripts/report/master-report.mjs \
+			--infra /b/mini-baas-infra --out /b/wiki/reports/comparison-report.html
+	@echo -e "$(_G)$(_W)✓ comparison report → wiki/reports/comparison-report.html$(_0)"
+
 scale-seed: _require-compose ## Provision SCALE= bench tenants (+keys+mounts) → artifacts/scale/tenants-<N>.jsonl (MOUNTS= ISOLATION= CONCURRENCY=)
 	@SCALE="$(if $(SCALE),$(SCALE),1000)"; \
 	TC_PORT="$$(docker port mini-baas-tenant-control 3022/tcp 2>/dev/null | head -1 | sed 's/.*://')"; \

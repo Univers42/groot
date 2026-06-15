@@ -1488,6 +1488,17 @@ fn backend(e: &tokio_postgres::Error) -> DataPlaneError {
                 ),
             };
         }
+        // SQLSTATE class 42 = "syntax error or access rule violation": undefined
+        // function (e.g. sum()/avg() on a TEXT column → 42883), undefined column
+        // (42703), undefined table (42P01), datatype mismatch (42804), grouping
+        // error (42803). Every one is the caller's request not fitting the schema
+        // — a clean 400, NEVER an engine 5xx/502. (42P10 above is the more
+        // specific upsert case; this generalises the rest of the class.)
+        if code.starts_with("42") {
+            return DataPlaneError::InvalidRequest {
+                message: db.message().to_string(),
+            };
+        }
     }
     // CLIENT-side bind failures (JsonParam: "not a date" into timestamptz,
     // a malformed uuid, a string into int4) never reach the server, so there
@@ -1875,10 +1886,42 @@ async fn run_list<C: GenericClient + Sync>(
 ) -> DataPlaneResult<DataResult> {
     let table = quote_ident(&op.resource)?;
     let mut params: Vec<BoxedParam> = Vec::new();
-    let where_sql = build_where(op.filter.as_ref(), &mut params)?;
-    let order_sql = build_order_by(op.sort.as_ref())?;
 
-    let limit = op.limit.unwrap_or(100).min(1000) as i64;
+    // Client filter (a Pred), optionally AND'd with a full-text predicate.
+    // Param push order is the source of $n truth: filter params, then the FTS
+    // query param, then the vector embedding param, then limit/offset.
+    let client_pred = compile_filter(op.filter.as_ref(), &mut params)?;
+    let fts = op
+        .search
+        .as_ref()
+        .map(|s| build_search(s, &mut params))
+        .transpose()?; // Option<(predicate, rank_expr)>
+    let where_sql = combine_where(client_pred, fts.as_ref().map(|(p, _)| p.as_str()));
+
+    // ORDER BY precedence: vector k-NN distance > explicit sort > FTS rank > none.
+    let vec_order = op
+        .vector
+        .as_ref()
+        .map(|v| build_vector_order(v, &mut params))
+        .transpose()?; // Option<distance_expr>
+    let order_sql = if let Some(ord) = &vec_order {
+        // nearest first: <=>/<->/<#> are "smaller = closer".
+        format!(" ORDER BY {ord} ASC")
+    } else if op.sort.as_ref().is_some_and(|s| !s.is_empty()) {
+        build_order_by(op.sort.as_ref())?
+    } else if let Some((_, rank)) = &fts {
+        format!(" ORDER BY {rank} DESC")
+    } else {
+        String::new()
+    };
+
+    // Vector search uses its own `k` as LIMIT; otherwise the usual list paging.
+    let limit = op
+        .vector
+        .as_ref()
+        .and_then(|v| v.k)
+        .map(|k| k.min(1000))
+        .unwrap_or_else(|| op.limit.unwrap_or(100).min(1000)) as i64;
     let offset = op.offset.unwrap_or(0) as i64;
     params.push(Box::new(limit));
     let limit_idx = params.len();
@@ -1901,6 +1944,118 @@ async fn run_list<C: GenericClient + Sync>(
         next_cursor: None,
         batch: None,
     })
+}
+
+/// Combine the client filter [`Pred`] with an optional full-text predicate into a
+/// single ` WHERE …` clause (owner-scoping on reads is enforced by RLS GUCs, so
+/// it is not appended here).
+fn combine_where(client: Pred, fts: Option<&str>) -> String {
+    match (client, fts) {
+        (Pred::AlwaysFalse, _) => " WHERE FALSE".to_string(),
+        (Pred::Sql(c), Some(f)) => format!(" WHERE ({c}) AND ({f})"),
+        (Pred::Sql(c), None) => format!(" WHERE ({c})"),
+        (Pred::Unconstrained, Some(f)) => format!(" WHERE ({f})"),
+        (Pred::Unconstrained, None) => String::new(),
+    }
+}
+
+/// Allowlisted Postgres text-search configuration (`regconfig`) — inlined as a
+/// literal (never from raw client text), default `english`.
+fn ts_language(lang: Option<&str>) -> DataPlaneResult<&'static str> {
+    Ok(match lang.unwrap_or("english").to_ascii_lowercase().as_str() {
+        "english" => "english",
+        "simple" => "simple",
+        "spanish" => "spanish",
+        "french" => "french",
+        "german" => "german",
+        "portuguese" => "portuguese",
+        "italian" => "italian",
+        "dutch" => "dutch",
+        "russian" => "russian",
+        other => {
+            return Err(DataPlaneError::InvalidRequest {
+                message: format!("unsupported search language '{other}'"),
+            })
+        }
+    })
+}
+
+/// Lowers a [`SearchSpec`] to `(predicate, rank_expr)`: a ranked Postgres
+/// full-text match over `concat_ws`-joined columns. The query string is BOUND
+/// (`$n`), the language is an allowlisted literal, columns are `quote_ident`'d.
+/// Both the predicate and the rank reference the same `$n` (parameter reuse).
+fn build_search(
+    spec: &data_plane_core::SearchSpec,
+    params: &mut Vec<BoxedParam>,
+) -> DataPlaneResult<(String, String)> {
+    if spec.columns.is_empty() {
+        return Err(DataPlaneError::InvalidRequest {
+            message: "search requires at least one column".to_string(),
+        });
+    }
+    if spec.query.trim().is_empty() {
+        return Err(DataPlaneError::InvalidRequest {
+            message: "search requires a non-empty query".to_string(),
+        });
+    }
+    let lang = ts_language(spec.language.as_deref())?;
+    let cols = spec
+        .columns
+        .iter()
+        .map(|c| quote_ident(c))
+        .collect::<DataPlaneResult<Vec<_>>>()?;
+    let doc = format!("concat_ws(' ', {})", cols.join(", "));
+    params.push(Box::new(spec.query.clone()));
+    let q = params.len();
+    let tsv = format!("to_tsvector('{lang}', {doc})");
+    let tsq = format!("websearch_to_tsquery('{lang}', ${q})");
+    Ok((format!("{tsv} @@ {tsq}"), format!("ts_rank({tsv}, {tsq})")))
+}
+
+/// Lowers a [`VectorSpec`] to a pgvector distance expression `"col" <op> $n::vector`.
+/// The embedding is bound as a `'[…]'` text literal cast to `vector`; the metric
+/// operator is an allowlist (`cosine`→`<=>`, `l2`→`<->`, `ip`→`<#>`).
+fn build_vector_order(
+    spec: &data_plane_core::VectorSpec,
+    params: &mut Vec<BoxedParam>,
+) -> DataPlaneResult<String> {
+    if spec.query.is_empty() {
+        return Err(DataPlaneError::InvalidRequest {
+            message: "vector search requires a non-empty query embedding".to_string(),
+        });
+    }
+    let col = quote_ident(&spec.column)?;
+    let opsym = match spec
+        .metric
+        .as_deref()
+        .unwrap_or("cosine")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "cosine" => "<=>",
+        "l2" | "euclidean" => "<->",
+        "ip" | "inner" | "dot" => "<#>",
+        other => {
+            return Err(DataPlaneError::InvalidRequest {
+                message: format!("unsupported vector metric '{other}'"),
+            })
+        }
+    };
+    let lit = format!(
+        "[{}]",
+        spec.query
+            .iter()
+            .map(|f| if f.is_finite() { format!("{f}") } else { "0".to_string() })
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    params.push(Box::new(lit));
+    let p = params.len();
+    // `$n::text::vector`, not `$n::vector`: the inner `::text` makes Postgres infer
+    // the bind param as TEXT (so the bound Rust String matches), then pgvector
+    // parses the text literal into a vector. A bare `$n::vector` makes the driver
+    // expect a native vector param and fails to serialize the String.
+    Ok(format!("{col} {opsym} ${p}::text::vector"))
 }
 
 async fn run_get<C: GenericClient + Sync>(
@@ -3133,5 +3288,99 @@ mod tests {
             build_pg_ddl("public", &ddl(SchemaDdlOp::AddColumn, "orders"), true).unwrap_err(),
             DataPlaneError::InvalidRequest { .. }
         ));
+    }
+
+    #[test]
+    fn fts_lowers_to_ranked_multicolumn_tsvector_match() {
+        let mut p: Vec<BoxedParam> = Vec::new();
+        let (pred, rank) = build_search(
+            &data_plane_core::SearchSpec {
+                query: "hello world".into(),
+                columns: vec!["title".into(), "body".into()],
+                language: Some("english".into()),
+            },
+            &mut p,
+        )
+        .unwrap();
+        assert_eq!(
+            pred,
+            "to_tsvector('english', concat_ws(' ', \"title\", \"body\")) @@ websearch_to_tsquery('english', $1)"
+        );
+        assert_eq!(
+            rank,
+            "ts_rank(to_tsvector('english', concat_ws(' ', \"title\", \"body\")), websearch_to_tsquery('english', $1))"
+        );
+        assert_eq!(p.len(), 1, "query bound ONCE, reused by predicate + rank");
+    }
+
+    #[test]
+    fn fts_defaults_english_and_rejects_bad_language_or_no_columns() {
+        let mut p: Vec<BoxedParam> = Vec::new();
+        let (pred, _) = build_search(
+            &data_plane_core::SearchSpec { query: "x".into(), columns: vec!["c".into()], language: None },
+            &mut p,
+        )
+        .unwrap();
+        assert!(pred.starts_with("to_tsvector('english',"), "default lang: {pred}");
+        // a hostile regconfig string is rejected, never inlined into the SQL.
+        let mut p2: Vec<BoxedParam> = Vec::new();
+        assert!(matches!(
+            build_search(
+                &data_plane_core::SearchSpec {
+                    query: "x".into(),
+                    columns: vec!["c".into()],
+                    language: Some("english'); DROP TABLE x;--".into()),
+                },
+                &mut p2,
+            )
+            .unwrap_err(),
+            DataPlaneError::InvalidRequest { .. }
+        ));
+        // empty columns / empty query are rejected.
+        let mut p3: Vec<BoxedParam> = Vec::new();
+        assert!(build_search(
+            &data_plane_core::SearchSpec { query: "x".into(), columns: vec![], language: None },
+            &mut p3
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn vector_lowers_to_pgvector_distance_per_metric() {
+        let mut p: Vec<BoxedParam> = Vec::new();
+        let ord = build_vector_order(
+            &data_plane_core::VectorSpec {
+                column: "embedding".into(),
+                query: vec![0.1, 0.2, 0.3],
+                k: Some(5),
+                metric: Some("cosine".into()),
+            },
+            &mut p,
+        )
+        .unwrap();
+        assert_eq!(ord, "\"embedding\" <=> $1::text::vector");
+        assert_eq!(p.len(), 1, "embedding bound as one text param, cast to vector");
+        for (m, sym) in [("l2", "<->"), ("ip", "<#>"), ("cosine", "<=>")] {
+            let mut pp: Vec<BoxedParam> = Vec::new();
+            let o = build_vector_order(
+                &data_plane_core::VectorSpec { column: "e".into(), query: vec![1.0], k: None, metric: Some(m.into()) },
+                &mut pp,
+            )
+            .unwrap();
+            assert!(o.contains(sym), "metric {m} should use {sym}: {o}");
+        }
+        // bad metric + empty embedding are rejected.
+        let mut pe: Vec<BoxedParam> = Vec::new();
+        assert!(build_vector_order(
+            &data_plane_core::VectorSpec { column: "e".into(), query: vec![1.0], k: None, metric: Some("nope".into()) },
+            &mut pe
+        )
+        .is_err());
+        let mut pq: Vec<BoxedParam> = Vec::new();
+        assert!(build_vector_order(
+            &data_plane_core::VectorSpec { column: "e".into(), query: vec![], k: None, metric: None },
+            &mut pq
+        )
+        .is_err());
     }
 }

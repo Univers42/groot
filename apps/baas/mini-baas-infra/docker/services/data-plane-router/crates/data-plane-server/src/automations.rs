@@ -291,6 +291,8 @@ impl AutomationEngine {
             returning: None,
             aggregate: None,
             fields: None,
+            search: None,
+            vector: None,
         };
         // DIRECT pool execute (not run_query) → the follow-up never re-triggers
         // automations (loop safety). Owner-stamped with the SAME identity.
