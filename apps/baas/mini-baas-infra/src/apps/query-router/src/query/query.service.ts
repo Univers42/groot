@@ -380,6 +380,14 @@ export class QueryService implements OnModuleInit {
   ) {
     const identity = context.identity;
     const tenantId = identity?.tenantId ?? userId;
+    // Guard against a malformed body that didn't deserialize into an ExecuteQueryDto
+    // instance (e.g. a JSON array or primitive): calling resolveOp() on a plain object
+    // throws a TypeError -> 500. That's a client error, so reject it cleanly as 400.
+    if (typeof (dto as { resolveOp?: unknown })?.resolveOp !== 'function') {
+      throw new BadRequestException(
+        'Invalid request body: expected a single operation object.',
+      );
+    }
     const op = dto.resolveOp();
     if (!op) {
       throw new BadRequestException(

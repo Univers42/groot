@@ -49,10 +49,36 @@ export class AllExceptionsFilter implements ExceptionFilter {
         error = (obj['error'] as string) ?? HttpStatus[status] ?? 'Error';
       }
     } else if (exception instanceof Error) {
-      status = HttpStatus.INTERNAL_SERVER_ERROR;
-      message = 'Internal server error';
-      error = 'Internal Server Error';
-      this.logger.error(`Unhandled: ${exception.message}`, exception.stack);
+      // Some framework/runtime errors carry an HTTP-meaningful status without being
+      // an HttpException — e.g. body-parser PayloadTooLargeError (413) and malformed
+      // JSON (400). Those are the CLIENT's fault: surface them cleanly as the 4xx they
+      // are instead of masking them as a 500. Anything without a 4xx status stays 500
+      // (so genuine server bugs are NOT hidden).
+      const anyErr = exception as unknown as {
+        statusCode?: unknown;
+        status?: unknown;
+        type?: unknown;
+      };
+      const carried =
+        typeof anyErr.statusCode === 'number'
+          ? anyErr.statusCode
+          : typeof anyErr.status === 'number'
+            ? anyErr.status
+            : anyErr.type === 'entity.too.large'
+              ? 413
+              : anyErr.type === 'entity.parse.failed'
+                ? 400
+                : undefined;
+      if (typeof carried === 'number' && carried >= 400 && carried < 500) {
+        status = carried;
+        error = HttpStatus[status] ?? 'Error';
+        message = exception.message || error;
+      } else {
+        status = HttpStatus.INTERNAL_SERVER_ERROR;
+        message = 'Internal server error';
+        error = 'Internal Server Error';
+        this.logger.error(`Unhandled: ${exception.message}`, exception.stack);
+      }
     } else {
       status = HttpStatus.INTERNAL_SERVER_ERROR;
       message = 'Internal server error';
