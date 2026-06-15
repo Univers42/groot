@@ -1,6 +1,45 @@
 ---
 import SectionHeading from '../ui/SectionHeading.astro';
-import HonestyNote from '../ui/HonestyNote.astro';
+
+// A real roadmap: three phases left-to-right (shipped → building → next), each
+// with a status and an honest checklist. Items move left ONLY when they pass the
+// same shadow → parity → cutover gates — nothing is listed as done that isn't.
+type Phase = { key: string; label: string; tag: string; items: string[] };
+
+const PHASES: Phase[] = [
+	{
+		key: 'shipped',
+		label: 'Shipped',
+		tag: 'live today',
+		items: [
+			'8 engines behind one API — list, get, insert, filter, aggregate',
+			'Auth, realtime, object storage, functions and GraphQL',
+			'First-class full-text + vector search (typed ops)',
+			'Per-tenant isolation, owner-scoping and rate limits',
+			'Self-host anywhere — measured 5 MB → multi-tenant footprints',
+		],
+	},
+	{
+		key: 'building',
+		label: 'Building now',
+		tag: 'in flight, gated',
+		items: [
+			'Full update/delete parity on the Rust plane (Postgres write verbs)',
+			'Metering → quotas → Stripe billing — built & gate-proven, flag-gated, going live in the cloud',
+			'Per-tenant backup/restore and a self-service console',
+		],
+	},
+	{
+		key: 'next',
+		label: 'Next',
+		tag: 'planned, not yet',
+		items: [
+			'Unified OLAP/OLTP cost-routing — point-reads hit the engine, analytics hit the lakehouse, automatically',
+			'HA + horizontal scale (Helm/K8s, multi-region) — most tiers genuinely don’t need it yet',
+			'More engines — one honest, fully-tested adapter at a time (8, not 80)',
+		],
+	},
+];
 ---
 
 <section class="gb-section gb-section--dim" aria-labelledby="roadmap-title">
@@ -8,29 +47,26 @@ import HonestyNote from '../ui/HonestyNote.astro';
 		<SectionHeading
 			kicker="What we won't pretend"
 			title="The honest roadmap."
-			lede="Marketing pages usually hide this part. We think the gaps are as load-bearing as the features — here is exactly where the engine is still being built."
+			lede="Most marketing pages hide this part. We don't: here's what's live, what we're building right now, and what's still ahead — and nothing moves left until it passes the same gates as everything else."
 			id="roadmap-title"
 		/>
-		<div class="gb-roadmap-list">
-			<HonestyNote title="Postgres update/delete on the new plane is in flight.">
-				The Rust data plane serves list/get/insert on all engines today; the remaining Postgres write
-				verbs ship behind the same shadow→parity→cutover gates as everything else.
-			</HonestyNote>
-			<HonestyNote title="OLAP/OLTP cost-routing is partial.">
-				Trino analytics is reachable, but as its own endpoint — the unified "point-reads hit the engine,
-				analytics hit the lakehouse, automatically" plane is the roadmap's centrepiece, not today's reality.
-			</HonestyNote>
-			<HonestyNote title="No billing layer yet.">
-				Capability masks and rate limits are enforced live; metering, quotas and invoicing are still to come.
-			</HonestyNote>
-			<HonestyNote title="Single-node today.">
-				The stack is Docker-Compose-first; HA and horizontal scale (Helm/K8s) are a later phase. Most
-				tenants on most tiers genuinely don't need them yet — see the measured footprints.
-			</HonestyNote>
-			<HonestyNote title="8 engines, not 80.">
-				We'd rather grow the list one honest, fully-tested engine at a time than advertise a number of
-				"connectors" we can't stand behind. Every engine here passes the same capability tests.
-			</HonestyNote>
-		</div>
+		<ol class="gb-roadmap" role="list">
+			{PHASES.map((p) => (
+				<li class={`gb-rm gb-rm--${p.key}`} data-rise>
+					<div class="gb-rm__head">
+						<span class="gb-rm__dot" aria-hidden="true"></span>
+						<h3 class="gb-rm__label">{p.label}</h3>
+						<span class="gb-rm__tag">{p.tag}</span>
+					</div>
+					<ul class="gb-rm__items" role="list">
+						{p.items.map((it) => <li>{it}</li>)}
+					</ul>
+				</li>
+			))}
+		</ol>
+		<p class="gb-rm__foot">
+			Things move from <strong>Next</strong> to <strong>Building</strong> to <strong>Shipped</strong> only
+			after shadow → parity → cutover gates pass. No silent shipping, no vapourware.
+		</p>
 	</div>
 </section>
