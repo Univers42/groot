@@ -29,6 +29,13 @@
 	height: 100%;
 }
 
+// Additive light: god-rays + the moonlight reflection read as light cast onto the
+// dark sky/slope (screen blend brightens where they overlap). CSP-safe (class).
+.gb-scene__rays,
+.gb-scene__reflect {
+	mix-blend-mode: screen;
+}
+
 // A soft scrim so the white headline stays AAA-legible over the bright moon side.
 .gb-hero::before {
 	content: '';
@@ -80,6 +87,12 @@
 // stars twinkle (deterministic positions; 5 delay buckets for an organic shimmer)
 .gb-star { opacity: 0.85; }
 
+// Star twinkle stays a CSS opacity animation — opacity (unlike SVG transforms)
+// animates reliably in every engine. The TRANSFORM-based motion (leg swing, hill
+// parallax, shooting star, moon pulse) is driven by src/scripts/hero/scene.ts via
+// setAttribute, because CSS `transform` on SVG (transform-box/transform-origin)
+// renders inconsistently in Firefox. Both paths are reduced-motion-respecting:
+// the CSS below is gated here; the JS checks the same media query.
 @media (prefers-reduced-motion: no-preference) {
 	.gb-star {
 		animation: gb-twinkle 4.5s ease-in-out infinite;
@@ -90,59 +103,11 @@
 	.gb-star--2 { animation-delay: 1.8s; }
 	.gb-star--3 { animation-delay: 2.7s; }
 	.gb-star--4 { animation-delay: 3.6s; }
-
-	// the figure's near leg swings from the knee (top-LEFT of its bbox = the knee
-	// joint, where the lower-leg path begins)
-	.gb-scene__leg {
-		transform-box: fill-box;
-		transform-origin: left top;
-		animation: gb-legswing 2.3s ease-in-out infinite;
-	}
-
-	// a shooting star streaks across, occasionally
-	.gb-scene__shoot {
-		opacity: 0;
-		animation: gb-shoot 9s ease-in infinite;
-	}
-
-	// slow parallax drift of the hill layers (kept within the 40px overscan)
-	.gb-scene__hill--back { animation: gb-drift-a 26s ease-in-out infinite; }
-	.gb-scene__hill--mid { animation: gb-drift-b 32s ease-in-out infinite; }
-
-	// the moon rim breathes a faint neon pulse
-	.gb-scene__moon-rim { animation: gb-moonpulse 6s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
 }
 
 @keyframes gb-twinkle {
 	0%, 100% { opacity: 0.2; }
 	50% { opacity: 1; }
-}
-
-@keyframes gb-legswing {
-	0%, 100% { transform: rotate(-13deg); }
-	50% { transform: rotate(24deg); }
-}
-
-@keyframes gb-shoot {
-	0% { opacity: 0; transform: translate(0, 0); }
-	3% { opacity: 0.9; }
-	14% { opacity: 0; transform: translate(260px, 140px); }
-	100% { opacity: 0; transform: translate(260px, 140px); }
-}
-
-@keyframes gb-drift-a {
-	0%, 100% { transform: translateX(0); }
-	50% { transform: translateX(-14px); }
-}
-
-@keyframes gb-drift-b {
-	0%, 100% { transform: translateX(0); }
-	50% { transform: translateX(10px); }
-}
-
-@keyframes gb-moonpulse {
-	0%, 100% { opacity: 0.4; }
-	50% { opacity: 0.85; }
 }
 
 // ── Entrance stagger — title → CTA (transform/opacity only, motion-gated). ─────
