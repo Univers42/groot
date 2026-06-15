@@ -239,6 +239,26 @@ master-report: ## ONE detailed HTML comparison report (perf + offers + matrix + 
 			--infra /b/mini-baas-infra --out /b/wiki/reports/comparison-report.html
 	@echo -e "$(_G)$(_W)✓ comparison report → wiki/reports/comparison-report.html$(_0)"
 
+# All HTML reports flow through ONE design system (scripts/report/lib-report.mjs):
+# styled, graphics-rich (inline SVG), zero-dep, CSP-safe. `make reports` regenerates
+# the whole wiki/reports/ suite + the portal index — the reproducible single command.
+# arg-less generators (each resolves its own data/out paths from import.meta.url)
+REPORT_GENS := supabase-verdict-report security-wins-report network-controls-report compliance-posture-report
+reports: master-report ## Regenerate EVERY HTML report (comparison + supabase-verdict + security/network/compliance wins) + portal (zero-dep, no host node)
+	@for g in $(REPORT_GENS); do \
+		echo "  → $$g"; \
+		docker run --rm -u "$(shell id -u):$(shell id -g)" \
+			-v "$(CURDIR)/..":/b -w /b public.ecr.aws/docker/library/node:22-bookworm \
+			node /b/mini-baas-infra/scripts/report/$$g.mjs || exit 1; \
+	done
+	@docker run --rm -u "$(shell id -u):$(shell id -g)" \
+		-v "$(CURDIR)/..":/b -w /b public.ecr.aws/docker/library/node:22-bookworm \
+		node /b/mini-baas-infra/scripts/report/portal.mjs \
+			--data /b/mini-baas-infra/scripts/bench/offers-compare-data.json \
+			--out /b/wiki/reports/index.html \
+			--bench3 benchmark-3way.html --bench9 benchmark-9way.html --postman postman-offers-report.html
+	@echo -e "$(_G)$(_W)✓ all HTML reports + portal → wiki/reports/ (open wiki/reports/index.html)$(_0)"
+
 scale-seed: _require-compose ## Provision SCALE= bench tenants (+keys+mounts) → artifacts/scale/tenants-<N>.jsonl (MOUNTS= ISOLATION= CONCURRENCY=)
 	@SCALE="$(if $(SCALE),$(SCALE),1000)"; \
 	TC_PORT="$$(docker port mini-baas-tenant-control 3022/tcp 2>/dev/null | head -1 | sed 's/.*://')"; \

@@ -156,6 +156,26 @@ function reportsNav(args) {
       desc: "Newman run of the offer-surface collection — auth, CRUD, aggregate, realtime, self-serve.",
     },
     {
+      href: "supabase-vs-grobase.html",
+      title: "★ Supabase vs Grobase — strong enough? (visual)",
+      desc: "Graphics-rich decision report: verdict gauge, win/parity/gap donut, measured head-to-head bars (read p95, footprint, density, insert p99), the new FTS m101 + vector m102 wins, and where Supabase still honestly leads.",
+    },
+    {
+      href: "security-data-wins.html",
+      title: "★ Security & data wins (visual)",
+      desc: "The four just-landed, gate-backed wins — full-text (m101), vector k-NN (m102), network/WAF (m140), compliance (m141) — as evidence cards + GAP→WIN tone shifts + control-coverage donut + perimeter diagram.",
+    },
+    {
+      href: "network-controls.html",
+      title: "Network controls + Cloudflare (visual)",
+      desc: "Perimeter-layers diagram (Cloudflare → in-stack OWASP-CRS WAF → Kong → segmented planes), WAF block matrix (CRS rule-IDs, gate m140), segmentation matrix, and the copy-paste Cloudflare recipe.",
+    },
+    {
+      href: "compliance-posture.html",
+      title: "Compliance posture — control matrix (visual)",
+      desc: "Audit-ready gauge, ASVS/SOC2/GDPR coverage donut, the full evidence-backed control matrix (gate m141), and the tamper-evident hash-chain demo — with the honest formal-cert caveat.",
+    },
+    {
       href: "../offer-vs-supabase.md",
       title: "Offer vs Supabase (doc)",
       desc: "Markdown deep-dive: tier-by-tier and feature-by-feature against Supabase.",
@@ -164,6 +184,11 @@ function reportsNav(args) {
       href: "../offer-vs-mongodb-atlas.md",
       title: "Offer vs MongoDB Atlas (doc)",
       desc: "Markdown deep-dive vs Atlas — and why the App Services BaaS layer is gone (EOL 2025-09-30).",
+    },
+    {
+      href: "../competitive-matrix.md",
+      title: "Competitive matrix — 91 rows (doc)",
+      desc: "The full capability matrix vs Supabase + Firebase, with the win/parity/gap status and a backing gate per row.",
     },
   ];
   const cards = items

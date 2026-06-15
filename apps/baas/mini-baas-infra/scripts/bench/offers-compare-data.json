@@ -208,19 +208,19 @@
         },
         {
           "feature": "WAF / network segmentation",
-          "grobase": "Per-plane network segmentation overlay (docker-compose.netseg.yml)",
-          "grobaseLevel": "ok",
-          "rival": "Managed network controls, Cloudflare-fronted",
-          "rivalLevel": "win",
-          "source": "docker-compose.netseg.yml / supabase.com"
+          "grobase": "In-stack OWASP-CRS WAF as the sole public listener (SQLi/XSS/traversal → 403 with CRS rule-IDs, benign passes — gate m140) + per-plane network segmentation (public edge ↛ data/control plane REFUSED, gate m140) + per-tenant IP allowlist (m106) + a copy-paste Cloudflare front-door recipe. Supabase OSS self-host ships neither an in-stack WAF nor plane isolation.",
+          "grobaseLevel": "win",
+          "rival": "Network restrictions / IP allow-list (managed); fronted by their own Cloudflare; no in-stack WAF in the OSS self-host stack",
+          "rivalLevel": "partial",
+          "source": "gate m140 + m106 / wiki/network-controls.md"
         },
         {
           "feature": "Compliance posture",
-          "grobase": "Verifiable, self-host controls: tamper-evident hash-chained audit (m104), continuous SOC2-lite evidence collector (m108), GDPR hard-erase + portable export (m105/m109), in-stack OWASP WAF, trust center (m112) — independently re-checkable, data stays in your infra. No third-party attestation yet.",
-          "grobaseLevel": "partial",
-          "rival": "SOC 2 + ISO 27001 (Team), HIPAA BAA (Enterprise) — third-party attested; no in-stack WAF, audit log not cryptographically tamper-evident",
+          "grobase": "Buyer-recomputable, cryptographically tamper-evident hash-chained audit (m104) + continuous SOC2-lite evidence collector that reflects reality (m108) + GDPR hard-erase/export (m105/m109), unified into an ASVS 4.0 + SOC 2 TSC + GDPR control matrix, every row evidence-backed (gate m141). All self-host + independently re-verifiable. Honest caveat: no external SOC2/ISO/HIPAA attestation yet (an auditor + business milestone, not a code gap).",
+          "grobaseLevel": "win",
+          "rival": "External-attested SOC 2 Type II + ISO/IEC 27001:2022 + HIPAA BAA as a hosted product — wins on the paper cert; controls are not buyer-recomputable",
           "rivalLevel": "win",
-          "source": "gates m104/m108/m105/m109/m112 + wiki/trust-center.md / supabase.com/security"
+          "source": "gate m141/m104/m108 + wiki/compliance-posture.md"
         },
         {
           "feature": "Cost per tenant at scale",
