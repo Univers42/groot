@@ -43,6 +43,11 @@ export type PermissionMode = 'abac' | 'rbac';
 export class DecisionsService {
   private readonly logger = new Logger(DecisionsService.name);
   private readonly mode: PermissionMode;
+  // B1: when ON, the PDP passes p_conditions_enabled=true to has_permission so
+  // the stored conditions JSONB (time_window/ip_cidr/aal/owner/resource_id)
+  // actually GATE a policy match. OFF (default) ⇒ has_permission ignores
+  // conditions exactly as in migration 007 — byte-parity with today.
+  private readonly conditionsEnabled: boolean;
 
   constructor(
     private readonly pg: PostgresService,
@@ -50,14 +55,33 @@ export class DecisionsService {
   ) {
     const raw = (config.get<string>('PERMISSION_MODE', 'abac') ?? 'abac').toLowerCase();
     this.mode = raw === 'rbac' ? 'rbac' : 'abac';
-    this.logger.log(`DecisionsService running in mode=${this.mode}`);
+    // Mirror the PERMISSION_MODE pattern: a single boolean, read once at boot.
+    // Conditions only make sense in abac mode (rbac has no JSONB scan at all).
+    this.conditionsEnabled =
+      this.mode === 'abac' &&
+      ['1', 'true', 'yes', 'on'].includes(
+        (config.get<string>('PERMISSION_CONDITIONS_ENABLED', '0') ?? '0').toLowerCase(),
+      );
+    this.logger.log(
+      `DecisionsService running in mode=${this.mode} conditions=${this.conditionsEnabled ? 'on' : 'off'}`,
+    );
   }
 
   async decide(dto: DecidePermissionDto): Promise<PermissionDecision> {
     const action = this.actionForOp(dto.op);
+    const attrs = this.buildAttrs(dto);
+    const resourceId = this.resourceId(dto);
     const rows = await this.pg.adminQuery<PermissionRow>(
-      `SELECT public.has_permission($1::uuid, $2, $3, $4) AS has_permission`,
-      [dto.user.id, dto.resource_type, dto.resource_name, action],
+      `SELECT public.has_permission($1::uuid, $2, $3, $4, $5::jsonb, $6, $7) AS has_permission`,
+      [
+        dto.user.id,
+        dto.resource_type,
+        dto.resource_name,
+        action,
+        JSON.stringify(attrs),
+        this.conditionsEnabled,
+        resourceId,
+      ],
     );
     const allow = rows[0]?.has_permission ?? false;
     const decision: PermissionDecision = {
@@ -75,6 +99,32 @@ export class DecisionsService {
       `${this.mode.toUpperCase()} decision user=${dto.user.id} resource=${dto.resource_type}/${dto.resource_name} op=${dto.op} allow=${allow}`,
     );
     return decision;
+  }
+
+  /**
+   * Build the request-attribute bag the SQL evaluator (auth.eval_conditions)
+   * sees: user_id, tenant_id, aal, ip, resource_id. The caller (query-router)
+   * supplies ip/aal/resource_id via {@link DecidePermissionDto.attributes}; we
+   * normalize them onto reserved keys so the SQL side stays simple. Stable shape
+   * even when conditions are OFF (the function ignores it then).
+   */
+  private buildAttrs(dto: DecidePermissionDto): Record<string, unknown> {
+    const a = dto.attributes ?? {};
+    const out: Record<string, unknown> = { ...a };
+    out['user_id'] = dto.user.id;
+    if (dto.tenant_id) out['tenant_id'] = dto.tenant_id;
+    // aal: passthrough from attributes (query-router/JWT claim), default aal1.
+    out['aal'] = typeof a['aal'] === 'string' && a['aal'] ? a['aal'] : 'aal1';
+    const rid = this.resourceId(dto);
+    if (rid) out['resource_id'] = rid;
+    return out;
+  }
+
+  /** Resolve the per-instance subject id from the dedicated field or attrs. */
+  private resourceId(dto: DecidePermissionDto): string | null {
+    if (typeof dto.resource_id === 'string' && dto.resource_id) return dto.resource_id;
+    const fromAttrs = dto.attributes?.['resource_id'];
+    return typeof fromAttrs === 'string' && fromAttrs ? fromAttrs : null;
   }
 
   private actionForOp(op: DecidePermissionDto['op']): string {
@@ -99,7 +149,13 @@ export class DecisionsService {
           AND (rp.resource_name = $3 OR rp.resource_name = '*')
           AND $4 = ANY(rp.actions)
           AND rp.effect = 'allow'
-        ORDER BY rp.priority DESC
+        ORDER BY
+          -- B3 tiebreak: a table-specific mask wins over a wildcard mask, then
+          -- by priority. Exact resource_name beats '*' at any priority so a
+          -- mask attached to one table is not shadowed by a broad wildcard row.
+          (rp.resource_name = $3) DESC,
+          (rp.resource_type = $2) DESC,
+          rp.priority DESC
         LIMIT 1`,
       [userId, resourceType, resourceName, action],
     );

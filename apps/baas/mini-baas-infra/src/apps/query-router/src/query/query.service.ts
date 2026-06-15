@@ -67,6 +67,12 @@ export interface EngineDescriptor {
 interface QueryRequestContext {
   requestId?: string;
   identity?: VerifiedRequestIdentity;
+  /** Caller IP (same source as audit.interceptor.ts) — fed to the PDP attrs so
+   *  ip_cidr conditions can decide. Undefined when not derivable. */
+  ip?: string;
+  /** Per-instance subject id (dto.filter?.id) — fed to the PDP so resource_id /
+   *  resource_id_in conditions can decide per-row (B3). Inert when conditions off. */
+  resourceId?: string;
   /** >0 on automation follow-up writes — they never re-trigger (loop safety). */
   automationDepth?: number;
 }
@@ -201,6 +207,12 @@ export class QueryService implements OnModuleInit {
   // run adapter-registry-go. Same env name + JSON shape the Rust router
   // reads — share a single source of truth across the stack.
   private readonly staticMounts: Map<string, { engine: string; connection_string: string }>;
+  // B5: when ON, api-key callers STOP short-circuiting on scope and instead
+  // flow through the ABAC PDP (their scope is projected to apikey:read/write/
+  // admin role membership seeded in migration 063), so they get the SAME masks
+  // + conditions a JWT caller gets. OFF (default) ⇒ today's decideByApiKeyScope
+  // — byte-identical scope-only decision.
+  private readonly apiKeyAbacEnabled: boolean;
 
   constructor(
     private readonly config: ConfigService,
@@ -223,6 +235,14 @@ export class QueryService implements OnModuleInit {
     this.staticMounts = parseStaticMounts(
       this.config.get<string>('DATA_PLANE_MOUNTS', '') ?? '',
     );
+    this.apiKeyAbacEnabled = ['1', 'true', 'yes', 'on'].includes(
+      (this.config.get<string>('API_KEY_ABAC_ENABLED', '0') ?? '0').toLowerCase(),
+    );
+    if (this.apiKeyAbacEnabled) {
+      this.logger.log(
+        'API_KEY_ABAC_ENABLED=1 — api-key callers flow through the ABAC PDP (scope→role projection) for masks/conditions',
+      );
+    }
     if (this.staticMounts.size > 0) {
       this.logger.log(
         `Static mount table loaded (${this.staticMounts.size} entries) — adapter-registry will be bypassed for matching dbIds`,
@@ -369,7 +389,13 @@ export class QueryService implements OnModuleInit {
 
     const { engine, connection_string, isolation, capability_overrides } =
       await this.fetchConnection(dbId, tenantId);
-    const decision = await this.decidePermission(userId, engine, resource, op, context);
+    // Per-instance subject for B3 conditions: the row id the caller is acting
+    // on (filter.id). Inert unless PERMISSION_CONDITIONS_ENABLED is on.
+    const resourceId = this.resourceIdFromFilter(dto.filter);
+    const decision = await this.decidePermission(userId, engine, resource, op, {
+      ...context,
+      resourceId,
+    });
     if (!decision.allow) {
       throw new ForbiddenException(decision.reason);
     }
@@ -489,7 +515,10 @@ export class QueryService implements OnModuleInit {
 
     // Authorize every op BEFORE opening the transaction — fail the batch closed.
     for (const o of ops) {
-      const decision = await this.decidePermission(userId, engine, o.resource, o.op, context);
+      const decision = await this.decidePermission(userId, engine, o.resource, o.op, {
+        ...context,
+        resourceId: this.resourceIdFromFilter(o.filter),
+      });
       if (!decision.allow) {
         throw new ForbiddenException(`op '${o.op} ${o.resource}': ${decision.reason}`);
       }
@@ -624,26 +653,44 @@ export class QueryService implements OnModuleInit {
     const identity = context.identity;
     const tenantId = identity?.tenantId ?? userId;
 
-    // API-key callers carry verified key scopes, not ABAC user roles. The
-    // synthetic `api-key:<id>` actor has no role rows (and isn't a UUID, so the
-    // user-centric ABAC engine would fail closed). Authorize by scope instead;
-    // ABAC + field masks remain the model for JWT/user auth.
-    const scoped = this.decideByApiKeyScope(identity, op);
-    if (scoped) return scoped;
+    // API-key callers carry verified key scopes, not ABAC user roles. By default
+    // (API_KEY_ABAC_ENABLED off) the synthetic `api-key:<id>` actor has no role
+    // rows (and isn't a UUID, so the user-centric ABAC engine would fail closed)
+    // — authorize by scope instead; ABAC + field masks remain the model for
+    // JWT/user auth. B5: when API_KEY_ABAC_ENABLED is ON, an api-key caller
+    // instead FALLS THROUGH to the PDP using its key uuid as the subject (its
+    // scope is projected to apikey:<scope> role membership in migration 063), so
+    // it gets the SAME masks/conditions a JWT caller gets.
+    const apiKeyUuid = this.apiKeyAbacEnabled ? this.apiKeyUuid(identity) : undefined;
+    if (!apiKeyUuid) {
+      const scoped = this.decideByApiKeyScope(identity, op);
+      if (scoped) return scoped;
+    }
+
+    // Subject the PDP decides on: the api-key uuid (B5 path) or the user id.
+    const subjectId = apiKeyUuid ?? userId;
 
     try {
       const { data } = await firstValueFrom(
         this.http.post<PermissionDecision>(
           `${this.permissionUrl}/permissions/decide`,
           {
-            user: { id: userId },
+            user: { id: subjectId },
             tenant_id: tenantId,
             project_id: identity?.projectId ?? tenantId,
             app_id: identity?.appId ?? 'legacy',
             resource_type: engine,
             resource_name: resource,
             op,
-            attributes: { request_id: context.requestId },
+            resource_id: context.resourceId,
+            attributes: {
+              request_id: context.requestId,
+              // ip feeds ip_cidr conditions; resource_id feeds per-instance
+              // (resource_id / resource_id_in) conditions. Both are inert unless
+              // PERMISSION_CONDITIONS_ENABLED is on at the PDP.
+              ...(context.ip ? { ip: context.ip } : {}),
+              ...(context.resourceId ? { resource_id: context.resourceId } : {}),
+            },
           },
           {
             timeout: this.controlPlaneTimeoutMs,
@@ -660,6 +707,20 @@ export class QueryService implements OnModuleInit {
         `ABAC decision service failed closed: ${error instanceof Error ? error.message : 'unknown error'}`,
       );
     }
+  }
+
+  /**
+   * Extract the key uuid from an api-key identity (`api-key:<uuid>`) when B5 is
+   * enabled — that uuid is the ABAC subject the PDP decides on (its scope is
+   * projected to apikey:<scope> role membership in migration 063). Returns
+   * undefined for non-api-key identities (they keep the JWT subject).
+   */
+  private apiKeyUuid(identity: VerifiedRequestIdentity | undefined): string | undefined {
+    if (identity?.authMethod !== 'kong-hmac') return undefined;
+    const uid = identity.userId;
+    if (!uid?.startsWith('api-key:')) return undefined;
+    const uuid = uid.slice('api-key:'.length);
+    return uuid.length > 0 ? uuid : undefined;
   }
 
   /**
@@ -688,6 +749,14 @@ export class QueryService implements OnModuleInit {
     if (READ.has(lop)) needed = 'read';
     else if (WRITE.has(lop)) needed = 'write';
     return { allow: false, reason: `api-key lacks '${needed}' scope for op '${op}'` };
+  }
+
+  /** Per-instance subject id from a query filter (`filter.id`), as a string —
+   *  the value B3 conditions (resource_id / resource_id_in) decide on. */
+  private resourceIdFromFilter(filter: Record<string, unknown> | undefined): string | undefined {
+    const id = filter?.['id'];
+    if (id === undefined || id === null) return undefined;
+    return typeof id === 'string' ? id : String(id);
   }
 
   private applyFieldMask(result: QueryResult, mask: FieldMask | undefined): QueryResult {
