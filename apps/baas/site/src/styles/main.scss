@@ -2,6 +2,8 @@
 @use 'abstracts/system-tokens';
 @use 'base/reset';
 @use 'base/typography';
+@use 'utilities/patterns';
+@use 'utilities/fx';
 @use 'layout/shell';
 @use 'layout/header';
 @use 'layout/footer';

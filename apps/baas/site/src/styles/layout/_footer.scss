@@ -1,8 +1,43 @@
+// ── FOOTER — dark raised panel, fat gradient top border, decorative depth. ────
 .gb-footer {
-	border-top: 1px solid var(--gb-line);
+	position: relative;
+	isolation: isolate;
+	overflow: hidden; // clip the bgword + floaters to the panel (zero overflow CLS)
 	background: var(--gb-bg-raised);
 	padding-block: var(--gb-space-12);
 	margin-top: var(--gb-section-gap);
+
+	// border-8 across the top, as a gradient sweep through four accents.
+	border-top: 8px solid transparent;
+	border-image: linear-gradient(90deg, var(--gb-a1), var(--gb-a4), var(--gb-a3), var(--gb-a2)) 1;
+}
+
+// faint diagonal stripes textured over the panel (pattern-on-pattern).
+.gb-footer::before {
+	content: '';
+	position: absolute;
+	inset: 0;
+	z-index: -1;
+	background-image: var(--pat-stripes);
+	opacity: 0.05;
+	pointer-events: none;
+}
+
+// ONE faint giant background word, bleeding off the bottom edge (aria-hidden).
+.gb-footer__bgword {
+	top: auto;
+	bottom: -3.5rem;
+	opacity: 0.06;
+	z-index: -1;
+}
+
+.gb-footer__floater {
+	z-index: 0;
+}
+
+.gb-footer__body {
+	position: relative;
+	z-index: 1;
 }
 
 .gb-footer__inner {
@@ -13,30 +48,94 @@
 	align-items: flex-start;
 }
 
-.gb-footer__tag {
-	color: var(--gb-text-faint);
-	font-size: var(--gb-text-sm);
-	max-width: 34ch;
+// ── Brand wordmark ────────────────────────────────────────────────────────────
+.gb-footer__brand {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.45rem;
+	font-family: var(--gb-font-display);
+	font-weight: 700;
+	font-size: 1.5rem;
+	color: var(--gb-text);
+	text-transform: uppercase;
+	letter-spacing: -0.02em;
+	text-shadow:
+		2px 2px 0 var(--gb-a5),
+		4px 4px 0 var(--gb-a1);
 }
 
-.gb-footer nav {
+.gb-footer__spark {
+	color: var(--gb-a3);
+	font-size: 0.85em;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.gb-footer__spark {
+		display: inline-block;
+		animation: gb-bounce-subtle 2.4s ease-in-out infinite;
+	}
+}
+
+.gb-footer__tag {
+	color: var(--gb-text-muted); // readable white-ish, not faint
+	font-size: var(--gb-text-sm);
+	max-width: 34ch;
+	margin-top: var(--gb-space-2);
+}
+
+// ── Footer nav ────────────────────────────────────────────────────────────────
+.gb-footer__nav {
 	display: flex;
 	gap: var(--gb-space-6);
 }
 
-.gb-footer a {
+.gb-footer__nav a {
+	position: relative;
 	color: var(--gb-text-muted);
+	font-family: var(--gb-font-mono);
 	font-size: var(--gb-text-sm);
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
 	text-decoration: none;
+	padding-bottom: 0.2rem;
+	transition: color var(--gb-dur-fast) var(--gb-ease-out);
 }
 
-.gb-footer a:hover {
+.gb-footer__nav a::after {
+	content: '';
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	height: 3px;
+	border-radius: 999px;
+	background: linear-gradient(90deg, var(--gb-a2), var(--gb-a1));
+	transform: scaleX(0);
+	transform-origin: left;
+	transition: transform var(--gb-dur-fast) var(--gb-ease-out);
+}
+
+.gb-footer__nav a:hover {
 	color: var(--gb-text);
-	text-decoration: underline;
+}
+
+.gb-footer__nav a:hover::after {
+	transform: scaleX(1);
+}
+
+.gb-footer__nav a:focus-visible {
+	outline: 3px solid var(--gb-a3);
+	outline-offset: 2px;
+	border-radius: var(--gb-radius-sm);
+	box-shadow:
+		0 0 0 4px var(--gb-bg-raised),
+		0 0 0 7px var(--gb-a2);
 }
 
 .gb-footer__note {
 	margin-top: var(--gb-space-8);
 	color: var(--gb-text-faint);
 	font-size: var(--gb-text-xs);
+	max-width: 70ch;
 }

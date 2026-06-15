@@ -1,4 +1,5 @@
 // Deterministic tenant population (fixed PRNG seed → stable visual, testable).
+import { GALAXY_COLORS } from '../../data/galaxy-palette.ts';
 import type { EngineId, IsolationId, TenantNode, TierId } from './types.ts';
 
 export function mulberry32(seed: number): () => number {
@@ -12,24 +13,10 @@ export function mulberry32(seed: number): () => number {
 	};
 }
 
-const ENGINE_COLORS: Record<EngineId, string> = {
-	postgres: '#7dd3fc',
-	mysql: '#fb923c',
-	mongodb: '#4ade80',
-	sqlite: '#a5b4fc',
-	redis: '#f87171',
-	cockroach: '#c084fc',
-	mssql: '#f472b6',
-	http: '#fde047',
-};
-
-const TIER_COLORS: Record<TierId, string> = {
-	nano: '#34d399',
-	basic: '#7dd3fc',
-	essential: '#a78bfa',
-	pro: '#fbbf24',
-	max: '#f472b6',
-};
+// Node colours come from the single galaxy palette (src/data/galaxy-palette.ts),
+// which mirrors the MAXIMALISM accents — so the drifting nodes match the site.
+const ENGINE_COLORS: Record<EngineId, string> = GALAXY_COLORS.engines;
+const TIER_COLORS: Record<TierId, string> = GALAXY_COLORS.tiers;
 
 const TIER_RADIUS: Record<TierId, number> = {
 	nano: 2.1,

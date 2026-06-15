@@ -88,7 +88,7 @@ export const VERDICTS: Verdict[] = [
 	{
 		id: 'nano',
 		name: 'Nano',
-		advantages: ['Free — one 5.1 MB static binary', 'Zero config: SQLite in-process', '6× lighter than PocketBase (measured)', 'Graduates to Basic with no rewrite'],
+		advantages: ['Free — one 5.1 MB static binary', 'Zero config: SQLite in-process', '~2 MiB idle RSS (measured)', 'Graduates to Basic with no rewrite'],
 		tradeoffs: ['SQLite-centric (PostgreSQL optional)', 'No rate limiting or tenant isolation', 'No realtime CDC, batch, aggregate or transactions'],
 		bestWhen: 'Landing pages, prototypes, or one tiny app where a 5 MB binary on a $5 box is all you need.',
 		outgrowWhen: 'You need PostgreSQL as primary, per-tenant rate limits, or more than one app.',

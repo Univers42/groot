@@ -1,55 +1,161 @@
+// ── HEADER — sticky, blurred, fat clashing accent underline, maximalist mark. ─
 .gb-header {
 	position: sticky;
 	top: 0;
 	z-index: 20;
-	backdrop-filter: blur(14px);
-	background: rgb(5 7 13 / 72%);
-	border-bottom: 1px solid var(--gb-line);
+	overflow: hidden; // keeps the decorative floater clipped to the bar
+	backdrop-filter: blur(16px);
+	background: rgb(13 13 26 / 80%);
+	border-bottom: 4px solid var(--gb-a1); // clashing magenta underline (decoration)
+	box-shadow:
+		0 2px 0 var(--gb-a2), // hairline cyan under the magenta — stacked, never single
+		0 14px 36px rgb(13 13 26 / 55%);
+}
+
+// Decorative floater — aria-hidden, animated drift (gated to motion-safe in fx).
+.gb-header__floater {
+	top: -0.6rem;
+	right: 8%;
 }
 
 .gb-header__inner {
+	position: relative;
+	z-index: 1;
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
 	gap: var(--gb-space-6);
-	padding-block: 0.8rem;
+	padding-block: 0.7rem;
 }
 
+// ── Brand ─────────────────────────────────────────────────────────────────────
 .gb-header__brand {
 	display: inline-flex;
 	align-items: center;
-	gap: 0.6rem;
+	gap: 0.55rem;
 	font-family: var(--gb-font-display);
 	font-weight: 700;
-	font-size: 1.25rem;
+	font-size: 1.3rem;
 	color: var(--gb-text);
 	text-decoration: none;
+	text-transform: uppercase;
 	letter-spacing: -0.02em;
 }
 
-.gb-header__brand svg {
-	width: 1.7rem;
-	height: 1.7rem;
+.gb-header__mark {
+	width: 1.85rem;
+	height: 1.85rem;
+	filter: drop-shadow(0 0 8px rgb(255 58 242 / 55%));
+	transition: transform var(--gb-dur-fast) var(--gb-ease-bounce);
 }
 
+@media (prefers-reduced-motion: no-preference) {
+	.gb-header__brand:hover .gb-header__mark {
+		transform: rotate(-8deg) scale(1.08);
+	}
+}
+
+// Brand wordmark: a small stacked shadow so it reads in-system without shouting.
+.gb-header__name {
+	text-shadow:
+		1px 1px 0 var(--gb-a5),
+		2px 2px 0 var(--gb-a1);
+}
+
+.gb-header__brand:focus-visible {
+	outline: 3px solid var(--gb-a3);
+	outline-offset: 3px;
+	border-radius: var(--gb-radius-sm);
+}
+
+// ── Nav ───────────────────────────────────────────────────────────────────────
 .gb-header__nav {
 	display: flex;
 	align-items: center;
-	gap: clamp(0.6rem, 2.5vw, 1.8rem);
+	gap: clamp(0.6rem, 2.5vw, 1.6rem);
 }
 
 .gb-header__link {
+	position: relative;
 	color: var(--gb-text-muted);
 	text-decoration: none;
+	font-family: var(--gb-font-mono);
 	font-size: var(--gb-text-sm);
 	font-weight: 600;
-	padding: 0.35rem 0.2rem;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	padding: 0.4rem 0.25rem;
+	transition: color var(--gb-dur-fast) var(--gb-ease-out);
+}
+
+// Accent underline that grows on hover/current — pure transform, zero CLS.
+.gb-header__link::after {
+	content: '';
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	height: 3px;
+	border-radius: 999px;
+	background: linear-gradient(90deg, var(--gb-a1), var(--gb-a2));
+	transform: scaleX(0);
+	transform-origin: left;
+	transition: transform var(--gb-dur-fast) var(--gb-ease-out);
 }
 
 .gb-header__link:hover {
 	color: var(--gb-text);
 }
 
+.gb-header__link:hover::after {
+	transform: scaleX(1);
+}
+
 .gb-header__link[aria-current='page'] {
-	color: var(--gb-primary);
+	color: var(--gb-a3); // yellow marks the current page (AA on dark)
+}
+
+.gb-header__link[aria-current='page']::after {
+	transform: scaleX(1);
+	background: linear-gradient(90deg, var(--gb-a3), var(--gb-a4));
+}
+
+// DOUBLE focus ring on nav links (8px total, contrasting accents + outline).
+.gb-header__link:focus-visible {
+	outline: 3px solid var(--gb-a3);
+	outline-offset: 2px;
+	border-radius: var(--gb-radius-sm);
+	box-shadow:
+		0 0 0 4px var(--gb-bg),
+		0 0 0 7px var(--gb-a2);
+}
+
+// ── CTA — a compact gradient+glow pill (smaller than the page's fat buttons). ─
+.gb-header__cta {
+	min-height: 2.7rem;
+	padding: 0.55rem 1.25rem;
+	border-width: 3px;
+	font-size: var(--gb-text-sm);
+	box-shadow:
+		0 0 18px rgb(255 58 242 / 50%),
+		4px 4px 0 var(--gb-a2),
+		8px 8px 0 var(--gb-a5);
+}
+
+.gb-header__cta:hover {
+	box-shadow:
+		0 0 26px rgb(255 58 242 / 70%),
+		5px 5px 0 var(--gb-a2),
+		10px 10px 0 var(--gb-a5);
+}
+
+.gb-header__cta-spark {
+	font-size: 0.9em;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.gb-header__cta-spark {
+		animation: gb-wiggle 1.4s ease-in-out infinite;
+		display: inline-block;
+	}
 }

@@ -1,18 +1,59 @@
+// ── HERO — maximalist: giant gradient-clipped headline, pill kicker, glowing
+// CTAs, tilted accent stat cards, floating shapes + one giant BUILD bgword.
+// All variety via classes (CSP forbids inline style=); motion behind the global
+// reduced-motion guard; decorations are absolute → zero CLS.
 .gb-hero {
+	position: relative;
+	isolation: isolate; // contain the absolute floaters + bgword behind content
 	min-height: calc(100dvh - 4rem);
 	display: grid;
 	align-content: center;
 	gap: var(--gb-space-6);
 	padding-block: var(--gb-space-16);
+	overflow: hidden; // bgword bleeds off-edge without scrolling the page
 }
 
-.gb-hero h1 {
-	max-width: 13ch;
+// keep the headline/lede/CTAs above every decorative layer
+.gb-hero__inner {
+	position: relative;
+	z-index: 2;
+	display: grid;
+	gap: var(--gb-space-6);
 }
 
-.gb-hero h1 em {
+// The big BUILD word sits behind content, bleeding off the left edge.
+.gb-hero__bgword {
+	z-index: 0;
+	opacity: 0.09;
+}
+
+// ── Kicker as a bold uppercase tracking-widest LABEL PILL ────────────────────
+.gb-hero__kicker {
+	justify-self: start;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.45rem 1.05rem;
+	border: 2px dashed var(--gb-a2); // cyan dashed clashes with the dark fill
+	border-radius: var(--gb-radius-pill);
+	background: rgb(45 27 78 / 60%);
+	color: var(--gb-a3); // yellow label text — AA on the dark pill
+	box-shadow:
+		0 0 16px rgb(0 245 212 / 30%),
+		4px 4px 0 var(--gb-a5);
+}
+
+// ── Massive H1 — mega stacked shadow comes from .tshadow-mega on the element ──
+.gb-hero__title {
+	max-width: 14ch;
+	font-size: var(--gb-text-hero);
+	line-height: 0.92;
+}
+
+// the highlighted word carries the animated gradient-text fill (.gradient-text);
+// reset its inherited italic so it reads as one continuous headline.
+.gb-hero__title em {
 	font-style: normal;
-	color: var(--gb-primary);
 }
 
 .gb-hero__ctas {
@@ -22,11 +63,68 @@
 	margin-top: var(--gb-space-2);
 }
 
+// ── Stat row — fat tilted accent cards with hard-stacked shadows ─────────────
 .gb-hero__stats {
 	display: flex;
 	flex-wrap: wrap;
-	gap: var(--gb-space-3);
+	gap: var(--gb-space-6);
 	margin-top: var(--gb-space-8);
+}
+
+// Upgrade the base .gb-stat into a bolder hero card: 4px border, fatter pad,
+// glow + hard double-stack tinted by the card's own --acc (set by .accent-N).
+.gb-hero__stats .gb-stat {
+	padding: var(--gb-space-6) var(--gb-space-6);
+	border-width: 4px;
+	border-radius: var(--gb-radius-lg);
+	box-shadow:
+		0 0 20px color-mix(in srgb, var(--acc) 40%, transparent),
+		6px 6px 0 var(--gb-a5),
+		12px 12px 0 color-mix(in srgb, var(--acc) 70%, transparent);
+	transition:
+		transform var(--gb-dur-fast) var(--gb-ease-bounce),
+		box-shadow var(--gb-dur-fast) var(--gb-ease-out);
+}
+
+.gb-hero__stats .gb-stat__value {
+	font-size: var(--gb-text-xl);
+}
+
+// Asymmetric rhythm: alternate slight rotation + vertical nudge per chip.
+.gb-stat--tilt-a { transform: rotate(-2deg) translateY(-0.5rem); }
+.gb-stat--tilt-b { transform: rotate(1deg) translateY(0.75rem); }
+.gb-stat--tilt-c { transform: rotate(2deg) translateY(-0.75rem); }
+.gb-stat--tilt-d { transform: rotate(-1deg) translateY(0.5rem); }
+
+@media (prefers-reduced-motion: no-preference) {
+	.gb-hero__stats .gb-stat:hover {
+		transform: scale(1.05) rotate(0deg) translateY(-0.25rem);
+		box-shadow:
+			0 0 30px color-mix(in srgb, var(--acc) 55%, transparent),
+			8px 8px 0 var(--gb-a5),
+			16px 16px 0 color-mix(in srgb, var(--acc) 70%, transparent);
+	}
+}
+
+// ── Emoji decorations (aria-hidden) — absolute, animated, zero CLS ───────────
+.gb-hero__emoji {
+	position: absolute;
+	z-index: 1;
+	font-size: clamp(1.8rem, 1rem + 2.5vw, 3rem);
+	line-height: 1;
+	pointer-events: none;
+	user-select: none;
+	filter: drop-shadow(0 0 10px rgb(255 58 242 / 45%));
+}
+
+.gb-hero__emoji--rocket {
+	top: 14%;
+	right: 12%;
+}
+
+.gb-hero__emoji--spark {
+	bottom: 16%;
+	left: 7%;
 }
 
 .gb-hero__hint {
