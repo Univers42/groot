@@ -11,8 +11,9 @@
 ## TL;DR — who wins where
 
 **Supabase** is the safer pick if you want a *managed* Postgres-native cloud with a polished Studio
-dashboard, `pg_graphql` + `pgvector` first-class, a huge community, and SOC 2 / HIPAA available
-**today**. **Grobase** is the pick if you want to **self-host one backend for any frontend** across
+dashboard, GraphQL on by default, a huge community, and SOC 2 / HIPAA available
+**today**. (Vector + full-text search used to belong on this list — Grobase now matches it with typed
+first-class ops; see below.) **Grobase** is the pick if you want to **self-host one backend for any frontend** across
 **up to 9 engines** (not just Postgres), bring your *own* database (`tenant_owned`), pack **24,888
 tenants into ~2.9 MiB of data-plane RAM** (measured — gate `m46`), ship a **5 MB single binary** at
 the low end, and pay **< $1/tenant amortized** at the high end — with an **in-stack OWASP WAF** as the
@@ -127,12 +128,18 @@ Grobase column cites `packages.json` / a gate / an artifact. Supabase column is 
   patterns out of the box; you get real Postgres, not an abstraction.
 - **Studio dashboard polish.** Supabase Studio (table editor, SQL editor, logs, auth UI) is far more
   mature than Grobase's tenant console.
-- **`pg_graphql` + `pgvector` first-class.** GraphQL and vector search are native, supported, and
-  documented. Grobase runs the **same `pg_graphql` extension** (gate `m59` even proves two-tenant RLS
-  isolation), but only as an **opt-in glibc edition** (the lean default 5xxs the route) and **Postgres
-  only**; and on **vector/full-text search Supabase wins outright** — Grobase exposes **neither as a
-  tenant op** and doesn't even install pgvector in its shipped image (stock `postgres:16-alpine`).
-  This is a clean Supabase win.
+- **`pg_graphql` first-class GraphQL.** GraphQL is native, supported, and documented. Grobase runs the
+  **same `pg_graphql` extension** (gate `m59` even proves two-tenant RLS isolation), but only as an
+  **opt-in glibc edition** (the lean default 5xxs the route) and **Postgres only** — so on GraphQL
+  *default availability* Supabase still leads.
+
+  > **Vector + full-text search is no longer a Supabase win — Grobase now wins it.** Grobase exposes
+  > both as **typed first-class data-plane ops**, owner-scoped and capability-gated: `op=list` +
+  > `search:{query,columns,language}` → **ranked, multi-column** `to_tsvector @@ websearch_to_tsquery`
+  > with `ts_rank` ordering (gate **m101**), and `op=list` + `vector:{column,query,k,metric}` →
+  > **pgvector k-NN** (`<=>`/`<->`/`<#>` = cosine/l2/ip, gate **m102**); the default Postgres image is
+  > now `pgvector/pgvector:pg16`. This is **more ergonomic than Supabase**, where FTS is a
+  > single-column query-string filter and vector search needs a hand-written SQL RPC.
 - **Managed-edge functions + turnkey backups.** Supabase Edge Functions deploy to Deno Deploy
   **edge regions worldwide**; Grobase functions are **single-node**. And Supabase runs daily
   backups + PITR as a **hands-off managed SLA** with contractual retention — Grobase's per-tenant
@@ -152,8 +159,10 @@ Grobase column cites `packages.json` / a gate / an artifact. Supabase column is 
 ## Choose Supabase if … / Choose Grobase if …
 
 > **Choose Supabase if** you want a managed, Postgres-native cloud you don't operate; you need a
-> polished dashboard; `pg_graphql`/`pgvector` matter; you need a **signed SOC 2 / ISO 27001 / HIPAA**
+> polished dashboard; GraphQL-on-by-default matters; you need a **signed SOC 2 / ISO 27001 / HIPAA**
 > attestation today; or your team is happiest in the Postgres ecosystem and one DB per app is fine.
+> (Vector + full-text search no longer belong here — Grobase matches them with typed first-class ops,
+> gates m101/m102.)
 
 > **Choose Grobase if** you want to **self-host one backend for any frontend** across **many engines**
 > (not just Postgres); you need to **bring your own database**; you're packing **many tenants into a
