@@ -107,6 +107,27 @@ API_KEY="${LIVE_TENANT_API_KEY}"
 DB_ID="${LIVE_TENANT_DB_ID}"
 CRUD_TABLE="edge_scratch_$(date +%s)"
 
+# ── 2a) PRE-WARM verify BEFORE the DDL ──────────────────────────────────────
+# The DDL is the FIRST verify-dependent call; a brand-new key cold-misses the
+# tenant-control verify cache. Hit a cheap verify-only call (a list on the
+# not-yet-created table) until verify is up — any non-503/000 response proves
+# verify passed AND warmed the cache, so the DDL below lands hot and succeeds
+# on the first try instead of burning the 25-try 503 budget.
+step "2a/5 PRE-WARM verify-cache before DDL (cheap call until verify up; ≤40 tries, 1s)"
+PREWARM_BODY='{"op":"list","limit":1}'
+pwarmed=0
+for i in $(seq 1 40); do
+  PW_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -X POST \
+    "${BASE_URL}/query/v1/${DB_ID}/tables/${CRUD_TABLE}" \
+    -H "apikey: ${ANON_KEY}" -H "X-Baas-Api-Key: ${API_KEY}" \
+    -H 'Content-Type: application/json' -d "${PREWARM_BODY}" 2>/dev/null || echo 000)"
+  case "${PW_CODE}" in
+    503|000) yellow "  … prewarm try ${i}/40 → HTTP ${PW_CODE} (verify cold; retry 1s)"; sleep 1 ;;
+    *)       ok "verify up after ${i} try/tries (HTTP ${PW_CODE}) — cache warmed for the DDL"; pwarmed=1; break ;;
+  esac
+done
+[[ "${pwarmed}" == "1" ]] || fail "verify never came up in 40 tries (last HTTP ${PW_CODE})"
+
 # ── 2) create the scratch table via the DDL route ───────────────────────────
 step "2/5 create scratch table '${CRUD_TABLE}' (generous benign schema) via /schema/ddl"
 # Generous benign column set so SUCCESS-expecting vectors find their columns

@@ -80,6 +80,26 @@ footer li{margin:2px 0}
         <p class="cd">Newman run of the offer-surface collection — auth, CRUD, aggregate, realtime, self-serve.</p>
         <span class="arrow">open &rarr;</span>
       </a>
+      <a class="card" href="supabase-vs-grobase.html">
+        <p class="ct">★ Supabase vs Grobase — strong enough? (visual)</p>
+        <p class="cd">Graphics-rich decision report: verdict gauge, win/parity/gap donut, measured head-to-head bars (read p95, footprint, density, insert p99), the new FTS m101 + vector m102 wins, and where Supabase still honestly leads.</p>
+        <span class="arrow">open &rarr;</span>
+      </a>
+      <a class="card" href="security-data-wins.html">
+        <p class="ct">★ Security &amp; data wins (visual)</p>
+        <p class="cd">The four just-landed, gate-backed wins — full-text (m101), vector k-NN (m102), network/WAF (m140), compliance (m141) — as evidence cards + GAP→WIN tone shifts + control-coverage donut + perimeter diagram.</p>
+        <span class="arrow">open &rarr;</span>
+      </a>
+      <a class="card" href="network-controls.html">
+        <p class="ct">Network controls + Cloudflare (visual)</p>
+        <p class="cd">Perimeter-layers diagram (Cloudflare → in-stack OWASP-CRS WAF → Kong → segmented planes), WAF block matrix (CRS rule-IDs, gate m140), segmentation matrix, and the copy-paste Cloudflare recipe.</p>
+        <span class="arrow">open &rarr;</span>
+      </a>
+      <a class="card" href="compliance-posture.html">
+        <p class="ct">Compliance posture — control matrix (visual)</p>
+        <p class="cd">Audit-ready gauge, ASVS/SOC2/GDPR coverage donut, the full evidence-backed control matrix (gate m141), and the tamper-evident hash-chain demo — with the honest formal-cert caveat.</p>
+        <span class="arrow">open &rarr;</span>
+      </a>
       <a class="card" href="../offer-vs-supabase.md">
         <p class="ct">Offer vs Supabase (doc)</p>
         <p class="cd">Markdown deep-dive: tier-by-tier and feature-by-feature against Supabase.</p>
@@ -88,6 +108,11 @@ footer li{margin:2px 0}
       <a class="card" href="../offer-vs-mongodb-atlas.md">
         <p class="ct">Offer vs MongoDB Atlas (doc)</p>
         <p class="cd">Markdown deep-dive vs Atlas — and why the App Services BaaS layer is gone (EOL 2025-09-30).</p>
+        <span class="arrow">open &rarr;</span>
+      </a>
+      <a class="card" href="../competitive-matrix.md">
+        <p class="ct">Competitive matrix — 91 rows (doc)</p>
+        <p class="cd">The full capability matrix vs Supabase + Firebase, with the win/parity/gap status and a backing gate per row.</p>
         <span class="arrow">open &rarr;</span>
       </a>
     </div>
@@ -255,9 +280,9 @@ footer li{margin:2px 0}
         </tr>
         <tr>
           <td><b>Vector / full-text search</b></td>
-          <td><span class="badge" style="background:#dc2626">gap</span> No first-class FTS or vector op; stock PG tsvector reachable only via admin-only /v1/admin/raw; pgvector NOT installed (base image postgres:16-alpine); $like/$ilike = substring only</td>
-          <td><span class="badge" style="background:#16a34a">win</span> pgvector + built-in tsvector FTS, first-class, managed + documented</td>
-          <td class="muted">operation.rs:24-32 (8-op surface) + docker-compose.yml:483 (stock postgres:16-alpine) + routes.rs:2178 (admin-only raw) / supabase.com docs</td>
+          <td><span class="badge" style="background:#16a34a">win</span> First-class op=fulltext_search (ranked to_tsvector @@ websearch_to_tsquery, multi-column, language-aware, owner-scoped — gate m101) + op=vector_search (pgvector kNN cosine/l2/ip — gate m102); engine-agnostic, capability-gated</td>
+          <td><span class="badge" style="background:#0891b2">ok</span> pgvector + tsvector (FTS is a single-column filter operator; vector needs a hand-written SQL RPC)</td>
+          <td class="muted">postgres.rs build_search/build_vector_order + gates m101/m102 / supabase.com</td>
         </tr>
         <tr>
           <td><b>Dashboard / Studio</b></td>
@@ -279,15 +304,15 @@ footer li{margin:2px 0}
         </tr>
         <tr>
           <td><b>WAF / network segmentation</b></td>
-          <td><span class="badge" style="background:#0891b2">ok</span> Per-plane network segmentation overlay (docker-compose.netseg.yml)</td>
-          <td><span class="badge" style="background:#16a34a">win</span> Managed network controls, Cloudflare-fronted</td>
-          <td class="muted">docker-compose.netseg.yml / supabase.com</td>
+          <td><span class="badge" style="background:#16a34a">win</span> In-stack OWASP-CRS WAF as the sole public listener (SQLi/XSS/traversal → 403 with CRS rule-IDs, benign passes — gate m140) + per-plane network segmentation (public edge ↛ data/control plane REFUSED, gate m140) + per-tenant IP allowlist (m106) + a copy-paste Cloudflare front-door recipe. Supabase OSS self-host ships neither an in-stack WAF nor plane isolation.</td>
+          <td><span class="badge" style="background:#a16207">partial</span> Network restrictions / IP allow-list (managed); fronted by their own Cloudflare; no in-stack WAF in the OSS self-host stack</td>
+          <td class="muted">gate m140 + m106 / wiki/network-controls.md</td>
         </tr>
         <tr>
           <td><b>Compliance posture</b></td>
-          <td><span class="badge" style="background:#a16207">partial</span> Verifiable, self-host controls: tamper-evident hash-chained audit (m104), continuous SOC2-lite evidence collector (m108), GDPR hard-erase + portable export (m105/m109), in-stack OWASP WAF, trust center (m112) — independently re-checkable, data stays in your infra. No third-party attestation yet.</td>
-          <td><span class="badge" style="background:#16a34a">win</span> SOC 2 + ISO 27001 (Team), HIPAA BAA (Enterprise) — third-party attested; no in-stack WAF, audit log not cryptographically tamper-evident</td>
-          <td class="muted">gates m104/m108/m105/m109/m112 + wiki/trust-center.md / supabase.com/security</td>
+          <td><span class="badge" style="background:#16a34a">win</span> Buyer-recomputable, cryptographically tamper-evident hash-chained audit (m104) + continuous SOC2-lite evidence collector that reflects reality (m108) + GDPR hard-erase/export (m105/m109), unified into an ASVS 4.0 + SOC 2 TSC + GDPR control matrix, every row evidence-backed (gate m141). All self-host + independently re-verifiable. Honest caveat: no external SOC2/ISO/HIPAA attestation yet (an auditor + business milestone, not a code gap).</td>
+          <td><span class="badge" style="background:#16a34a">win</span> External-attested SOC 2 Type II + ISO/IEC 27001:2022 + HIPAA BAA as a hosted product — wins on the paper cert; controls are not buyer-recomputable</td>
+          <td class="muted">gate m141/m104/m108 + wiki/compliance-posture.md</td>
         </tr>
         <tr>
           <td><b>Cost per tenant at scale</b></td>
