@@ -8,6 +8,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/dlesieur/mini-baas/control-plane/internal/cmek"
 	"github.com/dlesieur/mini-baas/control-plane/internal/packages"
 	"github.com/dlesieur/mini-baas/control-plane/internal/shared"
 	"github.com/jackc/pgx/v5"
@@ -73,6 +74,29 @@ type Service struct {
 	// SCRYPT_MAX_CONCURRENT) — the memory bound that stopped the 2026-06-11
 	// bulk-registration OOM loop.
 	sf singleflight.Group
+	// CMEK / BYOK (D4.8) — all OFF by default (cmekEnabled=false, kms=nil), so
+	// Register/GetConnection take the EXACT existing inline / cred-ref paths,
+	// byte-identical to the m121/S2 baseline. Set via SetCMEK from main.go when
+	// CMEK_ENABLED is on. When enabled and an INLINE mount is registered with a
+	// kms_key_id (or the default), the DSN is envelope-sealed: a fresh DEK
+	// encrypts it (reusing connection_enc/iv/tag) and the KMS WRAPS the DEK into
+	// cmek_wrapped_dek. GetConnection unwraps via the KMS and caches by the
+	// ciphertext tag exactly like the inline path (one KMS round-trip per
+	// ciphertext, NOT per request). CMEK NEVER enters the data plane / pool key.
+	cmekEnabled      bool
+	kms              cmek.KMSProvider
+	cmekDefaultKeyID string
+}
+
+// SetCMEK enables CMEK / BYOK envelope encryption for inline mounts (D4.8). A no-
+// op contract: pass enabled=false (or kms=nil) to keep the existing inline /
+// cred-ref behavior byte-identical (parity). When enabled, kms is the external
+// KMS that wraps/unwraps the per-mount DEK and defaultKeyID is the KEK used when
+// a register request omits kms_key_id. Called once at boot from main.go.
+func (s *Service) SetCMEK(enabled bool, kms cmek.KMSProvider, defaultKeyID string) {
+	s.cmekEnabled = enabled && kms != nil
+	s.kms = kms
+	s.cmekDefaultKeyID = defaultKeyID
 }
 
 // connCacheEntry pins the decrypted DSN to the exact ciphertext (auth tag)
@@ -180,6 +204,30 @@ ALTER TABLE public.tenant_databases ADD CONSTRAINT tenant_databases_credential_x
      AND connection_enc IS NULL AND connection_iv IS NULL AND connection_tag IS NULL
      AND connection_salt IS NULL)
 );
+-- CMEK / BYOK (migration 061, mirrored here so a FRESH EnsureSchema install
+-- converges with a migrated one): add the two nullable cmek_* columns, DROP the
+-- 060 two-way XOR check, and ADD a THREE-way check admitting a third mode —
+-- cmek-envelope (enc/iv/tag + cmek_wrapped_dek + cmek_kms_key_id, cred_* NULL).
+-- The cmek_* columns are NULL on every inline / cred-ref row, so the baseline is
+-- untouched. With CMEK_ENABLED OFF (default) mode (iii) is never written.
+ALTER TABLE public.tenant_databases ADD COLUMN IF NOT EXISTS cmek_wrapped_dek BYTEA;
+ALTER TABLE public.tenant_databases ADD COLUMN IF NOT EXISTS cmek_kms_key_id  TEXT;
+ALTER TABLE public.tenant_databases DROP CONSTRAINT IF EXISTS tenant_databases_credential_xor_check;
+ALTER TABLE public.tenant_databases DROP CONSTRAINT IF EXISTS tenant_databases_credential_mode_check;
+ALTER TABLE public.tenant_databases ADD CONSTRAINT tenant_databases_credential_mode_check CHECK (
+  (connection_enc IS NOT NULL AND connection_iv IS NOT NULL AND connection_tag IS NOT NULL
+     AND cred_provider IS NULL AND cred_reference IS NULL AND cred_version IS NULL
+     AND cmek_wrapped_dek IS NULL AND cmek_kms_key_id IS NULL)
+  OR
+  (cred_provider IS NOT NULL AND cred_reference IS NOT NULL
+     AND connection_enc IS NULL AND connection_iv IS NULL AND connection_tag IS NULL
+     AND connection_salt IS NULL
+     AND cmek_wrapped_dek IS NULL AND cmek_kms_key_id IS NULL)
+  OR
+  (connection_enc IS NOT NULL AND connection_iv IS NOT NULL AND connection_tag IS NOT NULL
+     AND cmek_wrapped_dek IS NOT NULL AND cmek_kms_key_id IS NOT NULL
+     AND cred_provider IS NULL AND cred_reference IS NULL AND cred_version IS NULL)
+);
 ALTER TABLE public.tenant_databases ENABLE ROW LEVEL SECURITY;
 -- Retire the pre-M12 broken policy on upgrade.
 DROP POLICY IF EXISTS tenant_isolation ON public.tenant_databases;
@@ -215,18 +263,53 @@ func (s *Service) Register(ctx context.Context, userID string, req RegisterDatab
 
 	usingRef := req.CredentialRef.set()
 
+	// CMEK / BYOK (D4.8): an inline mount is sealed via the external KMS envelope
+	// when CMEK is enabled AND a key id is in play (request kms_key_id, else the
+	// env default). cred-ref mounts NEVER use CMEK (they store no ciphertext).
+	// When CMEK is disabled / no key id resolves, usingCMEK stays false and the
+	// EXACT existing inline path runs (byte-parity baseline). Computed BEFORE the
+	// S2 max-tier check because CMEK is a valid non-plaintext-at-rest path: the
+	// DSN is only recoverable with the customer's KMS key, so a max-tier tenant
+	// may use it (the thing S2 forbids is platform-recoverable plaintext at rest).
+	cmekKeyID := req.KMSKeyID
+	if cmekKeyID == "" {
+		cmekKeyID = s.cmekDefaultKeyID
+	}
+	usingCMEK := s.cmekEnabled && !usingRef && cmekKeyID != ""
+
 	// S2 / G-Vault: a tenant whose tier's security_mode is "max" may NOT register
-	// an inline plaintext DSN — it must use a credential_ref so no plaintext is
+	// an inline plaintext DSN under the PLATFORM master key — it must use a
+	// credential_ref OR a CMEK envelope so no platform-recoverable plaintext is
 	// encrypted-at-rest for it. Gated on the resolved tier; a no-op when tiering
-	// is disabled or the tier is not max (parity for every non-max tenant).
-	if tiered && !usingRef && pkg.SecurityMode == "max" {
+	// is disabled or the tier is not max (parity for every non-max tenant), and
+	// exempted when the inline DSN will be CMEK-sealed.
+	if tiered && !usingRef && !usingCMEK && pkg.SecurityMode == "max" {
 		return RegisterResult{}, ErrPlaintextDsnForbidden
 	}
 
-	// Encrypt ONLY for the inline path. A cred-ref mount stores no ciphertext, so
-	// it never pays (nor risks) the scrypt KDF / AES-GCM seal.
-	var payload EncryptedPayload
-	if !usingRef {
+	// Encrypt ONLY for an inline path. A cred-ref mount stores no ciphertext, so
+	// it never pays (nor risks) the scrypt KDF / AES-GCM seal. The inline path is
+	// either the platform-master-key seal (today) or the CMEK envelope seal: both
+	// fill connection_enc/iv/tag; CMEK additionally yields a wrapped DEK + key id.
+	var (
+		payload  EncryptedPayload
+		cmekWrap []byte
+	)
+	switch {
+	case usingCMEK:
+		wrapped, iv, ct, sErr := cmek.Seal(ctx, s.kms, cmekKeyID, []byte(req.ConnectionString))
+		if sErr != nil {
+			return RegisterResult{}, fmt.Errorf("cmek seal: %w", sErr)
+		}
+		enc, tag, spErr := cmek.SplitCiphertext(ct)
+		if spErr != nil {
+			return RegisterResult{}, spErr
+		}
+		// Reuse the inline columns: enc/iv/tag carry the DEK-encrypted DSN. No
+		// scrypt salt (CMEK has no KDF), so connection_salt stays NULL.
+		payload = EncryptedPayload{Encrypted: enc, IV: iv, Tag: tag}
+		cmekWrap = wrapped
+	case !usingRef:
 		var err error
 		payload, err = s.enc.Encrypt(req.ConnectionString)
 		if err != nil {
@@ -262,6 +345,21 @@ func (s *Service) Register(ctx context.Context, userID string, req RegisterDatab
 				 RETURNING id, engine, name, created_at::text`,
 				userID, req.Engine, req.Name,
 				req.CredentialRef.Provider, req.CredentialRef.Reference, version, isolation,
+			)
+			return row.Scan(&out.ID, &out.Engine, &out.Name, &out.CreatedAt)
+		}
+		if usingCMEK {
+			// CMEK-envelope row: DEK-encrypted DSN in enc/iv/tag (NO salt — no KDF)
+			// + the KMS-wrapped DEK + the KMS key id. cred_* stay NULL. The 3-way
+			// DB check (migration 061 / EnsureSchema) enforces this exact shape.
+			row := tx.QueryRow(ctx,
+				`INSERT INTO public.tenant_databases
+				   (tenant_id, engine, name, connection_enc, connection_iv, connection_tag,
+				    cmek_wrapped_dek, cmek_kms_key_id, isolation)
+				 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+				 RETURNING id, engine, name, created_at::text`,
+				userID, req.Engine, req.Name,
+				payload.Encrypted, payload.IV, payload.Tag, cmekWrap, cmekKeyID, isolation,
 			)
 			return row.Scan(&out.ID, &out.Engine, &out.Name, &out.CreatedAt)
 		}
@@ -335,12 +433,14 @@ func (s *Service) FindOne(ctx context.Context, userID, id string) (TenantDatabas
 // ever travels back through the control plane for a Vault-backed mount.
 func (s *Service) GetConnection(ctx context.Context, userID, id string) (ConnectionResult, error) {
 	var (
-		engine    string
-		isolation string
-		payload   EncryptedPayload
-		provider  *string
-		reference *string
-		version   *string
+		engine     string
+		isolation  string
+		payload    EncryptedPayload
+		provider   *string
+		reference  *string
+		version    *string
+		cmekWrap   []byte
+		cmekKeyPtr *string
 	)
 	err := s.db.TenantTx(ctx, userID, func(tx pgx.Tx) error {
 		// EXPLICIT tenant scope (not just the RLS policy): the control-plane DB
@@ -352,10 +452,12 @@ func (s *Service) GetConnection(ctx context.Context, userID, id string) (Connect
 		// the query-router forwards as X-Tenant-Id.
 		row := tx.QueryRow(ctx,
 			`SELECT engine, isolation, connection_enc, connection_iv, connection_tag, connection_salt,
-			        cred_provider, cred_reference, cred_version
+			        cred_provider, cred_reference, cred_version,
+			        cmek_wrapped_dek, cmek_kms_key_id
 			   FROM public.tenant_databases WHERE id = $1 AND tenant_id = $2`, id, userID)
 		err := row.Scan(&engine, &isolation, &payload.Encrypted, &payload.IV, &payload.Tag, &payload.Salt,
-			&provider, &reference, &version)
+			&provider, &reference, &version,
+			&cmekWrap, &cmekKeyPtr)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -390,10 +492,23 @@ func (s *Service) GetConnection(ctx context.Context, userID, id string) (Connect
 		return result, nil
 	}
 
-	// scrypt-decrypt only when the ciphertext changed since the last call (the
-	// auth tag is a cryptographic digest of payload+key — equal tag ⇒ equal
-	// plaintext). Concurrent misses for one mount coalesce (sf) and distinct
-	// cold mounts queue on kdfSem. See connCache.
+	// CMEK / BYOK (D4.8): a cmek-envelope mount (cmek_wrapped_dek IS NOT NULL)
+	// decrypts via the EXTERNAL KMS — unwrap the DEK, then AES-GCM-open the DSN.
+	// It integrates with the SAME tag-cache + singleflight as the inline path, so
+	// the KMS is hit ONCE per ciphertext (NOT per request). If CMEK is disabled or
+	// no provider is wired, a stored cmek row cannot be served — fail closed
+	// rather than silently treat the DEK-ciphertext as a master-key ciphertext.
+	// If the KMS cannot unwrap (key revoked/deleted), cmek.Open returns
+	// ErrShredded and the caller gets a non-2xx — crypto-shred by construction.
+	usingCMEK := len(cmekWrap) > 0
+	if usingCMEK && (!s.cmekEnabled || s.kms == nil) {
+		return ConnectionResult{}, errors.New("cmek mount stored but CMEK is disabled/unconfigured — cannot decrypt")
+	}
+
+	// decrypt only when the ciphertext changed since the last call (the auth tag
+	// is a cryptographic digest of payload+key — equal tag ⇒ equal plaintext).
+	// Concurrent misses for one mount coalesce (sf); distinct cold inline mounts
+	// queue on the Encryptor's scryptSlots. See connCache.
 	var conn string
 	tag := string(payload.Tag)
 	if v, ok := s.connCache.Load(id); ok {
@@ -408,9 +523,24 @@ func (s *Service) GetConnection(ctx context.Context, userID, id string) (Connect
 					return e.conn, nil
 				}
 			}
-			c, err := s.enc.Decrypt(payload)
-			if err != nil {
-				return nil, err
+			var (
+				c   string
+				err error
+			)
+			if usingCMEK {
+				// Unwrap the DEK via the KMS using the row's stored key id, then
+				// AES-GCM-open the DEK-encrypted DSN (enc||tag reassembled).
+				ct := cmek.JoinCiphertext(payload.Encrypted, payload.Tag)
+				plain, oErr := cmek.Open(ctx, s.kms, derefStr(cmekKeyPtr), cmekWrap, payload.IV, ct)
+				if oErr != nil {
+					return nil, oErr
+				}
+				c = string(plain)
+			} else {
+				c, err = s.enc.Decrypt(payload)
+				if err != nil {
+					return nil, err
+				}
 			}
 			s.connCache.Store(id, connCacheEntry{tag: tag, conn: c})
 			return c, nil

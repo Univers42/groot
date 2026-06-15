@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/dlesieur/mini-baas/control-plane/internal/adapterregistry"
+	"github.com/dlesieur/mini-baas/control-plane/internal/cmek"
 	"github.com/dlesieur/mini-baas/control-plane/internal/shared"
 )
 
@@ -51,6 +53,29 @@ func main() {
 	}
 
 	svc := adapterregistry.NewService(db, enc, log)
+
+	// CMEK / BYOK (D4.8) — FLAG-GATED OFF = PARITY. When CMEK_ENABLED is off (the
+	// default) SetCMEK is never called, the provider stays nil, and Register/
+	// GetConnection take the EXACT existing inline-AES-GCM / cred-ref paths,
+	// byte-identical to the m121/S2 baseline. When on, an inline mount is envelope-
+	// sealed: a fresh DEK encrypts the DSN and an EXTERNAL KMS (Vault Transit, or
+	// a test-only local KEK) WRAPS the DEK. The platform stores only the wrapped
+	// DEK + ciphertext and cannot decrypt without the KMS (revoke the KMS key ⇒
+	// crypto-shred). CMEK lives entirely here in the control plane — it never
+	// enters the Rust data plane / pool key, so SHARE_POOLS density is untouched.
+	if envBool("CMEK_ENABLED") {
+		provider, defaultKey, cErr := buildKMSProvider()
+		if cErr != nil {
+			log.Error("cmek: provider init failed", "err", cErr)
+			os.Exit(1)
+		}
+		svc.SetCMEK(true, provider, defaultKey)
+		log.Info("CMEK / BYOK enabled (envelope-encrypt inline DSNs via external KMS) — CMEK_ENABLED",
+			"provider", os.Getenv("CMEK_KMS_PROVIDER"), "default_key", defaultKey)
+	} else {
+		log.Info("CMEK / BYOK disabled (CMEK_ENABLED off) — inline DSNs use the platform master key (byte-parity)")
+	}
+
 	if err := svc.EnsureSchema(ctx); err != nil {
 		log.Error("ensure schema failed", "err", err)
 		os.Exit(1)
@@ -82,6 +107,53 @@ func main() {
 		log.Error("graceful shutdown failed", "err", err)
 	}
 	log.Info("stopped")
+}
+
+// envBool reads a truthy env flag (default OFF = parity), mirroring the
+// tenant-control main.go helper.
+func envBool(key string) bool {
+	switch os.Getenv(key) {
+	case "1", "true", "on", "TRUE", "True", "ON":
+		return true
+	default:
+		return false
+	}
+}
+
+// buildKMSProvider constructs the CMEK KMS provider from env, returning the
+// provider + the default KEK id (used when a register request omits kms_key_id).
+//
+//	CMEK_KMS_PROVIDER       vault-transit (default) | local
+//	CMEK_VAULT_TRANSIT_KEY  the default Transit key id (also the local default key)
+//	vault-transit:          VAULT_ADDR + VAULT_TOKEN (+ optional VAULT_TRANSIT_MOUNT)
+//	local (TEST-ONLY):      CMEK_LOCAL_KEK_SEED seeds an in-process KEK — NEVER
+//	                        production (the KEK lives in this process's memory).
+func buildKMSProvider() (cmek.KMSProvider, string, error) {
+	defaultKey := os.Getenv("CMEK_VAULT_TRANSIT_KEY")
+	if defaultKey == "" {
+		return nil, "", fmt.Errorf("CMEK_VAULT_TRANSIT_KEY (default KMS key id) is required when CMEK_ENABLED")
+	}
+	switch os.Getenv("CMEK_KMS_PROVIDER") {
+	case "", "vault-transit":
+		p, err := cmek.NewVaultTransitProvider(cmek.VaultTransitConfig{
+			Addr:  os.Getenv("VAULT_ADDR"),
+			Token: os.Getenv("VAULT_TOKEN"),
+			Mount: os.Getenv("VAULT_TRANSIT_MOUNT"),
+		})
+		if err != nil {
+			return nil, "", err
+		}
+		return p, defaultKey, nil
+	case "local":
+		// TEST-ONLY: an in-process AES KEK. Documented as non-production.
+		seed := os.Getenv("CMEK_LOCAL_KEK_SEED")
+		if seed == "" {
+			seed = "cmek-local-default-seed"
+		}
+		return cmek.NewLocalKMSProvider(seed, defaultKey), defaultKey, nil
+	default:
+		return nil, "", fmt.Errorf("unknown CMEK_KMS_PROVIDER %q (want vault-transit|local)", os.Getenv("CMEK_KMS_PROVIDER"))
+	}
 }
 
 func healthcheck(cfg shared.Config) int {
