@@ -56,7 +56,18 @@ export class DecidePermissionDto {
   @IsIn(DECISION_OPS)
   op!: (typeof DECISION_OPS)[number];
 
-  @ApiPropertyOptional({ example: { ip: '127.0.0.1', request_id: 'req-1' } })
+  /**
+   * Optional per-instance subject — the specific row/object id the caller is
+   * acting on. Folded into the PDP attrs as `resource_id` so a policy whose
+   * conditions carry `resource_id` / `resource_id_in` can decide per-instance
+   * (B3). Absent ⇒ table-level decision only (today's behavior).
+   */
+  @ApiPropertyOptional({ example: 'row-123' })
+  @IsOptional()
+  @IsString()
+  resource_id?: string;
+
+  @ApiPropertyOptional({ example: { ip: '127.0.0.1', request_id: 'req-1', aal: 'aal2' } })
   @IsOptional()
   @IsObject()
   attributes?: Record<string, unknown>;

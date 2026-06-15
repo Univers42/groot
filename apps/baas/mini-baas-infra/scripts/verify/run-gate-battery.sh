@@ -75,6 +75,10 @@ ENTERPRISE_BATTERY=(
   m120  # data-plane spend-cap + abuse-suspend enforcement
   m121  # vault credential-ref enforcement
   m122  # read-replica routing
+  m135  # fine-grained ABAC: column masking applied (the highest-value mask proof)
+  m136  # fine-grained ABAC: stored conditions evaluate (ip_cidr/time_window; deny>allow; flag-OFF parity)
+  m137  # fine-grained ABAC: per-table + per-instance granularity (table/instance overrides)
+  m139  # fine-grained ABAC: api-key callers under the PDP (same mask as JWT; flag-OFF byte-parity)
 )
 
 # Cheapest high-signal subset for the per-PR path. m102 (live gateway) is run

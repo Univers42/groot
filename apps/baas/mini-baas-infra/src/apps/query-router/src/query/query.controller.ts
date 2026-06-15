@@ -27,6 +27,17 @@ import { QueryService } from './query.service';
 import { ExecuteQueryDto } from './dto/query.dto';
 import type { Request } from 'express';
 
+/**
+ * Caller IP for the ABAC PDP's ip_cidr conditions — SAME precedence as
+ * audit.interceptor.ts: first X-Forwarded-For hop → req.ip → socket address.
+ * Returns undefined when none is derivable (conditions then can't match an
+ * ip_cidr policy, which fails closed by design).
+ */
+function clientIp(req: Request): string | undefined {
+  const xff = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim();
+  return xff || req.ip || req.socket?.remoteAddress || undefined;
+}
+
 @ApiTags('query')
 // Root-mounted: the gateway prefix `/query/v1` is already stripped by Kong
 // (strip_path), so the controller serves the remainder (`/:dbId/tables/:table`)
@@ -54,6 +65,7 @@ export class QueryController {
     return this.service.executeQuery(dbId, table, user.id, dto, {
       requestId: request.requestId,
       identity,
+      ip: clientIp(request),
     });
   }
 
