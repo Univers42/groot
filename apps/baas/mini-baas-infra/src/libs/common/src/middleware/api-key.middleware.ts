@@ -40,14 +40,18 @@ export class ApiKeyMiddleware implements NestMiddleware {
   private readonly verifyUrl: string;
   private readonly serviceToken: string;
   private readonly timeoutMs: number;
-  // tiny TTL cache so repeat requests in a burst skip the network roundtrip
+  // TTL cache so repeat requests in a burst skip the network roundtrip. The TTL
+  // is the revocation-staleness window; env-configurable (default 30 s = the
+  // prior hard-coded value, so behaviour is unchanged unless an operator opts in
+  // to a longer cache to absorb sustained read bursts).
   private readonly cache = new Map<string, { exp: number; res: VerifyResponse }>();
-  private readonly cacheTtlMs = 30_000;
+  private readonly cacheTtlMs: number;
 
   constructor(config: ConfigService) {
     this.verifyUrl = config.get<string>('TENANT_CONTROL_URL', 'http://tenant-control:3022') + '/v1/keys/verify';
     this.serviceToken = config.get<string>('INTERNAL_SERVICE_TOKEN', '');
     this.timeoutMs = Number(config.get('API_KEY_VERIFY_TIMEOUT_MS', '2000'));
+    this.cacheTtlMs = Number(config.get('API_KEY_VERIFY_CACHE_TTL_MS', '30000'));
   }
 
   async use(req: Request, res: Response, next: NextFunction): Promise<void> {

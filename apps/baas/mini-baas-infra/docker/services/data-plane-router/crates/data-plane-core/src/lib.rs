@@ -24,7 +24,7 @@ pub use isolation::{safe_schema, Isolation, ScopeDirective};
 pub use mount::{CredentialRef, DatabaseMount, PoolPolicy};
 pub use operation::{
     AggFunc, Aggregate, AggregateSpec, BatchItemOutcome, BatchItemStatus, BatchSummary,
-    DataOperation, DataOperationKind, DataResult, ReturningMode,
+    DataOperation, DataOperationKind, DataResult, ReturningMode, SearchSpec, VectorSpec,
 };
 pub use ports::{
     EngineAdapter, EngineHealth, EnginePool, MigrationRequest, MigrationResult, MigrationStatus,

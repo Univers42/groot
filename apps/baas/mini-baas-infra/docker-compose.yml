@@ -480,7 +480,11 @@ services:
 
   # ─── Database Bootstrap ──────────────────────────────────────────
   db-bootstrap:
-    image: postgres:16-alpine
+    # pgvector/pgvector:pg16 = stock Postgres 16 + the `vector` extension (volume-
+    # compatible with postgres:16-alpine — same PGDATA). Ships pgvector so
+    # op=vector_search (k-NN) works out of the box; `CREATE EXTENSION vector` is
+    # enabled per-DB on first use. (A running stack keeps its image until recreated.)
+    image: pgvector/pgvector:pg16
     container_name: mini-baas-db-bootstrap
     env_file: [.env]
     environment:
@@ -868,7 +872,8 @@ services:
       TENANT_CONTROL_URL: ${TENANT_CONTROL_URL:-http://tenant-control:3022}
       INTERNAL_SERVICE_TOKEN: ${ADAPTER_REGISTRY_SERVICE_TOKEN:-${JWT_SECRET:-dev-service-token-change-me}}
       SERVICE_TOKEN_MODE: ${SERVICE_TOKEN_MODE:-hmac}
-      API_KEY_VERIFY_TIMEOUT_MS: ${API_KEY_VERIFY_TIMEOUT_MS:-2000}
+      API_KEY_VERIFY_TIMEOUT_MS: ${API_KEY_VERIFY_TIMEOUT_MS:-8000}
+      API_KEY_VERIFY_CACHE_TTL_MS: ${API_KEY_VERIFY_CACHE_TTL_MS:-30000}
       CONTROL_PLANE_TIMEOUT_MS: ${CONTROL_PLANE_TIMEOUT_MS:-2000}
       CONTROL_PLANE_RETRY_ATTEMPTS: ${CONTROL_PLANE_RETRY_ATTEMPTS:-2}
       QUERY_ROUTER_ADAPTER_CACHE_TTL_MS: ${QUERY_ROUTER_ADAPTER_CACHE_TTL_MS:-30000}

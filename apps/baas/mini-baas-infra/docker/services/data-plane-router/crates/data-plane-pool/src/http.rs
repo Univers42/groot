@@ -668,6 +668,8 @@ mod tests {
             returning: None,
             aggregate: None,
             fields: None,
+            search: None,
+            vector: None,
         };
         let path = append_query("/users", &op);
         assert!(path.starts_with("/users?"));

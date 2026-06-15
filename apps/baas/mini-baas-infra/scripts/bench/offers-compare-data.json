@@ -176,11 +176,11 @@
         },
         {
           "feature": "Vector / full-text search",
-          "grobase": "No first-class FTS or vector op; stock PG tsvector reachable only via admin-only /v1/admin/raw; pgvector NOT installed (base image postgres:16-alpine); $like/$ilike = substring only",
-          "grobaseLevel": "gap",
-          "rival": "pgvector + built-in tsvector FTS, first-class, managed + documented",
-          "rivalLevel": "win",
-          "source": "operation.rs:24-32 (8-op surface) + docker-compose.yml:483 (stock postgres:16-alpine) + routes.rs:2178 (admin-only raw) / supabase.com docs"
+          "grobase": "First-class op=fulltext_search (ranked to_tsvector @@ websearch_to_tsquery, multi-column, language-aware, owner-scoped — gate m101) + op=vector_search (pgvector kNN cosine/l2/ip — gate m102); engine-agnostic, capability-gated",
+          "grobaseLevel": "win",
+          "rival": "pgvector + tsvector (FTS is a single-column filter operator; vector needs a hand-written SQL RPC)",
+          "rivalLevel": "ok",
+          "source": "postgres.rs build_search/build_vector_order + gates m101/m102 / supabase.com"
         },
         {
           "feature": "Dashboard / Studio",
