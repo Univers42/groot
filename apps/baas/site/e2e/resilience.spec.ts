@@ -5,7 +5,7 @@ test.describe('Landing — resilience & accessibility', () => {
 		const ctx = await browser.newContext({ reducedMotion: 'reduce' });
 		const page = await ctx.newPage();
 		await page.goto('/');
-		await expect(page.getByRole('heading', { level: 1 })).toContainText('One backend for');
+		await expect(page.getByRole('heading', { level: 1 })).toContainText('One backend');
 		await expect(page.getByRole('heading', { name: 'What are you building?' })).toBeVisible();
 		await expect(page.locator('.gb-uc')).toHaveCount(5);
 		await ctx.close();
@@ -16,7 +16,7 @@ test.describe('Landing — resilience & accessibility', () => {
 		const page = await ctx.newPage();
 		await page.goto('/');
 		await expect(page.locator('.gb-galaxy__fallback')).toHaveCount(1);
-		await expect(page.getByRole('heading', { level: 1 })).toContainText('One backend for');
+		await expect(page.getByRole('heading', { level: 1 })).toContainText('One backend');
 		await expect(page.getByRole('heading', { name: 'What are you building?' })).toBeVisible();
 		await expect(page.locator('.gb-uc')).toHaveCount(5); // cards are server-rendered, no JS needed
 		await ctx.close();

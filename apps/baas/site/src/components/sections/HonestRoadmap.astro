@@ -1,17 +1,18 @@
 ---
 import SectionHeading from '../ui/SectionHeading.astro';
+import Icon from '../ui/Icon.astro';
 
 // A real roadmap: three phases left-to-right (shipped → building → next), each
 // with a status and an honest checklist. Items move left ONLY when they pass the
 // same shadow → parity → cutover gates — nothing is listed as done that isn't.
-type Phase = { key: string; label: string; tag: string; emoji: string; items: string[] };
+type Phase = { key: string; label: string; tag: string; icon: string; items: string[] };
 
 const PHASES: Phase[] = [
 	{
 		key: 'shipped',
 		label: 'Shipped',
 		tag: 'live today',
-		emoji: '✅',
+		icon: 'check',
 		items: [
 			'8 engines behind one API — list, get, insert, filter, aggregate',
 			'Auth, realtime, object storage, functions and GraphQL',
@@ -24,7 +25,7 @@ const PHASES: Phase[] = [
 		key: 'building',
 		label: 'Building now',
 		tag: 'in flight, gated',
-		emoji: '🔨',
+		icon: 'wrench',
 		items: [
 			'Full update/delete parity on the Rust plane (Postgres write verbs)',
 			'Metering → quotas → Stripe billing — built & gate-proven, flag-gated, going live in the cloud',
@@ -35,7 +36,7 @@ const PHASES: Phase[] = [
 		key: 'next',
 		label: 'Next',
 		tag: 'planned, not yet',
-		emoji: '🛰️',
+		icon: 'server',
 		items: [
 			'Unified OLAP/OLTP cost-routing — point-reads hit the engine, analytics hit the lakehouse, automatically',
 			'HA + horizontal scale (Helm/K8s, multi-region) — most tiers genuinely don’t need it yet',
@@ -69,7 +70,7 @@ const PHASES: Phase[] = [
 					<div class="gb-rm__head">
 						<span class="gb-rm__dot" aria-hidden="true"></span>
 						<h3 class="gb-rm__label">{p.label}</h3>
-						<span class="gb-rm__emoji" aria-hidden="true">{p.emoji}</span>
+						<span class="gb-rm__emoji" aria-hidden="true"><Icon name={p.icon} size={22} /></span>
 						<span class="gb-rm__tag">{p.tag}</span>
 					</div>
 					<ul class="gb-rm__items" role="list">

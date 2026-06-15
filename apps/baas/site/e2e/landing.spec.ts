@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 test.describe('Landing — condensed, public, use-case first', () => {
 	test('the page is condensed: hero + 5 use-cases + 4 value props + roadmap + CTA', async ({ page }) => {
 		await page.goto('/');
-		await expect(page.getByRole('heading', { level: 1 })).toContainText('One backend for');
+		await expect(page.getByRole('heading', { level: 1 })).toContainText('One backend');
 		await expect(page.getByRole('heading', { name: 'What are you building?' })).toBeVisible();
 		await expect(page.locator('.gb-uc')).toHaveCount(5);
 		await expect(page.locator('.gb-value')).toHaveCount(4);

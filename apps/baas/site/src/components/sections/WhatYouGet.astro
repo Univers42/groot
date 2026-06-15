@@ -1,5 +1,6 @@
 ---
 import SectionHeading from '../ui/SectionHeading.astro';
+import Icon from '../ui/Icon.astro';
 
 // Four plain-language promises — the whole value of Grobase, condensed. No jargon,
 // no comparisons, no acronyms a newcomer would have to look up.
@@ -7,26 +8,22 @@ const VALUES = [
 	{
 		title: 'One API, any database',
 		body: 'Postgres, MySQL, Mongo, SQLite, Redis and more — the same simple API over all of them. Switch engines without rewriting your app.',
-		icon: 'M4 7h16M4 12h16M4 17h16',
-		emoji: '🔌',
+		icon: 'plug',
 	},
 	{
 		title: 'Starts tiny, grows huge — same code',
 		body: 'Begin on a 5 MB binary on a spare machine. Grow to thousands of customers on shared servers. You never rewrite to move up.',
-		icon: 'M4 20V10M10 20V4M16 20v-8M20 20h-18',
-		emoji: '📈',
+		icon: 'chart',
 	},
 	{
 		title: 'You own your data',
 		body: 'Self-host it anywhere — your keys, your database, your machine. There is no lock-in, and the source is open.',
-		icon: 'M12 3l7 4v5c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V7zM9.5 12l2 2 3.5-4',
-		emoji: '🔑',
+		icon: 'key',
 	},
 	{
 		title: 'Honest, measured numbers',
 		body: 'Every figure on this site is measured on real hardware, not invented for marketing. You pay for what you actually use.',
-		icon: 'M5 19V5M5 19h14M8 16l3-4 3 2 4-6',
-		emoji: '📊',
+		icon: 'chart',
 	},
 ];
 ---
@@ -53,11 +50,8 @@ const VALUES = [
 		<ul class="gb-values" role="list">
 			{VALUES.map((v) => (
 				<li class="gb-value" data-rise>
-					<span class="gb-value__emoji animate-bounce-subtle" aria-hidden="true">{v.emoji}</span>
-					<span class="gb-value__icon" aria-hidden="true">
-						<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-							<path d={v.icon} />
-						</svg>
+					<span class="gb-value__icon animate-bounce-subtle" aria-hidden="true">
+						<Icon name={v.icon} size={28} />
 					</span>
 					<h3 class="gb-value__title">{v.title}</h3>
 					<p class="gb-value__body">{v.body}</p>

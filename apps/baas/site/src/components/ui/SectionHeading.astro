@@ -1,4 +1,6 @@
 ---
+import Icon from './Icon.astro';
+
 type Props = {
 	kicker: string;
 	title: string;
@@ -17,7 +19,7 @@ const titleClass = gradient ? 'gradient-text' : 'tshadow-mega';
 ---
 
 <div class={`gb-section__head ${accClass}`} data-rise>
-	<p class="gb-kicker"><span aria-hidden="true">★</span> {kicker}</p>
+	<p class="gb-kicker"><span aria-hidden="true"><Icon name="star" size={14} /></span> {kicker}</p>
 	<h2 id={id} class={titleClass}>{title}</h2>
 	{lede && <p class="gb-lede">{lede}</p>}
 </div>
