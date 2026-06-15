@@ -16,8 +16,14 @@ dashboard, `pg_graphql` + `pgvector` first-class, a huge community, and SOC 2 / 
 **up to 9 engines** (not just Postgres), bring your *own* database (`tenant_owned`), pack **24,888
 tenants into ~2.9 MiB of data-plane RAM** (measured — gate `m46`), ship a **5 MB single binary** at
 the low end, and pay **< $1/tenant amortized** at the high end — with an **in-stack OWASP WAF** as the
-sole public listener that neither rival ships. Supabase is one Postgres project per app; Grobase is a
-no-rewrite ladder from a 5 MB binary to a 10K-tenant platform on one codebase.
+sole public listener that neither rival ships. It also wins on axes Supabase is structurally weaker:
+**per-tenant granular backup/restore** (restore one tenant in isolation — gates `m87`/`m99`),
+**no-cap data-resident functions + storage** (full Deno runtime with warm pool/cron and S3 storage
+*with* image transforms, no invocation/per-GB/egress ceiling — gates `m96`/`m95`), **auth breadth on
+the same vendored gotrue engine** (passkeys + OIDC SSO + SCIM that Supabase paywalls — gates
+`m107`/`m110`/`m111`), and **cryptographically re-verifiable compliance controls** (tamper-evident
+audit + SOC2-lite evidence collector — gates `m104`/`m108`). Supabase is one Postgres project per app;
+Grobase is a no-rewrite ladder from a 5 MB binary to a 10K-tenant platform on one codebase.
 
 ---
 
@@ -52,16 +58,16 @@ Grobase column cites `packages.json` / a gate / an artifact. Supabase column is 
 | **Top price** | max **$149–299** | Team **$599/mo**; Enterprise **custom** |
 | **Database engines** | **1 → 9**: sqlite, postgresql, mysql, mariadb, mongodb, redis, cockroachdb, mssql, http (`packages.json` `engines`) | **Postgres only** (1 engine per project) |
 | **Storage included** | self-host: your disk; Fly volume $0.15/GB (`cost-analysis.md`) | Free 1 GB; Pro 100 GB |
-| **Auth / MAU** | unlimited self-host (gotrue + `binocle-one` accounts/OAuth/MFA); no MAU meter | Free 50,000 MAU; Pro 100,000 MAU |
+| **Auth / MAU** | **same engine** (gotrue `v2.188.1` vendored) + passkeys/WebAuthn (gate `m107`), per-tenant OIDC SSO (`m110`), SCIM 2.0 (`m111`), OAuth2/PKCE+TOTP+recovery (`m41`/`m42`); unlimited self-host, **no MAU meter** | Free 50,000 MAU; Pro 100,000 MAU; **SSO/SCIM gated behind Team ($599)+**, no first-class passkeys |
 | **Multi-tenancy** | **per-request RLS → SHARE_POOLS** packs 24,888 tenants @ 2.9 MiB / **0 standing pools** (gate `m46`, artifact below) | RLS *inside one Postgres project*; multi-tenant = your own design |
 | **rps (per tenant)** | nano 50 · basic 100 · essential 200 · pro 400 · max 800 (`packages.json` `limits.rps`, derived from `bench-capacity`) | not a published per-plan rps; gated by compute size |
 | **Isolation models** | **4 per mount** (shared_rls · schema-per-tenant · db-per-tenant · pool-per-tenant — gate `m46`) | 1 (one project = one DB) |
 | **Realtime** | addon on pro/max (`packages.json` addons) — Rust event bus + IRC bridge | Free 200 concurrent / 2M msgs/mo; Pro scales up |
-| **Functions** | addon on max (serverless runtime); functions DX gated `m56` | Free 500k edge-fn invocations/mo |
-| **Object storage** | addon on max (MinIO/S3); storage DX gated `m95` | Free 1 GB / Pro 100 GB built-in |
-| **Backups / PITR** | per-tenant backup/restore, flag `TENANT_BACKUP_ENABLED` (gate `m87`); PITR restore-to-timestamp gated `m99` | Pro daily backups + 7-day PITR option; Team 14-day retention |
+| **Functions** | full Deno runtime: deploy/invoke + DB-event triggers + secrets + **warm pool + per-invoke mem-cap + live cron** (gates `m56`/`m96`); self-host = **no invocation cap** | Free 500k edge-fn invocations/mo (**billing cap**); globally edge-distributed (Grobase is single-node) |
+| **Object storage** | S3/MinIO/any-S3 + **on-the-fly image transforms** (resize/webp/jpeg/png/avif) + per-bucket ABAC (gate `m95`); self-host = **no per-GB / egress / storage cap** | Free 1 GB / Pro 100 GB built-in (**hard quota**); managed CDN edge delivery |
+| **Backups / PITR** | **per-tenant** granular backup/restore (atomic Go-native COPY, restore one tenant in isolation — gate `m87`) + PITR restore-to-timestamp + tiered retention (gate `m99`); backups stay in your bucket | Pro daily backups + 7-day PITR; Team 14-day retention — **turnkey managed SLA, but whole-project only (no per-tenant restore)** |
 | **Quota / metering** | per-tenant cumulative quota (`packages.json` `limits.quota`) + B1 metering (m74–m79) | per-plan included allowances + usage overage |
-| **Compliance** | OWASP ASVS L1/L2 control map + SOC2-lite evidence ([`security-audit-asvs.md`](./security-audit-asvs.md)); **no third-party SOC2/HIPAA attestation yet** | **SOC 2 + ISO 27001 on Team**; HIPAA on Enterprise |
+| **Compliance** | **independently re-verifiable controls**: tamper-evident hash-chained per-tenant audit log (gate `m104`) + continuous SOC2-lite evidence collector that reflects reality (gate `m108`) + GDPR hard-erase/export (`m105`/`m109`) + trust center (`m112`) + OWASP ASVS L1/L2 map; **no third-party SOC2/HIPAA attestation yet** | **SOC 2 + ISO 27001 on Team** (the *paper*); HIPAA BAA on Enterprise — third-party attested |
 | **WAF** | **in-stack ModSecurity v3 + OWASP CRS** as sole public listener (`docker/services/waf`) | none in-stack |
 
 ---
@@ -92,6 +98,28 @@ Grobase column cites `packages.json` / a gate / an artifact. Supabase column is 
   rewrite (`packages.json` `_tenancy_guidance`). Supabase scaling means resizing a project's compute.
 - **< $1/tenant amortized.** A single `pro` host (~$21/mo infra) across ~50 tenants ≈
   **$0.40–1.00/tenant/month**; marginal cost of tenant N+1 ≈ storage only ([`cost-analysis.md`](./cost-analysis.md) §3).
+- **Per-tenant granular backup/restore (Supabase can't).** Restore **one** tenant without rolling
+  back the other 9,999 — atomic Go-native pgx COPY (`internal/backup/{extract,restore}.go`) + PITR
+  restore-to-timestamp with tiered retention (gates [`m87`](../mini-baas-infra/scripts/verify/m87-per-tenant-backup.sh)/[`m99`](../mini-baas-infra/scripts/verify/m99-pitr-restore.sh)).
+  Supabase backups are **whole-project only**, and they stay in your own bucket (data residency, no
+  SaaS backup-storage/egress markup).
+- **No-cap, data-resident functions + storage.** The full Deno functions runtime (warm pool +
+  per-invoke memory cap + live cron, gate [`m96`](../mini-baas-infra/scripts/verify/m96-functions-warm-cron.sh))
+  and S3 object storage **with on-the-fly image transforms** (gate
+  [`m95`](../mini-baas-infra/scripts/verify/m95-storage-transforms.sh)) carry **no invocation cap,
+  no per-GB/egress cap** on self-host — Supabase's 500k-invocations/mo and 1 GB/100 GB are billing
+  ceilings. Code and bytes never leave your infra.
+- **Auth breadth on the same engine.** gotrue is vendored verbatim (`supabase/gotrue:v2.188.1`) so
+  email/OAuth/MFA are at maturity parity; Grobase then adds **passkeys/WebAuthn** (gate `m107`),
+  **per-tenant OIDC SSO** (gate `m110`), and **SCIM 2.0** (gate `m111`) — all flag-OFF byte-parity.
+  Supabase gates SSO/SCIM behind paid Team/Enterprise tiers and ships no first-class passkeys.
+- **Cryptographically verifiable compliance controls.** A buyer can independently recompute the
+  tamper-evident hash-chained per-tenant audit log (`hash=sha256(prev_hash‖canonical(row))`, gate
+  [`m104`](../mini-baas-infra/scripts/verify/m104-audit-chain.sh)) and the continuous SOC2-lite
+  evidence collector reflects reality + detects DB tamper (gate
+  [`m108`](../mini-baas-infra/scripts/verify/m108-soc2-evidence.sh)) — controls you re-verify and run
+  in your own datacenter, not a certificate issued for someone else's cloud. (The *paper*
+  attestation is still Supabase's win — see below.)
 
 ## Where Supabase wins (honest)
 
@@ -100,7 +128,19 @@ Grobase column cites `packages.json` / a gate / an artifact. Supabase column is 
 - **Studio dashboard polish.** Supabase Studio (table editor, SQL editor, logs, auth UI) is far more
   mature than Grobase's tenant console.
 - **`pg_graphql` + `pgvector` first-class.** GraphQL and vector search are native, supported, and
-  documented. Grobase has GraphQL passthrough (gate `m59`) but it is younger.
+  documented. Grobase runs the **same `pg_graphql` extension** (gate `m59` even proves two-tenant RLS
+  isolation), but only as an **opt-in glibc edition** (the lean default 5xxs the route) and **Postgres
+  only**; and on **vector/full-text search Supabase wins outright** — Grobase exposes **neither as a
+  tenant op** and doesn't even install pgvector in its shipped image (stock `postgres:16-alpine`).
+  This is a clean Supabase win.
+- **Managed-edge functions + turnkey backups.** Supabase Edge Functions deploy to Deno Deploy
+  **edge regions worldwide**; Grobase functions are **single-node**. And Supabase runs daily
+  backups + PITR as a **hands-off managed SLA** with contractual retention — Grobase's per-tenant
+  backup + PITR are powerful but **flag-gated OFF and self-operated** (you run the WAL archiving,
+  base backups, retention pruning, and restore drill), with no read replicas.
+- **SAML 2.0 SSO + turnkey enterprise auth.** Grobase ships **OIDC** SSO + SCIM but **defers SAML
+  2.0** (needs a mock SAML IdP + XML-dsig — task #33); a SAML-only IdP must wait. Supabase's SSO/SCIM
+  are also **turnkey managed** (you don't operate them) with a polished Studio auth-management UI.
 - **Large community + managed-cloud maturity.** Huge community, broad docs, third-party tutorials,
   and a battle-tested hosted platform with years of operational history.
 - **SOC 2 + ISO 27001 (Team) and HIPAA (Enterprise) available today.** Grobase ships an OWASP ASVS /
@@ -118,8 +158,12 @@ Grobase column cites `packages.json` / a gate / an artifact. Supabase column is 
 > **Choose Grobase if** you want to **self-host one backend for any frontend** across **many engines**
 > (not just Postgres); you need to **bring your own database**; you're packing **many tenants into a
 > tiny footprint** (24,888 @ 2.9 MiB measured); you want a **5 MB single binary** at the floor and a
-> **no-rewrite path** to a platform; you want an **in-stack OWASP WAF** by default; or you need
-> **< $1/tenant** economics and 4 isolation models per mount.
+> **no-rewrite path** to a platform; you want an **in-stack OWASP WAF** by default; you need
+> **per-tenant granular backup/restore** (restore one tenant without touching the rest);
+> **no-cap, data-resident functions + storage** (no invocation / per-GB / egress ceiling, code+bytes
+> never leave your infra); **passkeys + OIDC SSO + SCIM** without a $599 paywall;
+> **cryptographically re-verifiable** audit + compliance controls; or you need **< $1/tenant**
+> economics and 4 isolation models per mount.
 
 ---
 

@@ -220,39 +220,39 @@ footer li{margin:2px 0}
         </tr>
         <tr>
           <td><b>Object storage</b></td>
-          <td><span class="badge" style="background:#0891b2">ok</span> S3/MinIO buckets, list, object, presigned sign (Max add-on)</td>
-          <td><span class="badge" style="background:#16a34a">win</span> 1 GB Free / 100 GB Pro, mature CDN + image transforms</td>
-          <td class="muted">/storage/v1/* / supabase.com/pricing</td>
+          <td><span class="badge" style="background:#16a34a">win</span> S3/MinIO (or any S3-compatible: R2/Backblaze/Wasabi/AWS) buckets, list, object, presigned sign + on-the-fly image transforms (resize/webp/jpeg/png/avif, gate m95) + per-bucket ABAC + per-request owner-scoping; self-host = NO per-GB / egress / total-storage cap (you pay only your own bucket)</td>
+          <td><span class="badge" style="background:#0891b2">ok</span> 1 GB Free / 100 GB Pro (hard quota), mature managed CDN + image transforms</td>
+          <td class="muted">/storage/v1/* + image-transform.ts + gate m95 / supabase.com/pricing</td>
         </tr>
         <tr>
           <td><b>Functions</b></td>
-          <td><span class="badge" style="background:#0891b2">ok</span> deploy / list / invoke (Max add-on)</td>
-          <td><span class="badge" style="background:#16a34a">win</span> Edge Functions, 500k invocations-mo Free, mature Deno runtime</td>
-          <td class="muted">/functions/v1/* / supabase.com/pricing</td>
+          <td><span class="badge" style="background:#16a34a">win</span> Deno runtime: deploy/list/invoke + DB-event triggers (cross-tenant-isolated) + per-fn secrets (AES-GCM) + warm pool + per-invoke mem-cap + live cron + baas CLI; self-host = NO invocation cap, data never leaves your infra</td>
+          <td><span class="badge" style="background:#16a34a">win</span> Edge Functions, 500k invocations/mo Free (billing cap), globally distributed (Deno Deploy edge), mature managed runtime</td>
+          <td class="muted">/functions/v1/* + functions-runtime/src/server.ts + gate m56/m79/m96 / supabase.com/pricing</td>
         </tr>
         <tr>
           <td><b>Auth / MFA</b></td>
-          <td><span class="badge" style="background:#0891b2">ok</span> gotrue surface (signup, password grant, recover, verify, MFA factors); binocle-one adds OAuth2 + admin UI</td>
-          <td><span class="badge" style="background:#16a34a">win</span> Mature GoTrue-based auth, many OAuth providers, MFA, 50k-100k MAU</td>
-          <td class="muted">/auth/v1/* / supabase.com/pricing</td>
+          <td><span class="badge" style="background:#16a34a">win</span> Same engine as Supabase (gotrue v2.188.1 vendored) + passkeys/WebAuthn (m107), per-tenant OIDC SSO (m110), SCIM 2.0 (m111), OAuth2/OIDC+PKCE+TOTP+recovery (m41/m42); self-host = no MAU cap</td>
+          <td><span class="badge" style="background:#0891b2">ok</span> Mature GoTrue-based auth, many OAuth providers, MFA, 50k-100k MAU — but SSO/SCIM are paid Team/Enterprise only, no first-class passkeys; SAML 2.0 + Studio auth UI win</td>
+          <td class="muted">Dockerfile FROM supabase/gotrue:v2.188.1; gates m107/m110/m111/m41/m42; supabase.com/pricing (SSO/SCIM = paid)</td>
         </tr>
         <tr>
-          <td><b>Backups</b></td>
-          <td><span class="badge" style="background:#0891b2">ok</span> Logical per-tenant backup/restore (Go-native COPY, gate m87, flag-gated)</td>
-          <td><span class="badge" style="background:#16a34a">win</span> Daily backups + 7-day PITR (Pro), 14-day retention (Team)</td>
-          <td class="muted">042_tenant_backups.sql + m87 / supabase.com/pricing</td>
+          <td><b>Backups / PITR</b></td>
+          <td><span class="badge" style="background:#16a34a">win</span> Per-TENANT logical backup/restore (atomic Go-native COPY, restore one tenant in isolation, gate m87) + PITR restore-to-timestamp (WAL archive + recovery_target_time, tier retention nano1d…max90d, gate m99) + whole-cluster drill (m47); self-host = backups in your own bucket, no storage/egress markup</td>
+          <td><span class="badge" style="background:#0891b2">ok</span> Daily backups + 7-day PITR (Pro), 14-day retention (Team) — turnkey managed SLA, but whole-project only (no per-tenant restore)</td>
+          <td class="muted">internal/backup/* + 042_tenant_backups.sql + gates m87/m99/m47 / supabase.com/pricing</td>
         </tr>
         <tr>
           <td><b>GraphQL</b></td>
-          <td><span class="badge" style="background:#0891b2">ok</span> GraphQL edition (docker-compose.graphql.yml, RLS-aware, gate m59)</td>
-          <td><span class="badge" style="background:#0891b2">ok</span> pg_graphql auto-API</td>
-          <td class="muted">docker-compose.graphql.yml / supabase.com docs</td>
+          <td><span class="badge" style="background:#0891b2">ok</span> pg_graphql (same extension as Supabase), RLS-isolation gate-proven (m59, two-tenant + anon-denied); self-host = no per-query/egress metering; opt-in glibc edition (docker-compose.graphql.yml)</td>
+          <td><span class="badge" style="background:#0891b2">ok</span> pg_graphql auto-API, default-on + hosted GraphiQL Studio explorer</td>
+          <td class="muted">scripts/verify/m59-graphql-live.sh / 035_pg_graphql.sql / kong.yml / supabase.com docs</td>
         </tr>
         <tr>
           <td><b>Vector / full-text search</b></td>
-          <td><span class="badge" style="background:#a16207">partial</span> Postgres pgvector + FTS where the engine supports it</td>
-          <td><span class="badge" style="background:#16a34a">win</span> pgvector + built-in FTS, first-class</td>
-          <td class="muted">engine-dependent / supabase.com docs</td>
+          <td><span class="badge" style="background:#dc2626">gap</span> No first-class FTS or vector op; stock PG tsvector reachable only via admin-only /v1/admin/raw; pgvector NOT installed (base image postgres:16-alpine); $like/$ilike = substring only</td>
+          <td><span class="badge" style="background:#16a34a">win</span> pgvector + built-in tsvector FTS, first-class, managed + documented</td>
+          <td class="muted">operation.rs:24-32 (8-op surface) + docker-compose.yml:483 (stock postgres:16-alpine) + routes.rs:2178 (admin-only raw) / supabase.com docs</td>
         </tr>
         <tr>
           <td><b>Dashboard / Studio</b></td>
@@ -280,9 +280,9 @@ footer li{margin:2px 0}
         </tr>
         <tr>
           <td><b>Compliance posture</b></td>
-          <td><span class="badge" style="background:#dc2626">gap</span> Audit-ready (tamper-evident audit on roadmap); no formal SOC 2 yet</td>
-          <td><span class="badge" style="background:#16a34a">win</span> SOC 2 + ISO 27001 (Team), HIPAA (Enterprise)</td>
-          <td class="muted">wiki/marketability-readiness.md / supabase.com/pricing</td>
+          <td><span class="badge" style="background:#a16207">partial</span> Verifiable, self-host controls: tamper-evident hash-chained audit (m104), continuous SOC2-lite evidence collector (m108), GDPR hard-erase + portable export (m105/m109), in-stack OWASP WAF, trust center (m112) — independently re-checkable, data stays in your infra. No third-party attestation yet.</td>
+          <td><span class="badge" style="background:#16a34a">win</span> SOC 2 + ISO 27001 (Team), HIPAA BAA (Enterprise) — third-party attested; no in-stack WAF, audit log not cryptographically tamper-evident</td>
+          <td class="muted">gates m104/m108/m105/m109/m112 + wiki/trust-center.md / supabase.com/security</td>
         </tr>
         <tr>
           <td><b>Cost per tenant at scale</b></td>
