@@ -10,6 +10,16 @@
 .gb-galaxy canvas {
 	width: 100%;
 	height: 100%;
+	// Ambient: the backdrop stays faint so it never competes with reading. A soft
+	// radial fade pulls it further back behind the centre column where copy lives.
+	opacity: 0.3;
+	mask-image: radial-gradient(125% 90% at 50% 38%, rgb(0 0 0 / 35%) 0%, rgb(0 0 0 / 70%) 48%, #000 100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.gb-galaxy canvas {
+		opacity: 0.22;
+	}
 }
 
 // Static fallback (no JS): a calm SVG starfield so the hero still has depth.
@@ -20,7 +30,7 @@
 	width: 100%;
 	height: 100%;
 	object-fit: cover;
-	opacity: 0.7;
+	opacity: 0.32;
 }
 
 // Hover/pin card describing one tenant's stack. Built via createElement only.
@@ -84,3 +94,6 @@
 	border-color: var(--gb-primary);
 	color: var(--gb-text);
 }
+
+// (The Genesis → Big Bang narrative beats were retired: the galaxy is now a calm
+// ambient backdrop, so the act-break, flash and supernova styles are gone.)

@@ -1,6 +1,6 @@
 // Pure layout functions: given the tenant population and a viewport, produce
-// target positions, per-node scale and links for one narrative state. No DOM,
-// no randomness beyond node fields — unit-tested with node:test.
+// target positions, per-node scale, per-node depth and links for one narrative
+// state. No DOM, no randomness beyond node fields — unit-tested with node:test.
 import type { EngineId, IsolationId, LayoutResult, LayoutState, TenantNode } from './types.ts';
 
 const TAU = Math.PI * 2;
@@ -48,18 +48,18 @@ function nearestLinks(targets: Float64Array, groups: number[]): Array<[number, n
 	return links;
 }
 
-function result(targets: Float64Array, rScales: Float64Array, links: Array<[number, number]>, scale: number): LayoutResult {
-	return { targets, rScales, links, scale };
+function result(targets: Float64Array, rScales: Float64Array, tzs: Float64Array, links: Array<[number, number]>, scale: number): LayoutResult {
+	return { targets, rScales, tzs, links, scale };
 }
 
-function base(n: number): { targets: Float64Array; rScales: Float64Array } {
+function base(n: number): { targets: Float64Array; rScales: Float64Array; tzs: Float64Array } {
 	const rScales = new Float64Array(n);
 	rScales.fill(1);
-	return { targets: new Float64Array(n * 2), rScales };
+	return { targets: new Float64Array(n * 2), rScales, tzs: new Float64Array(n) };
 }
 
 function layoutNebula(nodes: TenantNode[], w: number, h: number): LayoutResult {
-	const { targets, rScales } = base(nodes.length);
+	const { targets, rScales, tzs } = base(nodes.length);
 	const cx = w / 2;
 	const cy = h / 2;
 	const R = Math.min(w, h) * 0.46;
@@ -71,13 +71,42 @@ function layoutNebula(nodes: TenantNode[], w: number, h: number): LayoutResult {
 		const radius = Math.pow(t, 0.62) * R * (0.86 + hash01(node.id * 7) * 0.32);
 		targets[2 * i] = cx + Math.cos(angle) * radius * 1.18;
 		targets[2 * i + 1] = cy + Math.sin(angle) * radius * 0.86;
+		// Gentle depth swirl so the resting galaxy reads as 3D under camera yaw.
+		tzs[i] = Math.sin(t * TAU * 1.9 + arm) * 70;
 	});
 	const groups = nodes.map((_, i) => i % arms);
-	return result(targets, rScales, nearestLinks(targets, groups), 1);
+	return result(targets, rScales, tzs, nearestLinks(targets, groups), 1);
+}
+
+// "It started with one backend." Every cube springs onto a tight central cluster
+// around the bright origin cube; the origin dominates (rScale up). Single group →
+// non-empty links; all targets well within the central radius (test: <W*0.22).
+function layoutGenesis(nodes: TenantNode[], w: number, h: number): LayoutResult {
+	const { targets, rScales, tzs } = base(nodes.length);
+	const cx = w / 2;
+	const cy = h / 2;
+	const spacing = (Math.min(w, h) * 0.13) / Math.sqrt(nodes.length);
+	nodes.forEach((node, i) => {
+		if (node.origin) {
+			targets[2 * i] = cx;
+			targets[2 * i + 1] = cy;
+			rScales[i] = 3.8;
+			tzs[i] = 0;
+			return;
+		}
+		const r = spacing * Math.sqrt(i + 0.6);
+		const theta = i * GOLDEN_ANGLE;
+		targets[2 * i] = cx + Math.cos(theta) * r;
+		targets[2 * i + 1] = cy + Math.sin(theta) * r;
+		rScales[i] = 0.5 + hash01(node.id) * 0.25;
+		tzs[i] = (hash01(node.id * 19) - 0.5) * 40;
+	});
+	const groups = nodes.map(() => 0);
+	return result(targets, rScales, tzs, nearestLinks(targets, groups), 0.4);
 }
 
 function layoutEngines(nodes: TenantNode[], w: number, h: number): LayoutResult {
-	const { targets, rScales } = base(nodes.length);
+	const { targets, rScales, tzs } = base(nodes.length);
 	const cx = w / 2;
 	const cy = h / 2;
 	const ringR = Math.min(w, h) * 0.34;
@@ -95,12 +124,39 @@ function layoutEngines(nodes: TenantNode[], w: number, h: number): LayoutResult 
 		const theta = k * GOLDEN_ANGLE;
 		targets[2 * i] = gx + Math.cos(theta) * r;
 		targets[2 * i + 1] = gy + Math.sin(theta) * r;
+		// Each engine cluster sits on its own depth on the ring (yaw reveals it).
+		tzs[i] = Math.cos(a) * 120;
 	});
-	return result(targets, rScales, nearestLinks(targets, groups), 0.85);
+	return result(targets, rScales, tzs, nearestLinks(targets, groups), 0.85);
+}
+
+// "Then it grew — without a rewrite." Inflated cubes spread across discrete depth
+// planes in a structured lattice; camera pitch stacks the planes visibly.
+function layoutGrowth(nodes: TenantNode[], w: number, h: number): LayoutResult {
+	const { targets, rScales, tzs } = base(nodes.length);
+	const planeZ = [-220, -74, 74, 220];
+	const cols = 12;
+	const rows = Math.ceil(nodes.length / cols);
+	const cellW = (w * 0.74) / (cols - 1);
+	const cellH = (h * 0.5) / Math.max(1, rows - 1);
+	const groups: number[] = [];
+	nodes.forEach((node, i) => {
+		const p = i % planeZ.length; // guarantees ≥2 distinct depth planes
+		groups.push(p);
+		tzs[i] = planeZ[p]!;
+		const col = i % cols;
+		const row = Math.floor(i / cols);
+		const jitterX = (hash01(node.id * 3) - 0.5) * cellW * 0.5;
+		const jitterY = (hash01(node.id * 11) - 0.5) * cellH * 0.5;
+		targets[2 * i] = w * 0.13 + col * cellW + jitterX;
+		targets[2 * i + 1] = h * 0.25 + row * cellH + jitterY;
+		rScales[i] = 1.25 + hash01(node.id * 7) * 0.25;
+	});
+	return result(targets, rScales, tzs, nearestLinks(targets, groups), 0.95);
 }
 
 function layoutTiers(nodes: TenantNode[], w: number, h: number): LayoutResult {
-	const { targets, rScales } = base(nodes.length);
+	const { targets, rScales, tzs } = base(nodes.length);
 	const cy = h / 2;
 	const counters = new Map<number, number>();
 	const groups: number[] = [];
@@ -115,12 +171,13 @@ function layoutTiers(nodes: TenantNode[], w: number, h: number): LayoutResult {
 		const theta = k * GOLDEN_ANGLE;
 		targets[2 * i] = gx + Math.cos(theta) * r;
 		targets[2 * i + 1] = gy + Math.sin(theta) * r;
+		tzs[i] = (g - 2) * 55; // tiers step back in depth nano→max
 	});
-	return result(targets, rScales, nearestLinks(targets, groups), 0.8);
+	return result(targets, rScales, tzs, nearestLinks(targets, groups), 0.8);
 }
 
 function layoutIsolation(nodes: TenantNode[], w: number, h: number): LayoutResult {
-	const { targets, rScales } = base(nodes.length);
+	const { targets, rScales, tzs } = base(nodes.length);
 	const cx = w / 2;
 	const cy = h / 2;
 	const minDim = Math.min(w, h);
@@ -134,18 +191,21 @@ function layoutIsolation(nodes: TenantNode[], w: number, h: number): LayoutResul
 		const wobble = 1 + (hash01(node.id * 29) - 0.5) * 0.12;
 		targets[2 * i] = cx + Math.cos(angle) * rr * wobble * 1.25;
 		targets[2 * i + 1] = cy + Math.sin(angle) * rr * wobble;
+		// Concentric shells read as nested under the slow camera orbit.
+		tzs[i] = Math.sin(angle) * rr * 0.5;
 	});
-	return result(targets, rScales, nearestLinks(targets, groups), 0.9);
+	return result(targets, rScales, tzs, nearestLinks(targets, groups), 0.9);
 }
 
 function layoutPlanes(nodes: TenantNode[], w: number, h: number): LayoutResult {
-	const { targets, rScales } = base(nodes.length);
+	const { targets, rScales, tzs } = base(nodes.length);
 	// Three request streams: heavy TS orchestration, light Go control, tiny
 	// Rust data plane — node size visualises per-process weight (127 vs 3.3 MiB).
+	// Depth makes it literal: TS in front, Rust the small cube in the back.
 	const bands = [
-		{ y: 0.3, rScale: 1.75, share: 0.35 },
-		{ y: 0.5, rScale: 1.0, share: 0.25 },
-		{ y: 0.7, rScale: 0.5, share: 0.4 },
+		{ y: 0.3, rScale: 1.75, share: 0.35, z: -180 },
+		{ y: 0.5, rScale: 1.0, share: 0.25, z: 0 },
+		{ y: 0.7, rScale: 0.5, share: 0.4, z: 200 },
 	];
 	const groups: number[] = [];
 	const counters = new Map<number, number>();
@@ -159,12 +219,33 @@ function layoutPlanes(nodes: TenantNode[], w: number, h: number): LayoutResult {
 		targets[2 * i] = w * 0.08 + ((k * 53) % Math.max(1, Math.floor(w * 0.84)));
 		targets[2 * i + 1] = h * band.y + Math.sin(k * 1.7 + g) * h * 0.045;
 		rScales[i] = band.rScale;
+		tzs[i] = band.z;
 	});
-	return result(targets, rScales, nearestLinks(targets, groups), 0.9);
+	return result(targets, rScales, tzs, nearestLinks(targets, groups), 0.9);
+}
+
+// "And then it all comes together." The dense, slowly-pulsing central CORE the
+// Big Bang detonates from — tighter than cta, a slight depth shell. In-band,
+// non-empty links (the burst itself is imperative, not a layout).
+function layoutArmed(nodes: TenantNode[], w: number, h: number): LayoutResult {
+	const { targets, rScales, tzs } = base(nodes.length);
+	const cx = w / 2;
+	const cy = h / 2;
+	const spacing = (Math.min(w, h) * 0.1) / Math.sqrt(nodes.length);
+	nodes.forEach((node, i) => {
+		const r = spacing * Math.sqrt(i + 0.5);
+		const theta = i * GOLDEN_ANGLE;
+		targets[2 * i] = cx + Math.cos(theta) * r;
+		targets[2 * i + 1] = cy + Math.sin(theta) * r;
+		rScales[i] = 1.1 + hash01(node.id) * 0.5;
+		tzs[i] = (hash01(node.id * 5) - 0.5) * 70;
+	});
+	const groups = nodes.map(() => 0);
+	return result(targets, rScales, tzs, nearestLinks(targets, groups), 0.4);
 }
 
 function layoutCta(nodes: TenantNode[], w: number, h: number): LayoutResult {
-	const { targets, rScales } = base(nodes.length);
+	const { targets, rScales, tzs } = base(nodes.length);
 	const cx = w / 2;
 	const cy = h / 2;
 	const spacing = (Math.min(w, h) * 0.27) / Math.sqrt(nodes.length);
@@ -173,21 +254,28 @@ function layoutCta(nodes: TenantNode[], w: number, h: number): LayoutResult {
 		const theta = i * GOLDEN_ANGLE;
 		targets[2 * i] = cx + Math.cos(theta) * r;
 		targets[2 * i + 1] = cy + Math.sin(theta) * r;
+		tzs[i] = Math.sin(theta) * r * 0.35;
 	});
 	const groups = nodes.map(() => 0);
-	return result(targets, rScales, nearestLinks(targets, groups), 0.5);
+	return result(targets, rScales, tzs, nearestLinks(targets, groups), 0.5);
 }
 
 export function computeLayout(state: LayoutState, nodes: TenantNode[], w: number, h: number): LayoutResult {
 	switch (state) {
+		case 'genesis':
+			return layoutGenesis(nodes, w, h);
 		case 'engines':
 			return layoutEngines(nodes, w, h);
+		case 'growth':
+			return layoutGrowth(nodes, w, h);
+		case 'planes':
+			return layoutPlanes(nodes, w, h);
 		case 'tiers':
 			return layoutTiers(nodes, w, h);
 		case 'isolation':
 			return layoutIsolation(nodes, w, h);
-		case 'planes':
-			return layoutPlanes(nodes, w, h);
+		case 'bigbang-armed':
+			return layoutArmed(nodes, w, h);
 		case 'cta':
 			return layoutCta(nodes, w, h);
 		case 'nebula':
@@ -196,4 +284,4 @@ export function computeLayout(state: LayoutState, nodes: TenantNode[], w: number
 	}
 }
 
-export const ALL_STATES: LayoutState[] = ['nebula', 'engines', 'tiers', 'isolation', 'planes', 'cta'];
+export const ALL_STATES: LayoutState[] = ['nebula', 'genesis', 'engines', 'growth', 'planes', 'tiers', 'isolation', 'bigbang-armed', 'cta'];

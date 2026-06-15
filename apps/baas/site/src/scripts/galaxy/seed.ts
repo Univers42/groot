@@ -102,9 +102,25 @@ export function seedTenants(seed = 42): TenantNode[] {
 				tierColor: TIER_COLORS[tier],
 				phase: rand() * Math.PI * 2,
 				delay: 0,
+				z: 0,
+				tz: 0,
+				spin: 0,
+				spinSpeed: 0,
+				origin: false,
 			});
 			id += 1;
 		}
 	}
+	// Pseudo-3D cube attributes are drawn from the PRNG *after* the whole
+	// population loop, so the existing 120-node fingerprint (name / tier / engines
+	// / r / phase) stays byte-identical and the seed-determinism test holds.
+	for (const node of nodes) {
+		node.spin = rand() * Math.PI * 2;
+		node.spinSpeed = 0.15 + rand() * 0.25;
+	}
+	// The first max-tier tenant is the bright "origin" cube the genesis state
+	// collapses toward — the "it started with one backend" beat.
+	const originNode = nodes.find((node) => node.tier === 'max');
+	if (originNode) originNode.origin = true;
 	return nodes;
 }

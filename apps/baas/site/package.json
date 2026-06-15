@@ -17,11 +17,12 @@
     "lint:css": "node scripts/container-only.mjs stylelint \"src/**/*.scss\"",
     "lint:css:fix": "node scripts/container-only.mjs stylelint \"src/**/*.scss\" --fix",
     "lint:html": "node scripts/container-only.mjs html-validate \"dist/**/*.html\"",
-    "test": "node scripts/container-only.mjs node --experimental-strip-types --test src/scripts/galaxy/layouts.test.ts",
+    "test": "node scripts/container-only.mjs node --experimental-strip-types --test src/scripts/galaxy/layouts.test.ts src/scripts/galaxy/camera.test.ts",
     "audit:all": "node scripts/container-only.mjs node scripts/audit/run-all.mjs",
     "audit:lh": "node scripts/container-only.mjs node scripts/audit/lighthouse.mjs",
     "audit:a11y": "node scripts/container-only.mjs pa11y http://127.0.0.1:4325/ --config scripts/audit/pa11y.config.json",
-    "audit:csp": "node scripts/container-only.mjs node scripts/audit/csp-check.mjs http://127.0.0.1:4325"
+    "audit:csp": "node scripts/container-only.mjs node scripts/audit/csp-check.mjs http://127.0.0.1:4325",
+    "test:e2e": "node scripts/container-only.mjs playwright test"
   },
   "dependencies": {
     "@astrojs/check": "^0.9.4",
@@ -31,6 +32,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "@playwright/test": "^1.61.0",
     "eslint": "^9.39.4",
     "eslint-plugin-astro": "^1.7.0",
     "eslint-plugin-jsx-a11y": "^6.10.2",

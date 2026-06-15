@@ -3,11 +3,12 @@ import Layout from '../layouts/Layout.astro';
 import Header from '../components/layout/Header.astro';
 import Footer from '../components/layout/Footer.astro';
 import SectionHeading from '../components/ui/SectionHeading.astro';
-import TierCard from '../components/pricing/TierCard.astro';
+import PlanCard from '../components/pricing/PlanCard.astro';
+import PlanMatrix from '../components/pricing/PlanMatrix.astro';
+import PlanTradeoffs from '../components/pricing/PlanTradeoffs.astro';
 import TransparencyTable from '../components/pricing/TransparencyTable.astro';
 import MathBreakdown from '../components/pricing/MathBreakdown.astro';
 import AmortizationStory from '../components/pricing/AmortizationStory.astro';
-import CapabilityMatrix from '../components/pricing/CapabilityMatrix.astro';
 import Faq from '../components/pricing/Faq.astro';
 import { SITE } from '../data/site';
 import { TIERS } from '../data/tiers';
@@ -15,7 +16,7 @@ import { PRICING_FAQ } from '../data/faq';
 
 const title = `Pricing — ${SITE.name}`;
 const description =
-	'Grobase pricing with the math shown: every tier lists what you pay AND what it costs to run — live-measured RAM × the public Fly.io rate card. From a free single binary to a multi-tenant cloud.';
+	'Grobase pricing with the math shown: selectable plan cards, a full capability matrix, and an honest advantages/trade-offs breakdown for every tier — from a free single binary to a multi-tenant cloud.';
 
 const jsonLd = [
 	{
@@ -49,13 +50,27 @@ const jsonLd = [
 			<section class="gb-section" aria-labelledby="pricing-title">
 				<div class="gb-container">
 					<SectionHeading
-						kicker="Radical transparency"
-						title="Pricing with the math shown."
-						lede="Every tier lists what you pay and what it costs us to run on Fly.io — live-measured RAM, public rate card, reproducible artifacts. The margin is part of the product page, not a secret."
+						kicker="Choose your plan"
+						title="Pick a size. Grow into the next. Never rewrite."
+						lede="Every tier is a capability mask, not a marketing label — measured RAM, the public Fly.io rate card, honest limits. Select a plan to highlight it across the comparison matrix, then dig into the trade-offs."
 						id="pricing-title"
 					/>
-					<div class="gb-pricing-grid">
-						{TIERS.map((tier) => <TierCard tier={tier} />)}
+					<div class="gb-plan-suite">
+						<fieldset class="gb-plans">
+							<legend class="visually-hidden">Select a plan to compare</legend>
+							{TIERS.map((tier) => <PlanCard tier={tier} recommended={tier.id === 'pro'} />)}
+						</fieldset>
+
+						<div>
+							<h3 class="gb-plan-suite__h">The full comparison</h3>
+							<PlanMatrix />
+						</div>
+
+						<div>
+							<h3 class="gb-plan-suite__h">Advantages &amp; trade-offs, tier by tier</h3>
+							<p class="gb-plan-suite__sub">No tier is "best" — each is honest about what it gives you and what you give up. Expand any card to see when to choose it and when you'll outgrow it.</p>
+							<PlanTradeoffs />
+						</div>
 					</div>
 				</div>
 			</section>
@@ -91,17 +106,6 @@ const jsonLd = [
 						id="amortization-title"
 					/>
 					<AmortizationStory />
-				</div>
-			</section>
-
-			<section class="gb-section" aria-labelledby="caps-title">
-				<div class="gb-container">
-					<SectionHeading
-						kicker="Honest enforcement"
-						title="Tiers are capability masks, not marketing labels."
-						id="caps-title"
-					/>
-					<CapabilityMatrix />
 				</div>
 			</section>
 
