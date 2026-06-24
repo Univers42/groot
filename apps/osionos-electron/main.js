@@ -22,10 +22,10 @@ const crypto = require("node:crypto");
 // apply. Override with OSIONOS_BAAS_URL if the router runs elsewhere.
 //
 // MUST be 127.0.0.1, not "localhost": Chromium's net.fetch resolves "localhost" to
-// IPv6 ::1 first, but the mini-baas Kong binds IPv4-only (127.0.0.1:8002), so an
+// IPv6 ::1 first, but the grobase Kong binds IPv4-only (127.0.0.1:8000), so an
 // ::1 attempt is refused → net.fetch throws → the proxy returns 502 (the graph /
 // database calls fail). Coerce any localhost override to IPv4 too.
-const BAAS_TARGET = (process.env.OSIONOS_BAAS_URL || "http://127.0.0.1:8002")
+const BAAS_TARGET = (process.env.OSIONOS_BAAS_URL || "http://127.0.0.1:8000")
   .replace(/\/+$/, "")
   .replace(/\/\/localhost(?=[:/]|$)/, "//127.0.0.1");
 

@@ -53,7 +53,7 @@ app-images-push: app-images app-login
 healthcheck: certs
 ## Verify the grobase backend, website, osionos app, bridge, and auth gateway.
 	docker compose ps
-	$(CURL_HEALTH) $(BAAS_URL)/auth/v1/health >/dev/null
+	$(CURL_HEALTH) -H "apikey: $(BAAS_HEALTH_KEY)" $(BAAS_URL)/auth/v1/health >/dev/null
 	$(CURL_HEALTH) $(BRIDGE_URL)/api/auth/bridge/health
 	$(CURL_HEALTH) $(OSIONOS_URL) >/dev/null
 	$(CURL_HEALTH) $(WEBSITE_URL) >/dev/null

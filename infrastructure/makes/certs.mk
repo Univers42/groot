@@ -24,14 +24,15 @@ define TRUST_LOCAL_CA
 	src='$(CURDIR)/$(LOCAL_CA_CERT)'; \
 	if [[ ! -f "$$src" ]]; then echo "[certs] no CA at $$src; run make certs first" >&2; exit 0; fi; \
 	if command -v sudo >/dev/null 2>&1 && command -v update-ca-certificates >/dev/null 2>&1; then \
-		sudo cp "$$src" /usr/local/share/ca-certificates/track-binocle-local-ca.crt && sudo update-ca-certificates >/dev/null 2>&1 \
-			&& echo '[certs] grobase CA trusted in the system store' || echo '[certs] system CA trust import skipped (sudo/update-ca-certificates unavailable)'; \
+		sudo -n cp "$$src" /usr/local/share/ca-certificates/track-binocle-local-ca.crt 2>/dev/null && sudo -n update-ca-certificates >/dev/null 2>&1 \
+			&& echo '[certs] grobase CA trusted in the system store' || echo '[certs] system CA trust import skipped (needs: sudo make certs-trust-local)'; \
 	else \
 		echo '[certs] update-ca-certificates/sudo not available; skipping system CA trust'; \
 	fi; \
 	if command -v certutil >/dev/null 2>&1; then \
-		for db in "$$HOME/.pki/nssdb" $$HOME/.mozilla/firefox/*.default*; do \
+		for db in "$$HOME/.pki/nssdb" $$HOME/.mozilla/firefox/*.default* $$HOME/snap/firefox/common/.mozilla/firefox/*.default* $$HOME/.var/app/org.mozilla.firefox/.mozilla/firefox/*.default*; do \
 			[[ -d "$$db" ]] || continue; \
+			certutil -D -n 'Track Binocle Local CA' -d "sql:$$db" >/dev/null 2>&1 || true; \
 			certutil -A -n 'Track Binocle Local CA' -t 'C,,' -i "$$src" -d "sql:$$db" >/dev/null 2>&1 \
 				&& echo "[certs] grobase CA imported into NSS db $$db" || true; \
 		done; \

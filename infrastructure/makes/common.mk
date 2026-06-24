@@ -23,7 +23,7 @@ COMPOSE_BAKE ?= 1
 REGISTRY_CACHE_PREFIX ?=
 BAKE_FILE ?= docker-bake.hcl
 BAKE_GROUP ?= default
-BAKE_TARGETS ?= postgres kong osionos-app mail calendar
+BAKE_TARGETS ?= osionos-app mail calendar opposite-osiris-node
 TRACK_BINOCLE_BIND_ADDR ?= $(shell if [ -r /sys/class/dmi/id/product_name ] && grep -qi 'VirtualBox' /sys/class/dmi/id/product_name 2>/dev/null && ip route 2>/dev/null | grep -q 'default via 10\.0\.2\.2'; then printf '0.0.0.0'; else printf '127.0.0.1'; fi)
 COMPOSE_PROFILES ?= dev
 export COMPOSE_PROFILES COMPOSE_PROGRESS BUILDKIT_PROGRESS BUILDX_BUILDER DOCKER_BUILDKIT COMPOSE_DOCKER_CLI_BUILD COMPOSE_BAKE REGISTRY_CACHE_PREFIX TRACK_BINOCLE_BIND_ADDR
@@ -62,6 +62,9 @@ OSIONOS_URL := https://localhost:3001
 BRIDGE_URL := https://localhost:4000
 AUTH_URL := https://localhost:8787/api/auth
 BAAS_URL := http://127.0.0.1:8000
+# grobase Kong gates /auth/v1/* with key-auth, so the BaaS health probe must
+# present the anon apikey (read from the consolidated root .env.local).
+BAAS_HEALTH_KEY := $(shell grep -m1 -oE '^SB_KONG_KEY=.*' .env.local 2>/dev/null | cut -d= -f2-)
 MAIL_URL := https://localhost:3002
 MAIL_BRIDGE_URL := https://localhost:4100
 CALENDAR_URL := https://localhost:3003

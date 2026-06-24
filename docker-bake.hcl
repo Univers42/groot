@@ -1,7 +1,7 @@
+# Frontends-only: the backend (postgres/kong/etc.) lives in the standalone
+# grobase stack now, so the root bake no longer builds it.
 group "default" {
   targets = [
-    "postgres",
-    "kong",
     "osionos-app",
     "mail",
     "calendar",
@@ -15,8 +15,6 @@ group "secrets" {
 
 group "testing" {
   targets = [
-    "postgres",
-    "kong",
     "osionos-app",
     "mail",
     "calendar",
@@ -35,18 +33,6 @@ target "vault" {
   tags = [
     "track-binocle-vault:local",
   ]
-}
-
-target "postgres" {
-  context    = "./apps/baas/mini-baas-infra/docker/services/postgres"
-  dockerfile = "Dockerfile"
-  tags       = ["track-binocle-postgres:local"]
-}
-
-target "kong" {
-  context    = "./apps/baas"
-  dockerfile = "Dockerfile"
-  tags       = ["track-binocle/mini-baas-kong:local"]
 }
 
 target "osionos-app" {
@@ -95,7 +81,7 @@ group "grobase" {
 }
 
 target "grobase-site" {
-  context    = "./apps/baas/site"
+  context    = "./apps/grobase/vendor/grobase-website"
   dockerfile = "Dockerfile"
   target     = "dev"
   tags       = ["track-binocle/grobase-site:local"]

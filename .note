@@ -1,0 +1,59 @@
+ Everything's prepped and the path is clear:
+
+  - Fly vault is up (vault42.fly.dev → 200; the grobase 404s are just "no
+  root route", the API lives under paths).
+  - The 42ctl errors you see (os error 6) are because I'm running it
+  without a terminal — it wants to prompt for your vault passphrase and
+  there's no TTY here. That's the zero-knowledge guarantee in action: I 
+  literally cannot seal your data without your passphrase, and I shouldn't 
+  have it. So the final seal-and-upload is one command you run.
+
+  Your notes are exported and ready
+
+  ~/osionos-migration/osionos-notes-export.sql.gz — 540 KB, holding all 294
+  pages, 5 workspaces, memberships, and 33 page-configs as a re-importable
+  dump.
+
+  Step 1 — push to vault42 (run in your terminal)
+
+  cd ~/Documents/42ctl
+  ./42ctl-release note add grobase/full-export \
+    --project osionos-notes \
+    --file ~/osionos-migration/osionos-notes-export.sql.gz
+  # → it prompts for your vault passphrase, seals locally, uploads to the 
+  fly store
+  ./42ctl-release note ls --project osionos-notes      # verify it's there
+  --project osionos-notes is your fresh namespace, so these never mix with
+  other vault data.
+
+  Step 2 — on the other machine
+
+  # get 42ctl there (copy the binary, or build); the config already points 
+  at the fly store.
+  # carry your identity over — simplest is to copy your keystore:
+  #   scp -r ~/.config/42ctl  you@machine-B:~/.config/      (same 
+  passphrase unlocks it)
+  #   — or — 42ctl keys escrow  (here)  →  42ctl keys recover  (there)
+
+  ./42ctl-release note get grobase/full-export > osionos-export.sql.gz
+  gunzip osionos-export.sql.gz
+  # with machine-B's grobase up (osionos schema applied):
+  docker exec -i mini-baas-postgres psql -U postgres -d postgres <
+  osionos-export.sql
+  # then set dev.pro.photo's password on B's gotrue and log in
+
+  Things to know
+
+  - The passphrase is the only key. Lose it → the sealed notes are
+  unrecoverable (that's the design). Back it up.
+  - vault42 is the encrypted transit, not a usable store — machine B needs
+  grobase running to re-import and actually open the notes.
+  - Metadata (project name, note path, size) is visible to whoever runs the
+  fly store; only the content is sealed.
+
+  Want me to set up keys escrow now (so your identity rides to the other
+  machine without copying files), or split the export per-workspace into
+  separate notes instead of one? Otherwise, run Step 1 and tell me what
+  note ls shows — I'll confirm it landed correctly.
+
+✻ Sautéed for 14m 31s · 1 shell still running
