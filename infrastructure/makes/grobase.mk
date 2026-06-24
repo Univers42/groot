@@ -13,7 +13,7 @@ grobase-down:
 
 grobase-audit:
 ## Run the full Grobase quality gate: prod build + preview + Lighthouse (>=90 x4
-## on /, /pricing, /compare) + pa11y + CSP check + html-validate. Fails on any gate.
+## on /, /pricing, /security) + pa11y + CSP check + html-validate. Fails on any gate.
 	docker compose --profile grobase build grobase-site-audit
 	docker compose --profile grobase run --rm grobase-site-audit
 
