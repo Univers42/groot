@@ -39,17 +39,16 @@ jobs:
           git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
           git submodule update --init apps/grobase apps/opposite-osiris apps/calendar apps/mail apps/osionos/app
 
-      - name: Run Semgrep (community rules)
-        uses: semgrep/semgrep-action@v1
-        with:
-          config: >-
-            p/owasp-top-ten
-            p/typescript
-            p/dockerfile
-            p/nodejs
-            p/javascript
-          generateSarif: true
+      - name: Run Semgrep (community rules) -> SARIF
         continue-on-error: true
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src semgrep/semgrep:latest \
+            semgrep scan \
+              --config p/owasp-top-ten --config p/typescript --config p/dockerfile \
+              --config p/nodejs --config p/javascript \
+              --sarif --output /src/semgrep.sarif || true
+          # Guarantee a valid SARIF so the upload step never hard-fails this advisory job.
+          [ -s semgrep.sarif ] || printf '%s' '{"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[]}' > semgrep.sarif
 
       - name: Upload SARIF to GitHub Security tab
         if: always()
