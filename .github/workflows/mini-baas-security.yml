@@ -9,6 +9,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      run_dast:
+        description: "Also run the heavy DAST/ZAP scan (stands up the full grobase backend)"
+        type: boolean
+        default: false
 
 concurrency:
   group: mini-baas-security-${{ github.ref }}
@@ -353,9 +358,10 @@ jobs:
       contents: read
     timeout-minutes: 30
     needs: [sast-semgrep, sca-npm-audit, container-trivy, secret-trufflehog]
-    # Manual only: this stands up the full grobase stack (heavy, needs the backend),
-    # so it does not gate every push/PR. Run on demand via "Run workflow".
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    # Opt-in only: stands up the full grobase stack (heavy, needs the backend), so it
+    # never gates push/PR and is skipped on ordinary dispatches. Run it via
+    # "Run workflow" with run_dast=true.
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_dast }}
     steps:
       - uses: actions/checkout@v4
         with:
