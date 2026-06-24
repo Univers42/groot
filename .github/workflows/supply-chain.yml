@@ -20,7 +20,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+      # Init only the frontend submodules we install here (not the heavy grobase
+      # backend submodule). --recursive picks up their own nested submodules.
+      - name: Check out frontend submodules
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+        run: |
+          git config url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git submodule update --init --recursive \
+            apps/mail apps/calendar apps/opposite-osiris apps/osionos/app
 
       - uses: actions/setup-node@v4
         with:
@@ -33,7 +42,6 @@ jobs:
             echo "checking ${dir}"
             (cd "${dir}" && npm ci --ignore-scripts)
           done
-          (cd apps/baas/sdk && npm ci --ignore-scripts && npm run build)
           (cd apps/opposite-osiris && npm ci --ignore-scripts)
 
   pnpm-frozen-installs:
@@ -42,7 +50,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+      - name: Check out osionos submodule
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+        run: |
+          git config url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git submodule update --init --recursive apps/osionos/app
 
       - uses: actions/setup-node@v4
         with:

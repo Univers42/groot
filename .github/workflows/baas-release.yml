@@ -3,7 +3,7 @@
 #
 # Monorepo home (decided 2026-06-12): the standalone Univers42/mini-baas-infra
 # repo is a month stale, so the release fires from ft_transcendence with
-# working-directory apps/baas/mini-baas-infra. The same pipeline shape as the
+# working-directory apps/grobase. The same pipeline shape as the
 # proven realtime-agnostic release.yml: gates → bake push → binocle images →
 # binary extraction → GitHub Release → post-publish probe.
 #
@@ -16,7 +16,7 @@
 #   • buildx layer cache    → ghcr.io/univers42/mini-baas/cache:* (internal,
 #     CI-only — end users never pull it, visibility irrelevant)
 # v1.0 scope: linux/amd64 only (binocle Dockerfiles are x86_64-musl; arm64
-# bake matrix deferred to v1.1 — see apps/baas/mini-baas-infra/RELEASE.md).
+# bake matrix deferred to v1.1 — see apps/grobase/RELEASE.md).
 # ─────────────────────────────────────────────────────────────────────────────
 name: BaaS Release
 
@@ -28,11 +28,11 @@ on:
 
 env:
   HUB_NS: docker.io/dlesieur
-  INFRA: apps/baas/mini-baas-infra
+  INFRA: apps/grobase
 
 defaults:
   run:
-    working-directory: apps/baas/mini-baas-infra
+    working-directory: apps/grobase
 
 jobs:
   # ── Version from tag ────────────────────────────────────────────────────────
@@ -60,12 +60,21 @@ jobs:
     needs: version
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+      - name: Check out grobase submodule
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+        run: |
+          git config url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git submodule update --init apps/grobase
       - name: Build binocle images
         run: |
-          DOCKER_BUILDKIT=1 docker build -f docker/services/data-plane-router/Dockerfile.nano \
-            -t binocle-nano docker/services/data-plane-router
-          DOCKER_BUILDKIT=1 docker build -f docker/services/data-plane-router/Dockerfile.one \
-            -t binocle-one docker/services/data-plane-router
+          DOCKER_BUILDKIT=1 docker build -f src/data-plane-router/Dockerfile.nano \
+            -t binocle-nano src/data-plane-router
+          DOCKER_BUILDKIT=1 docker build -f src/data-plane-router/Dockerfile.one \
+            -t binocle-one src/data-plane-router
       - name: Gate m37 (nano)
         run: bash scripts/verify/m37-nano.sh
       - name: Gate m40 (one)
@@ -81,6 +90,15 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+      - name: Check out grobase submodule
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+        run: |
+          git config url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git submodule update --init apps/grobase
       - uses: docker/setup-buildx-action@v3
       # Docker Hub — where the images go (public by default on push).
       - uses: docker/login-action@v3
@@ -119,6 +137,15 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+      - name: Check out grobase submodule
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+        run: |
+          git config url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git submodule update --init apps/grobase
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -133,8 +160,8 @@ jobs:
               TAGS="$TAGS -t ${HUB_NS}/binocle-${ed}:latest"
             fi
             docker buildx build --push $TAGS \
-              -f docker/services/data-plane-router/Dockerfile.${ed} \
-              docker/services/data-plane-router
+              -f src/data-plane-router/Dockerfile.${ed} \
+              src/data-plane-router
           done
       - name: Extract binaries (Docker-first — the scratch image IS the binary)
         run: |
@@ -142,8 +169,8 @@ jobs:
           mkdir -p dist
           for ed in nano one; do
             docker buildx build --load -t binocle-${ed}:local \
-              -f docker/services/data-plane-router/Dockerfile.${ed} \
-              docker/services/data-plane-router
+              -f src/data-plane-router/Dockerfile.${ed} \
+              src/data-plane-router
             cid="$(docker create binocle-${ed}:local)"
             docker cp "${cid}:/binocle-${ed}" "dist/binocle-${ed}"
             docker rm -f "${cid}" >/dev/null
@@ -157,9 +184,9 @@ jobs:
         with:
           name: binocle-binaries
           path: |
-            apps/baas/mini-baas-infra/binocle-*-linux-amd64.tar.gz
-            apps/baas/mini-baas-infra/binocle-*-linux-amd64.tar.gz.sha256
-            apps/baas/mini-baas-infra/checksums.txt
+            apps/grobase/binocle-*-linux-amd64.tar.gz
+            apps/grobase/binocle-*-linux-amd64.tar.gz.sha256
+            apps/grobase/checksums.txt
           retention-days: 90
 
   # ── GitHub Release with assets ──────────────────────────────────────────────
@@ -171,6 +198,15 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+      - name: Check out grobase submodule
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+        run: |
+          git config url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git submodule update --init apps/grobase
       - uses: actions/download-artifact@v4
         with:
           name: binocle-binaries
@@ -181,7 +217,7 @@ jobs:
           VER="${{ needs.version.outputs.version }}"
           # shellcheck disable=SC2016  # the ${BINOCLE_VERSION:-...} in the sed script must stay literal
           sed -E 's#^VERSION="\$\{BINOCLE_VERSION:-[^}]*\}"#VERSION="${BINOCLE_VERSION:-'"$VER"'}"#' \
-            apps/baas/mini-baas-infra/scripts/install.sh > release-assets/install.sh
+            apps/grobase/scripts/ci/install.sh > release-assets/install.sh
           grep '^VERSION=' release-assets/install.sh
       - uses: softprops/action-gh-release@v2
         with:

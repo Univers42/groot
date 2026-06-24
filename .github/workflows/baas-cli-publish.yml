@@ -10,7 +10,7 @@
 # Requires repo secret NPM_TOKEN: an npm automation token with publish rights to
 # the @mini-baas scope. It is consumed only by `npm publish` via NODE_AUTH_TOKEN
 # and is never echoed. (Branding note: the package publishes under the name in
-# apps/baas/sdk/package.json — rename it there before tagging if you want a
+# apps/grobase/sdks/js/package.json — rename it there before tagging if you want a
 # different npm name. If the GitHub repo is private, drop `--provenance` below.)
 #
 # The tag namespace baas-cli-v* is deliberately separate from the Docker-image
@@ -25,7 +25,7 @@ on:
       - "baas-cli-v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+"
   pull_request:
     paths:
-      - "apps/baas/sdk/**"
+      - "apps/grobase"
       - ".github/workflows/baas-cli-publish.yml"
   workflow_dispatch:
     inputs:
@@ -40,7 +40,7 @@ concurrency:
 
 defaults:
   run:
-    working-directory: apps/baas/sdk
+    working-directory: apps/grobase/sdks/js
 
 jobs:
   # ── Always: build, smoke-test the CLI, and inspect the publishable tarball ───
@@ -49,11 +49,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+      - name: Check out grobase submodule
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+        run: |
+          git config url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git submodule update --init apps/grobase
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: npm
-          cache-dependency-path: apps/baas/sdk/package-lock.json
+          cache-dependency-path: apps/grobase/sdks/js/package-lock.json
       - name: Install (frozen lockfile, no lifecycle scripts)
         run: npm ci --ignore-scripts
       - name: Build (tsc -> dist)
@@ -80,7 +89,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: npm-tarball
-          path: apps/baas/sdk/*.tgz
+          path: apps/grobase/sdks/js/*.tgz
           retention-days: 14
 
   # ── Held: publishes ONLY on an explicit baas-cli-v* tag or a manual dry_run=false run
@@ -96,12 +105,21 @@ jobs:
       id-token: write   # npm provenance
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+      - name: Check out grobase submodule
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+        run: |
+          git config url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git submodule update --init apps/grobase
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
           cache: npm
-          cache-dependency-path: apps/baas/sdk/package-lock.json
+          cache-dependency-path: apps/grobase/sdks/js/package-lock.json
       - name: Install (frozen lockfile, no lifecycle scripts)
         run: npm ci --ignore-scripts
       - name: Build (tsc -> dist)
@@ -111,7 +129,7 @@ jobs:
         run: |
           PKG="$(node -p "require('./package.json').version")"
           TAG="${GITHUB_REF_NAME#baas-cli-v}"
-          [ "$PKG" = "$TAG" ] || { echo "::error::tag $TAG != package.json version $PKG — bump apps/baas/sdk/package.json or retag"; exit 1; }
+          [ "$PKG" = "$TAG" ] || { echo "::error::tag $TAG != package.json version $PKG — bump apps/grobase/sdks/js/package.json or retag"; exit 1; }
           echo "package version $PKG matches tag $TAG"
       - name: Publish @mini-baas/js (+ the baas CLI)
         run: |

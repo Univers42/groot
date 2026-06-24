@@ -31,6 +31,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
           fetch-depth: 0
 
       - name: Run Semgrep (community rules)
@@ -63,9 +64,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - dir: apps/baas/mini-baas-infra/src
+          - dir: apps/grobase/src
             tool: npm
-          - dir: apps/baas/sdk
+          - dir: apps/grobase/sdks/js
             tool: npm
           - dir: apps/opposite-osiris
             tool: npm
@@ -79,6 +80,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
 
       - uses: actions/setup-node@v4
         with:
@@ -111,6 +113,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
 
       - name: Skip if no token
         if: env.SNYK_TOKEN == ''
@@ -136,6 +139,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
 
       - name: Trivy filesystem scan
         uses: aquasecurity/trivy-action@master
@@ -160,7 +164,7 @@ jobs:
           docker build \
             --build-arg APP=query-router \
             -t mini-baas/query-router:ci \
-            apps/baas/mini-baas-infra/src
+            apps/grobase/src
 
       - name: Trivy image scan
         uses: aquasecurity/trivy-action@master
@@ -189,6 +193,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
           fetch-depth: 0
 
       - name: TruffleHog OSS
@@ -211,6 +216,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
 
       - name: Install gitleaks
         run: |
@@ -223,8 +229,8 @@ jobs:
       - name: gitleaks detect (baas working tree, blocking)
         run: |
           gitleaks detect --no-git \
-            --source apps/baas \
-            --config apps/baas/mini-baas-infra/.gitleaks.toml \
+            --source apps/grobase \
+            --config apps/grobase/.gitleaks.toml \
             --redact --no-banner --exit-code 1 \
             --report-format sarif --report-path gitleaks.sarif
 
@@ -246,12 +252,13 @@ jobs:
       fail-fast: false
       matrix:
         ws:
-          - apps/baas/mini-baas-infra/docker/services/data-plane-router
-          - apps/baas/mini-baas-infra/docker/services/realtime/realtime-agnostic
+          - apps/grobase/src/data-plane-router
+          - apps/grobase/infra/docker/services/realtime/realtime-agnostic
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
 
       - name: Install cargo-audit
         run: |
@@ -286,11 +293,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
 
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
-          cache-dependency-path: apps/baas/mini-baas-infra/go/control-plane/go.sum
+          cache-dependency-path: apps/grobase/src/control-plane/go.sum
 
       - name: Install govulncheck
         run: |
@@ -301,7 +309,7 @@ jobs:
       - name: govulncheck (reachability-based, blocking)
         run: |
           set -euo pipefail
-          cd apps/baas/mini-baas-infra/go/control-plane
+          cd apps/grobase/src/control-plane
           "$(go env GOPATH)/bin/govulncheck" ./...
 
   # ── 6. DAST — ZAP baseline on main only (heavy) ────────────────────────────
@@ -312,11 +320,14 @@ jobs:
       contents: read
     timeout-minutes: 30
     needs: [sast-semgrep, sca-npm-audit, container-trivy, secret-trufflehog]
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    # Manual only: this stands up the full grobase stack (heavy, needs the backend),
+    # so it does not gate every push/PR. Run on demand via "Run workflow".
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
 
       - name: Bring the baas stack up (safe ports)
         env:
@@ -324,7 +335,7 @@ jobs:
           BAAS_VERIFY_NO_WAF: "0"
         run: |
           set -e
-          : > apps/baas/mini-baas-infra/.env
+          : > apps/grobase/.env
           {
             echo "POSTGRES_USER=postgres"
             echo "POSTGRES_PASSWORD=postgres"
@@ -335,15 +346,15 @@ jobs:
             echo "KONG_CORS_ORIGIN_PLAYGROUND=https://localhost:3100"
             echo "KONG_CORS_ORIGIN_STUDIO=https://localhost:3001"
             echo "ADAPTER_REGISTRY_SERVICE_TOKEN=ci-adapter-token"
-          } >> apps/baas/mini-baas-infra/.env
-          bash apps/baas/scripts/generate-localhost-cert.sh >/dev/null
-          BAAS_VERIFY_SAFE_PORTS=1 make baas-up
+          } >> apps/grobase/.env
+          bash apps/grobase/scripts/certs/generate-localhost-cert.sh >/dev/null
+          BAAS_VERIFY_SAFE_PORTS=1 make -C apps/grobase up
 
       - name: ZAP baseline DAST
         env:
           WAF_HTTPS_PORT: "18443"
         run: |
-          bash apps/baas/mini-baas-infra/scripts/verify/zap-baseline.sh \
+          bash apps/grobase/scripts/verify/zap-baseline.sh \
             "https://127.0.0.1:18443"
 
       - name: Upload ZAP artifacts
@@ -351,11 +362,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: zap-baseline
-          path: apps/baas/mini-baas-infra/artifacts/security/zap-baseline.*
+          path: apps/grobase/artifacts/security/zap-baseline.*
 
       - name: Tear stack down
         if: always()
-        run: BAAS_VERIFY_SAFE_PORTS=1 make baas-down || true
+        run: make -C apps/grobase down || true
 
   # ── 7. Summary gate ────────────────────────────────────────────────────────
   security-gate:

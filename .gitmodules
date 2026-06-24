@@ -25,3 +25,7 @@
 [submodule "apps/opposite-osiris"]
 	path = apps/opposite-osiris
 	url = git@github.com:Univers42/prismatica.git
+[submodule "apps/grobase"]
+	path = apps/grobase
+	url = git@github.com:Univers42/grobase.git
+	branch = main

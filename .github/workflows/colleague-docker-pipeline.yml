@@ -1,11 +1,11 @@
 name: Colleague Docker Pipeline
 
+# Manual only. This runs the full `make all` bring-up, which now requires the
+# EXTERNAL grobase backend (started here from the apps/grobase submodule) plus the
+# org Vault OIDC secrets — neither is appropriate to gate every push/PR on. Run it
+# on demand via "Run workflow".
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-  pull_request:
 
 permissions:
   contents: read
@@ -90,6 +90,9 @@ jobs:
         env:
           GHCR_TOKEN: ${{ github.token }}
         run: printf '%s' "${GHCR_TOKEN}" | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+
+      - name: Start the grobase backend (external mini-baas stack)
+        run: make -C apps/grobase up
 
       - name: Run the colleague Docker workflow
         env:

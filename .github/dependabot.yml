@@ -1,75 +1,13 @@
+# Dependabot for the `groot` superproject.
+#
+# The application code (mail, calendar, opposite-osiris, osionos, grobase) lives in
+# SUBMODULES — their package manifests are not present in this superproject's tree,
+# so npm/pnpm ecosystems pointed at those paths cannot resolve a manifest here and
+# fail. Each submodule repo runs its OWN Dependabot for its JS deps. This config
+# only covers what the superproject itself owns: Docker base images, the GitHub
+# Actions it runs, and the submodule pointers themselves.
 version: 2
 updates:
-  - package-ecosystem: npm
-    directory: /apps/mail
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-    groups:
-      mail-js:
-        patterns:
-          - "*"
-
-  - package-ecosystem: npm
-    directory: /apps/calendar
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-    groups:
-      calendar-js:
-        patterns:
-          - "*"
-
-  - package-ecosystem: npm
-    directory: /apps/opposite-osiris
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-    groups:
-      website-js:
-        patterns:
-          - "*"
-
-  - package-ecosystem: npm
-    directory: /apps/baas/sdk
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-    groups:
-      sdk-js:
-        patterns:
-          - "*"
-
-  - package-ecosystem: npm
-    directory: /apps/osionos/app
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-    groups:
-      osionos-pnpm:
-        patterns:
-          - "*"
-
-  - package-ecosystem: npm
-    directory: /apps/osionos/app/src/shared/notion-database-sys
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-    groups:
-      notion-db-pnpm:
-        patterns:
-          - "*"
-
-  - package-ecosystem: npm
-    directory: /apps/osionos/app/src/shared/lib/markengine
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-    groups:
-      markengine-js:
-        patterns:
-          - "*"
-
   - package-ecosystem: docker
     directory: /
     schedule:
@@ -77,6 +15,12 @@ updates:
     open-pull-requests-limit: 5
 
   - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: gitsubmodule
     directory: /
     schedule:
       interval: weekly
