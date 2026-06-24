@@ -27,7 +27,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
         run: |
-          git config url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
           git submodule update --init --recursive \
             apps/mail apps/calendar apps/opposite-osiris apps/osionos/app
 
@@ -55,7 +55,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
         run: |
-          git config url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
           git submodule update --init --recursive apps/osionos/app
 
       - uses: actions/setup-node@v4

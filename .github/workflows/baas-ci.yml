@@ -37,7 +37,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
         run: |
-          git config url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
           git submodule update --init apps/grobase
       - name: vet + test (containerised toolchain)
         run: |
@@ -56,7 +56,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
         run: |
-          git config url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
           git submodule update --init apps/grobase
       - name: cargo test --workspace
         run: |
@@ -76,7 +76,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
         run: |
-          git config url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
           git submodule update --init apps/grobase
       - name: cargo test --workspace
         run: |
@@ -96,7 +96,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
         run: |
-          git config url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
           git submodule update --init apps/grobase
       - name: package manifest parity (config == Go-embedded copy)
         working-directory: apps/grobase
