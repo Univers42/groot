@@ -30,7 +30,7 @@ jobs:
         run: |
           git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
           git submodule update --init \
-            apps/mail apps/calendar apps/opposite-osiris apps/osionos/app
+            apps/mail apps/calendar apps/osionos/app
 
       - uses: actions/setup-node@v4
         with:
@@ -43,7 +43,6 @@ jobs:
             echo "checking ${dir}"
             (cd "${dir}" && npm ci --ignore-scripts)
           done
-          (cd apps/opposite-osiris && npm ci --ignore-scripts)
 
   pnpm-frozen-installs:
     name: pnpm frozen installs
@@ -57,7 +56,9 @@ jobs:
           GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
         run: |
           git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
-          git submodule update --init apps/osionos/app
+          # opposite-osiris is a pnpm project that consumes @grobase/js via a file:
+          # path into the grobase submodule, so init grobase (non-recursive) too.
+          git submodule update --init apps/grobase apps/opposite-osiris apps/osionos/app
 
       - uses: actions/setup-node@v4
         with:
@@ -73,7 +74,7 @@ jobs:
           set -euo pipefail
           # notion-database-sys is dropped: osionos/app pins it at a commit that no
           # longer exists upstream (orphaned ref) — re-pin it in the osionos repo to restore.
-          for dir in apps/osionos/app; do
+          for dir in apps/osionos/app apps/opposite-osiris; do
             echo "checking ${dir}"
             (cd "${dir}" && pnpm install --frozen-lockfile --prefer-offline --ignore-scripts)
           done
