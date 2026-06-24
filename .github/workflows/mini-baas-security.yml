@@ -69,18 +69,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Scope: BaaS/grobase only. Frontend app deps are covered by the
+          # Supply Chain workflow (frozen installs) + their own repos' CI.
           - dir: apps/grobase/src
             tool: npm
           - dir: apps/grobase/sdks/js
             tool: npm
-          - dir: apps/opposite-osiris
-            tool: npm
-          - dir: apps/calendar
-            tool: npm
-          - dir: apps/mail
-            tool: npm
-          - dir: apps/osionos/app
-            tool: pnpm
     steps:
       - uses: actions/checkout@v4
         with:
