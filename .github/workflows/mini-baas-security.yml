@@ -30,9 +30,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
           fetch-depth: 0
+      - name: Check out submodules (non-recursive)
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+        run: |
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git submodule update --init apps/grobase apps/opposite-osiris apps/calendar apps/mail apps/osionos/app
 
       - name: Run Semgrep (community rules)
         uses: semgrep/semgrep-action@v1
@@ -79,8 +84,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+      - name: Check out submodules (non-recursive)
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+        run: |
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git submodule update --init apps/grobase apps/opposite-osiris apps/calendar apps/mail apps/osionos/app
 
       - uses: actions/setup-node@v4
         with:
@@ -112,8 +122,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+      - name: Check out submodules (non-recursive)
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+        run: |
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git submodule update --init apps/grobase apps/opposite-osiris apps/calendar apps/mail apps/osionos/app
 
       - name: Skip if no token
         if: env.SNYK_TOKEN == ''
@@ -138,8 +153,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+      - name: Check out submodules (non-recursive)
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+        run: |
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git submodule update --init apps/grobase apps/opposite-osiris apps/calendar apps/mail apps/osionos/app
 
       - name: Trivy filesystem scan
         uses: aquasecurity/trivy-action@master
@@ -192,9 +212,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
           fetch-depth: 0
+      - name: Check out submodules (non-recursive)
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+        run: |
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git submodule update --init apps/grobase apps/opposite-osiris apps/calendar apps/mail apps/osionos/app
 
       - name: TruffleHog OSS
         uses: trufflesecurity/trufflehog@main
@@ -215,8 +240,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+      - name: Check out submodules (non-recursive)
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+        run: |
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git submodule update --init apps/grobase apps/opposite-osiris apps/calendar apps/mail apps/osionos/app
 
       - name: Install gitleaks
         run: |
@@ -257,8 +287,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+      - name: Check out submodules (non-recursive)
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+        run: |
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git submodule update --init apps/grobase apps/opposite-osiris apps/calendar apps/mail apps/osionos/app
 
       - name: Install cargo-audit
         run: |
@@ -292,8 +327,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+      - name: Check out submodules (non-recursive)
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+        run: |
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git submodule update --init apps/grobase apps/opposite-osiris apps/calendar apps/mail apps/osionos/app
 
       - uses: actions/setup-go@v5
         with:
@@ -326,8 +366,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+      - name: Check out submodules (non-recursive)
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+        run: |
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git submodule update --init apps/grobase apps/opposite-osiris apps/calendar apps/mail apps/osionos/app
 
       - name: Bring the baas stack up (safe ports)
         env:
