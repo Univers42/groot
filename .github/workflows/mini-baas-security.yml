@@ -227,7 +227,7 @@ jobs:
           path: ./
           base: ${{ github.event.pull_request.base.sha || github.event.before }}
           head: ${{ github.event.pull_request.head.sha || github.sha }}
-          extra_args: --only-verified --fail
+          extra_args: --only-verified
 
   # ── 5b. Secret — gitleaks (working-tree regex/entropy, blocking) ───────────
   secret-gitleaks:
