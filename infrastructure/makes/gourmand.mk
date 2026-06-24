@@ -11,7 +11,7 @@
 # ──────────────────────────────────────────────────────────────────────────────
 
 GOURMAND_SEEDS_DIR := tools/seeds
-GOURMAND_INFRA_DIR := apps/baas/mini-baas-infra
+GOURMAND_INFRA_DIR := apps/grobase
 
 .PHONY: gourmand-mount gourmand-people gourmand-content gourmand-env gourmand-verify gourmand-all
 

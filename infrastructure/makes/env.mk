@@ -1,11 +1,16 @@
+# Env-file helpers — secrets/env tooling moved to the standalone apps/grobase stack.
 env-format:
-	$(NODE_RUN) apps/baas/scripts/vault-env.mjs format
+## Deprecated at root: env formatting now lives in apps/grobase.
+	@echo "[skip] env-format now lives in apps/grobase"
 
-env-fetch: vault-up
-	$(VAULT_ENV_CMD) fetch
+env-fetch:
+## Deprecated at root: env fetch now lives in apps/grobase.
+	@echo "[skip] env-fetch now lives in apps/grobase"
 
 env-backup:
-	$(NODE_RUN) apps/baas/scripts/vault-env.mjs backup
+## Deprecated at root: env backup now lives in apps/grobase.
+	@echo "[skip] env-backup now lives in apps/grobase"
 
-env-restore-test: vault-seed
-	$(VAULT_ENV_CMD) roundtrip
+env-restore-test:
+## Deprecated at root: env restore-test now lives in apps/grobase.
+	@echo "[skip] env-restore-test now lives in apps/grobase"

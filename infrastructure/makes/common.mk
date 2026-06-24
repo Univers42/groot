@@ -34,12 +34,14 @@ DOCKER_PREFETCH_JOBS ?= 8
 DOCKER_PREFETCH_SCOPE ?= all
 COMPOSE_WAIT_TIMEOUT ?= 300
 COMPOSE_WAIT_INTERVAL ?= 2
-COMPOSE_HEALTHY_SERVICES_INFRA ?= postgres local-https-proxy pg-meta gotrue kong osionos-bridge
-COMPOSE_HEALTHY_SERVICES ?= $(COMPOSE_HEALTHY_SERVICES_INFRA) auth-gateway mail-bridge mail osionos-app opposite-osiris-web calendar-bridge calendar
-# supavisor restarts intermittently in CI, but the stack does not depend on it for readiness.
-COMPOSE_RUNNING_SERVICES_INFRA ?= redis postgrest
-COMPOSE_RUNNING_SERVICES ?= $(COMPOSE_RUNNING_SERVICES_INFRA) mailpit
-COMPOSE_COMPLETED_SERVICES_INFRA ?= db-bootstrap project-db-init local-runtime-secrets
+# Backend (postgres/gotrue/kong/postgrest/...) now lives in the standalone
+# apps/grobase stack (docker project mini-baas). The root pipeline only owns the
+# frontends, so the compose-wait lists carry frontend services only.
+COMPOSE_HEALTHY_SERVICES_INFRA ?= local-https-proxy osionos-bridge
+COMPOSE_HEALTHY_SERVICES ?= $(COMPOSE_HEALTHY_SERVICES_INFRA) auth-gateway osionos-app opposite-osiris-web
+COMPOSE_RUNNING_SERVICES_INFRA ?=
+COMPOSE_RUNNING_SERVICES ?= $(COMPOSE_RUNNING_SERVICES_INFRA)
+COMPOSE_COMPLETED_SERVICES_INFRA ?=
 COMPOSE_COMPLETED_SERVICES ?= $(COMPOSE_COMPLETED_SERVICES_INFRA)
 VERSION ?=
 BAAS_VERSION ?= $(if $(VERSION),$(if $(filter v%,$(VERSION)),$(VERSION),v$(VERSION)),v$(shell date +%F))
@@ -50,15 +52,16 @@ BAAS_SMTP_IMAGE ?= dlesieur/mini-baas-infra
 BAAS_SMTP_VERSION ?= smtp-v1
 MAILPIT_IMAGE ?= axllent/mailpit:v1.22.3
 BAAS_SERVICES ?= kong gotrue postgrest postgres redis realtime
-BAAS_DOCKERFILE := apps/baas/Dockerfile
-BAAS_CONTEXT := apps/baas
+# BaaS image build moved to the standalone apps/grobase repo; these are unused at root.
+BAAS_DOCKERFILE := apps/grobase/Dockerfile
+BAAS_CONTEXT := apps/grobase
 FRONTEND_DIR := apps/opposite-osiris
 BOOL ?= false
 WEBSITE_URL := https://localhost:4322
 OSIONOS_URL := https://localhost:3001
 BRIDGE_URL := https://localhost:4000
 AUTH_URL := https://localhost:8787/api/auth
-BAAS_URL := https://localhost:8000
+BAAS_URL := http://127.0.0.1:8000
 MAIL_URL := https://localhost:3002
 MAIL_BRIDGE_URL := https://localhost:4100
 CALENDAR_URL := https://localhost:3003
@@ -69,12 +72,13 @@ PLAYGROUND_VIEWER_URL := $(OSIONOS_URL)/playground-simulation/index.html
 VSCODE_CLI ?= /usr/bin/code
 GIT_COMMIT_MESSAGE ?= update
 GIT_PUSH_REMOTE ?= origin
-LOCAL_CERT_DIR ?= apps/baas/certs
+LOCAL_CERT_DIR ?= apps/grobase/certs
 LOCAL_CA_CERT := $(LOCAL_CERT_DIR)/track-binocle-local-ca.pem
 CERT_TRUST_MODE ?= system
 CURL_HEALTH := curl --cacert $(LOCAL_CA_CERT) --retry 30 --retry-delay 2 --retry-all-errors --retry-connrefused -fsS
 VAULT_COMPOSE := docker compose --profile secrets
-VAULT_ENV_CMD := $(VAULT_COMPOSE) run --rm vault-env node apps/baas/scripts/vault-env.mjs
+# Vault tooling moved to apps/grobase; this var is referenced only by neutralized targets.
+VAULT_ENV_CMD := true
 VAULT_SHARED_CMD := $(VAULT_COMPOSE) run --rm --no-deps
 VAULT_TEAM_ROLE ?= reader
 VAULT_TOKEN_TTL ?= 24h
@@ -128,7 +132,7 @@ HOST_GID := $(shell id -g)
 export HOST_UID HOST_GID
 NODE_BIN ?= $(shell command -v node 2>/dev/null || true)
 DOCKER_NODE := docker run --rm --user "$(HOST_UID):$(HOST_GID)" -e HOST_UID="$(HOST_UID)" -e HOST_GID="$(HOST_GID)" -v "$$PWD":/workspace -w /workspace node:22-alpine
-DOCKER_NODE_SHARED := docker run --rm --network host --user "$(HOST_UID):$(HOST_GID)" -e HOST_UID="$(HOST_UID)" -e HOST_GID="$(HOST_GID)" -e VAULT_ADDR -e VAULT_NAMESPACE -e VAULT_TOKEN -e VAULT_ENV_PREFIX -e NODE_EXTRA_CA_CERTS=/workspace/apps/baas/certs/track-binocle-local-ca.pem -v "$$PWD":/workspace -w /workspace node:22-alpine
+DOCKER_NODE_SHARED := docker run --rm --network host --user "$(HOST_UID):$(HOST_GID)" -e HOST_UID="$(HOST_UID)" -e HOST_GID="$(HOST_GID)" -e VAULT_ADDR -e VAULT_NAMESPACE -e VAULT_TOKEN -e VAULT_ENV_PREFIX -e NODE_EXTRA_CA_CERTS=/workspace/apps/grobase/certs/track-binocle-local-ca.pem -v "$$PWD":/workspace -w /workspace node:22-alpine
 DOCKER_NODE_VAULT := docker run --rm --user "$(HOST_UID):$(HOST_GID)" -e HOST_UID="$(HOST_UID)" -e HOST_GID="$(HOST_GID)" -e VAULT_ADDR -e VAULT_NAMESPACE -e VAULT_TOKEN -e VAULT_ENV_PREFIX -e VAULT_TEAM_ROLE -e VAULT_TOKEN_TTL -e VAULT_TEAM_TOKEN_FILE -e VAULT_PUBLIC_ADDR -e VAULT_GITHUB_OIDC_AUTH_PATH -e VAULT_GITHUB_OIDC_ROLE -e VAULT_GITHUB_OIDC_REPOSITORY -e VAULT_GITHUB_OIDC_AUDIENCE -e VAULT_GITHUB_AUTH_PATH -e VAULT_GITHUB_ORG -e VAULT_GITHUB_TEAM -v "$$PWD":/workspace -w /workspace node:22-alpine
 NODE_RUN := $(if $(NODE_BIN),$(NODE_BIN),$(DOCKER_NODE) node)
 NODE_RUN_SHARED := $(if $(NODE_BIN),$(NODE_BIN),$(DOCKER_NODE_SHARED) node)

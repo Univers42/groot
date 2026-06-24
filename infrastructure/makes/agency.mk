@@ -9,7 +9,7 @@
 # ──────────────────────────────────────────────────────────────────────────────
 
 AGENCY_SEEDS_DIR  := tools/seeds
-AGENCY_INFRA_DIR  := apps/baas/mini-baas-infra
+AGENCY_INFRA_DIR  := apps/grobase
 
 .PHONY: agency-people agency-seed agency-policies agency-content agency-verify agency-verify-platform agency-sim agency-all
 

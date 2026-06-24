@@ -1,110 +1,20 @@
 name: track-binocle
 
 services:
-  vault:
-    image: ${VAULT_IMAGE:-track-binocle-vault:local}
-    build:
-      context: ./apps/baas/mini-baas-infra/docker/services/vault
-      dockerfile: Dockerfile
-    profiles:
-      - secrets
-    cap_add:
-      - IPC_LOCK
-    command: vault server -config=/vault/config/vault.hcl
-    environment:
-      SKIP_SETCAP: "1"
-      VAULT_ADDR: http://127.0.0.1:8200
-      VAULT_API_ADDR: ${VAULT_API_ADDR:-https://localhost:18200}
-    expose:
-      - "8200"
-    volumes:
-      - track-binocle-vault-data:/vault/data
-    restart: unless-stopped
-    mem_limit: 512m
-    healthcheck:
-      test: ["CMD-SHELL", "vault status -address=http://127.0.0.1:8200 2>/dev/null | grep -q 'Sealed.*false' || exit 1"]
-      interval: 5s
-      timeout: 3s
-      start_period: 15s
-      retries: 10
-
-  vault-init:
-    image: ${VAULT_IMAGE:-track-binocle-vault:local}
-    build:
-      context: ./apps/baas/mini-baas-infra/docker/services/vault
-      dockerfile: Dockerfile
-    profiles:
-      - secrets
-    env_file:
-      - path: ./apps/baas/.env.local
-        required: false
-      - path: ./.env.local
-        required: false
-      - path: ./apps/osionos/app/.env
-        required: false
-    environment:
-      VAULT_ADDR: http://vault:8200
-    entrypoint: /vault/scripts/init-vault.sh
-    volumes:
-      - track-binocle-vault-data:/vault/data
-    depends_on:
-      vault:
-        condition: service_started
-    restart: "no"
-
-  vault-env:
-    image: public.ecr.aws/docker/library/node:22-alpine
-    profiles:
-      - secrets
-    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
-    working_dir: /workspace
-    environment:
-      HOST_UID: ${HOST_UID:-1000}
-      HOST_GID: ${HOST_GID:-1000}
-      VAULT_ADDR: http://vault:8200
-      VAULT_KEYS_FILE: /vault/data/.vault-keys.json
-      VAULT_ENV_PREFIX: secret/data/track-binocle/env
-      NODE_EXTRA_CA_CERTS: /workspace/apps/baas/certs/track-binocle-local-ca.pem
-    volumes:
-      - ./:/workspace
-      - track-binocle-vault-data:/vault/data:ro
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    command: ["node", "apps/baas/scripts/vault-env.mjs", "fetch"]
-    depends_on:
-      vault-init:
-        condition: service_completed_successfully
-    restart: "no"
-
-  vault-fly:
-    image: ${VAULT_FLY_IMAGE:-flyio/flyctl:latest}
-    profiles:
-      - secrets
-    environment:
-      FLY_API_TOKEN: ${FLY_API_TOKEN:-}
-    volumes:
-      - ./:/workspace
-    working_dir: /workspace
-    entrypoint: ["/flyctl"]
-    restart: "no"
-
   local-https-proxy:
     image: public.ecr.aws/docker/library/nginx:1.27-alpine
     volumes:
       - ./infrastructure/tls/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./apps/baas/certs:/etc/track-binocle/certs:ro
+      - ./apps/grobase/certs:/etc/track-binocle/certs:ro
     ports:
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${OPPOSITE_OSIRIS_HOST_PORT:-4322}:4322"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${OSIONOS_APP_HOST_PORT:-3001}:3001"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${OSIONOS_BRIDGE_HOST_PORT:-4000}:4000"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${AUTH_GATEWAY_HOST_PORT:-8787}:8787"
-      - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${KONG_HTTP_PORT:-8000}:8000"
-      - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${KONG_ADMIN_PORT:-8001}:8001"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${MAIL_HOST_PORT:-3002}:3002"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${MAIL_BRIDGE_PORT:-4100}:4100"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${CALENDAR_HOST_PORT:-3003}:3003"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${CALENDAR_BRIDGE_PORT:-4200}:4200"
-      - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${VAULT_PORT:-18200}:8200"
     healthcheck:
       test: ["CMD-SHELL", "nginx -t >/dev/null 2>&1"]
       interval: 5s
@@ -113,254 +23,6 @@ services:
       retries: 6
     restart: unless-stopped
     mem_limit: 128m
-
-  postgres:
-    image: ${BAAS_POSTGRES_IMAGE:-track-binocle-postgres:local}
-    build:
-      context: ./apps/baas/mini-baas-infra/docker/services/postgres
-    env_file:
-      - path: ./apps/baas/.env.local
-        required: false
-    ports:
-      - "127.0.0.1:${PG_PORT:-5432}:5432"
-    environment:
-      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
-      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
-    volumes:
-      - track-binocle-postgres-data:/var/lib/postgresql/data
-    restart: unless-stopped
-    mem_limit: 512m
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-postgres}"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-      start_period: 10s
-
-  db-bootstrap:
-    image: public.ecr.aws/docker/library/postgres:16-alpine
-    env_file:
-      - path: ./apps/baas/.env.local
-        required: false
-    environment:
-      REALTIME_DB_NAME: ${REALTIME_DB_NAME:-realtime}
-    command: >
-      sh -ec '
-        export PGPASSWORD="$${POSTGRES_PASSWORD:-postgres}";
-        until pg_isready -h postgres -U "$${POSTGRES_USER:-postgres}" -d "$${POSTGRES_DB:-postgres}"; do sleep 1; done;
-        psql -h postgres -U "$${POSTGRES_USER:-postgres}" -d "$${POSTGRES_DB:-postgres}" -v ON_ERROR_STOP=1 -v pwd="$${POSTGRES_PASSWORD:-postgres}" -v realtime_db="$${REALTIME_DB_NAME:-realtime}" -f /bootstrap/db-bootstrap.psql;
-      '
-    volumes:
-      - ./apps/baas/scripts/db-bootstrap.psql:/bootstrap/db-bootstrap.psql:ro
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: "no"
-
-  project-db-init:
-    image: public.ecr.aws/docker/library/postgres:16-alpine
-    env_file:
-      - path: ./apps/baas/.env.local
-        required: false
-    environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-    command: ["sh", "/bootstrap/apply-project-sql.sh"]
-    volumes:
-      - ./apps/baas/scripts/apply-project-sql.sh:/bootstrap/apply-project-sql.sh:ro
-      - ./models/user.sql:/project-init/01-user.sql:ro
-      - ./models/gdpr-migration.sql:/project-init/02-gdpr.sql:ro
-      - ./models/auth-security-migration.sql:/project-init/03-auth-security.sql:ro
-      - ./models/osionos-bridge-migration.sql:/project-init/04-osionos-bridge.sql:ro
-      - ./models/calendar-migration.sql:/project-init/05-calendar.sql:ro
-      - ./models/seeds.sql:/project-init/06-seeds.sql:ro
-      - ./models/rls-hardening-migration.sql:/project-init/07-rls-hardening.sql:ro
-      - ./models/osionos-chat-migration.sql:/project-init/08-osionos-chat.sql:ro
-    depends_on:
-      db-bootstrap:
-        condition: service_completed_successfully
-    restart: "no"
-
-  redis:
-    image: ${BAAS_REDIS_IMAGE:-public.ecr.aws/docker/library/redis:7-alpine}
-    command: redis-server --appendonly yes
-    volumes:
-      - track-binocle-redis-data:/data
-    restart: unless-stopped
-    mem_limit: 128m
-
-  mailpit:
-    image: ${MAILPIT_IMAGE:-axllent/mailpit:v1.22.3}
-    profiles:
-      - dev
-      - local
-    expose:
-      - "1025"
-      - "8025"
-    ports:
-      - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${MAILPIT_HOST_PORT:-8025}:8025"
-    restart: unless-stopped
-    mem_limit: 256m
-
-  gotrue:
-    image: ${BAAS_GOTRUE_IMAGE:-public.ecr.aws/supabase/gotrue:v2.188.1}
-    env_file:
-      - path: ./.env.local
-        required: false
-      - path: ./apps/baas/.env.local
-        required: false
-    environment:
-      GOTRUE_API_HOST: 0.0.0.0
-      GOTRUE_API_PORT: 9999
-      GOTRUE_LOG_LEVEL: ${GOTRUE_LOG_LEVEL:-info}
-      API_EXTERNAL_URL: ${API_EXTERNAL_URL:-https://localhost:8000/auth/v1}
-      GOTRUE_DB_DRIVER: postgres
-      GOTRUE_DB_MIGRATIONS_PATH: ${GOTRUE_DB_MIGRATIONS_PATH:-/usr/local/etc/auth/migrations}
-      GOTRUE_DISABLE_SIGNUP: ${GOTRUE_DISABLE_SIGNUP:-false}
-      GOTRUE_EXTERNAL_EMAIL_ENABLED: ${GOTRUE_EXTERNAL_EMAIL_ENABLED:-true}
-      GOTRUE_MAILER_AUTOCONFIRM: ${GOTRUE_MAILER_AUTOCONFIRM:-true}
-      GOTRUE_SMTP_HOST: ${SMTP_HOST:-mailpit}
-      GOTRUE_SMTP_PORT: ${SMTP_PORT:-1025}
-      GOTRUE_SMTP_USER: ${SMTP_USERNAME:-}
-      GOTRUE_SMTP_PASS: ${SMTP_PASSWORD:-}
-      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_FROM_ADDRESS:-noreply@mini-baas.local}
-      GOTRUE_SMTP_SENDER_NAME: ${SMTP_FROM_NAME:-Prismatica}
-      GOTRUE_MAILER_TEMPLATES_CONFIRMATION: /etc/gotrue/templates/email-verification.html
-      GOTRUE_MAILER_TEMPLATES_RECOVERY: /etc/gotrue/templates/password-reset.html
-      GOTRUE_MAILER_URLPATHS_CONFIRMATION: /auth/v1/verify
-      GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/v1/verify
-      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
-      GOTRUE_JWT_EXP: 3600
-      GOTRUE_JWT_ISSUER: ${API_EXTERNAL_URL:-https://localhost:8000/auth/v1}
-    volumes:
-      - ./infrastructure/gotrue-templates:/etc/gotrue/templates:ro
-    depends_on:
-      db-bootstrap:
-        condition: service_completed_successfully
-    restart: unless-stopped
-    mem_limit: 256m
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:9999/health || exit 1"]
-      interval: 5s
-      timeout: 3s
-      start_period: 15s
-      retries: 8
-
-  postgrest:
-    image: ${BAAS_POSTGREST_IMAGE:-mirror.gcr.io/postgrest/postgrest:v12.2.3}
-    env_file:
-      - path: ./apps/baas/.env.local
-        required: false
-    environment:
-      PGRST_DB_SCHEMA: ${PGRST_DB_SCHEMA:-public}
-      PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS:-public}
-      PGRST_DB_ANON_ROLE: ${PGRST_DB_ANON_ROLE:-anon}
-      PGRST_SERVER_PORT: 3000
-    depends_on:
-      postgres:
-        condition: service_healthy
-      project-db-init:
-        condition: service_completed_successfully
-    restart: unless-stopped
-    mem_limit: 256m
-
-  pg-meta:
-    image: ${BAAS_PG_META_IMAGE:-public.ecr.aws/supabase/postgres-meta:v0.91.0}
-    env_file:
-      - path: ./apps/baas/.env.local
-        required: false
-    environment:
-      PG_META_PORT: 8080
-    depends_on:
-      postgres:
-        condition: service_healthy
-      project-db-init:
-        condition: service_completed_successfully
-    restart: unless-stopped
-    mem_limit: 256m
-
-  supavisor:
-    profiles:
-      - supavisor
-    image: ${BAAS_SUPAVISOR_IMAGE:-public.ecr.aws/supabase/supavisor:2.7.4}
-    env_file:
-      - path: ./apps/baas/.env.local
-        required: false
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-    mem_limit: 512m
-
-  kong:
-    image: ${BAAS_KONG_IMAGE:-track-binocle/mini-baas-kong:local}
-    pull_policy: ${BAAS_KONG_PULL_POLICY:-missing}
-    build:
-      context: ./apps/baas
-      dockerfile: Dockerfile
-    env_file:
-      - path: ./.env.local
-        required: false
-      - path: ./apps/baas/.env.local
-        required: false
-    expose:
-      - "8000"
-      - "8001"
-    environment:
-      KONG_DATABASE: "off"
-      KONG_DECLARATIVE_CONFIG: /tmp/kong.yml
-      KONG_PROXY_ACCESS_LOG: /dev/stdout
-      KONG_ADMIN_ACCESS_LOG: /dev/stdout
-      KONG_PROXY_ERROR_LOG: /dev/stderr
-      KONG_ADMIN_ERROR_LOG: /dev/stderr
-      KONG_ADMIN_LISTEN: "0.0.0.0:8001"
-      KONG_HEADERS: "off"
-      KONG_NGINX_HTTP_CLIENT_MAX_BODY_SIZE: "1m"
-      KONG_NGINX_HTTP_CLIENT_BODY_TIMEOUT: "1s"
-      KONG_NGINX_WORKER_PROCESSES: "1"
-      KONG_MEM_CACHE_SIZE: "64m"
-      KONG_UNTRUSTED_LUA_SANDBOX_REQUIRES: "cjson.safe"
-      GOTRUE_JWT_ISS: ${API_EXTERNAL_URL:-https://localhost:8000/auth/v1}
-    command:
-      - sh
-      - -ec
-      - |
-        sed \
-          -e "s|__KONG_PUBLIC_API_KEY__|$${KONG_PUBLIC_API_KEY}|g" \
-          -e "s|__KONG_SERVICE_API_KEY__|$${KONG_SERVICE_API_KEY}|g" \
-          -e "s|__KONG_CORS_ORIGIN_APP__|$${KONG_CORS_ORIGIN_APP:-https://localhost:3000}|g" \
-          -e "s|__KONG_CORS_ORIGIN_PLAYGROUND__|$${KONG_CORS_ORIGIN_PLAYGROUND:-https://localhost:3100}|g" \
-          -e "s|__KONG_CORS_ORIGIN_STUDIO__|$${KONG_CORS_ORIGIN_STUDIO:-https://localhost:3001}|g" \
-          -e "s|__KONG_CORS_ORIGIN_FRONTEND__|$${KONG_CORS_ORIGIN_FRONTEND:-https://localhost:4322}|g" \
-          -e "s|__JWT_SECRET__|$${JWT_SECRET}|g" \
-          -e "s|__GOTRUE_JWT_ISS__|$${GOTRUE_JWT_ISS}|g" \
-          -e "s|__KONG_ANON_UUID__|$${KONG_ANON_UUID:-cd4f782c-ac87-5081-b322-b54834d15651}|g" \
-          /etc/kong/kong.yml.tmpl > /tmp/kong.yml
-        exec /docker-entrypoint.sh kong docker-start
-    healthcheck:
-      test: ["CMD-SHELL", "kong health"]
-      interval: 5s
-      timeout: 3s
-      start_period: 20s
-      retries: 10
-    depends_on:
-      gotrue:
-        condition: service_healthy
-      postgrest:
-        condition: service_started
-      pg-meta:
-        condition: service_started
-    restart: unless-stopped
-    mem_limit: 1g
-
-  local-runtime-secrets:
-    image: public.ecr.aws/docker/library/node:22-alpine
-    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
-    working_dir: /app
-    command: ["node", "apps/baas/scripts/ensure-osionos-runtime-secrets.mjs"]
-    volumes:
-      - ./:/app
-    restart: "no"
 
   # osionos-bridge — the editor's persistence/gateway, as its own self-contained
   # image (Docker Hub dlesieur/osionos-bridge), built FROM the osionos submodule
@@ -373,16 +35,14 @@ services:
     env_file:
       - path: ./.env.local
         required: false
-      - path: ./apps/baas/.env.local
-        required: false
+      # secrets injected at up-time from ./.env.local
     environment:
       OSIONOS_BRIDGE_PORT: 4000
       OSIONOS_APP_URL: ${OSIONOS_APP_URL:-https://localhost:3001}
       OSIONOS_ALLOWED_ORIGIN: ${OSIONOS_ALLOWED_ORIGIN:-https://localhost:3001}
-      # NOTE: this service sits on BOTH the default and mini-baas networks and
-      # both stacks expose a "kong" DNS alias — use the unambiguous root
-      # container name here so BaaS reads/writes always hit track-binocle.
-      OSIONOS_BAAS_URL: http://track-binocle-kong-1:8000
+      # BaaS reads/writes go to the grobase-owned mini-baas Kong over the
+      # external mini-baas network (container-name DNS).
+      OSIONOS_BAAS_URL: http://mini-baas-kong:8000
       AUTH_GATEWAY_URL: ${AUTH_GATEWAY_URL:-http://auth-gateway:8787}
       OSIONOS_BRIDGE_PERSISTENCE: ${OSIONOS_BRIDGE_PERSISTENCE:-auto}
       OSIONOS_BRIDGE_REQUIRE_BAAS: ${OSIONOS_BRIDGE_REQUIRE_BAAS:-false}
@@ -417,13 +77,6 @@ services:
     networks:
       - default
       - mini-baas
-    depends_on:
-      local-runtime-secrets:
-        condition: service_completed_successfully
-      kong:
-        condition: service_healthy
-      project-db-init:
-        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4000/api/auth/bridge/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
       interval: 5s
@@ -534,6 +187,9 @@ services:
       - "4100"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - mini-baas
     healthcheck:
       test: ["CMD-SHELL", "node -e \"const port=process.env.MAIL_BRIDGE_PORT||4100; fetch('http://127.0.0.1:'+port+'/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
       interval: 5s
@@ -596,15 +252,14 @@ services:
         required: false
       - path: ./apps/calendar/.env.local
         required: false
-      - path: ./apps/baas/.env.local
-        required: false
+      # secrets injected at up-time from ./.env.local
     environment:
       NODE_ENV: development
       CALENDAR_BRIDGE_PORT: ${CALENDAR_BRIDGE_PORT:-4200}
       CALENDAR_APP_ORIGIN: https://localhost:${CALENDAR_HOST_PORT:-3003}
       CALENDAR_BRIDGE_PUBLIC_ORIGIN: https://localhost:${CALENDAR_BRIDGE_PORT:-4200}
       CALENDAR_REDIRECT_URI: https://localhost:${CALENDAR_BRIDGE_PORT:-4200}/auth/google/callback
-      CALENDAR_BAAS_URL: http://kong:8000
+      CALENDAR_BAAS_URL: http://mini-baas-kong:8000
       CALENDAR_BAAS_PUBLIC_URL: https://localhost:${KONG_HTTP_PORT:-8000}
       VAULT_ADDR: ${CALENDAR_BRIDGE_VAULT_ADDR:-http://vault:8200}
     volumes:
@@ -614,11 +269,9 @@ services:
       - "4200"
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    depends_on:
-      kong:
-        condition: service_healthy
-      project-db-init:
-        condition: service_completed_successfully
+    networks:
+      - default
+      - mini-baas
     healthcheck:
       test: ["CMD-SHELL", "node -e \"const port=process.env.CALENDAR_BRIDGE_PORT||4200; fetch('http://127.0.0.1:'+port+'/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
       interval: 5s
@@ -678,11 +331,10 @@ services:
     env_file:
       - path: ./.env.local
         required: false
-      - path: ./apps/baas/.env.local
-        required: false
+      # secrets injected at up-time from ./.env.local
     environment:
       AUTH_GATEWAY_PORT: 8787
-      PUBLIC_BAAS_URL: http://kong:8000
+      PUBLIC_BAAS_URL: http://mini-baas-kong:8000
       OSIONOS_BRIDGE_URL: http://osionos-bridge:4000/api/auth/bridge/session
       PUBLIC_SITE_URL: https://localhost:${OPPOSITE_OSIRIS_HOST_PORT:-4322}
       AUTH_REQUIRE_EMAIL_VERIFICATION: ${AUTH_REQUIRE_EMAIL_VERIFICATION:-false}
@@ -691,7 +343,7 @@ services:
       # Behavior flag defaults to bypass for local (prod sets it false). The
       # SECRET itself is NOT set here on purpose — `environment:` overrides
       # `env_file:`, so an empty default would clobber the Vault-fetched value.
-      # TURNSTILE_SECRET_KEY flows from env_file (apps/baas/.env.local <- Vault).
+      # TURNSTILE_SECRET_KEY is injected at up-time from ./.env.local.
       TURNSTILE_BYPASS_LOCAL: ${TURNSTILE_BYPASS_LOCAL:-true}
       SMTP_HOST: ${SMTP_HOST:-mailpit}
       SMTP_PORT: ${SMTP_PORT:-1025}
@@ -710,24 +362,17 @@ services:
       AUTH_TRUSTED_PROXY_HOPS: ${AUTH_TRUSTED_PROXY_HOPS:-2}
       # Shared, restart-surviving rate-limit / lockout / anti-replay state.
       # Falls back to a bounded in-memory store if Redis is unreachable.
-      REDIS_URL: ${AUTH_GATEWAY_REDIS_URL:-redis://redis:6379}
+      REDIS_URL: ${AUTH_GATEWAY_REDIS_URL:-redis://mini-baas-redis:6379}
       # osionos origin used to validate the bridge redirect target (LOW-3).
       PUBLIC_OSIONOS_APP_URL: ${PUBLIC_OSIONOS_APP_URL:-https://localhost:3001}
     expose:
       - "8787"
+    networks:
+      - default
+      - mini-baas
     depends_on:
-      local-runtime-secrets:
-        condition: service_completed_successfully
-      kong:
-        condition: service_healthy
-      project-db-init:
-        condition: service_completed_successfully
-      mailpit:
-        condition: service_started
       osionos-bridge:
         condition: service_healthy
-      redis:
-        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8787/api/auth/availability').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
       interval: 5s
@@ -751,17 +396,18 @@ services:
       # Runtime, env-driven BaaS upstreams. Default to the local stack's service
       # DNS; override (e.g. OO_BAAS_UPSTREAM=https://baas.example.com) for prod.
       OO_AUTH_UPSTREAM: ${OO_AUTH_UPSTREAM:-http://auth-gateway:8787}
-      OO_BAAS_UPSTREAM: ${OO_BAAS_UPSTREAM:-http://kong:8000}
+      OO_BAAS_UPSTREAM: ${OO_BAAS_UPSTREAM:-http://mini-baas-kong:8000}
       OO_RESOLVER: ${OO_RESOLVER:-127.0.0.11}
     expose:
       - "8080"
     # Optional direct (plain-HTTP) access for debugging, bypassing the TLS proxy.
     ports:
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${OPPOSITE_OSIRIS_WEB_HOST_PORT:-4323}:8080"
+    networks:
+      - default
+      - mini-baas
     depends_on:
       auth-gateway:
-        condition: service_healthy
-      kong:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1 || exit 1"]
@@ -771,54 +417,6 @@ services:
       retries: 5
     restart: unless-stopped
     mem_limit: 128m
-
-  # grobase-site — the Grobase (mini-baas product) marketing website, a
-  # standalone Astro app at apps/baas/site. Dedicated `grobase` profile with
-  # zero depends_on: it needs none of the BaaS stack and never affects
-  # `make up`. Dev hot-reload on 4324; the one-shot grobase-site-audit service
-  # runs the full quality gate (Lighthouse >=90 x4, pa11y, CSP, html-validate)
-  # against a prod preview on 4325. Lifecycle: make grobase-up / grobase-audit.
-  grobase-site:
-    profiles:
-      - grobase
-    image: ${GROBASE_SITE_IMAGE:-track-binocle/grobase-site:local}
-    build:
-      context: ./apps/baas/site
-      target: dev
-    working_dir: /app
-    command: ["npm", "run", "dev"]
-    environment:
-      NODE_ENV: development
-      CHOKIDAR_USEPOLLING: "true"
-      GROBASE_IN_DOCKER: "1"
-    volumes:
-      - ./apps/baas/site:/app
-      - grobase-site-node-modules:/app/node_modules
-    ports:
-      - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${GROBASE_SITE_HOST_PORT:-4324}:4324"
-    healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4324').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
-      interval: 5s
-      timeout: 3s
-      start_period: 30s
-      retries: 20
-    restart: unless-stopped
-    mem_limit: 1g
-
-  grobase-site-audit:
-    profiles:
-      - grobase
-    image: ${GROBASE_SITE_AUDIT_IMAGE:-track-binocle/grobase-site-audit:local}
-    build:
-      context: ./apps/baas/site
-      target: audit
-    working_dir: /app
-    environment:
-      GROBASE_IN_DOCKER: "1"
-      LH_MIN: ${GROBASE_LH_MIN:-90}
-    ports:
-      - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${GROBASE_PREVIEW_HOST_PORT:-4325}:4325"
-    mem_limit: 2g
 
   playground-simulation:
     profiles:
@@ -849,7 +447,7 @@ services:
       PLAYGROUND_SLOWMO_MS: ${PLAYGROUND_SLOWMO_MS:-80}
     volumes:
       - ./apps/osionos/app:/app
-      - ./apps/baas/certs:/certs:ro
+      - ./apps/grobase/certs:/certs:ro
       - osionos-browser-test-node-modules:/app/node_modules
       - osionos-browser-test-pnpm-store:/pnpm/store
     entrypoint: ["/bin/bash", "/app/docker/services/browser-tests/entrypoint.sh"]
@@ -875,8 +473,7 @@ services:
     env_file:
       - path: ./.env.local
         required: false
-      - path: ./apps/baas/.env.local
-        required: false
+      # secrets injected at up-time from ./.env.local
     environment:
       CI: "1"
       NODE_ENV: test
@@ -898,33 +495,27 @@ services:
       NODE_EXTRA_CA_CERTS: /certs/track-binocle-local-ca.pem
     volumes:
       - ./apps/osionos/app:/app
-      - ./apps/baas/certs:/certs:ro
+      - ./apps/grobase/certs:/certs:ro
       - ./tools/seeds/.agency-people.env:/seeds/.agency-people.env:ro
-      - ./apps/baas/mini-baas-infra/.agency-tenant.env:/seeds/.agency-tenant.env:ro
       - osionos-browser-test-node-modules:/app/node_modules
       - osionos-browser-test-pnpm-store:/pnpm/store
     entrypoint: ["/bin/bash", "/app/docker/services/browser-tests/entrypoint.sh"]
     command: ["node", "scripts/agency-simulation.mjs"]
 
 volumes:
-  track-binocle-vault-data:
-  track-binocle-postgres-data:
-  track-binocle-redis-data:
   osionos-app-node-modules:
   osionos-app-pnpm-store:
   mail-node-modules:
   calendar-node-modules:
   osionos-browser-test-node-modules:
   osionos-browser-test-pnpm-store:
-  mini-baas-sdk-node-modules:
-  opposite-osiris-node-modules:
-  grobase-site-node-modules:
 
 networks:
-  # The mini-baas stack's network (started by apps/baas/mini-baas-infra),
-  # declared external so osionos-bridge can reach the permission-engine and
-  # the Rust realtime gateway by container-name DNS (mini-baas-kong,
-  # mini-baas-realtime). Only osionos-bridge attaches to it.
+  # The grobase backend stack's network (docker project `mini-baas`), declared
+  # external so the kept frontends can reach the grobase services by
+  # container-name DNS (mini-baas-kong, mini-baas-gotrue, mini-baas-postgrest,
+  # mini-baas-realtime, mini-baas-redis). The bridge, auth-gateway,
+  # opposite-osiris-web, calendar-bridge and mail-bridge all attach to it.
   mini-baas:
     name: mini-baas_mini-baas
     external: true
