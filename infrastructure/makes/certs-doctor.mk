@@ -13,7 +13,15 @@
 # Certificate diagnostics target.
 certs-doctor: certs
 ## Check whether the local trust stores and running HTTPS proxy use the current local HTTPS CA.
-	@bash apps/baas/scripts/trust-localhost-cert.sh --verify || true
+	@if [[ -f '$(LOCAL_CA_CERT)' ]] && command -v openssl >/dev/null 2>&1; then \
+		if openssl verify -CAfile '$(LOCAL_CA_CERT)' '$(LOCAL_CA_CERT)' >/dev/null 2>&1; then \
+			echo '[certs] grobase CA at $(LOCAL_CA_CERT) is present and self-consistent'; \
+		else \
+			echo '[certs] CA at $(LOCAL_CA_CERT) failed self-verify; rerun make certs' >&2; \
+		fi; \
+	else \
+		echo '[certs] no CA at $(LOCAL_CA_CERT) (run make certs) or openssl missing — skipping CA self-check'; \
+	fi
 	@if docker compose ps --status running --quiet local-https-proxy 2>/dev/null | grep -q .; then \
 		port="$${OPPOSITE_OSIRIS_HOST_PORT:-4322}"; \
 		tmp_cert="$$(mktemp)"; \

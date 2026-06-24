@@ -13,7 +13,7 @@
 # Milestone-gated verification targets for the mini-baas backend.
 #
 # Each `baas-verify-mX` target wraps the matching script under
-# apps/baas/mini-baas-infra/scripts/verify/. The script is the single source
+# apps/grobase/scripts/verify/. The script is the single source
 # of truth — Make targets are thin wrappers so CI and humans use the same
 # entrypoints.
 #
@@ -23,8 +23,8 @@
 # Full gate (requires the stack to be up via `make baas-up`):
 #   BAAS_VERIFY_LIVE=1 make baas-verify-m1
 
-BAAS_VERIFY_DIR := apps/baas/mini-baas-infra/scripts/verify
-BAAS_COMPOSE_FILE := apps/baas/mini-baas-infra/docker-compose.yml
+BAAS_VERIFY_DIR := apps/grobase/scripts/verify
+BAAS_COMPOSE_FILE := apps/grobase/docker-compose.yml
 
 # Set BAAS_VERIFY_LIVE=1 to enable runtime probes (docker compose health,
 # /docs-json HTTP curl, audit_log row count).
@@ -100,7 +100,7 @@ BAAS_COMPOSE_FILES := -f $(BAAS_COMPOSE_FILE)
 baas-up:
 ## Bring the baas docker-compose stack up and wait for healthchecks.
 	@set -e; \
-	bash apps/baas/scripts/generate-localhost-cert.sh >/dev/null; \
+	bash apps/grobase/scripts/certs/generate-localhost-cert.sh >/dev/null; \
 	if $(BAAS_PORT_OVERRIDES) docker compose $(BAAS_COMPOSE_FILES) $(BAAS_VERIFY_PROFILES) up -d --wait $(BAAS_VERIFY_SCALE); then \
 		:; \
 	else \
@@ -175,7 +175,7 @@ baas-verify-all: baas-verify-m10
 
 # ── Higher milestone gates (m11+) — one self-contained script each ─────────────
 # Every milestone beyond the m1-m10 foundation ships a self-contained gate at
-# apps/baas/mini-baas-infra/scripts/verify/m<NN>-*.sh (currently through m94). The
+# apps/grobase/scripts/verify/m<NN>-*.sh (currently through m94). The
 # generic pattern rule below maps `make baas-verify-mNN` to the matching script by
 # glob, so a new gate is runnable the moment its script lands — no per-target edit.
 #
@@ -241,13 +241,13 @@ SECURITY_SKIP ?=
 SECURITY_FAIL_LEVEL ?= high
 SECURITY_TRIVY_SEVERITY ?= HIGH,CRITICAL
 
-.PHONY: baas-security-scan baas-zap
+.PHONY: baas-security-scan baas-zap baas-security-audit baas-compliance-scan baas-compliance-evidence-export
 
 baas-security-scan:
 ## SAST + SCA + Container + Secret scan via Docker (no host install required).
 	@SECURITY_FAIL_LEVEL=$(SECURITY_FAIL_LEVEL) \
 	 SECURITY_TRIVY_SEVERITY=$(SECURITY_TRIVY_SEVERITY) \
-	 bash apps/baas/mini-baas-infra/scripts/security/run-security-scans.sh \
+	 bash apps/grobase/scripts/security/run-security-scans.sh \
 	   $(if $(SECURITY_ONLY),--only=$(SECURITY_ONLY),) \
 	   $(if $(SECURITY_SKIP),--skip=$(SECURITY_SKIP),)
 
@@ -255,7 +255,24 @@ baas-zap:
 ## DAST baseline scan with OWASP ZAP against the live WAF. Stack must be up.
 ## Usage: BAAS_VERIFY_SAFE_PORTS=1 make baas-zap
 	@WAF_HTTPS_PORT=$${WAF_HTTPS_PORT:-18443} \
-	 bash apps/baas/mini-baas-infra/scripts/verify/zap-baseline.sh
+	 bash apps/grobase/scripts/verify/zap-baseline.sh
+
+baas-security-audit:
+## OSS audit suite: OSV deps + IaC misconfig (always) + Nuclei/sqlmap/web-privacy (if a live target responds). Docker-first.
+## Vars: AUDIT_FAIL_LEVEL (default HIGH) · AUDIT_ONLY=osv,iac · AUDIT_SKIP=... · TARGET_URL=... · SITE_URL=...
+	@AUDIT_FAIL_LEVEL=$(or $(AUDIT_FAIL_LEVEL),HIGH) \
+	 bash apps/grobase/scripts/security/audit/run-audit.sh \
+	   $(if $(AUDIT_ONLY),--only=$(AUDIT_ONLY),) \
+	   $(if $(AUDIT_SKIP),--skip=$(AUDIT_SKIP),)
+
+baas-compliance-scan:
+## Infra compliance-as-code: Checkov over helm (maps to ISO A.8 / SOC2 CC6-7). Prowler/Steampipe run by hand vs live cloud — see wiki/compliance/infra-compliance-scanning.md.
+	@COMPLIANCE_FAIL_LEVEL=$(or $(COMPLIANCE_FAIL_LEVEL),warn) \
+	 bash apps/grobase/scripts/security/compliance/infra-compliance-scan.sh
+
+baas-compliance-evidence-export:
+## Assemble the auditor / Vanta-Drata hand-off bundle (matrices + SoA + gates + posture -> artifacts/audit-handoff/<date>/).
+	@bash apps/grobase/scripts/security/handoff/compliance-evidence-export.sh
 
 # ── SDK codegen (Docker-only, no node required on host) ───────────────────────
 BAAS_CODEGEN_IMAGE := mini-baas-sdk-codegen:local
@@ -265,7 +282,7 @@ BAAS_CODEGEN_NETWORK := mini-baas_mini-baas
 
 baas-codegen-image:
 ## Build the one-shot image that runs openapi-collect + codegen inside docker.
-	docker build -f apps/baas/sdk/Dockerfile.codegen -t $(BAAS_CODEGEN_IMAGE) apps/baas/sdk
+	docker build -f apps/grobase/sdks/js/Dockerfile.codegen -t $(BAAS_CODEGEN_IMAGE) apps/grobase/sdks/js
 
 baas-codegen: baas-codegen-image
 ## Collect /docs-json from running NestJS apps and generate typed SDK clients.
@@ -277,7 +294,7 @@ baas-codegen: baas-codegen-image
 	  -e OPENAPI_BASE_URL=http://host.docker.internal:0 \
 	  --add-host host.docker.internal:host-gateway \
 	  $(BAAS_CODEGEN_IMAGE) \
-	  'bash apps/baas/mini-baas-infra/scripts/openapi-collect.sh --docker-network && \
-	   cd apps/baas/sdk && \
+	  'bash apps/grobase/scripts/ops/openapi-collect.sh --docker-network && \
+	   cd apps/grobase/sdks/js && \
 	   npm install --no-audit --no-fund --prefer-offline && \
 	   node ./scripts/codegen.mjs'

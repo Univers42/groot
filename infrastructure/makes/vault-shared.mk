@@ -59,7 +59,7 @@ vault-fetch-shared:
 	fi; \
 	if [[ -n '$(VAULT_NAMESPACE)' ]]; then export VAULT_NAMESPACE='$(VAULT_NAMESPACE)'; fi; \
 	if [[ -z "$${NODE_EXTRA_CA_CERTS:-}" && -f '$(LOCAL_CA_CERT)' ]]; then export NODE_EXTRA_CA_CERTS='$(LOCAL_CA_CERT)'; fi; \
-	$(NODE_RUN_SHARED) apps/baas/scripts/vault-env.mjs fetch
+	echo '[skip] vault-fetch-shared now lives in apps/grobase'
 
 vault-shared-doctor:
 ## Check shared Vault token wiring without printing secret values.
@@ -148,7 +148,7 @@ vault-publish-shared:
 	: "$${VAULT_TOKEN:?Set a writer VAULT_API_KEY, VAULT_TOKEN, or provide VAULT_PUBLISH_TOKEN_FILE=$(VAULT_PUBLISH_TOKEN_FILE)}"; \
 	: "$${VAULT_ADDR:?Set VAULT_ADDR or provide VAULT_TOKEN_FILE}"; \
 	if [[ -n '$(VAULT_NAMESPACE)' ]]; then export VAULT_NAMESPACE='$(VAULT_NAMESPACE)'; fi; \
-	$(NODE_RUN_SHARED) apps/baas/scripts/vault-env.mjs publish
+	echo '[skip] vault-publish-shared now lives in apps/grobase'
 
 vault-status-shared:
 ## Check managed Vault env coverage with an invited reader/writer API key or token.
@@ -163,4 +163,4 @@ vault-status-shared:
 	: "$${VAULT_TOKEN:?Set VAULT_API_KEY, VAULT_TOKEN, or provide VAULT_TOKEN_FILE=$(VAULT_TOKEN_FILE)}"; \
 	: "$${VAULT_ADDR:?Set VAULT_ADDR or provide VAULT_TOKEN_FILE=$(VAULT_TOKEN_FILE)}"; \
 	if [[ -n '$(VAULT_NAMESPACE)' ]]; then export VAULT_NAMESPACE='$(VAULT_NAMESPACE)'; fi; \
-	$(NODE_RUN_SHARED) apps/baas/scripts/vault-env.mjs status
+	echo '[skip] vault-status-shared now lives in apps/grobase'

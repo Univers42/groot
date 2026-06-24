@@ -5,7 +5,7 @@ app-images:
 app-login:
 ## Log in to DockerHub using DOCKER_USER/DOCKER_PAT from the shell or ignored env files.
 	@set +u; set -a; \
-	for env_file in .env.local .env apps/baas/mini-baas-infra/.env; do \
+	for env_file in .env.local .env; do \
 		if [[ -f "$$env_file" ]]; then . "$$env_file"; fi; \
 	done; \
 	set +a; set -u; \
@@ -21,7 +21,7 @@ app-login:
 app-images-push: app-images app-login
 ## Tag and push the application images to DockerHub. Use VERSION=vX.Y.Z to override the tag.
 	@set +u; set -a; \
-	for env_file in .env.local .env apps/baas/mini-baas-infra/.env; do \
+	for env_file in .env.local .env; do \
 		if [[ -f "$$env_file" ]]; then . "$$env_file"; fi; \
 	done; \
 	set +a; set -u; \
@@ -51,9 +51,9 @@ app-images-push: app-images app-login
 	done
 
 healthcheck: certs
-## Verify the BaaS, website, osionos app, Mail, Calendar, bridges, and app-to-BaaS connectivity.
+## Verify the grobase backend, website, osionos app, bridge, and auth gateway.
 	docker compose ps
-	$(CURL_HEALTH) $(BAAS_URL) >/dev/null
+	$(CURL_HEALTH) $(BAAS_URL)/auth/v1/health >/dev/null
 	$(CURL_HEALTH) $(BRIDGE_URL)/api/auth/bridge/health
 	$(CURL_HEALTH) $(OSIONOS_URL) >/dev/null
 	$(CURL_HEALTH) $(WEBSITE_URL) >/dev/null
@@ -65,19 +65,6 @@ healthcheck: certs
 		exit 1; \
 	fi
 	$(CURL_HEALTH) -o /dev/null -w 'auth-gateway-https-%{http_code}\n' $(AUTH_URL)/availability
-	$(CURL_HEALTH) $(MAILPIT_URL) >/dev/null
-	@if docker compose exec -T auth-gateway test -f scripts/verify-newsletter-delivery.mjs 2>/dev/null; then \
-		docker compose exec -T auth-gateway node scripts/verify-newsletter-delivery.mjs; \
-	else \
-		echo '[healthcheck] newsletter-delivery verifier not in this auth-gateway image (script moved with the prismatica split) — skipped'; \
-	fi
-	$(CURL_HEALTH) $(MAIL_BRIDGE_URL)/health >/dev/null
-	$(CURL_HEALTH) $(MAIL_URL) >/dev/null
-	$(CURL_HEALTH) $(CALENDAR_BRIDGE_URL)/health >/dev/null
-	$(CURL_HEALTH) $(CALENDAR_URL) >/dev/null
-	docker compose exec -T mail-bridge node -e "fetch('http://127.0.0.1:' + (process.env.MAIL_BRIDGE_PORT || '4100') + '/session').then((r) => r.json()).then((session) => { if (!session.configured) console.warn('[healthcheck] Gmail OAuth credentials are not configured; Mail stays available with mock/local data, but Gmail connect and sync are disabled until this developer adds their own Google OAuth client credentials.'); }).catch((error) => { console.error(error.message); process.exit(1); })"
-	docker compose exec -T calendar-bridge node -e "fetch('http://127.0.0.1:' + (process.env.CALENDAR_BRIDGE_PORT || '4200') + '/session').then((r) => r.json()).then((session) => { if (!session.configured) console.warn('[healthcheck] Google Calendar OAuth credentials are not configured; Calendar stays available, but Google Calendar connect and sync are disabled until this developer adds their own Google OAuth client credentials.'); }).catch((error) => { console.error(error.message); process.exit(1); })"
-	docker compose exec -T calendar-bridge node -e "fetch('http://127.0.0.1:' + (process.env.CALENDAR_BRIDGE_PORT || '4200') + '/baas/status').then((r) => r.json()).then((status) => { if (!status.connected) { console.error('calendar bridge cannot reach the BaaS gateway'); process.exit(1); } }).catch((error) => { console.error(error.message); process.exit(1); })"
 
 showcase:
 ## Print the local service URLs after the pipeline is healthy.

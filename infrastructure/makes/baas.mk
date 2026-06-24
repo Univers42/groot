@@ -48,9 +48,9 @@ OSIONOS_APP_ENV := apps/osionos/app/.env
 
 seed-live-demo:
 ## Seed the live-database demo (pg-commerce + mysql-ops + mongo-activity through
-## the mini-baas control plane), then rebuild osionos-app with the BaaS env
-## baked in and restart it. Needs the mini-baas stack up (make -C apps/baas/mini-baas-infra up).
-	@$(MAKE) -C apps/baas/mini-baas-infra seed-live-demo
+## the grobase control plane), then rebuild osionos-app with the BaaS env baked
+## in and restart it. Needs the grobase stack up (make -C apps/grobase up).
+	@$(MAKE) -C apps/grobase seed-live-demo APP_ENV_FILE=$(CURDIR)/apps/osionos/app/.env
 	@$(MAKE) osionos-app-live
 
 osionos-app-live:
