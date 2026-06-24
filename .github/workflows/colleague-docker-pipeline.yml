@@ -29,9 +29,14 @@ jobs:
       - name: Checkout repository and submodules
         uses: actions/checkout@v5
         with:
-          submodules: true
           fetch-depth: 0
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+      - name: Check out submodules (non-recursive)
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+        run: |
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git submodule update --init apps/grobase apps/opposite-osiris apps/calendar apps/mail apps/osionos/app
 
       - name: Verify Vault OIDC configuration
         env:
