@@ -1,93 +1,115 @@
-# BaaS CI — fast checks on every PR / feature push that touches the BaaS.
-# The exhaustive live verify-all (gates needing a running stack) stays local /
-# nightly; this is the pre-merge gate: it must (a) compile + unit-test the Go
-# and Rust planes, (b) prove every image still BUILDS FROM A CLEAN CHECKOUT —
-# the rc.2-class bug where a .gitignore pattern silently swallowed a source file
-# that all local builds resolved from disk — and (c) validate the static config
-# (package manifest parity, Prometheus rules).
+# BaaS CI — fast pre-merge checks for the grobase backend.
+#
+# grobase is now a SEPARATE repo (Univers42/grobase), tracked here as the
+# `apps/grobase` submodule. Its own CI (that repo's .github/workflows/ci.yml) runs
+# the exhaustive image-build + integration + enterprise battery. THIS workflow is
+# the lean superproject gate: it checks out the pinned grobase commit and proves
+# the Go control-plane and the two Rust planes compile + unit-test, plus validates
+# static config. Toolchains run in containers (Docker-first) so no host setup drifts.
 name: BaaS CI
 
 on:
   pull_request:
     paths:
-      - "apps/baas/mini-baas-infra/**"
+      - "apps/grobase"
       - ".github/workflows/baas-ci.yml"
   push:
-    branches: ["feat/**", "fix/**", "chore/**"]
+    branches: ["main", "feat/**", "fix/**", "chore/**"]
     paths:
-      - "apps/baas/mini-baas-infra/**"
+      - "apps/grobase"
+      - ".github/workflows/baas-ci.yml"
+  workflow_dispatch:
 
 concurrency:
   group: baas-ci-${{ github.ref }}
   cancel-in-progress: true
 
-defaults:
-  run:
-    working-directory: apps/baas/mini-baas-infra
-
 jobs:
   go:
     name: Go control-plane (vet + test)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
-          cache-dependency-path: apps/baas/mini-baas-infra/go/control-plane/go.sum
-      - name: vet + test
-        working-directory: apps/baas/mini-baas-infra/go/control-plane
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+      - name: Check out grobase submodule
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
         run: |
-          go vet ./...
-          go test ./...
+          git config url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git submodule update --init apps/grobase
+      - name: vet + test (containerised toolchain)
+        run: |
+          docker run --rm -v "$PWD/apps/grobase/src/control-plane:/src" -w /src \
+            golang:1.25-bookworm sh -c "go vet ./... && go test ./..."
 
-  rust:
+  rust-data-plane:
     name: Rust data-plane (test)
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: apps/baas/mini-baas-infra/docker/services/data-plane-router
-      - name: cargo test (core + pool + server, incl. ratelimit-redis feature)
-        working-directory: apps/baas/mini-baas-infra/docker/services/data-plane-router
-        run: cargo test -p data-plane-core -p data-plane-pool -p data-plane-server --features ratelimit-redis
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+      - name: Check out grobase submodule
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+        run: |
+          git config url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git submodule update --init apps/grobase
+      - name: cargo test --workspace
+        run: |
+          docker run --rm -e CARGO_NET_RETRY=10 -e CARGO_HTTP_MULTIPLEXING=false \
+            -v "$PWD/apps/grobase/src/data-plane-router:/src" -w /src \
+            rust:1-bookworm cargo test --workspace
 
-  bake:
-    name: Bake all images (build-only, clean checkout)
+  rust-realtime:
+    name: Rust realtime (test)
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      # Build every bake target from THIS checkout, no push. Catches the
-      # gitignore-swallowed-source / stale-target class of bug that local
-      # builds (which resolve files from disk) cannot — the exact failure that
-      # bit baas-v1.0.0-rc.1 and rc.2.
-      - name: bake default (build only)
-        # Clear the registry cache-to/cache-from refs: build-only validation
-        # needs no GHCR auth, and it builds every target from THIS checkout.
+        with:
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+      - name: Check out grobase submodule
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
         run: |
-          docker buildx bake -f docker-bake.hcl \
-            --set "*.platform=linux/amd64" \
-            --set "*.cache-to=" \
-            --set "*.cache-from=" \
-            default
+          git config url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git submodule update --init apps/grobase
+      - name: cargo test --workspace
+        run: |
+          docker run --rm -e CARGO_NET_RETRY=10 -e CARGO_HTTP_MULTIPLEXING=false \
+            -v "$PWD/apps/grobase/infra/docker/services/realtime/realtime-agnostic:/src" -w /src \
+            rust:1-bookworm cargo test --workspace
 
   static:
     name: Static config (manifest parity + Prometheus rules)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: package manifest parity (config == Go-embedded copy)
+        with:
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+      - name: Check out grobase submodule
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
         run: |
-          diff <(jq -S . config/packages/packages.json) \
-               <(jq -S . go/control-plane/internal/packages/packages.json) \
-            && echo "✓ package manifest is the single source of truth"
+          git config url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git submodule update --init apps/grobase
+      - name: package manifest parity (config == Go-embedded copy)
+        working-directory: apps/grobase
+        run: |
+          diff <(jq -S . infra/config/packages/packages.json) \
+               <(jq -S . src/control-plane/internal/packages/packages.json) \
+            && echo "package manifest is the single source of truth"
       - name: Prometheus rules + config (m52)
+        working-directory: apps/grobase
         run: |
           docker run --rm --entrypoint promtool \
-            -v "$PWD/config/prometheus":/etc/prometheus \
+            -v "$PWD/infra/config/prometheus":/etc/prometheus \
             prom/prometheus:v2.52.0 check config /etc/prometheus/prometheus.yml
       - name: shellcheck verify gates (advisory)
+        working-directory: apps/grobase
         run: shellcheck -S error scripts/verify/m*.sh || true
