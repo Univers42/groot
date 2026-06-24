@@ -4,20 +4,15 @@
 # SUBMODULES — their package manifests are not present in this superproject's tree,
 # so npm/pnpm ecosystems pointed at those paths cannot resolve a manifest here and
 # fail. Each submodule repo runs its OWN Dependabot for its JS deps. This config
-# only covers what the superproject itself owns: Docker base images + the GitHub
-# Actions it runs.
+# only covers what the superproject itself owns: the GitHub Actions it runs.
 #
-# NO gitsubmodule ecosystem: the grobase gitlink is intentionally pinned to a
-# fix branch (not its default branch), so a submodule-pointer bump would regress
-# it; the app submodules are managed in their own repos.
+# NO docker ecosystem: the root has only docker-compose.yml (external/pull-only
+# images), no Dockerfile for Dependabot to update — it errors with "No Dockerfiles
+# found". Frontend/backend Dockerfiles live in their own submodule repos.
+# NO gitsubmodule ecosystem: the grobase gitlink is intentionally pinned to a fix
+# branch (not its default branch), so a pointer bump would regress it.
 version: 2
 updates:
-  - package-ecosystem: docker
-    directory: /
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-
   - package-ecosystem: github-actions
     directory: /
     schedule:
