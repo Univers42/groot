@@ -18,3 +18,7 @@ bootstrap:
 docs:
 ## Show the primary Docker pipeline documentation files.
 	@printf 'Read README.md and docs/howtouse.md for the Docker-only pipeline workflow.\n'
+
+rebuild-server:
+## Run the host rebuild daemon (127.0.0.1:7799) so the osionos Update button can rebuild the stack (make all) on click. Leave it running in a terminal.
+	@python3 scripts/dev-rebuild-server.py

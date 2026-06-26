@@ -48,3 +48,4 @@ include $(MAKE_DIR)/gourmand.mk
 include $(MAKE_DIR)/grobase.mk
 include $(MAKE_DIR)/baas-release.mk
 include $(MAKE_DIR)/baas-verify.mk
+include $(MAKE_DIR)/update.mk

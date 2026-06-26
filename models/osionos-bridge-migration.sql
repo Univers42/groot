@@ -59,10 +59,19 @@ CREATE TABLE IF NOT EXISTS public.osionos_pages (
   collaborators JSONB NOT NULL DEFAULT '[]'::jsonb,
   properties JSONB NOT NULL DEFAULT '[]'::jsonb,
   content JSONB NOT NULL DEFAULT '[]'::jsonb,
+  is_template BOOLEAN NOT NULL DEFAULT false,
+  is_default_template BOOLEAN NOT NULL DEFAULT false,
+  recurrence JSONB,
   archived_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Database templates (additive, idempotent — for tables created before templates).
+ALTER TABLE public.osionos_pages
+  ADD COLUMN IF NOT EXISTS is_template BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS is_default_template BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS recurrence JSONB;
 
 CREATE TABLE IF NOT EXISTS public.osionos_page_configurations (
   page_id TEXT NOT NULL,
@@ -128,6 +137,7 @@ CREATE INDEX IF NOT EXISTS osionos_pages_workspace_archived_idx ON public.osiono
 CREATE INDEX IF NOT EXISTS osionos_pages_workspace_parent_idx ON public.osionos_pages(workspace_id, parent_page_id);
 CREATE INDEX IF NOT EXISTS osionos_pages_workspace_updated_idx ON public.osionos_pages(workspace_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS osionos_pages_workspace_surface_idx ON public.osionos_pages(workspace_id, surface);
+CREATE INDEX IF NOT EXISTS osionos_pages_workspace_template_idx ON public.osionos_pages(workspace_id, is_template) WHERE is_template;
 CREATE INDEX IF NOT EXISTS osionos_page_configurations_page_idx ON public.osionos_page_configurations(page_id);
 CREATE INDEX IF NOT EXISTS osionos_page_configurations_workspace_idx ON public.osionos_page_configurations(workspace_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS osionos_page_action_events_page_idx ON public.osionos_page_action_events(page_id, created_at DESC);
@@ -362,7 +372,13 @@ BEGIN
   VALUES (p_provider, p_subject, p_subject, p_email_hash, v_display_name)
   ON CONFLICT (provider, subject) DO UPDATE SET
     email_hash = EXCLUDED.email_hash,
-    display_name = EXCLUDED.display_name,
+    -- Preserve a real "First Last" display name over a stem/handle the portal may
+    -- pass on re-login (the handoff falls back to the email local-part). A real
+    -- name has a space; a stem (e02.lindqvist / dlesieur4242) does not.
+    display_name = CASE
+      WHEN EXCLUDED.display_name !~ ' ' AND public.osionos_bridge_identities.display_name ~ ' '
+      THEN public.osionos_bridge_identities.display_name
+      ELSE EXCLUDED.display_name END,
     updated_at = now(),
     last_seen_at = now()
   RETURNING private_workspace_id INTO v_workspace_id;
