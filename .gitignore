@@ -61,3 +61,6 @@ screenshots/
 
 # vault42 tool state (contains secret-file patterns)
 .42ctl/
+
+# electron-builder root-owned node_modules quarantine (build junk, never track)
+.nm_el_quarantine_*/
