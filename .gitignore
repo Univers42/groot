@@ -55,3 +55,9 @@ tools/seeds/.gourmand-people.env
 
 # m58-gate root-owned SDK-generator debris (regenerated; never track)
 apps/baas/sdk-*.rootowned-stale/
+
+# debug screenshots (throwaway PNGs)
+screenshots/
+
+# vault42 tool state (contains secret-file patterns)
+.42ctl/
