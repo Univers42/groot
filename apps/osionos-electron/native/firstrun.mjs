@@ -31,6 +31,7 @@ const MIGRATIONS = [
   "osionos-bridge-migration.sql",
   "osionos-folder-surface-migration.sql",
   "rls-hardening-migration.sql",
+  "osionos-admin-migration.sql",
 ];
 
 function signJwt(payload, secret) {

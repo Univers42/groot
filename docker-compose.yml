@@ -43,6 +43,11 @@ services:
       # BaaS reads/writes go to the grobase-owned mini-baas Kong over the
       # external mini-baas network (container-name DNS).
       OSIONOS_BAAS_URL: http://mini-baas-kong:8000
+      # The adapter-registry (the database LIST) is keyed by tenant; the bridge
+      # resolves it server-side so the browser never has to pass ?tenant= (and
+      # so a missing hint can't 503 us into the env mock mounts). Same tenant the
+      # permission proxy uses below (PERMS_TENANT_ID).
+      OSIONOS_BAAS_TENANT_ID: ${OSIONOS_BAAS_TENANT_ID:-agency}
       AUTH_GATEWAY_URL: ${AUTH_GATEWAY_URL:-http://auth-gateway:8787}
       OSIONOS_BRIDGE_PERSISTENCE: ${OSIONOS_BRIDGE_PERSISTENCE:-auto}
       OSIONOS_BRIDGE_REQUIRE_BAAS: ${OSIONOS_BRIDGE_REQUIRE_BAAS:-false}
@@ -139,6 +144,7 @@ services:
         VITE_BAAS_LIVE_MOUNTS: ${VITE_BAAS_LIVE_MOUNTS:-}
         VITE_BAAS_REALTIME_TOKEN: ${VITE_BAAS_REALTIME_TOKEN:-}
         VITE_BAAS_TENANT_ID: ${VITE_BAAS_TENANT_ID:-}
+        VITE_GIPHY_API_KEY: ${GIPHY_API:-}
         VITE_BAAS_EDGES_DB_ID: ${VITE_BAAS_EDGES_DB_ID:-}
         VITE_BAAS_EDGES_TABLE: ${VITE_BAAS_EDGES_TABLE:-}
         VITE_BAAS_GRAPH_RESOURCES: ${VITE_BAAS_GRAPH_RESOURCES:-}

@@ -67,6 +67,10 @@ ARG VITE_SECOND_BRAIN_V2=
 ARG VITE_BAAS_LIVE_MOUNTS=
 ARG VITE_BAAS_REALTIME_TOKEN=
 ARG VITE_BAAS_TENANT_ID=
+ARG VITE_CHAT_WS=true
+# Giphy search key (GIPHY_API in .env.local). Public beta-style key, client-side
+# by design; empty = the GIF picker shows a "not configured" toast.
+ARG VITE_GIPHY_API_KEY=
 ENV VITE_API_URL=$VITE_API_URL \
     VITE_PRISMATICA_URL=$VITE_PRISMATICA_URL \
     VITE_MAIL_APP_URL=$VITE_MAIL_APP_URL \
@@ -89,6 +93,14 @@ ENV VITE_API_URL=$VITE_API_URL \
     VITE_BAAS_LIVE_MOUNTS=$VITE_BAAS_LIVE_MOUNTS \
     VITE_BAAS_REALTIME_TOKEN=$VITE_BAAS_REALTIME_TOKEN \
     VITE_BAAS_TENANT_ID=$VITE_BAAS_TENANT_ID
+
+# vite's import.meta.env OBJECT (whole-object reads in the vendored realtime
+# plane + wsTransport) is populated ONLY from .env FILES, not the Dockerfile ENV,
+# and the host .env is .dockerignored. Write the realtime build env here so
+# liveRealtimeUrl()/resolveLiveRealtimeToken() get a non-empty VITE_BAAS_URL +
+# valid token and the chat WebSocket actually connects.
+RUN printf 'VITE_BAAS_URL=%s\nVITE_BAAS_REALTIME_TOKEN=%s\nVITE_CHAT_WS=%s\nVITE_GIPHY_API_KEY=%s\n' \
+      "$VITE_BAAS_URL" "$VITE_BAAS_REALTIME_TOKEN" "$VITE_CHAT_WS" "$VITE_GIPHY_API_KEY" > .env.production.local
 
 # Build, then strip source maps from the shipped image (they tripled its size
 # and leak source; keep them only in local builds) and precompress static
