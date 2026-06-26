@@ -1,6 +1,7 @@
 [submodule "vendor/scripts"]
 	path = vendor/scripts
 	url = git@github.com:Univers42/scripts.git
+	ignore = untracked
 [submodule "apps/osionos/app"]
 	path = apps/osionos/app
 	url = git@github.com:Univers42/osionos.git
@@ -13,6 +14,7 @@
 [submodule "vendor/born2root"]
 	path = vendor/born2root
 	url = git@github.com:Univers42/born2root.git
+	ignore = untracked
 [submodule "vendor/QA"]
 	path = vendor/QA
 	url = git@github.com:Univers42/QA.git
