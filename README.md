@@ -1,282 +1,168 @@
-# How To Use The Docker Pipeline
+# ft_transcendence — "Track Binocle"
 
-This workspace runs through Docker Compose only. Do not install app dependencies on the host and do not start the website or osionos app with local `npm`, `pnpm`, or `node` scripts. The root `docker-compose.yml` is the source of truth for the backend, the website, the osionos app, and the bridge between them.
+A Docker-first monorepo: a Notion-like collaborative block editor (**osionos**), a marketing
+and auth site (**opposite-osiris**), and Gmail/Calendar apps — all running on a self-hostable
+Backend-as-a-Service (**grobase**). One command brings the whole thing up.
 
-## What Runs
+Three languages, three planes: **TypeScript** (the apps), **Go** (the control plane —
+provisioning, auth, tenancy), **Rust** (the data plane — query execution, realtime). Everything
+runs in containers. **Never install dependencies on the host** — there is no host `node`/`npm`/`go`.
 
-- Website: `https://localhost:4322`
-- osionos app: `https://localhost:3001`
-- osionos bridge API: `https://localhost:4000`
-- Auth gateway: `https://localhost:8787/api/auth`
-- BaaS gateway: `https://localhost:8000`
-- Vault: `https://localhost:18200`
-- osionos Mail: `https://localhost:3002`
-- Mail bridge: `https://localhost:4100`
-- osionos Calendar: `https://localhost:3003`
-- Calendar bridge: `https://localhost:4200`
+---
 
-The browser flow is:
+## Quick start
 
-1. Open the website at `https://localhost:4322`.
-2. Create or sign in to a local development account.
-3. The website asks the auth gateway for an osionos bridge session.
-4. The bridge creates a short-lived one-time token and persists the private osionos workspace in Postgres.
-5. The browser redirects to `https://localhost:3001/#bridge_token=...`.
-6. osionos consumes the token and opens the user's private workspace.
-7. The osionos sidebar app buttons open the Docker-served Mail and Calendar apps.
+You need **Docker** (with its data-root on a big disk — see [below](#docker-on-a-big-disk)) and **git**.
 
-## Normal Workflow
-
-Most users only need two commands:
-
-```sh
+```bash
+git clone --recursive <repo-url> ft_transcendence
+cd ft_transcendence
 make all
-make playground
 ```
 
-`make all` bootstraps the ignored runtime files, builds and starts the Docker stack, runs health checks, then prints the localhost URLs only after the pipeline is ready.
+`make all` is self-provisioning. It syncs submodules to the latest source, pulls secrets from the
+vault if they're missing, starts the **grobase** backend, restores the demo data when the databases
+are empty, builds and starts the frontends, healthchecks them, and prints a clickable list of URLs.
+The first run may prompt for `sudo` once to trust the local TLS certificate.
 
-The root stack terminates local TLS in a Docker Nginx proxy. `make all`, `make up`, and `make healthcheck` generate the local certificate automatically. On interactive developer machines, `make all` also trusts the project CA in the system and browser trust stores, prompting for sudo when the Linux system CA store must be updated. On Debian/Ubuntu VMs, the trust helper installs missing certificate tooling with sudo before updating the system and browser trust stores. Firefox profiles, including Snap and Flatpak profiles, are configured to read enterprise/system roots and must be fully restarted after the CA is imported.
+When it finishes, open the website and sign in:
 
-If VS Code or SSH opens a random forwarded URL such as `https://localhost:40775`, the browser is running on the forwarding host, not inside the VM. `make all` tries to copy and trust `apps/baas/certs/track-binocle-local-ca.pem` on that browser host over SSH/SCP when a back-to-host route is reachable. See [docs/host-browser-https-pipeline.md](docs/host-browser-https-pipeline.md) for the complete host-browser HTTPS path and [docs/troubleshoot/browser-host-ca-trust.md](docs/troubleshoot/browser-host-ca-trust.md) when the host firewall, user, or SSH port needs to be configured.
+| URL | Login |
+|-----|-------|
+| `https://localhost:4322` | `dev.pro.photo` / `Osionos123!` |
 
-`make playground` opens a VS Code simulation viewer, then runs the Docker-contained Playwright scenario: open the website, create a development account, sign in, bridge into osionos, create a persisted markdown page through the osionos bridge, open Settings, open Mail and Calendar from the sidebar, and probe both service bridges. If Gmail or Google Calendar are already authorized in their ignored token files, the simulation also samples real messages/events without printing account values.
+> First time on a machine? You also need the vault key — see [Fresh machine](#fresh-machine--migration).
 
-## Dependency Supply Chain Controls
+---
 
-Docker builds and CI use frozen lockfiles. npm-based apps use `npm ci --ignore-scripts`, and the local mini-BaaS SDK is built through an explicit trusted `npm run build` step instead of install-time lifecycle hooks. pnpm-based apps use `minimum-release-age=1440`, frozen lockfiles, store integrity checks, and explicit `onlyBuiltDependencies` allowlists for packages that genuinely need build scripts.
+## The apps
 
-Dependabot and Renovate are configured at the root so JS, Docker, and GitHub Actions updates are reviewable and delayed after publication. Docker image CI enables SBOM/provenance attestations where the existing image pipelines build through Buildx.
+`make all` brings up the frontends; the **grobase** backend serves them. Host ports:
 
-## Environment And Vault
+| App | Tech | URL | Purpose |
+|-----|------|-----|---------|
+| **opposite-osiris** | Astro | `https://localhost:4322` | Marketing site + auth landing — start here |
+| **osionos** | React + Vite | `https://localhost:3001` | Block editor / collaborative document system |
+| **osionos-bridge** | TypeScript | `https://localhost:4000` | Workspace persistence between site and editor |
+| **auth-gateway** | Go | `https://localhost:8787/api/auth` | Authentication & session management |
+| **mail** | React / TS | `https://localhost:3002` | Gmail OAuth integration |
+| **calendar** | React / TS | `https://localhost:3003` | Google Calendar OAuth integration |
+| **grobase** (Kong) | Rust/Go/TS | `http://127.0.0.1:8000` | The BaaS gateway — auth, data, realtime, storage |
+| **LiveKit** | WebRTC SFU | `ws://127.0.0.1:7880` | Media server for osionos video rooms |
 
-Runtime env files are managed by Docker-only commands. The generated `.env.example` files are grouped by required, recommended, optional, and legacy keys. Optional keys may stay commented or blank when the feature is not enabled, for example external SMTP, analytics, Sonar, or third-party API integrations. The root `make all` pipeline owns a local Mailpit SMTP inbox so auth and newsletter email flows are deterministic on fresh machines. Gmail and Google Calendar OAuth credentials are required for the root `make all` pipeline because the healthcheck verifies that both bridges are configured.
+A single TLS proxy publishes the 8 HTTPS frontend ports. The `showcase` step lists only the
+services that are actually running. Desktop/Electron builds must use `127.0.0.1`, not `localhost`
+(Kong is IPv4-only).
 
-Useful commands:
+---
 
-```sh
-make pulls
-make all
-make all-local
-make env-format
-make vault-seed
-make vault-publish
-make vault-status
-make vault-invite-token VAULT_TEAM_ROLE=reader
-make vault-fly-invite-token VAULT_TEAM_ROLE=reader
-make vault-invite-token VAULT_TEAM_ROLE=writer VAULT_TOKEN_TTL=8h
-make vault-shared-doctor
-make vault-session-check
-make vault-login-user
-make vault-login-fly-admin
-make vault-session-status
-make vault-get-secrets
-make vault-session-reader-token
-make vault-session-writer-token
-make vault-logout
-make vault-fetch-shared VAULT_TOKEN_FILE=.vault/track-binocle-reader.env
-VAULT_API_KEY=... VAULT_ADDR=https://track-binocle-vault.fly.dev make vault-fetch-shared
-make env-fetch-shared
-make vault-publish-shared VAULT_PUBLISH_TOKEN_FILE=.vault/track-binocle-writer.env
-make vault-repair-shared VAULT_PUBLISH_TOKEN_FILE=.vault/track-binocle-writer.env
-make vault-github-oidc
-make vault-fly
-make admin-cred-lost
-make vault-rotate-approles
-make vault-verify-approles
-make env-fetch
-make env-restore-test
-make db-password-check
-make db-password-apply
-make pushes
+## Everyday commands
+
+Every command runs through the root **Makefile** — it's the authority.
+
+| Command | What it does |
+|---------|-------------|
+| `make all` | The everyday lifecycle: certs → backend → frontends → health → URLs |
+| `make healthcheck` | Probe the backend, website, editor, bridge, and auth gateway |
+| `make showcase` | Print the clickable URL list for the running stack |
+| `make pulls` | Fetch and update all submodules |
+| `make -C apps/grobase up` | Start the grobase backend on its own |
+| `make -C apps/grobase editions` | List backend editions (see [Configuration](#configuration)) |
+| `docker compose ps` | Service status |
+| `docker compose logs -f <service>` | Follow a service's logs |
+| `docker compose up -d --build <service>` | Rebuild one frontend |
+| `docker compose down` | Stop the frontends (keeps data) |
+
+`make grobase-up` is unrelated — it serves the standalone **grobase marketing site** at
+`http://127.0.0.1:4324`, not the backend.
+
+---
+
+## Configuration
+
+**Editions** pick which slice of the grobase backend comes up. Run them from `apps/grobase`:
+
+```bash
+make -C apps/grobase editions          # lean query realtime analytics prod full migrate tetris
+make -C apps/grobase up EDITION=query  # start a known-good shape
 ```
 
-`make all` is the teammate pipeline. It tries to fetch shared env values before bootstrap, then continues with locally generated development secrets when no shared Vault credential is present or when the shared fetch fails. Set `VAULT_SHARED_REQUIRED=true` when you want missing, expired, unreachable, or wrong-host Vault credentials to stop the run. GitHub Actions always keeps shared Vault fetch failures fatal. `make all-local` is the explicit offline/generated-secret development path.
+`make all` uses the **`migrate`** edition by default — every snapshot engine (Postgres, MySQL,
+Mongo, MSSQL, MinIO) plus the full app/control/data plane and realtime, minus the heavy monitoring
+extras. Override with `make all GROBASE_EDITION=full` for the everything-on shape.
 
-`make pulls` fetches and pulls the root repository plus every recursive submodule. It uses configured upstream branches when they exist and otherwise fetches without changing branches.
+**Secrets** live in **vault42** (a zero-knowledge store) and travel through the **42ctl** CLI only.
+HashiCorp Vault is retired — don't use it.
 
-`make pushes` stages, commits, and pushes every recursive submodule and then the root repository. It commits deeper nested submodules first so parent repositories record the new submodule SHAs. The default commit message is `update`; override it with `make pushes GIT_COMMIT_MESSAGE="your message"`.
-
-`make env-format` rewrites managed env files and examples with comments and categories. Real env files comment out missing values so later Compose env files do not accidentally override earlier non-empty secrets with blanks.
-
-`make vault-seed` starts local HashiCorp Vault through the Compose `secrets` profile, initializes and unseals it, creates service AppRoles, and stores the managed env data under `secret/data/track-binocle/env/*`. Browser and host-side Vault access go through the local HTTPS proxy at `https://localhost:18200`; Docker-side service-to-service Vault traffic uses `http://vault:8200`.
-
-`make vault-publish` updates the managed Vault env records from the ignored local env files after a maintainer changes a credential. `make vault-status` compares local and Vault key coverage without printing values.
-
-For teammates, a maintainer can run `make vault-fly-invite-token VAULT_TEAM_ROLE=reader` to mint an ignored `.vault/track-binocle-reader.env` token from the Fly-hosted shared Vault, or `make vault-fly-invite-token VAULT_TEAM_ROLE=writer VAULT_TOKEN_TTL=8h` for someone allowed to publish updated secrets. Use `make vault-invite-token` only for same-machine local Vault testing; localhost token files are deliberately rejected by the shared fetch path unless `VAULT_ALLOW_LOCAL_SHARED=true` is set. Share invite files through your normal secure channel, never through Git. Invited users must keep the token file private with mode `600` or `400`; the shared Vault targets refuse group-readable or world-readable token files. Invited users can place the reader file in `.vault/`, run `make vault-shared-doctor`, and then run `make all`; the Makefile fetches shared secrets before bootstrap when it can, and otherwise continues with local generated secrets unless `VAULT_SHARED_REQUIRED=true` is set. If you want to hand over a password-like API key instead of a file, give the teammate the reader token value and the Vault URL; they can run `VAULT_API_KEY=... VAULT_ADDR=https://track-binocle-vault.fly.dev make vault-fetch-shared` or `VAULT_API_KEY=... VAULT_ADDR=https://track-binocle-vault.fly.dev make all`. If `VAULT_ADDR` is omitted with `VAULT_API_KEY` or `VAULT_TOKEN`, the Makefile defaults shared fetches to `https://track-binocle-vault.fly.dev`.
-
-For the full fresh-clone checklist, see [docs/cybersecurity/fresh-clone-vault-onboarding.md](docs/cybersecurity/fresh-clone-vault-onboarding.md).
-
-For first-class Vault session management, use `make vault-session-check`, `make vault-login-user`, `make vault-login-approle`, `make vault-login-jwt`, `make vault-login-fly-admin`, `make vault-session-status`, `make vault-get-secrets`, and `make vault-logout`. These targets write private token files, support `VAULT_NAMESPACE`, and avoid printing token values. See [wiki/security/vault-session-management.md](wiki/security/vault-session-management.md) for the full workflow, including AppRole, JWT/OIDC, Fly admin sessions, invite-token minting, and cleanup.
-
-If a colleague receives an old or incomplete Vault payload, the fetch now fails before Compose starts and prints only the missing key names. A maintainer with complete ignored env files should repair the shared Vault with `make vault-repair-shared VAULT_PUBLISH_TOKEN_FILE=.vault/track-binocle-writer.env`, then recreate or resend reader tokens as needed. Writers can still run `make vault-publish-shared VAULT_PUBLISH_TOKEN_FILE=.vault/track-binocle-writer.env` after updating local ignored env files.
-
-The GitHub workflow `.github/workflows/colleague-docker-pipeline.yml` simulates the colleague path on `push`, `pull_request`, and manual runs. It authenticates to Vault with GitHub OIDC, so do not store a static Vault token in GitHub secrets. In GitHub Actions, `make all` now requires the OIDC-generated `.vault/track-binocle-reader.env` file and fails fast if that authorization step did not happen. `make vault-fly` creates the Fly app `track-binocle-vault`, deploys Vault at `https://track-binocle-vault.fly.dev`, publishes the managed env records, configures GitHub Actions OIDC, maps the GitHub team `Univers42/transcendance` to the Vault reader policy, and sets the repository variables. The variables `TRACK_BINOCLE_VAULT_ADDR`, `TRACK_BINOCLE_VAULT_AUTH_PATH=jwt`, `TRACK_BINOCLE_VAULT_ROLE=track-binocle-github-actions`, and `TRACK_BINOCLE_VAULT_ENV_PREFIX=secret/data/track-binocle/env` describe the Vault OIDC login path. If private submodule checkout needs broader access than `GITHUB_TOKEN`, set `SUBMODULES_TOKEN` to a PAT that can read the submodule repositories.
-
-Developers in the GitHub team can use Vault's GitHub auth against the public Fly Vault without a shared Vault password. After authenticating with `gh`, run `gh auth refresh -s read:org` if the CLI token cannot read organization teams, then `export VAULT_ADDR=https://track-binocle-vault.fly.dev` and `export VAULT_API_KEY="$(vault login -method=github -format=json token="$(gh auth token)" | jq -r '.auth.client_token')"`. `make vault-fetch-shared` can then fetch the managed env files. The Vault policy grants read access only to the managed env path, not broad `secret/*` access.
-
-If the Fly Vault admin API key is lost but the Vault unseal/recovery key still exists in the Fly Vault volume, run `make admin-cred-lost` from the owner machine. The target asks for `EMAIL_RECUP_ADMIN_VAULT`, a typed confirmation phrase, a local passphrase, and valid Fly operator access, then uses Vault's root-generation flow to write a fresh admin token to `.vault/track-binocle-admin.env`, update the Fly key file, retire the previous stored root token when possible, publish the current managed env data, and mint fresh `.vault/track-binocle-reader.env` and `.vault/track-binocle-writer.env` files. It does not email or print credentials. If the unseal/recovery key is lost too, Vault cannot recover the old secrets; use the destructive `make vault-fly-reset VAULT_FLY_RESET_CONFIRM=destroy-track-binocle-vault` path only when you are ready to reseed from local ignored env files.
-
-`make vault-rotate-approles` rotates service AppRole secret IDs and stores the new IDs in Vault. `make vault-verify-approles` logs in with the root service AppRoles and verifies each token can read the managed Vault env secret without printing secret values. This confirms the local AppRole path for the BaaS, osionos, website, Mail, and Calendar services.
-
-`make env-fetch` materializes the current Vault values back into the ignored local env files before the Compose stack starts. Fetch merges non-empty Vault values with existing local/generated values, so an older Vault record cannot erase a newly generated required value. `make env-restore-test` creates `.env.bak` files, removes the managed env files, fetches them from Vault, and verifies required keys came back.
-
-The root Compose stack sends local auth and newsletter mail through Mailpit at `http://localhost:8025` by default. This keeps `make all` usable without depending on outbound SMTP from the developer machine or CI runner. Local healthcheck addresses are generated from `AUTH_TEST_EMAIL_DOMAIN` or the configured sender domain and are accepted through `AUTH_EMAIL_DOMAIN_ALLOWLIST` before DNS lookup, so a fresh Docker run can prove Mailpit delivery without relying on an external mailbox domain. To test a real SMTP provider instead, export `SMTP_HOST`, `SMTP_PORT`, `SMTP_ENCRYPTION`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_ADDRESS`, and set `MAILPIT_VERIFY_DELIVERY=false` for that run.
-
-If the live Postgres volume was initialized with an older password than `apps/baas/.env.local`, `make db-password-check` detects the drift and `make db-password-apply` applies the current ignored env password to the live Postgres role without printing it. After changing database credentials, run `make db-password-apply`, `make vault-publish`, and then `make env-fetch` on other machines.
-
-## osionos Mail And Calendar
-
-The Gmail and Google Calendar service apps are Docker-managed from the repository root:
-
-```sh
-docker compose up --build mail mail-bridge calendar calendar-bridge
+```bash
+make vault42-pull-all              # dry-run: show what would be restored
+make vault42-pull-all APPLY=1      # restore the whole .env tree (passphrase prompt, hidden)
 ```
 
-Convenience commands are also available:
+`make all` pulls secrets automatically when the vault key is present and the env files are missing,
+so you rarely call this directly. `.env*` files land at the repo root and under each app
+(`apps/grobase/.env`, `apps/osionos/app/.env`, …).
 
-```sh
-make mail-up
-make calendar-up
-npm run dev:all
+For depth: backend internals and flags → [`apps/grobase/CLAUDE.md`](apps/grobase/CLAUDE.md);
+architecture and security → [`wiki/`](wiki/).
+
+---
+
+## Fresh machine / migration
+
+The vault key is the one secret in neither git nor the vault itself — copy it over first, then
+`make all` reconstitutes the whole machine (code, secrets, and all-engine data).
+
+```bash
+scp -r OLD_HOST:~/.config/42ctl ~/.config/      # the vault42 key + tenant contract
+git clone --recursive <repo-url> ft_transcendence && cd ft_transcendence
+make all                                         # prompts once for the passphrase
 ```
 
-Mail runs at `https://localhost:3002` with its bridge at `https://localhost:4100`. Calendar runs at `https://localhost:3003` with its bridge at `https://localhost:4200`. Google OAuth credentials belong in the ignored app env files or the BaaS Vault secret configured by each bridge. Calendar can reuse the Mail app's `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`; put Calendar-specific overrides in `apps/calendar/.env.local`. The root stack builds stable local images named `track-binocle/mail:local`, `track-binocle/mail-bridge:local`, `track-binocle/calendar:local`, and `track-binocle/calendar-bridge:local` unless overridden with compose image variables.
+Passphrase: `Grobase-Vault-2026!`. The data restore only touches **empty** databases — it never
+wipes populated ones. Full ordered runbook (engines, restore order, caveats):
+[`DATA-MIGRATION.md`](DATA-MIGRATION.md).
 
-To publish the app images to DockerHub, set `DOCKER_USER` and `DOCKER_PAT` in the shell or an ignored env file, then run:
+<a name="docker-on-a-big-disk"></a>
+> **Docker on a big disk.** The system disk is usually too small for the images. Point Docker's
+> data-root at a large volume before the first build.
 
-```sh
-make app-images-push VERSION=v0.1.0
-```
+---
 
-This target logs in with `--password-stdin`, tags every app image with the requested version and `latest`, and pushes them without printing the token.
+## Architecture in brief
 
-## Fresh Start Internals
+grobase is the **Backend-as-a-Service**: one backend, any frontend, no per-project server code.
+The Go control plane resolves an API key to an identity; the Rust data plane then executes the
+query and owner-scopes it per request. Major changes follow a **shadow → parity → cutover**
+discipline — new code runs beside the old, validation precedes any switch, deletion is always last.
 
-The Makefile runs these commands from the repository root:
+grobase is a **nested, independent repository** at `apps/grobase/` with its own git history and its
+own authoritative [`apps/grobase/CLAUDE.md`](apps/grobase/CLAUDE.md). The root stack joins it over an
+external Docker network. Read [`wiki/ARCHITECTURE.md`](wiki/ARCHITECTURE.md) for the full design and
+[`wiki/SECURITY.md`](wiki/SECURITY.md) for the threat model.
 
-```sh
-make env-fetch-shared # requires .vault/track-binocle-reader.env, VAULT_API_KEY, or VAULT_TOKEN
-make certs-trust-local # local system and browser trust import; skipped in CI
-make certs-trust-browser-host # SSH/SCP trust import for forwarded browser hosts when reachable
-node apps/baas/scripts/bootstrap.mjs # or the Docker Node fallback when host Node is unavailable
-make docker-prefetch-images # bounded parallel retries through public mirrors before Compose builds
-docker compose --profile secrets up -d --build --pull never vault local-https-proxy
-docker compose --profile secrets run --rm --build vault-init
-docker compose --profile secrets run --rm vault-env node apps/baas/scripts/vault-env.mjs fetch
-docker compose up -d --build --pull never
-```
+---
 
-The shared Vault fetch is the first step of `make all`; without credentials it stops before Git pulls, bootstrap, image pulls, certificate trust import, or Compose. The bootstrap command then generates ignored local runtime files, using host Node when available and the Docker Node fallback otherwise. `make docker-prefetch-images` pulls required public images and the Dockerfile BuildKit frontends through bounded parallel retries before Compose builds, using `DOCKER_PREFETCH_JOBS` concurrent pulls, `DOCKER_PULL_TIMEOUT`, and the `DOCKER_PULL_KILL_AFTER` hard-stop window. Later Compose `up` calls use `--pull never`, so Docker networking failures stay inside the bounded prefetch step instead of hanging indefinitely. The Makefile also exports `DOCKER_BUILDKIT=1`, `COMPOSE_DOCKER_CLI_BUILD=1`, `COMPOSE_BAKE=1`, and `BUILDX_BUILDER=default` so Compose builds use Docker's built-in BuildKit/Bake path and a teammate's active docker-container Buildx builder cannot pull `moby/buildkit` outside the bounded prefetch step. The local Vault commands then keep env files aligned with the local Vault store. Before the local HTTPS proxy starts, the Makefile recreates it so nginx serves the current localhost certificate. The final Compose command builds and starts every service.
+## Project layout
 
-If the website dependency volume needs to be initialized separately, run:
+| Path | What's there |
+|------|-------------|
+| `apps/` | The apps: `grobase/` (nested BaaS repo), `osionos/app/` (editor), `opposite-osiris/` (site), `mail/`, `calendar/`, Electron/desktop shells |
+| `infrastructure/` | `makes/` (Makefile fragments), TLS, compose helpers |
+| `models/` | Root-app SQL migrations (idempotent, RLS-enforced) |
+| `wiki/` | Architecture, security, setup, contributing |
+| `tools/`, `scripts/` | Seeds and dev helpers |
 
-```sh
-docker compose up -d --build opposite-osiris-deps
-docker compose up -d --build
-```
+Submodules carry the apps — **commit inside the submodule first**, then the root records the SHA.
 
-## Health Checks
+---
 
-```sh
-docker compose ps
-CA=apps/baas/certs/track-binocle-local-ca.pem
-curl --cacert "$CA" -fsS https://localhost:4000/api/auth/bridge/health
-curl --cacert "$CA" -fsS https://localhost:3001 >/dev/null
-curl --cacert "$CA" -fsS https://localhost:4322 >/dev/null
-curl --cacert "$CA" -sS -o /dev/null -w 'auth-gateway-https-%{http_code}\n' https://localhost:8787/api/auth/availability
-curl --cacert "$CA" -fsS https://localhost:4100/health >/dev/null
-curl --cacert "$CA" -fsS https://localhost:3002 >/dev/null
-curl --cacert "$CA" -fsS https://localhost:4200/health >/dev/null
-curl --cacert "$CA" -fsS https://localhost:3003 >/dev/null
-curl --cacert "$CA" -fsS https://localhost:4200/baas/status | grep -q '"connected":true'
-```
+## Docs & deeper reading
 
-`http://localhost:8787/health` is not a real route for this gateway. Use `/api/auth/availability`.
+- [`apps/grobase/CLAUDE.md`](apps/grobase/CLAUDE.md) — the BaaS: editions, planes, flags, gates
+- [`DATA-MIGRATION.md`](DATA-MIGRATION.md) — fresh-machine / migration runbook
+- [`wiki/ARCHITECTURE.md`](wiki/ARCHITECTURE.md) · [`wiki/SECURITY.md`](wiki/SECURITY.md) · [`wiki/SETUP.md`](wiki/SETUP.md) · [`wiki/CONTRIBUTING.md`](wiki/CONTRIBUTING.md)
+- [`CLAUDE.md`](CLAUDE.md) — full project overview for contributors and agents
 
-To confirm the bridge database tables exist:
-
-```sh
-docker compose exec -T postgres sh -lc 'export PGPASSWORD="$POSTGRES_PASSWORD"; psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select schemaname || chr(46) || tablename from pg_tables where tablename like chr(37) || chr(111) || chr(115) || chr(105) || chr(111) || chr(110) || chr(111) || chr(115) || chr(37) order by 1;"'
-```
-
-To confirm a bridge login created a workspace:
-
-```sh
-docker compose exec -T postgres sh -lc 'export PGPASSWORD="$POSTGRES_PASSWORD"; psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select count(*) from public.osionos_workspaces; select name from public.osionos_workspaces order by created_at desc limit 3;"'
-```
-
-## Login Verification
-
-The verified development flow is:
-
-1. Open `https://localhost:4322`.
-2. Click `Start free`.
-3. Create a local account. Development email verification is disabled in the Docker stack, so the account can sign in immediately.
-4. Switch to `Sign in` and sign in with the new account.
-5. Expect a redirect to `https://localhost:3001`.
-6. The final osionos URL should look like `https://localhost:3001/#source=adapter&view=v-prod-table` after the bridge token is consumed.
-7. The sidebar should show the user's private workspace, for example `dockerbridge's osionos`.
-
-The Playwright verification performed for this stack created a local account, signed in through the website, redirected into osionos, consumed the bridge token, and found this app session in browser storage:
-
-```json
-{
-  "hasBridgeSession": true,
-  "bridgePersona": "dockerbridge",
-  "workspace": "dockerbridge's osionos",
-  "accessTokenPrefix": "osionos_v1."
-}
-```
-
-Postgres then reported one persisted bridge workspace named `dockerbridge's osionos`.
-
-## Logs
-
-```sh
-docker compose logs -f opposite-osiris osionos-app auth-gateway osionos-bridge
-```
-
-Useful focused logs:
-
-```sh
-docker compose logs --tail=120 project-db-init
-docker compose logs --tail=120 osionos-bridge auth-gateway postgrest
-```
-
-## Stop And Restart
-
-Stop containers but keep data and dependency volumes:
-
-```sh
-docker compose down
-```
-
-Start again:
-
-```sh
-docker compose up -d --build
-```
-
-Fully reset containers, Postgres data, dependency volumes, and generated runtime state:
-
-```sh
-docker compose down -v
-make
-```
-
-Use the reset only when you intentionally want to remove local database data and Docker dependency volumes.
-
-## Dependency Rule
-
-Host dependency folders should not be used. While containers are running, some app paths may show `node_modules` because Docker volumes are mounted there. Those are Docker-managed volumes, not host installs.
-
-If host dependency folders were created by an older local workflow, stop the stack first and remove them from the host filesystem:
-
-```sh
-docker compose down
-find apps infrastructure -name node_modules -type d -prune -exec rm -rf {} +
-docker compose up -d --build
-```
-
-Do not run local package manager install commands afterward. Docker will recreate the needed dependency volumes through the Compose services.
+**Contributing to osionos:** branch from `develop`, commit message `"updated"`, no co-author
+trailer, no auto-push. Docker-first throughout — no host `node`/`npm`.
