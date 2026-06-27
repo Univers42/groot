@@ -75,9 +75,18 @@ jobs:
       - name: Place the vault key (machine config, like installing Docker)
         run: |
           mkdir -p "$HOME/.config/42ctl"
-          printf '%s' "$VAULT42_KEYSTORE_B64" | base64 -d > "$HOME/.config/42ctl/keystore.v42"
+          echo "secret length: ${#VAULT42_KEYSTORE_B64} chars (base64 of a ~498-byte key ≈ 664)"
+          # Strip to the base64 alphabet first: tolerates a stray zsh '%', CR/LF, or paste
+          # whitespace. Valid base64 is only [A-Za-z0-9+/=], so this is lossless for a good value.
+          printf '%s' "$VAULT42_KEYSTORE_B64" | tr -cd 'A-Za-z0-9+/=' | base64 -d > "$HOME/.config/42ctl/keystore.v42" 2>/dev/null || {
+            echo "::error::VAULT42_KEYSTORE_B64 is not decodable base64. Re-set it EXACTLY with:"
+            echo "::error::  base64 -w0 ~/.config/42ctl/keystore.v42 | gh secret set VAULT42_KEYSTORE_B64 -R Univers42/groot"
+            exit 1
+          }
+          n=$(wc -c < "$HOME/.config/42ctl/keystore.v42")
+          echo "decoded keystore bytes: $n (expect ~498)"
+          [ "$n" -ge 200 ] || { echo "::error::decoded key is only $n bytes — the secret content is wrong (not a full keystore.v42)"; exit 1; }
           chmod 600 "$HOME/.config/42ctl/keystore.v42"
-          echo "keystore bytes: $(wc -c < "$HOME/.config/42ctl/keystore.v42") (expect ~498)"
 
       - name: "☄  make all   — provisions the whole machine from nothing"
         run: make all
