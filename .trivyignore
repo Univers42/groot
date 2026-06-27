@@ -1,0 +1,10 @@
+# Trivy ignore file — accepted, justified residuals only.
+# Each entry names the advisory, the package, and why it is not actioned here.
+# Honored by the `mini-baas security` workflow's Trivy fs/image scans (root cwd).
+
+# glib 0.18.5 (apps/osionos-desktop/src-tauri/Cargo.lock) — GHSA-wrw7-89jp-8q8g,
+# unsoundness in the `Iterator`/`DoubleEndedIterator` impls for `VariantStrIter`.
+# The fix (glib 0.20) is a major gtk-rs / Tauri ecosystem bump that breaks the
+# desktop build; severity is MEDIUM and the Tauri desktop shell is not in any CI
+# build path. Remove this line when the Tauri stack moves to glib 0.20.
+GHSA-wrw7-89jp-8q8g

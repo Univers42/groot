@@ -168,7 +168,15 @@ jobs:
           ignore-unfixed: true
           format: sarif
           output: trivy-fs.sarif
-          skip-dirs: 'node_modules,dist,.git,coverage,playwright-report,vendor'
+          # Scope the fs scan to root-repo-owned production code. Excluded:
+          # build artifacts (node_modules/dist/build/coverage/...); third-party vendored
+          # trees (**/vendor — the bare `vendor` missed nested apps/grobase/vendor);
+          # generated docusaurus (**/static_docs, **/.docusaurus); the dead pre-extraction
+          # backup (apps/baas.bak, also deleted); and the independent submodules/nested
+          # repos whose dependencies are gated elsewhere — the frontend apps by their own
+          # repos' CI + the Supply Chain workflow, and apps/grobase by THIS workflow's
+          # dedicated cargo-audit / govulncheck / npm-audit jobs.
+          skip-dirs: 'node_modules,**/node_modules,dist,**/dist,build,**/build,.git,coverage,playwright-report,vendor,**/vendor,**/static_docs,**/.docusaurus,apps/baas.bak,apps/osionos/app,apps/opposite-osiris,apps/mail,apps/calendar,apps/grobase,apps/vite-gourmand'
 
       - name: Upload Trivy filesystem SARIF
         if: always()
