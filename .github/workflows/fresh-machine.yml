@@ -1,0 +1,159 @@
+name: Fresh-Machine Migration
+
+# Proves the whole project rebuilds FROM NOTHING on a clean Ubuntu + clean Docker —
+# exactly the migration to another machine. A fresh ubuntu-latest runner IS the new
+# machine. Mirrors `make bootstrap` but CI-tailored: recorded submodule SHAs (reproducible),
+# non-interactive vault42 secret pull (FT_PASSPHRASE, NO email OTP), GHCR pull-fallback backend,
+# then the committed all-engine data snapshot restored into fresh volumes.
+#
+# Secrets it consumes (set once on the repo — Settings ▸ Secrets and variables ▸ Actions):
+#   VAULT42_PASSPHRASE    – the keystore passphrase (already set)
+#   VAULT42_KEYSTORE_B64  – base64 of ~/.config/42ctl/keystore.v42 (the sealed private key;
+#                           zero-knowledge decryption is impossible without it). YOU set this —
+#                           the agent is blocked from sending secrets off-box.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fresh-machine.yml'
+      - 'infrastructure/makes/**'
+      - 'scripts/**'
+      - 'Makefile'
+      - 'apps/grobase'
+      - 'apps/grobase/scripts/vault/ctl-env.sh'
+  workflow_dispatch:
+    inputs:
+      edition:
+        description: 'grobase edition to bring up (lean|query|realtime|analytics|full)'
+        default: 'query'
+      frontends:
+        description: 'also build + start the root frontends (heavy)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: fresh-machine-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  from-zero:
+    name: Build from nothing
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      VAULT42_PASSPHRASE: ${{ secrets.VAULT42_PASSPHRASE }}
+      VAULT42_KEYSTORE_B64: ${{ secrets.VAULT42_KEYSTORE_B64 }}
+      EDITION: ${{ github.event.inputs.edition || 'query' }}
+      COMPOSE_PROFILES: dev
+      DOCKER_BUILDKIT: '1'
+      # make all auto-trust step needs no TTY sudo on a runner; CA trust is irrelevant in CI
+      TRACK_BINOCLE_SKIP_CERT_TRUST: '1'
+    steps:
+      - name: Reclaim runner disk (a full stack pulls many images)
+        run: |
+          echo "before:"; df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          sudo docker image prune -af >/dev/null 2>&1 || true
+          echo "after:"; df -h / | tail -1
+
+      - name: Checkout superproject + all submodules at recorded SHAs (public, no PAT)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Sanity — migration payload present from the clone (code + data)
+        run: |
+          set -e
+          test -f apps/grobase/Makefile || { echo "::error::grobase submodule not checked out"; exit 1; }
+          echo "grobase gitlink: $(git -C apps/grobase rev-parse --short HEAD)"
+          echo "data-snapshots size: $(du -sh apps/grobase/data-snapshots | cut -f1)"
+          ls apps/grobase/data-snapshots/archives/postgres/*.dump >/dev/null \
+            || { echo "::error::no postgres dumps in the clone — gitlink predates the snapshots"; exit 1; }
+          echo "snapshot engines present:"; ls apps/grobase/data-snapshots/archives
+
+      - name: Gate — keystore secret required for the vault42 path
+        id: gate
+        run: |
+          if [ -n "$VAULT42_KEYSTORE_B64" ] && [ -n "$VAULT42_PASSPHRASE" ]; then
+            echo "vault=yes" >> "$GITHUB_OUTPUT"
+            echo "✓ keystore + passphrase present — running the full from-zero bootstrap"
+          else
+            echo "vault=no"  >> "$GITHUB_OUTPUT"
+            echo "::warning::VAULT42_KEYSTORE_B64 and/or VAULT42_PASSPHRASE not set — secret pull + backend bring-up skipped."
+            echo "Set them once (see the job summary) to exercise the full migration."
+          fi
+
+      - name: Restore the sealed vault keystore (enables non-interactive pull, NO OTP)
+        if: steps.gate.outputs.vault == 'yes'
+        run: |
+          mkdir -p "$HOME/.config/42ctl"
+          printf '%s' "$VAULT42_KEYSTORE_B64" | base64 -d > "$HOME/.config/42ctl/keystore.v42"
+          chmod 600 "$HOME/.config/42ctl/keystore.v42"
+          echo "keystore bytes: $(wc -c < "$HOME/.config/42ctl/keystore.v42")"
+
+      - name: Pull all *.env/secrets from vault42 (non-interactive, no mail/OTP)
+        if: steps.gate.outputs.vault == 'yes'
+        env:
+          FT_PASSPHRASE: ${{ secrets.VAULT42_PASSPHRASE }}
+        run: |
+          set -e
+          make vault42-pull-all APPLY=1 FORCE=1
+          test -f apps/grobase/.env || { echo "::error::secrets did not materialize (apps/grobase/.env missing)"; exit 1; }
+          echo "materialized env files:"; git ls-files --others --exclude-standard | grep -E '(^|/)\.env' | head -40 || true
+
+      - name: Backend up — pull GHCR images, start grobase (the new machine boots)
+        if: steps.gate.outputs.vault == 'yes'
+        run: |
+          set -e
+          make -C apps/grobase up EDITION="$EDITION"
+          docker ps --format '  {{.Names}}\t{{.Status}}' | sort
+
+      - name: Restore the all-engine data snapshot into the fresh volumes
+        if: steps.gate.outputs.vault == 'yes'
+        run: |
+          set -e
+          make restore-if-empty
+          echo "== row-count proof =="
+          docker exec mini-baas-postgres psql -U postgres -d postgres -tAc \
+            "SELECT 'osionos_pages='||count(*) FROM osionos_pages" 2>/dev/null || echo "(postgres osionos_pages not present in this edition)"
+
+      - name: Frontends (optional, heavy) + healthcheck
+        if: steps.gate.outputs.vault == 'yes' && github.event.inputs.frontends == 'true'
+        run: |
+          set -e
+          make all SKIP_SYNC=1
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          echo "== docker ps -a =="; docker ps -a || true
+          echo "== unhealthy/exited logs =="
+          for c in $(docker ps -a --format '{{.Names}}' | grep -E '^mini-baas-' || true); do
+            st=$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null || echo '?')
+            case "$st" in running) : ;; *) echo "--- $c ($st) ---"; docker logs --tail 60 "$c" 2>&1 || true ;; esac
+          done
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## Fresh-Machine Migration"
+            echo ""
+            if [ "${{ steps.gate.outputs.vault }}" = "yes" ]; then
+              echo "Ran the full from-zero bootstrap (vault42 secrets → backend → data restore)."
+            else
+              echo "**Action required:** set the keystore secret to run the full migration. On your old machine:"
+              echo ""
+              echo '```sh'
+              echo 'base64 -w0 ~/.config/42ctl/keystore.v42 | gh secret set VAULT42_KEYSTORE_B64 -R Univers42/groot'
+              echo '```'
+              echo ""
+              echo "(\`VAULT42_PASSPHRASE\` is already set. The agent cannot set secrets — this is yours to run.)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
