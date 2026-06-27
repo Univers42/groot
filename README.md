@@ -32,10 +32,21 @@ cd ft_transcendence
 make all                 # prompts once (hidden) for the passphrase: Grobase-Vault-2026!
 ```
 
-`make all` then self-provisions end to end: syncs submodules to the latest source → pulls the
-secrets from vault42 → starts the **grobase** backend → restores the demo data when the databases
-are empty → builds and starts the frontends → healthchecks → prints a clickable list of URLs.
-The first run may also prompt for `sudo` once to trust the local TLS certificate.
+`make all` then self-provisions the whole machine end to end:
+
+1. **syncs every submodule** to the latest source;
+2. **pulls every secret** (`.env` tree) from vault42;
+3. **builds + starts the grobase backend** — all **6 database engines** (Postgres, MySQL, Mongo,
+   MSSQL, DynamoDB, MinIO) plus the control/data/realtime planes — on a healthy private network;
+4. **restores your data into every engine** when they're empty (fail-safe: it never wipes a
+   populated database);
+5. **builds + starts the frontends**;
+6. **trusts the local CA** (one `sudo` prompt the first time) so every app opens over **green HTTPS**,
+   no browser warning;
+7. **healthchecks** everything and prints a clickable list of trusted-HTTPS URLs.
+
+It's CI-proven: a clean Ubuntu runner does exactly `git clone --recursive` + `make all` and comes up
+fully green with all six engines' data restored.
 
 When it finishes, open the website and sign in:
 
@@ -43,9 +54,10 @@ When it finishes, open the website and sign in:
 |-----|-------|
 | `https://localhost:4322` | `dev.pro.photo` / `Osionos123!` |
 
-> **No vault access?** If you can't copy `~/.config/42ctl/` (e.g. you're not on the team), `make all`
-> will stop and tell you the key is missing. See [Running without the vault](#running-without-the-vault)
-> to supply your own `.env` secrets instead.
+> **No vault access?** `make all` still works — with no vault key it runs in **local mode**: grobase
+> self-generates its own secrets and the root config is derived locally, so a bare `git clone` +
+> `make all` brings the stack up with zero manual config. You just sign up fresh (the restored demo
+> data was stamped under the original keys). See [Running without the vault](#running-without-the-vault).
 
 ---
 
