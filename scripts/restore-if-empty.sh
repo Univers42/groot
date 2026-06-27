@@ -1,11 +1,12 @@
 #!/usr/bin/env sh
-# restore-if-empty.sh — load the all-engine data snapshot ONLY when the stack is
-# genuinely fresh: every RUNNING primary engine (postgres osionos, mysql ops, mongo
-# activity) is CONFIRMED empty. FAIL-SAFE: any engine with data, or any uncertainty
-# (unreachable / query error), aborts the restore — it never wipes a populated stack.
-# Engines that aren't running are ignored (restore-databases.sh only touches running
-# ones, and the backend guard already ensured the core stack is up). Wired into
-# `make all` (and `make bootstrap`).
+# restore-if-empty.sh — load the all-engine data snapshot when the stack is genuinely
+# fresh: every RUNNING primary engine (postgres osionos, mysql ops, mongo activity) is
+# CONFIRMED empty. FAIL-SAFE: an engine with data aborts the restore — it never wipes a
+# populated stack. grobase `up` is DETACHED (no --wait), so on a fresh machine the engines
+# are still booting when we arrive; we WAIT for docker health first, otherwise a transient
+# "not ready" is misread as "uncertain" and the restore is WRONGLY skipped (the bug that
+# left a fresh machine with no data). A populated engine is healthy at once, so the no-wipe
+# path is never delayed. Wired into `make all` (and `make bootstrap`).
 set -u
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -14,6 +15,21 @@ RESTORE="$REPO/apps/grobase/data-snapshots/restore-databases.sh"
 running() { docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$1"; }
 note()    { printf '[restore-if-empty] %s\n' "$1" >&2; }
 numeric() { case "$1" in '' | *[!0-9]*) return 1 ;; *) return 0 ;; esac; }
+
+# wait_healthy <container>: block until docker reports the engine healthy, or give up after
+# ~180s. An engine with no healthcheck returns at once (nothing to wait on).
+wait_healthy() {
+	c="$1"
+	running "$c" || return 0
+	i=0
+	while [ "$i" -lt 90 ]; do
+		st=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$c" 2>/dev/null || echo none)
+		case "$st" in healthy | none) return 0 ;; esac
+		i=$((i + 1))
+		sleep 2
+	done
+	note "$c still not healthy after 180s — probe may read it as uncertain"
+}
 
 EMPTY=1
 REASON=""
@@ -58,6 +74,11 @@ mongo_probe() {
 	numeric "$c" || c='?'
 	gate mongo "$c"
 }
+
+# Engines are still booting after a detached `up` — wait for health before probing/restoring.
+for e in mini-baas-postgres mini-baas-mysql mini-baas-mongo mini-baas-mssql mini-baas-minio; do
+	wait_healthy "$e"
+done
 
 pg_probe
 mysql_probe
