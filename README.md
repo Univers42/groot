@@ -14,16 +14,28 @@ runs in containers. **Never install dependencies on the host** — there is no h
 
 You need **Docker** (with its data-root on a big disk — see [below](#docker-on-a-big-disk)) and **git**.
 
+**`make all` alone is enough on a machine that already has the vault key.** The secrets
+(`.env` files, JWT secret, service keys, API keys) are NOT in the repo — they live in a separate
+zero-knowledge vault (**vault42**), and `make all` pulls them automatically. But it can only pull
+them if your machine holds the vault **identity**, which is the one thing the clone can't give you.
+
+So on a **brand-new machine, do this once first** — then `make all` does the rest:
+
 ```bash
+# 1. Place the vault identity (one-time, like installing Docker). Copy ~/.config/42ctl/
+#    from a machine that already has it (498-byte keystore.v42 + contract-default.tok):
+scp -r OLD_HOST:~/.config/42ctl ~/.config/
+
+# 2. Clone and bring everything up:
 git clone --recursive <repo-url> ft_transcendence
 cd ft_transcendence
-make all
+make all                 # prompts once (hidden) for the passphrase: Grobase-Vault-2026!
 ```
 
-`make all` is self-provisioning. It syncs submodules to the latest source, pulls secrets from the
-vault if they're missing, starts the **grobase** backend, restores the demo data when the databases
-are empty, builds and starts the frontends, healthchecks them, and prints a clickable list of URLs.
-The first run may prompt for `sudo` once to trust the local TLS certificate.
+`make all` then self-provisions end to end: syncs submodules to the latest source → pulls the
+secrets from vault42 → starts the **grobase** backend → restores the demo data when the databases
+are empty → builds and starts the frontends → healthchecks → prints a clickable list of URLs.
+The first run may also prompt for `sudo` once to trust the local TLS certificate.
 
 When it finishes, open the website and sign in:
 
@@ -31,7 +43,9 @@ When it finishes, open the website and sign in:
 |-----|-------|
 | `https://localhost:4322` | `dev.pro.photo` / `Osionos123!` |
 
-> First time on a machine? You also need the vault key — see [Fresh machine](#fresh-machine--migration).
+> **No vault access?** If you can't copy `~/.config/42ctl/` (e.g. you're not on the team), `make all`
+> will stop and tell you the key is missing. See [Running without the vault](#running-without-the-vault)
+> to supply your own `.env` secrets instead.
 
 ---
 
@@ -102,6 +116,32 @@ make vault42-pull-all APPLY=1      # restore the whole .env tree (passphrase pro
 `make all` pulls secrets automatically when the vault key is present and the env files are missing,
 so you rarely call this directly. `.env*` files land at the repo root and under each app
 (`apps/grobase/.env`, `apps/osionos/app/.env`, …).
+
+### Running without the vault
+
+No team / no vault key? You can still run the stack — the backend mints its own secrets, and the
+root needs only a few values you set yourself. The trade-off: secrets are freshly generated, so the
+**restored demo data won't line up** (its rows were stamped under the original keys). Just create a
+new account on first launch.
+
+```bash
+# Backend: `make -C apps/grobase up` auto-runs `make env` when apps/grobase/.env is absent,
+# generating apps/grobase/.env.secrets (JWT secret, DB passwords, …) locally. Or do it explicitly:
+make -C apps/grobase secrets        # generate all backend secrets → apps/grobase/.env
+
+# Root: copy the example and fill the few REQUIRED keys with any local value:
+cp .env.example .env.local
+#   OSIONOS_APP_SESSION_SECRET, OSIONOS_BRIDGE_SHARED_SECRET, OSIONOS_BRIDGE_EMAIL_HASH_SALT
+#   → any random string. Everything else has a working Docker default.
+
+make all                            # no vault key present → it skips the pull and uses your .env
+```
+
+**What stays optional** (leave blank to disable, smaller attack surface): `LIVEKIT_API_KEY` /
+`LIVEKIT_API_SECRET` (default to `devkey` — video rooms still work locally), Gmail/Google
+`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` in `apps/mail/.env.local` and `apps/calendar/.env.local`
+(mail/calendar OAuth disable cleanly without them), and `SONAR_TOK` / `FLY_API_TOKEN` / `DOCKER_PAT`
+(CI/ops only). The required osionos and grobase secrets above are all the stack needs to boot.
 
 For depth: backend internals and flags → [`apps/grobase/CLAUDE.md`](apps/grobase/CLAUDE.md);
 architecture and security → [`wiki/`](wiki/).
