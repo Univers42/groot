@@ -296,7 +296,14 @@ jobs:
       - name: Install cargo-audit
         run: |
           set -euo pipefail
-          cargo install cargo-audit --locked
+          if cargo audit --version >/dev/null 2>&1; then cargo audit --version; exit 0; fi
+          for i in 1 2 3; do
+            echo "::group::cargo install cargo-audit (attempt $i/3)"
+            cargo install cargo-audit --locked && { echo "::endgroup::"; break; }
+            echo "::endgroup::"
+            echo "attempt $i failed (transient crates.io/network?) — retrying in $((i*20))s"
+            sleep $((i * 20))
+          done
           cargo audit --version
 
       - name: cargo audit (blocking)
