@@ -108,7 +108,8 @@ jobs:
           docker ps --format '{{.Names}}' | grep -E 'mini-baas-(postgres|mysql|mongo|mssql|dynamodb|minio)' | sort
           fail=0
           gt0() { case "$1" in ''|*[!0-9]*) return 1 ;; 0) return 1 ;; *) return 0 ;; esac; }
-          pgc=$(docker exec mini-baas-postgres psql -U postgres -d postgres -tAc "SELECT count(*) FROM osionos_pages" 2>/dev/null | tr -d '[:space:]')
+          pgpw=$(docker exec mini-baas-postgres printenv POSTGRES_PASSWORD 2>/dev/null)
+          pgc=$(docker exec -e PGPASSWORD="$pgpw" mini-baas-postgres psql -U postgres -d postgres -tAc "SELECT count(*) FROM osionos_pages" 2>/dev/null | tr -d '[:space:]')
           echo "postgres osionos_pages = ${pgc:-<none>}"
           gt0 "$pgc" || { echo "::error::postgres osionos_pages empty — data did NOT restore"; fail=1; }
           pw=$(docker exec mini-baas-mysql printenv MYSQL_ROOT_PASSWORD 2>/dev/null)

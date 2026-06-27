@@ -47,7 +47,8 @@ gate() {
 pg_probe() {
 	running mini-baas-postgres || return 0
 	docker exec mini-baas-postgres pg_isready -U postgres -q 2>/dev/null || { gate postgres '?'; return 0; }
-	c=$(docker exec mini-baas-postgres psql -U postgres -d postgres -tAc \
+	pw=$(docker exec mini-baas-postgres printenv POSTGRES_PASSWORD 2>/dev/null)
+	c=$(docker exec -e PGPASSWORD="$pw" mini-baas-postgres psql -U postgres -d postgres -tAc \
 		"SELECT CASE WHEN to_regclass('public.osionos_pages') IS NULL THEN 0 ELSE (SELECT count(*) FROM osionos_pages) END" \
 		2>/dev/null | tr -d '[:space:]')
 	numeric "$c" || c='?'
