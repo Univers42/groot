@@ -124,6 +124,21 @@ jobs:
           echo "(dynamodb is a hypertube-vendor engine with private images — out of the CI shape by design)"
           [ "$fail" = 0 ] && echo "✓ all core engines restored with data" || exit 1
 
+      - name: Assert no unhealthy/restarting containers (everything green)
+        if: success()
+        run: |
+          echo "== all containers =="
+          docker ps -a --format '{{.Names}}\t{{.Status}}' | sort
+          echo "== checking running containers for unhealthy/restarting =="
+          bad=$(docker ps --format '{{.Names}}\t{{.Status}}' | grep -iE 'unhealthy|Restarting' || true)
+          # one-shot init jobs legitimately Exited(0) — only flag non-zero exits among -a
+          badexit=$(docker ps -a --format '{{.Names}}\t{{.Status}}' | grep -iE 'Exited \([1-9]' || true)
+          if [ -n "$bad" ] || [ -n "$badexit" ]; then
+            echo "::error::not everything is green:"; printf '%s\n%s\n' "$bad" "$badexit"
+            exit 1
+          fi
+          echo "✓ every container healthy — nothing unhealthy, restarting, or crashed"
+
       - name: Postgres restore diagnostics
         if: failure()
         run: |
