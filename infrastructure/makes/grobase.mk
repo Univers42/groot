@@ -31,10 +31,13 @@ grobase-e2e:
 # is the running apps/grobase stack and must NOT be re-upped from here.
 ROOT_FRONTENDS := osionos-bridge osionos-app auth-gateway opposite-osiris-web local-https-proxy livekit
 
-# Engine set `make all` brings up on a fresh machine. `full` = all data engines the
-# snapshots cover that ship public images (postgres mongo mysql mssql minio); dynamodb-local
-# lives in the hypertube vendor stack (private images) so it is out of the default CI shape.
-GROBASE_EDITION ?= full
+# Engine set `make all` brings up on a fresh machine. `migrate` = all snapshot engines
+# (postgres mongo mysql mssql minio, all public images) + full app/control/data plane +
+# realtime, but WITHOUT the monitoring/lakehouse extras (loki/prometheus/grafana, trino,
+# studio, functions) that come up unhealthy in a constrained env — so `make all` is fully
+# green. Use GROBASE_EDITION=full for the everything-on shape. dynamodb stays out (hypertube
+# vendor stack, private images).
+GROBASE_EDITION ?= migrate
 
 backend-up:
 ## Ensure the grobase backend is up — START it if it's down (not just guard), so a bare `make all` reconstitutes a clean machine. Brings up GROBASE_EDITION (default full = all public-image engines). Secrets are pulled earlier by `secrets-ensure`; if they are still absent and there is no vault key, stop with guidance.

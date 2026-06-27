@@ -127,17 +127,21 @@ jobs:
       - name: Assert no unhealthy/restarting containers (everything green)
         if: success()
         run: |
-          echo "== all containers =="
-          docker ps -a --format '{{.Names}}\t{{.Status}}' | sort
-          echo "== checking running containers for unhealthy/restarting =="
-          bad=$(docker ps --format '{{.Names}}\t{{.Status}}' | grep -iE 'unhealthy|Restarting' || true)
-          # one-shot init jobs legitimately Exited(0) — only flag non-zero exits among -a
-          badexit=$(docker ps -a --format '{{.Names}}\t{{.Status}}' | grep -iE 'Exited \([1-9]' || true)
-          if [ -n "$bad" ] || [ -n "$badexit" ]; then
-            echo "::error::not everything is green:"; printf '%s\n%s\n' "$bad" "$badexit"
-            exit 1
-          fi
-          echo "✓ every container healthy — nothing unhealthy, restarting, or crashed"
+          for t in $(seq 1 18); do
+            bad=$(docker ps --format '{{.Names}}\t{{.Status}}' | grep -iE 'unhealthy|Restarting' || true)
+            # one-shot init jobs legitimately Exited(0) — only flag NON-zero exits
+            badexit=$(docker ps -a --format '{{.Names}}\t{{.Status}}' | grep -iE 'Exited \([1-9]' || true)
+            if [ -z "$bad" ] && [ -z "$badexit" ]; then
+              echo "✓ every container healthy — nothing unhealthy, restarting, or crashed"
+              docker ps -a --format '  {{.Names}}\t{{.Status}}' | sort
+              exit 0
+            fi
+            echo "[$t/18] not yet green, waiting 10s — $(printf '%s %s' "$bad" "$badexit" | tr '\n' ' ' | sed 's/  */ /g')"
+            sleep 10
+          done
+          echo "== final container state =="; docker ps -a --format '  {{.Names}}\t{{.Status}}' | sort
+          echo "::error::still unhealthy/restarting after ~180s:"; printf '%s\n%s\n' "$bad" "$badexit"
+          exit 1
 
       - name: Postgres restore diagnostics
         if: failure()

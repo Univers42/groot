@@ -92,7 +92,9 @@ mongo_probe
 if [ "$EMPTY" = 1 ]; then
 	note "all running primary engines empty → restoring the full snapshot (all engines)…"
 	CONFIRM=1 "$RESTORE"
-	docker restart mini-baas-minio mini-baas-realtime >/dev/null 2>&1 || true
+	# The pg --clean restore swaps the schema under the postgres-connected services, leaving
+	# them stale/unhealthy — bounce them (and the storage/realtime CDC) so they reconnect.
+	docker restart mini-baas-minio mini-baas-realtime mini-baas-postgrest mini-baas-supavisor >/dev/null 2>&1 || true
 	note "restore complete."
 else
 	note "data present ($REASON) — skipping restore (no wipe)."
