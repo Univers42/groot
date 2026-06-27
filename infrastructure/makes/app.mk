@@ -67,21 +67,5 @@ healthcheck: certs
 	$(CURL_HEALTH) -o /dev/null -w 'auth-gateway-https-%{http_code}\n' $(AUTH_URL)/availability
 
 showcase:
-## Print the local service URLs after the pipeline is healthy.
-	@printf '\nPipeline ready. Open these local services:\n'
-	@printf '  Website:             %s\n' '$(WEBSITE_URL)'
-	@printf '  osionos app:         %s\n' '$(OSIONOS_URL)'
-	@printf '  osionos bridge API:  %s\n' '$(BRIDGE_URL)'
-	@printf '  Auth gateway:        %s\n' '$(AUTH_URL)'
-	@printf '  BaaS gateway:        %s\n\n' '$(BAAS_URL)'
-	@printf '  Vault:               %s\n\n' '$(VAULT_URL)'
-	@printf '  Local mail inbox:    %s\n\n' '$(MAILPIT_URL)'
-	@printf '  osionos Mail:        %s\n' '$(MAIL_URL)'
-	@printf '  Mail bridge:         %s\n' '$(MAIL_BRIDGE_URL)'
-	@printf '  osionos Calendar:    %s\n' '$(CALENDAR_URL)'
-	@printf '  Calendar bridge:     %s\n\n' '$(CALENDAR_BRIDGE_URL)'
-	@if [[ -n "$${SSH_CONNECTION:-}" || -n "$${VSCODE_IPC_HOOK_CLI:-}" || -n "$${VSCODE_GIT_IPC_HANDLE:-}" ]]; then \
-		printf '[certs] Remote/forwarded browser note: if your browser opens a random forwarded URL such as https://localhost:<port>, it is running outside this VM.\n'; \
-		printf '[certs] Firefox note: prefer the canonical URLs printed above when reachable; if VS Code remaps to another port, close and reopen that forwarded port after certificate regeneration.\n'; \
-		printf '[certs] make certs-trust-browser-host tries SSH/SCP CA trust for that browser host; see docs/troubleshoot/browser-host-ca-trust.md if SSH is blocked.\n\n'; \
-	fi
+## Recap every local URL the RUNNING stack exposes — click to open. Last step of `make all`. (Only services that are actually up are listed.) Logic in scripts/showcase.sh.
+	@sh scripts/showcase.sh
