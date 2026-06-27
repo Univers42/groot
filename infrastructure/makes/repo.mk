@@ -63,16 +63,13 @@ vault42-pull-all:
 
 bootstrap:
 ## FROM-ZERO one command (fresh clone / wiped machine): submodules → secrets ← vault42 → grobase backend → restore all-engine data → frontends. Brings the whole stack back. The data restore is DESTRUCTIVE (drop-and-replace) — meant for an empty/fresh setup. Needs ~/.config/42ctl/keystore.v42 (copy it over first).
-	@echo '── bootstrap 1/5 · submodules → stable branches ──────────────────────'
+	@echo '── bootstrap 1/4 · submodules → stable branches ──────────────────────'
 	@$(MAKE) --no-print-directory syncro-submodule
-	@echo '── bootstrap 2/5 · secrets ← vault42 (keystore passphrase prompt) ─────'
+	@echo '── bootstrap 2/4 · secrets ← vault42 (keystore passphrase prompt) ─────'
 	@$(MAKE) --no-print-directory vault42-pull-all APPLY=1
-	@echo '── bootstrap 3/5 · grobase backend up ────────────────────────────────'
+	@echo '── bootstrap 3/4 · grobase backend up ────────────────────────────────'
 	@$(MAKE) -C apps/grobase up
-	@echo '── bootstrap 4/5 · restore all-engine data (DESTRUCTIVE drop-replace) ─'
-	@CONFIRM=1 apps/grobase/data-snapshots/restore-databases.sh
-	@docker restart mini-baas-minio mini-baas-realtime >/dev/null 2>&1 || true
-	@echo '── bootstrap 5/5 · root frontends ────────────────────────────────────'
+	@echo '── bootstrap 4/4 · frontends + auto-restore data (make all) ───────────'
 	@$(MAKE) --no-print-directory all
 	@echo '✓ bootstrap complete — everything is back. Login: dev.pro.photo / Osionos123!'
 

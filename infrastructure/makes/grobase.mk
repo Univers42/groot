@@ -41,6 +41,30 @@ backend-up:
 		exit 1; \
 	fi
 
+restore-if-empty:
+## FAIL-SAFE auto-restore: load the data snapshot ONLY when the DBs are genuinely fresh/empty. Restores iff the osionos schema is ABSENT, or present with CONFIRMED 0 rows. Any data present, or any uncertainty (pg unreachable / query error) → SKIP (never wipes). Wired into `make all`.
+	@if ! docker exec mini-baas-postgres pg_isready -U postgres -q 2>/dev/null; then \
+		echo '[restore-if-empty] postgres not reachable — skipping (no restore)'; \
+	else \
+		has=$$(docker exec mini-baas-postgres psql -U postgres -d postgres -tAc "SELECT to_regclass('public.osionos_pages') IS NOT NULL" 2>/dev/null | tr -d '[:space:]'); \
+		if [ "$$has" = "t" ]; then \
+			n=$$(docker exec mini-baas-postgres psql -U postgres -d postgres -tAc "SELECT count(*) FROM osionos_pages" 2>/dev/null | tr -d '[:space:]'); \
+			if [ "$${n:-1}" -gt 0 ] 2>/dev/null; then \
+				echo "[restore-if-empty] data present ($$n osionos pages) — skipping restore"; \
+			else \
+				echo '[restore-if-empty] osionos schema present but EMPTY → restoring snapshot…'; \
+				CONFIRM=1 apps/grobase/data-snapshots/restore-databases.sh; \
+				docker restart mini-baas-minio mini-baas-realtime >/dev/null 2>&1 || true; \
+			fi; \
+		elif [ "$$has" = "f" ]; then \
+			echo '[restore-if-empty] osionos schema absent → fresh DB, restoring snapshot…'; \
+			CONFIRM=1 apps/grobase/data-snapshots/restore-databases.sh; \
+			docker restart mini-baas-minio mini-baas-realtime >/dev/null 2>&1 || true; \
+		else \
+			echo "[restore-if-empty] DB state undetermined — skipping (run 'make bootstrap' if this is a fresh setup)"; \
+		fi; \
+	fi
+
 frontends-up: certs docker-prefetch-images compose-build
 ## Build and start ONLY the root frontends against the running grobase backend.
 	docker compose --env-file ./.env.local up -d --build --wait $(ROOT_FRONTENDS)
