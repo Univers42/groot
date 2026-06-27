@@ -11,6 +11,56 @@
 # **************************************************************************** #
 
 # Repository synchronization targets.
+
+# vault42 (zero-knowledge) config — the ONLY secrets store (HashiCorp Vault is retired).
+VAULT42_PROJECT ?= transcendence
+CTL_IMAGE       ?= docker.io/dlesieur/42ctl:latest
+CTL_CFG_DIR     ?= $(HOME)/.config/42ctl
+
+syncro-submodule:
+## Force EVERY submodule onto its stable branch at latest (fix detached HEADs, ff-pull) so a fresh start never builds the wrong image. Dirty submodules are skipped (never clobbered). Run `make all` after to rebuild.
+	@set -eu; \
+	command -v git >/dev/null || { echo '[syncro] git not found' >&2; exit 1; }; \
+	echo '[syncro] sync submodule URLs from .gitmodules'; \
+	git submodule sync --recursive >/dev/null; \
+	echo '[syncro] init + checkout all submodules at their recorded SHAs'; \
+	git submodule update --init --recursive; \
+	echo '[syncro] put each submodule on a real branch at latest stable'; \
+	git submodule foreach --recursive ' \
+		set -eu; \
+		if ! (git diff --quiet && git diff --cached --quiet) 2>/dev/null; then \
+			echo "  ! $$displaypath has local changes — skipping (commit/stash first)"; exit 0; \
+		fi; \
+		cur=$$(git symbolic-ref --short -q HEAD || true); \
+		if [ -n "$$cur" ]; then \
+			branch="$$cur"; \
+		else \
+			decl=$$(git config -f "$$toplevel/.gitmodules" --get "submodule.$$name.branch" 2>/dev/null || true); \
+			def=$$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed "s@^origin/@@" || true); \
+			branch=$${decl:-$${def:-main}}; \
+			git fetch --quiet --prune origin || true; \
+			git checkout -B "$$branch" "origin/$$branch"; \
+		fi; \
+		git fetch --quiet --prune origin || true; \
+		git pull --quiet --ff-only origin "$$branch" 2>/dev/null \
+			|| echo "  ! $$displaypath: not ff-only (diverged) — left at $$(git rev-parse --short HEAD)"; \
+		printf "  = %-28s %s (%s)\n" "$$displaypath" "$$(git rev-parse --short HEAD)" "$$branch"; \
+	'; \
+	echo '[syncro] verify nothing is left detached…'; \
+	bad=$$(git submodule foreach --quiet --recursive 'git symbolic-ref -q HEAD >/dev/null 2>&1 || printf "%s " "$$displaypath"' || true); \
+	if [ -n "$$bad" ]; then echo "[syncro] STILL DETACHED (likely dirty/diverged): $$bad" >&2; fi; \
+	echo '[syncro] done. Now: make all   (rebuilds frontends from the synced source)'
+
+vault42-push-all:
+## vault42: push the WHOLE monorepo *.env*/*.secrets tree (root + every submodule) to the remote ZK vault, encrypted on this machine. Passphrase read hidden. NOTE: agents are blocked from sending secrets off-box — run this yourself.
+	@REPO_DIR="$(CURDIR)" CTL_IMAGE="$(CTL_IMAGE)" CTL_CFG_DIR="$(CTL_CFG_DIR)" VAULT_ENV_PROJECT="$(VAULT42_PROJECT)" \
+		sh apps/grobase/scripts/vault/ctl-env.sh push
+
+vault42-pull-all:
+## vault42: restore the WHOLE monorepo *.env* tree from the remote ZK vault — DRY-RUN unless APPLY=1 (FORCE=1 overwrites existing). Passphrase read hidden.
+	@REPO_DIR="$(CURDIR)" CTL_IMAGE="$(CTL_IMAGE)" CTL_CFG_DIR="$(CTL_CFG_DIR)" VAULT_ENV_PROJECT="$(VAULT42_PROJECT)" \
+		sh apps/grobase/scripts/vault/ctl-env.sh pull $(if $(filter 1,$(APPLY)),--apply,) $(if $(filter 1,$(FORCE)),--force,)
+
 pulls:
 ## Fetch and pull the root repo plus every recursive submodule using configured upstreams.
 	@set -eu; \
