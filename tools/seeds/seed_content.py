@@ -47,7 +47,10 @@ def table(headers, rows, header_row=True):
              tableConfig={"headerRow": header_row, "showBorders": True, "stripedRows": True})
 
 def variant_for(title):
-    return int(hashlib.md5(title.encode()).hexdigest(), 16) % 4
+    # Non-crypto bucketing only: pick 1 of 4 content variants for seed/demo data.
+    # md5 is used purely as a fast, stable hash here (not for security), hence
+    # usedforsecurity=False and the suppression of the weak-hash rule.
+    return int(hashlib.md5(title.encode(), usedforsecurity=False).hexdigest(), 16) % 4  # nosemgrep: python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5
 
 # ---------------------------------------------------------------------------- #
 #  LESSON CONTENT — a real, concise, topic-specific lesson per note.           #
