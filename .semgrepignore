@@ -48,3 +48,14 @@ vendor/
 **/pnpm-lock.yaml
 **/yarn.lock
 **/Cargo.lock
+
+# ── Dead pre-extraction BaaS backup (removed from the tree; ignored defensively) ──
+apps/baas.bak/
+
+# ── Generated documentation: docusaurus source + built static site ────────
+# Not project source — the live docusaurus source is regenerated from these and
+# the built HTML carries only generated dev/localhost links.
+**/static_docs/
+**/.docusaurus/
+wiki/transcendence/docs/
+wiki/api/
