@@ -80,4 +80,4 @@ docker-prefetch-images:
 		start_pull public.ecr.aws/supabase/postgres-meta:v0.91.0; \
 	fi; \
 	while [ "$$(jobs -p | wc -l)" -gt 0 ]; do wait_for_pull; done; \
-	if [ "$$failed" -ne 0 ]; then echo '[docker] one or more image pulls failed'; exit 1; fi
+	if [ "$$failed" -ne 0 ]; then echo '[docker] some prefetch pulls failed (transient registry rate-limit?) — continuing; the build/up pulls these on demand' >&2; fi
