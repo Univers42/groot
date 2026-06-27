@@ -47,11 +47,15 @@ gate() {
 pg_probe() {
 	running mini-baas-postgres || return 0
 	docker exec mini-baas-postgres pg_isready -U postgres -q 2>/dev/null || { gate postgres '?'; return 0; }
-	pw=$(docker exec mini-baas-postgres printenv POSTGRES_PASSWORD 2>/dev/null)
-	c=$(docker exec -e PGPASSWORD="$pw" mini-baas-postgres psql -U postgres -d postgres -tAc \
-		"SELECT CASE WHEN to_regclass('public.osionos_pages') IS NULL THEN 0 ELSE (SELECT count(*) FROM osionos_pages) END" \
-		2>/dev/null | tr -d '[:space:]')
-	numeric "$c" || c='?'
+	# Two steps: a query that hard-references osionos_pages PARSE-fails when the table is
+	# absent (fresh machine) — even inside a CASE — so check existence first, count only if present.
+	ex=$(docker exec mini-baas-postgres psql -U postgres -d postgres -tAc \
+		"SELECT (to_regclass('public.osionos_pages') IS NOT NULL)" 2>/dev/null | tr -d '[:space:]')
+	case "$ex" in
+		f) c=0 ;;
+		t) c=$(docker exec mini-baas-postgres psql -U postgres -d postgres -tAc "SELECT count(*) FROM osionos_pages" 2>/dev/null | tr -d '[:space:]'); numeric "$c" || c='?' ;;
+		*) c='?' ;;
+	esac
 	gate postgres "$c"
 }
 
