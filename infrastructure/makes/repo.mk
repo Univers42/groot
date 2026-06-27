@@ -62,15 +62,22 @@ vault42-pull-all:
 		sh apps/grobase/scripts/vault/ctl-env.sh pull $(if $(filter 1,$(APPLY)),--apply,) $(if $(filter 1,$(FORCE)),--force,)
 
 bootstrap:
-## FROM-ZERO one command (fresh clone / wiped machine): submodules → secrets ← vault42 → grobase backend → restore all-engine data → frontends. Brings the whole stack back. The data restore is DESTRUCTIVE (drop-and-replace) — meant for an empty/fresh setup. Needs ~/.config/42ctl/keystore.v42 (copy it over first).
+## FROM-ZERO one command (fresh clone / clean Docker / wiped machine): keystore check → submodules → secrets ← vault42 → grobase backend (builds+pulls all images) → restore all-engine data → frontends. Brings the whole stack back from 0 B of Docker. The data restore is DESTRUCTIVE (drop-and-replace) — meant for an empty/fresh setup. Prereq: copy ~/.config/42ctl/keystore.v42 over first (the only file in neither git nor the vault).
+	@if [ ! -f "$(CTL_CFG_DIR)/keystore.v42" ]; then \
+		echo '[bootstrap] MISSING vault key: $(CTL_CFG_DIR)/keystore.v42' >&2; \
+		echo '            It is the vault42 master key — the one secret in neither git nor the vault itself.' >&2; \
+		echo '            Copy it from your old machine first (scp / USB), then re-run make bootstrap, e.g.:' >&2; \
+		echo '              mkdir -p $(CTL_CFG_DIR) && scp OLD_HOST:~/.config/42ctl/keystore.v42 $(CTL_CFG_DIR)/' >&2; \
+		exit 1; \
+	fi
 	@echo '── bootstrap 1/4 · submodules → stable branches ──────────────────────'
 	@$(MAKE) --no-print-directory syncro-submodule
 	@echo '── bootstrap 2/4 · secrets ← vault42 (keystore passphrase prompt) ─────'
 	@$(MAKE) --no-print-directory vault42-pull-all APPLY=1
-	@echo '── bootstrap 3/4 · grobase backend up ────────────────────────────────'
+	@echo '── bootstrap 3/4 · grobase backend up (builds + pulls all images) ─────'
 	@$(MAKE) -C apps/grobase up
-	@echo '── bootstrap 4/4 · frontends + auto-restore data (make all) ───────────'
-	@$(MAKE) --no-print-directory all
+	@echo '── bootstrap 4/4 · frontends + auto-restore all-engine data ───────────'
+	@$(MAKE) --no-print-directory all SKIP_SYNC=1
 	@echo '✓ bootstrap complete — everything is back. Login: dev.pro.photo / Osionos123!'
 
 pulls:
