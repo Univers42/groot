@@ -101,25 +101,27 @@ jobs:
       - name: "☄  make all   — provisions the whole machine from nothing"
         run: make all
 
-      - name: Prove the all-engine data restored (per-engine row counts)
+      - name: Prove the all-engine data restored (ASSERTS non-zero — green ⇒ data present)
         if: success()
         run: |
-          set +e
           echo "== running engines =="
           docker ps --format '{{.Names}}' | grep -E 'mini-baas-(postgres|mysql|mongo|mssql|dynamodb|minio)' | sort
-          echo "== postgres =="
-          docker exec mini-baas-postgres psql -U postgres -d postgres -tAc \
-            "SELECT 'osionos_pages='||count(*) FROM osionos_pages" 2>/dev/null
-          echo "== mysql =="
+          fail=0
+          gt0() { case "$1" in ''|*[!0-9]*) return 1 ;; 0) return 1 ;; *) return 0 ;; esac; }
+          pgc=$(docker exec mini-baas-postgres psql -U postgres -d postgres -tAc "SELECT count(*) FROM osionos_pages" 2>/dev/null | tr -d '[:space:]')
+          echo "postgres osionos_pages = ${pgc:-<none>}"
+          gt0 "$pgc" || { echo "::error::postgres osionos_pages empty — data did NOT restore"; fail=1; }
           pw=$(docker exec mini-baas-mysql printenv MYSQL_ROOT_PASSWORD 2>/dev/null)
-          docker exec mini-baas-mysql mysql -uroot -p"$pw" -N -e \
-            "SELECT CONCAT('ops_tables=',count(*)) FROM information_schema.tables WHERE table_schema='ops'" 2>/dev/null
-          echo "== mongo =="
+          myc=$(docker exec mini-baas-mysql mysql -uroot -p"$pw" -N -e "SELECT count(*) FROM information_schema.tables WHERE table_schema='ops'" 2>/dev/null | tr -d '[:space:]')
+          echo "mysql ops tables = ${myc:-<none>}"
+          gt0 "$myc" || { echo "::error::mysql ops schema empty — data did NOT restore"; fail=1; }
           mu=$(docker exec mini-baas-mongo printenv MONGO_INITDB_ROOT_USERNAME 2>/dev/null)
           mp=$(docker exec mini-baas-mongo printenv MONGO_INITDB_ROOT_PASSWORD 2>/dev/null)
-          docker exec mini-baas-mongo mongosh --quiet -u "$mu" -p "$mp" --authenticationDatabase admin \
-            --eval 'print("activity_events="+db.getSiblingDB("activity").events.countDocuments())' 2>/dev/null
+          moc=$(docker exec mini-baas-mongo mongosh --quiet -u "$mu" -p "$mp" --authenticationDatabase admin --eval 'db.getSiblingDB("activity").events.countDocuments()' 2>/dev/null | tr -d '[:space:]')
+          echo "mongo activity.events = ${moc:-<none>}"
+          gt0 "$moc" || { echo "::error::mongo activity empty — data did NOT restore"; fail=1; }
           echo "(dynamodb is a hypertube-vendor engine with private images — out of the CI shape by design)"
+          [ "$fail" = 0 ] && echo "✓ all core engines restored with data" || exit 1
 
       - name: Diagnostics on failure
         if: failure()
