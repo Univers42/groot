@@ -101,28 +101,35 @@ jobs:
       - name: "☄  make all   — provisions the whole machine from nothing"
         run: make all
 
-      - name: Prove the all-engine data restored (ASSERTS non-zero — green ⇒ data present)
+      - name: Prove the all-engine data restored (ASSERTS all 6 engines non-zero)
         if: success()
         run: |
           echo "== running engines =="
           docker ps --format '{{.Names}}' | grep -E 'mini-baas-(postgres|mysql|mongo|mssql|dynamodb|minio)' | sort
           fail=0
           gt0() { case "$1" in ''|*[!0-9]*) return 1 ;; 0) return 1 ;; *) return 0 ;; esac; }
+          # 1 postgres (osionos pages)
           pgpw=$(docker exec mini-baas-postgres printenv POSTGRES_PASSWORD 2>/dev/null)
           pgc=$(docker exec -e PGPASSWORD="$pgpw" mini-baas-postgres psql -U postgres -d postgres -tAc "SELECT count(*) FROM osionos_pages" 2>/dev/null | tr -d '[:space:]')
-          echo "postgres osionos_pages = ${pgc:-<none>}"
-          gt0 "$pgc" || { echo "::error::postgres osionos_pages empty — data did NOT restore"; fail=1; }
-          pw=$(docker exec mini-baas-mysql printenv MYSQL_ROOT_PASSWORD 2>/dev/null)
-          myc=$(docker exec mini-baas-mysql mysql -uroot -p"$pw" -N -e "SELECT count(*) FROM information_schema.tables WHERE table_schema='ops'" 2>/dev/null | tr -d '[:space:]')
-          echo "mysql ops tables = ${myc:-<none>}"
-          gt0 "$myc" || { echo "::error::mysql ops schema empty — data did NOT restore"; fail=1; }
-          mu=$(docker exec mini-baas-mongo printenv MONGO_INITDB_ROOT_USERNAME 2>/dev/null)
-          mp=$(docker exec mini-baas-mongo printenv MONGO_INITDB_ROOT_PASSWORD 2>/dev/null)
+          echo "postgres osionos_pages = ${pgc:-<none>}"; gt0 "$pgc" || { echo "::error::postgres osionos_pages empty"; fail=1; }
+          # 2 mysql (ops schema)
+          mypw=$(docker exec mini-baas-mysql printenv MYSQL_ROOT_PASSWORD 2>/dev/null)
+          myc=$(docker exec mini-baas-mysql mysql -uroot -p"$mypw" -N -e "SELECT count(*) FROM information_schema.tables WHERE table_schema='ops'" 2>/dev/null | tr -d '[:space:]')
+          echo "mysql ops tables = ${myc:-<none>}"; gt0 "$myc" || { echo "::error::mysql ops empty"; fail=1; }
+          # 3 mongo (activity events)
+          mu=$(docker exec mini-baas-mongo printenv MONGO_INITDB_ROOT_USERNAME 2>/dev/null); mp=$(docker exec mini-baas-mongo printenv MONGO_INITDB_ROOT_PASSWORD 2>/dev/null)
           moc=$(docker exec mini-baas-mongo mongosh --quiet -u "$mu" -p "$mp" --authenticationDatabase admin --eval 'db.getSiblingDB("activity").events.countDocuments()' 2>/dev/null | tr -d '[:space:]')
-          echo "mongo activity.events = ${moc:-<none>}"
-          gt0 "$moc" || { echo "::error::mongo activity empty — data did NOT restore"; fail=1; }
-          echo "(dynamodb is a hypertube-vendor engine with private images — out of the CI shape by design)"
-          [ "$fail" = 0 ] && echo "✓ all core engines restored with data" || exit 1
+          echo "mongo activity.events = ${moc:-<none>}"; gt0 "$moc" || { echo "::error::mongo activity empty"; fail=1; }
+          # 4 mssql (finance DB tables)
+          msc=$(docker exec mini-baas-mssql sh -lc '/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -h-1 -W -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM finance.sys.tables"' 2>/dev/null | tr -d '[:space:]')
+          echo "mssql finance tables = ${msc:-<none>}"; gt0 "$msc" || { echo "::error::mssql finance empty"; fail=1; }
+          # 5 dynamodb (table count)
+          ddc=$(docker run --rm --network mini-baas_mini-baas -e AWS_ACCESS_KEY_ID=local -e AWS_SECRET_ACCESS_KEY=local -e AWS_DEFAULT_REGION=us-east-1 amazon/aws-cli dynamodb list-tables --endpoint-url http://mini-baas-dynamodb-local:8000 --output text --query 'length(TableNames)' 2>/dev/null | tr -d '[:space:]')
+          echo "dynamodb tables = ${ddc:-<none>}"; gt0 "$ddc" || { echo "::error::dynamodb empty"; fail=1; }
+          # 6 minio (object count)
+          mnc=$(docker exec mini-baas-minio sh -c 'find /data -type f -not -path "*/.minio.sys/*" 2>/dev/null | wc -l' 2>/dev/null | tr -d '[:space:]')
+          echo "minio objects = ${mnc:-<none>}"; gt0 "$mnc" || { echo "::error::minio objects empty"; fail=1; }
+          [ "$fail" = 0 ] && echo "✓ ALL 6 engines restored with data (postgres mysql mongo mssql dynamodb minio)" || exit 1
 
       - name: Assert core/engine/app containers healthy (everything green)
         if: success()
