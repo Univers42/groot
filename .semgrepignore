@@ -59,3 +59,16 @@ apps/baas.bak/
 **/.docusaurus/
 wiki/transcendence/docs/
 wiki/api/
+
+# ── Dev TLS reverse-proxy configs (localhost-only) ────────────────────────
+# The only Semgrep findings in these are the intentional, security-reviewed
+# reverse-proxy patterns the Dockerised dev proxy REQUIRES: a server-side `set`
+# upstream resolved lazily via `resolver` (so the proxy still boots when an
+# upstream container is down/restarting), and Host / X-Forwarded-Host forwarding
+# for upstream vhost routing. Both are safe on a loopback-only TLS front door and
+# are annotated inline with `# nosemgrep` + rationale. They are excluded here
+# because GitHub code-scanning surfaces in-source nosemgrep suppressions
+# (suppressions.kind = "inSource") as OPEN alerts rather than honoring them.
+# nginx syntax is gated separately by `nginx -t`.
+infrastructure/tls/nginx.conf
+infrastructure/scripts/tls/nginx.conf
