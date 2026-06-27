@@ -64,7 +64,9 @@ AUTH_URL := https://localhost:8787/api/auth
 BAAS_URL := http://127.0.0.1:8000
 # grobase Kong gates /auth/v1/* with key-auth, so the BaaS health probe must
 # present the anon apikey (read from the consolidated root .env.local).
-BAAS_HEALTH_KEY := $(shell grep -m1 -oE '^SB_KONG_KEY=.*' .env.local 2>/dev/null | cut -d= -f2-)
+# Deferred (=) not immediate (:=): on a fresh machine .env.local does not exist at parse
+# time — `make all` pulls it mid-run (secrets-ensure) — so this must re-read at recipe time.
+BAAS_HEALTH_KEY = $(shell grep -m1 -oE '^SB_KONG_KEY=.*' .env.local 2>/dev/null | cut -d= -f2-)
 MAIL_URL := https://localhost:3002
 MAIL_BRIDGE_URL := https://localhost:4100
 CALENDAR_URL := https://localhost:3003
