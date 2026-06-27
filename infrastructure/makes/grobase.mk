@@ -35,7 +35,9 @@ backend-up:
 ## Guard only: verify the standalone apps/grobase backend is already running (never re-ups it).
 	@if ! docker network ls --format '{{.Name}}' 2>/dev/null | grep -q '^mini-baas_mini-baas$$' \
 		|| ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^mini-baas-kong$$'; then \
-		echo '[backend] grobase backend not running — start it from apps/grobase (make -C apps/grobase up)' >&2; \
+		echo '[backend] grobase backend not running.' >&2; \
+		echo '          fresh machine / wiped data?  make bootstrap   (submodules → secrets → backend → restore data → frontends)' >&2; \
+		echo '          backend only:                make -C apps/grobase up' >&2; \
 		exit 1; \
 	fi
 

@@ -138,17 +138,30 @@ the disabled HashiCorp vault). Do **not** ship these.
 
 ---
 
-## 6. One-glance checklist for the new machine
+## 6. One-glance: the new machine in one command
 
 ```bash
+# copy ~/.config/42ctl/{keystore.v42,config.json} over first (vault42 decrypt key), then:
 git clone <url> ft_transcendence && cd ft_transcendence
+make bootstrap          # everything, from zero (prompts once for the vault42 passphrase)
+```
+
+`make bootstrap` runs the whole sequence below in order — it's the from-zero / wiped-machine command:
+
+```bash
 make syncro-submodule                                  # 1. correct source / images
 make vault42-pull-all APPLY=1                           # 2. secrets  (pass: Grobase-Vault-2026!)
 make -C apps/grobase up                                 # 3a. engines + network
-CONFIRM=1 apps/grobase/data-snapshots/restore-databases.sh   # 3b. data
+CONFIRM=1 apps/grobase/data-snapshots/restore-databases.sh   # 3b. data (DESTRUCTIVE drop-replace)
 docker restart mini-baas-minio mini-baas-realtime       # 3c. cache re-read
 make all                                                # 4. frontends
 ```
 
 Login `dev.pro.photo / Osionos123!`. If something is empty, the engine was down at restore time —
 bring it up and re-run `restore-databases.sh` (idempotent drop-and-replace).
+
+> **`make bootstrap` vs `make all`:** `bootstrap` is the **one-time from-zero** command (it includes the
+> *destructive* data restore). `make all` is the **everyday** lifecycle (certs → guard backend → frontends
+> → health) — on an existing machine the Docker volumes persist, so `make all` already brings everything
+> back without touching data. If `make all` errors that the backend is down, it now points you to
+> `make bootstrap`.
