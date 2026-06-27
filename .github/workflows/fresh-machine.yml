@@ -124,6 +124,20 @@ jobs:
           echo "(dynamodb is a hypertube-vendor engine with private images — out of the CI shape by design)"
           [ "$fail" = 0 ] && echo "✓ all core engines restored with data" || exit 1
 
+      - name: Postgres restore diagnostics
+        if: failure()
+        run: |
+          P="docker exec mini-baas-postgres psql -U postgres"
+          echo "== databases =="; $P -tAc "SELECT datname FROM pg_database WHERE datistemplate=false" 2>&1
+          echo "== public tables in postgres DB =="; $P -d postgres -tAc "SELECT count(*) FROM pg_tables WHERE schemaname='public'" 2>&1
+          echo "== osionos_pages now? =="; $P -d postgres -tAc "SELECT to_regclass('public.osionos_pages')" 2>&1
+          echo "== commerce DB present (other postgres dump)? =="; $P -tAc "SELECT count(*) FROM pg_database WHERE datname='commerce'" 2>&1
+          echo "== RE-RUN db-postgres.dump restore, show errors =="
+          docker exec -i mini-baas-postgres pg_restore --clean --if-exists --no-owner --no-privileges -d postgres \
+            < apps/grobase/data-snapshots/archives/postgres/db-postgres.dump 2>&1 | grep -iE 'error|fatal|denied|does not exist|cannot|permission' | head -25
+          echo "== osionos_pages + count after re-run =="; $P -d postgres -tAc "SELECT to_regclass('public.osionos_pages')" 2>&1
+          $P -d postgres -tAc "SELECT count(*) FROM osionos_pages" 2>&1 | head -1
+
       - name: Diagnostics on failure
         if: failure()
         run: |
