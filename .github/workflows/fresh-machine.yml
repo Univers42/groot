@@ -133,7 +133,7 @@ jobs:
           echo "== osionos_pages now? =="; $P -d postgres -tAc "SELECT to_regclass('public.osionos_pages')" 2>&1
           echo "== commerce DB present (other postgres dump)? =="; $P -tAc "SELECT count(*) FROM pg_database WHERE datname='commerce'" 2>&1
           echo "== RE-RUN db-postgres.dump restore, show errors =="
-          docker exec -i mini-baas-postgres pg_restore --clean --if-exists --no-owner --no-privileges -d postgres \
+          docker exec -i mini-baas-postgres pg_restore -U postgres --clean --if-exists --no-owner --no-privileges -d postgres \
             < apps/grobase/data-snapshots/archives/postgres/db-postgres.dump 2>&1 | grep -iE 'error|fatal|denied|does not exist|cannot|permission' | head -25
           echo "== osionos_pages + count after re-run =="; $P -d postgres -tAc "SELECT to_regclass('public.osionos_pages')" 2>&1
           $P -d postgres -tAc "SELECT count(*) FROM osionos_pages" 2>&1 | head -1
