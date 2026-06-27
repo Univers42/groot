@@ -40,16 +40,13 @@ ROOT_FRONTENDS := osionos-bridge osionos-app auth-gateway opposite-osiris-web lo
 GROBASE_EDITION ?= migrate
 
 backend-up:
-## Ensure the grobase backend is up — START it if it's down (not just guard), so a bare `make all` reconstitutes a clean machine. Brings up GROBASE_EDITION (default full = all public-image engines). Secrets are pulled earlier by `secrets-ensure`; if they are still absent and there is no vault key, stop with guidance.
+## Ensure the grobase backend is up — START it if it's down (not just guard), so a bare `make all` reconstitutes a clean machine. Brings up GROBASE_EDITION (default migrate). With a vault key, secrets are pulled earlier by `secrets-ensure`; with NO vault key, grobase self-generates its secrets (no-vault local mode) and `env-local-ensure` derives the root ./.env.local afterward.
 	@if docker network ls --format '{{.Name}}' 2>/dev/null | grep -q '^mini-baas_mini-baas$$' \
 		&& docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^mini-baas-kong$$'; then \
 		exit 0; \
 	fi; \
-	if [ ! -f apps/grobase/.env ]; then \
-		echo '[backend] grobase secrets missing (apps/grobase/.env absent) and no vault key to pull them.' >&2; \
-		echo '          Fresh machine? copy  ~/.config/42ctl/keystore.v42  over (the one secret in neither' >&2; \
-		echo '          git nor the vault), then re-run  make all  — secrets-ensure will pull the rest.' >&2; \
-		exit 1; \
+	if [ ! -f apps/grobase/.env ] && [ ! -f "$(CTL_CFG_DIR)/keystore.v42" ]; then \
+		echo '[backend] no vault key — LOCAL mode: grobase will self-generate its secrets (make -C apps/grobase env).' >&2; \
 	fi; \
 	echo "[backend] starting grobase backend (EDITION=$(GROBASE_EDITION))…" >&2; \
 	$(MAKE) -C apps/grobase up EDITION=$(GROBASE_EDITION)

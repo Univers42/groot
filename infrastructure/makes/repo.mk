@@ -69,17 +69,20 @@ secrets-ensure:
 		printf '[secrets] fresh machine — pulling *.env tree from vault42 (project=%s)…\n' "$(VAULT42_PROJECT)"; \
 		$(MAKE) --no-print-directory vault42-pull-all APPLY=1 FORCE=1; \
 	else \
-		printf '[secrets] no grobase/.env and no vault42 keystore at %s — skipping (backend-up will guide).\n' "$(CTL_CFG_DIR)/keystore.v42"; \
+		printf '[secrets] no grobase/.env and no vault42 keystore at %s — LOCAL mode: grobase self-generates its secrets; ./.env.local is derived after backend-up (env-local-ensure).\n' "$(CTL_CFG_DIR)/keystore.v42"; \
 	fi
+
+.PHONY: env-local-ensure
+env-local-ensure:
+## Wired into `make all` AFTER backend-up. When there is no root ./.env.local (no-vault fresh machine), derive it from the now-generated apps/grobase/.env so the frontends authenticate against the freshly self-generated backend. No-op when ./.env.local already exists (vault-pulled or hand-edited).
+	@bash scripts/gen-local-env.sh
 
 bootstrap:
 ## Thin alias kept for muscle memory — `make all` is now self-provisioning (it runs secrets-ensure + brings the backend up), so `make bootstrap` simply runs it. FROM-ZERO on a clean machine: copy ~/.config/42ctl/keystore.v42 over first (the only file in neither git nor the vault), then `make all`. The data restore is DESTRUCTIVE on an EMPTY stack only (restore-if-empty never wipes populated data).
 	@if [ ! -f "$(CTL_CFG_DIR)/keystore.v42" ] && [ -z "$${FT_PASSPHRASE:-}$${VAULT42_PASSPHRASE:-}" ]; then \
-		echo '[bootstrap] no vault key at $(CTL_CFG_DIR)/keystore.v42 — secrets cannot be pulled.' >&2; \
-		echo '            It is the vault42 master key — the one secret in neither git nor the vault itself.' >&2; \
-		echo '            Copy it from your old machine first (scp / USB), then re-run, e.g.:' >&2; \
-		echo '              mkdir -p $(CTL_CFG_DIR) && scp OLD_HOST:~/.config/42ctl/keystore.v42 $(CTL_CFG_DIR)/' >&2; \
-		exit 1; \
+		echo '[bootstrap] no vault key at $(CTL_CFG_DIR)/keystore.v42 — running in LOCAL no-vault mode:' >&2; \
+		echo '            grobase self-generates its secrets and ./.env.local is derived locally.' >&2; \
+		echo '            (To restore the SHARED secrets + demo data instead, copy ~/.config/42ctl/keystore.v42 over first.)' >&2; \
 	fi
 	@$(MAKE) --no-print-directory all
 	@echo '✓ bootstrap complete — everything is back. Login: dev.pro.photo / Osionos123!'
