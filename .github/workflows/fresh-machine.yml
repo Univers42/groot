@@ -143,3 +143,5 @@ jobs:
             echo "config), then \`git clone --recursive\` + \`make all\` — nothing else. Green here means a"
             echo "fresh machine reconstitutes the whole stack (code → secrets → backend → data → frontends)."
           } >> "$GITHUB_STEP_SUMMARY"
+
+# rerun: secrets complete (keystore+contract+passphrase)
