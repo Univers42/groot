@@ -23,9 +23,20 @@ certs:
 define TRUST_LOCAL_CA
 	src='$(CURDIR)/$(LOCAL_CA_CERT)'; \
 	if [[ ! -f "$$src" ]]; then echo "[certs] no CA at $$src; run make certs first" >&2; exit 0; fi; \
-	if command -v sudo >/dev/null 2>&1 && command -v update-ca-certificates >/dev/null 2>&1; then \
-		sudo -n cp "$$src" /usr/local/share/ca-certificates/track-binocle-local-ca.crt 2>/dev/null && sudo -n update-ca-certificates >/dev/null 2>&1 \
-			&& echo '[certs] grobase CA trusted in the system store' || echo '[certs] system CA trust import skipped (needs: sudo make certs-trust-local)'; \
+	dst='/usr/local/share/ca-certificates/track-binocle-local-ca.crt'; \
+	if [[ -f "$$dst" ]] && cmp -s "$$src" "$$dst"; then \
+		echo '[certs] grobase CA already trusted in the system store'; \
+	elif command -v sudo >/dev/null 2>&1 && command -v update-ca-certificates >/dev/null 2>&1; then \
+		if [[ -t 0 && "$${CI:-}" != 'true' && "$${GITHUB_ACTIONS:-}" != 'true' ]]; then \
+			echo '[certs] trusting the grobase CA in the system store (one sudo prompt)…'; \
+			sudo cp "$$src" "$$dst" && sudo update-ca-certificates >/dev/null 2>&1 \
+				&& echo '[certs] grobase CA trusted in the system store' \
+				|| echo '[certs] system CA trust FAILED — re-run once: sudo make certs-trust-local'; \
+		else \
+			sudo -n cp "$$src" "$$dst" 2>/dev/null && sudo -n update-ca-certificates >/dev/null 2>&1 \
+				&& echo '[certs] grobase CA trusted (passwordless sudo)' \
+				|| echo '[certs] system CA trust skipped (non-interactive) — run once: sudo make certs-trust-local'; \
+		fi; \
 	else \
 		echo '[certs] update-ca-certificates/sudo not available; skipping system CA trust'; \
 	fi; \
