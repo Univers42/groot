@@ -85,11 +85,6 @@ for e in mini-baas-postgres mini-baas-mysql mini-baas-mongo mini-baas-mssql mini
 	wait_healthy "$e"
 done
 
-# DEBUG (temporary): surface why postgres reads as unreadable in CI.
-note "DEBUG pg health=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' mini-baas-postgres 2>/dev/null)"
-note "DEBUG pg_isready=[$(docker exec mini-baas-postgres pg_isready -U postgres -d postgres 2>&1 | head -1)]"
-note "DEBUG pg SELECT1=[$(docker exec mini-baas-postgres psql -U postgres -d postgres -tAc 'SELECT 1' 2>&1 | head -2 | tr '\n' ' ')]"
-
 pg_probe
 mysql_probe
 mongo_probe
