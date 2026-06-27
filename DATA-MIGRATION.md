@@ -19,9 +19,12 @@ Three independent payloads carry the state — keep them straight:
 ## 0. Prerequisites on the new machine
 
 - Docker, with the **data-root on a large disk** (`/mnt/storage` here — the system disk is tiny).
-- Your **vault42 identity** recovered locally: `~/.config/42ctl/keystore.v42`. On a brand-new
-  machine you create it once with `make -C apps/grobase ctl-remote ARGS="keys recover --email <you>"`
-  (email-OTP → fetches your escrowed keystore). The keystore is unlocked by the passphrase below.
+- Your **whole vault42 identity dir** copied over: `~/.config/42ctl/` — specifically
+  **`keystore.v42`** (the private key) **and `contract-default.tok`** (the tenant contract that
+  authorises the vault; the keystore alone gets `Unauthenticated: missing auth metadata`). Easiest is
+  `scp -r OLD_HOST:~/.config/42ctl ~/.config/`. Alternatively recover the keystore via
+  `make -C apps/grobase ctl-remote ARGS="keys recover --email <you>"` (email-OTP) then `auth login`
+  for a fresh contract — but copying the dir is OTP-free. The keystore is unlocked by the passphrase below.
 - **vault42 passphrase: `Grobase-Vault-2026!`** (the two common mis-guesses `Osionos-Vault-2026!` /
   `Vault-Osionos-2026!` are **wrong** — they will not unlock the keystore). It is *fake/demo* and
   deliberately shared; rotate it if this ever holds anything real.
@@ -141,9 +144,10 @@ the disabled HashiCorp vault). Do **not** ship these.
 ## 6. One-glance: the new machine in one command
 
 ```bash
-# copy ~/.config/42ctl/{keystore.v42,config.json} over first (vault42 decrypt key), then:
-git clone <url> ft_transcendence && cd ft_transcendence
-make bootstrap          # everything, from zero (prompts once for the vault42 passphrase)
+# copy the WHOLE ~/.config/42ctl/ dir over first (keystore.v42 + contract-default.tok + config.json):
+#   scp -r OLD_HOST:~/.config/42ctl ~/.config/
+git clone --recursive <url> ft_transcendence && cd ft_transcendence
+make all                # everything, from zero — self-provisions (prompts once for the vault42 passphrase)
 ```
 
 `make bootstrap` runs the whole sequence below in order — it's the from-zero / wiped-machine command:
