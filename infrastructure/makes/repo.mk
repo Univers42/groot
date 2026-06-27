@@ -61,23 +61,27 @@ vault42-pull-all:
 	@REPO_DIR="$(CURDIR)" CTL_IMAGE="$(CTL_IMAGE)" CTL_CFG_DIR="$(CTL_CFG_DIR)" VAULT_ENV_PROJECT="$(VAULT42_PROJECT)" \
 		sh apps/grobase/scripts/vault/ctl-env.sh pull $(if $(filter 1,$(APPLY)),--apply,) $(if $(filter 1,$(FORCE)),--force,)
 
+secrets-ensure:
+## Fresh-machine secret provisioning, wired into `make all`. If grobase secrets are ABSENT but a vault42 keystore is present, pull the whole *.env tree from vault42 — non-interactive when FT_PASSPHRASE/VAULT42_PASSPHRASE is set (CI), else one hidden prompt. Secrets already present → no-op. No keystore → leave it (backend-up gives guidance). This is what lets a bare `make all` provision a clean machine end-to-end.
+	@if [ -f apps/grobase/.env ]; then \
+		printf '[secrets] grobase/.env present — skipping vault pull\n'; \
+	elif [ -f "$(CTL_CFG_DIR)/keystore.v42" ]; then \
+		printf '[secrets] fresh machine — pulling *.env tree from vault42 (project=%s)…\n' "$(VAULT42_PROJECT)"; \
+		$(MAKE) --no-print-directory vault42-pull-all APPLY=1 FORCE=1; \
+	else \
+		printf '[secrets] no grobase/.env and no vault42 keystore at %s — skipping (backend-up will guide).\n' "$(CTL_CFG_DIR)/keystore.v42"; \
+	fi
+
 bootstrap:
-## FROM-ZERO one command (fresh clone / clean Docker / wiped machine): keystore check → submodules → secrets ← vault42 → grobase backend (builds+pulls all images) → restore all-engine data → frontends. Brings the whole stack back from 0 B of Docker. The data restore is DESTRUCTIVE (drop-and-replace) — meant for an empty/fresh setup. Prereq: copy ~/.config/42ctl/keystore.v42 over first (the only file in neither git nor the vault).
-	@if [ ! -f "$(CTL_CFG_DIR)/keystore.v42" ]; then \
-		echo '[bootstrap] MISSING vault key: $(CTL_CFG_DIR)/keystore.v42' >&2; \
+## Thin alias kept for muscle memory — `make all` is now self-provisioning (it runs secrets-ensure + brings the backend up), so `make bootstrap` simply runs it. FROM-ZERO on a clean machine: copy ~/.config/42ctl/keystore.v42 over first (the only file in neither git nor the vault), then `make all`. The data restore is DESTRUCTIVE on an EMPTY stack only (restore-if-empty never wipes populated data).
+	@if [ ! -f "$(CTL_CFG_DIR)/keystore.v42" ] && [ -z "$${FT_PASSPHRASE:-}$${VAULT42_PASSPHRASE:-}" ]; then \
+		echo '[bootstrap] no vault key at $(CTL_CFG_DIR)/keystore.v42 — secrets cannot be pulled.' >&2; \
 		echo '            It is the vault42 master key — the one secret in neither git nor the vault itself.' >&2; \
-		echo '            Copy it from your old machine first (scp / USB), then re-run make bootstrap, e.g.:' >&2; \
+		echo '            Copy it from your old machine first (scp / USB), then re-run, e.g.:' >&2; \
 		echo '              mkdir -p $(CTL_CFG_DIR) && scp OLD_HOST:~/.config/42ctl/keystore.v42 $(CTL_CFG_DIR)/' >&2; \
 		exit 1; \
 	fi
-	@echo '── bootstrap 1/4 · submodules → stable branches ──────────────────────'
-	@$(MAKE) --no-print-directory syncro-submodule
-	@echo '── bootstrap 2/4 · secrets ← vault42 (keystore passphrase prompt) ─────'
-	@$(MAKE) --no-print-directory vault42-pull-all APPLY=1
-	@echo '── bootstrap 3/4 · grobase backend up (builds + pulls all images) ─────'
-	@$(MAKE) -C apps/grobase up
-	@echo '── bootstrap 4/4 · frontends + auto-restore all-engine data ───────────'
-	@$(MAKE) --no-print-directory all SKIP_SYNC=1
+	@$(MAKE) --no-print-directory all
 	@echo '✓ bootstrap complete — everything is back. Login: dev.pro.photo / Osionos123!'
 
 pulls:

@@ -2,11 +2,11 @@
 # The BaaS backend now runs as the standalone apps/grobase stack (docker project
 # mini-baas). The root pipeline regenerates certs (via grobase), guards that the
 # grobase backend is up, brings up the root FRONTENDS only, then healthchecks.
-all: sync-submodules-soft certs certs-trust-local backend-up restore-if-empty frontends-up healthcheck showcase
-## Sync submodules to latest, regenerate certs, guard the grobase backend, restore data IF the DBs are fresh (fail-safe no-op otherwise), start the root frontends, and verify.
+all: sync-submodules-soft secrets-ensure certs certs-trust-local backend-up restore-if-empty frontends-up healthcheck showcase
+## FROM-ZERO self-provisioning: sync submodules to latest → pull secrets from vault42 if absent → certs → START the grobase backend if down → restore all-engine data IF fresh (fail-safe no-op otherwise) → build+start frontends → verify → clickable recap. A clean clone + `make all` reconstitutes the whole machine.
 
-all-local: sync-submodules-soft certs certs-trust-local backend-up restore-if-empty frontends-up healthcheck showcase
-## Same frontends-on-grobase pipeline; alias kept for callers that used all-local.
+all-local: sync-submodules-soft secrets-ensure certs certs-trust-local backend-up restore-if-empty frontends-up healthcheck showcase
+## Same self-provisioning pipeline; alias kept for callers that used all-local.
 
 sync-submodules-soft:
 ## Best-effort recursive submodule sync to latest (ff-only, skips dirty) so `make all` always builds the newest code. NEVER blocks the pipeline — network/sync hiccups just print a note and continue. Skipped entirely with SKIP_SYNC=1.
