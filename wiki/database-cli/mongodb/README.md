@@ -46,6 +46,7 @@ Never touch `admin`, `config`, `local`, `mini_baas`, `mini_baas_ai`, or `mini_ba
 | 04 | [04-users-roles.md](04-users-roles.md) | Creating users, built-in roles, custom roles, `authSource` |
 | 05 | [05-security.md](05-security.md) | Auth model, least privilege, TLS flags, hardening checklist |
 | 06 | [06-backup-restore.md](06-backup-restore.md) | `mongodump`/`mongorestore`, `mongoexport`/`mongoimport` via sidecar |
+| — | [operations.md](operations.md) | Day-to-day ops & live-data inspection: where data lives, read-only browsing, server/ops commands, `explain()` |
 
 ## Engine facts at a glance
 
