@@ -31,8 +31,11 @@ Part of the 9-part tooling wiki — see [README.md](./README.md) ·
   — see [01](./01-format-lint-types.md)).
 - **Lighthouse threshold is ≥ 90 on all 4 categories** (`min=90` default), evaluated on
   **3 pages** (`/`, `/pricing/`, `/security/`).
-- ⚠️ **`make grobase-audit` and `make grobase-e2e` are BROKEN in this checkout** — no
-  compose service backs them. A working Docker reproduce is given below.
+- ✅ **`make grobase-audit` and `make grobase-e2e` work** via the `grobase-site-audit`
+  compose service (`docker-compose.yml:516`); an equivalent manual Docker invocation is
+  shown below. (The *sibling* dev-server targets `grobase-up` / `grobase-logs` /
+  `grobase-down` are the broken ones — they point at a bake-only `grobase-site` service;
+  see [08](./08-orchestration-and-verification-gates.md).)
 - ⚠️ **`axe` is NOT an active gate** in this repo (the only `@axe-core` usage is a vendored
   playground test, wired to nothing). Treat it as absent.
 
@@ -42,9 +45,9 @@ Part of the 9-part tooling wiki — see [README.md](./README.md) ·
 
 | Tool | Purpose | Config (`path:line`) | Run command | Scope |
 |------|---------|----------------------|-------------|-------|
-| **Lighthouse (grobase site)** | Perf / a11y / best-practices / SEO gate, fail if any category < min | `apps/grobase/vendor/grobase-website/scripts/audit/lighthouse.mjs:12` (categories), `:13` (pages), `:18` (min=90) | `make grobase-audit` ⚠️ *(broken — see reproduce)* / `npm run audit:lh` | Marketing site, 4 categories × 3 pages |
-| **pa11y (grobase site)** | Programmatic **WCAG2AA** a11y audit in headless Chromium | `apps/grobase/vendor/grobase-website/scripts/audit/pa11y.config.json:2` (standard=WCAG2AA) | `make grobase-audit` ⚠️ / `npm run audit:a11y` | Marketing site, 3 pages |
-| **csp-check (grobase site)** | Proves CSP correctness in a real browser; fails on violations / console errors / weak `<meta>` CSP | `apps/grobase/vendor/grobase-website/scripts/audit/csp-check.mjs:52`, `:57` (rejects `unsafe-inline`) | `make grobase-audit` ⚠️ / `npm run audit:csp` | Marketing site, 3 pages |
+| **Lighthouse (grobase site)** | Perf / a11y / best-practices / SEO gate, fail if any category < min | `apps/grobase/vendor/grobase-website/scripts/audit/lighthouse.mjs:12` (categories), `:13` (pages), `:18` (min=90) | `make grobase-audit` / `npm run audit:lh` | Marketing site, 4 categories × 3 pages |
+| **pa11y (grobase site)** | Programmatic **WCAG2AA** a11y audit in headless Chromium | `apps/grobase/vendor/grobase-website/scripts/audit/pa11y.config.json:2` (standard=WCAG2AA) | `make grobase-audit` / `npm run audit:a11y` | Marketing site, 3 pages |
+| **csp-check (grobase site)** | Proves CSP correctness in a real browser; fails on violations / console errors / weak `<meta>` CSP | `apps/grobase/vendor/grobase-website/scripts/audit/csp-check.mjs:52`, `:57` (rejects `unsafe-inline`) | `make grobase-audit` / `npm run audit:csp` | Marketing site, 3 pages |
 | **html-validate** | Static HTML validity + markup-quality lint over built `dist/**/*.html` | `apps/grobase/vendor/grobase-website/.htmlvalidate.json:2`; `apps/opposite-osiris/.htmlvalidate.json:2` | `npm run lint:html` (grobase site) / container-only `html-validate "dist/**/*.html"` (opposite-osiris) | Grobase site **and** opposite-osiris built HTML |
 | **stylelint (SCSS)** | CSS/SCSS lint (`stylelint-config-standard-scss`) over authored SCSS | `apps/grobase/vendor/grobase-website/.stylelintrc.json:2`; `apps/opposite-osiris/.stylelintrc.json:2` | `npm run lint:css` (grobase site) / container-only `stylelint "src/**/*.scss"` (opposite-osiris) | Grobase site **and** opposite-osiris `src/**/*.scss` |
 | **eslint-plugin-jsx-a11y** (via `eslint-plugin-astro`) | A11y lint of `.astro` templates (`flat/jsx-a11y-recommended`) | `apps/grobase/vendor/grobase-website/eslint.config.mjs:23`, `:37`; `apps/opposite-osiris/eslint.config.mjs:28`, `:45` | `npm run lint` (grobase site) / container-only `eslint .` (opposite-osiris) | `.astro` templates only |
