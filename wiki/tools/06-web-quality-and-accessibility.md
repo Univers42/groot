@@ -113,31 +113,41 @@ puppeteer/lighthouse browser fetch); `CHROME_PATH` / `PUPPETEER_EXECUTABLE_PATH`
 
 ---
 
-## ⚠️ Broken wiring — and the working reproduce
+## The audit make targets — what works, what doesn't
 
-`infrastructure/makes/grobase.mk` (the `grobase-audit` / `grobase-e2e` / `grobase-up` /
-`grobase-logs` / `grobase-down` targets) runs
-`docker compose --profile grobase ... grobase-site[-audit]` — but **no compose file defines
-a `grobase-site` or `grobase-site-audit` service**. The root `docker-compose.yml` has no
-such service; only `docker-bake.hcl:83` defines a `grobase-site` **bake** target. So every
-`grobase-site` make target is broken in this checkout (independently documented at
-`wiki/FAQ/05-securite-rgpd-anssi.md:40`).
+The audit/e2e targets in `infrastructure/makes/grobase.mk` **work**. They drive the
+`grobase-site-audit` compose service, which **is** defined at `docker-compose.yml:516`
+(profile `grobase`, build target `audit`):
 
-The underlying audit **scripts and configs are all real and correct** — only the
-make/compose glue is broken. Reproduce the full audit gate directly from the Dockerfile
-`audit` stage:
+- `make grobase-audit` (`grobase.mk:14-18`) → `docker compose --profile grobase build grobase-site-audit`
+  then `docker compose --profile grobase run --rm grobase-site-audit` (runs `scripts/audit/run-all.mjs`).
+- `make grobase-e2e` (`grobase.mk:20-25`) → same build, then `run --rm grobase-site-audit npm run test:e2e`.
+
+This was wired in on 2026-06-28 — `wiki/FAQ/05-securite-rgpd-anssi.md:40` documents the
+fix ("the missing `grobase-site-audit` compose service was wired into `docker-compose.yml`"),
+not breakage.
+
+> **The genuinely-broken siblings are the dev-server targets**, not these. `make grobase-up`
+> / `grobase-logs` / `grobase-down` (`grobase.mk:1-12`) reference a plain **`grobase-site`**
+> service that exists only as a buildx-bake target (`docker-bake.hcl:83`) and is **not**
+> defined in any compose file — so those three fail with "no such service". Covered in
+> [08 Orchestration & Verification Gates](./08-orchestration-and-verification-gates.md).
+
+An equivalent **manual** path builds the same Dockerfile `audit` stage directly (handy when
+you want the image without the compose wrapper):
 
 ```bash
-# Working reproduce of make grobase-audit (runs scripts/audit/run-all.mjs):
+# Equivalent to make grobase-audit (runs scripts/audit/run-all.mjs):
 cd apps/grobase/vendor/grobase-website \
   && docker build --target audit -t grobase-site-audit:local . \
   && docker run --rm grobase-site-audit:local
 ```
 
-| Intended target | Status | Real invocation |
-|-----------------|--------|-----------------|
-| `make grobase-audit` (`infrastructure/makes/grobase.mk:14`) | ⚠️ broken (no compose service) | `docker build --target audit ... && docker run --rm grobase-site-audit:local` |
-| `make grobase-e2e` (`infrastructure/makes/grobase.mk:20`) | ⚠️ broken (no compose service) | builds `grobase-site-audit` image then runs `npm run test:e2e` (see [05 Testing](./05-testing-frameworks.md)) |
+| Target | Status | Invocation |
+|--------|--------|-----------|
+| `make grobase-audit` (`grobase.mk:14`) | ✅ works | compose service `grobase-site-audit` (`docker-compose.yml:516`); or the manual `docker build --target audit` above |
+| `make grobase-e2e` (`grobase.mk:20`) | ✅ works | builds `grobase-site-audit`, then `npm run test:e2e` (see [05 Testing](./05-testing-frameworks.md)) |
+| `make grobase-up` / `grobase-logs` / `grobase-down` (`grobase.mk:1-12`) | ⚠️ broken | reference bake-only `grobase-site` (no compose service) — see [08](./08-orchestration-and-verification-gates.md) |
 
 Single-tool reproduce (inside the audit image / container-only) — each maps to a
 `package.json` script: `npm run audit:lh`, `npm run audit:a11y`, `npm run audit:csp`,
@@ -153,7 +163,7 @@ Single-tool reproduce (inside the audit image / container-only) — each maps to
 |-------|-------|
 | Purpose | Reproducible perf/a11y/best-practices/SEO gate over the prod preview; fails any category < min on any page |
 | Config | `apps/grobase/vendor/grobase-website/scripts/audit/lighthouse.mjs:12` (categories), `:13` (pages), `:18` (`min` = `--min`/`LH_MIN`/default 90); devDep `package.json:41` (`lighthouse ^13.3.0`) |
-| Run | `make grobase-audit` ⚠️ / `cd apps/grobase/vendor/grobase-website && npm run audit:lh` / Docker reproduce above |
+| Run | `make grobase-audit` / `cd apps/grobase/vendor/grobase-website && npm run audit:lh` / manual Docker build above |
 | Threshold | **≥ 90** on all 4 categories × 3 pages (default, overridable via `LH_MIN`) |
 | Scope | Marketing site only; runs against `astro preview` on `:4325`; Chromium via apk (`CHROME_PATH=/usr/bin/chromium-browser`) |
 
@@ -163,7 +173,7 @@ Single-tool reproduce (inside the audit image / container-only) — each maps to
 |-------|-------|
 | Purpose | Programmatic WCAG2AA a11y audit of the rendered pages in headless Chromium |
 | Config | `apps/grobase/vendor/grobase-website/scripts/audit/pa11y.config.json:2` (standard=WCAG2AA, `timeout 60000`); invoked `run-all.mjs:60`; devDep `package.json:42` (`pa11y ^9.1.1`) |
-| Run | `make grobase-audit` ⚠️ / `npm run audit:a11y` (standalone hits only `/`) / Docker reproduce |
+| Run | `make grobase-audit` / `npm run audit:a11y` (standalone hits only `/`) / manual Docker build |
 | Threshold | WCAG2AA — any violation fails |
 | Scope | All 3 pages in `run-all.mjs`; the standalone `audit:a11y` script hits only `:4325/` |
 
@@ -176,7 +186,7 @@ Single-tool reproduce (inside the audit image / container-only) — each maps to
 |-------|-------|
 | Purpose | Proves CSP correctness in a real browser: fails on any `securitypolicyviolation`, any console error, or a `<meta>` CSP that is missing, lacks `sha256-` hashes, or contains `unsafe-inline` |
 | Config | `scripts/audit/csp-check.mjs:52` (problem checks), `:57` (rejects `unsafe-inline`); invoked `run-all.mjs:58`; script `package.json:24` (`audit:csp`) |
-| Run | `make grobase-audit` ⚠️ / `npm run audit:csp` / Docker reproduce |
+| Run | `make grobase-audit` / `npm run audit:csp` / manual Docker build |
 | Threshold | Zero violations / zero console errors / strict meta-CSP |
 | Scope | 3 pages; uses the puppeteer bundled with pa11y |
 
@@ -276,9 +286,11 @@ else these are individual scripts.
 
 ## Gotchas & honest caveats
 
-1. **`make grobase-audit` / `grobase-e2e` are broken** — no compose service backs them. Use
-   the `docker build --target audit` reproduce. The audit *scripts/configs* are correct;
-   only the make/compose wiring is broken (confirmed at `wiki/FAQ/05-securite-rgpd-anssi.md:40`).
+1. **`make grobase-audit` / `grobase-e2e` work** — backed by the `grobase-site-audit`
+   compose service (`docker-compose.yml:516`), wired in 2026-06-28 (per
+   `wiki/FAQ/05-securite-rgpd-anssi.md:40`). The broken siblings are the dev-server targets
+   `grobase-up` / `grobase-logs` / `grobase-down`, which reference a bake-only `grobase-site`
+   service ([08](./08-orchestration-and-verification-gates.md)).
 2. **opposite-osiris `audit:a11y` / `audit:csp` / `audit:all` are non-functional** — those
    `package.json` scripts (lines 22–24) reference `apps/opposite-osiris/scripts/audit/`
    which **does not exist** (no `pa11y.config.json`, `csp-check.mjs`, or `run-all.mjs`
