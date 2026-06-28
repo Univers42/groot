@@ -41,7 +41,7 @@ There is no host `node`/`npm`/`pnpm`/`go`/`cargo` in this project — **every ga
 | `make -C apps/grobase test-lint` | Full grobase lint matrix: shell · rust · go · ts · yaml · docker · make | `apps/grobase/orchestrators/makes/100-test.mk` |
 | `make -C apps/grobase tests` | Full grobase 14-kind test matrix | `apps/grobase/orchestrators/makes/40-tests.mk` |
 | `make baas-verify-m1` … `make baas-verify-all` | Milestone acceptance gates M1–M10 (chain) and M11+ by glob | `infrastructure/makes/baas-verify.mk:132` |
-| `make grobase-audit` ⚠ | Lighthouse + pa11y + csp + html-validate (**broken make/compose wiring in this checkout** — see [06](./06-web-quality-and-accessibility.md)) | `infrastructure/makes/grobase.mk:14` |
+| `make grobase-audit` | Lighthouse + pa11y + csp + html-validate (compose service `grobase-site-audit`, `docker-compose.yml:516`) | `infrastructure/makes/grobase.mk:14` |
 | `make all` | Whole-machine bring-up → healthcheck → showcase | `infrastructure/makes/pipeline.mk:5` |
 
 ---
@@ -99,7 +99,7 @@ Every tool in the catalog, grouped by layer. Config paths and run commands are r
 | Checkov | sast | Policy-as-code IaC/Helm/Compose misconfig | `apps/grobase/scripts/security/audit/iac-scan.sh:45` | `make baas-security-audit AUDIT_ONLY=iac` | grobase IaC/Helm/Compose |
 | Renovate | governance | Auto dep-update PRs, 3-day release-age hold | `renovate.json:8` | (GitHub app / mend.io bot) | Root repo, npm/pnpm/docker |
 | minimum-release-age | governance | Refuse to install too-new packages (7-day) | `apps/osionos/app/.npmrc:1` | (enforced at install time) | osionos/app (full 7-day hold) |
-| pnpm overrides (selector+caret) | governance | Force vulnerable transitives to a fixed version | `apps/osionos/app/package.json:89`, `apps/opposite-osiris/package.json:75` | `docker run --rm -v "$PWD:/repo" -w /repo/apps/<app> node:22-alpine sh -lc 'corepack enable && corepack prepare pnpm@11.5.1 --activate && pnpm install --lockfile-only'` | pnpm apps (osionos/app, opposite-osiris) |
+| pnpm overrides (selector+caret) | governance | Force vulnerable transitives to a fixed version | `apps/osionos/app/package.json:90`, `apps/opposite-osiris/package.json:77` | `docker run --rm -v "$PWD:/repo" -w /repo/apps/<app> node:22-alpine sh -lc 'corepack enable && corepack prepare pnpm@11.5.1 --activate && pnpm install --lockfile-only'` | pnpm apps (osionos/app, opposite-osiris) |
 
 ### DAST & Pentest → [04](./04-dast-and-pentest.md)
 
@@ -116,8 +116,8 @@ Every tool in the catalog, grouped by layer. Config paths and run commands are r
 |------|-------|---------|--------|-------------|-------|
 | Playwright (osionos e2e) | test | Offline browser e2e of the block editor | `apps/osionos/app/playwright.config.ts:33` | `cd apps/osionos/app && bash scripts/docker-run.sh test-e2e` | osionos editor (`.mjs` specs) |
 | Playwright (grobase site) | test | Marketing-site e2e against prod preview | `apps/grobase/vendor/grobase-website/playwright.config.ts:11` | `make grobase-e2e` | grobase marketing site |
-| node:test (osionos canvas) | test | Block-model/serialization/tx unit tests | `apps/osionos/app/package.json:14` | `cd apps/osionos/app && bash scripts/docker-run.sh test-canvas` | osionos canvas (`.test.ts`, strip-types) |
-| node:test (osionos bridge) | test | Auth-handoff + bridge API tests | `apps/osionos/app/package.json:15` | `cd apps/osionos/app && bash scripts/docker-run.sh test-bridge` | osionos bridge (`.test.mjs`) |
+| node:test (osionos canvas) | test | Block-model/serialization/tx unit tests | `apps/osionos/app/package.json:23` | `cd apps/osionos/app && bash scripts/docker-run.sh test-canvas` | osionos canvas (`.test.ts`, strip-types) |
+| node:test (osionos bridge) | test | Auth-handoff + bridge API tests | `apps/osionos/app/package.json:25` | `cd apps/osionos/app && bash scripts/docker-run.sh test-bridge` | osionos bridge (`.test.mjs`) |
 | node:test (grobase JS SDK) | test | `@grobase/js` SDK unit tests | `apps/grobase/sdks/js/package.json:53` | `cd apps/grobase/sdks/js && npm run build && npm test` | grobase sdks/js |
 | go test | test | Go control-plane unit/fuzz (vet first, no `-race`) | `apps/grobase/orchestrators/makes/40-tests.mk:36` | `make -C apps/grobase test-go` | grobase Go control plane (92 `*_test.go`) |
 | cargo test (data plane) | test | Rust data-plane workspace | `apps/grobase/orchestrators/makes/40-tests.mk:39` | `make -C apps/grobase rust-data-plane-test` | grobase Rust data plane |
@@ -133,7 +133,7 @@ Every tool in the catalog, grouped by layer. Config paths and run commands are r
 
 | Tool | Layer | Purpose | Config | Run command | Scope |
 |------|-------|---------|--------|-------------|-------|
-| Lighthouse (grobase site) | web-quality | Perf/a11y/best-practices/SEO ≥90 ×4 | `apps/grobase/vendor/grobase-website/scripts/audit/lighthouse.mjs:12` | `make grobase-audit` ⚠ broken — `cd apps/grobase/vendor/grobase-website && docker build --target audit -t grobase-site-audit:local . && docker run --rm grobase-site-audit:local` | grobase marketing site (3 pages) |
+| Lighthouse (grobase site) | web-quality | Perf/a11y/best-practices/SEO ≥90 ×4 | `apps/grobase/vendor/grobase-website/scripts/audit/lighthouse.mjs:12` | `make grobase-audit` (compose service `grobase-site-audit`, `docker-compose.yml:516`) | grobase marketing site (3 pages) |
 | pa11y (grobase site) | a11y | WCAG2AA audit in headless Chromium | `apps/grobase/vendor/grobase-website/scripts/audit/pa11y.config.json:2` | `cd apps/grobase/vendor/grobase-website && npm run audit:a11y` | grobase marketing site |
 | csp-check (grobase site) | web-quality | CSP correctness (no inline, sha256 hashes) | `apps/grobase/vendor/grobase-website/scripts/audit/csp-check.mjs:52` | `cd apps/grobase/vendor/grobase-website && npm run audit:csp` | grobase marketing site (3 pages) |
 | html-validate (web-quality) | web-quality | Built HTML validity over `dist/**` | `apps/grobase/vendor/grobase-website/.htmlvalidate.json:2` | `cd apps/grobase/vendor/grobase-website && npm run lint:html` | grobase site + opposite-osiris |
@@ -219,4 +219,4 @@ flowchart TD
 - **Container naming:** root frontends are `track-binocle-<service>-1`; the backend is the separate `mini-baas` compose project (`mini-baas-*`).
 - **Package managers:** pnpm → opposite-osiris, osionos/app, grobase-website · npm → mail, calendar, grobase src + sdks/js · Poetry → grobase sdks/python.
 - **Strictness is asymmetric:** osionos ESLint is `--max-warnings=0` and clippy is `-D warnings`, but opposite-osiris `npm run lint` is bare `eslint .` (warnings don't fail it) — the generic `quality.sh` gate is what enforces `--max-warnings 0` everywhere.
-- **Known-broken in this checkout:** `make grobase-audit` / `make grobase-e2e` (no compose service defined — use the Docker `--target audit` reproduce); OSV/IaC audit paths are stale post-flatten. Details in [04](./04-dast-and-pentest.md) and [06](./06-web-quality-and-accessibility.md).
+- **Marketing-site targets:** `make grobase-audit` / `make grobase-e2e` work via the `grobase-site-audit` compose service (`docker-compose.yml:516`). The dev-server targets `make grobase-up` / `grobase-logs` / `grobase-down` instead reference a `grobase-site` *service* that exists only as a buildx-bake target (`docker-bake.hcl:83`), not a compose service — so as-written they fail with "no such service". OSV/IaC audit paths are stale post-flatten. Details in [04](./04-dast-and-pentest.md), [06](./06-web-quality-and-accessibility.md), and [08](./08-orchestration-and-verification-gates.md).
