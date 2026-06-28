@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS public.osionos_pages (
   is_template BOOLEAN NOT NULL DEFAULT false,
   is_default_template BOOLEAN NOT NULL DEFAULT false,
   recurrence JSONB,
+  template_surface TEXT CHECK (template_surface IS NULL OR template_surface IN ('profile', 'marketplace-app')),
   archived_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -71,7 +72,8 @@ CREATE TABLE IF NOT EXISTS public.osionos_pages (
 ALTER TABLE public.osionos_pages
   ADD COLUMN IF NOT EXISTS is_template BOOLEAN NOT NULL DEFAULT false,
   ADD COLUMN IF NOT EXISTS is_default_template BOOLEAN NOT NULL DEFAULT false,
-  ADD COLUMN IF NOT EXISTS recurrence JSONB;
+  ADD COLUMN IF NOT EXISTS recurrence JSONB,
+  ADD COLUMN IF NOT EXISTS template_surface TEXT CHECK (template_surface IS NULL OR template_surface IN ('profile', 'marketplace-app'));
 
 CREATE TABLE IF NOT EXISTS public.osionos_page_configurations (
   page_id TEXT NOT NULL,

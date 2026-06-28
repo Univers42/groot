@@ -8,7 +8,7 @@ old SQL as a harmless side effect, which we ignore).
 """
 import base64, hashlib, json, sys
 
-sys.path.insert(0, "/home/dlesieur/Documents/ft_transcendence/temp")
+sys.path.insert(0, "/home/dlesieur/Documents/groot/temp")
 from seed_academy import (  # noqa: E402
     N, CURATED, default_code, EXT, LANG_LABEL, slug, snake,
 )
@@ -361,7 +361,7 @@ for cat, sub, title, lang, related in N:
         f"UPDATE public.osionos_pages SET content={jcol(content)}, updated_at=now() "
         f"WHERE workspace_id='{WS}' AND title={sqlstr(title)} AND surface IS NULL;")
 lines.append("COMMIT;")
-out = "/home/dlesieur/Documents/ft_transcendence/temp/seed_content.sql"
+out = "/home/dlesieur/Documents/groot/temp/seed_content.sql"
 with open(out, "w") as fh:
     fh.write("\n".join(lines) + "\n")
 authored = sum(1 for _, _, t, _, _ in N if t in L)

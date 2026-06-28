@@ -642,7 +642,7 @@ for rid, parent, title, icon, surface, props, content in rows:
         f"'{rid}', '{WS}', {parent_sql}, '{OWNER}', {sqlstr(title)}, {icon_sql}, {surface_sql}, "
         f"'private', '[]'::jsonb, {jcol(props)}, {jcol(content)}, now(), now());")
 lines.append("COMMIT;")
-out = "/home/dlesieur/Documents/ft_transcendence/temp/seed_arch.sql"
+out = "/home/dlesieur/Documents/groot/temp/seed_arch.sql"
 with open(out, "w") as fh:
     fh.write("\n".join(lines) + "\n")
 print(f"root+folders: {len(SUBFOLDERS)+1}  notes: {len(TOPICS)}  rows: {len(rows)}", file=sys.stderr)

@@ -22,7 +22,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 PEOPLE_ENV = HERE / ".agency-people.env"
-TENANT_ENV = HERE.parent.parent / "apps" / "baas" / "mini-baas-infra" / ".agency-tenant.env"
+TENANT_ENV = HERE.parent.parent / "apps" / "grobase" / ".agency-tenant.env"
 OUT = HERE / "seed_agency.sql"
 
 random.seed(42)

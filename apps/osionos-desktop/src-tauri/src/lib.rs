@@ -2,13 +2,13 @@ use std::path::PathBuf;
 use std::process::Command;
 
 /// Resolve the Track Binocle repo dir that holds docker-compose.yml.
-/// Override with TRACK_BINOCLE_HOME; defaults to ~/Documents/ft_transcendence.
+/// Override with TRACK_BINOCLE_HOME; defaults to ~/Documents/groot.
 fn track_binocle_home() -> PathBuf {
     if let Ok(dir) = std::env::var("TRACK_BINOCLE_HOME") {
         return PathBuf::from(dir);
     }
     let home = std::env::var("HOME").unwrap_or_default();
-    PathBuf::from(format!("{home}/Documents/ft_transcendence"))
+    PathBuf::from(format!("{home}/Documents/groot"))
 }
 
 /// Boot the local suite (osionos + Mail + Calendar + lean BaaS) in the
