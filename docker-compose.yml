@@ -508,6 +508,20 @@ services:
     entrypoint: ["/bin/bash", "/app/docker/services/browser-tests/entrypoint.sh"]
     command: ["node", "scripts/agency-simulation.mjs"]
 
+  # Grobase marketing-site quality gate — backs `make grobase-audit` and
+  # `make grobase-e2e`. Builds the website's `audit` Dockerfile stage (system
+  # Chromium + Lighthouse + pa11y) and runs the self-contained gate (astro build →
+  # HTTP preview on :4325 → html-validate + CSP check + pa11y WCAG2AA + Lighthouse
+  # >=90 ×4). Self-contained: no published ports, no backend network needed.
+  grobase-site-audit:
+    profiles:
+      - grobase
+    build:
+      context: ./apps/grobase/vendor/grobase-website
+      dockerfile: Dockerfile
+      target: audit
+    image: track-binocle/grobase-site-audit:local
+
 volumes:
   osionos-app-node-modules:
   osionos-app-pnpm-store:

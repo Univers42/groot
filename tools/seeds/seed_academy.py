@@ -1277,7 +1277,7 @@ for rid, parent, title, icon, surface, props, content in rows:
         f"'private', '[]'::jsonb, {jcol(props)}, {jcol(content)}, now(), now());")
 lines.append("COMMIT;")
 
-out = "/home/dlesieur/Documents/ft_transcendence/temp/seed_academy.sql"
+out = "/home/dlesieur/Documents/groot/temp/seed_academy.sql"
 with open(out, "w") as fh:
     fh.write("\n".join(lines) + "\n")
 print(f"folders: {len(folders)+1}  notes: {len(notes)}  rows: {len(rows)}", file=sys.stderr)

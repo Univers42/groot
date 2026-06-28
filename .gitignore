@@ -26,7 +26,6 @@ prompt
 apps/track-binocle
 CLAUDE.md
 adversarial-reviewer-SKILL.md
-.claude
 
 # Local task workflow artifacts
 .claude/workflow/

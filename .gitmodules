@@ -33,3 +33,6 @@
 	path = apps/grobase
 	url = git@github.com:Univers42/grobase.git
 	branch = main
+[submodule ".claude"]
+	path = .claude
+	url = git@github.com:Univers42/claude-deal-with-the-devil.git

@@ -1,0 +1,17 @@
+# CS50 datasets are fetched from the official source on demand — never committed here.
+# (Their bundles include third-party-licensed data, e.g. IMDb.)
+cs50/downloads/
+cs50/extracted/
+
+# Never commit dataset binaries anywhere under playground/datas/
+*.zip
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# Generated artifacts (CSV extracts from .db files, assembled sqlite, etc.)
+_generated/
+**/_generated/
+
+# Keep the committed sample CSVs (they are NOT matched above) and all scripts/READMEs.

@@ -31,13 +31,15 @@ grobase-e2e:
 # is the running apps/grobase stack and must NOT be re-upped from here.
 ROOT_FRONTENDS := osionos-bridge osionos-app auth-gateway opposite-osiris-web local-https-proxy livekit
 
-# Engine set `make all` brings up on a fresh machine. `migrate` = all snapshot engines
-# (postgres mongo mysql mssql minio, all public images) + full app/control/data plane +
-# realtime, but WITHOUT the monitoring/lakehouse extras (loki/prometheus/grafana, trino,
-# studio, functions) that come up unhealthy in a constrained env — so `make all` is fully
-# green. Use GROBASE_EDITION=full for the everything-on shape. dynamodb stays out (hypertube
-# vendor stack, private images).
-GROBASE_EDITION ?= migrate
+# Engine set `make all` brings up on a fresh machine. Default `devlean` = the daily-dev
+# shape: every CORE engine (postgres mongo redis minio, all public images) + full
+# app/control/data plane + realtime, but WITHOUT the heavy à-la-carte extra-engines plane
+# (mysql/mariadb/cockroach/mssql, ~750 MiB — cockroach alone ~590 MiB) and WITHOUT the
+# monitoring/lakehouse extras that come up unhealthy in a constrained env. osionos uses
+# none of the extra engines, so nothing is lost — and the constrained host stops thrashing.
+# The extra DB engines are one flag away: `make all GROBASE_EDITION=migrate` (all snapshot
+# engines, the old default) or `=full` (everything-on). dynamodb stays out (private images).
+GROBASE_EDITION ?= devlean
 
 backend-up:
 ## Ensure the grobase backend is up — START it if it's down (not just guard), so a bare `make all` reconstitutes a clean machine. Brings up GROBASE_EDITION (default migrate). With a vault key, secrets are pulled earlier by `secrets-ensure`; with NO vault key, grobase self-generates its secrets (no-vault local mode) and `env-local-ensure` derives the root ./.env.local afterward.
