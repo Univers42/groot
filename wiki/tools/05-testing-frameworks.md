@@ -112,8 +112,8 @@ These are Playwright-**library** driver scripts (`node scripts/*.mjs`), **not** 
 
 | Surface | Purpose | Config | Run command | Scope |
 |---|---|---|---|---|
-| osionos canvas | Block model / serialization / transaction units, TS stripped on the fly | `apps/osionos/app/scripts/docker-run.sh:35`; `apps/osionos/app/package.json:14` | `cd apps/osionos/app && bash scripts/docker-run.sh test-canvas` | ~30+ `*.test.ts` under `tests/canvas/` (canvas-model, chart-engine, live-*, block-combinations…) |
-| osionos bridge | Website→editor auth-handoff, bridge API/chat/mentions/ratelimit/rtc | `apps/osionos/app/scripts/docker-run.sh:37`; `apps/osionos/app/package.json:15` | `cd apps/osionos/app && bash scripts/docker-run.sh test-bridge` | `*.test.mjs` under `tests/bridge/` (bridge-api, bridge-chat-media, bridge-mentions, bridge-ratelimit, collab-rtc) |
+| osionos canvas | Block model / serialization / transaction units, TS stripped on the fly | `apps/osionos/app/scripts/docker-run.sh:35`; `apps/osionos/app/package.json:23` | `cd apps/osionos/app && bash scripts/docker-run.sh test-canvas` | ~30+ `*.test.ts` under `tests/canvas/` (canvas-model, chart-engine, live-*, block-combinations…) |
+| osionos bridge | Website→editor auth-handoff, bridge API/chat/mentions/ratelimit/rtc | `apps/osionos/app/scripts/docker-run.sh:37`; `apps/osionos/app/package.json:25` | `cd apps/osionos/app && bash scripts/docker-run.sh test-bridge` | `*.test.mjs` under `tests/bridge/` (bridge-api, bridge-chat-media, bridge-mentions, bridge-ratelimit, collab-rtc) |
 | grobase JS SDK | Units for `@grobase/js` (account/auth/rest/schema/storage/realtime/graphql/http-hardening/cli) | `apps/grobase/sdks/js/package.json:53` | `cd apps/grobase/sdks/js && npm run build && npm test` | ~10 `*.test.mjs` under `tests/` |
 
 Single-test forms:

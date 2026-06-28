@@ -72,17 +72,17 @@ per-app config decides the file globs.
 ```mermaid
 flowchart LR
   subgraph Frontends["Root frontends (Docker-first)"]
-    OO["opposite-osiris\npnpm · container-only.mjs"]
-    OS["osionos/app\npnpm · docker-run.sh"]
-    MC["mail + calendar\nnpm · tsc only"]
+    OO["opposite-osiris<br/>pnpm · container-only.mjs"]
+    OS["osionos/app<br/>pnpm · docker-run.sh"]
+    MC["mail + calendar<br/>npm · tsc only"]
   end
   subgraph Grobase["grobase (nested repo · make -C apps/grobase)"]
-    TS["NestJS src\neslint + prettier + tsc"]
-    GO["Go\ngofumpt + go vet"]
-    RS["Rust\ncargo fmt + clippy"]
-    SH["shell\nshellcheck"]
+    TS["NestJS src<br/>eslint + prettier + tsc"]
+    GO["Go<br/>gofumpt + go vet"]
+    RS["Rust<br/>cargo fmt + clippy"]
+    SH["shell<br/>shellcheck"]
   end
-  Q[".claude/tools/quality.sh\nrepo-wide strict gate"]
+  Q[".claude/tools/quality.sh<br/>repo-wide strict gate"]
   OO --> Q
   OS --> Q
   MC --> Q
