@@ -63,3 +63,6 @@ screenshots/
 
 # electron-builder root-owned node_modules quarantine (build junk, never track)
 .nm_el_quarantine_*/
+*.secrets
+.secrets
+*secret*
