@@ -25,14 +25,17 @@ FORCE="${FORCE:-0}"
 note() { printf '[gen-local-env] %s\n' "$1" >&2; }
 
 if [ -f "$OUT" ] && [ "$FORCE" != 1 ]; then
-	note "$(basename "$OUT") already present — leaving it (FORCE=1 to overwrite)."
-	exit 0
+  note "$(basename "$OUT") already present — leaving it (FORCE=1 to overwrite)."
+  exit 0
 fi
 if [ ! -f "$GRO_ENV" ]; then
-	note "apps/grobase/.env not found — bring the backend up first (make backend-up)."
-	exit 1
+  note "apps/grobase/.env not found — bring the backend up first (make backend-up)."
+  exit 1
 fi
-command -v openssl >/dev/null 2>&1 || { note "openssl required"; exit 1; }
+command -v openssl >/dev/null 2>&1 || {
+  note "openssl required"
+  exit 1
+}
 
 # Read a key's value from grobase's generated .env (strip quotes; empty if absent).
 gval() { sed -n "s/^$1=//p" "$GRO_ENV" | head -1 | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//"; }
@@ -46,10 +49,12 @@ SERVICE="$(gval SERVICE_ROLE_KEY)"
 JWT="$(gval JWT_SECRET)"
 ADAPTER="$(gval ADAPTER_REGISTRY_SERVICE_TOKEN)"
 [ -n "$PUBLIC" ] && [ -n "$SERVICE" ] && [ -n "$JWT" ] || {
-	note "grobase .env is missing ANON_KEY/SERVICE_ROLE_KEY/JWT_SECRET — is the backend healthy?"; exit 1; }
+  note "grobase .env is missing ANON_KEY/SERVICE_ROLE_KEY/JWT_SECRET — is the backend healthy?"
+  exit 1
+}
 
 umask 077
-cat > "$OUT" <<EOF
+cat >"$OUT" <<EOF
 # ./.env.local — GENERATED for a no-vault local machine by scripts/gen-local-env.sh.
 # Derived from apps/grobase/.env (BaaS keys) + locally-minted osionos secrets.
 # Delete this file and re-run \`make all\` to regenerate against a fresh backend.

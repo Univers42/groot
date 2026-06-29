@@ -27,8 +27,8 @@ SIDECAR_URI="mongodb://${MONGO_USER}:${MONGO_PASS}@${CONTAINER}:27017/learn_shop
 echo "==> [Mongo] Dropping scratch database learn_shop (cleanup for re-run)..."
 docker exec "${CONTAINER}" \
   mongosh --quiet \
-    "mongodb://${MONGO_USER}:${MONGO_PASS}@localhost:27017/admin?authSource=admin" \
-    --eval "db.getSiblingDB('learn_shop').dropDatabase()"
+  "mongodb://${MONGO_USER}:${MONGO_PASS}@localhost:27017/admin?authSource=admin" \
+  --eval "db.getSiblingDB('learn_shop').dropDatabase()"
 
 # ── Load ─────────────────────────────────────────────────────────────────────
 for COLLECTION in customers products orders; do
@@ -40,19 +40,19 @@ for COLLECTION in customers products orders; do
     -v "${CSV_DIR}:/csv:ro" \
     "${MONGO_IMAGE}" \
     mongoimport \
-      --uri "${SIDECAR_URI}" \
-      --collection "${COLLECTION}" \
-      --type csv \
-      --headerline \
-      "/csv/${COLLECTION}.csv"
+    --uri "${SIDECAR_URI}" \
+    --collection "${COLLECTION}" \
+    --type csv \
+    --headerline \
+    "/csv/${COLLECTION}.csv"
 done
 
 # ── Verify ───────────────────────────────────────────────────────────────────
 echo "==> [Mongo] Verifying document counts..."
 docker exec "${CONTAINER}" \
   mongosh --quiet \
-    "mongodb://${MONGO_USER}:${MONGO_PASS}@localhost:27017/admin?authSource=admin" \
-    --eval "
+  "mongodb://${MONGO_USER}:${MONGO_PASS}@localhost:27017/admin?authSource=admin" \
+  --eval "
       const d = db.getSiblingDB('learn_shop');
       const c = d.customers.countDocuments();
       const p = d.products.countDocuments();

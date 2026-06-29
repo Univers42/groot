@@ -1,0 +1,17 @@
+*
+!apps
+apps/*
+!apps/grobase
+apps/grobase/*
+!apps/grobase/sdks
+apps/grobase/sdks/*
+!apps/grobase/sdks/js
+!apps/opposite-osiris
+apps/opposite-osiris/*
+!apps/opposite-osiris/scripts
+!apps/opposite-osiris/src
+apps/opposite-osiris/src/*
+!apps/opposite-osiris/src/email-templates
+**/node_modules
+**/.git
+**/dist

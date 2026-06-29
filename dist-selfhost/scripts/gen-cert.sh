@@ -22,10 +22,13 @@ SERVER_CERT="$CERT_DIR/localhost.pem"
 OPENSSL_CONFIG="$CERT_DIR/localhost-openssl.cnf"
 SERVER_EXT="$CERT_DIR/localhost-ext.cnf"
 
-command -v openssl >/dev/null 2>&1 || { echo "FATAL: openssl is required to generate local certs." >&2; exit 1; }
+command -v openssl >/dev/null 2>&1 || {
+  echo "FATAL: openssl is required to generate local certs." >&2
+  exit 1
+}
 mkdir -p "$CERT_DIR"
 
-cat > "$OPENSSL_CONFIG" <<'EOF'
+cat >"$OPENSSL_CONFIG" <<'EOF'
 [req]
 default_bits = 2048
 prompt = no
@@ -44,7 +47,7 @@ IP.1 = 127.0.0.1
 IP.2 = ::1
 EOF
 
-cat > "$SERVER_EXT" <<'EOF'
+cat >"$SERVER_EXT" <<'EOF'
 basicConstraints = critical,CA:FALSE
 keyUsage = critical,digitalSignature,keyEncipherment
 extendedKeyUsage = serverAuth
@@ -71,8 +74,8 @@ fi
 
 server_needs_regen=1
 if [ "$ca_regenerated" -eq 0 ] && [ -s "$SERVER_KEY" ] && [ -s "$SERVER_CERT" ]; then
-  if openssl verify -CAfile "$CA_CERT" "$SERVER_CERT" >/dev/null 2>&1 \
-    && openssl x509 -checkend 2592000 -noout -in "$SERVER_CERT" >/dev/null 2>&1; then
+  if openssl verify -CAfile "$CA_CERT" "$SERVER_CERT" >/dev/null 2>&1 &&
+    openssl x509 -checkend 2592000 -noout -in "$SERVER_CERT" >/dev/null 2>&1; then
     server_needs_regen=0
   fi
 fi

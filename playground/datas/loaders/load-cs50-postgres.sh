@@ -47,7 +47,7 @@ TARGET_DB="${2:-learn_${STEM}}"
 
 PG_CONTAINER="mini-baas-postgres"
 NETWORK="mini-baas_mini-baas"
-PG_HOST="mini-baas-postgres"   # hostname inside the Docker network
+PG_HOST="mini-baas-postgres" # hostname inside the Docker network
 
 echo "==> [cs50→postgres] SQLite source : ${SQLITE_ABS}"
 echo "==> [cs50→postgres] Target DB     : ${TARGET_DB}"

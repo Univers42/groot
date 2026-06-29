@@ -20,6 +20,7 @@ agency-seed: ## Agency: provision the live tenant + 10 tables + edges, seed ~950
 	bash $(AGENCY_INFRA_DIR)/scripts/seed/agency-tenant.sh
 	python3 $(AGENCY_SEEDS_DIR)/seed_agency.py
 	docker exec -i mini-baas-postgres psql -U postgres -d agency -v ON_ERROR_STOP=1 -q < $(AGENCY_SEEDS_DIR)/seed_agency.sql
+	docker exec -i mini-baas-postgres psql -U postgres -d agency -v ON_ERROR_STOP=1 -q < $(AGENCY_INFRA_DIR)/scripts/seed/agency-normalize-ids.sql
 	@echo "agency tenant seeded (see $(AGENCY_INFRA_DIR)/.agency-tenant.env)"
 
 agency-policies: ## Agency: seed ABAC roles + policies (permission-engine + osionos defaults)

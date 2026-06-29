@@ -26,8 +26,11 @@ ORG_WS_NAME="Binocle Intelligence Agency"
 ORG_WS_SLUG="binocle-intelligence-agency"
 OUT_ENV="${SCRIPT_DIR}/.agency-people.env"
 
-cyan()  { printf '\033[0;36m[people] %s\033[0m\n' "$*"; }
-fail()  { printf '\033[0;31m[people] FAIL: %s\033[0m\n' "$*" >&2; exit 1; }
+cyan() { printf '\033[0;36m[people] %s\033[0m\n' "$*"; }
+fail() {
+  printf '\033[0;31m[people] FAIL: %s\033[0m\n' "$*" >&2
+  exit 1
+}
 
 docker inspect "${PG_CTN}" >/dev/null 2>&1 || fail "postgres container ${PG_CTN} not running"
 docker inspect "${BRIDGE_CTN}" >/dev/null 2>&1 || fail "bridge container ${BRIDGE_CTN} not running"
@@ -134,7 +137,8 @@ JS
 cyan "resolving uuids from auth.users"
 declare -A UUID_OF
 while IFS='|' read -r email uuid; do
-  email="${email// /}"; uuid="${uuid// /}"
+  email="${email// /}"
+  uuid="${uuid// /}"
   [[ -n "${email}" && -n "${uuid}" ]] && UUID_OF["${email}"]="${uuid}"
 done < <(PSQL -At -F'|' -c "SELECT email, id FROM auth.users WHERE email LIKE '%@agency.local'")
 for entry in "${ROSTER[@]}"; do
@@ -156,7 +160,8 @@ cyan "upserting bridge identities + private workspaces"
 
 # ── 4) shared org workspace + members ────────────────────────────────────────
 cyan "upserting org workspace '${ORG_WS_NAME}' + 21 members"
-OWNER_UUID="${UUID_OF[owner@agency.local]}"
+owner_key="owner@agency.local"
+OWNER_UUID="${UUID_OF[$owner_key]}"
 {
   cat <<SQL
 INSERT INTO public.osionos_workspaces (id, owner_id, name, slug, source, settings)
@@ -169,9 +174,9 @@ SQL
     IFS='|' read -r email _name _role _dept _clr _region ws_role _mode <<<"${entry}"
     uuid="${UUID_OF[${email}]}"
     case "${ws_role}" in
-      owner|admin) perms="ARRAY['create','read','update','delete','admin']" ;;
-      editor)      perms="ARRAY['create','read','update','delete']" ;;
-      *)           perms="ARRAY['read']" ;;
+    owner | admin) perms="ARRAY['create','read','update','delete','admin']" ;;
+    editor) perms="ARRAY['create','read','update','delete']" ;;
+    *) perms="ARRAY['read']" ;;
     esac
     cat <<SQL
 INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role, permissions)
@@ -193,10 +198,10 @@ cyan "writing ${OUT_ENV}"
   for entry in "${ROSTER[@]}"; do
     IFS='|' read -r email name role dept clr region ws_role mode <<<"${entry}"
     echo "AGENCY_PERSON_${i}=${UUID_OF[${email}]}|${email}|${name}|${role}|${dept}|${clr}|${region}|${ws_role}"
-    i=$((i+1))
+    i=$((i + 1))
   done
   echo "AGENCY_PERSON_COUNT=${i}"
-} > "${OUT_ENV}"
+} >"${OUT_ENV}"
 
 MEMBERS=$(PSQL -At -c "SELECT count(*) FROM public.osionos_workspace_members WHERE workspace_id='${ORG_WS_ID}'")
 [[ "${MEMBERS}" == "21" ]] || fail "expected 21 org members, found ${MEMBERS}"

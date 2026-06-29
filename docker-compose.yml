@@ -83,7 +83,11 @@ services:
       - default
       - mini-baas
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4000/api/auth/bridge/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "fetch(''http://127.0.0.1:4000/api/auth/bridge/health'').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"',
+        ]
       interval: 5s
       timeout: 3s
       start_period: 45s
@@ -157,7 +161,8 @@ services:
       osionos-bridge:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
+      test:
+        ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
       interval: 5s
       timeout: 3s
       start_period: 15s
@@ -197,7 +202,11 @@ services:
       - default
       - mini-baas
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"const port=process.env.MAIL_BRIDGE_PORT||4100; fetch('http://127.0.0.1:'+port+'/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "const port=process.env.MAIL_BRIDGE_PORT||4100; fetch(''http://127.0.0.1:''+port+''/health'').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"',
+        ]
       interval: 5s
       timeout: 3s
       start_period: 20s
@@ -232,7 +241,11 @@ services:
       mail-bridge:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3002').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "fetch(''http://127.0.0.1:3002'').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"',
+        ]
       interval: 5s
       timeout: 3s
       start_period: 30s
@@ -279,7 +292,11 @@ services:
       - default
       - mini-baas
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"const port=process.env.CALENDAR_BRIDGE_PORT||4200; fetch('http://127.0.0.1:'+port+'/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "const port=process.env.CALENDAR_BRIDGE_PORT||4200; fetch(''http://127.0.0.1:''+port+''/health'').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"',
+        ]
       interval: 5s
       timeout: 3s
       start_period: 20s
@@ -315,7 +332,11 @@ services:
       calendar-bridge:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3003').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "fetch(''http://127.0.0.1:3003'').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"',
+        ]
       interval: 5s
       timeout: 3s
       start_period: 30s
@@ -380,7 +401,11 @@ services:
       osionos-bridge:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8787/api/auth/availability').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "fetch(''http://127.0.0.1:8787/api/auth/availability'').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"',
+        ]
       interval: 5s
       timeout: 3s
       start_period: 20s
@@ -416,7 +441,11 @@ services:
       auth-gateway:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1 || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1 || exit 1",
+        ]
       interval: 10s
       timeout: 3s
       start_period: 5s
@@ -456,7 +485,8 @@ services:
       - ./apps/grobase/certs:/certs:ro
       - osionos-browser-test-node-modules:/app/node_modules
       - osionos-browser-test-pnpm-store:/pnpm/store
-    entrypoint: ["/bin/bash", "/app/docker/services/browser-tests/entrypoint.sh"]
+    entrypoint:
+      ["/bin/bash", "/app/docker/services/browser-tests/entrypoint.sh"]
     command: ["node", "scripts/playground-simulation.mjs"]
 
   # agency-simulation — the Binocle Intelligence Agency end-to-end Playwright
@@ -505,7 +535,8 @@ services:
       - ./tools/seeds/.agency-people.env:/seeds/.agency-people.env:ro
       - osionos-browser-test-node-modules:/app/node_modules
       - osionos-browser-test-pnpm-store:/pnpm/store
-    entrypoint: ["/bin/bash", "/app/docker/services/browser-tests/entrypoint.sh"]
+    entrypoint:
+      ["/bin/bash", "/app/docker/services/browser-tests/entrypoint.sh"]
     command: ["node", "scripts/agency-simulation.mjs"]
 
   # Grobase marketing-site quality gate — backs `make grobase-audit` and

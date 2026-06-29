@@ -1,0 +1,139 @@
+The security wiki is built, evidence-grounded, and fully verified.
+
+What's in wiki/security/
+
+┌──────────────────────────────────────────────┬───────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                              │                                               Count                                               │
+├──────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ README hub                                   │ 1 (trust narrative + defense-in-depth flagship + full index)                                      │
+├──────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ attack/<concept>.md (the threats)            │ 32                                                                                                │
+├──────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ defense/<app>/<concept>.md> (what each app   │ 107 — grobase 23 · opposite-osiris 19 · auth-gateway 15 · platform 15 · osionos-bridge 14 ·       │
+│ does)                                        │ mail-calendar 12 · osionos 9                                                                      │
+├──────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Preserved existing Vault guides + security   │ 7 (folded into the new README, nothing deleted)                                                   │
+│ reviews                                      │                                                                                                   │
+└──────────────────────────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+Each defense note follows your structure: what the concept is → what it defends against (links the attack/ note) → how this app implements it (cited code) → how we know it's applied (the live gate/test/CI) → OWASP/SANS reference → residual risk. Each attack note explains the attack, a real-world example, the OWASP class, and links back to the apps that defend it.
+
+How it answers "why trust these apps"
+
+The README opens with the trust argument and a flagship defense-in-depth table that traces one data atom (a user's note row) outward through 10 independent layers — RLS → trust boundary → signed session → MFA → Kong → WAF → TLS → network isolation → vault42 → CI gates — naming what an attacker must additionally defeat at each. That's the "atom → component, widening scope" framing you asked for, and it's grounded in real files (models/rls-hardening-migration.sql, the bridge's service-role handling, ModSecurity+OWASP CRS, infrastructure/tls/nginx.conf, .npmrc release-age, the CI security workflow).
+
+How it's kept honest ("only facts, no bullshit")
+
+A 4-stage pipeline, all grounded in the repo:
+1. Read-only audit — 10 auditors inventoried 175 real controls with file-level evidence (no aspirational claims).
+2. Authoring — every note written from that evidence, the author re-opening each cited file.
+3. Adversarial critics — re-checked every citation; flagged 32 issues (10 high) — a nonexistent mount_parity.go, a tx.rs↔auth.rs link swap, a fabricated compose mount, wrong env-var names, off-by-one line numbers, a 17-vs-18 count, and many wrong link depths.
+4. Fixers + global link-check — all 32 fixed against source; a final sweep confirms 660 file-links resolve, 0 broken, 0 machine-absolute paths. (Spot-check: the mfa-passkeys note's 4 cited files all exist.)
+
+References point to OWASP (Top 10 + Cheat Sheet Series, all URL-verified), with SANS / Krebs / The Hacker News / Have I Been Pwned as corroborating sources — summarized and cited in original wording, never reproduced. The audit also surfaced 4 controls beyond the OWASP-10 seed (CAPTCHA/bot protection, data-integrity safeguards, network segmentation, reverse-tabnabbing).
+
+Scale (you enabled ultracode): 4 workflows, ~190 agents, ~6.7M tokens. No application code or running services were touched — this was a read-only audit plus new Markdown. The existing wiki/security/README.md was preserved (its Vault guide index is folded into the new hub; I flagged that those guides predate the move to vault42).
+
+Everything is uncommitted. Want me to commit it — e.g. docs(security): evidence-grounded defense/attack wiki (107 defense + 32 attack notes, OWASP-referenced) — on a branch, and/or split mail and calendar into separate folders (they currently share mail-calendar/)?
+
+✻ Cooked for 2h 37m 11s
+
+❯ in database-cli we cannot connect to any database because we don't know the credentials what are they each time of my database ? to connect as admin I need on each doc to leak those of course. I don't care because there is only fake conntent within them. or maybe we have environment variables that hold them but I don't know where to find them ? to write the documentation I
+
+Quick but important clarification first: the documented commands already connect you as admin without you knowing the password. The pattern docker exec -it mini-baas-postgres sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' resolves the credential from the container's own environment inside the container — so you never type it. That's why the loaders worked. If a specific engine's command failed for you, tell me which.
+
+That said — the credentials are real env-vars inside each container, sourced from grobase's apps/grobase/.env (gitignored; pulled from vault42 or self-generated in no-vault mode). Let me show you exactly where they live and their current values.
+
+  Ran 1 shell command
+
+Let me grab the one that didn't print (MSSQL) — echo in that image's shell swallowed it; printenv is reliable:
+
+  Ran 1 shell command
+
+The MSSQL container returned nothing — let me check whether it's actually running and what its real password env-var is (without suppressing errors this time):
+
+  Ran 1 shell command
+
+That's the missing piece: mini-baas-mssql exited 3 hours ago — it's stopped, which is almost certainly part of "can't connect." The password still lives in its container config (and apps/grobase/.env). Let me read it from the stopped container and confirm which DB engines are actually up.
+
+  Ran 1 shell command
+
+Found the real blocker — and it's not credentials. Three of the engines are stopped:
+
+┌───────────────────────────────────────────────┬──────────────────────┐
+│                    Engine                     │        Status        │
+├───────────────────────────────────────────────┼──────────────────────┤
+│ postgres, mariadb, mysql, mongo, redis, minio │ ✅ Up (21h, healthy) │
+├───────────────────────────────────────────────┼──────────────────────┤
+│ mssql, cockroach, dynamodb-local              │ ❌ Exited ~3h ago    │
+└───────────────────────────────────────────────┴──────────────────────┘
+
+So connections to MSSQL / CockroachDB / DynamoDB genuinely fail right now. Start them:
+
+make backend-up        # brings the whole grobase stack back up
+# or just the three: docker start mini-baas-mssql mini-baas-cockroach mini-baas-dynamodb-local
+
+You don't actually need to type the password
+
+The documented commands resolve the credential inside the container (sh -lc '… "$VAR"'), which is why the loaders worked. These connect you as admin with no password typed:
+
+docker exec -it mini-baas-postgres  sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+docker exec -it mini-baas-mariadb   sh -lc 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD"'
+docker exec -it mini-baas-mysql     sh -lc 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD"'
+docker exec -it mini-baas-mssql     sh -lc 'sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C'
+docker exec -it mini-baas-mongo     sh -lc 'mongosh -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin'
+docker exec -it mini-baas-redis     redis-cli
+docker exec -it mini-baas-cockroach cockroach sql --insecure
+
+Your current local values (for a GUI client / reference)
+
+▎ These are your machine's dev secrets — fine to read here, but see the warning below about putting them in the docs.
+
+┌───────────────┬─────────────────────────────────┬──────────────────────────────────┬───────────┬────────────────────────────────────────────────┐
+│    Engine     │              user               │             password             │    db     │                   env var(s)                   │
+├───────────────┼─────────────────────────────────┼──────────────────────────────────┼───────────┼────────────────────────────────────────────────┤
+│ PostgreSQL    │ postgres                        │ 7vccIqcGhb15i6XfiiHjIBVE         │ postgres  │ POSTGRES_USER / POSTGRES_PASSWORD /            │
+│               │                                 │                                  │           │ POSTGRES_DB                                    │
+├───────────────┼─────────────────────────────────┼──────────────────────────────────┼───────────┼────────────────────────────────────────────────┤
+│ MariaDB       │ root (or                        │ mariaroot                        │ mini_baas │ MARIADB_ROOT_PASSWORD …                        │
+│               │ mini_baas/mini_baas_pw)         │                                  │           │                                                │
+├───────────────┼─────────────────────────────────┼──────────────────────────────────┼───────────┼────────────────────────────────────────────────┤
+│ MySQL         │ root (or                        │ mysqlroot                        │ mini_baas │ MYSQL_ROOT_PASSWORD …                          │
+│               │ mini_baas/mini_baas_pw)         │                                  │           │                                                │
+├───────────────┼─────────────────────────────────┼──────────────────────────────────┼───────────┼────────────────────────────────────────────────┤
+│ SQL Server    │ sa                              │ Mssql_Strong!Pass1               │ —         │ MSSQL_SA_PASSWORD                              │
+├───────────────┼─────────────────────────────────┼──────────────────────────────────┼───────────┼────────────────────────────────────────────────┤
+│ MongoDB       │ mongo                           │ mongo (authSource admin)         │ —         │ MONGO_INITDB_ROOT_USERNAME / …PASSWORD         │
+├───────────────┼─────────────────────────────────┼──────────────────────────────────┼───────────┼────────────────────────────────────────────────┤
+│ Redis         │ —                               │ (none — no auth)                 │ —         │ —                                              │
+├───────────────┼─────────────────────────────────┼──────────────────────────────────┼───────────┼────────────────────────────────────────────────┤
+│ CockroachDB   │ root                            │ (none — --insecure)              │ —         │ —                                              │
+├───────────────┼─────────────────────────────────┼──────────────────────────────────┼───────────┼────────────────────────────────────────────────┤
+│ MinIO         │ minioadmin                      │ e13c9e3a28a2aa7fba65da9279c46b6c │ —         │ MINIO_ROOT_USER / MINIO_ROOT_PASSWORD          │
+├───────────────┼─────────────────────────────────┼──────────────────────────────────┼───────────┼────────────────────────────────────────────────┤
+│ DynamoDB      │ any                             │ any (AWS_ACCESS_KEY_ID=local)    │ —         │ —                                              │
+│ Local         │                                 │                                  │           │                                                │
+└───────────────┴─────────────────────────────────┴──────────────────────────────────┴───────────┴────────────────────────────────────────────────┘
+
+Where they come from / how to look one up
+
+They're env vars inside each container, sourced from apps/grobase/.env + apps/grobase/.env.secrets (both gitignored; pulled from vault42 or self-generated in no-vault mode). To reveal any one value yourself:
+
+docker exec mini-baas-postgres printenv POSTGRES_PASSWORD
+# (for a stopped container, read its config instead:)
+docker inspect mini-baas-mssql --format '{{range .Config.Env}}{{println .}}{{end}}' | grep SA_PASSWORD
+
+⚠️ Please don't hard-code these into the wiki docs
+
+The "fake content" is the data — but these credentials are the real backend admin passwords, not throwaway doc creds. Pasting them into wiki/database-cli/*.md would:
+- commit live secrets to git (the postgres/minio/mssql passwords are not in git today — I verified), and
+- trip your own CI secret-scan gates (gitleaks + TruffleHog — the ones documented in wiki/security/defense/platform/secrets-management.md).
+
+That's exactly why I wrote the docs with the "$VAR" pattern: they work without anyone knowing the value.
+
+The right doc fix is a "Credentials & connecting" section in wiki/database-cli/README.md that documents the env-var names, the docker exec … printenv lookup, and host-vs-in-container connection — without the values. Want me to add that? (And if you connect GUI clients from the host, I can list each engine's published host port via docker port.)
+
+✻ Crunched for 7m 58s
+
+※ recap: We're building the database-cli docs and you hit connection failures. The cause: mssql, cockroach, and dynamodb-local are stopped. Next: run `make backend-up` to restart them, then reconnect using the documented commands. (disable recaps in /config)
+

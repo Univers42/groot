@@ -102,7 +102,7 @@ jobs:
       (github.event_name == 'workflow_dispatch' && inputs.dry_run == false)
     permissions:
       contents: read
-      id-token: write   # npm provenance
+      id-token: write # npm provenance
     steps:
       - uses: actions/checkout@v4
         with:

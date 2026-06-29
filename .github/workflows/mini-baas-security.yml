@@ -176,7 +176,7 @@ jobs:
           # repos whose dependencies are gated elsewhere — the frontend apps by their own
           # repos' CI + the Supply Chain workflow, and apps/grobase by THIS workflow's
           # dedicated cargo-audit / govulncheck / npm-audit jobs.
-          skip-dirs: 'node_modules,**/node_modules,dist,**/dist,build,**/build,.git,coverage,playwright-report,vendor,**/vendor,**/static_docs,**/.docusaurus,apps/baas.bak,apps/osionos/app,apps/opposite-osiris,apps/mail,apps/calendar,apps/grobase,apps/vite-gourmand'
+          skip-dirs: "node_modules,**/node_modules,dist,**/dist,build,**/build,.git,coverage,playwright-report,vendor,**/vendor,**/static_docs,**/.docusaurus,apps/baas.bak,apps/osionos/app,apps/opposite-osiris,apps/mail,apps/calendar,apps/grobase,apps/vite-gourmand"
 
       - name: Upload Trivy filesystem SARIF
         if: always()
@@ -444,7 +444,16 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    needs: [sast-semgrep, sca-npm-audit, container-trivy, secret-trufflehog, secret-gitleaks, sca-cargo-audit, sca-govulncheck]
+    needs:
+      [
+        sast-semgrep,
+        sca-npm-audit,
+        container-trivy,
+        secret-trufflehog,
+        secret-gitleaks,
+        sca-cargo-audit,
+        sca-govulncheck,
+      ]
     if: always()
     steps:
       - name: Aggregate verdict
