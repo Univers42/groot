@@ -31,8 +31,11 @@ OUT_ENV="${SCRIPT_DIR}/.gourmand-people.env"
 STATE_ENV="${INFRA_ROOT}/.gourmand-tenant.env"
 APP_ENV_FILE="${APP_ENV_FILE:-${REPO_ROOT}/apps/osionos/app/.env}"
 
-cyan()  { printf '\033[0;36m[vg-people] %s\033[0m\n' "$*"; }
-fail()  { printf '\033[0;31m[vg-people] FAIL: %s\033[0m\n' "$*" >&2; exit 1; }
+cyan() { printf '\033[0;36m[vg-people] %s\033[0m\n' "$*"; }
+fail() {
+  printf '\033[0;31m[vg-people] FAIL: %s\033[0m\n' "$*" >&2
+  exit 1
+}
 
 docker inspect "${PG_CTN}" >/dev/null 2>&1 || fail "postgres container ${PG_CTN} not running (root stack)"
 docker inspect "${BRIDGE_CTN}" >/dev/null 2>&1 || fail "bridge container ${BRIDGE_CTN} not running"
@@ -62,7 +65,8 @@ cyan "querying the client's staff roster (User ⋈ Role, staff roles only)"
 ROLES_JSON="$(gwq Role '{"op":"list","limit":50}')" || fail "Role list failed"
 USERS_JSON="$(gwq User '{"op":"list","limit":500}')" || fail "User list failed"
 OWNERS_JSON="$(gwq CompanyOwner '{"op":"list","limit":50}')" || fail "CompanyOwner list failed"
-ROSTER_TSV="$(python3 - "$ROLES_JSON" "$USERS_JSON" "$OWNERS_JSON" <<'PY'
+ROSTER_TSV="$(
+  python3 - "$ROLES_JSON" "$USERS_JSON" "$OWNERS_JSON" <<'PY'
 import json, sys
 roles = {r["id"]: r["name"] for r in json.loads(sys.argv[1])["rows"]}
 users = json.loads(sys.argv[2])["rows"]
@@ -147,13 +151,17 @@ JS
 cyan "upserting bridge identities + private workspaces"
 declare -A UUID_OF
 while IFS='|' read -r email uuid; do
-  email="${email// /}"; uuid="${uuid// /}"
+  email="${email// /}"
+  uuid="${uuid// /}"
   [[ -n "${email}" && -n "${uuid}" ]] && UUID_OF["${email}"]="${uuid}"
 done < <(PSQL -At -F'|' -c "SELECT email, id FROM auth.users")
 {
   while IFS='|' read -r email name _role _ws; do
     uuid="${UUID_OF[${email}]:-}"
-    [[ -n "${uuid}" ]] || { echo "-- missing ${email}" ; continue; }
+    [[ -n "${uuid}" ]] || {
+      echo "-- missing ${email}"
+      continue
+    }
     printf "SELECT public.osionos_bridge_upsert_workspace('prismatica', '%s'::uuid, encode(hmac('%s', :'salt', 'sha256'), 'hex'), '%s');\n" \
       "${uuid}" "${email}" "${name//\'/\'\'}"
   done <<<"${ROSTER_TSV}"
@@ -173,11 +181,12 @@ ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, slug = EXCLUDED.slug,
   owner_id = EXCLUDED.owner_id, settings = EXCLUDED.settings, updated_at = now();
 SQL
   while IFS='|' read -r email _name _role ws; do
-    uuid="${UUID_OF[${email}]:-}"; [[ -n "${uuid}" ]] || continue
+    uuid="${UUID_OF[${email}]:-}"
+    [[ -n "${uuid}" ]] || continue
     case "${ws}" in
-      owner|admin) perms="ARRAY['create','read','update','delete','admin']" ;;
-      editor)      perms="ARRAY['create','read','update','delete']" ;;
-      *)           perms="ARRAY['read']" ;;
+    owner | admin) perms="ARRAY['create','read','update','delete','admin']" ;;
+    editor) perms="ARRAY['create','read','update','delete']" ;;
+    *) perms="ARRAY['read']" ;;
     esac
     cat <<SQL
 INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role, permissions)
@@ -201,6 +210,6 @@ cyan "writing ${OUT_ENV}"
     echo "GOURMAND_CRED_${i}=${email}|${UUID_OF[${email}]:-}|${name}|${ws}|${PW_OF[${email}]}"
     i=$((i + 1))
   done <<<"${ROSTER_TSV}"
-} > "${OUT_ENV}"
+} >"${OUT_ENV}"
 chmod 600 "${OUT_ENV}"
 cyan "OK — ${STAFF_COUNT} staff mirrored into '${ORG_WS_NAME}' (${ORG_WS_ID})"

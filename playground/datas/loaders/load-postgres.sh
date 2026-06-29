@@ -71,17 +71,17 @@ SQL
 echo "--- import customers (8 rows expected) ---"
 docker exec -i "${CONTAINER}" sh -lc \
   "psql -U \"\$POSTGRES_USER\" -d ${DB} -q -c \"\copy customers FROM STDIN WITH (FORMAT csv, HEADER true)\"" \
-  < "${CSV_DIR}/customers.csv"
+  <"${CSV_DIR}/customers.csv"
 
 echo "--- import products (6 rows expected) ---"
 docker exec -i "${CONTAINER}" sh -lc \
   "psql -U \"\$POSTGRES_USER\" -d ${DB} -q -c \"\copy products FROM STDIN WITH (FORMAT csv, HEADER true)\"" \
-  < "${CSV_DIR}/products.csv"
+  <"${CSV_DIR}/products.csv"
 
 echo "--- import orders (15 rows expected) ---"
 docker exec -i "${CONTAINER}" sh -lc \
   "psql -U \"\$POSTGRES_USER\" -d ${DB} -q -c \"\copy orders FROM STDIN WITH (FORMAT csv, HEADER true)\"" \
-  < "${CSV_DIR}/orders.csv"
+  <"${CSV_DIR}/orders.csv"
 
 # ── 4. Verify ──────────────────────────────────────────────────────────────
 echo ""

@@ -39,13 +39,16 @@ awscli() {
 drop_table() {
   local tname="$1"
   echo "    Dropping ${tname} (if present)..."
-  if awscli describe-table --table-name "${tname}" > /dev/null 2>&1; then
-    awscli delete-table --table-name "${tname}" > /dev/null
+  if awscli describe-table --table-name "${tname}" >/dev/null 2>&1; then
+    awscli delete-table --table-name "${tname}" >/dev/null
     # Poll until gone (DynamoDB Local deletes synchronously, but be safe)
     local retries=10
-    while awscli describe-table --table-name "${tname}" > /dev/null 2>&1; do
+    while awscli describe-table --table-name "${tname}" >/dev/null 2>&1; do
       retries=$((retries - 1))
-      [ "${retries}" -eq 0 ] && { echo "ERROR: ${tname} delete timed out"; exit 1; }
+      [ "${retries}" -eq 0 ] && {
+        echo "ERROR: ${tname} delete timed out"
+        exit 1
+      }
       sleep 0.5
     done
     echo "    Deleted."
@@ -84,7 +87,7 @@ build_batch_json() {
   # --request-items is already the RequestItems parameter; provide the bare table map.
   local items
   items="$(paste -sd ',' "${items_file}")"
-  printf '{"%s":[%s]}' "${table}" "${items}" > "${out_file}"
+  printf '{"%s":[%s]}' "${table}" "${items}" >"${out_file}"
 }
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
@@ -102,7 +105,7 @@ for TABLE in learn_shop_customers learn_shop_products learn_shop_orders; do
     --attribute-definitions AttributeName=id,AttributeType=N \
     --key-schema AttributeName=id,KeyType=HASH \
     --billing-mode PAY_PER_REQUEST \
-    > /dev/null
+    >/dev/null
 done
 
 # ── Generate JSON batch files ─────────────────────────────────────────────────
@@ -110,27 +113,27 @@ echo "==> [DynamoDB] Generating batch-write JSON from CSVs..."
 
 # customers
 CUST_ITEMS="${TMPDIR_WORK}/cust_items.txt"
-: > "${CUST_ITEMS}"
+: >"${CUST_ITEMS}"
 tail -n +2 "${CSV_DIR}/customers.csv" | while IFS=, read -r id name email created_at; do
-  customer_item "${id}" "${name}" "${email}" "${created_at}" >> "${CUST_ITEMS}"
+  customer_item "${id}" "${name}" "${email}" "${created_at}" >>"${CUST_ITEMS}"
 done
 build_batch_json learn_shop_customers "${CUST_ITEMS}" "${TMPDIR_WORK}/batch_customers.json"
 
 # products
 PROD_ITEMS="${TMPDIR_WORK}/prod_items.txt"
-: > "${PROD_ITEMS}"
+: >"${PROD_ITEMS}"
 tail -n +2 "${CSV_DIR}/products.csv" | while IFS=, read -r id name price_cents stock; do
-  product_item "${id}" "${name}" "${price_cents}" "${stock}" >> "${PROD_ITEMS}"
+  product_item "${id}" "${name}" "${price_cents}" "${stock}" >>"${PROD_ITEMS}"
 done
 build_batch_json learn_shop_products "${PROD_ITEMS}" "${TMPDIR_WORK}/batch_products.json"
 
 # orders
 ORD_ITEMS="${TMPDIR_WORK}/ord_items.txt"
-: > "${ORD_ITEMS}"
-tail -n +2 "${CSV_DIR}/orders.csv" | \
+: >"${ORD_ITEMS}"
+tail -n +2 "${CSV_DIR}/orders.csv" |
   while IFS=, read -r id customer_id product_id qty status created_at; do
     order_item "${id}" "${customer_id}" "${product_id}" "${qty}" "${status}" "${created_at}" \
-      >> "${ORD_ITEMS}"
+      >>"${ORD_ITEMS}"
   done
 build_batch_json learn_shop_orders "${ORD_ITEMS}" "${TMPDIR_WORK}/batch_orders.json"
 
@@ -142,17 +145,17 @@ for PAIR in "learn_shop_customers:batch_customers.json" "learn_shop_products:bat
   echo "    Writing to ${TABLE}..."
   awscli batch-write-item \
     --request-items "file:///json/${JSON_FILE}" \
-    > /dev/null
+    >/dev/null
 done
 
 # ── Verify ────────────────────────────────────────────────────────────────────
 echo "==> [DynamoDB] Verifying item counts via scan --select COUNT..."
 CUST_COUNT="$(awscli scan --table-name learn_shop_customers --select COUNT --query 'Count' --output text)"
-PROD_COUNT="$(awscli scan --table-name learn_shop_products  --select COUNT --query 'Count' --output text)"
-ORD_COUNT="$(awscli  scan --table-name learn_shop_orders     --select COUNT --query 'Count' --output text)"
+PROD_COUNT="$(awscli scan --table-name learn_shop_products --select COUNT --query 'Count' --output text)"
+ORD_COUNT="$(awscli scan --table-name learn_shop_orders --select COUNT --query 'Count' --output text)"
 
-printf 'customers: %s  (expected 8)\n'  "${CUST_COUNT}"
-printf 'products:  %s  (expected 6)\n'  "${PROD_COUNT}"
+printf 'customers: %s  (expected 8)\n' "${CUST_COUNT}"
+printf 'products:  %s  (expected 6)\n' "${PROD_COUNT}"
 printf 'orders:    %s  (expected 15)\n' "${ORD_COUNT}"
 
 if [ "${CUST_COUNT}" = "8" ] && [ "${PROD_COUNT}" = "6" ] && [ "${ORD_COUNT}" = "15" ]; then

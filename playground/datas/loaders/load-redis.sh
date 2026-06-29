@@ -51,7 +51,7 @@ echo "==> [Redis] Streaming HSET + SADD commands via redis-cli --pipe (DB 15)...
   done
 
   # orders: id,customer_id,product_id,qty,status,created_at
-  tail -n +2 "${CSV_DIR}/orders.csv" | \
+  tail -n +2 "${CSV_DIR}/orders.csv" |
     while IFS=, read -r id customer_id product_id qty status created_at; do
       resp HSET "shop:order:${id}" \
         id "${id}" customer_id "${customer_id}" product_id "${product_id}" \
@@ -64,11 +64,11 @@ echo "==> [Redis] Streaming HSET + SADD commands via redis-cli --pipe (DB 15)...
 echo "==> [Redis] Verifying counts via SCARD on index sets..."
 CUST_COUNT="$(docker exec "${CONTAINER}" redis-cli -n 15 SCARD shop:customers)"
 PROD_COUNT="$(docker exec "${CONTAINER}" redis-cli -n 15 SCARD shop:products)"
-ORD_COUNT="$(docker exec "${CONTAINER}"  redis-cli -n 15 SCARD shop:orders)"
+ORD_COUNT="$(docker exec "${CONTAINER}" redis-cli -n 15 SCARD shop:orders)"
 TOTAL_KEYS="$(docker exec "${CONTAINER}" redis-cli -n 15 DBSIZE)"
 
-printf 'customers: %s  (expected 8)\n'  "${CUST_COUNT}"
-printf 'products:  %s  (expected 6)\n'  "${PROD_COUNT}"
+printf 'customers: %s  (expected 8)\n' "${CUST_COUNT}"
+printf 'products:  %s  (expected 6)\n' "${PROD_COUNT}"
 printf 'orders:    %s  (expected 15)\n' "${ORD_COUNT}"
 printf 'total keys in DB 15: %s  (expected 32)\n' "${TOTAL_KEYS}"
 

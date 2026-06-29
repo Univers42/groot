@@ -263,7 +263,7 @@ fn resolve(&self, mount: &DatabaseMount) -> DataPlaneResult<String> {
         return Ok(dsn);
     }
     let dsn = build_dsn(mount)?;                     // MISS — decrypt once
-    self.cache.put(key, dsn.clone());
+    self.cache.put(&key, &dsn);                      // put takes &str (see note above)
     Ok(dsn)
 }
 ```

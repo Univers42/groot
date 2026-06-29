@@ -153,11 +153,47 @@ So the email is never even stored raw — only an HMAC hash of it, salted with
 
 ---
 
-## 4. Layer 1 — the frontend: an ABAC engine that *reflects*, never *enforces*
+## 4. Layer 1 — the frontend: ABAC that *reflects*, never *enforces*
 
-The osionos editor ships a real client-side ABAC engine (inside the embedded
-`notion-database-sys` package). Its job is to grey-out / hide what you can't do, so the UI feels
-right — **the server still re-checks everything.**
+The frontend's only job is to grey-out / hide what you can't do, so the UI feels right —
+**the server still re-checks everything.** There are two pieces here, and it's worth keeping them
+straight:
+
+- **The literal browser gate** — pure functions in `pageAccess.ts` that the sidebar/menus call to
+  decide whether to *render* a Read/Edit/Delete affordance.
+- **The object-database's ABAC engine** — `AbacEngine` inside the embedded `notion-database-sys`
+  package, a Mongoose-backed resolver used by the live-database pages. It's app code, not the
+  database RLS of §5 — so it is still a *reflect* layer, just a richer one.
+
+### 4a₀. The browser gate — attribute checks in plain TypeScript
+
+[apps/osionos/app/src/shared/lib/auth/pageAccess.ts:134-165](apps/osionos/app/src/shared/lib/auth/pageAccess.ts#L134-L165):
+
+```ts
+export function canReadPage(page: PageEntry, context: PageAccessContext | null): boolean {
+  if (!context || !hasWorkspaceAccess(page, context)) return false;
+  const visibility = normalizePageVisibility(page.visibility);
+  if (visibility === "public") return true;                       // resource attr: visibility
+  if (visibility === "shared") return true;
+  if (page.ownerId && page.ownerId === context.userId) return true;  // ownership attr
+  if (isLegacyPage(page)) return true;
+  return getCollaboratorRole(page, context.userId) !== null;      // collaborator attr
+}
+
+export function canEditPage(page: PageEntry, context: PageAccessContext | null): boolean {
+  if (!context || !hasWorkspaceAccess(page, context)) return false;
+  if (context.sharedWorkspaceIds.includes(page.workspaceId)) return true;
+  if (page.ownerId && page.ownerId === context.userId) return true;
+  if (isLegacyPage(page)) return true;
+  const collaboratorRole = getCollaboratorRole(page, context.userId);
+  return collaboratorRole === "editor" || collaboratorRole === "owner";
+}
+```
+
+Even here, at the cheapest layer, the decision is **attributes** (`visibility`, `ownerId ===
+userId`, collaborator role) — never a bare role name. `canDeletePage` is literally
+`return canEditPage(...)` ([:167-172](apps/osionos/app/src/shared/lib/auth/pageAccess.ts#L167-L172)).
+But this runs in the browser against a client cache, so it is **UX only**: the authority is §5/§6.
 
 ### 4a. The access-rule shape — ABAC targets, not just roles
 

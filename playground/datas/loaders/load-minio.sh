@@ -41,7 +41,7 @@ mccli() {
 
 # ── Cleanup (remove bucket if present) ───────────────────────────────────────
 echo "==> [MinIO] Removing bucket ${BUCKET} if present (cleanup for re-run)..."
-if mccli ls "baas/${BUCKET}" > /dev/null 2>&1; then
+if mccli ls "baas/${BUCKET}" >/dev/null 2>&1; then
   mccli rb --force "baas/${BUCKET}"
   echo "    Removed."
 else
