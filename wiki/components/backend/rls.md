@@ -6,6 +6,16 @@
 
 PostgREST is the REST gateway to PostgreSQL. Instead of connecting as the [superuser](glossary.md#superuser) (which bypasses RLS unconditionally), it connects as a dedicated non-superuser role called `authenticator` that is marked [NOBYPASSRLS](glossary.md#nobypassrls). This attribute makes the role structurally unable to skip [RLS](glossary.md#rls-row-level-security), no matter what future privilege changes occur.
 
+Base64 decode and read the claims (yes anyone can do that). kong0s Lua hook extracts sub / email / role to forward as headers - not a security check.
+
+The real "is this token valid ?" check is the signature. Kong's jwt plugin verifies the JWT's HMAC signature against the shared JWT_SECRET (HS256) and checks exp . Bad signature/expired -> 401, never reaches PostgREST.
+
+"Mint" = create + sign a brand new token (like a mint tamps a coin)
+so "GoTrue mints a JWT" means : on succesful login. GoTrue generates teh token, filles in the claimes (subm email, role, exp) and signs it with the secrete. It's the file user.
+
+PostgREST/RLS enforce ownership
+so yes: Kong (the reverse proxy) has hte final say on authentication -> 401 never reaches PostgREST... 
+
 For every request, PostgREST receives a [JWT](glossary.md#jwt-json-web-token) token from GoTrue, verifies its signature, and sets the verified claims (user ID, tenant ID, role) as a [GUC](glossary.md#guc-grand-unified-configuration) (`request.jwt.claims`) in the session. Then it executes [SET ROLE](glossary.md#set-role) to switch to the appropriate request role (anon, authenticated, or service_role) based on the JWT. Within that role's context, all RLS policies activate. Because the [authenticator role](glossary.md#authenticator-role) is NOBYPASSRLS and [NOINHERIT](glossary.md#noinherit), it gains no privileges until it explicitly switches roles—and switching only becomes active after JWT verification.
 
 ## How it works
