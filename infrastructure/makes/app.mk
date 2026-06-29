@@ -69,3 +69,7 @@ healthcheck: certs
 showcase:
 ## Recap every local URL the RUNNING stack exposes — click to open. Last step of `make all`. (Only services that are actually up are listed.) Logic in scripts/showcase.sh.
 	@sh scripts/showcase.sh
+
+check_health_apps:
+## App health matrix — each app probed on localhost AND in production (Vercel sites + fly backend): UP/DOWN per environment with clickable URLs. Logic in scripts/check-health-apps.sh.
+	@sh scripts/check-health-apps.sh
