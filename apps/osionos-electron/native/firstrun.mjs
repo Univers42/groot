@@ -23,7 +23,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // user -> gdpr -> auth-security -> osionos-bridge -> folder-surface -> rls-hardening.
 // gdpr adds users.deletion_requested_at/deleted_at (a migrated dump needs them);
 // rls-hardening last (it grants on the gdpr functions). Calendar/mail are skipped
-// (separate apps). bootstrap.sql (roles) runs before all of these.
+// (separate apps). bootstrap.sql (roles) runs before all of these. object-databases
+// last — it needs osionos_workspaces (from osionos-bridge) and is otherwise standalone;
+// it gives the offline edition the same server-side home for `/database` blocks.
 const MIGRATIONS = [
   "user.sql",
   "gdpr-migration.sql",
@@ -32,6 +34,8 @@ const MIGRATIONS = [
   "osionos-folder-surface-migration.sql",
   "rls-hardening-migration.sql",
   "osionos-admin-migration.sql",
+  "osionos-object-databases-migration.sql",
+  "osionos-page-cover-position-migration.sql",
 ];
 
 function signJwt(payload, secret) {
