@@ -3,5 +3,6 @@
   "mssql.intelliSense.enableErrorChecking": false,
   "files.associations": {
     "*.psql": "postgres"
-  }
+  },
+  "git.ignoreLimitWarning": true
 }

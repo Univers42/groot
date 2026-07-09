@@ -66,3 +66,6 @@ screenshots/
 *.secrets
 .secrets
 *secret*
+
+# 12G pre-extraction BaaS snapshot — never commit (git-status noise)
+apps/baas.bak/
