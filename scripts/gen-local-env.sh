@@ -53,6 +53,16 @@ ADAPTER="$(gval ADAPTER_REGISTRY_SERVICE_TOKEN)"
   exit 1
 }
 
+# VAPID P-256 keypair for Web Push (RFC 8292); empty when node is absent so push
+# stays dormant (an off-by-default feature — never blocks provisioning).
+VAPID_PUBLIC=""
+VAPID_PRIVATE=""
+if command -v node >/dev/null 2>&1; then
+  VAPID_KEYS="$(node -e 'const c=require("crypto"),e=c.createECDH("prime256v1");e.generateKeys();const u=b=>b.toString("base64url");process.stdout.write(u(e.getPublicKey())+" "+u(e.getPrivateKey()))')"
+  VAPID_PUBLIC="${VAPID_KEYS%% *}"
+  VAPID_PRIVATE="${VAPID_KEYS##* }"
+fi
+
 umask 077
 cat >"$OUT" <<EOF
 # ./.env.local — GENERATED for a no-vault local machine by scripts/gen-local-env.sh.
@@ -79,6 +89,11 @@ OSIONOS_APP_SESSION_TTL_SECONDS=2592000
 OSIONOS_ALLOWED_ORIGIN=https://localhost:3001
 OSIONOS_APP_URL=https://localhost:3001
 PUBLIC_OSIONOS_APP_URL=https://localhost:3001
+
+# ── Web Push (RFC 8292 VAPID); empty = push dormant (off by default) ──
+OSIONOS_VAPID_PUBLIC_KEY=$VAPID_PUBLIC
+OSIONOS_VAPID_PRIVATE_KEY=$VAPID_PRIVATE
+OSIONOS_VAPID_SUBJECT=mailto:admin@osionos.local
 
 # ── Degrade-until-provisioned (empty is safe) ──
 # OSIONOS_BAAS_API_KEY: the live-DB demo's mbk_ app key — minted by \`make seed-live-demo\`.

@@ -73,6 +73,12 @@ services:
       REALTIME_PUBLISH_URL: ${REALTIME_PUBLISH_URL:-http://mini-baas-realtime:4000}
       # Agency org workspace: scopes /api/people + default feed topic.
       OSIONOS_ORG_WORKSPACE_ID: ${OSIONOS_ORG_WORKSPACE_ID:-b1a0c1e5-0000-4000-a000-000000000001}
+      # IDE code runner (P3) — DOUBLE-GATED, default DISABLED. The /api/ide/run
+      # route is off unless this URL is set AND the `runner` compose profile is
+      # started. Ships EMPTY on purpose (never set in shared/parity/fly without a
+      # human go-ahead). Enable locally: OSIONOS_RUNNER_URL=http://osionos-runner:7900
+      # plus `COMPOSE_PROFILES=runner`.
+      OSIONOS_RUNNER_URL: ${OSIONOS_RUNNER_URL:-}
       HOME: ${OSIONOS_BRIDGE_HOME:-/tmp}
       PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     expose:
@@ -82,6 +88,9 @@ services:
     networks:
       - default
       - mini-baas
+      # Reaches the (optional, profile-gated) code runner over an internal-only
+      # network — no effect until the `runner` profile is up + OSIONOS_RUNNER_URL set.
+      - osionos-runner-net
     healthcheck:
       test:
         [
@@ -94,6 +103,43 @@ services:
       retries: 24
     restart: unless-stopped
     mem_limit: 512m
+
+  # osionos-runner — the IDE code-execution sandbox (P3). Runs untrusted user
+  # source in ~13 languages. The CONTAINER is the sandbox: nsjail can't create
+  # namespaces under cap_drop:ALL on this host (apparmor_restrict_unprivileged_userns=1),
+  # so hardening lives here and was PROVEN with a hostile corpus (fork bomb,
+  # infinite loop, 4GB alloc, egress, fs-escape, unshare — all contained, no
+  # CAP_SYS_ADMIN). Reachable ONLY from the bridge over the internal network,
+  # never the browser, never mini-baas. Behind the `runner` profile → NOT started
+  # by `make all`; enable with COMPOSE_PROFILES=runner + OSIONOS_RUNNER_URL set.
+  osionos-runner:
+    build:
+      context: infrastructure/docker/osionos/runner
+    image: ${OSIONOS_RUNNER_IMAGE:-dlesieur/osionos-runner:latest}
+    container_name: track-binocle-osionos-runner
+    profiles: ["runner"]
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+    ulimits:
+      nproc: 256
+      fsize: 16000000
+      cpu: 20
+    tmpfs:
+      - /work:size=64m,mode=1777
+      - /tmp:size=16m,mode=1777
+    environment:
+      RUNNER_PORT: "7900"
+    expose:
+      - "7900"
+    networks:
+      - osionos-runner-net
 
   # livekit — self-hosted WebRTC SFU for osionos video rooms. Signalling/HTTP
   # (and the twirp admin API) on 7880, TCP ICE fallback on 7881, media over a
@@ -570,3 +616,9 @@ networks:
   mini-baas:
     name: mini-baas_mini-baas
     external: true
+  # Internal-only network for the IDE code runner: `internal: true` = NO egress
+  # (the Docker daemon enforces it without needing unprivileged user namespaces),
+  # so executed user code can reach neither the internet nor mini-baas. Only the
+  # bridge and osionos-runner join it.
+  osionos-runner-net:
+    internal: true
