@@ -62,12 +62,26 @@ vault42-pull-all:
 		sh apps/grobase/scripts/vault/ctl-env.sh pull $(if $(filter 1,$(APPLY)),--apply,) $(if $(filter 1,$(FORCE)),--force,)
 
 secrets-ensure:
-## Fresh-machine secret provisioning, wired into `make all`. If grobase secrets are ABSENT but a vault42 keystore is present, pull the whole *.env tree from vault42 — non-interactive when FT_PASSPHRASE/VAULT42_PASSPHRASE is set (CI), else one hidden prompt. Secrets already present → no-op. No keystore → leave it (backend-up gives guidance). This is what lets a bare `make all` provision a clean machine end-to-end.
+## Fresh-machine secret provisioning, wired into `make all`. If grobase secrets are ABSENT but a vault42 keystore is present, pull the whole *.env tree from vault42 — non-interactive when FT_PASSPHRASE/VAULT42_PASSPHRASE is set (CI), else one hidden prompt. Secrets already present → no-op. No keystore → LOCAL mode directly. A vault-PULL FAILURE (shared vault unreachable/empty) is NOT fatal — it falls back LOUDLY to the same LOCAL mode (grobase self-generates its own secrets; ./.env.local is derived after backend-up via env-local-ensure) instead of aborting `make all`. This is what lets a bare `make all` provision a clean machine end-to-end even when the shared vault is down.
 	@if [ -f apps/grobase/.env ]; then \
 		printf '[secrets] grobase/.env present — skipping vault pull\n'; \
 	elif [ -f "$(CTL_CFG_DIR)/keystore.v42" ]; then \
 		printf '[secrets] fresh machine — pulling *.env tree from vault42 (project=%s)…\n' "$(VAULT42_PROJECT)"; \
-		$(MAKE) --no-print-directory vault42-pull-all APPLY=1 FORCE=1; \
+		if $(MAKE) --no-print-directory vault42-pull-all APPLY=1 FORCE=1; then \
+			printf '[secrets] vault42 pull applied\n'; \
+		else \
+			rc=$$?; \
+			rm -f apps/grobase/.env; \
+			printf '\n[secrets] ################################################################\n' >&2; \
+			printf '[secrets] # WARNING: vault42 pull FAILED (exit %s) — the SHARED vault secrets\n' "$$rc" >&2; \
+			printf '[secrets] # are UNAVAILABLE (see the ctl-env.sh error above). Falling back to\n' >&2; \
+			printf '[secrets] # LOCAL mode: grobase will self-generate its OWN secrets and\n' >&2; \
+			printf '[secrets] # ./.env.local will be derived from them (env-local-ensure, after\n' >&2; \
+			printf '[secrets] # backend-up). This stack will NOT share secrets/data with the team\n' >&2; \
+			printf '[secrets] # until a human restores the vault (make vault42-push-all) and this\n' >&2; \
+			printf '[secrets] # target is re-run.\n' >&2; \
+			printf '[secrets] ################################################################\n\n' >&2; \
+		fi; \
 	else \
 		printf '[secrets] no grobase/.env and no vault42 keystore at %s — LOCAL mode: grobase self-generates its secrets; ./.env.local is derived after backend-up (env-local-ensure).\n' "$(CTL_CFG_DIR)/keystore.v42"; \
 	fi
