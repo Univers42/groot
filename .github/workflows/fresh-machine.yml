@@ -18,6 +18,10 @@ on:
       - "scripts/**"
       - "Makefile"
       - "docker-compose.yml"
+      # a .dockerignore / bake change can break `make all`'s image builds outright
+      # (an excluded COPY source fails the build) — so they gate this run too
+      - ".dockerignore"
+      - "docker-bake.hcl"
       - "apps/grobase"
   workflow_dispatch:
     inputs:
