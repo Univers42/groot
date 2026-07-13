@@ -361,7 +361,11 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
+          # Minor-version floor + check-latest so this always resolves to the
+          # newest 1.25.x patch (never re-pinned to a stale cached patch like
+          # go1.25.11, which shipped GO-2026-5856 — fixed in go1.25.12).
           go-version: "1.25"
+          check-latest: true
           cache-dependency-path: apps/grobase/src/control-plane/go.sum
 
       - name: Install govulncheck
