@@ -8,6 +8,7 @@ apps/grobase/sdks/*
 !apps/grobase/sdks/js
 !apps/opposite-osiris
 apps/opposite-osiris/*
+!apps/opposite-osiris/docker
 !apps/opposite-osiris/scripts
 !apps/opposite-osiris/src
 apps/opposite-osiris/src/*
