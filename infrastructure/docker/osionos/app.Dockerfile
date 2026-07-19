@@ -105,7 +105,9 @@ RUN printf 'VITE_BAAS_URL=%s\nVITE_BAAS_REALTIME_TOKEN=%s\nVITE_CHAT_WS=%s\nVITE
 # Build, then strip source maps from the shipped image (they tripled its size
 # and leak source; keep them only in local builds) and precompress static
 # assets so nginx's gzip_static serves them with zero CPU per request.
-RUN pnpm exec vite build --base "$VITE_BASE" \
+# The app outgrew Node's default ~2 GiB heap during rollup's render phase —
+# raise the cap (it's a ceiling, not a reservation).
+RUN NODE_OPTIONS=--max-old-space-size=4096 pnpm exec vite build --base "$VITE_BASE" \
  && find build -name '*.map' -delete \
  && find build -type f \( -name '*.js' -o -name '*.css' -o -name '*.svg' \
       -o -name '*.json' -o -name '*.wasm' \) -size +1k -print0 \
