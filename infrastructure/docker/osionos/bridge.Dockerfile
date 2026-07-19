@@ -24,7 +24,8 @@ COPY scripts/bridge-api.mjs scripts/bridge-graph.mjs scripts/bridge-graph-data.m
 	scripts/bridge-chat-media.mjs scripts/bridge-storage-core.mjs scripts/bridge-ratelimit.mjs scripts/bridge-chat-search.mjs scripts/bridge-chat-threads.mjs \
 	scripts/bridge-communities.mjs \
 	scripts/bridge-profile.mjs scripts/bridge-feed.mjs scripts/bridge-social.mjs scripts/bridge-notify.mjs scripts/bridge-push.mjs scripts/bridge-media.mjs scripts/bridge-tasks.mjs scripts/bridge-comments.mjs scripts/bridge-public.mjs \
-	scripts/bridge-collab.mjs scripts/bridge-social-core.mjs ./scripts/
+	scripts/bridge-collab.mjs scripts/bridge-social-core.mjs \
+	scripts/bridge-ide-sandbox.mjs scripts/ide-docker.mjs scripts/ide-sandbox-spec.mjs ./scripts/
 
 USER node
 EXPOSE 4000
