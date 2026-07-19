@@ -39,6 +39,11 @@ RUN printf 'ulimit -c 0\n' > /etc/profile.d/00-nocore.sh \
 RUN useradd --uid 10001 --create-home --shell /bin/bash coder \
     && mkdir -p /workspace && chown coder:coder /workspace
 
+# The in-sandbox filesystem agent (P4): watches /workspace and streams
+# create/modify/delete events for the gateway, applying the ignore set so a
+# `pip install` never floods the page store. Launched per-session by the gateway.
+COPY osio-fs-agent.mjs /usr/local/lib/osio-fs-agent.mjs
+
 WORKDIR /workspace
 USER coder
 # Keep-alive PID 1; shells + tools attach via `docker exec`. P4 replaces this

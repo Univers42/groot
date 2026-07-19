@@ -1,0 +1,117 @@
+// **************************************************************************** //
+//                                                                              //
+//                                                         :::      ::::::::    //
+//    osio-fs-agent.mjs                                  :+:      :+:    :+:    //
+//                                                     +:+ +:+         +:+      //
+//    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         //
+//                                                 +#+#+#+#+#+   +#+            //
+//    Created: 2026/07/19 00:00:00 by dlesieur          #+#    #+#              //
+//    Updated: 2026/07/19 00:00:00 by dlesieur         ###   ########.fr        //
+//                                                                              //
+// **************************************************************************** //
+
+// The in-sandbox filesystem agent (P4). Watches /workspace and streams
+// create/modify/delete events (one JSON line each) for the gateway to map back
+// into pages. The load-bearing control is the IGNORE set applied HERE, before an
+// event ever leaves the container: without it a single `pip install` / `npm i`
+// would turn thousands of dependency files into pages. Node built-ins only.
+
+import fs from "node:fs";
+import path from "node:path";
+import crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
+
+const ROOT = process.env.OSIO_FS_ROOT || "/workspace";
+const MAX_FILE_BYTES = 512 * 1024;
+
+// Directory names that are never synced to pages (build output, VCS, caches,
+// dependency trees). A `.osioignore` in the workspace root adds more.
+const DEFAULT_IGNORE_DIRS = new Set([
+  ".git", "node_modules", "dist", "build", "target", "__pycache__",
+  ".venv", "venv", ".cache", ".next", ".turbo", ".gradle", ".idea",
+  ".vscode", ".pnpm-store", "vendor", ".tox", ".mypy_cache", ".pytest_cache",
+  ".osio", "coverage", ".nyc_output", "bin", "obj",
+]);
+const DEFAULT_IGNORE_FILE = /\.(pyc|pyo|class|o|a|so|dylib|dll|exe|bin|lock|log|map|min\.js|min\.css)$/i;
+const DEFAULT_IGNORE_BASENAMES = new Set([".DS_Store", "Thumbs.db", "package-lock.json", "pnpm-lock.yaml", "yarn.lock"]);
+
+/** A relative path is ignored when ANY segment is an ignored dir, or the file
+ *  matches an ignored basename/extension. Pure — the sync's correctness pivot. */
+export function isIgnored(relPath, extraDirs = new Set()) {
+  const parts = relPath.split("/").filter(Boolean);
+  if (parts.length === 0) return true;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (DEFAULT_IGNORE_DIRS.has(parts[i]) || extraDirs.has(parts[i])) return true;
+  }
+  const base = parts[parts.length - 1];
+  if (DEFAULT_IGNORE_DIRS.has(base) || extraDirs.has(base)) return true;
+  if (DEFAULT_IGNORE_BASENAMES.has(base)) return true;
+  return DEFAULT_IGNORE_FILE.test(base);
+}
+
+/** sha256 of file bytes — the gateway compares this to the hash of an
+ *  editor-originated write to suppress the echo (no loop back into updateBlock). */
+export function hashContent(buffer) {
+  return crypto.createHash("sha256").update(buffer).digest("hex").slice(0, 16);
+}
+
+function loadExtraIgnore(root) {
+  try {
+    const raw = fs.readFileSync(path.join(root, ".osioignore"), "utf8");
+    return new Set(raw.split("\n").map((l) => l.trim().replace(/\/$/, "")).filter((l) => l && !l.startsWith("#")));
+  } catch {
+    return new Set();
+  }
+}
+
+function emit(event, relPath, extra = {}) {
+  process.stdout.write(`${JSON.stringify({ event, path: relPath, ...extra })}\n`);
+}
+
+function readMeta(absPath) {
+  try {
+    const stat = fs.statSync(absPath);
+    if (!stat.isFile() || stat.size > MAX_FILE_BYTES) return null;
+    return { hash: hashContent(fs.readFileSync(absPath)) };
+  } catch {
+    return null;
+  }
+}
+
+function startWatch() {
+  const extraDirs = loadExtraIgnore(ROOT);
+  emit("ready", "", { root: ROOT });
+  fs.watch(ROOT, { recursive: true }, (_type, filename) => {
+    if (!filename) return;
+    const relPath = String(filename).replaceAll("\\", "/");
+    if (isIgnored(relPath, extraDirs)) return;
+    const absPath = path.join(ROOT, relPath);
+    if (!fs.existsSync(absPath)) { emit("delete", relPath); return; }
+    const meta = readMeta(absPath);
+    if (meta) emit("write", relPath, meta);
+  });
+}
+
+const isMain = process.argv[1] === fileURLToPath(import.meta.url);
+
+if (isMain && process.argv.includes("--selfcheck")) {
+  const fail = [];
+  const chk = (label, got, want) => { if (got !== want) fail.push(`${label}: got ${got}, want ${want}`); };
+  chk("keep source", isIgnored("src/main.py"), false);
+  chk("keep nested", isIgnored("a/b/c/util.ts"), false);
+  chk("ignore node_modules", isIgnored("node_modules/left-pad/index.js"), true);
+  chk("ignore nested node_modules", isIgnored("src/x/node_modules/y.js"), true);
+  chk("ignore .git", isIgnored(".git/config"), true);
+  chk("ignore __pycache__", isIgnored("pkg/__pycache__/mod.cpython.pyc"), true);
+  chk("ignore .pyc", isIgnored("mod.pyc"), true);
+  chk("ignore lockfile", isIgnored("package-lock.json"), true);
+  chk("ignore dist", isIgnored("dist/bundle.js"), true);
+  chk("ignore .osio", isIgnored(".osio/manifest.json"), true);
+  chk("extra ignore", isIgnored("secrets/key.txt", new Set(["secrets"])), true);
+  chk("hash stable", hashContent(Buffer.from("hello")), hashContent(Buffer.from("hello")));
+  if (fail.length) { process.stderr.write(`selfcheck FAIL:\n${fail.join("\n")}\n`); process.exit(1); }
+  process.stdout.write("selfcheck OK: fs-agent ignore matcher correct\n");
+  process.exit(0);
+}
+
+if (isMain) startWatch();
