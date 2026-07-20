@@ -1,0 +1,55 @@
+# osionos IDE sandbox daemon — a SECOND, isolated Docker daemon.
+#
+# It runs the per-(user,workspace) IDE sandboxes on its OWN data-root, so a
+# sandbox/provisioner compromise can never see the mini-baas backend containers
+# on the main daemon (devil condition 1). It is rootful (like the main daemon)
+# but `--userns-remap=default` maps container-root to an unprivileged host uid,
+# so a container escape does NOT yield host root.
+#
+# TWO-DAEMON SAFETY: distinct data-root/exec-root/socket/pidfile + a
+# non-overlapping bridge subnet. `--iptables=false` so this daemon NEVER touches
+# the main daemon's DOCKER/DOCKER-USER chains (a shared-iptables race could break
+# the backend). The sandbox network is `--internal` (L2 only, no NAT needed); the
+# in-daemon egress proxy's outbound NAT is a single scoped rule installed
+# separately (ide-egress-nat.sh), never via this daemon.
+#
+# Install (operator, once):
+#   sudo cp infrastructure/docker/osionos/ide-sandbox/docker-ide.service \
+#     /etc/systemd/system/docker-ide.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now docker-ide
+# Requires the loopback prjquota data-root mounted at /var/lib/docker-ide first
+# (see README.md "Activation").
+
+[Unit]
+Description=osionos IDE isolated Docker daemon
+After=network-online.target
+Wants=network-online.target
+# Must not start before the quota-backed data-root is mounted.
+RequiresMountsFor=/var/lib/docker-ide
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/dockerd \
+  --data-root=/var/lib/docker-ide \
+  --exec-root=/run/docker-ide \
+  --host=unix:///run/docker-ide.sock \
+  --pidfile=/run/docker-ide.pid \
+  --userns-remap=default \
+  --iptables=false \
+  --ip-forward=true \
+  --bridge=none \
+  --default-address-pool base=10.202.0.0/16,size=24 \
+  --storage-driver=overlay2 \
+  --group=docker
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=on-failure
+RestartSec=3
+Delegate=yes
+KillMode=process
+LimitNOFILE=1048576
+LimitNPROC=infinity
+LimitCORE=infinity
+TasksMax=infinity
+
+[Install]
+WantedBy=multi-user.target

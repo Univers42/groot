@@ -80,38 +80,47 @@ and the sandbox-image hardening probes. The rest need the live nested daemon +
 
 ## Host prerequisites (why the live corpus isn't auto-run here)
 
-Rootless dind needs host support this machine lacks out of the box — a probe
-showed `rootlesskit: fork/exec … operation not permitted` (the host's
-`apparmor_restrict_unprivileged_userns` blocking rootlesskit) and unloadable
-`ip_tables` modules. An operator must, on the deployment host:
+The isolated daemon is a SECOND rootful dockerd (`docker-ide.service`) — chosen
+over rootless-dind because this host keeps `apparmor_restrict_unprivileged_userns=1`
+(a real mitigation we do NOT relax). It runs `--userns-remap` (container-root →
+unprivileged host uid) + `--iptables=false` (never touches the main daemon's
+chains). Operator host-prep (sudo):
 
-1. Allow the dind container's userns: an apparmor profile for it, **or**
-   `sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` (host policy call).
-2. `modprobe ip_tables ip6_tables nf_tables` (or bake into the host).
-3. cgroup v2 delegation for the dind user + `/etc/subuid`,`/etc/subgid` entries.
-4. Put the dind **data-root on a pquota-capable fs** (xfs prjquota / ext4) for
-   the inode+block quota (condition 15), on a filesystem **separate** from the
-   host daemon's `/var/lib/docker`.
-
-These are host-policy changes (sudo, invasive) deliberately left to the operator,
-not performed by the build.
+1. **Quota data-root** (condition 15 — the host data-root is ext, no prjquota):
+   ```
+   sudo fallocate -l 24G /var/lib/docker-ide.img
+   sudo mkfs.ext4 -O quota -E quotatype=prjquota /var/lib/docker-ide.img
+   sudo mkdir -p /var/lib/docker-ide
+   sudo mount -o loop,prjquota /var/lib/docker-ide.img /var/lib/docker-ide
+   echo '/var/lib/docker-ide.img /var/lib/docker-ide ext4 loop,prjquota 0 0' | sudo tee -a /etc/fstab
+   ```
+2. **Install + start the daemon:**
+   ```
+   sudo cp infrastructure/docker/osionos/ide-sandbox/docker-ide.service /etc/systemd/system/
+   sudo systemctl daemon-reload && sudo systemctl enable --now docker-ide
+   ```
+3. **Egress NAT** (scoped to docker-ide's 10.202.0.0/16 pool only):
+   ```
+   sudo sh infrastructure/docker/osionos/ide-sandbox/ide-egress-nat.sh up
+   ```
 
 ## Activation
 
 ```sh
-# 1. Build the three images on the host daemon.
+# 1. Build the three images on the MAIN daemon.
 docker build -t osionos-ide-egress:latest        infrastructure/docker/osionos/ide-egress-proxy
 docker build -t osionos-ide-socket-proxy:latest  infrastructure/docker/osionos/ide-socket-proxy
 docker build -t osionos-ide-sandbox:latest       infrastructure/docker/osionos/ide-sandbox
 
-# 2. Bring up the isolated daemon + filter (after the host prereqs above).
-COMPOSE_PROFILES=ide docker compose up -d osionos-ide-dockerd osionos-ide-socket-proxy
+# 2. After the host-prep above, bring up the filter (talks to /run/docker-ide.sock).
+COMPOSE_PROFILES=ide docker compose up -d osionos-ide-socket-proxy
 
-# 3. One-time seed of images + networks + in-dind egress proxy.
-sh infrastructure/docker/osionos/ide-sandbox/bootstrap.sh
+# 3. One-time seed of images + networks + egress proxy into docker-ide (sudo:
+#    the socket is root-owned).
+sudo sh infrastructure/docker/osionos/ide-sandbox/bootstrap.sh
 
 # 4. Run the FULL 16-condition hostile corpus (must be green before enabling).
-sh infrastructure/docker/osionos/ide-sandbox/verify.sh
+sudo sh infrastructure/docker/osionos/ide-sandbox/verify.sh
 
 # 5. Enable on the bridge (double-gate): set on the osionos-bridge service and
 #    join it to osionos-ide-control-net.

@@ -7,63 +7,60 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/07/19 00:00:00 by dlesieur          #+#    #+#              #
-#    Updated: 2026/07/19 00:00:00 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/07/20 00:00:00 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
-# One-time PRIVILEGED setup of the IDE sandbox plane — run by an operator, NEVER
+# One-time PRIVILEGED setup of the IDE sandbox plane on the ISOLATED docker-ide
+# daemon — run by an operator (sudo: /run/docker-ide.sock is root-owned), NEVER
 # on the per-request path (that keeps the runtime provisioner unable to touch
-# /images or networks — devil condition 8). It seeds the sandbox + egress images
-# INTO the isolated dind daemon and stands up the internal sandbox network with
-# its in-dind egress proxy. Uses host `docker exec` into the dind container, so
-# it talks to dind's OWN daemon, never the filtered runtime socket-proxy.
+# /images — devil condition 8). It seeds the sandbox + egress images INTO
+# docker-ide and stands up the internal sandbox network + its egress proxy.
 #
-# Usage:  sh infrastructure/docker/osionos/ide-sandbox/bootstrap.sh
-# Pre:    COMPOSE_PROFILES=ide docker compose up -d osionos-ide-dockerd \
-#           osionos-ide-socket-proxy   (and the two images built on the host)
+# Talks to docker-ide's OWN socket directly (not the filtered runtime proxy).
+#
+# Usage:  sudo sh infrastructure/docker/osionos/ide-sandbox/bootstrap.sh
+# Pre:    docker-ide.service running; the two images built on the MAIN daemon;
+#         ide-egress-nat.sh up  (for the egress proxy's outbound NAT).
 
 set -eu
 
-DIND="track-binocle-osionos-ide-dockerd"
+IDE_SOCK="${OSIONOS_IDE_DOCKER_SOCK:-/run/docker-ide.sock}"
+IDE="docker -H unix://${IDE_SOCK}"
 SANDBOX_IMAGE="${OSIONOS_IDE_SANDBOX_IMAGE:-osionos-ide-sandbox:latest}"
 EGRESS_IMAGE="${OSIONOS_IDE_EGRESS_IMAGE:-osionos-ide-egress:latest}"
 SANDBOX_NET="osio-ide-sandbox-net"
-GIT_HOSTS="${OSIONOS_IDE_EGRESS_GIT_HOSTS:-}"
+EGRESS_NET="osio-ide-egress-net"
+GIT_HOSTS="${OSIONOS_IDE_EGRESS_GIT_HOSTS:-github.com}"
 
 log() { printf '[ide-bootstrap] %s\n' "$1"; }
 
-# 1. Wait for the isolated daemon to accept commands.
-log "waiting for the dind daemon…"
-i=0
-until docker exec "$DIND" docker info >/dev/null 2>&1; do
-  i=$((i + 1)); [ "$i" -gt 60 ] && { log "dind never became ready"; exit 1; }
-  sleep 1
-done
+# 1. Reachable?
+$IDE info >/dev/null 2>&1 || { log "docker-ide daemon not reachable at ${IDE_SOCK} — is docker-ide.service up?"; exit 1; }
 
-# 2. Seed the two images into dind (host build → dind load). This is the ONLY
-#    image transfer; the runtime path never loads images.
-log "seeding images into the isolated daemon…"
-docker save "$SANDBOX_IMAGE" | docker exec -i "$DIND" docker load
-docker save "$EGRESS_IMAGE" | docker exec -i "$DIND" docker load
+# 2. Seed the two images: build on the MAIN daemon, pipe into docker-ide. The
+#    ONLY image transfer; the runtime path never loads images.
+log "seeding images into docker-ide…"
+docker save "$SANDBOX_IMAGE" | $IDE load
+docker save "$EGRESS_IMAGE" | $IDE load
 
-# 3. The internal sandbox network — `internal` = sandboxes get NO off-box route;
-#    their only reachable peer is the egress proxy on this same net (condition 3).
-log "creating the internal sandbox network…"
-docker exec "$DIND" docker network inspect "$SANDBOX_NET" >/dev/null 2>&1 \
-  || docker exec "$DIND" docker network create --internal "$SANDBOX_NET"
+# 3. Networks — sandbox-net is `--internal` (sandboxes get NO off-box route,
+#    only the egress proxy on the same net); egress-net is egress-capable (the
+#    NAT script MASQUERADEs the 10.202 pool it draws from).
+log "creating networks…"
+$IDE network inspect "$SANDBOX_NET" >/dev/null 2>&1 || $IDE network create --internal "$SANDBOX_NET"
+$IDE network inspect "$EGRESS_NET"  >/dev/null 2>&1 || $IDE network create "$EGRESS_NET"
 
-# 4. The egress proxy INSIDE dind — dual-homed: sandbox-net (as `ide-egress`,
-#    the sole egress path) + the default net (real egress). Hardened like a
-#    sandbox. Connect-time IP re-validation defeats DNS-rebind (condition 5).
-log "starting the in-dind egress proxy…"
-docker exec "$DIND" docker rm -f ide-egress >/dev/null 2>&1 || true
-docker exec "$DIND" docker run -d --name ide-egress \
+# 4. The egress proxy — dual-homed: sandbox-net (as `ide-egress`, the sole egress
+#    path) + egress-net (real egress via the host NAT). Hardened like a sandbox.
+log "starting the egress proxy…"
+$IDE rm -f ide-egress >/dev/null 2>&1 || true
+$IDE run -d --name ide-egress \
   --network "$SANDBOX_NET" --network-alias ide-egress \
   --cap-drop ALL --security-opt no-new-privileges:true --read-only \
   --restart unless-stopped \
   -e "IDE_EGRESS_GIT_HOSTS=$GIT_HOSTS" \
   "$EGRESS_IMAGE"
-# Give the proxy a second NIC on the default (egress) net so it can reach out.
-docker exec "$DIND" docker network connect bridge ide-egress
+$IDE network connect "$EGRESS_NET" ide-egress
 
 log "done. sandboxes create on $SANDBOX_NET; egress via ide-egress:8080."

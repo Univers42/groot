@@ -42,6 +42,9 @@ const ALLOW = [
   ["POST", new RegExp(`^/(v[\\d.]+/)?containers/${ID}/exec$`)],
   ["DELETE", new RegExp(`^/(v[\\d.]+/)?containers/${ID}(\\?.*)?$`)],
   ["POST", /^\/(v[\d.]+\/)?exec\/[a-f0-9]+\/start$/],
+  // PTY geometry only — resizes an already-created exec's TTY. No new
+  // capability, id-pinned, docker validates w/h as ints; scoped + benign.
+  ["POST", /^\/(v[\d.]+\/)?exec\/[a-f0-9]+\/resize(\?.*)?$/],
   ["GET", /^\/(v[\d.]+\/)?exec\/[a-f0-9]+\/json$/],
   ["POST", /^\/(v[\d.]+\/)?volumes\/create$/],
   ["GET", /^\/(v[\d.]+\/)?networks\/[\w.-]+$/],
@@ -132,6 +135,8 @@ if (isMain && process.argv.includes("--selfcheck")) {
   const chk = (label, got, want) => { if (got !== want) fail.push(`${label}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`); };
   chk("allow create", isAllowed("POST", "/containers/create?name=ide-" + "a".repeat(32)), true);
   chk("allow start", isAllowed("POST", "/containers/ide-" + "a".repeat(32) + "/start"), true);
+  chk("allow resize", isAllowed("POST", "/exec/deadbeef01/resize?w=120&h=40"), true);
+  chk("deny foreign resize", isAllowed("POST", "/exec/../containers/x/resize"), false);
   chk("deny images", isAllowed("POST", "/images/create?fromImage=x"), false);
   chk("deny build", isAllowed("POST", "/build"), false);
   chk("deny foreign exec", isAllowed("POST", "/containers/mini-baas-postgres/exec"), false);

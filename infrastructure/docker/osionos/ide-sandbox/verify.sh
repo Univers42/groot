@@ -7,7 +7,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2026/07/19 00:00:00 by dlesieur          #+#    #+#              #
-#    Updated: 2026/07/19 00:00:00 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/07/20 00:00:00 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -17,22 +17,21 @@
 # Exit 0 = all conditions hold; non-zero = a BLOCK condition failed.
 
 set -u
-DIND="track-binocle-osionos-ide-dockerd"
+IDE="docker -H unix://${OSIONOS_IDE_DOCKER_SOCK:-/run/docker-ide.sock}"
 PROBE="ide-probe-corpus"
 SANDBOX_NET="osio-ide-sandbox-net"
 SANDBOX_IMAGE="${OSIONOS_IDE_SANDBOX_IMAGE:-osionos-ide-sandbox:latest}"
-PROXY="${OSIONOS_IDE_DOCKER_HOST:-osionos-ide-socket-proxy:2375}"
 pass=0; fail=0
 
 ok()   { printf '  \033[0;32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
 bad()  { printf '  \033[0;31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
-# in-sandbox exec
-sx()   { docker exec "$DIND" docker exec "$PROBE" sh -c "$1" 2>/dev/null; }
+# in-sandbox exec (on the isolated docker-ide daemon)
+sx()   { $IDE exec "$PROBE" sh -c "$1" 2>/dev/null; }
 # expect the in-sandbox command to FAIL (non-zero) — the safe outcome
 deny() { if sx "$1" >/dev/null 2>&1; then bad "$2"; else ok "$2"; fi; }
 
-docker exec "$DIND" docker rm -f "$PROBE" >/dev/null 2>&1
-docker exec "$DIND" docker run -d --name "$PROBE" --network "$SANDBOX_NET" \
+$IDE rm -f "$PROBE" >/dev/null 2>&1
+$IDE run -d --name "$PROBE" --network "$SANDBOX_NET" \
   --cap-drop ALL --security-opt no-new-privileges:true --read-only \
   --pids-limit 512 --memory 512m --ulimit core=0 \
   --tmpfs /tmp:size=32m --tmpfs /home/coder:size=16m \
@@ -58,13 +57,23 @@ if [ "$(sx 'ulimit -c')" = "0" ]; then ok "core dumps disabled (RLIMIT_CORE=0)";
 deny "fallocate -l 2000M /tmp/big" "tmpfs write bounded by quota"
 
 echo "== Socket-proxy body filter (conditions 8,9) =="
-priv='{"Image":"'"$SANDBOX_IMAGE"'","HostConfig":{"Privileged":true}}'
-code=$(docker exec "$DIND" sh -c "wget -qO- --post-data='$priv' --header='Content-Type: application/json' http://$PROXY/containers/create 2>&1 | grep -c 'create rejected: Privileged'" 2>/dev/null || echo 0)
-if [ "${code:-0}" != "0" ]; then ok "socket-proxy rejects Privileged create"; else bad "socket-proxy rejects Privileged create"; fi
-code=$(docker exec "$DIND" sh -c "wget -qO- --post-data='{}' http://$PROXY/images/create?fromImage=x 2>&1 | grep -c 'not allowed'" 2>/dev/null || echo 0)
-if [ "${code:-0}" != "0" ]; then ok "socket-proxy denies /images"; else bad "socket-proxy denies /images"; fi
+# The create-body vetting (Privileged/Binds/host-modes/CapAdd reject + endpoint
+# allowlist + name pinning) is exhaustively asserted by the proxy's own
+# --selfcheck; run it here as the condition-8/9 proof rather than a fragile
+# wget across the internal control-net (the proxy is not host-reachable).
+if docker run --rm "${OSIONOS_IDE_SOCKET_PROXY_IMAGE:-osionos-ide-socket-proxy:latest}" node /app/proxy.mjs --selfcheck >/dev/null 2>&1; then
+  ok "socket-proxy body filter + endpoint allowlist (--selfcheck)"
+else
+  bad "socket-proxy body filter + endpoint allowlist (--selfcheck)"
+fi
+# Egress proxy deny-tables (metadata/RFC1918/IPv6 ULA) — condition 5,6.
+if docker run --rm "${OSIONOS_IDE_EGRESS_IMAGE:-osionos-ide-egress:latest}" node /app/proxy.mjs --selfcheck >/dev/null 2>&1; then
+  ok "egress-proxy deny tables + IP revalidation (--selfcheck)"
+else
+  bad "egress-proxy deny tables + IP revalidation (--selfcheck)"
+fi
 
-docker exec "$DIND" docker rm -f "$PROBE" >/dev/null 2>&1
+$IDE rm -f "$PROBE" >/dev/null 2>&1
 echo ""
 printf 'RESULT: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ] || exit 1
