@@ -79,6 +79,14 @@ services:
       # human go-ahead). Enable locally: OSIONOS_RUNNER_URL=http://osionos-runner:7900
       # plus `COMPOSE_PROFILES=runner`.
       OSIONOS_RUNNER_URL: ${OSIONOS_RUNNER_URL:-}
+      # IDE workspace sandbox (P2–P7) — DOUBLE-GATED, default DISABLED. All
+      # /api/ide/{session,pty,lsp,fsync,git,search,fs} routes stay 404 unless BOTH
+      # are set AND the `ide` profile (socket-proxy) is up. Ships EMPTY on purpose.
+      # Enable locally: OSIONOS_IDE_SANDBOX=1 +
+      # OSIONOS_IDE_DOCKER_HOST=osionos-ide-socket-proxy:2375 + COMPOSE_PROFILES=ide.
+      OSIONOS_IDE_SANDBOX: ${OSIONOS_IDE_SANDBOX:-}
+      OSIONOS_IDE_DOCKER_HOST: ${OSIONOS_IDE_DOCKER_HOST:-}
+      OSIONOS_IDE_EGRESS_GIT_HOSTS: ${OSIONOS_IDE_EGRESS_GIT_HOSTS:-github.com}
       HOME: ${OSIONOS_BRIDGE_HOME:-/tmp}
       PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     expose:
@@ -91,6 +99,9 @@ services:
       # Reaches the (optional, profile-gated) code runner over an internal-only
       # network — no effect until the `runner` profile is up + OSIONOS_RUNNER_URL set.
       - osionos-runner-net
+      # IDE control plane → the filtering socket-proxy (OSIONOS_IDE_DOCKER_HOST).
+      # Internal-only; no effect until the `ide` profile is up + the envs above set.
+      - osionos-ide-control-net
     healthcheck:
       test:
         [

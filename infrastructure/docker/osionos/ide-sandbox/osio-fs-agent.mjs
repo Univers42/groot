@@ -89,18 +89,54 @@ function readMeta(absPath) {
   }
 }
 
+// Hand-rolled recursive watch: `fs.watch(dir, {recursive:true})` is unavailable
+// on Linux before node 20 (the sandbox runs node 18), so we watch each directory
+// and grow the watch set as subdirs appear. When a NEW subtree lands (e.g. a
+// `git pull` creating dirs), its existing files are emitted too — a plain watch
+// would miss files created before we attached.
 function startWatch() {
   const extraDirs = loadExtraIgnore(ROOT);
-  emit("ready", "", { root: ROOT });
-  fs.watch(ROOT, { recursive: true }, (_type, filename) => {
+  const watchers = new Map(); // absDir -> FSWatcher
+  const relOf = (abs) => path.relative(ROOT, abs).replaceAll("\\", "/");
+
+  const dirIgnored = (relDir) =>
+    Boolean(relDir) && relDir.split("/").some((seg) => DEFAULT_IGNORE_DIRS.has(seg) || extraDirs.has(seg));
+
+  function addTree(absDir, emitExisting) {
+    if (dirIgnored(relOf(absDir))) return;
+    if (!watchers.has(absDir)) {
+      let watcher;
+      try { watcher = fs.watch(absDir, (_t, filename) => onEvent(absDir, filename)); }
+      catch { return; }
+      watcher.on("error", () => { try { watcher.close(); } catch { /* gone */ } watchers.delete(absDir); });
+      watchers.set(absDir, watcher);
+    }
+    let entries;
+    try { entries = fs.readdirSync(absDir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const abs = path.join(absDir, entry.name);
+      if (entry.isDirectory()) addTree(abs, emitExisting);
+      else if (emitExisting) {
+        const rel = relOf(abs);
+        if (!isIgnored(rel, extraDirs)) { const meta = readMeta(abs); if (meta) emit("write", rel, meta); }
+      }
+    }
+  }
+
+  function onEvent(absDir, filename) {
     if (!filename) return;
-    const relPath = String(filename).replaceAll("\\", "/");
-    if (isIgnored(relPath, extraDirs)) return;
-    const absPath = path.join(ROOT, relPath);
-    if (!fs.existsSync(absPath)) { emit("delete", relPath); return; }
-    const meta = readMeta(absPath);
-    if (meta) emit("write", relPath, meta);
-  });
+    const abs = path.join(absDir, String(filename));
+    const rel = relOf(abs);
+    if (!rel || isIgnored(rel, extraDirs)) return;
+    let stat;
+    try { stat = fs.statSync(abs); } catch { emit("delete", rel); return; }
+    if (stat.isDirectory()) { addTree(abs, true); return; } // new subtree → watch + surface its files
+    const meta = readMeta(abs);
+    if (meta) emit("write", rel, meta);
+  }
+
+  addTree(ROOT, false); // initial scan doesn't re-emit already-materialized files
+  emit("ready", "", { root: ROOT });
 }
 
 const isMain = process.argv[1] === fileURLToPath(import.meta.url);
