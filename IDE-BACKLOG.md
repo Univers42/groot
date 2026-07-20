@@ -224,6 +224,8 @@ The history uses **three overlapping axes**. This table is the reconciliation.
 | G-ACT | Live activation must be re-run per host (needs operator sudo) | `ide-sandbox/README.md` §Host prereqs | expected |
 | ~~G-REAP~~ | ✅ **RESOLVED** — reaper scheduled on a guarded `unref()` interval in `startBridgeServer` | `bridge-api.mjs` | fixed |
 | ~~G-CREATE~~ | ✅ **RESOLVED** — errors surfaced via `notifyCreateFailure` (+ canvas test) | `pageCreateFeedback.ts` | fixed |
+| ~~G-DBSURFACE~~ | ✅ **RESOLVED (root cause of "can't create a dev page")** — the live `osionos_pages_surface_check` DB constraint allowed `page/agent/home/folder/wiki/app` but **not `code`**, so every `surface='code'` insert 400'd (`23514 check_violation`). The `notifyCreateFailure` fix surfaced it. The fix migration existed (`models/osionos-code-surface-migration.sql`, committed `ef168070`) but had **never been applied** to the live DB — applied it; Playwright-verified `surface='code'` now → **HTTP 201**. | `models/osionos-code-surface-migration.sql` | fixed |
+| G-MIGRUN | **No auto-apply for `models/*.sql`** — the code-surface migration sat unapplied because nothing runs `models/*.sql` (no make target, no CI step). Future osionos migrations can silently not-apply the same way. Add a `models/`-apply step to the lifecycle + a verify gate. | `models/*.sql` (no runner) | **process gap** |
 | ~~G-RUNLANG~~ | ✅ **RESOLVED** — all 13 runner languages installed + verified running | `runner/Dockerfile` | fixed |
 | ~~G-EXEC~~ | ✅ **RESOLVED** — runner `/work` was `noexec` → every compiled language failed; made exec-able | `docker-compose.yml` | fixed |
 | ~~G-SBXLANG~~ | ✅ **BUILT** (runtime pends Plane B) — gcc/g++/clang/make/go/rust/jdk added to the sandbox image | `ide-sandbox/Dockerfile` | fixed (built) |
@@ -375,6 +377,14 @@ starts automatically (self-gated until now).
 
 ## Changelog
 
+- **2026-07-20 (e)** — **Fixed the real root cause of "can't create a dev page."** The
+  `notifyCreateFailure` fix exposed a live `400 23514 check_violation`: the
+  `osionos_pages_surface_check` constraint lacked `'code'`. The fix migration existed
+  (`models/osionos-code-surface-migration.sql`) but was never applied — applied it to the
+  live DB (constraint now includes `code`). **Verified with dockerized Playwright** against
+  the live stack (website login → osionos → bridge): `surface='code'` create → **HTTP 201**
+  (was 400), control `surface='page'` → 201; probe pages cleaned up. Logged the process gap
+  G-MIGRUN (no auto-apply for `models/*.sql`).
 - **2026-07-20 (d)** — **Plane B activated.** Host prep (isolated `docker-ide` daemon,
   data-root, egress NAT, socket-proxy, egress proxy) was already in place from a prior
   session; re-seeded the new toolchain sandbox image, `verify.sh` **15/15**, added the
