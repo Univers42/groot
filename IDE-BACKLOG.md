@@ -334,8 +334,50 @@ re-run the `verify.sh` gate.
 
 ---
 
+## Appendix — Plane B activation (ready-to-run)
+
+The three images are **already built** on the main daemon
+(`osionos-ide-{egress,socket-proxy,sandbox}:latest`), so skip the runbook's build step.
+Only the `sudo` half remains (second Docker daemon). Run from the repo root; the
+authority is `infrastructure/docker/osionos/ide-sandbox/README.md`.
+
+```sh
+# 1. Loopback data-root (ext4; use mkfs.xfs + mount -o loop,pquota for per-sandbox quota):
+sudo fallocate -l 24G /var/lib/docker-ide.img
+sudo mkfs.ext4 -q -O quota -E quotatype=prjquota /var/lib/docker-ide.img
+sudo mkdir -p /var/lib/docker-ide
+sudo mount -o loop,prjquota /var/lib/docker-ide.img /var/lib/docker-ide
+echo '/var/lib/docker-ide.img /var/lib/docker-ide ext4 loop,prjquota,nofail 0 0' | sudo tee -a /etc/fstab
+# 2. Isolated daemon:
+sudo cp infrastructure/docker/osionos/ide-sandbox/docker-ide.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now docker-ide
+# 3. Scoped egress NAT:
+sudo sh infrastructure/docker/osionos/ide-sandbox/ide-egress-nat.sh up
+# 4. Filtering socket-proxy (main daemon → /run/docker-ide.sock):
+COMPOSE_PROFILES=ide docker compose up -d osionos-ide-socket-proxy
+# 5. Seed the pre-built images + networks into docker-ide:
+sudo sh infrastructure/docker/osionos/ide-sandbox/bootstrap.sh
+# 6. HOSTILE-CORPUS GATE — must print 15 PASS before enabling:
+sudo sh infrastructure/docker/osionos/ide-sandbox/verify.sh
+# 7. Flip the bridge double-gate, then recreate the bridge:
+#    add to ./.env.local:  OSIONOS_IDE_SANDBOX=1
+#                          OSIONOS_IDE_DOCKER_HOST=osionos-ide-socket-proxy:2375
+#                          OSIONOS_IDE_EGRESS_GIT_HOSTS=github.com
+docker compose --env-file ./.env.local up -d osionos-bridge
+```
+
+After step 7: open a workspace in IDE mode → the terminal (`bash -l`), multi-language LSP
+(go/rust/c/cpp/ts/python), bidirectional file-sync, and git all come alive. The reaper
+starts automatically (self-gated until now).
+
 ## Changelog
 
+- **2026-07-20 (c)** — Epic 3 Run panel shipped live (`IdeRunPanel`, quality green, in the
+  bundle). Epic 4 (fly) assessed → design finding recorded (not a drop-in; exec-attach
+  transport gap). Pre-built the three Plane B images on the main daemon so activation is
+  sudo-only; added the ready-to-run activation block above. Committed: osionos `b3f6d23d`
+  (core) + `d1855c8c` (Run panel); root `b883403e` + `d5f18d4e` (no co-author trailer,
+  unpushed, pre-existing WIP untouched).
 - **2026-07-20 (b)** — Epics 0–2 landed + verified.
   - **Plane A activated (live):** `VITE_OSIO_IDE=1` baked (compose build-arg →
     `app.Dockerfile` `.env.production.local`; verified `VITE_OSIO_IDE:"1"` in the bundle),
