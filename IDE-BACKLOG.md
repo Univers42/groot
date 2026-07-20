@@ -228,7 +228,7 @@ The history uses **three overlapping axes**. This table is the reconciliation.
 | ~~G-EXEC~~ | ✅ **RESOLVED** — runner `/work` was `noexec` → every compiled language failed; made exec-able | `docker-compose.yml` | fixed |
 | ~~G-SBXLANG~~ | ✅ **BUILT** (runtime pends Plane B) — gcc/g++/clang/make/go/rust/jdk added to the sandbox image | `ide-sandbox/Dockerfile` | fixed (built) |
 | ~~G-LSP~~ | ◑ **PARTIAL** — go/rust/clangd added + wired (built); **Java (jdtls) still TODO** | `bridge-ide-exec.mjs`, `lspClient.ts`, `ide-sandbox/Dockerfile` | mostly fixed |
-| G-DEBUG | Run/Debug side panel is a literal placeholder ("Run and debug arrives with the sandbox shell") | `IdeSidePanel.tsx:56-59` | feature (Epic 3) |
+| ◑ G-DEBUG | Run panel now live (`IdeRunPanel` — streams the runner); **DAP debugger + test-runner + tasks still TODO** | `src/features/ide/ui/IdeRunPanel.tsx` | partial (Epic 3) |
 | G-SEARCH | Frontend search is in-memory browser grep; the container `rg --json` route (`/api/ide/search`) exists but is unused by the UI | `browserSearch.ts`, `IdeSearchPanel.tsx` | polish |
 | G-GIT | Git panel = status/commit/push only; no branch/stash/diff-view | `useIdeGit.ts:36-38` | polish |
 | G-FLY | fly-machines provider deferred; `/api/ide/*` 404s on fly/Vercel (Docker-only today) | `ide-docker.mjs` | feature |
@@ -295,20 +295,32 @@ re-run the `verify.sh` gate.
 - **Acceptance:** editing `.go`/`.rs`/`.c`/`.cpp` yields diagnostics/completion ⏳ (Plane B).
 - **Follow-up:** add `jdtls` (Java LSP); wire `java` into the two maps once it lands.
 
-### Epic 3 — Debugger / tests / tasks (`TODO`) — gap G-DEBUG (largest)
-- [ ] Replace the `IdeSidePanel.tsx:56` placeholder with a real Run/Debug panel.
-- [ ] New DAP relay `WS /api/ide/debug` mirroring the LSP relay (debugpy / js-debug in the
-      sandbox image); a test-runner action; a minimal tasks system.
+### Epic 3 — Debugger / tests / tasks — Run panel `DONE`; debugger `TODO` — gap G-DEBUG
+- [x] **Run panel** `DONE` — replaced the `IdeSidePanel` placeholder with `IdeRunPanel`
+      (`src/features/ide/ui/IdeRunPanel.tsx`): runs the active code file through the live
+      runner (Plane A), streams stdout/stderr + exit status, Run/Stop/Clear. Reuses
+      `useCodeRunner` + `RunConsole`'s `streamClass`. (tsc/eslint verified.)
+- [ ] **Debugger (DAP):** new relay `WS /api/ide/debug` mirroring the LSP relay (debugpy /
+      js-debug in the sandbox image); breakpoint UI. **Needs Plane B** (sandbox) to run.
+- [ ] **Test runner + tasks:** a test-runner action + a minimal tasks system.
 - [ ] Flag-gated, argv unit-tested, `verify.sh`/OpenAPI extended.
-- **Acceptance:** set a breakpoint in a Python/JS file and hit it; run a test suite from the
-      panel and see pass/fail.
+- **Acceptance:** Run panel streams a file's output ✅; set a breakpoint and hit it ⏳ (DAP);
+      run a test suite from the panel ⏳.
 
 ### Epic 4 — Cloud/prod sandbox (fly-machines provider) (`TODO`) — gap G-FLY
-- [ ] Implement the deferred provider behind `ide-docker.mjs`'s interface (drop-in adapter;
-      keep the local isolated daemon as the default).
 - [ ] Provision/attach/reap a fly Machine per `(user,workspace)`; wire egress + volume.
 - **Acceptance:** with the fly provider configured, `/api/ide/*` provisions a remote sandbox
       from the deployed bridge instead of 404-ing.
+- **⚠ Design finding (2026-07-20):** this is **NOT a clean drop-in** behind `ide-docker.mjs`.
+  That client relies on Docker's **exec-attach hijack** — a raw bidirectional TCP upgrade
+  (`POST /exec/{id}/start`) — for the PTY (`/api/ide/pty`) and LSP (`/api/ide/lsp`) relays.
+  Fly Machines exposes no equivalent bidirectional exec-attach over its API. A fly provider
+  therefore needs a **different terminal transport**: run a small shell/LSP-mux server inside
+  the machine and connect to it over fly's private 6PN network (or a WS the machine serves),
+  rather than reusing the Docker exec stream. So Epic 4 splits into: (a) a provider abstraction
+  over lifecycle (create/start/stop/destroy + volume) that both Docker and fly implement, and
+  (b) a transport abstraction so PTY/LSP work over either the Docker hijack **or** an in-machine
+  server. (b) is the hard part. Cannot be verified without a Fly org + deploy.
 
 ### Epic 5 — Polish (fold in opportunistically) — gaps G-SEARCH, G-GIT, G-CREATEUI, G-LSPRE, G-TERMRE, G-FSW, G-WSCAP, G-QUOTA, G-DOC
 - [ ] Swap frontend `browserSearch` → container `POST /api/ide/search`.
