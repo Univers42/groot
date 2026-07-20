@@ -265,11 +265,14 @@ re-run the `verify.sh` gate.
 - [x] **G-REAP** `DONE` — `reapExpiredSandboxes` scheduled on a guarded, `unref()`'d
       interval in `startBridgeServer` (`bridge-api.mjs`); self-gates OFF until Plane B.
       Bridge tests 89/89 green.
-- [ ] **Plane B** `TODO` — live activation (guided sudo host prep → `verify.sh` 15/15 →
-      flip gate → e2e). Needs operator sudo; not doable headless.
+- [x] **Plane B** `DONE (activated)` — host prep was already in place; re-seeded the new
+      toolchain image into `docker-ide`, **`verify.sh` 15/15**, flipped the bridge gate
+      (`OSIONOS_IDE_SANDBOX=1` + `OSIONOS_IDE_DOCKER_HOST` in `.env.local` + app `.env`),
+      recreated the bridge. Control path verified: daemon reachable, socket-proxy
+      `/_ping 200`, bridge on `osionos-ide-control-net`. Browser E2E is the final confirm.
 - **Acceptance:** create a code page (survives reload) ✅, Run + Format work ✅, a forced API
-  failure shows an error ✅, the powerful terminal opens with a persistent volume ⏳ (Plane B),
-  LSP + live-sync + git all work end-to-end ⏳ (Plane B).
+  failure shows an error ✅, the powerful terminal + LSP + live-sync + git are **armed**
+  (`/api/ide/*` live) — confirm in the browser.
 
 ### Epic 1 — Languages + compile toolchains — `DONE` (runner) / `DONE, pending activation` (sandbox)
 - [x] Runner image + `LANGS`: `DONE` — installed the missing 6 (ruby/php/lua/perl/go/rust,
@@ -372,6 +375,12 @@ starts automatically (self-gated until now).
 
 ## Changelog
 
+- **2026-07-20 (d)** — **Plane B activated.** Host prep (isolated `docker-ide` daemon,
+  data-root, egress NAT, socket-proxy, egress proxy) was already in place from a prior
+  session; re-seeded the new toolchain sandbox image, `verify.sh` **15/15**, added the
+  bridge double-gate to `.env.local` + app `.env`, recreated the bridge. Verified daemon
+  reachability, socket-proxy `/_ping 200`, control-net membership. The powerful terminal +
+  multi-language LSP + live-sync + git are now live behind `/api/ide/*`.
 - **2026-07-20 (c)** — Epic 3 Run panel shipped live (`IdeRunPanel`, quality green, in the
   bundle). Epic 4 (fly) assessed → design finding recorded (not a drop-in; exec-attach
   transport gap). Pre-built the three Plane B images on the main daemon so activation is
