@@ -138,29 +138,36 @@ provisioner. Bridge modules, no new deps (WebSocket is hand-rolled: `ide-ws.mjs`
 
 | Route | Phase | What | Verified |
 |---|---|---|---|
-| WS `/api/ide/pty` | P3 | interactive shell (`docker exec -it bash`) | ws codec + exec engine |
+| WS `/api/ide/pty` | P3 | interactive shell (`docker exec -it bash`) + out-of-band APC resize | ws codec + exec engine |
 | WS `/api/ide/lsp?lang=` | P5 | LSP stdio relay (typescript/pyright) | ws codec + exec engine |
+| WS `/api/ide/fsync` | P4 | fs-agent event stream (writeback) | ws codec + exec engine |
 | POST `/api/ide/git` | P6 | status/commit/push; subcommand allowlist; **`config` denied** (can't defeat the per-op PAT); PAT request-scoped | argv unit tests |
 | POST `/api/ide/search` | P7 | `rg --json`, query after `--` (no flag injection) | parser + argv tests |
 | POST `/api/ide/fs` | P4 | editor→container write (base64 argv, path-traversal guarded) | argv test |
 
-Frontend built (no dep, static-verified): the **Source Control panel** (P6) —
-status/commit/push, graceful "no sandbox" state offline.
+Frontend shipped (all behind `osio.ide`, static-verified — typecheck + eslint +
+canvas suite green): **terminal** (xterm.js over `/api/ide/pty`, lazy-loaded, PTY
+resize propagated), **LSP** (`@codemirror/lsp-client` over `/api/ide/lsp` through
+a dependency-free Content-Length codec, + a diagnostics store + Problems panel),
+**live sync** (materialize on attach, editor→container mirror, `/api/ide/fsync`
+writeback → page CRUD with ignore-set + sha256 echo-suppression), and the
+**Source Control panel** (P6) — status/commit/push, graceful "no sandbox" offline.
 
-## Remaining to finish (each ~an afternoon, needs the prepped host)
+## Remaining to finish
 
-1. **Terminal frontend (P3):** an `xterm.js` component in the bottom strip that
-   opens `wss://…/api/ide/pty?token=…&workspaceId=…` and pipes bytes. New dep
-   (`@xterm/xterm`), so add via the Docker lockfile flow. The server relay + WS
-   codec are done.
-2. **LSP client (P5):** `@codemirror/lsp-client` wired to `/api/ide/lsp`, feeding
-   a diagnostics store + a Problems panel. Add one language server per line to
-   `LSP_SERVERS` (bridge-ide-exec) + the sandbox image.
-3. **Live sync loop (P4):** launch `osio-fs-agent.mjs` per session (`docker exec`)
-   and map its events → page CRUD via a `.osio/manifest.json`. The ignore core +
-   the write route are done.
+1. ~~Terminal frontend (P3)~~ — **done**: `IdeTerminal` (xterm.js) over
+   `/api/ide/pty`, lazy-loaded, resize propagated via an APC control frame.
+2. ~~LSP client (P5)~~ — **done**: `@codemirror/lsp-client` → `/api/ide/lsp`
+   through a dependency-free Content-Length codec; diagnostics store + Problems
+   panel; `typescript-language-server` + `pyright` in the sandbox image.
+3. ~~Live sync loop (P4)~~ — **done**: `useIdeFsSync` streams `/api/ide/fsync`
+   → page CRUD; materialize on attach; editor→container mirror; ignore-set +
+   sha256 echo-suppression (no `.osio/manifest.json` needed — the page tree is
+   the manifest, path↔pageId derived via `pathForPage`).
 4. **fly-machines provider (P7):** a drop-in behind `ide-docker`'s interface —
    deferred (YAGNI until a fly deploy is attempted).
+5. **Live activation (Part E):** the isolated daemon still needs the host sudo
+   prep below; then `verify.sh` 16/16 + the terminal/LSP/sync/git end-to-end run.
 
 ## Trade-off notes
 
