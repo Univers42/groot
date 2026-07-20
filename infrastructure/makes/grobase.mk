@@ -57,6 +57,18 @@ restore-if-empty:
 ## FAIL-SAFE auto-restore (wired into `make all`): loads the all-engine snapshot ONLY when EVERY running primary engine (postgres osionos, mysql ops, mongo activity) is CONFIRMED empty. Any engine with data, or any uncertainty (unreachable / query error), → SKIP (never wipes). Logic in scripts/restore-if-empty.sh.
 	@sh scripts/restore-if-empty.sh
 
+apply-models:
+## Apply pending root-app models/*.sql migrations to the live DB (checksum-tracked; ADOPTS an existing schema on first run, then applies only new/changed files — never blindly replays order-sensitive migrations). Wired into `make all`. Logic in scripts/apply-models.sh.
+	@sh scripts/apply-models.sh apply
+
+apply-models-check:
+## Verify GATE (read-only): exit non-zero if any models/*.sql migration is pending (committed but unapplied) — the guard that catches the class of bug where a migration silently never ran. Wire into CI.
+	@sh scripts/apply-models.sh check
+
+apply-models-baseline:
+## Adopt the migration ledger on an already-migrated DB: record every current models/*.sql as applied WITHOUT running it.
+	@sh scripts/apply-models.sh baseline
+
 frontends-up: certs docker-prefetch-images compose-build
 ## Build and start ONLY the root frontends against the running grobase backend.
 	docker compose --env-file ./.env.local up -d --build --wait $(ROOT_FRONTENDS)
