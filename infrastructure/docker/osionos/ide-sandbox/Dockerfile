@@ -5,13 +5,25 @@
 #
 # Hardening is enforced at CREATE time by the provisioner (cap_drop ALL,
 # no-new-privileges, non-root, pids/mem/cpu, RLIMIT_CORE=0, inode+block quota).
-# This image adds only toolchains + the PAT-broker credential helper. P3/P5
-# extend it with the full language toolchains + language servers.
+# This image adds the toolchains + language servers + the PAT-broker credential
+# helper. Everything that needs npm/apt egress runs BEFORE the HTTP_PROXY ENV
+# block below — on the build daemon the in-daemon egress proxy does not exist.
 FROM debian:bookworm-slim
 
+# Base tools + `ripgrep` (the /api/ide/search backend: `rg --json`) + node/npm
+# (runs the fs-agent AND the two language servers below).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      bash ca-certificates curl git python3 procps iproute2 \
+      bash ca-certificates curl git python3 procps iproute2 ripgrep nodejs npm \
     && rm -rf /var/lib/apt/lists/*
+
+# Language servers (P5) — matches bridge-ide-exec.mjs LSP_SERVERS:
+#   typescript → typescript-language-server --stdio
+#   python     → pyright-langserver --stdio
+# Global, so a `docker exec` LSP relay finds them on PATH. Major-pinned (a dev
+# sandbox toolchain, not a project dependency under the release-age policy).
+RUN npm install -g --no-audit --no-fund \
+      typescript@5 typescript-language-server@4 pyright@1 \
+    && npm cache clean --force
 
 # PAT broker (devil condition 13): the credential helper only emits a secret
 # when GIT_PAT is present in the GIT PROCESS env — which happens ONLY when the

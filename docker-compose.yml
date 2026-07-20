@@ -600,40 +600,16 @@ services:
     image: track-binocle/grobase-site-audit:local
 
   # ── IDE sandbox plane (profile `ide`; NEVER started by `make all`) ──────────
-  # A DEDICATED, ISOLATED rootless Docker daemon that runs the per-(user,
-  # workspace) IDE sandboxes on its OWN data-root — a separate daemon from the
-  # host daemon that runs mini-baas, so a sandbox/provisioner compromise cannot
-  # see the backend (devil condition 1). Rootless = no `privileged`. Requires
-  # host support (cgroup v2 delegation + /etc/subuid,subgid) — see the runbook
-  # infrastructure/docker/osionos/ide-sandbox/README.md. Its socket is shared to
-  # the filter over a volume, never published to the host or a sandbox net.
-  osionos-ide-dockerd:
-    image: ${OSIONOS_IDE_DIND_IMAGE:-docker:27-dind-rootless}
-    container_name: track-binocle-osionos-ide-dockerd
-    profiles: ["ide"]
-    restart: unless-stopped
-    security_opt:
-      - seccomp=unconfined
-      - apparmor=unconfined
-    environment:
-      DOCKER_HOST: unix:///dind-run/docker.sock
-      DOCKER_TLS_CERTDIR: ""
-    command:
-      - "--host=unix:///dind-run/docker.sock"
-      - "--group=0"
-    volumes:
-      - osionos-ide-dind-data:/home/rootless/.local/share/docker
-      - osionos-ide-dind-sock:/dind-run
-    networks:
-      # Egress-capable: the IN-dind egress proxy reaches registries/git through
-      # here. The SANDBOXES sit on an internal net INSIDE this daemon, one hop
-      # behind that proxy — the two-layer isolation.
-      - osionos-ide-egress-net
-
+  # The isolated sandbox daemon is NOT a compose service — it is a host systemd
+  # unit `docker-ide.service` (a second rootful dockerd, own data-root/socket,
+  # --userns-remap, --iptables=false) so a sandbox/provisioner compromise can
+  # never see the mini-baas backend on the main daemon (devil condition 1). See
+  # the runbook infrastructure/docker/osionos/ide-sandbox/README.md "Activation".
+  #
   # The filtering docker-socket proxy — the ONLY path from the provisioner to the
-  # dind daemon (condition 2). Fronts the dind unix socket (shared volume),
-  # exposes a filtered TCP endpoint that allowlists endpoints AND vets the create
-  # body (condition 8). Reachable only by the bridge on the internal control net.
+  # docker-ide daemon (condition 2). It bind-mounts the host /run/docker-ide.sock
+  # and exposes a filtered TCP endpoint that allowlists endpoints AND vets the
+  # create body (condition 8). Reachable only by the bridge on the control net.
   osionos-ide-socket-proxy:
     build:
       context: infrastructure/docker/osionos/ide-socket-proxy
@@ -649,13 +625,12 @@ services:
     environment:
       IDE_DOCKER_SOCK: /dind-run/docker.sock
     volumes:
-      - osionos-ide-dind-sock:/dind-run
+      # Host bind of the isolated daemon's socket (docker-ide.service).
+      - ${OSIONOS_IDE_DOCKER_SOCK:-/run/docker-ide.sock}:/dind-run/docker.sock
     expose:
       - "2375"
     networks:
       - osionos-ide-control-net
-    depends_on:
-      - osionos-ide-dockerd
 
 volumes:
   osionos-app-node-modules:
@@ -664,9 +639,6 @@ volumes:
   calendar-node-modules:
   osionos-browser-test-node-modules:
   osionos-browser-test-pnpm-store:
-  # IDE plane: the isolated dind daemon's data-root + its shared socket dir.
-  osionos-ide-dind-data:
-  osionos-ide-dind-sock:
 
 networks:
   # The grobase backend stack's network (docker project `mini-baas`), declared
@@ -685,10 +657,8 @@ networks:
     internal: true
   # IDE control plane (bridge ↔ socket-proxy): internal, no egress — the control
   # path never needs the internet. The bridge joins this to reach the filter at
-  # osionos-ide-socket-proxy:2375 (OSIONOS_IDE_DOCKER_HOST).
+  # osionos-ide-socket-proxy:2375 (OSIONOS_IDE_DOCKER_HOST). The sandbox networks
+  # (internal sandbox-net + the egress proxy) live INSIDE the docker-ide daemon,
+  # created by bootstrap.sh — not here.
   osionos-ide-control-net:
     internal: true
-  # The isolated dind daemon's own network — egress-capable, because the IN-dind
-  # egress proxy reaches registries/git through it. It carries NO backend route:
-  # it is a fresh bridge network, never joined to mini-baas.
-  osionos-ide-egress-net:
