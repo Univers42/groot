@@ -12,6 +12,9 @@
 # in server.mjs.
 FROM node:22-bookworm-slim
 
+# Toolchains for every language the runner's LANGS map declares runnable, so a
+# language never shows as runnable in the UI but fails with "... : not found".
+# node (js/ts) comes from the base image; the rest are one apt package each.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 \
       gcc \
@@ -20,6 +23,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
       black \
       clang-format \
+      ruby \
+      php-cli \
+      lua5.4 \
+      perl \
+      golang-go \
+      rustc \
+    && ln -s /usr/bin/lua5.4 /usr/local/bin/lua \
     && rm -rf /var/lib/apt/lists/*
 
 # Non-root runtime user. /work is the mount point for a compose tmpfs (writable

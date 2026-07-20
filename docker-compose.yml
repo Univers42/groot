@@ -143,7 +143,13 @@ services:
       fsize: 16000000
       cpu: 20
     tmpfs:
-      - /work:size=64m,mode=1777
+      # /work needs `exec`: compiled languages (c/cpp/go/rust) build a native
+      # binary here and run it — Docker tmpfs defaults to noexec, which breaks
+      # every compiled language. Executing user code IS the runner's purpose;
+      # isolation rests on cap_drop ALL + seccomp + read-only rootfs + non-root +
+      # the internal (egress-less) network + pids/mem/cpu/fsize limits, not on a
+      # noexec scratch dir. /tmp stays noexec (nothing needs to exec from it).
+      - /work:size=64m,mode=1777,exec
       - /tmp:size=16m,mode=1777
     environment:
       RUNNER_PORT: "7900"
@@ -195,6 +201,9 @@ services:
         VITE_REQUIRE_BRIDGE_SESSION: "true"
         VITE_ALLOW_OFFLINE_MODE: "false"
         VITE_PAGE_ACTION_SYNC_ENABLED: "true"
+        # IDE / Dev-Mode surface (code files + CodeMirror editor + IDE shell).
+        # Empty default keeps it OFF for the public web image; the app .env sets =1.
+        VITE_OSIO_IDE: ${VITE_OSIO_IDE:-}
         # mini-baas live-database + graph wiring (Vite inlines at build).
         # Empty defaults keep those surfaces dormant; `make seed-live-demo`
         # at the repo root rebuilds this image with the values from the app
