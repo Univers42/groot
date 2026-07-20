@@ -225,7 +225,7 @@ The history uses **three overlapping axes**. This table is the reconciliation.
 | ~~G-REAP~~ | ✅ **RESOLVED** — reaper scheduled on a guarded `unref()` interval in `startBridgeServer` | `bridge-api.mjs` | fixed |
 | ~~G-CREATE~~ | ✅ **RESOLVED** — errors surfaced via `notifyCreateFailure` (+ canvas test) | `pageCreateFeedback.ts` | fixed |
 | ~~G-DBSURFACE~~ | ✅ **RESOLVED (root cause of "can't create a dev page")** — the live `osionos_pages_surface_check` DB constraint allowed `page/agent/home/folder/wiki/app` but **not `code`**, so every `surface='code'` insert 400'd (`23514 check_violation`). The `notifyCreateFailure` fix surfaced it. The fix migration existed (`models/osionos-code-surface-migration.sql`, committed `ef168070`) but had **never been applied** to the live DB — applied it; Playwright-verified `surface='code'` now → **HTTP 201**. | `models/osionos-code-surface-migration.sql` | fixed |
-| G-MIGRUN | **No auto-apply for `models/*.sql`** — the code-surface migration sat unapplied because nothing runs `models/*.sql` (no make target, no CI step). Future osionos migrations can silently not-apply the same way. Add a `models/`-apply step to the lifecycle + a verify gate. | `models/*.sql` (no runner) | **process gap** |
+| ~~G-MIGRUN~~ | ✅ **RESOLVED** — `scripts/apply-models.sh` (checksum ledger; adopts existing schema, applies only new/changed, never blindly replays the order-sensitive surface migrations). `make apply-models` wired into `make all`; `make apply-models-check` is a read-only gate that fails on a committed-but-unapplied migration (shellcheck-clean, gate proven). | `scripts/apply-models.sh` | fixed |
 | ~~G-RUNLANG~~ | ✅ **RESOLVED** — all 13 runner languages installed + verified running | `runner/Dockerfile` | fixed |
 | ~~G-EXEC~~ | ✅ **RESOLVED** — runner `/work` was `noexec` → every compiled language failed; made exec-able | `docker-compose.yml` | fixed |
 | ~~G-SBXLANG~~ | ✅ **BUILT** (runtime pends Plane B) — gcc/g++/clang/make/go/rust/jdk added to the sandbox image | `ide-sandbox/Dockerfile` | fixed (built) |
@@ -240,7 +240,7 @@ The history uses **three overlapping axes**. This table is the reconciliation.
 | G-LSPRE | No LSP reconnect beyond client-eviction-on-close + next-open | `lspClient.ts:85-95` | polish |
 | G-TERMRE | No terminal auto-reconnect (relies on panel remount) | `useIdeTerminal.ts:35` | polish |
 | G-WSCAP | WS message cap 1 MiB, no permessage-deflate — a very large LSP payload closes the socket | `ide-ws.mjs:25` | polish |
-| G-RUNSTDIN | Runner is run-to-completion only — no interactive stdin | `runner/server.mjs:30-32` | feature |
+| ~~G-RUNSTDIN~~ | ✅ **RESOLVED (interactive run)** — the one-shot runner still has no stdin (`input()` → EOFError), but in IDE Workspace mode the **Run** action now executes the file in the real sandbox **PTY** (`terminalRunBus` → `useIdeTerminal` → `ws.send`), where `input()` works. Playwright-verified: interactive `input()` over the live PTY reads input and prints the result (no EOFError). | `terminalRunBus.ts`, `CodeFileView.tsx`, `useIdeTerminal.ts` | fixed |
 | G-DOC | Runbook doc-lag (see §4.4) | `ide-sandbox/README.md` | docs |
 
 ---
@@ -377,6 +377,16 @@ starts automatically (self-gated until now).
 
 ## Changelog
 
+- **2026-07-21 (f)** — Two follow-ups. (1) **Migration runner** —
+  `scripts/apply-models.sh` (checksum ledger: adopt existing schema, apply only new/changed,
+  never blindly replay order-sensitive migrations) + `make apply-models` (wired into
+  `make all`) + `make apply-models-check` gate (shellcheck-clean; gate proven to catch a
+  planted pending migration). Adopted the current live schema (34 files). (2) **Interactive
+  Run** — in IDE mode the Run button now executes the file in the real sandbox PTY
+  (`terminalRunBus`), so `input()`/stdin work instead of EOFError. **Playwright-verified**:
+  `/api/ide/session` provisions (HTTP 200) and an interactive `input()` program over the
+  live PTY prompts + reads input + prints the result. Commits: root `05c4be3d`; osionos
+  `16b194c0`.
 - **2026-07-20 (e)** — **Fixed the real root cause of "can't create a dev page."** The
   `notifyCreateFailure` fix exposed a live `400 23514 check_violation`: the
   `osionos_pages_surface_check` constraint lacked `'code'`. The fix migration existed
