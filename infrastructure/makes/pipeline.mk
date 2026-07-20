@@ -2,7 +2,7 @@
 # The BaaS backend now runs as the standalone apps/grobase stack (docker project
 # mini-baas). The root pipeline regenerates certs (via grobase), guards that the
 # grobase backend is up, brings up the root FRONTENDS only, then healthchecks.
-all: sync-submodules-soft secrets-ensure certs certs-trust-local backend-up env-local-ensure restore-if-empty frontends-up healthcheck showcase
+all: sync-submodules-soft secrets-ensure certs certs-trust-local backend-up env-local-ensure restore-if-empty apply-models frontends-up healthcheck showcase
 ## FROM-ZERO self-provisioning: sync submodules to latest → pull secrets from vault42 (or, with NO vault key, grobase self-generates them) → certs → START the grobase backend if down → derive root ./.env.local locally when absent (no-vault mode) → restore all-engine data IF fresh (fail-safe no-op otherwise) → build+start frontends → verify → clickable recap. A clean clone + `make all` reconstitutes the whole machine — with the vault key it restores the SHARED secrets+data, without it everything is generated locally.
 
 all-local: sync-submodules-soft secrets-ensure certs certs-trust-local backend-up env-local-ensure restore-if-empty frontends-up healthcheck showcase
