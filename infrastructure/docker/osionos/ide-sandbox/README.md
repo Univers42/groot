@@ -70,7 +70,7 @@ operator steps to activate + run the full hostile corpus.
 | 12 | PAT scoped + short-lived | P6 (git brokering) | deferred to P6 |
 | 13 | PAT never on a synced path / shell env | image probes (helper + shell env) | ✅ verified |
 | 14 | Core dumps disabled | image probe (`ulimit -c` = 0) + create ulimit | ✅ verified |
-| 15 | Inode + block quota, separate fs | `StorageOpt.size`; inode cap needs pquota data-root | built; needs pquota host fs |
+| 15 | Block quota, separate fs | separate loopback data-root caps host blast; per-sandbox `StorageOpt.size` is xfs+pquota-only, opt-in via `OSIONOS_IDE_STORAGE_QUOTA` | ✅ host-bounded; per-sandbox = xfs upgrade |
 | 16 | Idle/lifetime reap + CPU budget | `reapExpiredSandboxes` (lifetime) + `NanoCpus` cap | built; idle-signal in P3 |
 
 Offline-verified (no live daemon): **2, 4, 5, 6, 8, 9, 10-auth, 11, 13, 14** via
@@ -86,14 +86,18 @@ over rootless-dind because this host keeps `apparmor_restrict_unprivileged_usern
 unprivileged host uid) + `--iptables=false` (never touches the main daemon's
 chains). Operator host-prep (sudo):
 
-1. **Quota data-root** (condition 15 — the host data-root is ext, no prjquota):
+1. **Separate loopback data-root** (condition 15 — caps host blast at the image
+   size regardless of a runaway sandbox). ext4 is enough for this:
    ```
    sudo fallocate -l 24G /var/lib/docker-ide.img
-   sudo mkfs.ext4 -O quota -E quotatype=prjquota /var/lib/docker-ide.img
+   sudo mkfs.ext4 -q -O quota -E quotatype=prjquota /var/lib/docker-ide.img
    sudo mkdir -p /var/lib/docker-ide
    sudo mount -o loop,prjquota /var/lib/docker-ide.img /var/lib/docker-ide
-   echo '/var/lib/docker-ide.img /var/lib/docker-ide ext4 loop,prjquota 0 0' | sudo tee -a /etc/fstab
+   echo '/var/lib/docker-ide.img /var/lib/docker-ide ext4 loop,prjquota,nofail 0 0' | sudo tee -a /etc/fstab
    ```
+   For a PER-SANDBOX block quota, make the image `xfs` instead (`mkfs.xfs -f`,
+   `mount -o loop,pquota`) and set `OSIONOS_IDE_STORAGE_QUOTA=2G` on the bridge —
+   overlay2 `StorageOpt.size` works only over xfs+pquota, not ext4-prjquota.
 2. **Install + start the daemon:**
    ```
    sudo cp infrastructure/docker/osionos/ide-sandbox/docker-ide.service /etc/systemd/system/
