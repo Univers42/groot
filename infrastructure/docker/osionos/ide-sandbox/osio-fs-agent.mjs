@@ -68,11 +68,22 @@ function emit(event, relPath, extra = {}) {
   process.stdout.write(`${JSON.stringify({ event, path: relPath, ...extra })}\n`);
 }
 
+/** A file is treated as binary (and NOT synced to a page) if a NUL byte appears
+ *  in its leading bytes — pages hold code/text, never binaries. */
+export function looksBinary(buffer) {
+  const scan = buffer.subarray(0, Math.min(buffer.length, 8000));
+  return scan.includes(0);
+}
+
 function readMeta(absPath) {
   try {
     const stat = fs.statSync(absPath);
     if (!stat.isFile() || stat.size > MAX_FILE_BYTES) return null;
-    return { hash: hashContent(fs.readFileSync(absPath)) };
+    const buffer = fs.readFileSync(absPath);
+    if (looksBinary(buffer)) return null;
+    // Content rides the event (base64) so the writeback needs no read round-trip;
+    // hash lets the consumer suppress the echo of its own editor→container write.
+    return { hash: hashContent(buffer), content: buffer.toString("base64") };
   } catch {
     return null;
   }
@@ -109,6 +120,8 @@ if (isMain && process.argv.includes("--selfcheck")) {
   chk("ignore .osio", isIgnored(".osio/manifest.json"), true);
   chk("extra ignore", isIgnored("secrets/key.txt", new Set(["secrets"])), true);
   chk("hash stable", hashContent(Buffer.from("hello")), hashContent(Buffer.from("hello")));
+  chk("text not binary", looksBinary(Buffer.from("print('hi')\n")), false);
+  chk("NUL is binary", looksBinary(Buffer.from([0x89, 0x50, 0x00, 0x01])), true);
   if (fail.length) { process.stderr.write(`selfcheck FAIL:\n${fail.join("\n")}\n`); process.exit(1); }
   process.stdout.write("selfcheck OK: fs-agent ignore matcher correct\n");
   process.exit(0);
