@@ -11,9 +11,11 @@
 FROM debian:bookworm-slim
 
 # Base tools + `ripgrep` (the /api/ide/search backend: `rg --json`) + node/npm
-# (runs the fs-agent AND the two language servers below).
+# (runs the fs-agent AND the two language servers below) + pip/venv (a real
+# `pip install` is a headline sandbox use case; egress allows pypi over 443).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      bash ca-certificates curl git python3 procps iproute2 ripgrep nodejs npm \
+      bash ca-certificates curl git python3 python3-pip python3-venv \
+      procps iproute2 ripgrep nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 
 # Language servers (P5) — matches bridge-ide-exec.mjs LSP_SERVERS:
