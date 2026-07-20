@@ -24,6 +24,7 @@
 // is exactly what condition 8's probe tests, hence this custom filter.
 
 import http from "node:http";
+import net from "node:net";
 import { fileURLToPath } from "node:url";
 
 const LISTEN_PORT = Number(process.env.IDE_SOCKET_PROXY_PORT || 2375);
@@ -103,6 +104,25 @@ const server = http.createServer((req, res) => {
     return;
   }
   forward(req, res, null);
+});
+
+// Exec-attach hijack (PTY/LSP): docker upgrades `/exec/{id}/start` to a raw
+// bidirectional stream. Only that endpoint may upgrade; pipe it to the dind
+// socket both ways. Everything else already went through the filtered path.
+server.on("upgrade", (req, clientSocket, head) => {
+  if (!/^\/(v[\d.]+\/)?exec\/[a-f0-9]+\/start$/.test(req.url || "")) {
+    clientSocket.destroy();
+    return;
+  }
+  const headers = Object.entries(req.headers).map(([k, v]) => `${k}: ${v}`).join("\r\n");
+  const upstream = net.connect(DOCKER_SOCK, () => {
+    upstream.write(`${req.method} ${req.url} HTTP/1.1\r\n${headers}\r\n\r\n`);
+    if (head && head.length) upstream.write(head);
+    upstream.pipe(clientSocket);
+    clientSocket.pipe(upstream);
+  });
+  upstream.on("error", () => clientSocket.destroy());
+  clientSocket.on("error", () => upstream.destroy());
 });
 
 const isMain = process.argv[1] === fileURLToPath(import.meta.url);

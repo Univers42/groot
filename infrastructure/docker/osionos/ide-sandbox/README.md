@@ -120,6 +120,39 @@ sh infrastructure/docker/osionos/ide-sandbox/verify.sh
 #      OSIONOS_IDE_EGRESS_GIT_HOSTS=github.com   # the user's git host(s)
 ```
 
+## P3–P7 routes (server halves — built + verified offline)
+
+All reuse the P2 socket-proxy path + `ide-docker` exec engine (proven live via a
+throwaway-container `runExec` test), auth-first + double-gated like the
+provisioner. Bridge modules, no new deps (WebSocket is hand-rolled: `ide-ws.mjs`,
+`--selfcheck`'d):
+
+| Route | Phase | What | Verified |
+|---|---|---|---|
+| WS `/api/ide/pty` | P3 | interactive shell (`docker exec -it bash`) | ws codec + exec engine |
+| WS `/api/ide/lsp?lang=` | P5 | LSP stdio relay (typescript/pyright) | ws codec + exec engine |
+| POST `/api/ide/git` | P6 | status/commit/push; subcommand allowlist; **`config` denied** (can't defeat the per-op PAT); PAT request-scoped | argv unit tests |
+| POST `/api/ide/search` | P7 | `rg --json`, query after `--` (no flag injection) | parser + argv tests |
+| POST `/api/ide/fs` | P4 | editor→container write (base64 argv, path-traversal guarded) | argv test |
+
+Frontend built (no dep, static-verified): the **Source Control panel** (P6) —
+status/commit/push, graceful "no sandbox" state offline.
+
+## Remaining to finish (each ~an afternoon, needs the prepped host)
+
+1. **Terminal frontend (P3):** an `xterm.js` component in the bottom strip that
+   opens `wss://…/api/ide/pty?token=…&workspaceId=…` and pipes bytes. New dep
+   (`@xterm/xterm`), so add via the Docker lockfile flow. The server relay + WS
+   codec are done.
+2. **LSP client (P5):** `@codemirror/lsp-client` wired to `/api/ide/lsp`, feeding
+   a diagnostics store + a Problems panel. Add one language server per line to
+   `LSP_SERVERS` (bridge-ide-exec) + the sandbox image.
+3. **Live sync loop (P4):** launch `osio-fs-agent.mjs` per session (`docker exec`)
+   and map its events → page CRUD via a `.osio/manifest.json`. The ignore core +
+   the write route are done.
+4. **fly-machines provider (P7):** a drop-in behind `ide-docker`'s interface —
+   deferred (YAGNI until a fly deploy is attempted).
+
 ## Trade-off notes
 
 - **Rootless dind vs. host DOCKER-USER iptables.** Condition 1 (isolate from the
