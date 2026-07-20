@@ -37,6 +37,10 @@ ARG VITE_CALENDAR_APP_URL=https://localhost:3003
 ARG VITE_REQUIRE_BRIDGE_SESSION=true
 ARG VITE_ALLOW_OFFLINE_MODE=false
 ARG VITE_PAGE_ACTION_SYNC_ENABLED=true
+# IDE / Dev-Mode surface. featureFlags.ts reads it via a COMPUTED
+# import.meta.env[key], which is populated only from .env FILES (see the
+# .env.production.local write below), not the Dockerfile ENV. Empty = OFF.
+ARG VITE_OSIO_IDE=
 ARG VITE_APP_VERSION=image
 # Auth mode: "portal" makes the app show its own login/sign-up portal (no mock,
 # no website redirect). Empty = legacy bridge/offline behavior (web image).
@@ -99,8 +103,8 @@ ENV VITE_API_URL=$VITE_API_URL \
 # and the host .env is .dockerignored. Write the realtime build env here so
 # liveRealtimeUrl()/resolveLiveRealtimeToken() get a non-empty VITE_BAAS_URL +
 # valid token and the chat WebSocket actually connects.
-RUN printf 'VITE_BAAS_URL=%s\nVITE_BAAS_REALTIME_TOKEN=%s\nVITE_CHAT_WS=%s\nVITE_GIPHY_API_KEY=%s\n' \
-      "$VITE_BAAS_URL" "$VITE_BAAS_REALTIME_TOKEN" "$VITE_CHAT_WS" "$VITE_GIPHY_API_KEY" > .env.production.local
+RUN printf 'VITE_BAAS_URL=%s\nVITE_BAAS_REALTIME_TOKEN=%s\nVITE_CHAT_WS=%s\nVITE_GIPHY_API_KEY=%s\nVITE_OSIO_IDE=%s\n' \
+      "$VITE_BAAS_URL" "$VITE_BAAS_REALTIME_TOKEN" "$VITE_CHAT_WS" "$VITE_GIPHY_API_KEY" "$VITE_OSIO_IDE" > .env.production.local
 
 # Build, then strip source maps from the shipped image (they tripled its size
 # and leak source; keep them only in local builds) and precompress static

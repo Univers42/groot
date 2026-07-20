@@ -13,9 +13,13 @@ FROM debian:bookworm-slim
 # Base tools + `ripgrep` (the /api/ide/search backend: `rg --json`) + node/npm
 # (runs the fs-agent AND the two language servers below) + pip/venv (a real
 # `pip install` is a headline sandbox use case; egress allows pypi over 443).
+# Base tools + compile toolchains for a real multi-language dev shell:
+#   gcc/g++/clang/make → C/C++    rustc/cargo → Rust    default-jdk → Java
+#   clangd → the C/C++ language server (P5).  Go + its LSP land below (tarball).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       bash ca-certificates curl git python3 python3-pip python3-venv \
       procps iproute2 ripgrep nodejs npm \
+      gcc g++ clang clangd make rustc cargo default-jdk-headless \
     && rm -rf /var/lib/apt/lists/*
 
 # Language servers (P5) — matches bridge-ide-exec.mjs LSP_SERVERS:
@@ -26,6 +30,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN npm install -g --no-audit --no-fund \
       typescript@5 typescript-language-server@4 pyright@1 \
     && npm cache clean --force
+
+# Compiled-language language servers (P5, extended) — matches bridge-ide-exec.mjs
+# LSP_SERVERS: go → gopls, rust → rust-analyzer, c/cpp → clangd (from apt above).
+# gopls needs a modern Go (bookworm apt Go is too old for gopls@latest), so pull
+# Go from the official tarball; rust-analyzer ships a self-contained release
+# binary. All of this needs egress and MUST stay ABOVE the HTTP_PROXY ENV block
+# below (on the build daemon the in-daemon egress proxy does not exist yet).
+ARG GO_VERSION=1.23.4
+RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tgz \
+    && tar -C /usr/local -xzf /tmp/go.tgz && rm /tmp/go.tgz
+ENV PATH="/usr/local/go/bin:${PATH}"
+# Symlink go/gofmt into /usr/local/bin: the interactive sandbox shell is `bash -l`,
+# whose /etc/profile resets PATH and drops the ENV addition above — but keeps
+# /usr/local/bin. Without this, `go` is "command not found" in the terminal.
+RUN GOBIN=/usr/local/bin go install golang.org/x/tools/gopls@latest \
+    && ln -s /usr/local/go/bin/go /usr/local/bin/go \
+    && ln -s /usr/local/go/bin/gofmt /usr/local/bin/gofmt \
+    && rm -rf /root/go /root/.cache/go-build
+RUN curl -fsSL "https://github.com/rust-lang/rust-analyzer/releases/latest/download/rust-analyzer-x86_64-unknown-linux-gnu.gz" \
+      | gunzip -c > /usr/local/bin/rust-analyzer \
+    && chmod +x /usr/local/bin/rust-analyzer
 
 # PAT broker (devil condition 13): the credential helper only emits a secret
 # when GIT_PAT is present in the GIT PROCESS env — which happens ONLY when the
