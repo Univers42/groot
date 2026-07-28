@@ -377,6 +377,19 @@ starts automatically (self-gated until now).
 
 ## Changelog
 
+- **2026-07-28 (g)** — **Phase 3 slice 2: navigation + outbound mirror + sandbox
+  visibility.** (1) Outbound delete/rename/move now PROPAGATE to the sandbox
+  (`sandboxMirrorOps` via the VFS provider — the stale-twin bug where a renamed page
+  left both names on disk is fixed; sync-ledger entries follow the file). (2) The
+  explorer grew a browse-only SANDBOX root over the sandbox:// mount — everything the
+  terminal created incl. what page-sync skips (binaries, node_modules), watch-bus
+  refreshed, honest offline state. (3) Problems/Search finally land on the LINE:
+  one-slot `ideRevealBus` consumed by CodeFileView (selection + scrollIntoView; the
+  request survives lazy page loads). Gates: canvas 880/880, quality clean, IDE e2e —
+  dock spec 3/3 solo; ONE machine-load flake observed in the full 7-test sweep
+  (dock:35 under concurrent builds; weakest wait hardened to 30s) — stays on the
+  Phase 6 flake ledger, not papered over.
+
 - **2026-07-28 (f)** — **Phase 3 slice 1: the terminal became a real daily-driver
   surface.** (1) Bridge-OWNED PTY sessions (`ide-term-sessions.mjs`, in BOTH bridge
   Dockerfile COPY lists): the bridge holds the docker exec; browser sockets attach/
