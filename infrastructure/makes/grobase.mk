@@ -70,6 +70,12 @@ apply-models-baseline:
 	@sh scripts/apply-models.sh baseline
 
 frontends-up: certs docker-prefetch-images compose-build
-## Build and start ONLY the root frontends against the running grobase backend.
+## Build and start ONLY the root frontends against the running grobase backend. Also
+## resurrects the IDE plane containers (runner / sandbox socket-proxy) — but ONLY when
+## ./.env.local records them as activated (see IDE-BACKLOG.md); fresh machines skip both.
 	docker compose --env-file ./.env.local up -d --build --wait $(ROOT_FRONTENDS)
+	@grep -qs '^OSIONOS_RUNNER_URL=.' ./.env.local && \
+		COMPOSE_PROFILES=runner docker compose --env-file ./.env.local up -d osionos-runner || true
+	@grep -qs '^OSIONOS_IDE_SANDBOX=1' ./.env.local && \
+		COMPOSE_PROFILES=ide docker compose --env-file ./.env.local up -d osionos-ide-socket-proxy || true
 	$(MAKE) compose-wait
