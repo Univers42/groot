@@ -377,6 +377,23 @@ starts automatically (self-gated until now).
 
 ## Changelog
 
+- **2026-07-28 (f)** — **Phase 3 slice 1: the terminal became a real daily-driver
+  surface.** (1) Bridge-OWNED PTY sessions (`ide-term-sessions.mjs`, in BOTH bridge
+  Dockerfile COPY lists): the bridge holds the docker exec; browser sockets attach/
+  detach; a reload reattaches to the SAME shell — history, cwd, running process — with
+  a 256KiB replay ring painted first. Opening a terminal AUTO-PROVISIONS the sandbox
+  (`ensureSandbox` shared with /api/ide/session; the dead-route era is over), the
+  reaper's activity signal is session-aware (attached clients or output within 30min),
+  and DELETE /api/ide/session disposes sessions. Frontend reconnects with backoff on
+  network drops (deliberate closes stay closed, reason printed); `term.reset()` before
+  replay so nothing doubles. (2) The VS Code bottom dock: Terminal / Problems / Output /
+  Debug Console / Ports — terminal stays mounted across tab switches; Output carries
+  fs-sync/terminal/conflict events (with a conflict badge); Ports lists sandbox TCP
+  listeners via the new `/api/ide/ports` (`ss -tln`, list-only — forwarding needs the
+  session proxy); Debug Console is an HONEST placeholder until DAP. Gates: bridge
+  113/113 (full session lifecycle vs fake duplex), canvas 878/878, quality clean, IDE
+  e2e 6/6 (new ideDock spec; cold-compile timeout bumps matched to the house pattern).
+
 - **2026-07-28 (e)** — **Phase 2 slice 3: the sync engine got honest.** Silent
   last-writer-wins is GONE: inbound sandbox writes go through a three-way decision
   (`ideSyncEngine.decideInboundWrite` — echo / ignore / create / fast-forward /
