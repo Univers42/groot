@@ -377,6 +377,20 @@ starts automatically (self-gated until now).
 
 ## Changelog
 
+- **2026-07-28 (d)** — **Phase 2 slice 2: the write-only sandbox hole is closed.** The
+  bridge grew argv-safe VFS exec ops (`/api/ide/fs` + `op: read/list/stat/mkdir/delete/
+  rename/write`; legacy no-op writes untouched; write is now ATOMIC via temp+mv), specs
+  written busybox+debian-portable with tagged `VFSERR:` errors parsed client-side into
+  the taxonomy. New `sandbox://` provider (injected transport) passes the SAME
+  conformance corpus through a REAL local sh in the canvas suite — the exact scripts a
+  live sandbox runs, proven without a stack. `PageFacade` went lazy (`readContent`), the
+  real `usePageStore` adapter landed (`pageStoreFacade`), and `materialize` became the
+  first SyncLink consumer (`mirrorTree` over two providers, echo-hash hook preserved,
+  caps reported as counts). Gates: canvas 871/871 (corpus ×4 targets + synclink), bridge
+  107/107, quality clean; live bridge probe: op route mounted, auth-first. Remaining for
+  slice 3: explorer/search/fsync-index onto the mount table, bidirectional SyncLink with
+  surfaced conflicts, provider.watch over the fsync stream.
+
 - **2026-07-28 (c)** — **ADRs approved; Phase 2 (VFS core) begun. Two requirements added
   by the owner:** (1) the bottom strip must grow into a full VS Code-style dock —
   Terminal / Problems / Output / Debug Console / Ports as writable tabs (Phase 3 UI
