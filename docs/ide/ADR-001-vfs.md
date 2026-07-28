@@ -86,6 +86,19 @@ mid-walk, names with spaces/quotes/newlines/emoji/RTL.
   page-provider (title→segment is *its* boundary concern, nobody else's).
 - Explorer gains an honest second root ("Sandbox") instead of pretending one tree exists.
 
+## Addendum — approved 2026-07-28, with two confirmed targets
+
+1. **Host integration is a first-class goal, not a maybe.** osionos must eventually run
+   as a desktop interface over the real OS filesystem (the way VS Code/Obsidian open a
+   folder), on Linux/Windows/macOS, with the SAME UI — i.e. a `file://` host provider
+   behind this exact interface, reached from the Electron/Tauri shells. The conformance
+   suite is the contract that makes that drop-in: a host provider ships when the corpus
+   passes against it, and no consumer changes.
+2. **POSIX presentation everywhere.** Whatever the backend (pages, sandbox, NTFS), the
+   IDE presents paths POSIX-style (`/workspace/src/main.c`) — differences (case rules,
+   separators, reserved names) live in provider capabilities and normalization at the
+   boundary, never in the UI.
+
 ## What would falsify this decision
 
 - If block-level collaborative editing must operate live on files *inside* a
