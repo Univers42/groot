@@ -377,6 +377,23 @@ starts automatically (self-gated until now).
 
 ## Changelog
 
+- **2026-07-28 (h)** — **Phase 3 slice 3: the VS Code entry points + tasks v1.** A
+  TERMINAL menu in the top menu bar (after View, flag-gated) with the full set — New
+  Terminal (⌃`) · Split Terminal · New Terminal Window (honest toast until the desktop
+  shell) · Run Task · Run Build Task · Run Active File · Run Selected Test · Configure
+  Tasks · Configure Default Build Task — entering IDE mode with the dock open from the
+  ordinary chrome. Ctrl+J joins Ctrl+` as the dock chord. Terminals are now
+  MULTI-SESSION in the UI: New Terminal = fresh bridge session, Split renders two
+  side-by-side (server side supported N sessions since slice 1). Tasks v1 = a
+  `tasks.json` CODE PAGE at the workspace root (data-not-code, edited in the IDE
+  itself; template auto-created on first Run Build Task): tasks run in the interactive
+  PTY at /workspace where the WHOLE materialized tree lives — so multi-file programs
+  (#include "util.h", import mymodule, gcc *.c) link exactly like a local machine; the
+  menu module lazy-imports the heavy chains to keep the warm chunk clean. Gates:
+  canvas 886/886 (tasks parsing/defaults/template), quality clean, dock e2e 6/6
+  (menu items, Ctrl+J, menu-driven entry, tasks.json auto-create; two locator
+  collisions with the new menu fixed by scoping — accelerators ride accessible names).
+
 - **2026-07-28 (g)** — **Phase 3 slice 2: navigation + outbound mirror + sandbox
   visibility.** (1) Outbound delete/rename/move now PROPAGATE to the sandbox
   (`sandboxMirrorOps` via the VFS provider — the stale-twin bug where a renamed page
