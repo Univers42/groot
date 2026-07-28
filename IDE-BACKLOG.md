@@ -377,6 +377,22 @@ starts automatically (self-gated until now).
 
 ## Changelog
 
+- **2026-07-28 (e)** — **Phase 2 slice 3: the sync engine got honest.** Silent
+  last-writer-wins is GONE: inbound sandbox writes go through a three-way decision
+  (`ideSyncEngine.decideInboundWrite` — echo / ignore / create / fast-forward /
+  CONFLICT) against a session ledger of last-agreed hashes (recorded on outbound
+  writes AND echo confirmations); conflicts keep the LOCAL content, surface in the
+  status bar, and resolve one-click in an editor banner (Keep mine / Take sandbox).
+  `useIdeFsSync` rewrote onto the VFS facade (`resolveFacadePath` — the per-event
+  index rebuild from RECON §2 is gone) and now PUBLISHES raw agent events on a
+  per-workspace bus; `sandbox://` `watch()` rides that bus (capability native when
+  fed — one fsync socket, many watchers). Search migrated to a VFS walk
+  (`vfsSearch` over the osionos:// mount — works over any future mount);
+  `browserSearch.ts` deleted. Gates: canvas 875/875 (sync matrix + bus + watch
+  scoping + search), bridge 107/107, quality clean, IDE e2e 4/4. Deferred by
+  choice: explorer stays the reactive store view until the Phase 3 multi-root
+  dock; bidirectional deletes/renames through SyncLink land with it.
+
 - **2026-07-28 (d)** — **Phase 2 slice 2: the write-only sandbox hole is closed.** The
   bridge grew argv-safe VFS exec ops (`/api/ide/fs` + `op: read/list/stat/mkdir/delete/
   rename/write`; legacy no-op writes untouched; write is now ATOMIC via temp+mv), specs
