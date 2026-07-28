@@ -377,6 +377,19 @@ starts automatically (self-gated until now).
 
 ## Changelog
 
+- **2026-07-28** — **Regression found + fixed: the IDE vanished after a workspace teardown
+  + `make all`.** Three-part cause: (1) the root `frontends-up --build` rebakes osionos-app
+  with `VITE_OSIO_IDE` interpolated from `./.env.local`, where it was never set (it lived
+  only in the app `.env` used by `make update_web`) → the rebuilt bundle compiled the whole
+  IDE surface out; (2) the `runner` / `ide` compose profiles are outside `make all`, so the
+  teardown removed `track-binocle-osionos-runner` + `osionos-ide-socket-proxy` and nothing
+  restarted them; (3) bridge gates survived (they live in `./.env.local`) and the host
+  `docker-ide` daemon stayed active/enabled. Fixes: `VITE_OSIO_IDE=1` added to
+  `./.env.local` (so every root rebake keeps the UI), and `frontends-up` now resurrects the
+  two plane containers — gated on `./.env.local` recording them as activated
+  (`OSIONOS_RUNNER_URL` / `OSIONOS_IDE_SANDBOX=1`), so fresh machines/CI still start
+  nothing (ships-off-by-default preserved).
+
 - **2026-07-21 (f)** — Two follow-ups. (1) **Migration runner** —
   `scripts/apply-models.sh` (checksum ledger: adopt existing schema, apply only new/changed,
   never blindly replay order-sensitive migrations) + `make apply-models` (wired into
