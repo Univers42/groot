@@ -377,6 +377,15 @@ starts automatically (self-gated until now).
 
 ## Changelog
 
+- **2026-07-28 (c)** — **ADRs approved; Phase 2 (VFS core) begun. Two requirements added
+  by the owner:** (1) the bottom strip must grow into a full VS Code-style dock —
+  Terminal / Problems / Output / Debug Console / Ports as writable tabs (Phase 3 UI
+  target; Problems moves/mirrors from the side panel, Output = runner/LSP/fsync logs,
+  Ports = sandbox port map); (2) host integration is first-class: the same IDE must run
+  over the real OS filesystem (Linux/Windows/macOS) via a `file://` provider under the
+  Electron/Tauri shells, with POSIX-style presentation everywhere — recorded as an
+  addendum in ADR-001; the conformance suite is the drop-in contract.
+
 - **2026-07-28 (b)** — **Phase 0/1 of the daily-driver engagement + the approved hotfix
   batch.** Recon (`docs/ide/RECON.md`) and the three ADRs + interface spec
   (`docs/ide/ADR-00{1,2,3}-*.md`, `docs/ide/interfaces/ide-interfaces.ts`) landed in the
