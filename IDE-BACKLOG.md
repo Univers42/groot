@@ -377,6 +377,29 @@ starts automatically (self-gated until now).
 
 ## Changelog
 
+- **2026-07-28 (b)** — **Phase 0/1 of the daily-driver engagement + the approved hotfix
+  batch.** Recon (`docs/ide/RECON.md`) and the three ADRs + interface spec
+  (`docs/ide/ADR-00{1,2,3}-*.md`, `docs/ide/interfaces/ide-interfaces.ts`) landed in the
+  monorepo root: VFS = mount-table over BOTH stores with an explicit SyncLink (page tree
+  stays the workspace-default mount); terminal = bridge-owned sessions with replay ring on
+  the existing byte-transparent transport; language layer = one manifest, all six existing
+  registries become projections. Hotfixes (all with unit tests where a pure seam exists):
+  LSP mux-header desync fixed by demuxing docker's non-TTY stream in the bridge (NOT
+  Tty:true — a PTY would cook protocol bytes); strict full-frame resize parse (paste can
+  no longer trigger it); reaper is activity-aware via a live per-container exec registry
+  (soft 4h idle / hard 12h — no mid-terminal guillotine; bridge restart degrades to
+  age-only); WS auth moved off the query string onto `Sec-WebSocket-Protocol`
+  (`osio-token.<jwt>`, query fallback kept one transition); Origin allowlist enforced on
+  upgrade (same predicate as REST CORS); all upgrade failures now answer with HTTP status
+  pre-handshake or WS close code+reason post-handshake (4001/4004/4008/4013/4029) and the
+  terminal prints the reason; `/api/ide/{git,search,fs}` gate-check precedes the method
+  check (no route-disclosing 405 when disabled); `/api/ide/fs` got its own rate bucket
+  (120 cap / 20 rps) so a 500-file materialize takes seconds instead of 429ing at 60,
+  and materialize failures are counted + surfaced; fsync auto-reconnects with 1s/4s/15s
+  backoff instead of dying silently; **Ctrl+`** toggles the terminal strip. New tests:
+  `tests/bridge/ide-exec-parse.test.mjs` (resize/auth/demux/close-frame/handshake-echo),
+  `tests/bridge/ide-reaper.test.mjs` (reap predicate), ops gate-order regression test.
+
 - **2026-07-28** — **Regression found + fixed: the IDE vanished after a workspace teardown
   + `make all`.** Three-part cause: (1) the root `frontends-up --build` rebakes osionos-app
   with `VITE_OSIO_IDE` interpolated from `./.env.local`, where it was never set (it lived
