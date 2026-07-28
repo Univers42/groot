@@ -5,6 +5,29 @@
 ## - Volumes are preserved unless explicitly removed.
 ## - Database data stored in named volumes will survive normal cleanup.
 
+fclean:
+## Wipe the WORKSPACE Docker state — root frontends (track-binocle) + grobase backend (mini-baas):
+## containers, networks, project images. KEEPS all data volumes AND build caches, so `make all`
+## rebuilds warm. Add NUKE_CACHES=1 to also wipe the build caches (cold rebuild).
+	@ENVF=""; [ -f ./.env.local ] && ENVF="--env-file ./.env.local"; \
+	docker compose $$ENVF down --rmi all --remove-orphans || true
+	@$(MAKE) --no-print-directory -C apps/grobase clean NUKE_CACHES=$(NUKE_CACHES)
+	@docker image prune -f >/dev/null 2>&1 || true
+	@echo "✓ fclean done — data volumes preserved (make ffclean CONFIRM=1 wipes them too). Rebuild: make all"
+
+ffclean:
+## DANGER: fclean + WIPE DATA VOLUMES of both projects (track-binocle_* + mini-baas_*) —
+## postgres/mongo/mysql/minio data is PERMANENTLY DELETED. Requires CONFIRM=1.
+	@if [ "$(CONFIRM)" != "1" ]; then \
+	  echo "ffclean PERMANENTLY DELETES all data volumes (track-binocle_* + mini-baas_*)."; \
+	  echo "Refusing without confirmation — re-run: make ffclean CONFIRM=1"; exit 1; fi
+	@ENVF=""; [ -f ./.env.local ] && ENVF="--env-file ./.env.local"; \
+	docker compose $$ENVF down -v --rmi all --remove-orphans || true
+	@$(MAKE) --no-print-directory -C apps/grobase fclean CONFIRM=1 NUKE_CACHES=$(NUKE_CACHES)
+	@docker volume ls -q | grep -E '^track-binocle_' | xargs -r docker volume rm >/dev/null 2>&1 || true
+	@docker image prune -f >/dev/null 2>&1 || true
+	@echo "✓ ffclean done — workspace reset, data volumes wiped. Rebuild from scratch: make all"
+
 docker-clean:
 ## Remove all unused containers, networks, images (dangling/unreferenced), and optionally, volumes.
 	docker system prune -a --volumes=$(BOOL) -f
