@@ -33,7 +33,7 @@ jobs:
       security-events: write
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
           fetch-depth: 0
@@ -80,7 +80,7 @@ jobs:
           - dir: apps/grobase/sdks/js
             tool: npm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
       - name: Check out submodules (non-recursive)
@@ -118,7 +118,7 @@ jobs:
     env:
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
       - name: Check out submodules (non-recursive)
@@ -149,7 +149,7 @@ jobs:
       security-events: write
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
       - name: Check out submodules (non-recursive)
@@ -227,7 +227,7 @@ jobs:
       contents: read
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
           fetch-depth: 0
@@ -255,7 +255,7 @@ jobs:
       security-events: write
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
       - name: Check out submodules (non-recursive)
@@ -302,7 +302,7 @@ jobs:
           - apps/grobase/src/data-plane-router
           - apps/grobase/infra/docker/services/realtime/realtime-agnostic
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
       - name: Check out submodules (non-recursive)
@@ -349,7 +349,7 @@ jobs:
       contents: read
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
       - name: Check out submodules (non-recursive)
@@ -393,7 +393,7 @@ jobs:
     # "Run workflow" with run_dast=true.
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_dast }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
       - name: Check out submodules (non-recursive)

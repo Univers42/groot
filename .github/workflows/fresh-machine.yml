@@ -68,7 +68,7 @@ jobs:
           echo "vault secrets present (keystore + contract + passphrase)"
 
       - name: git clone --recursive (root + all submodules at latest)
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           fetch-depth: 1

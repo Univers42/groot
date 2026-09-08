@@ -19,7 +19,7 @@ jobs:
     name: npm frozen installs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
       # Init only the frontend submodules we install here (not the heavy grobase
@@ -48,7 +48,7 @@ jobs:
     name: pnpm frozen installs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
       - name: Check out osionos submodule
