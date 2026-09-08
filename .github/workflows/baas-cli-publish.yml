@@ -48,7 +48,7 @@ jobs:
     name: Build · smoke-test · pack (never publishes)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
       - name: Check out grobase submodule
@@ -104,7 +104,7 @@ jobs:
       contents: read
       id-token: write # npm provenance
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
       - name: Check out grobase submodule
