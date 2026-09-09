@@ -32,7 +32,7 @@ jobs:
           git submodule update --init \
             apps/mail apps/calendar apps/osionos/app
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
 
@@ -60,7 +60,7 @@ jobs:
           # path into the grobase submodule, so init grobase (non-recursive) too.
           git submodule update --init apps/grobase apps/opposite-osiris apps/osionos/app
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
 
