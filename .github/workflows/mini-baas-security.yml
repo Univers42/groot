@@ -359,7 +359,7 @@ jobs:
           git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
           git submodule update --init apps/grobase apps/opposite-osiris apps/calendar apps/mail apps/osionos/app
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           # Minor-version floor + check-latest so this always resolves to the
           # newest 1.25.x patch (never re-pinned to a stale cached patch like
