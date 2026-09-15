@@ -17,7 +17,8 @@ These are not points. They are pass/fail, and none of them is technical.
 | Check | Where | Status |
 |---|---|---|
 | Privacy Policy and Terms of Service, reachable, real content | `apps/opposite-osiris` | **Unverified** |
-| Commits from every team member, visible work split | `git shortlog -sn --all`, root and each submodule | **Unverified** |
+| Commits from every team member, visible work split | `git submodule foreach --recursive 'git shortlog -sn --all'
+`, root and each submodule | **Unverified** |
 | No JavaScript warnings or errors in the browser console | all six frontends, DevTools open | **Unverified** |
 | Single-command containerised deployment | [operations/01-bring-up](operations/01-bring-up.md) | Verified |
 | HTTPS for every connection from a browser or script | [security/04-network](security/04-network.md) | Verified |
