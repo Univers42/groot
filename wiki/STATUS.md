@@ -24,11 +24,17 @@ Update this table whenever a page's status block changes. It is the working list
 | platform/06-contracts | Verified | — |
 | platform/07-isolation | Verified | — |
 | platform/08-engines | Partial | Capability table transcribed from READMEs, not from `/engines` |
-| product/* | Not written | Day 3 |
-| security/* | Not written | Day 2 |
-| operations/* | Not written | Day 2 |
-| quality/* | Not written | Day 2 |
-| project/* | Not written | Day 3 |
+| security/01-model | Partial | Fine-grained ABAC flags off; unclear if needed for the demo |
+| security/02-proofs | Verified | — |
+| security/03-known-weaknesses | Verified | — |
+| security/04-network | Partial | Is Kong's `:8000` an external surface anywhere? |
+| operations/01-bring-up | Partial | Which edition `make all` raises (`migrate` not in the list) |
+| operations/02-flags | Verified | — |
+| operations/03-deployment | Verified | — |
+| operations/04-troubleshooting | Verified | — |
+| operations/05-secrets | Partial | Is a vault42 instance with our tenant running? |
+| quality/01-gates · 02-key-gates | Verified | — |
+| product/* · project/* | Not written | Day 3 |
 
 ---
 
