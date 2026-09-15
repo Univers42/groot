@@ -34,7 +34,14 @@ Update this table whenever a page's status block changes. It is the working list
 | operations/04-troubleshooting | Verified | — |
 | operations/05-secrets | Partial | Is a vault42 instance with our tenant running? |
 | quality/01-gates · 02-key-gates | Verified | — |
-| product/* · project/* | Not written | Day 3 |
+| product/01-apps | Verified | — |
+| product/02-osionos | Partial | Relationship with `notion-database-sys` unconfirmed |
+| product/03-opposite-osiris | Partial | **Privacy Policy / ToS existence unverified** |
+| product/04-repos | Partial | What is actually inside the delivered perimeter |
+| project/01-subject | Unverified by nature | Source is private; re-check on each subject version |
+| project/02-modules | Partial | Four open checks worth ~6 points |
+| project/03-team | **Template** | Facts not held anywhere; fill with the team |
+| project/04-glossary | Verified | — |
 
 ---
 
