@@ -15,7 +15,8 @@ Update this table whenever a page's status block changes. It is the working list
 
 | Page | Status | Blocking gap |
 |---|---|---|
-| README · ONBOARDING · DEFENSE · STATUS | Verified | — |
+| README · ONBOARDING · STATUS | Verified | — |
+| DEFENSE | Verified | Rewritten against the official evaluation grid, 2026-09-15 |
 | platform/01-overview | Verified | — |
 | platform/02-planes | Verified | — |
 | platform/03-data-plane | Partial | Operation envelope not enumerated against `/engines` |
@@ -51,16 +52,22 @@ Ordered by what they unlock, not by effort. Each one is minutes.
 
 | # | Check | Command | If it goes the wrong way |
 |---|---|---|---|
-| 1 | Privacy Policy / ToS exist | inspect `apps/opposite-osiris` | Project rejected outright |
-| 2 | Commits from all members | `git shortlog -sn --all` | Project rejected outright |
-| 3 | Browser console clean | open all six frontends with DevTools | Project rejected outright |
-| 4 | Does `VaultProvider` talk to HashiCorp Vault? | read `crates/data-plane-pool/` credential layer; migration `060` | 2 points and the only cybersecurity module |
-| 5 | What are `src/apps/ai/` and `src/apps/analytics/`? | read both | Up to 4 points from categories we wrote off |
-| 6 | Is `RUST_DATA_PLANE_FORWARD=1` set anywhere? | `grep -rn "RUST_DATA_PLANE_FORWARD=" scripts/env/ .env*` | The Rust data plane receives no traffic in production |
-| 7 | Which edition does groot's `make all` raise? | `make editions`; compare with the root Makefile | `migrate` is not in grobase's edition list |
-| 8 | `verify_cache` TTL | `crates/data-plane-server/` | Window during which a revoked key still works |
-| 9 | Default realtime bus | `realtime-server` assembly | Whether the deployment is single- or multi-node |
-| 10 | Operation envelope | `GET /engines` on a running stack | Exact limits of what clients can ask for |
+| 1 | All 4–5 members attending | ask them | **The review stops; no grade** |
+| 2 | No credentials committed anywhere | `git grep -nE "(password\|secret\|api[_-]?key\|token)\s*=\s*['\"][^'\"]{8,}"` | **Immediate failure** |
+| 3 | Privacy Policy / ToS exist | inspect `apps/opposite-osiris` | Project rejected outright |
+| 4 | `git clone --recursive` into an empty dir yields a buildable tree | rehearse it | ~70% of the work falls outside the grade |
+| 5 | Commits from all members | `git shortlog -sn --all` | Teamwork criterion failed |
+| 6 | Browser console clean | open all six frontends with DevTools | Rejection criterion |
+| 7 | A CSS framework is in use | inspect each frontend | Graded item; plain CSS is not sufficient |
+| 8 | Responsive on desktop and mobile | resize / device mode | Graded item, never tested |
+| 9 | Frontend-side input validation | try empty, malformed, XSS, SQLi | Graded item; they will try these |
+| 10 | Does `VaultProvider` talk to HashiCorp Vault? | read `crates/data-plane-pool/` credential layer; migration `060` | 2 points and the only cybersecurity module |
+| 11 | What are `src/apps/ai/` and `src/apps/analytics/`? | read both | Up to 4 points from categories we wrote off |
+| 12 | Is `RUST_DATA_PLANE_FORWARD=1` set anywhere? | `grep -rn "RUST_DATA_PLANE_FORWARD=" scripts/env/ .env*` | The Rust data plane receives no traffic in production |
+| 13 | Which edition does groot's `make all` raise? | `make editions`; compare with the root Makefile | `migrate` is not in grobase's edition list |
+| 14 | `verify_cache` TTL | `crates/data-plane-server/` | Window during which a revoked key still works |
+| 15 | Default realtime bus | `realtime-server` assembly | Whether the deployment is single- or multi-node |
+| 16 | Operation envelope | `GET /engines` on a running stack | Exact limits of what clients can ask for |
 
 ---
 
