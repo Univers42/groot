@@ -90,7 +90,7 @@ jobs:
           git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
           git submodule update --init apps/grobase apps/opposite-osiris apps/calendar apps/mail apps/osionos/app
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
 
