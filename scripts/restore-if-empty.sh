@@ -73,8 +73,16 @@ gate() {
   esac
 }
 
+# pg_probe: postgres is the one engine every edition runs and the one holding the users and
+# pages, so "not running" is NOT "empty" — it is unknown, and unknown skips the restore.
+# Treating it as empty let a stack whose postgres happened to be down (with mysql/mongo
+# absent or empty) replay the snapshot over its data the moment postgres came back.
 pg_probe() {
-  running mini-baas-postgres || return 0
+  running mini-baas-postgres || {
+    EMPTY=0
+    REASON="postgres is not running — cannot confirm the stack is empty"
+    return 0
+  }
   docker exec mini-baas-postgres pg_isready -U postgres -q 2>/dev/null || {
     gate postgres '?'
     return 0
