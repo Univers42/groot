@@ -20,7 +20,7 @@ operator steps to activate + run the full hostile corpus.
               ide-socket-proxy  ── allowlist endpoints + vet create body
                       │  (shared unix socket, NOT a network)
                       ▼
-         osionos-ide-dockerd  ── ISOLATED rootless daemon, own data-root
+         osionos-ide-dockerd  ── ISOLATED daemon (rootful + userns-remap), own data-root
               (its own containers; cannot see mini-baas)
                       │  in-dind networks
         ┌─────────────┴───────────────┐
@@ -31,7 +31,8 @@ operator steps to activate + run the full hostile corpus.
    no off-box route          the ONLY path out
 ```
 
-- **A dedicated rootless daemon** runs the sandboxes on its own data-root, so a
+- **A dedicated, isolated daemon** (rootful dockerd with `--userns-remap=default` — NOT
+  rootless; see "Rootful, not rootless" below) runs the sandboxes on its own data-root, so a
   sandbox/provisioner compromise cannot see the 28 `mini-baas-*` backend
   containers on the host daemon (**condition 1** — the catastrophic-blast-radius
   fix).
@@ -56,7 +57,7 @@ operator steps to activate + run the full hostile corpus.
 
 | # | Condition | How verified | Status |
 |---|---|---|---|
-| 1 | Sandboxes not on the mini-baas daemon | isolated rootless `osionos-ide-dockerd`; `verify.sh` (`docker ps` shows no backend) | built; live probe needs host prep |
+| 1 | Sandboxes not on the mini-baas daemon | isolated `osionos-ide-dockerd` (rootful + userns-remap); `verify.sh` (`docker ps` shows no backend) | built; live probe needs host prep |
 | 2 | Docker reached only via allowlist socket-proxy | `ide-socket-proxy --selfcheck` | ✅ verified |
 | 3 | Sandbox has no direct off-box route | `sandbox-net --internal`; `verify.sh` (`curl 1.1.1.1` fails) | built; live probe |
 | 4 | Caps hold under a hostile shell | image probe: `unshare`→EPERM, `CapEff=0`, read-only | ✅ verified |
@@ -107,6 +108,22 @@ chains). Operator host-prep (sudo):
    ```
    sudo sh infrastructure/docker/osionos/ide-sandbox/ide-egress-nat.sh up
    ```
+
+## Rootful, not rootless — what that does and does not protect
+
+`docker-ide.service` runs **rootful** `dockerd` with `--userns-remap=default` (verified live:
+`docker -H unix:///run/docker-ide.sock info` reports `name=userns`). Earlier revisions of this
+document called it "rootless"; it is not, and the difference is load-bearing:
+
+- **Protected:** root *inside a sandbox* is remapped to an unprivileged host uid
+  (data-root `/var/lib/docker-ide/100000.100000`), so a container escape lands as nobody.
+- **NOT protected:** the daemon process itself is host root. Anything that can drive that
+  daemon arbitrarily can get host root — which is exactly why the socket is reachable only
+  through `osionos-ide-socket-proxy`, whose body filter must stay strict (container, volume
+  AND network creates are vetted; the volume/network vetting was added 2026-09-16 after a
+  `local` volume with `DriverOpts {o:bind, device:/}` was shown to pass through unvetted).
+- The socket file is `root:docker 0660`: every member of the host `docker` group can
+  already drive the main daemon as root, so this adds no new privilege to that group.
 
 ## Activation
 
@@ -175,6 +192,10 @@ writeback → page CRUD with ignore-set + sha256 echo-suppression), and the
 
 ## Trade-off notes
 
+- **SUPERSEDED (2026-09-16):** the paragraph below describes the original rootless-dind
+  design. The deployed daemon is the rootful, userns-remapped `docker-ide.service` (see
+  "Rootful, not rootless" above), so the rootlesskit-netns argument no longer applies; the
+  off-box block still rests on the `internal` sandbox network + the egress proxy.
 - **Rootless dind vs. host DOCKER-USER iptables.** Condition 1 (isolate from the
   backend daemon) drove the rootless-dind choice. Rootless dind can't program
   host `DOCKER-USER` chains, so the sandbox's off-box block is enforced by the

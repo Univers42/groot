@@ -71,6 +71,37 @@ export function unsafeCreateBody(body) {
   return null;
 }
 
+/** Reject a volume create that could reach the host filesystem (condition 8).
+ *  `/volumes/create` was allowlisted with NO body inspection, and unsafeCreateBody only
+ *  rejects `Mounts[].Type === "bind"` — so a `local` volume created with
+ *  `DriverOpts {type:none, o:bind, device:/}` and then mounted as `Type:"volume"` bound
+ *  the daemon host's filesystem into a sandbox. The provisioner only ever sends
+ *  `{Name, Driver:"local", Labels}`, so any driver option or other driver is refused. */
+export function unsafeVolumeBody(body) {
+  const driver = String(body?.Driver ?? "local");
+  if (driver !== "local") return "Driver";
+  const opts = body?.DriverOpts;
+  if (opts && typeof opts === "object" && Object.keys(opts).length) return "DriverOpts";
+  return null;
+}
+
+/** Reject a network create that leaves the isolated bridge model (condition 8).
+ *  macvlan/ipvlan/host attach a sandbox to the physical network; the provisioner only
+ *  ever creates `Driver:"bridge"` networks. */
+export function unsafeNetworkBody(body) {
+  if (String(body?.Driver ?? "bridge") !== "bridge") return "Driver";
+  if (body?.ConfigFrom) return "ConfigFrom";
+  return null;
+}
+
+/** The body vetter for a create endpoint, or null when the endpoint carries no body risk. */
+function bodyVetter(path) {
+  if (/\/containers\/create/.test(path)) return unsafeCreateBody;
+  if (/\/volumes\/create$/.test(path)) return unsafeVolumeBody;
+  if (/\/networks\/create$/.test(path)) return unsafeNetworkBody;
+  return null;
+}
+
 function deny(res, code, message) {
   res.writeHead(code, { "content-type": "application/json" });
   res.end(JSON.stringify({ message: `ide-socket-proxy: ${message}` }));
@@ -91,8 +122,9 @@ const server = http.createServer((req, res) => {
   const path = req.url || "/";
   if (!isAllowed(method, path)) return deny(res, 403, `endpoint not allowed: ${method} ${path}`);
 
-  // Create must have its body vetted before it reaches the daemon.
-  if (method === "POST" && /\/containers\/create/.test(path)) {
+  // Every create (container, volume, network) has its body vetted before it reaches the daemon.
+  const vet = method === "POST" ? bodyVetter(path) : null;
+  if (vet) {
     const chunks = [];
     let size = 0;
     req.on("data", (c) => { size += c.length; if (size > 256 * 1024) req.destroy(); chunks.push(c); });
@@ -100,7 +132,7 @@ const server = http.createServer((req, res) => {
       const raw = Buffer.concat(chunks);
       let body;
       try { body = JSON.parse(raw.toString("utf8") || "{}"); } catch { return deny(res, 400, "invalid create body"); }
-      const bad = unsafeCreateBody(body);
+      const bad = vet(body);
       if (bad) return deny(res, 403, `create rejected: ${bad}`);
       forward(req, res, raw);
     });
@@ -147,6 +179,13 @@ if (isMain && process.argv.includes("--selfcheck")) {
   chk("capadd rejected", unsafeCreateBody({ HostConfig: { CapAdd: ["SYS_ADMIN"] } }), "CapAdd");
   chk("bind mount rejected", unsafeCreateBody({ HostConfig: { Mounts: [{ Type: "bind", Source: "/" }] } }), "bind-mount");
   chk("clean body ok", unsafeCreateBody({ HostConfig: { CapDrop: ["ALL"], Mounts: [{ Type: "volume" }] } }), null);
+  chk("host-bind volume rejected", unsafeVolumeBody({ Name: "x", Driver: "local", DriverOpts: { type: "none", o: "bind", device: "/" } }), "DriverOpts");
+  chk("foreign volume driver rejected", unsafeVolumeBody({ Name: "x", Driver: "vieux/sshfs" }), "Driver");
+  chk("provisioner volume ok", unsafeVolumeBody({ Name: "ide-vol", Driver: "local", Labels: { "osio.ide.managed": "1" } }), null);
+  chk("macvlan network rejected", unsafeNetworkBody({ Name: "x", Driver: "macvlan" }), "Driver");
+  chk("provisioner network ok", unsafeNetworkBody({ Name: "ide-net", Driver: "bridge", Internal: true }), null);
+  chk("volume create is vetted", bodyVetter("/v1.47/volumes/create") === unsafeVolumeBody, true);
+  chk("network create is vetted", bodyVetter("/networks/create") === unsafeNetworkBody, true);
   if (fail.length) { process.stderr.write(`selfcheck FAIL:\n${fail.join("\n")}\n`); process.exit(1); }
   process.stdout.write("selfcheck OK: socket-proxy allow/deny + body filter correct\n");
   process.exit(0);
