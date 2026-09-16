@@ -361,10 +361,18 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          # Minor-version floor + check-latest so this always resolves to the
-          # newest 1.25.x patch (never re-pinned to a stale cached patch like
-          # go1.25.11, which shipped GO-2026-5856 — fixed in go1.25.12).
-          go-version: "1.25"
+          # Minor-version floor + check-latest so this always resolves to the newest
+          # patch (never re-pinned to a stale cached patch like go1.25.11, which
+          # shipped GO-2026-5856 — fixed in go1.25.12).
+          #
+          # Floor is 1.26 because the TOOL sets it, not the audited code: govulncheck
+          # is installed @latest, and golang.org/x/vuln v1.8.0 declares `go 1.26.0`,
+          # so `go install` under 1.25 fails outright — the job died at "Install
+          # govulncheck", before auditing anything. The audited module is still
+          # go 1.25.0 (apps/grobase/src/control-plane/go.mod); a newer toolchain
+          # builds it unchanged. Pinning the tool instead would freeze the
+          # vulnerability database this gate exists to track.
+          go-version: "1.26"
           check-latest: true
           cache-dependency-path: apps/grobase/src/control-plane/go.sum
 
