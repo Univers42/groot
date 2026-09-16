@@ -72,7 +72,25 @@ vault-restore:
 	$(MAKE) -C apps/grobase vault-restore SEED_DIR="$(CURDIR)/secrets" \
 		$(if $(FETCH),FETCH=$(FETCH),) EDITION="$(or $(EDITION),$(GROBASE_EDITION))"
 
+apply-models:
+## Apply pending root-app models/*.sql migrations to the live DB (checksum-tracked; applies only new/changed files). MANUAL ONLY — deliberately NOT in `make all`: on an EMPTY database it runs all files in alphabetical order, and the notification-type migrations (comments / feed-engagement / tasks) are order-sensitive, so the result silently drops `page_comment`; user.sql / gdpr / auth-security also fail there against the uuid `users` table. CAUTION: on a populated database with an empty ledger it ADOPTS — records every file as applied WITHOUT running it — which is how 23 tables came to be missing while the ledger said all 34 had run. Check the objects exist before trusting it. Logic in scripts/apply-models.sh.
+	@sh scripts/apply-models.sh apply
+
+apply-models-check:
+## Verify GATE (read-only): exit non-zero if any models/*.sql migration is pending (committed but unapplied) — the guard that catches the class of bug where a migration silently never ran. Wire into CI.
+	@sh scripts/apply-models.sh check
+
+apply-models-baseline:
+## Adopt the migration ledger on an already-migrated DB: record every current models/*.sql as applied WITHOUT running it.
+	@sh scripts/apply-models.sh baseline
+
 frontends-up: certs docker-prefetch-images compose-build
-## Build and start ONLY the root frontends against the running grobase backend.
+## Build and start ONLY the root frontends against the running grobase backend. Also
+## resurrects the IDE plane containers (runner / sandbox socket-proxy) — but ONLY when
+## ./.env.local records them as activated (see IDE-BACKLOG.md); fresh machines skip both.
 	docker compose --env-file ./.env.local up -d --build --wait $(ROOT_FRONTENDS)
+	@grep -qs '^OSIONOS_RUNNER_URL=.' ./.env.local && \
+		COMPOSE_PROFILES=runner docker compose --env-file ./.env.local up -d osionos-runner || true
+	@grep -qs '^OSIONOS_IDE_SANDBOX=1' ./.env.local && \
+		COMPOSE_PROFILES=ide docker compose --env-file ./.env.local up -d osionos-ide-socket-proxy || true
 	$(MAKE) compose-wait
