@@ -32,9 +32,9 @@ grobase-e2e:
 ROOT_FRONTENDS := osionos-bridge osionos-app auth-gateway opposite-osiris-web local-https-proxy livekit
 
 # Engine set `make all` brings up on a fresh machine. Default `devlean` = the daily-dev
-# shape: every CORE engine (postgres mongo redis minio, all public images) + full
+# shape: every CORE engine (postgres mysql mongo redis minio, all public images) + full
 # app/control/data plane + realtime, but WITHOUT the heavy à-la-carte extra-engines plane
-# (mysql/mariadb/cockroach/mssql, ~750 MiB — cockroach alone ~590 MiB) and WITHOUT the
+# (mariadb/cockroach/mssql — cockroach alone ~590 MiB; mysql is data-plane and stays) and WITHOUT the
 # monitoring/lakehouse extras that come up unhealthy in a constrained env. osionos uses
 # none of the extra engines, so nothing is lost — and the constrained host stops thrashing.
 # The extra DB engines are one flag away: `make all GROBASE_EDITION=migrate` (all snapshot
