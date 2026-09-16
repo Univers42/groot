@@ -45,6 +45,8 @@ syncro-submodule:
 		git pull --quiet --ff-only origin "$$branch" 2>/dev/null \
 			|| echo "  ! $$displaypath: not ff-only (diverged) — left at $$(git rev-parse --short HEAD)"; \
 		printf "  = %-28s %s (%s)\n" "$$displaypath" "$$(git rev-parse --short HEAD)" "$$branch"; \
+		git submodule update --init --recursive || \
+			echo "  ! $$displaypath: nested submodule init failed"; \
 	'; \
 	echo '[syncro] verify nothing is left detached…'; \
 	bad=$$(git submodule foreach --quiet --recursive 'git symbolic-ref -q HEAD >/dev/null 2>&1 || printf "%s " "$$displaypath"' || true); \
