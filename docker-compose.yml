@@ -79,6 +79,14 @@ services:
       # human go-ahead). Enable locally: OSIONOS_RUNNER_URL=http://osionos-runner:7900
       # plus `COMPOSE_PROFILES=runner`.
       OSIONOS_RUNNER_URL: ${OSIONOS_RUNNER_URL:-}
+      # IDE workspace sandbox (P2–P7) — DOUBLE-GATED, default DISABLED. All
+      # /api/ide/{session,pty,lsp,fsync,git,search,fs} routes stay 404 unless BOTH
+      # are set AND the `ide` profile (socket-proxy) is up. Ships EMPTY on purpose.
+      # Enable locally: OSIONOS_IDE_SANDBOX=1 +
+      # OSIONOS_IDE_DOCKER_HOST=osionos-ide-socket-proxy:2375 + COMPOSE_PROFILES=ide.
+      OSIONOS_IDE_SANDBOX: ${OSIONOS_IDE_SANDBOX:-}
+      OSIONOS_IDE_DOCKER_HOST: ${OSIONOS_IDE_DOCKER_HOST:-}
+      OSIONOS_IDE_EGRESS_GIT_HOSTS: ${OSIONOS_IDE_EGRESS_GIT_HOSTS:-github.com}
       HOME: ${OSIONOS_BRIDGE_HOME:-/tmp}
       PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     expose:
@@ -91,6 +99,9 @@ services:
       # Reaches the (optional, profile-gated) code runner over an internal-only
       # network — no effect until the `runner` profile is up + OSIONOS_RUNNER_URL set.
       - osionos-runner-net
+      # IDE control plane → the filtering socket-proxy (OSIONOS_IDE_DOCKER_HOST).
+      # Internal-only; no effect until the `ide` profile is up + the envs above set.
+      - osionos-ide-control-net
     healthcheck:
       test:
         [
@@ -132,7 +143,13 @@ services:
       fsize: 16000000
       cpu: 20
     tmpfs:
-      - /work:size=64m,mode=1777
+      # /work needs `exec`: compiled languages (c/cpp/go/rust) build a native
+      # binary here and run it — Docker tmpfs defaults to noexec, which breaks
+      # every compiled language. Executing user code IS the runner's purpose;
+      # isolation rests on cap_drop ALL + seccomp + read-only rootfs + non-root +
+      # the internal (egress-less) network + pids/mem/cpu/fsize limits, not on a
+      # noexec scratch dir. /tmp stays noexec (nothing needs to exec from it).
+      - /work:size=64m,mode=1777,exec
       - /tmp:size=16m,mode=1777
     environment:
       RUNNER_PORT: "7900"
@@ -184,6 +201,9 @@ services:
         VITE_REQUIRE_BRIDGE_SESSION: "true"
         VITE_ALLOW_OFFLINE_MODE: "false"
         VITE_PAGE_ACTION_SYNC_ENABLED: "true"
+        # IDE / Dev-Mode surface (code files + CodeMirror editor + IDE shell).
+        # Empty default keeps it OFF for the public web image; the app .env sets =1.
+        VITE_OSIO_IDE: ${VITE_OSIO_IDE:-}
         # mini-baas live-database + graph wiring (Vite inlines at build).
         # Empty defaults keep those surfaces dormant; `make seed-live-demo`
         # at the repo root rebuilds this image with the values from the app
@@ -599,6 +619,39 @@ services:
       target: audit
     image: track-binocle/grobase-site-audit:local
 
+  # ── IDE sandbox plane (profile `ide`; NEVER started by `make all`) ──────────
+  # The isolated sandbox daemon is NOT a compose service — it is a host systemd
+  # unit `docker-ide.service` (a second rootful dockerd, own data-root/socket,
+  # --userns-remap, --iptables=false) so a sandbox/provisioner compromise can
+  # never see the mini-baas backend on the main daemon (devil condition 1). See
+  # the runbook infrastructure/docker/osionos/ide-sandbox/README.md "Activation".
+  #
+  # The filtering docker-socket proxy — the ONLY path from the provisioner to the
+  # docker-ide daemon (condition 2). It bind-mounts the host /run/docker-ide.sock
+  # and exposes a filtered TCP endpoint that allowlists endpoints AND vets the
+  # create body (condition 8). Reachable only by the bridge on the control net.
+  osionos-ide-socket-proxy:
+    build:
+      context: infrastructure/docker/osionos/ide-socket-proxy
+    image: ${OSIONOS_IDE_SOCKET_PROXY_IMAGE:-osionos-ide-socket-proxy:latest}
+    container_name: track-binocle-osionos-ide-socket-proxy
+    profiles: ["ide"]
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      IDE_DOCKER_SOCK: /dind-run/docker.sock
+    volumes:
+      # Host bind of the isolated daemon's socket (docker-ide.service).
+      - ${OSIONOS_IDE_DOCKER_SOCK:-/run/docker-ide.sock}:/dind-run/docker.sock
+    expose:
+      - "2375"
+    networks:
+      - osionos-ide-control-net
+
 volumes:
   osionos-app-node-modules:
   osionos-app-pnpm-store:
@@ -621,4 +674,11 @@ networks:
   # so executed user code can reach neither the internet nor mini-baas. Only the
   # bridge and osionos-runner join it.
   osionos-runner-net:
+    internal: true
+  # IDE control plane (bridge ↔ socket-proxy): internal, no egress — the control
+  # path never needs the internet. The bridge joins this to reach the filter at
+  # osionos-ide-socket-proxy:2375 (OSIONOS_IDE_DOCKER_HOST). The sandbox networks
+  # (internal sandbox-net + the egress proxy) live INSIDE the docker-ide daemon,
+  # created by bootstrap.sh — not here.
+  osionos-ide-control-net:
     internal: true
