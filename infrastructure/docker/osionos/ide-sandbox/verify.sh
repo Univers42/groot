@@ -84,6 +84,33 @@ else
 fi
 
 $IDE rm -f "$PROBE" >/dev/null 2>&1
+
+echo "== Code runner (shared uid) =="
+# The runner executes every user's code in ONE container, as the SAME uid as its own
+# server (cap_drop ALL leaves no way to switch uid per run). Node treats SIGUSR1 as
+# "start the inspector", and user code may signal a same-uid process: measured, one
+# `kill -USR1 1` from uid 10001 made the server log "Debugger listening", i.e. any
+# user's program could attach to the broker of everyone's runs. The server must be
+# started with --disable-sigusr1. Probed on a THROWAWAY copy, never the live runner.
+RUNNER_IMAGE="${OSIONOS_RUNNER_IMAGE:-dlesieur/osionos-runner:latest}"
+if docker image inspect "$RUNNER_IMAGE" >/dev/null 2>&1; then
+  rp="ide-runner-sigusr1-probe"
+  docker rm -f "$rp" >/dev/null 2>&1
+  docker run -d --name "$rp" --network none --cap-drop ALL --read-only \
+    --tmpfs /tmp --tmpfs /work "$RUNNER_IMAGE" >/dev/null 2>&1
+  sleep 2
+  docker exec -u 10001 "$rp" sh -c 'kill -USR1 1' >/dev/null 2>&1
+  sleep 1
+  if docker logs "$rp" 2>&1 | grep -qi 'debugger listening'; then
+    bad "runner server ignores SIGUSR1 from user code (no inspector)"
+  else
+    ok "runner server ignores SIGUSR1 from user code (no inspector)"
+  fi
+  docker rm -f "$rp" >/dev/null 2>&1
+else
+  bad "runner image $RUNNER_IMAGE not present — cannot verify"
+fi
+
 echo ""
 printf 'RESULT: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ] || exit 1
