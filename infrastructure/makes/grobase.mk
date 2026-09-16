@@ -70,7 +70,7 @@ vault-restore:
 		[ -n "$(FETCH)" ] || exit 1; \
 	}
 	$(MAKE) -C apps/grobase vault-restore SEED_DIR="$(CURDIR)/secrets" \
-		$(if $(FETCH),FETCH=$(FETCH),) $(if $(EDITION),EDITION=$(EDITION),)
+		$(if $(FETCH),FETCH=$(FETCH),) EDITION="$(or $(EDITION),$(GROBASE_EDITION))"
 
 frontends-up: certs docker-prefetch-images compose-build
 ## Build and start ONLY the root frontends against the running grobase backend.
