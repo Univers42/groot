@@ -69,3 +69,4 @@ screenshots/
 
 # 12G pre-extraction BaaS snapshot — never commit (git-status noise)
 apps/baas.bak/
+.vault42-local-mode

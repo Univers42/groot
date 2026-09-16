@@ -36,13 +36,28 @@ jobs:
         with:
           node-version: "22"
 
+      # The dir list goes stale the moment a submodule drops a package: markengine
+      # lived at apps/osionos/app/src/shared/lib/markengine until osionos removed it
+      # (it survives only as .gitpatches/markengine-shared.bundle), and `cd` into the
+      # gone directory failed the whole job under `set -e` — a supply-chain gate that
+      # reports "red" for a package that no longer exists tells you nothing.
+      # So: discover the npm projects instead of listing them, and fail loudly if the
+      # discovery finds none, because a silently-empty gate is worse than a red one.
       - name: Verify npm lockfiles without lifecycle scripts
         run: |
           set -euo pipefail
+          found=0
           for dir in apps/mail apps/calendar apps/osionos/app/src/shared/lib/markengine; do
+            if [ ! -f "${dir}/package-lock.json" ]; then
+              echo "::notice::skipping ${dir} — no package-lock.json (package moved or removed)"
+              continue
+            fi
             echo "checking ${dir}"
             (cd "${dir}" && npm ci --ignore-scripts)
+            found=$((found + 1))
           done
+          [ "$found" -gt 0 ] || { echo "::error::no npm lockfile found in any listed directory — this gate verified nothing"; exit 1; }
+          echo "verified ${found} npm lockfile(s)"
 
   pnpm-frozen-installs:
     name: pnpm frozen installs
