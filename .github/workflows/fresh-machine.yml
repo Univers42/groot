@@ -67,16 +67,38 @@ jobs:
           [ -n "$VAULT42_CONTRACT_B64" ] || { echo "::error::VAULT42_CONTRACT_B64 secret is unset — set it once: base64 -w0 ~/.config/42ctl/contract-default.tok | gh secret set VAULT42_CONTRACT_B64 -R Univers42/groot"; exit 1; }
           echo "vault secrets present (keystore + contract + passphrase)"
 
-      - name: git clone --recursive (root + all submodules at latest)
+      # Order matters and used to be wrong: the rewrite that makes `git@github.com:` URLs
+      # resolve without an SSH key was configured AFTER the recursive checkout that needs
+      # it. Every .gitmodules in this tree — root, osionos/app, and notion-database-sys
+      # three levels down — uses the SSH form, so the nested clones had nothing to rewrite
+      # with. It also used two plain `git config` calls for the same key: insteadOf is
+      # MULTI-VALUED, so the second silently REPLACED the first and only `ssh://git@…`
+      # was ever rewritten — the `git@github.com:` form every submodule actually uses was
+      # not. `--add` keeps both.
+      - name: Rewrite SSH submodule URLs to public HTTPS (no SSH keys in CI)
+        run: |
+          git config --global --add url."https://github.com/".insteadOf "git@github.com:"
+          git config --global --add url."https://github.com/".insteadOf "ssh://git@github.com/"
+          git config --global --get-all url."https://github.com/".insteadOf
+
+      - name: git clone (root only — submodules are next, explicitly)
         uses: actions/checkout@v7
         with:
-          submodules: recursive
           fetch-depth: 1
 
-      - name: Submodule sync over public HTTPS (no SSH keys in CI)
+      # Explicit rather than `submodules: recursive` so a failure names the submodule that
+      # failed instead of collapsing 20 nested clones into one red step with no detail.
+      # This exact sequence was reproduced green against every repo in the tree over
+      # anonymous HTTPS before being committed.
+      - name: git submodule update --init --recursive (all 20, depth 1)
         run: |
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
-          git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+          set -euo pipefail
+          git submodule sync --recursive
+          git submodule update --init --recursive --depth=1
+          n=$(git submodule status --recursive | wc -l)
+          echo "checked out ${n} submodule(s)"
+          [ "$n" -ge 20 ] || { echo "::error::expected >=20 submodules, got ${n}"; exit 1; }
+          git submodule status --recursive | sed 's/^/  /'
 
       - name: Place the vault identity (keystore + contract) — machine config
         run: |
