@@ -106,7 +106,9 @@ chains). Operator host-prep (sudo):
    ```
 3. **Egress NAT** (scoped to docker-ide's 10.202.0.0/16 pool only):
    ```
-   sudo sh infrastructure/docker/osionos/ide-sandbox/ide-egress-nat.sh up
+   sudo sh infrastructure/docker/osionos/ide-sandbox/install-egress-nat.sh
+   # (installs a root-owned copy + a docker-ide drop-in so the rules survive reboots;
+   #  a one-off `sudo sh …/ide-egress-nat.sh up` is lost at the next boot)
    ```
 
 ## Rootful, not rootless — what that does and does not protect
