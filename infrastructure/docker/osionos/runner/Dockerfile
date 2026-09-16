@@ -42,4 +42,8 @@ COPY server.mjs /app/server.mjs
 
 USER runner
 EXPOSE 7900
-CMD ["node", "/app/server.mjs"]
+# --disable-sigusr1: user code runs as this same uid and may signal PID 1. Node's default
+# SIGUSR1 action starts the inspector on 127.0.0.1:9229, which that same code could then
+# attach to — taking over the server that brokers every user's runs. Measured before this
+# flag: one `kill -USR1 1` from uid 10001 → "Debugger listening". (Node >= 22.14.)
+CMD ["node", "--disable-sigusr1", "/app/server.mjs"]
