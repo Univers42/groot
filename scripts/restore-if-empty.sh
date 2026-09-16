@@ -31,6 +31,29 @@ wait_healthy() {
   note "$c still not healthy after 180s — probe may read it as uncertain"
 }
 
+SEEDS="$REPO/secrets"
+MANIFEST="$REPO/apps/grobase/data-snapshots/archives/MANIFEST.json"
+
+# snapshot_vintage: when the git-committed archive was taken. A restore that does not say
+# how old its data is cannot be told apart from a restore of the right data.
+snapshot_vintage() {
+  [ -f "$MANIFEST" ] || { printf 'unknown'; return 0; }
+  v=$(sed -n 's/.*"created_utc"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$MANIFEST" | head -1)
+  printf '%s' "${v:-unknown}"
+}
+
+# name_the_alternative: the git snapshot is what ships in the repo, but it is not always the
+# freshest data the project has — the 42ctl vault seeds are pushed separately and cover
+# engines the committed archive excludes (redis, among others). When both are on disk, the
+# one that did NOT run is the one worth naming, or a fresh clone silently comes up on
+# whichever happened to be wired in.
+name_the_alternative() {
+  [ -f "$SEEDS/postgres-all.sql.gz" ] || return 0
+  note "NOTE: vault seeds are ALSO on disk in ./secrets and are not what just restored."
+  note "      They are the 42ctl vault's copy — usually newer, and they carry engines the"
+  note "      committed archive lists as excluded. To use them instead: make vault-restore"
+}
+
 EMPTY=1
 REASON=""
 
@@ -109,11 +132,13 @@ mongo_probe
 
 if [ "$EMPTY" = 1 ]; then
   note "all running primary engines empty → restoring the full snapshot (all engines)…"
+  note "source: git-committed snapshot apps/grobase/data-snapshots, taken $(snapshot_vintage)"
   CONFIRM=1 "$RESTORE"
   # The pg --clean restore swaps the schema under the postgres-connected services, leaving
   # them stale/unhealthy — bounce them (and the storage/realtime CDC) so they reconnect.
   docker restart mini-baas-minio mini-baas-realtime mini-baas-postgrest mini-baas-supavisor >/dev/null 2>&1 || true
   note "restore complete."
+  name_the_alternative
 else
   note "data present ($REASON) — skipping restore (no wipe)."
 fi

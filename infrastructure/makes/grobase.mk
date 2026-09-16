@@ -54,8 +54,18 @@ backend-up:
 	$(MAKE) -C apps/grobase up EDITION=$(GROBASE_EDITION)
 
 restore-if-empty:
-## FAIL-SAFE auto-restore (wired into `make all`): loads the all-engine snapshot ONLY when EVERY running primary engine (postgres osionos, mysql ops, mongo activity) is CONFIRMED empty. Any engine with data, or any uncertainty (unreachable / query error), → SKIP (never wipes). Logic in scripts/restore-if-empty.sh.
+## FAIL-SAFE auto-restore (wired into `make all`): loads the all-engine snapshot ONLY when EVERY running primary engine (postgres osionos, mysql ops, mongo activity) is CONFIRMED empty. Any engine with data, or any uncertainty (unreachable / query error), → SKIP (never wipes). It restores the GIT-COMMITTED snapshot; when the vault seeds are also on disk it says so and names `make vault-restore`, which is newer and covers more engines. Logic in scripts/restore-if-empty.sh.
 	@sh scripts/restore-if-empty.sh
+
+vault-restore:
+## Rebuild every engine's DATA from the 42ctl vault seeds in ./secrets (newer + more engines than the git snapshot `restore-if-empty` uses). DESTRUCTIVE — replays dumps over the running engines. FETCH=1 pulls the seeds from the vault first.
+	@[ -d "$(CURDIR)/secrets" ] || { \
+		printf 'no ./secrets here — the vault seeds are not on disk.\n' >&2; \
+		printf 'Pull them first: make vault42-pull-all APPLY=1   (or pass FETCH=1)\n' >&2; \
+		[ -n "$(FETCH)" ] || exit 1; \
+	}
+	$(MAKE) -C apps/grobase vault-restore SEED_DIR="$(CURDIR)/secrets" \
+		$(if $(FETCH),FETCH=$(FETCH),) $(if $(EDITION),EDITION=$(EDITION),)
 
 frontends-up: certs docker-prefetch-images compose-build
 ## Build and start ONLY the root frontends against the running grobase backend.
