@@ -7,6 +7,15 @@ node_modules/
 .env*local
 .env\ copy*
 .env*.bak
+# Per-tenant / per-app provisioning state (api keys, JWT secrets, DSNs) — NEVER track.
+# apps/grobase/.gitignore has carried these globs since the seed scripts started emitting
+# them, but the SUPERPROJECT did not, so a copy that lands one level up — apps/.savanna-
+# tenant.env, written by a seed run from the repo root — was untracked AND unignored: one
+# `git add -A` from being committed in cleartext. The name does not start with `.env`, so
+# none of the rules above see it.
+*-tenant.env
+*-baas.env
+*.env.stale
 .vault/
 audit/
 # `audit/` (report-output dirs) accidentally swallowed the BaaS audit MODULE
