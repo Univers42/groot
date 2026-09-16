@@ -57,8 +57,8 @@ restore-if-empty:
 ## FAIL-SAFE auto-restore (wired into `make all`): loads the all-engine snapshot ONLY when EVERY running primary engine (postgres osionos, mysql ops, mongo activity) is CONFIRMED empty. Any engine with data, or any uncertainty (unreachable / query error), → SKIP (never wipes). It restores the GIT-COMMITTED snapshot; when the vault seeds are also on disk it says so and names `make vault-restore`, which is newer and covers more engines. Logic in scripts/restore-if-empty.sh.
 	@sh scripts/restore-if-empty.sh
 
-vault-seed:
-## Capture every RUNNING engine's data into ./secrets — the exact file set `make vault-restore` replays, and what `make vault42-push-all` then sends to the vault. Records coverage in secrets/MANIFEST.json; never deletes. Bring the engines-extra profile up first if you want mssql + dynamodb covered.
+vault42-seed:
+## Capture every RUNNING engine's data into ./secrets — the exact file set `make vault-restore` replays, and what `make vault42-push-all` then sends to the vault. (Named vault42-seed: `vault-seed` is the HashiCorp Vault env loader in vault.mk.) Records coverage in secrets/MANIFEST.json; never deletes. Bring the engines-extra profile up first if you want mssql + dynamodb covered.
 	@mkdir -p "$(CURDIR)/secrets"
 	$(MAKE) -C apps/grobase vault-seed SEED_DIR="$(CURDIR)/secrets"
 
