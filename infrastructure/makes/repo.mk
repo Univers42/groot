@@ -13,7 +13,12 @@
 # Repository synchronization targets.
 
 # vault42 (zero-knowledge) config — the ONLY secrets store (HashiCorp Vault is retired).
-VAULT42_PROJECT ?= transcendence
+# The project name is the manifest key in the vault — get it wrong and `secrets-ensure`
+# fails with "no manifest for project X" and falls back to LOCAL mode, so a fresh machine
+# silently comes up with self-generated secrets instead of the team's. Measured on a clean
+# clone: this said `transcendence`, the vault holds `groot`, and the whole bootstrap
+# reported success while sharing nothing. Override per-machine with VAULT42_PROJECT=.
+VAULT42_PROJECT ?= groot
 CTL_IMAGE       ?= docker.io/dlesieur/42ctl:latest
 CTL_CFG_DIR     ?= $(HOME)/.config/42ctl
 
