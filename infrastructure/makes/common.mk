@@ -61,7 +61,15 @@ WEBSITE_URL := https://localhost:4322
 OSIONOS_URL := https://localhost:3001
 BRIDGE_URL := https://localhost:4000
 AUTH_URL := https://localhost:8787/api/auth
-BAAS_URL := http://127.0.0.1:8000
+# grobase's scripts/ops/resolve-ports.sh moves Kong to the next FREE host port when 8000 is
+# already taken (an old stack still shutting down is enough), so a hardcoded 8000 fails the
+# health gate against a backend that is perfectly healthy — measured: Kong published on 8001
+# while this said 8000, and `make all` died at healthcheck after a clean build.
+# Deferred (=) like BAAS_HEALTH_KEY below: resolved at recipe time, once the backend is up.
+# Falls back to 8000 when the container is not running yet, so the message stays the obvious
+# "could not connect to 8000" rather than a make error about an empty URL.
+BAAS_PORT = $(shell docker port mini-baas-kong 8000/tcp 2>/dev/null | head -1 | sed 's/.*://')
+BAAS_URL = http://127.0.0.1:$(or $(BAAS_PORT),8000)
 # grobase Kong gates /auth/v1/* with key-auth, so the BaaS health probe must
 # present the anon apikey (read from the consolidated root .env.local).
 # Deferred (=) not immediate (:=): on a fresh machine .env.local does not exist at parse
