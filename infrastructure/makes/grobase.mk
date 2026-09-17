@@ -84,10 +84,13 @@ apply-models-baseline:
 ## Adopt the migration ledger on an already-migrated DB: record every current models/*.sql as applied WITHOUT running it.
 	@sh scripts/apply-models.sh baseline
 
-frontends-up: certs docker-prefetch-images compose-build
+frontends-up: certs
 ## Build and start ONLY the root frontends against the running grobase backend. Also
 ## resurrects the IDE plane containers (runner / sandbox socket-proxy) — but ONLY when
 ## ./.env.local records them as activated (see IDE-BACKLOG.md); fresh machines skip both.
+## Builds only what it starts: the bake group (compose-build) makes :local images that
+## nothing here runs, and a fresh machine has a 20-30 GB /var to share.
+	@$(MAKE) --no-print-directory docker-prefetch-images DOCKER_PREFETCH_SCOPE=frontends
 	docker compose --env-file ./.env.local up -d --build --wait $(ROOT_FRONTENDS)
 	@grep -qs '^OSIONOS_RUNNER_URL=.' ./.env.local && \
 		COMPOSE_PROFILES=runner docker compose --env-file ./.env.local up -d osionos-runner || true

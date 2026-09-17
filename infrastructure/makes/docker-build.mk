@@ -29,12 +29,14 @@ compose-build: buildx-setup
 	docker buildx bake --builder '$(BUILDX_BUILDER)' --file '$(BAKE_FILE)' --load $$cache_flags '$(BAKE_GROUP)'
 
 docker-prefetch-images:
-## Pull required public images from resilient mirrors before Compose builds.
+## Pull required public images from resilient mirrors before Compose builds. Scope `frontends`
+## is only the bases of the images frontends-up builds (make all), `vault` the Vault stack's,
+## `all` the whole root compose graph (up, up-infra).
 	@set -eu; \
 	jobs='$(DOCKER_PREFETCH_JOBS)'; \
 	scope='$(DOCKER_PREFETCH_SCOPE)'; \
 	case "$$jobs" in ''|*[!0-9]*) echo '[docker] DOCKER_PREFETCH_JOBS must be a positive integer'; exit 1;; esac; \
-	case "$$scope" in all|vault) ;; *) echo '[docker] DOCKER_PREFETCH_SCOPE must be all or vault'; exit 1;; esac; \
+	case "$$scope" in all|vault|frontends) ;; *) echo '[docker] DOCKER_PREFETCH_SCOPE must be all, vault or frontends'; exit 1;; esac; \
 	if [ "$$jobs" -lt 1 ]; then jobs=1; fi; \
 	echo "[docker] prefetching $$scope images with up to $$jobs concurrent pulls"; \
 	pull_image() { \
@@ -66,11 +68,15 @@ docker-prefetch-images:
 	}; \
 	start_pull public.ecr.aws/docker/library/node:22-alpine node:22-alpine; \
 	start_pull public.ecr.aws/docker/library/nginx:1.27-alpine nginx:1.27-alpine; \
-	start_pull docker/dockerfile:1; \
 	start_pull docker/dockerfile:1.7; \
-	start_pull public.ecr.aws/hashicorp/vault:1.16 hashicorp/vault:1.16; \
-	if [[ "$$scope" == 'all' ]]; then \
+	if [[ "$$scope" != 'frontends' ]]; then \
+		start_pull docker/dockerfile:1; \
+		start_pull public.ecr.aws/hashicorp/vault:1.16 hashicorp/vault:1.16; \
+	fi; \
+	if [[ "$$scope" != 'vault' ]]; then \
 		start_pull public.ecr.aws/docker/library/node:22-bookworm-slim node:22-bookworm-slim; \
+	fi; \
+	if [[ "$$scope" == 'all' ]]; then \
 		start_pull public.ecr.aws/docker/library/postgres:16-alpine postgres:16-alpine; \
 		start_pull public.ecr.aws/docker/library/redis:7-alpine redis:7-alpine; \
 		start_pull '$(MAILPIT_IMAGE)'; \
