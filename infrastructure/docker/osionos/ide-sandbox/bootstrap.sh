@@ -40,6 +40,12 @@ $IDE info >/dev/null 2>&1 || { log "docker-ide daemon not reachable at ${IDE_SOC
 
 # 2. Seed the two images: build on the MAIN daemon, pipe into docker-ide. The
 #    ONLY image transfer; the runtime path never loads images.
+for img in "$SANDBOX_IMAGE" "$EGRESS_IMAGE"; do
+  docker image inspect "$img" >/dev/null 2>&1 || {
+    log "$img is not on the main daemon — build it first: docker build -t $img <context> (README, Activation step 1)"
+    exit 1
+  }
+done
 log "seeding images into docker-ide…"
 docker save "$SANDBOX_IMAGE" | $IDE load
 docker save "$EGRESS_IMAGE" | $IDE load
@@ -62,5 +68,18 @@ $IDE run -d --name ide-egress \
   -e "IDE_EGRESS_GIT_HOSTS=$GIT_HOSTS" \
   "$EGRESS_IMAGE"
 $IDE network connect "$EGRESS_NET" ide-egress
+
+# 5. Only docker-ide runs the sandbox image, so the main daemon's copy (~2.8 GB, the
+#    largest image on the machine) goes once docker-ide confirms it has it; the build
+#    cache keeps a rebuild quick. Cleanup only: a refusal is reported, never fatal.
+#    `sudo OSIONOS_IDE_KEEP_MAIN_COPY=1 sh bootstrap.sh` keeps it. The egress image
+#    stays: verify.sh runs its selfcheck on the main daemon.
+if [ "${OSIONOS_IDE_KEEP_MAIN_COPY:-0}" != 1 ]; then
+  if $IDE image inspect "$SANDBOX_IMAGE" >/dev/null 2>&1 && docker image rm "$SANDBOX_IMAGE" >/dev/null; then
+    log "removed the main daemon's copy of $SANDBOX_IMAGE (docker-ide has it)"
+  else
+    log "kept the main daemon's copy of $SANDBOX_IMAGE — remove it later with: docker image rm $SANDBOX_IMAGE"
+  fi
+fi
 
 log "done. sandboxes create on $SANDBOX_NET; egress via ide-egress:8080."
