@@ -82,6 +82,9 @@ RUN useradd --uid 10001 --create-home --shell /bin/bash coder \
 # create/modify/delete events for the gateway, applying the ignore set so a
 # `pip install` never floods the page store. Launched per-session by the gateway.
 COPY osio-fs-agent.mjs /usr/local/lib/osio-fs-agent.mjs
+# The ignore set is what keeps build output, dependency trees and half-written saves out of
+# the page store: an image whose matcher is wrong must not build.
+RUN node /usr/local/lib/osio-fs-agent.mjs --selfcheck
 
 WORKDIR /workspace
 USER coder

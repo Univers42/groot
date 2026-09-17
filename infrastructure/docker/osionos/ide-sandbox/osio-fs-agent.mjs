@@ -33,6 +33,10 @@ const DEFAULT_IGNORE_DIRS = new Set([
   ".osio", "coverage", ".nyc_output", "bin", "obj",
 ]);
 const DEFAULT_IGNORE_FILE = /\.(pyc|pyo|class|o|a|so|dylib|dll|exe|bin|lock|log|map|min\.js|min\.css)$/i;
+// Transient files that exist only for the length of a save: the VFS write op's own
+// `<file>.vfstmp<pid>` (written, then renamed over the target) and vim swap files. Synced,
+// each became a page that the rename never removed (measured: `main.c.vfstmp46`).
+const TRANSIENT_FILE = /(\.vfstmp\d+|\.sw[a-p])$/;
 const DEFAULT_IGNORE_BASENAMES = new Set([".DS_Store", "Thumbs.db", "package-lock.json", "pnpm-lock.yaml", "yarn.lock"]);
 
 /** A relative path is ignored when ANY segment is an ignored dir, or the file
@@ -46,7 +50,7 @@ export function isIgnored(relPath, extraDirs = new Set()) {
   const base = parts[parts.length - 1];
   if (DEFAULT_IGNORE_DIRS.has(base) || extraDirs.has(base)) return true;
   if (DEFAULT_IGNORE_BASENAMES.has(base)) return true;
-  return DEFAULT_IGNORE_FILE.test(base);
+  return DEFAULT_IGNORE_FILE.test(base) || TRANSIENT_FILE.test(base);
 }
 
 /** sha256 of file bytes — the gateway compares this to the hash of an
@@ -155,6 +159,9 @@ if (isMain && process.argv.includes("--selfcheck")) {
   chk("ignore dist", isIgnored("dist/bundle.js"), true);
   chk("ignore .osio", isIgnored(".osio/manifest.json"), true);
   chk("extra ignore", isIgnored("secrets/key.txt", new Set(["secrets"])), true);
+  chk("ignore own atomic-write temp", isIgnored("src/main.c.vfstmp46"), true);
+  chk("ignore vim swap", isIgnored("src/.main.c.swp"), true);
+  chk("keep a real .vfstmp-looking name", isIgnored("notes/vfstmp.md"), false);
   chk("hash stable", hashContent(Buffer.from("hello")), hashContent(Buffer.from("hello")));
   chk("text not binary", looksBinary(Buffer.from("print('hi')\n")), false);
   chk("NUL is binary", looksBinary(Buffer.from([0x89, 0x50, 0x00, 0x01])), true);
