@@ -62,12 +62,13 @@ services:
       # Permission UX proxy (scripts/bridge-perms.mjs) → mini-baas Kong over
       # the external mini-baas network (container-name DNS; the bare "kong"
       # alias is ambiguous from here because this service sits on BOTH
-      # networks). PERMS_SERVICE_APIKEY / PERMS_SERVICE_TOKEN come from
-      # ./.env.local via env_file (secrets stay out of compose).
+      # networks). It authenticates as the bridge's own service identity
+      # (SERVICE_ROLE_KEY + ADAPTER_REGISTRY_SERVICE_TOKEN); PERMS_SERVICE_APIKEY /
+      # PERMS_SERVICE_TOKEN in ./.env.local are optional overrides, normally blank.
+      # Share rules live in Postgres (public.osionos_share_rules), not in a file.
       PERMS_KONG_URL: ${PERMS_KONG_URL:-http://mini-baas-kong:8000}
       PERMS_TENANT_ID: ${PERMS_TENANT_ID:-agency}
       PERMS_PEOPLE_ENV: /seeds/.agency-people.env
-      PERMS_RULES_FILE: /tmp/perms-rules.json
       # Chat/feed realtime publishes (scripts/bridge-chat.mjs, bridge-feed.mjs)
       # go server-side to the Rust realtime gateway: POST /v1/publish.
       REALTIME_PUBLISH_URL: ${REALTIME_PUBLISH_URL:-http://mini-baas-realtime:4000}
