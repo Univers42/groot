@@ -38,19 +38,25 @@ permissions:
 
 jobs:
   # restore-if-empty decides whether `make all` replays the committed snapshot OVER the
-  # running engines. Its no-wipe rules are unit-tested against a fake docker — seconds, no
-  # secrets, no stack — so a regression fails here before the two-hour run below.
+  # running engines, and make-all-footprint pins what `make all` pulls and builds (a fresh
+  # machine has a 20-30 GB /var). Both run against a fake docker — seconds, no secrets, no
+  # stack — so a regression fails here before the two-hour run below. The footprint tests
+  # drive the real Makefile (make + GNU timeout) and grobase's vault-restore.sh.
   restore-gate-tests:
-    name: restore-if-empty safety tests (bats)
+    name: make all safety + footprint tests (bats)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      - name: grobase checkout (vault-restore.sh is under test)
+        run: |
+          git config --global --add url."https://github.com/".insteadOf "git@github.com:"
+          git submodule update --init --depth 1 apps/grobase
       - name: bats scripts/tests
         run: |
-          docker run --rm -v "$PWD:/code" -w /code \
+          docker run --rm -v "$PWD:/code" -w /code --entrypoint sh \
             bats/bats:1.11.1@sha256:e56e7c49087cb766b1ba9c5732b8f5402d289252d52f64e1eefb88269f74125c \
-            scripts/tests
+            -c 'apk add -q --no-cache make coreutils && bats scripts/tests'
 
   clone-and-make-all:
     name: clone --recursive + make all
