@@ -24,9 +24,21 @@ REGISTRY_CACHE_PREFIX ?=
 BAKE_FILE ?= docker-bake.hcl
 BAKE_GROUP ?= default
 BAKE_TARGETS ?= osionos-app mail calendar opposite-osiris-node
-TRACK_BINOCLE_BIND_ADDR ?= $(shell if [ -r /sys/class/dmi/id/product_name ] && grep -qi 'VirtualBox' /sys/class/dmi/id/product_name 2>/dev/null && ip route 2>/dev/null | grep -q 'default via 10\.0\.2\.2'; then printf '0.0.0.0'; else printf '127.0.0.1'; fi)
+# Best-effort Make-level default for consumers that just read this variable.
+# GNU Make 4.4.1's $(shell)+export machinery has proven flaky here even with
+# one-time (:=) expansion and its own export line (reproduced: identical
+# expression, 1-in-3 runs wrong) — the `up`/`all` recipes that actually launch
+# Docker do NOT rely on this value; they call detect-bind-addr.sh directly at
+# shell-execution time instead, which sidesteps the flake entirely.
+ifeq ($(origin TRACK_BINOCLE_BIND_ADDR),undefined)
+TRACK_BINOCLE_BIND_ADDR := $(shell sh infrastructure/scripts/detect-bind-addr.sh)
+endif
+# Exported on its own line, not bundled with the list below: grouping it into a
+# shared `export A B C ...` list re-triggers the same GNU Make 4.4.1 recursion
+# guard on the whole batch, not just this variable (reproduced empirically).
+export TRACK_BINOCLE_BIND_ADDR
 COMPOSE_PROFILES ?= dev
-export COMPOSE_PROFILES COMPOSE_PROGRESS BUILDKIT_PROGRESS BUILDX_BUILDER DOCKER_BUILDKIT COMPOSE_DOCKER_CLI_BUILD COMPOSE_BAKE REGISTRY_CACHE_PREFIX TRACK_BINOCLE_BIND_ADDR
+export COMPOSE_PROFILES COMPOSE_PROGRESS BUILDKIT_PROGRESS BUILDX_BUILDER DOCKER_BUILDKIT COMPOSE_DOCKER_CLI_BUILD COMPOSE_BAKE REGISTRY_CACHE_PREFIX
 DOCKER_PULL_ATTEMPTS ?= 1
 DOCKER_PULL_TIMEOUT ?= 120
 DOCKER_PULL_KILL_AFTER ?= 15
