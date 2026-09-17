@@ -143,7 +143,9 @@ docker build -t osionos-ide-sandbox:latest       infrastructure/docker/osionos/i
 COMPOSE_PROFILES=ide docker compose up -d osionos-ide-socket-proxy
 
 # 3. One-time seed of images + networks + egress proxy into docker-ide (sudo:
-#    the socket is root-owned).
+#    the socket is root-owned). Afterwards only docker-ide holds the sandbox image
+#    (the main daemon's ~2.8 GB copy is removed), so re-seeding later starts again
+#    from step 1. To keep it: sudo OSIONOS_IDE_KEEP_MAIN_COPY=1 sh <this script>
 sudo sh infrastructure/docker/osionos/ide-sandbox/bootstrap.sh
 
 # 4. Run the FULL 16-condition hostile corpus (must be green before enabling).
