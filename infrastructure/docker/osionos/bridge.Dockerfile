@@ -20,7 +20,7 @@ WORKDIR /app
 # collab + their shared core).
 COPY scripts/bridge-api.mjs scripts/bridge-graph.mjs scripts/bridge-graph-data.mjs scripts/bridge-records.mjs scripts/bridge-agent.mjs scripts/bridge-runner.mjs \
 	scripts/bridge-connector.mjs scripts/bridge-oauth.mjs \
-	scripts/bridge-rtc.mjs scripts/bridge-perms.mjs scripts/bridge-chat.mjs \
+	scripts/bridge-rtc.mjs scripts/bridge-perms.mjs scripts/bridge-perms-rules.mjs scripts/bridge-chat.mjs \
 	scripts/bridge-chat-media.mjs scripts/bridge-storage-core.mjs scripts/bridge-ratelimit.mjs scripts/bridge-chat-search.mjs scripts/bridge-chat-threads.mjs \
 	scripts/bridge-communities.mjs \
 	scripts/bridge-profile.mjs scripts/bridge-feed.mjs scripts/bridge-social.mjs scripts/bridge-notify.mjs scripts/bridge-push.mjs scripts/bridge-media.mjs scripts/bridge-tasks.mjs scripts/bridge-comments.mjs scripts/bridge-public.mjs \
