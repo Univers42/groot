@@ -50,9 +50,9 @@ up: certs docker-prefetch-images compose-build
 ## Build and start every service in the root Docker Compose graph.
 	@docker compose kill local-https-proxy mailpit db-bootstrap project-db-init gotrue kong postgrest pg-meta supavisor osionos-bridge osionos-app auth-gateway opposite-osiris-web mail-bridge mail calendar-bridge calendar >/dev/null 2>&1 || true
 	@docker compose rm -f local-https-proxy mailpit db-bootstrap project-db-init gotrue kong postgrest pg-meta supavisor osionos-bridge osionos-app auth-gateway opposite-osiris-web mail-bridge mail calendar-bridge calendar >/dev/null 2>&1 || true
-	docker compose up -d --no-build --pull never --wait postgres
+	TRACK_BINOCLE_BIND_ADDR="$$(sh infrastructure/scripts/detect-bind-addr.sh)" docker compose up -d --no-build --pull never --wait postgres
 	$(MAKE) db-password-apply
-	docker compose up -d --no-build --pull never
+	TRACK_BINOCLE_BIND_ADDR="$$(sh infrastructure/scripts/detect-bind-addr.sh)" docker compose up -d --no-build --pull never
 	$(MAKE) compose-wait
 
 up-infra: certs docker-prefetch-images compose-build

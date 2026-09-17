@@ -91,7 +91,7 @@ frontends-up: certs
 ## Builds only what it starts: the bake group (compose-build) makes :local images that
 ## nothing here runs, and a fresh machine has a 20-30 GB /var to share.
 	@$(MAKE) --no-print-directory docker-prefetch-images DOCKER_PREFETCH_SCOPE=frontends
-	docker compose --env-file ./.env.local up -d --build --wait $(ROOT_FRONTENDS)
+	TRACK_BINOCLE_BIND_ADDR="$$(sh infrastructure/scripts/detect-bind-addr.sh)" docker compose --env-file ./.env.local up -d --build --wait $(ROOT_FRONTENDS)
 	@grep -qs '^OSIONOS_RUNNER_URL=.' ./.env.local && \
 		COMPOSE_PROFILES=runner docker compose --env-file ./.env.local up -d osionos-runner || true
 	@grep -qs '^OSIONOS_IDE_SANDBOX=1' ./.env.local && \
