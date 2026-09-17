@@ -32,9 +32,9 @@ grobase-e2e:
 ROOT_FRONTENDS := osionos-bridge osionos-app auth-gateway opposite-osiris-web local-https-proxy livekit
 
 # Engine set `make all` brings up on a fresh machine. Default `devlean` = the daily-dev
-# shape: every CORE engine (postgres mongo redis minio, all public images) + full
-# app/control/data plane + realtime, but WITHOUT the heavy à-la-carte extra-engines plane
-# (mysql/mariadb/cockroach/mssql, ~750 MiB — cockroach alone ~590 MiB) and WITHOUT the
+# shape: every CORE engine (postgres mysql mongo redis minio, all public images — mysql lives
+# in the data plane) + full app/control/data plane + realtime, but WITHOUT the heavy à-la-carte
+# extra-engines plane (mariadb/cockroach/mssql, ~750 MiB — cockroach alone ~590 MiB) and WITHOUT the
 # monitoring/lakehouse extras that come up unhealthy in a constrained env. osionos uses
 # none of the extra engines, so nothing is lost — and the constrained host stops thrashing.
 # The extra DB engines are one flag away: `make all GROBASE_EDITION=migrate` (all snapshot
@@ -54,8 +54,8 @@ backend-up:
 	$(MAKE) -C apps/grobase up EDITION=$(GROBASE_EDITION)
 
 restore-if-empty:
-## FAIL-SAFE auto-restore (wired into `make all`): loads the all-engine snapshot ONLY when EVERY running primary engine (postgres osionos, mysql ops, mongo activity) is CONFIRMED empty. Any engine with data, or any uncertainty (unreachable / query error), → SKIP (never wipes). It restores the GIT-COMMITTED snapshot; when the vault seeds are also on disk it says so and names `make vault-restore`, which is newer and covers more engines. Logic in scripts/restore-if-empty.sh.
-	@sh scripts/restore-if-empty.sh
+## FAIL-SAFE auto-restore (wired into `make all`): loads data ONLY when every running primary engine (postgres osionos, mysql ops, mongo activity) is CONFIRMED empty and postgres is running. Source: the vault seeds in ./secrets when present (checksum-verified, all engines, via `make vault-restore`), else the committed git snapshot. A failed or unfinished vault restore stops `make all` and names the resume command (`make vault-restore`) — it is never mistaken for data on a later run. Logic in scripts/restore-if-empty.sh.
+	@GROBASE_EDITION="$(GROBASE_EDITION)" sh scripts/restore-if-empty.sh
 
 vault42-seed:
 ## Capture every RUNNING engine's data into ./secrets — the exact file set `make vault-restore` replays, and what `make vault42-push-all` then sends to the vault. (Named vault42-seed: `vault-seed` is the HashiCorp Vault env loader in vault.mk.) Records coverage in secrets/MANIFEST.json; never deletes. Bring the engines-extra profile up first if you want mssql + dynamodb covered.

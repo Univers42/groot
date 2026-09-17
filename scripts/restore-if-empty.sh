@@ -1,12 +1,14 @@
 #!/usr/bin/env sh
-# restore-if-empty.sh — load the all-engine data snapshot when the stack is genuinely
-# fresh: every RUNNING primary engine (postgres osionos, mysql ops, mongo activity) is
-# CONFIRMED empty. FAIL-SAFE: an engine with data aborts the restore — it never wipes a
-# populated stack. grobase `up` is DETACHED (no --wait), so on a fresh machine the engines
-# are still booting when we arrive; we WAIT for docker health first, otherwise a transient
-# "not ready" is misread as "uncertain" and the restore is WRONGLY skipped (the bug that
-# left a fresh machine with no data). A populated engine is healthy at once, so the no-wipe
-# path is never delayed. Wired into `make all` (and `make bootstrap`).
+# restore-if-empty.sh — load the all-engine data when the stack is genuinely fresh: every
+# RUNNING primary engine (postgres osionos, mysql ops, mongo activity) is CONFIRMED empty.
+# FAIL-SAFE: an engine with data aborts the restore — it never wipes a populated stack.
+# The source is the 42ctl vault seeds in ./secrets when they are on disk (pulled by
+# `make all`'s secrets-ensure: newest data, all 7 engines), else the committed git snapshot.
+# grobase `up` is DETACHED (no --wait), so on a fresh machine the engines are still booting
+# when we arrive; we WAIT for docker health first, otherwise a transient "not ready" is
+# misread as "uncertain" and the restore is WRONGLY skipped (the bug that left a fresh
+# machine with no data). A populated engine is healthy at once, so the no-wipe path is never
+# delayed. Wired into `make all` (and `make bootstrap`).
 set -u
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -42,16 +44,69 @@ snapshot_vintage() {
   printf '%s' "${v:-unknown}"
 }
 
-# name_the_alternative: the git snapshot is what ships in the repo, but it is not always the
-# freshest data the project has — the 42ctl vault seeds are pushed separately and cover
-# engines the committed archive excludes (redis, among others). When both are on disk, the
-# one that did NOT run is the one worth naming, or a fresh clone silently comes up on
-# whichever happened to be wired in.
-name_the_alternative() {
-  [ -f "$SEEDS/postgres-all.sql.gz" ] || return 0
-  note "NOTE: vault seeds are ALSO on disk in ./secrets and are not what just restored."
-  note "      They are the 42ctl vault's copy — usually newer, and they carry engines the"
-  note "      committed archive lists as excluded. To use them instead: make vault-restore"
+STATE_BASE="${XDG_STATE_HOME:-$HOME/.local/state}"
+MARKER="$STATE_BASE/groot/restore-in-progress"
+VAULT_RESTORE="$REPO/apps/grobase/scripts/ops/vault-restore.sh"
+VAULT_BACKUPS="$STATE_BASE/grobase/vault-restore"
+ENGINE_SEEDS="postgres-all.sql.gz mysql-all.sql.gz mongo.archive.gz minio.tar.gz redis.rdb"
+OPTIONAL_SEEDS="dynamodb-all.tar.gz mssql-all.tar.gz"
+
+# refuse_unfinished_restore: a vault restore that died half-way leaves postgres restored and
+# the other engines empty. The next run would read postgres's rows as "data present" and
+# never finish the job, so the marker (kept outside the repo) makes this run stop and say so.
+refuse_unfinished_restore() {
+  [ -e "$MARKER" ] || return 0
+  note "a vault restore started ($(cat "$MARKER" 2>/dev/null)) and never finished — engines may be half-restored."
+  note "  resume it:              make vault-restore"
+  note "  pre-restore backups:    $VAULT_BACKUPS"
+  note "  when resolved, remove:  $MARKER"
+  exit 1
+}
+
+# vault_seeds_present: any engine dump in ./secrets means the vault is the source of truth.
+vault_seeds_present() {
+  for f in $ENGINE_SEEDS; do [ -f "$SEEDS/$f" ] && return 0; done
+  return 1
+}
+
+# verify_seeds: every dump the restore will replay (the optional engines only when present)
+# is listed in SHA256SUMS and matches it. Other files in ./secrets never block the restore.
+verify_seeds() {
+  [ -f "$SEEDS/SHA256SUMS" ] || { note "./secrets has no SHA256SUMS"; return 1; }
+  needed="$ENGINE_SEEDS"
+  for f in $OPTIONAL_SEEDS; do [ -f "$SEEDS/$f" ] && needed="$needed $f"; done
+  sums=$(awk -v want=" $needed " '{ n = $2; sub(/^\*/, "", n) } index(want, " " n " ") { print; seen[n] = 1 }
+    END { split(want, w, " "); for (i in w) if (w[i] != "" && !(w[i] in seen)) { print "MISSING " w[i] > "/dev/stderr"; bad = 1 } exit bad }' \
+    "$SEEDS/SHA256SUMS") || { note "a seed the restore needs is not listed in SHA256SUMS"; return 1; }
+  (cd "$SEEDS" && printf '%s\n' "$sums" | sha256sum -c >/dev/null 2>&1) || { note "a vault seed does not match SHA256SUMS"; return 1; }
+}
+
+# restore_from_vault: replay the verified seeds through vault-restore.sh in the caller's
+# edition. A failure stops `make all` — never a fallback to the older git snapshot over a
+# half-restored stack — and keeps the marker so the next run cannot call it done.
+restore_from_vault() {
+  verify_seeds || { note "vault seeds failed verification — nothing was restored"; exit 1; }
+  mkdir -p "$(dirname "$MARKER")"
+  printf '%s, seeds %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(sha256sum "$SEEDS/SHA256SUMS" | cut -c1-16)" > "$MARKER"
+  note "all running primary engines empty → restoring the vault seeds in ./secrets (all engines)…"
+  if ! EDITION="${GROBASE_EDITION:-devlean}" SEED_DIR="$SEEDS" sh "$VAULT_RESTORE"; then
+    note "vault restore FAILED — the stack may be half-restored. Resume with: make vault-restore"
+    note "pre-restore backups: $VAULT_BACKUPS"
+    exit 1
+  fi
+  rm -f "$MARKER"
+  note "vault restore complete."
+}
+
+# restore_from_git: no vault seeds on disk (no vault key / LOCAL mode) — the committed snapshot.
+restore_from_git() {
+  note "all running primary engines empty → restoring the full snapshot (all engines)…"
+  note "source: git-committed snapshot apps/grobase/data-snapshots, taken $(snapshot_vintage) — no vault seeds in ./secrets"
+  CONFIRM=1 "$RESTORE"
+  # The pg --clean restore swaps the schema under the postgres-connected services, leaving
+  # them stale/unhealthy — bounce them (and the storage/realtime CDC) so they reconnect.
+  docker restart mini-baas-minio mini-baas-realtime mini-baas-postgrest mini-baas-supavisor >/dev/null 2>&1 || true
+  note "restore complete."
 }
 
 EMPTY=1
@@ -129,6 +184,8 @@ mongo_probe() {
   gate mongo "$c"
 }
 
+refuse_unfinished_restore
+
 # Engines are still booting after a detached `up` — wait for health before probing/restoring.
 for e in mini-baas-postgres mini-baas-mysql mini-baas-mongo mini-baas-mssql mini-baas-minio; do
   wait_healthy "$e"
@@ -138,15 +195,10 @@ pg_probe
 mysql_probe
 mongo_probe
 
-if [ "$EMPTY" = 1 ]; then
-  note "all running primary engines empty → restoring the full snapshot (all engines)…"
-  note "source: git-committed snapshot apps/grobase/data-snapshots, taken $(snapshot_vintage)"
-  CONFIRM=1 "$RESTORE"
-  # The pg --clean restore swaps the schema under the postgres-connected services, leaving
-  # them stale/unhealthy — bounce them (and the storage/realtime CDC) so they reconnect.
-  docker restart mini-baas-minio mini-baas-realtime mini-baas-postgrest mini-baas-supavisor >/dev/null 2>&1 || true
-  note "restore complete."
-  name_the_alternative
-else
+if [ "$EMPTY" != 1 ]; then
   note "data present ($REASON) — skipping restore (no wipe)."
+elif vault_seeds_present; then
+  restore_from_vault
+else
+  restore_from_git
 fi

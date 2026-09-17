@@ -53,6 +53,10 @@ operator steps to activate + run the full hostile corpus.
   dumps are disabled so a git crash can't drop a PAT-bearing core on `/workspace`
   (**condition 14**).
 
+**Invariant — one bridge per sandbox daemon.** Provisioning is single-flight *within* a bridge
+process (`ensureSandbox`); it re-inspects before a force-remove and adopts a 409 on create, but
+two bridges pointed at the same `docker-ide` daemon could still remove each other's running box.
+
 ## The 16 conditions — verification status
 
 | # | Condition | How verified | Status |
@@ -72,7 +76,7 @@ operator steps to activate + run the full hostile corpus.
 | 13 | PAT never on a synced path / shell env | image probes (helper + shell env) | ✅ verified |
 | 14 | Core dumps disabled | image probe (`ulimit -c` = 0) + create ulimit | ✅ verified |
 | 15 | Block quota, separate fs | separate loopback data-root caps host blast; per-sandbox `StorageOpt.size` is xfs+pquota-only, opt-in via `OSIONOS_IDE_STORAGE_QUOTA` | ✅ host-bounded; per-sandbox = xfs upgrade |
-| 16 | Idle/lifetime reap + CPU budget | `reapExpiredSandboxes` (lifetime) + `NanoCpus` cap | built; idle-signal in P3 |
+| 16 | Idle/lifetime reap + CPU budget | `reapExpiredSandboxes`: past 4 h an idle box is stopped, past 12 h any box; `NanoCpus` cap. A stopped box is re-provisioned by the terminal, the session POST, or the LSP/fs-sync sockets — but a box stopped at the 12 h cap comes back only on an explicit action (terminal / session POST), so an open tab cannot keep one alive | `ide-ensure-sandbox.test.mjs` (hard-cap refusal, single-flight, 409 adoption) |
 
 Offline-verified (no live daemon): **2, 4, 5, 6, 8, 9, 10-auth, 11, 13, 14** via
 `node --test tests/bridge/ide-sandbox-*.test.mjs`, the two proxy `--selfcheck`s,
