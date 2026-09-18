@@ -63,4 +63,31 @@ osionos-app-live:
 	docker compose --env-file .env --env-file $(OSIONOS_APP_ENV) build osionos-app
 	docker compose --env-file .env --env-file $(OSIONOS_APP_ENV) up -d osionos-app
 
-.PHONY: seed-live-demo osionos-app-live
+live-data-ensure:
+## Converge the osionos LIVE-DATABASE credential: issue the tenant API key when
+## ./.env.local has none (its cleartext is returned ONCE at issue time and is
+## unrecoverable, so a lost .env.local can only be repaired by issuing a new one)
+## and re-stamp the seeded demo rows onto the new owner principal in the same
+## step — a new key has a new uuid, and owner-scoped reads would otherwise return
+## ZERO rows: authenticated, silent, empty. Idempotent: a converged stack no-ops.
+	@bash scripts/ensure-live-data-access.sh
+
+live-data-check:
+## Report whether the live-database credential is converged; non-zero if a repair
+## is needed. Changes nothing — safe for CI and healthcheck.
+	@bash scripts/ensure-live-data-access.sh --check
+
+mounts-reencrypt:
+## Repair live mounts whose stored DSN ciphertext no longer opens under the
+## CURRENT VAULT_ENC_KEY (every /connect 500s). On a machine with no vault42
+## keystore, grobase SELF-GENERATES its secrets, so regenerating them while the
+## database survives orphans every ciphertext. Re-encrypts via the registry
+## itself, preserving mount ids so no reference breaks. Idempotent.
+	@bash scripts/reencrypt-mounts.sh
+
+mounts-check:
+## Report which live mounts fail to decrypt; non-zero if any do. Changes nothing.
+	@bash scripts/reencrypt-mounts.sh --check
+
+.PHONY: seed-live-demo osionos-app-live live-data-ensure live-data-check \
+        mounts-reencrypt mounts-check
