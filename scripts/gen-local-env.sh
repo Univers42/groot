@@ -77,7 +77,16 @@ KONG_PUBLIC_API_KEY=$PUBLIC
 KONG_SERVICE_API_KEY=$SERVICE
 SB_KONG_KEY=$PUBLIC
 ADAPTER_REGISTRY_SERVICE_TOKEN=$ADAPTER
-VITE_BAAS_URL=http://127.0.0.1:8000
+# Browser-facing BaaS origin — baked into the bundle by vite, so it must be a URL a
+# BROWSER can reach. Deliberately the APP'S OWN origin: the proxy mounts Kong's
+# /auth/v1 /rest/v1 /realtime/v1 /storage/v1 /query/v1 /meta/v1 on :3001 too
+# (infrastructure/tls/nginx.conf), so the whole app needs exactly ONE reachable
+# port. Any other value adds a second browser-facing port that every host
+# tunnel/port-forward must also know about — and when it doesn't, the app
+# half-loads with a dead realtime socket. liveRealtimeUrl() rewrites http->ws,
+# so this also decides the socket: wss://localhost:3001/realtime/v1/ws.
+# Kong's own 127.0.0.1:8000 is docker-host loopback + plain HTTP: never valid here.
+VITE_BAAS_URL=https://localhost:3001
 VITE_BAAS_REALTIME_TOKEN=$PUBLIC
 VITE_CHAT_WS=true
 
