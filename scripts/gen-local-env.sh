@@ -106,7 +106,8 @@ OSIONOS_VAPID_SUBJECT=mailto:admin@osionos.local
 
 # ── Degrade-until-provisioned (empty is safe) ──
 # OSIONOS_BAAS_API_KEY: the live-DB demo's mbk_ app key — minted by \`make seed-live-demo\`.
-# PERMS_SERVICE_*: agency ABAC service — set by the agency simulation.
+# PERMS_SERVICE_*: optional overrides for the bridge's permission-engine credentials. Leave
+# blank: the bridge then uses its own service identity (copies here went stale once).
 OSIONOS_BAAS_API_KEY=
 PERMS_SERVICE_APIKEY=
 PERMS_SERVICE_TOKEN=
