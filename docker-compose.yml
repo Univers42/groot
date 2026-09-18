@@ -1,5 +1,14 @@
 name: track-binocle
 
+# Healthcheck cadence: `interval: 30s` + `start_interval: 2s`, never a bare 5s.
+# A healthcheck is a full `runc` container-exec — MEASURED at ~47 forks each on
+# this VM (`nginx -t` 49, `pg_isready` 45). At 5s across 25 containers that is
+# ~5.5 execs/sec ≈ 250 forks/sec of pure namespace setup, and the guest measured
+# 136 forks/sec with the stack completely IDLE. start_interval keeps probing at
+# 2s until the container first goes healthy, so `depends_on: service_healthy`
+# gating stays as fast as before — the 30s only applies once it is up and stable.
+# Requires Docker >= 25 (this host: 29.8.0).
+
 services:
   local-https-proxy:
     image: public.ecr.aws/docker/library/nginx:1.27-alpine
@@ -25,7 +34,8 @@ services:
       - mini-baas
     healthcheck:
       test: ["CMD-SHELL", "nginx -t >/dev/null 2>&1"]
-      interval: 5s
+      interval: 30s
+      start_interval: 2s
       timeout: 3s
       start_period: 5s
       retries: 6
@@ -105,7 +115,8 @@ services:
           "CMD-SHELL",
           'node -e "fetch(''http://127.0.0.1:4000/api/auth/bridge/health'').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"',
         ]
-      interval: 5s
+      interval: 30s
+      start_interval: 2s
       timeout: 3s
       start_period: 45s
       retries: 24
@@ -217,7 +228,8 @@ services:
     healthcheck:
       test:
         ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
-      interval: 5s
+      interval: 30s
+      start_interval: 2s
       timeout: 3s
       start_period: 15s
       retries: 20
@@ -261,7 +273,8 @@ services:
           "CMD-SHELL",
           'node -e "const port=process.env.MAIL_BRIDGE_PORT||4100; fetch(''http://127.0.0.1:''+port+''/health'').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"',
         ]
-      interval: 5s
+      interval: 30s
+      start_interval: 2s
       timeout: 3s
       start_period: 20s
       retries: 12
@@ -300,7 +313,8 @@ services:
           "CMD-SHELL",
           'node -e "fetch(''http://127.0.0.1:3002'').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"',
         ]
-      interval: 5s
+      interval: 30s
+      start_interval: 2s
       timeout: 3s
       start_period: 30s
       retries: 20
@@ -351,7 +365,8 @@ services:
           "CMD-SHELL",
           'node -e "const port=process.env.CALENDAR_BRIDGE_PORT||4200; fetch(''http://127.0.0.1:''+port+''/health'').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"',
         ]
-      interval: 5s
+      interval: 30s
+      start_interval: 2s
       timeout: 3s
       start_period: 20s
       retries: 12
@@ -391,7 +406,8 @@ services:
           "CMD-SHELL",
           'node -e "fetch(''http://127.0.0.1:3003'').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"',
         ]
-      interval: 5s
+      interval: 30s
+      start_interval: 2s
       timeout: 3s
       start_period: 30s
       retries: 20
@@ -460,7 +476,8 @@ services:
           "CMD-SHELL",
           'node -e "fetch(''http://127.0.0.1:8787/api/auth/availability'').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"',
         ]
-      interval: 5s
+      interval: 30s
+      start_interval: 2s
       timeout: 3s
       start_period: 20s
       retries: 12
