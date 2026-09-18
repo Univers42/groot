@@ -13,7 +13,18 @@
 # Repository synchronization targets.
 
 # vault42 (zero-knowledge) config — the ONLY secrets store (HashiCorp Vault is retired).
-VAULT42_PROJECT ?= transcendence
+# The project name is the manifest key in the vault — get it wrong and `secrets-ensure`
+# fails with "no manifest for project X" and falls back to LOCAL mode, so a fresh machine
+# silently comes up with self-generated secrets instead of the team's. Measured on a clean
+# clone: this said `transcendence`, the vault holds `groot`, and the whole bootstrap
+# reported success while sharing nothing. Override per-machine with VAULT42_PROJECT=.
+VAULT42_PROJECT ?= groot
+# Breadcrumb dropped when LOCAL mode is taken; see secrets-ensure. Deliberately NOT
+# named .env* — ctl-env.sh's push scan captures `.env`, `.env.*`, `*.env`, `*.secrets`
+# and `*.secret`, so an .env-shaped marker would be uploaded to the shared vault and
+# then RESTORED onto every other machine's pull, flipping healthy machines into
+# local-mode. A per-machine marker must not travel through the shared store.
+LOCAL_MODE_MARK := .vault42-local-mode
 CTL_IMAGE       ?= docker.io/dlesieur/42ctl:latest
 CTL_CFG_DIR     ?= $(HOME)/.config/42ctl
 
@@ -45,6 +56,8 @@ syncro-submodule:
 		git pull --quiet --ff-only origin "$$branch" 2>/dev/null \
 			|| echo "  ! $$displaypath: not ff-only (diverged) — left at $$(git rev-parse --short HEAD)"; \
 		printf "  = %-28s %s (%s)\n" "$$displaypath" "$$(git rev-parse --short HEAD)" "$$branch"; \
+		git submodule update --init --recursive || \
+			echo "  ! $$displaypath: nested submodule init failed"; \
 	'; \
 	echo '[syncro] verify nothing is left detached…'; \
 	bad=$$(git submodule foreach --quiet --recursive 'git symbolic-ref -q HEAD >/dev/null 2>&1 || printf "%s " "$$displaypath"' || true); \
@@ -62,16 +75,37 @@ vault42-pull-all:
 		sh apps/grobase/scripts/vault/ctl-env.sh pull $(if $(filter 1,$(APPLY)),--apply,) $(if $(filter 1,$(FORCE)),--force,)
 
 secrets-ensure:
-## Fresh-machine secret provisioning, wired into `make all`. If grobase secrets are ABSENT but a vault42 keystore is present, pull the whole *.env tree from vault42 — non-interactive when FT_PASSPHRASE/VAULT42_PASSPHRASE is set (CI), else one hidden prompt. Secrets already present → no-op. No keystore → LOCAL mode directly. A vault-PULL FAILURE (shared vault unreachable/empty) is NOT fatal — it falls back LOUDLY to the same LOCAL mode (grobase self-generates its own secrets; ./.env.local is derived after backend-up via env-local-ensure) instead of aborting `make all`. This is what lets a bare `make all` provision a clean machine end-to-end even when the shared vault is down.
+## Fresh-machine secret provisioning, wired into `make all`. If grobase secrets are ABSENT but a vault42 keystore is present, pull the whole *.env tree from vault42 — non-interactive when FT_PASSPHRASE/VAULT42_PASSPHRASE is set (CI), else one hidden prompt. Secrets already present → no-op. No keystore → LOCAL mode directly. A vault-PULL FAILURE (shared vault unreachable/empty) is NOT fatal — it falls back LOUDLY to the same LOCAL mode (grobase self-generates its own secrets; ./.env.local is derived after backend-up via env-local-ensure) instead of aborting `make all`. This is what lets a bare `make all` provision a clean machine end-to-end even when the shared vault is down. LOCAL mode drops the marker .vault42-local-mode, and while it exists EVERY later run prints a loud banner saying the machine is on self-generated secrets — without it, the first branch below silently skips the pull forever and `make all` reports success while sharing nothing. Recovery is NOT automatic: the data volumes were initialised with the local secrets and POSTGRES_PASSWORD only applies to an empty PGDATA, so the banner names the (destructive) steps instead.
 	@if [ -f apps/grobase/.env ]; then \
-		printf '[secrets] grobase/.env present — skipping vault pull\n'; \
+		if [ -f $(LOCAL_MODE_MARK) ]; then \
+			printf '\n[secrets] ################################################################\n' >&2; \
+			printf '[secrets] # THIS MACHINE IS IN LOCAL MODE — its secrets are self-generated,\n' >&2; \
+			printf '[secrets] # NOT the team'"'"'s. Nothing here is shared with anybody. The marker\n' >&2; \
+			printf '[secrets] # %s says a previous run fell back; grobase/.env exists, so\n' "$(LOCAL_MODE_MARK)" >&2; \
+			printf '[secrets] # the vault pull is skipped and will STAY skipped until you act.\n' >&2; \
+			printf '[secrets] #\n' >&2; \
+			printf '[secrets] # It is not auto-repaired: the data volumes were initialised with\n' >&2; \
+			printf '[secrets] # THESE secrets, and POSTGRES_PASSWORD is only honoured by initdb on\n' >&2; \
+			printf '[secrets] # an empty PGDATA — swapping the files under a live volume locks the\n' >&2; \
+			printf '[secrets] # stack out of its own database. Recovery discards local data:\n' >&2; \
+			printf '[secrets] #\n' >&2; \
+			printf '[secrets] #   docker compose -p mini-baas down -v --remove-orphans\n' >&2; \
+			printf '[secrets] #   rm -f apps/grobase/.env apps/grobase/.env.secrets \\\n' >&2; \
+			printf '[secrets] #         apps/grobase/.env.local ./.env.local %s\n' "$(LOCAL_MODE_MARK)" >&2; \
+			printf '[secrets] #   make all\n' >&2; \
+			printf '[secrets] ################################################################\n\n' >&2; \
+		else \
+			printf '[secrets] grobase/.env present — skipping vault pull\n'; \
+		fi; \
 	elif [ -f "$(CTL_CFG_DIR)/keystore.v42" ]; then \
 		printf '[secrets] fresh machine — pulling *.env tree from vault42 (project=%s)…\n' "$(VAULT42_PROJECT)"; \
 		if $(MAKE) --no-print-directory vault42-pull-all APPLY=1 FORCE=1; then \
 			printf '[secrets] vault42 pull applied\n'; \
+			rm -f $(LOCAL_MODE_MARK); \
 		else \
 			rc=$$?; \
 			rm -f apps/grobase/.env; \
+			touch $(LOCAL_MODE_MARK); \
 			printf '\n[secrets] ################################################################\n' >&2; \
 			printf '[secrets] # WARNING: vault42 pull FAILED (exit %s) — the SHARED vault secrets\n' "$$rc" >&2; \
 			printf '[secrets] # are UNAVAILABLE (see the ctl-env.sh error above). Falling back to\n' >&2; \
@@ -83,6 +117,7 @@ secrets-ensure:
 			printf '[secrets] ################################################################\n\n' >&2; \
 		fi; \
 	else \
+		touch $(LOCAL_MODE_MARK); \
 		printf '[secrets] no grobase/.env and no vault42 keystore at %s — LOCAL mode: grobase self-generates its secrets; ./.env.local is derived after backend-up (env-local-ensure).\n' "$(CTL_CFG_DIR)/keystore.v42"; \
 	fi
 

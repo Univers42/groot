@@ -37,8 +37,30 @@ permissions:
   contents: read
 
 jobs:
+  # restore-if-empty decides whether `make all` replays the committed snapshot OVER the
+  # running engines, and make-all-footprint pins what `make all` pulls and builds (a fresh
+  # machine has a 20-30 GB /var). Both run against a fake docker — seconds, no secrets, no
+  # stack — so a regression fails here before the two-hour run below. The footprint tests
+  # drive the real Makefile (make + GNU timeout) and grobase's vault-restore.sh.
+  restore-gate-tests:
+    name: make all safety + footprint tests (bats)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: grobase checkout (vault-restore.sh is under test)
+        run: |
+          git config --global --add url."https://github.com/".insteadOf "git@github.com:"
+          git submodule update --init --depth 1 apps/grobase
+      - name: bats scripts/tests
+        run: |
+          docker run --rm -v "$PWD:/code" -w /code --entrypoint sh \
+            bats/bats:1.11.1@sha256:e56e7c49087cb766b1ba9c5732b8f5402d289252d52f64e1eefb88269f74125c \
+            -c 'apk add -q --no-cache make coreutils && bats scripts/tests'
+
   clone-and-make-all:
     name: clone --recursive + make all
+    needs: restore-gate-tests
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -67,16 +89,38 @@ jobs:
           [ -n "$VAULT42_CONTRACT_B64" ] || { echo "::error::VAULT42_CONTRACT_B64 secret is unset — set it once: base64 -w0 ~/.config/42ctl/contract-default.tok | gh secret set VAULT42_CONTRACT_B64 -R Univers42/groot"; exit 1; }
           echo "vault secrets present (keystore + contract + passphrase)"
 
-      - name: git clone --recursive (root + all submodules at latest)
+      # Order matters and used to be wrong: the rewrite that makes `git@github.com:` URLs
+      # resolve without an SSH key was configured AFTER the recursive checkout that needs
+      # it. Every .gitmodules in this tree — root, osionos/app, and notion-database-sys
+      # three levels down — uses the SSH form, so the nested clones had nothing to rewrite
+      # with. It also used two plain `git config` calls for the same key: insteadOf is
+      # MULTI-VALUED, so the second silently REPLACED the first and only `ssh://git@…`
+      # was ever rewritten — the `git@github.com:` form every submodule actually uses was
+      # not. `--add` keeps both.
+      - name: Rewrite SSH submodule URLs to public HTTPS (no SSH keys in CI)
+        run: |
+          git config --global --add url."https://github.com/".insteadOf "git@github.com:"
+          git config --global --add url."https://github.com/".insteadOf "ssh://git@github.com/"
+          git config --global --get-all url."https://github.com/".insteadOf
+
+      - name: git clone (root only — submodules are next, explicitly)
         uses: actions/checkout@v7
         with:
-          submodules: recursive
           fetch-depth: 1
 
-      - name: Submodule sync over public HTTPS (no SSH keys in CI)
+      # Explicit rather than `submodules: recursive` so a failure names the submodule that
+      # failed instead of collapsing 20 nested clones into one red step with no detail.
+      # This exact sequence was reproduced green against every repo in the tree over
+      # anonymous HTTPS before being committed.
+      - name: git submodule update --init --recursive (all 20, depth 1)
         run: |
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
-          git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+          set -euo pipefail
+          git submodule sync --recursive
+          git submodule update --init --recursive --depth=1
+          n=$(git submodule status --recursive | wc -l)
+          echo "checked out ${n} submodule(s)"
+          [ "$n" -ge 20 ] || { echo "::error::expected >=20 submodules, got ${n}"; exit 1; }
+          git submodule status --recursive | sed 's/^/  /'
 
       - name: Place the vault identity (keystore + contract) — machine config
         run: |
