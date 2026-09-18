@@ -41,9 +41,14 @@ ARG VITE_APP_VERSION=image
 # Auth mode: "portal" makes the app show its own login/sign-up portal (no mock,
 # no website redirect). Empty = legacy bridge/offline behavior (web image).
 ARG VITE_AUTH_MODE=
-# BaaS query API (kong). Default matches the .env; the desktop build overrides to
-# https://localhost:8000 so the secure app:// window isn't mixed-content/redirect blocked.
-ARG VITE_BAAS_URL=http://127.0.0.1:8000
+# BaaS query API (kong), as the BROWSER must reach it — vite inlines this at build
+# time and liveRealtimeUrl() derives the realtime socket from it (http->ws), so a
+# value only the docker host can resolve strands every client off-box. Default is
+# the APP'S OWN origin: the proxy also mounts Kong's /auth/v1 /rest/v1 /realtime/v1
+# /storage/v1 /query/v1 /meta/v1 on :3001, so ONE reachable port serves the whole
+# app and no extra port has to be tunnelled/forwarded. Kong's own 127.0.0.1:8000
+# is docker-host loopback plain HTTP and is NOT a valid browser origin here.
+ARG VITE_BAAS_URL=https://localhost:3001
 # Asset base. Web/nginx image keeps "/" (absolute). The desktop bundle passes
 # "./" so assets resolve relative to index.html inside the Tauri webview.
 ARG VITE_BASE=/

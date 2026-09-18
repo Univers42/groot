@@ -15,6 +15,14 @@ services:
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${MAIL_BRIDGE_PORT:-4100}:4100"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${CALENDAR_HOST_PORT:-3003}:3003"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${CALENDAR_BRIDGE_PORT:-4200}:4200"
+      # TLS edge for the grobase BaaS gateway. 8444, not 8000 — mini-baas-kong already
+      # publishes its own plain-HTTP listener on the host's 8000.
+      - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${GROBASE_TLS_HOST_PORT:-8444}:8444"
+    # `mini-baas` (external) is required by the :8444 server block — its upstream is the
+    # grobase container name `mini-baas-kong`, which resolves only on that network.
+    networks:
+      - default
+      - mini-baas
     healthcheck:
       test: ["CMD-SHELL", "nginx -t >/dev/null 2>&1"]
       interval: 5s
@@ -564,7 +572,9 @@ services:
       AGENCY_WEBSITE_URL: https://127.0.0.1:4322
       AGENCY_APP_URL: https://127.0.0.1:3001
       AGENCY_BRIDGE_URL: https://127.0.0.1:4000
-      AGENCY_KONG_URL: https://127.0.0.1:8000
+      # 8444 = the proxy's TLS edge for Kong. Host 8000 is Kong's own plain-HTTP
+      # listener, so an https:// URL against it could never connect.
+      AGENCY_KONG_URL: https://127.0.0.1:8444
       AGENCY_MAILPIT_URL: http://127.0.0.1:8025
       AGENCY_LIVEKIT_HTTP_URL: http://127.0.0.1:7880
       AGENCY_ARTIFACTS_DIR: /app/test-results/agency-simulation
