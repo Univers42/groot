@@ -89,5 +89,18 @@ mounts-check:
 ## Report which live mounts fail to decrypt; non-zero if any do. Changes nothing.
 	@bash scripts/reencrypt-mounts.sh --check
 
+models-migrate:
+## Apply every models/*.sql migration that targets the grobase postgres public
+## schema (idempotent; skips the auth-gateway-shaped files and the superseded
+## surface-constraint steps — see the script header). models/ had NO runner:
+## on this machine ELEVEN migrations had never been applied, and the missing
+## osionos_pages.cover_position column alone made every page save 502 and
+## stalled the whole page-sync outbox — nothing persisted, reloads wiped work.
+	@sh scripts/apply-models-migrations.sh
+
+models-check:
+## Report unapplied models migrations; non-zero if any. Changes nothing.
+	@sh scripts/apply-models-migrations.sh --check
+
 .PHONY: seed-live-demo osionos-app-live live-data-ensure live-data-check \
-        mounts-reencrypt mounts-check
+        mounts-reencrypt mounts-check models-migrate models-check
