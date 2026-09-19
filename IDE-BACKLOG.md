@@ -7,7 +7,7 @@
 > scattered narrative in commit messages and the infra runbook
 > (`infrastructure/docker/osionos/ide-sandbox/README.md`), which it now reconciles.
 >
-> Last reconciled: **2026-07-20** (branch `feat/ide-full-mode`).
+> Last reconciled: **2026-07-20** (commit `e93d3154`, formerly branch `feat/ide-full-mode`, merged into `main`).
 
 ---
 

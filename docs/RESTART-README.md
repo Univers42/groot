@@ -19,7 +19,7 @@ no trailer. Verify any pasted handoff against `git log` / `git branch -a` before
 - This machine is the OWNER and the reference: `make healthcheck` exit 0,
   `bash scripts/gen-local-env.sh --check` = in sync (7 keys), postgres osionos_pages = 391 = the vault seed.
 - Git: every repo has develop == main == HEAD, all pushed, every submodule pointer reachable on its remote.
-  groot 1e623bf6; osionos fc2f6649 (checked out on develop); grobase cba6d70f (branch fix/osionos-live-mounts);
+  groot 1e623bf6; osionos fc2f6649 (checked out on develop); grobase cba6d70f (= main; branch fix/osionos-live-mounts removed, see docs/branch-cleanup-2026-09-20.md);
   vendor/scripts 2bb05b4f (develop merged, both committed virtualenvs dropped, 149 files); calendar aed2172;
   monkey-bot 3a454e6; osionos-ui 476fb34; notion-database-sys cc0c8c1.
   Exception: vendor/born2root develop is PR-protected -> main 758748d, develop a2cc983 (PR pending, human).
