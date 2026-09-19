@@ -168,8 +168,9 @@ secrets-ensure:
 
 .PHONY: env-local-ensure
 env-local-ensure:
-## Wired into `make all` AFTER backend-up. When there is no root ./.env.local (no-vault fresh machine), derive it from the now-generated apps/grobase/.env so the frontends authenticate against the freshly self-generated backend. No-op when ./.env.local already exists (vault-pulled or hand-edited).
+## Wired into `make all` AFTER backend-up. When there is no root ./.env.local (no-vault fresh machine), derive it from the now-generated apps/grobase/.env so the frontends authenticate against the freshly self-generated backend. No-op when ./.env.local already exists (vault-pulled or hand-edited). Then `--sync` refreshes ONLY the seven derived BaaS keys (JWT_SECRET, ANON_KEY, SERVICE_ROLE_KEY, KONG_*, SB_KONG_KEY, ADAPTER_REGISTRY_SERVICE_TOKEN) from apps/grobase/.env, in place — an existing file can no longer keep a stale Kong key, the recurring healthcheck 401. `bash scripts/gen-local-env.sh --check` reports drift by key name.
 	@bash scripts/gen-local-env.sh
+	@bash scripts/gen-local-env.sh --sync || printf '[env-local-ensure] derived keys not all refreshed — inspect: bash scripts/gen-local-env.sh --check\n' >&2
 
 bootstrap:
 ## Thin alias kept for muscle memory — `make all` is now self-provisioning (it runs secrets-ensure + brings the backend up), so `make bootstrap` simply runs it. FROM-ZERO on a clean machine: copy ~/.config/42ctl/keystore.v42 over first (the only file in neither git nor the vault), then `make all`. The data restore is DESTRUCTIVE on an EMPTY stack only (restore-if-empty never wipes populated data).
