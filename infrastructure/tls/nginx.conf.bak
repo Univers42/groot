@@ -106,11 +106,6 @@ http {
     location /storage/v1/  { proxy_pass http://$track_binocle_baas; } # nosemgrep: generic.nginx.security.dynamic-proxy-host.dynamic-proxy-host
     location /query/v1/    { proxy_pass http://$track_binocle_baas; } # nosemgrep: generic.nginx.security.dynamic-proxy-host.dynamic-proxy-host
     location /meta/v1/     { proxy_pass http://$track_binocle_baas; } # nosemgrep: generic.nginx.security.dynamic-proxy-host.dynamic-proxy-host
-    # The self-service console is a Kong route too, and tenantConsoleClient
-    # derives its base from VITE_BAAS_URL -- which is THIS origin. Without this
-    # line its fetches fell through to `location /` and got the SPA's index.html
-    # instead of JSON, so the panel stayed on 'connect a mini-baas project'.
-    location /v1/tenants/ { proxy_pass http://$track_binocle_baas; } # nosemgrep: generic.nginx.security.dynamic-proxy-host.dynamic-proxy-host
     location / { proxy_pass http://$track_binocle_upstream; } # nosemgrep: generic.nginx.security.dynamic-proxy-host.dynamic-proxy-host
   }
 

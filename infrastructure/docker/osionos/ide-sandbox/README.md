@@ -176,8 +176,10 @@ provisioner. Bridge modules, no new deps (WebSocket is hand-rolled: `ide-ws.mjs`
 
 Frontend shipped (all behind `osio.ide`, static-verified — typecheck + eslint +
 canvas suite green): **terminal** (xterm.js over `/api/ide/pty`, lazy-loaded, PTY
-resize propagated), **LSP** (`@codemirror/lsp-client` over `/api/ide/lsp` through
-a dependency-free Content-Length codec, + a diagnostics store + Problems panel),
+resize propagated), **LSP** (a dependency-free JSON-RPC client — `lspProtocol.ts` —
+over `/api/ide/lsp` through a Content-Length codec, surfaced in the Monaco editor as
+completion/hover/signature/definition providers + model markers, + a diagnostics store
++ Problems panel),
 **live sync** (materialize on attach, editor→container mirror, `/api/ide/fsync`
 writeback → page CRUD with ignore-set + sha256 echo-suppression), and the
 **Source Control panel** (P6) — status/commit/push, graceful "no sandbox" offline.
@@ -186,9 +188,10 @@ writeback → page CRUD with ignore-set + sha256 echo-suppression), and the
 
 1. ~~Terminal frontend (P3)~~ — **done**: `IdeTerminal` (xterm.js) over
    `/api/ide/pty`, lazy-loaded, resize propagated via an APC control frame.
-2. ~~LSP client (P5)~~ — **done**: `@codemirror/lsp-client` → `/api/ide/lsp`
-   through a dependency-free Content-Length codec; diagnostics store + Problems
-   panel; `typescript-language-server` + `pyright` in the sandbox image.
+2. ~~LSP client (P5)~~ — **done**: `lspProtocol.ts` (own JSON-RPC client) →
+   `/api/ide/lsp` through a dependency-free Content-Length codec, rendered by the
+   Monaco adapter `lspMonaco.ts`; diagnostics store + Problems panel;
+   `typescript-language-server` + `pyright` + `clangd` in the sandbox image.
 3. ~~Live sync loop (P4)~~ — **done**: `useIdeFsSync` streams `/api/ide/fsync`
    → page CRUD; materialize on attach; editor→container mirror; ignore-set +
    sha256 echo-suppression (no `.osio/manifest.json` needed — the page tree is
