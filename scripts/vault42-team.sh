@@ -87,10 +87,10 @@ bash "$REPO/scripts/gen-local-env.sh" --sync || note "derived keys not all refre
 	exit 0
 }
 
+# One 42ctl invocation, shared with the ad-hoc calls (scripts/vault42-ctl.sh): same
+# image, keystore and passphrase handling. Quiet: an absent overlay is a normal outcome.
 ctl() {
-	docker run --rm --user "$(id -u):$(id -g)" \
-		-e FT_CONFIG=/cfg/config.json -e FT_KEYSTORE=/cfg/keystore.v42 -e FT_PASSPHRASE \
-		-v "$CTL_CFG_DIR:/cfg" "$CTL_IMAGE" "$@" 2>/dev/null || true
+	CTL_IMAGE="$CTL_IMAGE" CTL_CFG_DIR="$CTL_CFG_DIR" sh "$REPO/scripts/vault42-ctl.sh" "$@" 2>/dev/null </dev/null || true
 }
 
 overlay="$(ctl env secret get --org "$ORG" --project "$PROJECT" --env "$ENVNAME" "$OVERLAY_SECRET")"
