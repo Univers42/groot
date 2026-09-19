@@ -62,6 +62,10 @@ for _a in "$@"; do
 done
 
 [ "$verb" = push ] && note "publishing this checkout to $ORG/$PROJECT/$ENVNAME — every teammate's next pull gets this tree"
+# A pull backup (`--backup` writes the displaced file aside as .bak) of a private file is
+# not itself `*.local`, so a push would publish it to every member — measured on the first
+# team push: .env.local.bak went out SHARED. Every .bak stays private, whatever it backs up.
+[ "$verb" = push ] && set -- "$@" --private '*.bak'
 
 VAULT_ENV_ORG="$ORG" VAULT_ENV_PROJECT="$PROJECT" VAULT_ENV_NAME="$ENVNAME" \
 	REPO_DIR="$REPO" CTL_IMAGE="$CTL_IMAGE" CTL_CFG_DIR="$CTL_CFG_DIR" \
