@@ -199,28 +199,10 @@ restamp_mongo() {
 # ── env emission ────────────────────────────────────────────────────────────
 # Rewrite KEY=VALUE in place (or append), preserving the file's mode. Never
 # echoes the value.
-put_env() {
-	local file="$1" name="$2" value="$3"
-	[ -f "${file}" ] || { install -m 600 /dev/null "${file}"; }
-	python3 - "${file}" "${name}" "${value}" <<'PY'
-import os, pathlib, sys
-path, name, value = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
-mode = os.stat(path).st_mode & 0o777 if path.exists() else 0o600
-lines = path.read_text().splitlines() if path.exists() else []
-out, seen = [], False
-for line in lines:
-    if line.split('=', 1)[0].strip() == name and not line.lstrip().startswith('#'):
-        if not seen:
-            out.append(f'{name}={value}')
-            seen = True
-        continue
-    out.append(line)
-if not seen:
-    out.append(f'{name}={value}')
-path.write_text('\n'.join(out) + '\n')
-os.chmod(path, mode)
-PY
-}
+# put_env FILE KEY VALUE — the shared env-file primitive (in place, atomic, mode kept,
+# never echoes the value). One implementation for every writer of ./.env.local.
+# shellcheck source=scripts/lib/envfile.sh
+. "${REPO_ROOT}/scripts/lib/envfile.sh"
 
 main() {
 	command -v docker >/dev/null 2>&1 || die "docker is required"

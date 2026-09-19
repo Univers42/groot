@@ -75,6 +75,9 @@ fi
 # gen-local-env.sh is idempotent: it leaves an existing ./.env.local alone, so the
 # owner (whose private copy the pull restored) keeps theirs untouched.
 bash "$REPO/scripts/gen-local-env.sh" || note "gen-local-env.sh did not run — .env.local left as found"
+# The pulled apps/grobase/.env may be newer than an .env.local this machine already had:
+# refresh the seven derived BaaS keys in place so Kong's key and the frontends' key agree.
+bash "$REPO/scripts/gen-local-env.sh" --sync || note "derived keys not all refreshed — inspect: bash scripts/gen-local-env.sh --check"
 [ -f "$ENV_LOCAL" ] || {
 	note "no .env.local to overlay — skipping"
 	exit 0
