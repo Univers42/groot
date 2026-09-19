@@ -69,6 +69,8 @@ screenshots/
 
 # vault42 tool state (contains secret-file patterns)
 .42ctl/
+# the team handbook carries every filled secret slot — hand it over out-of-band, never via git
+*.team.html
 
 # electron-builder root-owned node_modules quarantine (build junk, never track)
 .nm_el_quarantine_*/
