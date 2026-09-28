@@ -24,6 +24,12 @@ services:
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${MAIL_BRIDGE_PORT:-4100}:4100"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${CALENDAR_HOST_PORT:-3003}:3003"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${CALENDAR_BRIDGE_PORT:-4200}:4200"
+      # drawnosaurus. LITERAL 127.0.0.1, not TRACK_BINOCLE_BIND_ADDR: that variable comes
+      # from detect-bind-addr.sh and resolves to 0.0.0.0 here (every line above is
+      # currently published on every interface — `ss -ltn`). drawnosaurus has no per-user
+      # auth, so it is the one vhost that must never leave the loopback. The cost is that
+      # it is unreachable from another machine, which is intended in Phase 1.
+      - "127.0.0.1:${DRAWNOSAURUS_HOST_PORT:-3007}:3007"
       # TLS edge for the grobase BaaS gateway. 8444, not 8000 — mini-baas-kong already
       # publishes its own plain-HTTP listener on the host's 8000.
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${GROBASE_TLS_HOST_PORT:-8444}:8444"
@@ -31,9 +37,14 @@ services:
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${TRACK_BINOCLE_VHOST_HTTPS_PORT:-443}:443"
     # `mini-baas` (external) is required by the :8444 server block — its upstream is the
     # grobase container name `mini-baas-kong`, which resolves only on that network.
+    # `drawnosaurus-internal` is joined the same way osionos-bridge joins
+    # osionos-runner-net: the CLIENT reaches into the isolated network, and the isolated
+    # services never join the shared one. That is what keeps drawnosaurus-gateway (which
+    # stamps Caddy's `host` role on everything) unreachable from the other containers.
     networks:
       - default
       - mini-baas
+      - drawnosaurus-internal
     healthcheck:
       test: ["CMD-SHELL", "nginx -t >/dev/null 2>&1"]
       interval: 30s
@@ -220,6 +231,10 @@ services:
         VITE_PRISMATICA_URL: https://localhost:${OPPOSITE_OSIRIS_HOST_PORT:-4322}
         VITE_MAIL_APP_URL: https://localhost:${MAIL_HOST_PORT:-3002}
         VITE_CALENDAR_APP_URL: https://localhost:${CALENDAR_HOST_PORT:-3003}
+        # The Whiteboard embed tab (drawnosaurus). Baked at build like the two above, so
+        # the tab is gated by the osio.whiteboard flag (default OFF), not by this being
+        # empty — see featureFlags.ts. Turn on per-session with ?osio.whiteboard=1.
+        VITE_WHITEBOARD_APP_URL: https://localhost:${DRAWNOSAURUS_HOST_PORT:-3007}
         VITE_REQUIRE_BRIDGE_SESSION: "true"
         VITE_ALLOW_OFFLINE_MODE: "false"
         VITE_PAGE_ACTION_SYNC_ENABLED: "true"
@@ -682,7 +697,161 @@ services:
     networks:
       - osionos-ide-control-net
 
+  # ---------------------------------------------------------------------------
+  # drawnosaurus — opt-in collaborative whiteboard (apps/drawnosaurus, pinned).
+  #
+  # Explicit services rather than `include:` of the submodule's own compose: that file
+  # publishes host ports on every service, two of them on 0.0.0.0 (its `realtime` and the
+  # gateway's SHARE_PORT). Including it would leak them. Here nothing publishes a port —
+  # the ONLY way in is local-https-proxy:3007, on 127.0.0.1.
+  #
+  # Isolation (three layers, all groot-side; the submodule is unmodified):
+  #  1. `drawnosaurus-internal` is `internal: true` — no egress, and unreachable from the
+  #     other track-binocle containers. The GATEWAY DOES NOT JOIN THE DEFAULT NETWORK:
+  #     local-https-proxy joins the internal net instead (same shape as osionos-runner-net
+  #     below). Dual-homing the gateway would let any of the ~27 containers reach the API
+  #     with Caddy's `host` role stamped on it — including DELETE.
+  #  2. nginx :3007 refuses /v1/share* entirely and DELETE /v1/boards/*.
+  #  3. SHARE_TUNNEL_TARGET is deliberately ABSENT: apps/api/src/config.ts:96 then yields
+  #     tunnelTarget=null, and tunnel.ts:113 returns before spawning the cloudflared binary
+  #     that api.Dockerfile:27 bakes into the image. Do not add it back.
+  #
+  # KNOWN, ACCEPTED (Phase 1): anyone who can reach 127.0.0.1:3007 can list, create and
+  # EDIT every board — PUT /v1/boards/:slug is a full replace, so "DELETE is blocked" does
+  # not mean data cannot be lost. There is no per-user identity; X-Owner-Id is pinned empty
+  # at the proxy because apps/api/src/auth.ts:22-31 otherwise lets a caller pick any owner.
+  drawnosaurus-mongo:
+    image: mongo:7
+    command: ["--bind_ip_all", "--quiet"]
+    volumes:
+      - drawnosaurus-mongo-data:/data/db
+    expose:
+      - "27017"
+    networks:
+      - drawnosaurus-internal
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 30s
+      start_period: 10s
+      start_interval: 2s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+    mem_limit: 512m
+
+  drawnosaurus-api:
+    build:
+      context: ./apps/drawnosaurus
+      dockerfile: docker/api.Dockerfile
+    environment:
+      MONGO_URL: mongodb://drawnosaurus-mongo:27017
+      MONGO_DB: drawnosaurus
+      PORT: "4000"
+      # Not "*" (the upstream default at config.ts:91). This is the only thing refusing a
+      # cross-origin write from a page the user happens to have open.
+      CORS_ORIGIN: https://localhost:${OSIONOS_APP_HOST_PORT:-3001}
+      AUTH_MODE: dev
+      # SHARE_TUNNEL_TARGET intentionally omitted — see the header. Layer 3.
+    depends_on:
+      drawnosaurus-mongo:
+        condition: service_healthy
+    expose:
+      - "4000"
+    networks:
+      drawnosaurus-internal:
+        # The gateway's Caddyfile is mounted read-only from the submodule and hardcodes
+        # `api:4000` / `realtime:4000` / `web:3000` — upstream's own service names. Renaming
+        # them here would mean editing drawnosaurus, so the containers answer to both names
+        # instead. Without this the gateway 502s on "lookup api ... server misbehaving".
+        aliases: [api]
+    restart: unless-stopped
+    mem_limit: 512m
+
+  drawnosaurus-realtime:
+    build:
+      context: ./apps/drawnosaurus/engine/realtime
+      dockerfile: ../../docker/realtime.Dockerfile
+    environment:
+      REALTIME_HOST: "0.0.0.0"
+      REALTIME_PORT: "4000"
+      REALTIME_AUTH: "noauth"
+      REALTIME_STATIC_DIR: "/app/static"
+      RUST_LOG: "info,realtime_gateway=info,realtime_server=info"
+    expose:
+      - "4000"
+    networks:
+      drawnosaurus-internal:
+        aliases: [realtime]   # see drawnosaurus-api
+    restart: unless-stopped
+    mem_limit: 512m
+
+  drawnosaurus-web:
+    build:
+      context: ./apps/drawnosaurus
+      dockerfile: docker/web.Dockerfile
+      args:
+        BUILD_APP_SHA: ${DRAWNOSAURUS_APP_SHA:-unknown}
+        BUILD_ENGINE_SHA: ${DRAWNOSAURUS_ENGINE_SHA:-unknown}
+    environment:
+      PORT: "3000"
+      # Both empty on purpose: the API and /ws are same-origin behind the gateway.
+      PUBLIC_API_URL: ""
+      PUBLIC_REALTIME_WS_URL: ""
+    depends_on:
+      - drawnosaurus-api
+    expose:
+      - "3000"
+    networks:
+      drawnosaurus-internal:
+        aliases: [web]   # see drawnosaurus-api
+    restart: unless-stopped
+    mem_limit: 512m
+
+  # Caddy decides authority by ARRIVAL PORT: :80 = role `host` (everything), :81/:82 =
+  # guest. We proxy to :80 because the board LIST must work; the capabilities :80 would
+  # otherwise expose are taken back by nginx (layer 2) and by the missing tunnel target
+  # (layer 3). :81 and :82 are never published and never reachable.
+  drawnosaurus-gateway:
+    image: caddy:2.10.2-alpine
+    volumes:
+      - ./apps/drawnosaurus/docker/gateway/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - drawnosaurus-api
+      - drawnosaurus-realtime
+      - drawnosaurus-web
+    expose:
+      - "80"
+    networks:
+      - drawnosaurus-internal
+    restart: unless-stopped
+    mem_limit: 256m
+
+  # Build-only helper: produces engine/pkg on a bind mount. `make drawnosaurus-wasm` runs
+  # it as the host user (rootful daemon) so the artifact is not root-owned. Never `up`.
+  #
+  # Deliberately on `default`, NOT drawnosaurus-internal: cargo fetches crates.io and a
+  # git dependency (vtracer) from github.com, and the internal network has no egress —
+  # putting it there fails the build with "failed to resolve address for github.com".
+  # It costs nothing in isolation: this container is `run --rm`, never serves anything,
+  # and never needs to reach the api, mongo or the gateway.
+  #
+  # This is now the ONLY drawnosaurus service that keeps a profile. The five runtime
+  # services lost theirs so `make all` starts them, but this one must stay gated: its
+  # CMD is the wasm build, so a service-less `up -d` would "start" it, run a compile and
+  # exit — a failed container in `docker compose ps` on every boot. It is reached only by
+  # `run --rm` from the drawnosaurus-wasm target, which passes --profile explicitly.
+  drawnosaurus-wasm:
+    profiles: [drawnosaurus]
+    build:
+      context: ./apps/drawnosaurus
+      dockerfile: docker/wasm.Dockerfile
+    volumes:
+      - ./apps/drawnosaurus/engine:/engine
+      - drawnosaurus-cargo-home:/cargo-home
+
 volumes:
+  drawnosaurus-mongo-data:
+  drawnosaurus-cargo-home:
   osionos-app-node-modules:
   osionos-app-pnpm-store:
   mail-node-modules:
@@ -704,6 +873,13 @@ networks:
   # so executed user code can reach neither the internet nor mini-baas. Only the
   # bridge and osionos-runner join it.
   osionos-runner-net:
+    internal: true
+  # drawnosaurus: `internal: true` = NO egress, so the cloudflared binary baked into its
+  # api image could not dial out even if something started it (it cannot — see the service
+  # block). Only drawnosaurus' own services and local-https-proxy join it; the gateway
+  # deliberately does NOT join `default`, or every container in the project could reach the
+  # API as Caddy's privileged `host` role.
+  drawnosaurus-internal:
     internal: true
   # IDE control plane (bridge ↔ socket-proxy): internal, no egress — the control
   # path never needs the internet. The bridge joins this to reach the filter at

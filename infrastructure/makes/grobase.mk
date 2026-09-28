@@ -29,7 +29,13 @@ grobase-e2e:
 
 # Frontends the root pipeline owns. The backend (postgres/gotrue/kong/postgrest/...)
 # is the running apps/grobase stack and must NOT be re-upped from here.
-ROOT_FRONTENDS := osionos-bridge osionos-app auth-gateway opposite-osiris-web local-https-proxy livekit
+#
+# $(DRAWNOSAURUS_SERVICES) is the Whiteboard plane, default-on since T12-P1b. Referenced
+# rather than repeated — drawnosaurus.mk is included first (Makefile:45 before :49), so the
+# list has one definition. Its wasm artifact is a build INPUT for drawnosaurus-web, which is
+# why frontends-up takes drawnosaurus-wasm as a prerequisite below and not as a step inside
+# the recipe: `up -d --build` would otherwise build the web image against a missing pkg/.
+ROOT_FRONTENDS := osionos-bridge osionos-app auth-gateway opposite-osiris-web local-https-proxy livekit $(DRAWNOSAURUS_SERVICES)
 
 # Engine set `make all` brings up on a fresh machine. Default `devlean` = the daily-dev
 # shape: every CORE engine (postgres mysql mongo redis minio, all public images — mysql lives
@@ -84,7 +90,7 @@ apply-models-baseline:
 ## Adopt the migration ledger on an already-migrated DB: record every current models/*.sql as applied WITHOUT running it.
 	@sh scripts/apply-models.sh baseline
 
-frontends-up: certs
+frontends-up: certs drawnosaurus-wasm
 ## Build and start ONLY the root frontends against the running grobase backend. Also
 ## resurrects the IDE plane containers (runner / sandbox socket-proxy) — but ONLY when
 ## ./.env.local records them as activated (see IDE-BACKLOG.md); fresh machines skip both.
