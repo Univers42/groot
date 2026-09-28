@@ -722,7 +722,6 @@ services:
   # at the proxy because apps/api/src/auth.ts:22-31 otherwise lets a caller pick any owner.
   drawnosaurus-mongo:
     image: mongo:7
-    profiles: [drawnosaurus]
     command: ["--bind_ip_all", "--quiet"]
     volumes:
       - drawnosaurus-mongo-data:/data/db
@@ -741,7 +740,6 @@ services:
     mem_limit: 512m
 
   drawnosaurus-api:
-    profiles: [drawnosaurus]
     build:
       context: ./apps/drawnosaurus
       dockerfile: docker/api.Dockerfile
@@ -770,7 +768,6 @@ services:
     mem_limit: 512m
 
   drawnosaurus-realtime:
-    profiles: [drawnosaurus]
     build:
       context: ./apps/drawnosaurus/engine/realtime
       dockerfile: ../../docker/realtime.Dockerfile
@@ -789,7 +786,6 @@ services:
     mem_limit: 512m
 
   drawnosaurus-web:
-    profiles: [drawnosaurus]
     build:
       context: ./apps/drawnosaurus
       dockerfile: docker/web.Dockerfile
@@ -817,7 +813,6 @@ services:
   # (layer 3). :81 and :82 are never published and never reachable.
   drawnosaurus-gateway:
     image: caddy:2.10.2-alpine
-    profiles: [drawnosaurus]
     volumes:
       - ./apps/drawnosaurus/docker/gateway/Caddyfile:/etc/caddy/Caddyfile:ro
     depends_on:
@@ -839,6 +834,12 @@ services:
   # putting it there fails the build with "failed to resolve address for github.com".
   # It costs nothing in isolation: this container is `run --rm`, never serves anything,
   # and never needs to reach the api, mongo or the gateway.
+  #
+  # This is now the ONLY drawnosaurus service that keeps a profile. The five runtime
+  # services lost theirs so `make all` starts them, but this one must stay gated: its
+  # CMD is the wasm build, so a service-less `up -d` would "start" it, run a compile and
+  # exit — a failed container in `docker compose ps` on every boot. It is reached only by
+  # `run --rm` from the drawnosaurus-wasm target, which passes --profile explicitly.
   drawnosaurus-wasm:
     profiles: [drawnosaurus]
     build:
