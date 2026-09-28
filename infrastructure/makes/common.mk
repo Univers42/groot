@@ -73,6 +73,7 @@ WEBSITE_URL := https://localhost:4322
 OSIONOS_URL := https://localhost:3001
 BRIDGE_URL := https://localhost:4000
 AUTH_URL := https://localhost:8787/api/auth
+DRAWNOSAURUS_URL := https://localhost:$(if $(DRAWNOSAURUS_HOST_PORT),$(DRAWNOSAURUS_HOST_PORT),3007)
 # grobase's scripts/ops/resolve-ports.sh moves Kong to the next FREE host port when 8000 is
 # already taken (an old stack still shutting down is enough), so a hardcoded 8000 fails the
 # health gate against a backend that is perfectly healthy — measured: Kong published on 8001
