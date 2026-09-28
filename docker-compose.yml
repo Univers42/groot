@@ -737,6 +737,7 @@ services:
       start_interval: 2s
       timeout: 5s
       retries: 12
+    restart: unless-stopped
     mem_limit: 512m
 
   drawnosaurus-api:
@@ -765,6 +766,7 @@ services:
         # them here would mean editing drawnosaurus, so the containers answer to both names
         # instead. Without this the gateway 502s on "lookup api ... server misbehaving".
         aliases: [api]
+    restart: unless-stopped
     mem_limit: 512m
 
   drawnosaurus-realtime:
@@ -783,6 +785,7 @@ services:
     networks:
       drawnosaurus-internal:
         aliases: [realtime]   # see drawnosaurus-api
+    restart: unless-stopped
     mem_limit: 512m
 
   drawnosaurus-web:
@@ -805,6 +808,7 @@ services:
     networks:
       drawnosaurus-internal:
         aliases: [web]   # see drawnosaurus-api
+    restart: unless-stopped
     mem_limit: 512m
 
   # Caddy decides authority by ARRIVAL PORT: :80 = role `host` (everything), :81/:82 =
@@ -824,6 +828,7 @@ services:
       - "80"
     networks:
       - drawnosaurus-internal
+    restart: unless-stopped
     mem_limit: 256m
 
   # Build-only helper: produces engine/pkg on a bind mount. `make drawnosaurus-wasm` runs
