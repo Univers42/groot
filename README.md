@@ -235,8 +235,8 @@ on. Some module demonstrations need a larger edition or a feature flag — see [
   [`archive/wiki-2026-09/todo/`](archive/wiki-2026-09/todo/).
 - **Code workflow:** submodule-based monorepo — changes are committed inside a submodule first,
   then the root records the new commit. Numbered **verification gates**
-  (`scripts/verify/run-gate-battery.sh --fast` per pull request, `--enterprise` nightly) are the
-  team's definition of "done". 🚧 TODO: branch model and review rules.
+  (`apps/grobase/scripts/verify/run-gate-battery.sh --fast` per pull request, `--enterprise`
+  nightly) are the team's definition of "done". 🚧 TODO: branch model and review rules.
 - **Communication channels:** 🚧 TODO — e.g. Discord, Slack, in-person at campus.
 
 ---
