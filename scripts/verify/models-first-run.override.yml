@@ -1,0 +1,22 @@
+# Isolation overlay for scripts/verify/models-first-run.sh — the grobase
+# database path only. Renames every container (the base files pin
+# container_name: mini-baas-*, which would collide with the LIVE stack) and
+# publishes NO host ports. Named volumes are project-prefixed by compose, so
+# the script's separate --project-name already gives fresh ones.
+#
+# The container names are hardcoded to the default PROJECT=t1repro; overriding
+# PROJECT in the script without editing them here makes the two disagree.
+services:
+  postgres:
+    container_name: t1repro-postgres
+    ports: !reset []
+  db-bootstrap:
+    container_name: t1repro-db-bootstrap
+  mailpit:
+    container_name: t1repro-mailpit
+    ports: !reset []
+  gotrue:
+    container_name: t1repro-gotrue
+    ports: !reset []
+  pg-migrate:
+    container_name: t1repro-pg-migrate
