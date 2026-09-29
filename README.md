@@ -433,7 +433,8 @@ what makes one isolation rule apply to any table.
 | Public API | Key-authenticated, rate-limited API behind Kong, documented with OpenAPI | 🚧 TODO |
 
 > 🔍 CHECK: the Privacy Policy and Terms pages exist (`apps/opposite-osiris/src/pages/legal/`) but
-> the data-controller name and address in `src/data/legal.ts` are still marked "(placeholder)".
+> the data-controller name and address in `apps/opposite-osiris/src/data/legal.ts` are still
+> marked "(placeholder)".
 > Placeholder legal content is a rejection criterion — replace them with real content.
 
 ---
