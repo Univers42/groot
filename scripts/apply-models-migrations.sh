@@ -29,7 +29,10 @@
 #      target the auth gateway's own database, and applying them here fails on
 #      a uuid/integer foreign-key clash (measured, not assumed):
 #        gdpr-migration.sql  user.sql  auth-security-migration.sql
-#        auth-gateway-users-reconcile-migration.sql
+#      auth-gateway-users-reconcile-migration.sql was on this list and does NOT
+#      belong to it: it is additive uuid-native DDL (five ADD COLUMN IF NOT
+#      EXISTS on public.users, two unique indexes, one trigger) and applies with
+#      exit 0 on a from-scratch database. See ORDERING below.
 #   2. Files expecting a users table shaped with username/avatar_url columns
 #      this database's public.users does not have (same foreign-DB family):
 #        rls-hardening-migration.sql  seeds.sql
@@ -43,7 +46,7 @@
 #        osionos-folder-surface-migration.sql  osionos-wiki-surface-migration.sql
 #
 # ORDERING
-#   Everything else applies in plain alphabetical glob order EXCEPT the four
+#   Everything else applies in plain alphabetical glob order EXCEPT the six
 #   files below, which must run first and in this exact sequence — each is a
 #   real cross-file dependency (a table/function another file's DDL requires
 #   at run time, not merely IF NOT EXISTS-shaped), so alphabetical order alone
@@ -51,10 +54,22 @@
 #   set to a from-scratch database (a fully-converged dev machine hides this —
 #   every table already exists, so the true first-run order never gets
 #   exercised there):
+#     auth-gateway-users-reconcile-migration.sql adds public.users.username
+#         (needed by osionos-people-directory-migration.sql, whose view selects
+#         u.username / u.name). Nothing else in models/ or in grobase's own
+#         scripts/migrations/postgresql/ ever adds that column, so while this
+#         file was skipped the people-directory view could NEVER be created on
+#         a fresh database — it only worked on this machine because the file
+#         had been hand-applied here long ago. First, because it needs only
+#         public.users + public.user_profiles, both from grobase migration
+#         001_initial_schema.sql (applied by the pg-migrate init container).
 #     osionos-bridge-migration.sql      creates osionos_pages, osionos_bridge_identities
 #         (needed by osionos-admin-migration.sql, osionos-page-search-migration.sql)
 #     osionos-chat-migration.sql        creates osionos_channels, osionos_messages,
 #         osionos_channel_members (needed by osionos-engagement-migration.sql)
+#     osionos-social-migration.sql      adds osionos_bridge_identities.username
+#         (needed by osionos-people-directory-migration.sql; its own header
+#         declares the bridge + chat dependency, hence this position)
 #     osionos-engagement-migration.sql  creates osionos_notifications
 #         (needed by osionos-comments-migration.sql)
 #     osionos-page-search-migration.sql defines public.osionos_page_blocks()
@@ -82,13 +97,13 @@ trap 'rm -f "${ERR_FILE}"' EXIT
 # Dependency order (see "ORDERING" above) — each must run before the plain
 # alphabetical pass reaches its dependent. Space-separated: no filename here
 # contains a space or glob character.
-ORDERED_FIRST="osionos-bridge-migration.sql osionos-chat-migration.sql osionos-engagement-migration.sql osionos-page-search-migration.sql"
+ORDERED_FIRST="auth-gateway-users-reconcile-migration.sql osionos-bridge-migration.sql osionos-chat-migration.sql osionos-social-migration.sql osionos-engagement-migration.sql osionos-page-search-migration.sql"
 
 note() { printf '[models] %s\n' "$*" >&2; }
 
 skipped() {
 	case "$1" in
-	gdpr-migration.sql | user.sql | auth-security-migration.sql | auth-gateway-users-reconcile-migration.sql)
+	gdpr-migration.sql | user.sql | auth-security-migration.sql)
 		return 0
 		;;
 	rls-hardening-migration.sql | seeds.sql)
