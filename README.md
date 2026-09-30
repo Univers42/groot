@@ -87,73 +87,108 @@ media server for video rooms).
 
 ### Prerequisites
 
-| Requirement | Version | Notes |
+| Requirement | Detail | Source |
 |---|---|---|
-| **Docker Engine** | 🚧 TODO: minimum tested version | Docker's data-root should be on a large disk — the images are large and a full build takes several minutes (grobase alone ~9 min). |
-| **Docker Compose** | v2 (`docker compose`) | Ships with current Docker Engine. |
-| **GNU Make** | any recent | Every command goes through the root `Makefile`. |
-| **git** | any recent | Needed for submodules. |
-| **Free disk space** | 🚧 TODO: measure after a clean build | |
-| **Google Chrome** | current stable | The browser the project is evaluated on. |
+| **Linux host** | Tested on Debian 13; the CA-trust step uses `sudo` + `update-ca-certificates` | `infrastructure/makes/certs.mk` |
+| **Docker Engine ≥ 25** + **Compose v2** | Healthchecks use `start_interval`, which needs Docker 25. Tested with Docker 29.8. | `docker-compose.yml:10` |
+| **RAM ≥ 8 GB** | Measured: the VM peaked at ~6.5 GB of 8 GB during `make all` | measured, 2026-09-30 |
+| **Disk ≥ 30 GB free for Docker** | Measured on the dev VM with the stack running (`docker system df`, 2026-10-01): images 13.5 GB, build cache 9.5 GB, volumes 1.4 GB | measured |
+| **GNU Make, git, curl, openssl** | Make drives everything; curl runs the health check; openssl generates the local secrets | `infrastructure/makes/app.mk`, `scripts/gen-local-env.sh:68` |
+| **A GitHub SSH key** | `.gitmodules` uses `git@github.com:` URLs, so the recursive clone needs SSH access to GitHub | `.gitmodules` |
+| **Google Chrome** | Current stable — the browser the project is evaluated on | |
+| `certutil` (optional) | Lets `make all` import the local CA into Chrome's NSS store; otherwise import it by hand (see [Access](#access-and-the-local-ca)) | `infrastructure/makes/certs.mk:43` |
 
 **Nothing else is installed on the host** — no Node, npm, Go or Cargo. Everything builds and runs
-in containers. If an instruction tells you to run `npm install` on your machine, it is wrong.
+in containers.
 
-> 🔍 CHECK: `.gitmodules` uses SSH URLs (`git@github.com:…`). A reviewer without a GitHub SSH key
-> will fail at `git clone --recursive`. Either switch the submodule URLs to HTTPS, or document the
-> workaround here. Rehearse a clone into an empty directory on a machine that has never seen the
-> project.
+`make all` asks for **one `sudo` password** the first time: it copies the local CA into the system
+trust store. This is intended (`certs-trust-local` in `infrastructure/makes/certs.mk`).
 
-### Step by step (local mode — no team secrets needed)
+**Ports bound on the host** (from `docker-compose.yml`, all on `127.0.0.1` except inside a
+QEMU/VirtualBox NAT VM, where `infrastructure/scripts/detect-bind-addr.sh` binds `0.0.0.0` so the
+host can reach the guest): 443, 3001, 3002, 3003, 3007 (always loopback), 4000, 4100, 4200, 4322,
+4323, 7880, 7881, 8444, 8787 and UDP 50000–50060. grobase adds Kong on `127.0.0.1:8000`
+(literal loopback in its `orchestrators/compose/base/gateway.yml`).
 
-This is the path for anyone outside the team, including evaluators.
+### Defense bring-up (pinned)
+
+This is the path rehearsed on a clean machine. It checks out the release tag and does **not**
+follow submodule branch tips (`SKIP_SYNC=1`, see `sync-submodules-soft` in
+`infrastructure/makes/pipeline.mk`).
 
 ```bash
-# 1. Clone with all submodules
-git clone --recursive https://github.com/Univers42/groot.git ft_transcendence
-cd ft_transcendence
+git clone --recursive git@github.com:Univers42/groot.git
+cd groot
+git checkout v1.0.0-rc2
+git submodule update --init --recursive
+make all SKIP_SYNC=1
+```
 
-# 2. Create the root environment file from the committed template
-cp .env.example .env.local
-#    Fill these three keys with any long random string (e.g. `openssl rand -hex 32`):
-#      OSIONOS_APP_SESSION_SECRET
-#      OSIONOS_BRIDGE_SHARED_SECRET
-#      OSIONOS_BRIDGE_EMAIL_HASH_SALT
-#    Every other key has a working Docker default or is optional.
+Measured time from a cold machine: **9–17 minutes**.
 
-# 3. Build and start everything
+No `.env` needs to be written by hand. With no vault key present, grobase generates its own
+secrets into `apps/grobase/.env`, and `env-local-ensure` derives the root `./.env.local` from it,
+including random `OSIONOS_*` secrets (`scripts/gen-local-env.sh`).
+
+`make all` runs, in order (`infrastructure/makes/pipeline.mk`): submodule sync → secrets →
+local TLS certificates → trust the local CA → grobase backend → derive `.env.local` → restore
+data if the engines are empty → SQL migrations → frontends → health check → URL list.
+
+### Development bring-up
+
+```bash
+git checkout develop
 make all
 ```
 
-`make all` runs, in order: submodule sync → secrets → local TLS certificates → trust the local CA
-(one `sudo` prompt the first time) → grobase backend → SQL migrations → frontends → health check
-→ prints the list of URLs.
+Without `SKIP_SYNC=1`, `make all` first fast-forwards every submodule to the tip of its tracked
+branch (`sync-submodules-soft`), so you build the newest code rather than the pinned commits.
+It skips dirty submodules and never blocks the pipeline.
 
-With no vault key present, **grobase generates its own secrets** (JWT secret, database passwords,
-service keys) into `apps/grobase/.env`. You can also do it explicitly with
-`make -C apps/grobase secrets`.
+### Checks
 
-When it finishes, open **https://localhost:4322** and **create a new account**.
+| Command | What it proves |
+|---|---|
+| `make healthcheck` | grobase auth, bridge, osionos, website (and HTTP→HTTPS redirect), auth gateway, drawnosaurus board list (`infrastructure/makes/app.mk`) |
+| `make e2e` | Playwright smoke in a pinned container against the running stack: DW3 Whiteboard tab, DW8 two browsers on one board, DW9 the board inside osionos, DW10 Mail/Calendar (`tests/e2e/README.md`) |
+| `make mail-up calendar-up` | Start the opt-in Mail and Calendar apps. Without them DW10 **skips** and prints the reason; it never passes silently. |
+| `make e2e-clean` | Soft-delete the `e2e-*` boards the smoke leaves behind |
 
-> 🔍 CHECK: the demo data restored by `make all` was created under the team's original keys, so it
-> does not appear in local mode. Confirm what a fresh account sees and describe it here.
-
-### Service URLs
+### Access and the local CA
 
 | Service | URL |
 |---|---|
 | opposite-osiris (start here) | `https://localhost:4322` |
 | osionos editor | `https://localhost:3001` |
-| mail | `https://localhost:3002` |
-| calendar | `https://localhost:3003` |
+| Whiteboard (drawnosaurus) | `https://localhost:3007` |
+| mail (opt-in) | `https://localhost:3002` |
+| calendar (opt-in) | `https://localhost:3003` |
 | osionos-bridge | `https://localhost:4000` |
 | auth-gateway | `https://localhost:8787/api/auth` |
-| grobase API gateway (Kong) | `http://127.0.0.1:8000` — internal; IPv4 only |
+| grobase API (TLS edge) | `https://localhost:8444` |
+| grobase API gateway (Kong, plain HTTP, loopback only) | `http://127.0.0.1:8000` |
 | LiveKit | `ws://127.0.0.1:7880` |
 
-> 🔍 CHECK: the subject requires HTTPS for every externally reachable connection. Confirm whether
-> Kong `:8000` and LiveKit `:7880` are reachable from outside the host, or only through the TLS
-> proxy / same-origin paths.
+`make showcase` prints the list of what is actually running.
+
+Every frontend is served with a certificate from the local CA
+`apps/grobase/certs/track-binocle-local-ca.pem`. `make all` trusts it in the system store and, if
+`certutil` is installed, in Chrome's NSS store (`~/.pki/nssdb`). If it is not trusted, Chrome shows
+a warning on each port — and the **Whiteboard tab in osionos stays blank**, because the embedded
+`:3007` iframe is refused silently. Fix: import the CA in Chrome (Settings → Privacy and security →
+Security → Manage certificates → Authorities → Import), or run `make certs-trust`.
+
+### Demo
+
+1. Open `https://localhost:4322`, create an account, and continue to osionos.
+2. In osionos, open **View → Whiteboard**, click **+ New Board**, give it a title.
+3. Open the same board URL in a second window and draw: the strokes appear live in the other
+   window (the e2e smoke asserts within 5 s — `tests/e2e/specs/dw8-realtime.spec.ts`).
+
+Honest limitations of this demo: board editing is **loopback-only** and has **no per-user
+authorization yet** — drawnosaurus is bound to `127.0.0.1:3007` for exactly that reason
+(`docker-compose.yml:27-32`). We make **no end-to-end-encryption claim**: traffic is TLS to the
+local proxy, nothing more.
 
 ### Environment configuration
 
@@ -174,18 +209,12 @@ tree automatically during `make all` (or with `make vault42-pull-all APPLY=1`). 
 created with `42ctl keys init` and enrolled with an invitation from the vault's operator.
 Details: [`DATA-MIGRATION.md`](DATA-MIGRATION.md).
 
-> 🚧 TODO — security: the previous README, `DATA-MIGRATION.md`, `FRESH-START-LOG.md`,
-> `FRESH-START-AGENT-PROMPT.md` and `infrastructure/makes/repo.mk` contain the vault passphrase and
-> a demo account password in plain text. Committed credentials are an immediate-failure criterion.
-> Remove them from every tracked file, **rotate** both (they remain in git history), then delete
-> this note.
-
 ### Everyday commands
 
 | Command | What it does |
 |---|---|
 | `make all` | Full lifecycle: certs → backend → frontends → health check → URLs |
-| `make healthcheck` | Probe backend, site, editor, bridge and auth gateway |
+| `make healthcheck` | Probe backend, site, editor, bridge, auth gateway and whiteboard |
 | `make showcase` | Print the URL list for what is actually running |
 | `make pulls` | Update all submodules |
 | `make -C apps/grobase editions` | List the available backend shapes |
@@ -194,14 +223,13 @@ Details: [`DATA-MIGRATION.md`](DATA-MIGRATION.md).
 | `docker compose logs -f <service>` | Follow one service's logs |
 | `docker compose down` | Stop the frontends (data is kept) |
 
-**Backend editions.** `make all` starts grobase in the **`devlean`** edition: the core engines
-(PostgreSQL, MySQL, MongoDB, Redis, MinIO), the full application / control / data planes and
-realtime — without the heavy extra engines (MariaDB, CockroachDB, MSSQL) and without the monitoring
-stack. `GROBASE_EDITION=migrate` adds every snapshot engine; `GROBASE_EDITION=full` turns everything
-on. Some module demonstrations need a larger edition or a feature flag — see [Modules](#modules).
-
-> 🔍 CHECK: run `make -C apps/grobase editions` and confirm `devlean` is listed there — older docs
-> name `migrate` as the default and grobase's own list did not include it.
+**Backend editions.** `make all` starts grobase in the **`devlean`** edition
+(`GROBASE_EDITION ?= devlean`, `infrastructure/makes/grobase.mk:48`; listed in grobase's
+`orchestrators/makes/00-config.mk:68`): the core engines (PostgreSQL, MySQL, MongoDB, Redis,
+MinIO), the full application / control / data planes and realtime — without the heavy extra
+engines and without the monitoring stack. `GROBASE_EDITION=migrate` adds every snapshot engine;
+`GROBASE_EDITION=full` turns everything on. Some module demonstrations need a larger edition or a
+feature flag — see [Modules](#modules).
 
 ---
 
