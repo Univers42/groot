@@ -235,37 +235,36 @@ feature flag — see [Modules](#modules).
 
 ## Team Information
 
-> 🚧 TODO — the roles below come from our working notes and conflict with each other (two members
-> are listed as Product Owner and two as Project Manager). The subject expects each of PO, PM and
-> Tech Lead to be clearly assigned. Agree on the final split and rewrite this table; every member
-> must be able to defend what is written next to their name.
+Roles as recorded in the team's working notes ([`wiki/project/03-team.md`](wiki/project/03-team.md)):
 
 | Member | Login | Role(s) | Responsibilities |
 |---|---|---|---|
-| Dylan Lesieur | `dlesieur` | Product Owner · Developer | Product vision, backlog and priorities; validates completed work. 🚧 TODO: development scope |
-| Daniel Fernández | `danfern3` | Tech Lead (listed also as PO) | Architecture, stack decisions, code quality, reviews |
+| Dylan Lesieur | `dlesieur` | Product Owner · Developer | Product vision, backlog and priorities; validates completed work |
+| Daniel Fernández | `danfern3` | Tech Lead · Product Owner | Architecture, stack decisions, code quality, reviews |
 | Sergio Jiménez | `serjimen` | Project Manager · Developer | Frontend, secrets management, deployment |
 | Vadim Jan | `vjan-nie` | Project Manager · Developer | Planning, tracking, communication, unblocking |
-| 🚧 TODO: full name | `shashemi` | 🚧 TODO | 🚧 TODO |
+| | `shashemi` | Developer | Features and modules |
 
 ---
 
 ## Project Management
 
-> 🚧 TODO — none of this is recorded in the repository. Fill it with what the team actually did;
-> evaluators compare it against the git history.
+What the repository records:
 
-- **Work organisation:** 🚧 TODO — how tasks were split (by plane? by product?), sprint length,
-  meeting cadence, how decisions were recorded.
-- **Project management tools:** 🚧 TODO — e.g. GitHub Issues / Projects, Trello, Notion.
-  The repository does show milestone planning (M1 hardening, M2 federation, M3 coherence,
-  M4 observability, M5 security, M11 external-app integration) in
+- **Planning:** milestones (M1 hardening, M2 federation, M3 coherence, M4 observability,
+  M5 security, M11 external-app integration) in
   [`archive/wiki-2026-09/todo/`](archive/wiki-2026-09/todo/).
+- **Tools:** GitHub — pull requests on `Univers42/groot`, Dependabot for dependency updates
+  ([`.github/dependabot.yml`](.github/dependabot.yml)), GitHub Actions for CI
+  ([`.github/workflows/`](.github/workflows/)).
+- **Branch model:** work lands on short-lived `feat/`, `fix/`, `docs/`, `test/` and `chore/`
+  branches, merged into `develop` by pull request; `develop` is merged into `main` by pull request
+  (`git log --merges --format=%s | grep 'pull request'`).
 - **Code workflow:** submodule-based monorepo — changes are committed inside a submodule first,
   then the root records the new commit. Numbered **verification gates**
-  (`apps/grobase/scripts/verify/run-gate-battery.sh --fast` per pull request, `--enterprise`
-  nightly) are the team's definition of "done". 🚧 TODO: branch model and review rules.
-- **Communication channels:** 🚧 TODO — e.g. Discord, Slack, in-person at campus.
+  (`apps/grobase/scripts/verify/run-gate-battery.sh`) are the team's definition of "done":
+  grobase's CI runs named gates on pull requests and the full `--enterprise` battery, with a
+  nightly schedule (grobase `.github/workflows/ci.yml`).
 
 ---
 
