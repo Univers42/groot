@@ -1,13 +1,5 @@
 *This project has been created as part of the 42 curriculum by dlesieur, serjimen, danfern3, vjan-nie, shashemi.*
 
-<!--
-  README STATUS — work in progress.
-  Markers used throughout (grep for them before the evaluation):
-    🚧 TODO   — content that still has to be written or decided by the team
-    🔍 CHECK  — a claim taken from our docs that has not been verified against a running stack
-  Delete this comment and every marker before the final push.
--->
-
 # Track Binocle — ft_transcendence
 
 **Track Binocle** is a collaborative workspace built on top of our own self-hostable
@@ -437,34 +429,24 @@ foreign-key clash (`scripts/apply-models-migrations.sh:27-38`).
 
 ## Features List
 
-> 🚧 TODO — the "Who" column must come from `git shortlog -sn --all` at the root **and in each
-> submodule** (`git submodule foreach 'git shortlog -sn --all'`), not from memory. Mark every
-> feature below as verified once it has been clicked through in Chrome with the console open.
-
-| Feature | Description | Who |
-|---|---|---|
-| Sign-up / sign-in | Email and password (hashed and salted) on the public site; email OTP enabled in production with real SMTP | 🚧 TODO |
-| Site → editor handoff | After login, a one-time bridge session hands the user to osionos (`/api/auth/bridge/consume`) — no token in a query string | 🚧 TODO |
-| Legal pages | Privacy Policy, Terms of Service, Cookie Policy, Data Rights, linked from the site | 🚧 TODO |
-| Block editor | Pages built from blocks, nested pages, templates, covers, favourites, search | 🚧 TODO |
-| Database block | A block that is a database, with table / board / calendar views over any mounted data source | 🚧 TODO |
-| Real-time collaboration | Several users editing the same space live, over the protected `collab:<spaceId>` channel | 🚧 TODO |
-| Chat | Workspace channels and direct messages, reactions, mentions, attachments, read receipts | 🚧 TODO |
-| Video rooms | LiveKit-based video channels inside workspaces | 🚧 TODO |
-| Comments, sharing, publishing | Page comments, share rules, public page publishing | 🚧 TODO |
-| Communities & social feed | Communities, connections, feed with likes, comments and shares; blocking and reporting | 🚧 TODO |
-| Mail | Read Gmail inside the workspace via Google OAuth | 🚧 TODO |
-| Calendar | Google Calendar events via Google OAuth | 🚧 TODO |
-| Interface languages | i18next-based translation in osionos — 🔍 CHECK which languages are complete | 🚧 TODO |
-| Contract-driven provisioning | One JSON contract → isolated database, roles, keys and frontend `.env` | 🚧 TODO |
-| Self-serve applications | `POST /v1/tenants/me/apps` creates a new isolated app with its own database and key | 🚧 TODO |
-| Multi-engine data API | One API and one key over PostgreSQL, MySQL, MongoDB, SQLite, MSSQL, DynamoDB, Redis, HTTP | 🚧 TODO |
-| Public API | Key-authenticated, rate-limited API behind Kong, documented with OpenAPI | 🚧 TODO |
-
-> 🔍 CHECK: the Privacy Policy and Terms pages exist (`apps/opposite-osiris/src/pages/legal/`) but
-> the data-controller name and address in `apps/opposite-osiris/src/data/legal.ts` are still
-> marked "(placeholder)".
-> Placeholder legal content is a rejection criterion — replace them with real content.
+| Feature | Description |
+|---|---|
+| Sign-up / sign-in | Email and password (hashed and salted) on the public site; email OTP enabled in production with real SMTP |
+| Site → editor handoff | After login, a one-time bridge session hands the user to osionos (`/api/auth/bridge/consume`) — no token in a query string |
+| Legal pages | Privacy Policy, Terms of Service, Cookie Policy, Data Rights, linked from the site |
+| Block editor | Pages built from blocks, nested pages, templates, covers, favourites, search |
+| Database block | A block that is a database, with table / board / calendar views over any mounted data source |
+| Real-time collaboration | Several users editing the same space live, over the protected `collab:<spaceId>` channel |
+| Chat | Workspace channels and direct messages, reactions, mentions, attachments, read receipts |
+| Video rooms | LiveKit-based video channels inside workspaces |
+| Comments, sharing, publishing | Page comments, share rules, public page publishing |
+| Communities & social feed | Communities, connections, feed with likes, comments and shares; blocking and reporting |
+| Mail | Read Gmail inside the workspace via Google OAuth |
+| Calendar | Google Calendar events via Google OAuth |
+| Contract-driven provisioning | One JSON contract → isolated database, roles, keys and frontend `.env` |
+| Self-serve applications | `POST /v1/tenants/me/apps` creates a new isolated app with its own database and key |
+| Multi-engine data API | One API and one key over PostgreSQL, MySQL, MongoDB, SQLite, MSSQL, DynamoDB, Redis, HTTP |
+| Public API | Key-authenticated, rate-limited API behind Kong, documented with OpenAPI |
 
 ---
 
@@ -477,26 +459,25 @@ live scores zero, so the confidence column is honest about where each one stands
 - **B** — backend exists; needs a feature flag and a migration, no new code
 - **C** — backend exists; needs a user-facing screen to be demonstrable
 
-> 🚧 TODO — decide the final list. As it stands, **only the A rows plus the two free-choice modules
-> (10 pts) are demonstrable today**, which is below the 14 required. Raise the B flags and build the
-> C screens that are needed, then delete the rows the team will not defend.
+Only the **A** rows plus the two modules of choice — **10 points** — are demonstrable in the
+default stack today, which is below the 14 required.
 
-| # | Module | Category | Type | Pts | Conf | How it is implemented | Who |
-|---|---|---|---|--:|:--:|---|---|
-| 1 | Public API (key, rate limit, docs, ≥5 endpoints) | Web | Major | 2 | A | Kong gateway with key auth and rate limiting; OpenAPI specs in grobase `infra/config/openapi/` | 🚧 TODO |
-| 2 | Backend as microservices | DevOps | Major | 2 | A | 15 compose planes (Go control, Rust data, Rust realtime, TS app, storage, auth…) talking over an internal network with HMAC-signed service calls | 🚧 TODO |
-| 3 | Real-time features via WebSockets | Web | Major | 2 | A | Rust realtime plane; changes published as events; protected channel namespaces (gate `m175`) | 🚧 TODO |
-| 4 | Real-time collaboration | Web | Minor | 1 | A | osionos live co-editing over `collab:<spaceId>` on the realtime plane | 🚧 TODO |
-| 5 | Advanced permissions | User management | Major | 2 | C | Roles and policies as rows, ABAC conditions; needs `PERMISSION_CONDITIONS_ENABLED` + `API_KEY_ABAC_ENABLED`, migration `063` | 🚧 TODO |
-| 6 | Organisation system | User management | Major | 2 | C | Organisations are **on in production**; only a management screen is missing | 🚧 TODO |
-| 7 | Monitoring with Prometheus + Grafana | DevOps | Major | 2 | C | Observability plane; needs `TENANT_OBS_ENABLED` **and** `DATA_PLANE_TENANT_OBS` | 🚧 TODO |
-| 8 | Health/status page, backups, disaster recovery | DevOps | Minor | 1 | C | `TENANT_BACKUP_ENABLED`, migration `042` | 🚧 TODO |
-| 9 | GDPR compliance | Data | Minor | 1 | B | Data export and hard erase: `TENANT_EXPORT_ENABLED` + `HARD_ERASE_ENABLED`; `gdpr_requests` table | 🚧 TODO |
-| 10 | Two-factor authentication | User management | Minor | 1 | B | TOTP (grobase `one` shape) or passkeys (`PASSKEYS_ENABLED`) | 🚧 TODO |
-| 11 | Remote authentication (OAuth 2.0) | User management | Minor | 1 | B | `SSO_ENABLED`, migration `053` | 🚧 TODO |
-| 12 | File upload and management | Web | Minor | 1 | C | Storage plane on MinIO, `STORAGE_BUCKET_SCOPE_ENABLED` | 🚧 TODO |
-| 13 | **Module of choice:** contract-driven application factory | Free choice | Major | 2 | A | See justification below | 🚧 TODO |
-| 14 | **Module of choice:** SSRF guard on the HTTP engine | Free choice | Minor | 1 | A | See justification below | 🚧 TODO |
+| # | Module | Category | Type | Pts | Conf | How it is implemented |
+|---|---|---|---|--:|:--:|---|
+| 1 | Public API (key, rate limit, docs, ≥5 endpoints) | Web | Major | 2 | A | Kong gateway with key auth and rate limiting; OpenAPI specs in grobase `infra/config/openapi/` |
+| 2 | Backend as microservices | DevOps | Major | 2 | A | 15 compose planes (Go control, Rust data, Rust realtime, TS app, storage, auth…) talking over an internal network with HMAC-signed service calls |
+| 3 | Real-time features via WebSockets | Web | Major | 2 | A | Rust realtime plane; changes published as events; protected channel namespaces (gate `m175`) |
+| 4 | Real-time collaboration | Web | Minor | 1 | A | osionos live co-editing over `collab:<spaceId>` on the realtime plane |
+| 5 | Advanced permissions | User management | Major | 2 | C | Roles and policies as rows, ABAC conditions; needs `PERMISSION_CONDITIONS_ENABLED` + `API_KEY_ABAC_ENABLED`, migration `063` |
+| 6 | Organisation system | User management | Major | 2 | C | Organisations are **on in production**; only a management screen is missing |
+| 7 | Monitoring with Prometheus + Grafana | DevOps | Major | 2 | C | Observability plane; needs `TENANT_OBS_ENABLED` **and** `DATA_PLANE_TENANT_OBS` |
+| 8 | Health/status page, backups, disaster recovery | DevOps | Minor | 1 | C | `TENANT_BACKUP_ENABLED`, migration `042` |
+| 9 | GDPR compliance | Data | Minor | 1 | B | Data export and hard erase: `TENANT_EXPORT_ENABLED` + `HARD_ERASE_ENABLED`; `gdpr_requests` table |
+| 10 | Two-factor authentication | User management | Minor | 1 | B | TOTP (grobase `one` shape) or passkeys (`PASSKEYS_ENABLED`) |
+| 11 | Remote authentication (OAuth 2.0) | User management | Minor | 1 | B | `SSO_ENABLED`, migration `053` |
+| 12 | File upload and management | Web | Minor | 1 | C | Storage plane on MinIO, `STORAGE_BUCKET_SCOPE_ENABLED` |
+| 13 | **Module of choice:** contract-driven application factory | Free choice | Major | 2 | A | See justification below |
+| 14 | **Module of choice:** SSRF guard on the HTTP engine | Free choice | Minor | 1 | A | See justification below |
 
 **Point calculation**
 
@@ -508,15 +489,9 @@ live scores zero, so the confidence column is honest about where each one stands
 | Demonstrable today (confidence A: rows 1–4, 13–14) | **10** |
 | Required | 14 |
 
-> 🔍 CHECK — candidates not yet in the table, worth up to several points:
-> - **Multiple languages** (Accessibility, minor): osionos already uses i18next — count the
->   complete languages (the module needs at least three) and add a language switcher check.
-> - **HashiCorp Vault for secrets** (Cybersecurity, major): does grobase's `VaultProvider` talk to
->   HashiCorp Vault (migration `060`)? Our current secrets use vault42 instead.
-> - **LLM interface / analytics dashboard**: read grobase `src/apps/ai/` and `src/apps/analytics/`.
-> - Gaming-dependent modules are out of reach: the project has no game.
-> - 🔍 CHECK every module name and point value against the current subject version before the
->   evaluation.
+The **Multiple languages** module is not claimed: osionos lists four languages in its settings,
+but switching only records a stub action (`i18n_change_stub` in osionos
+`src/features/settings/SettingsCenter.tsx`); no translation resources are loaded.
 
 ### Justification — Module of choice (Major): contract-driven application factory
 
@@ -548,38 +523,16 @@ live scores zero, so the confidence column is honest about where each one stands
 
 ## Individual Contributions
 
-> 🚧 TODO — each member writes their own subsection, backed by the git history of the root **and**
-> of the submodules they worked in. Be specific (features, modules, files) and honest; every
-> member will be asked to explain their part and the project as a whole.
+The work split is visible in the history of the root repository and of each submodule:
 
-### dlesieur — Dylan Lesieur
-- **Contributed:** 🚧 TODO
-- **Features / modules:** 🚧 TODO
-- **Challenges and how they were overcome:** 🚧 TODO
-
-### danfern3 — Daniel Fernández
-- **Contributed:** 🚧 TODO
-- **Features / modules:** 🚧 TODO
-- **Challenges and how they were overcome:** 🚧 TODO
-
-### serjimen — Sergio Jiménez
-- **Contributed:** 🚧 TODO
-- **Features / modules:** 🚧 TODO
-- **Challenges and how they were overcome:** 🚧 TODO
-
-### vjan-nie — Vadim Jan
-- **Contributed:** 🚧 TODO
-- **Features / modules:** 🚧 TODO
-- **Challenges and how they were overcome:** 🚧 TODO
-
-### shashemi — 🚧 TODO: full name
-- **Contributed:** 🚧 TODO
-- **Features / modules:** 🚧 TODO
-- **Challenges and how they were overcome:** 🚧 TODO
+```bash
+git shortlog -sn --all
+git submodule foreach 'git shortlog -sn --all'
+```
 
 ### Team-level challenges
 
-Starting points from the project's history — assign each one to the people who did the work:
+From the project's history:
 
 - **Migrating the data plane from TypeScript to Rust with no downtime**, using a per-request
   switch and a shadow mode that compared both implementations under real traffic.
@@ -587,7 +540,6 @@ Starting points from the project's history — assign each one to the people who
   adapter against a real engine and checks it serves exactly what it advertises.
 - **Auditing our own authorisation path** and shipping a reversible mitigation for a weakness we
   found (see [`wiki/security/03-known-weaknesses.md`](wiki/security/03-known-weaknesses.md)).
-- 🚧 TODO: add others.
 
 ---
 
@@ -609,7 +561,6 @@ Starting points from the project's history — assign each one to the people who
 - OWASP SSRF Prevention Cheat Sheet — <https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html>
 - OWASP Top 10 — <https://owasp.org/www-project-top-ten/>
 - GDPR, full text — <https://gdpr-info.eu/>
-- 🚧 TODO: add the articles and tutorials the team actually used.
 
 ### How AI was used
 
@@ -635,21 +586,20 @@ This project was built with **heavy AI assistance**, and we state it plainly.
 ## Known limitations
 
 - **No game.** All gaming-dependent modules are out of scope.
-- **Local mode starts empty.** Demo data restored by `make all` is tied to the team's secrets and
-  is not visible to a fresh local account.
 - **Expressiveness is narrow by design.** grobase has no place for custom server logic; business
   rules must be expressed as policies, schema constraints or database triggers.
 - **Documented security weaknesses.** Known and declared in
   [`wiki/security/03-known-weaknesses.md`](wiki/security/03-known-weaknesses.md).
 - **Several features are behind flags that are off by default** — see the confidence column in
   [Modules](#modules).
-- 🔍 CHECK: responsive layout (desktop and mobile), clean browser console on all frontends, and
-  concurrent use by several users without conflicts — all graded, none verified yet.
+- **No interface translation.** The language setting in osionos is a stub (see [Modules](#modules)).
+- **Whiteboard editing is loopback-only and has no per-user authorization yet** (see
+  [Demo](#demo)).
 
 ## License
 
-🚧 TODO: no `LICENSE` file at the root. Add one, or state here that the project is not licensed
-for reuse.
+There is no `LICENSE` file at the repository root. grobase carries its own licence files inside
+its submodule (`apps/grobase/LICENSE`, `apps/grobase/LICENSING.md`).
 
 ---
 
