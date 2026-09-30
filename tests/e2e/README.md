@@ -6,8 +6,8 @@ Playwright 1.63.0 in its official image (`Dockerfile`), against the **running** 
 
 - **DW3** osionos View → Whiteboard lists boards past the 8 s grace timer; `+ New Board` needs a title.
 - **DW8** two contexts on one :3007 board see each other's strokes within 5 s.
-- **DW9** the same, drawing inside the osionos iframe. **DW10** Mail/Calendar panes live at 15 s — SKIP when those opt-in apps are down.
-- Every spec fails on any console error. No retries.
+- **DW9** the same, drawing inside the osionos iframe. **DW10** installs Mail/Calendar from the Marketplace, opens each from its rail entry, checks the pane at 15 s, uninstalls — SKIP when those opt-in apps are down.
+- Every spec fails on any console error (one Playwright-caused sandbox message excepted, see `lib/fixtures.ts`). No retries.
 - HTTPS: the grobase CA is mounted and imported into Chromium's NSS store and `NODE_EXTRA_CA_CERTS`; errors are never ignored.
 - Login is the real signed handoff: gateway login → `/api/auth/osionos-session` → `#bridge_token=`.
 - Leaves: the user `e2e-smoke@example.com` (reused every run, override with `E2E_EMAIL`/`E2E_PASSWORD`) and, until `make e2e-clean`, `e2e-*` boards. Clean soft-deletes (`deletedAt`) and refuses if a title only nearly matches (`E2E-x`).
