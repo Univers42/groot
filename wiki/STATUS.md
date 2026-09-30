@@ -55,7 +55,6 @@ Ordered by what they unlock, not by effort. Each one is minutes.
 | 1 | All 4–5 members attending | ask them | **The review stops; no grade** |
 | 2 | No credentials committed anywhere | `git grep -nE "(password\|secret\|api[_-]?key\|token)\s*=\s*['\"][^'\"]{8,}"` | **Immediate failure** |
 | 3 | Privacy Policy / ToS exist | inspect `apps/opposite-osiris` | Project rejected outright |
-| 4 | `git clone --recursive` into an empty dir yields a buildable tree | rehearse it | ~70% of the work falls outside the grade |
 | 5 | Commits from all members | `git shortlog -sn --all` | Teamwork criterion failed |
 | 6 | Browser console clean | open all six frontends with DevTools | Rejection criterion |
 | 7 | A CSS framework is in use | inspect each frontend | Graded item; plain CSS is not sufficient |
@@ -82,6 +81,7 @@ Kept so nobody re-opens them.
 | Is the realtime workspace in git? | Yes | `git ls-files infra/docker/services/realtime/` |
 | How many engines? | Seven by default, eight with DynamoDB, plus two dialects | `crates/data-plane-pool/README.md` |
 | Which flags are on in production? | orgs, RBAC hierarchy, environments, groups, invites, self-serve, app channels, email OTP | `deploy/fly/boot.sh` |
+| Does `git clone --recursive` into an empty dir yield a buildable tree? (open check #4) | Yes | Laptop clean clone, 2026-09-30: sync mode pass (16m44s); pinned `v1.0.0-rc1` pass. Fresh VM `make all` on `develop`: 8m55s, 0 failed migrations, `make healthcheck` pass |
 
 ---
 
