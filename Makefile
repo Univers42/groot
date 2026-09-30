@@ -51,3 +51,4 @@ include $(MAKE_DIR)/baas-release.mk
 include $(MAKE_DIR)/baas-verify.mk
 include $(MAKE_DIR)/prettier.mk
 include $(MAKE_DIR)/update.mk
+include $(MAKE_DIR)/e2e.mk
