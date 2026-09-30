@@ -566,20 +566,25 @@ From the project's history:
 
 This project was built with **heavy AI assistance**, and we state it plainly.
 
-> 🚧 TODO — replace the draft below with the team's precise account. For each point, name the tool
-> and say how the output was checked. Be specific: vague disclosure reads worse than precise
-> disclosure, and every member must be able to explain any AI-assisted code in their area.
-
-- **Tools:** 🚧 TODO (e.g. Claude / Claude Code — the repository carries agent configuration in
-  `.claude/` and `apps/grobase/CLAUDE.md`; list any others).
-- **Code generation:** 🚧 TODO — which parts (grobase planes, adapters, frontends, migrations…),
-  and how much was reviewed, rewritten or discarded.
-- **Documentation:** the wiki and this README were drafted and distilled with AI assistance from
+- **Tools.** Claude, through Claude Code. The agent configuration is versioned with the code: the
+  `.claude/` submodule (rules, agents and workflows), and `apps/grobase/CLAUDE.md` /
+  `apps/grobase/AGENTS.md` inside grobase.
+- **Workflow: orchestrator and executors.** A team member runs an orchestrator session that
+  breaks the work into small, numbered tasks with explicit preconditions and a "done when". Each
+  task goes to an executor session that implements it on its own branch in small commits and
+  returns a report with evidence (the commands it ran and their output). The orchestrator — and
+  the human behind it — checks the report before the next task starts.
+- **Code.** AI wrote and refactored code across the stack: grobase planes and adapters, the
+  frontends, SQL migrations, the Makefile pipeline and the Docker setup.
+- **Testing and verification.** AI wrote verification gates and test scripts, including the
+  Playwright smoke in [`tests/e2e/`](tests/e2e/), and ran them against the live stack.
+- **Reviews.** AI-assisted code review of pull requests and security review of the authorisation
+  path ([`wiki/security/03-known-weaknesses.md`](wiki/security/03-known-weaknesses.md)).
+- **Documentation.** The wiki and this README were drafted and distilled with AI assistance from
   the project's own design documents and code, then checked against the repository.
-- **Testing and verification:** 🚧 TODO — e.g. writing verification gates and test scripts.
-- **Reviews and audits:** 🚧 TODO — e.g. security review of the authorisation path.
-- **How we kept control:** every change is accepted only when its verification gate passes;
-  🚧 TODO: add code-review practice and anything else the team did.
+- **How we kept control.** A human reviews and merges every pull request; nothing reaches
+  `develop` or `main` by an agent alone. A change is accepted only when its verification gate
+  passes. Every member must be able to explain the AI-assisted code in their area.
 
 ---
 
