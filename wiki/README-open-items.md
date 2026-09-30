@@ -35,3 +35,10 @@ named in the first column, then delete the row.
 | Project Management | Task-tracking tool | GitHub Issues / Projects, Trello, Notion…? The repository shows only PRs and the milestone files. |
 | Project Management | Review rules | Required reviewers / branch protection are GitHub settings, not in the repository. |
 | Project Management | Communication channels | Discord, Slack, campus…? |
+
+## Technical Stack and Database Schema
+
+| README section | Item | Context |
+|---|---|---|
+| Technical Stack | Is plain CSS in mail and calendar acceptable? | The subject requires "a CSS framework or styling solution". osionos uses Tailwind, the site Sass; mail and calendar (`apps/mail`, `apps/calendar` at the pinned commits) ship only `src/styles.css`. `wiki/STATUS.md` open check #7. |
+| Database Schema | grobase registry tables with key columns | Read them from grobase's own migrations and add them to the schema section (tenants, mounts, roles, policies, API keys). |
