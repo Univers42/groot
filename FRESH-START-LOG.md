@@ -15,7 +15,7 @@ definitions — details below).
 - **Path:** with-vault (identity present at `~/.config/42ctl/` — both `keystore.v42` and
   `contract-default.tok`)
 - **Host:** Linux, Docker 29.1.3, data-root `/var/lib/docker` on `/dev/nvme0n1p7` (116 GB free), git 2.53.0
-- **Command:** `FT_PASSPHRASE='Grobase-Vault-2026!' make all` (default `GROBASE_EDITION=migrate`)
+- **Command:** `FT_PASSPHRASE=<redacted> make all` (default `GROBASE_EDITION=migrate`)
 
 ## Prerequisite checks (all passed)
 
@@ -44,7 +44,7 @@ The root pipeline exited **0** and printed the clickable URL list.
 
 Frontend/root healthcheck: website `https://localhost:4322`, osionos `https://localhost:3001`, bridge
 `https://localhost:4000`, auth-gateway `https://localhost:8787/api/auth` (HTTP 200), grobase BaaS
-`http://127.0.0.1:8000/auth/v1/health` (200). Login: `dev.pro.photo / Osionos123!`.
+`http://127.0.0.1:8000/auth/v1/health` (200). Login: `dev.pro.photo@gmail.com` (password: `make demo-login`).
 
 ---
 

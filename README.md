@@ -120,11 +120,13 @@ Measured time from a cold machine: **9–17 minutes**.
 
 No `.env` needs to be written by hand. With no vault key present, grobase generates its own
 secrets into `apps/grobase/.env`, and `env-local-ensure` derives the root `./.env.local` from it,
-including random `OSIONOS_*` secrets (`scripts/gen-local-env.sh`).
+including random `OSIONOS_*` secrets and the demo account's `DEMO_LOGIN_PASSWORD`
+(`scripts/gen-local-env.sh`). An older `.env.local` without it gets one minted on the next
+`make all`, which says so by name.
 
 `make all` runs, in order (`infrastructure/makes/pipeline.mk`): submodule sync → secrets →
 local TLS certificates → trust the local CA → grobase backend → derive `.env.local` → restore
-data if the engines are empty → SQL migrations → frontends → health check → URL list.
+data if the engines are empty → set the demo account's password → SQL migrations → frontends → health check → URL list.
 
 ### Development bring-up
 
@@ -172,7 +174,10 @@ Security → Manage certificates → Authorities → Import), or run `make certs
 
 ### Demo
 
-1. Open `https://localhost:4322`, create an account, and continue to osionos.
+1. Open `https://localhost:4322`, create an account, and continue to osionos. Or sign in with the
+   seeded demo account: `make demo-login` prints its email and password. The password is
+   generated per machine and kept only in `./.env.local` (git-ignored); it is never committed.
+   It applies to the local stack only, not to production.
 2. In osionos, open **View → Whiteboard**, click **+ New Board**, give it a title.
 3. Open the same board URL in a second window and draw: the strokes appear live in the other
    window (the e2e smoke asserts within 5 s — `tests/e2e/specs/dw8-realtime.spec.ts`).
