@@ -23,6 +23,7 @@ on:
       - ".dockerignore"
       - "docker-bake.hcl"
       - "apps/grobase"
+      - "apps/opposite-osiris"
   workflow_dispatch:
     inputs:
       grobase_edition:
@@ -48,10 +49,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - name: grobase checkout (vault-restore.sh is under test)
+      - name: grobase + opposite-osiris checkout (vault-restore.sh and the web/gateway Dockerfiles are under test)
         run: |
           git config --global --add url."https://github.com/".insteadOf "git@github.com:"
-          git submodule update --init --depth 1 apps/grobase
+          git submodule update --init --depth 1 apps/grobase apps/opposite-osiris
       - name: bats scripts/tests
         run: |
           docker run --rm -v "$PWD:/code" -w /code --entrypoint sh \
