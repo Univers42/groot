@@ -566,14 +566,7 @@ From the project's history:
 
 This project was built with **heavy AI assistance**, and we state it plainly.
 
-- **Tools.** Claude, through Claude Code. The agent configuration is versioned with the code: the
-  `.claude/` submodule (rules, agents and workflows), and `apps/grobase/CLAUDE.md` /
-  `apps/grobase/AGENTS.md` inside grobase.
-- **Workflow: orchestrator and executors.** A team member runs an orchestrator session that
-  breaks the work into small, numbered tasks with explicit preconditions and a "done when". Each
-  task goes to an executor session that implements it on its own branch in small commits and
-  returns a report with evidence (the commands it ran and their output). The orchestrator — and
-  the human behind it — checks the report before the next task starts.
+- **Tools.** Team members used AI assistants in different forms, according to their own work.
 - **Code.** AI wrote and refactored code across the stack: grobase planes and adapters, the
   frontends, SQL migrations, the Makefile pipeline and the Docker setup.
 - **Testing and verification.** AI wrote verification gates and test scripts, including the
