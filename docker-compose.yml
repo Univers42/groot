@@ -56,10 +56,11 @@ services:
     mem_limit: 128m
 
   # osionos-bridge — the editor's persistence/gateway, as its own self-contained
-  # image (Docker Hub dlesieur/osionos-bridge), built FROM the osionos submodule
-  # without modifying it. Pure Node, no npm deps. Config via env_file at runtime.
+  # image, built FROM the osionos submodule without modifying it (published as
+  # dlesieur/osionos-bridge; `make all PULL_PREBUILT=1` pulls that instead).
+  # Pure Node, no npm deps. Config via env_file at runtime.
   osionos-bridge:
-    image: ${OSIONOS_BRIDGE_IMAGE:-dlesieur/osionos-bridge:latest}
+    image: ${OSIONOS_BRIDGE_IMAGE:-track-binocle/osionos-bridge:local}
     build:
       context: ./apps/osionos/app
       dockerfile: ../../../infrastructure/docker/osionos/bridge.Dockerfile
@@ -159,7 +160,7 @@ services:
   osionos-runner:
     build:
       context: infrastructure/docker/osionos/runner
-    image: ${OSIONOS_RUNNER_IMAGE:-dlesieur/osionos-runner:latest}
+    image: ${OSIONOS_RUNNER_IMAGE:-track-binocle/osionos-runner:local}
     container_name: track-binocle-osionos-runner
     profiles: ["runner"]
     restart: unless-stopped
@@ -215,12 +216,14 @@ services:
     restart: unless-stopped
     mem_limit: 512m
 
-  # osionos-app — the block editor as a standalone STATIC image (Docker Hub
-  # dlesieur/osionos-app), built FROM the submodule without modifying it. VITE_*
+  # osionos-app — the block editor as a standalone STATIC image, built FROM the
+  # submodule without modifying it (published as dlesieur/osionos-app). VITE_*
   # are baked at build; nginx serves the build on :80 and the editor talks to the
   # osionos-bridge cross-origin at VITE_API_URL. Fronted by local-https-proxy :3001.
+  # Tagged osionos-web, not osionos-app: the bake dev image already owns
+  # track-binocle/osionos-app:local, and `make compose-build` would overwrite it.
   osionos-app:
-    image: ${OSIONOS_APP_IMAGE:-dlesieur/osionos-app:latest}
+    image: ${OSIONOS_APP_IMAGE:-track-binocle/osionos-web:local}
     profiles:
       - dev
     build:
@@ -453,13 +456,17 @@ services:
     mem_limit: 1g
 
   # prismatica-auth-gateway — the custom API gateway / auth BFF, as its own
-  # self-contained image (Docker Hub dlesieur/prismatica-auth-gateway). PULL-ONLY:
-  # the opposite-osiris source was removed from this repo, so there is no local
-  # build path — rebuild the image from the opposite-osiris source elsewhere.
+  # self-contained image, built from the pinned apps/opposite-osiris submodule
+  # (published as dlesieur/prismatica-auth-gateway). The context is the repo root
+  # because the Dockerfile COPYs apps/opposite-osiris/...; its per-Dockerfile
+  # .dockerignore allowlists the few files it needs.
   # Server-only secrets (SERVICE_ROLE_KEY, OSIONOS_BRIDGE_SHARED_SECRET,
   # TURNSTILE_SECRET_KEY, SMTP) are injected at RUNTIME via env_file below.
   auth-gateway:
-    image: ${AUTH_GATEWAY_IMAGE:-dlesieur/prismatica-auth-gateway:latest}
+    image: ${AUTH_GATEWAY_IMAGE:-track-binocle/prismatica-auth-gateway:local}
+    build:
+      context: .
+      dockerfile: apps/opposite-osiris/docker/services/api-gateway/Dockerfile
     profiles:
       - dev
       - local
@@ -522,16 +529,25 @@ services:
     restart: unless-stopped
     mem_limit: 256m
 
-  # opposite-osiris WEBSITE — served as a STANDALONE image (Docker Hub
-  # dlesieur/opposite-osiris-web): nginx serves the static `astro build` output
-  # AND reverse-proxies /api/* to the BaaS, mirroring the old Vite dev-proxy
-  # routing. Fronted by local-https-proxy at :4322. PULL-ONLY: the opposite-osiris
-  # source was removed from this repo, so there is no local build path — rebuild
-  # the image from the opposite-osiris source elsewhere.
+  # opposite-osiris WEBSITE — served as a STANDALONE image, built from the pinned
+  # apps/opposite-osiris submodule (published as dlesieur/opposite-osiris-web):
+  # nginx serves the static `astro build` output AND reverse-proxies /api/* to the
+  # BaaS, mirroring the old Vite dev-proxy routing. Fronted by local-https-proxy
+  # at :4322. Repo-root context, narrowed by the per-Dockerfile .dockerignore.
   opposite-osiris-web:
     profiles:
       - dev
-    image: ${OPPOSITE_OSIRIS_WEB_IMAGE:-dlesieur/opposite-osiris-web:latest}
+    image: ${OPPOSITE_OSIRIS_WEB_IMAGE:-track-binocle/opposite-osiris-web:local}
+    build:
+      context: .
+      dockerfile: apps/opposite-osiris/docker/services/web/Dockerfile
+      # PUBLIC_* are inlined into the browser bundle. The anon key is this machine's
+      # grobase key from ./.env.local (public by design); the published image bakes
+      # whichever key its builder had.
+      args:
+        PUBLIC_BAAS_ANON_KEY: ${ANON_KEY:-}
+        PUBLIC_SITE_URL: https://localhost:${OPPOSITE_OSIRIS_HOST_PORT:-4322}
+        PUBLIC_OSIONOS_APP_URL: ${PUBLIC_OSIONOS_APP_URL:-https://localhost:3001}
     environment:
       # Runtime, env-driven BaaS upstreams. Default to the local stack's service
       # DNS; override (e.g. OO_BAAS_UPSTREAM=https://baas.example.com) for prod.
