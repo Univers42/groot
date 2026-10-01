@@ -172,6 +172,15 @@ env-local-ensure:
 	@bash scripts/gen-local-env.sh
 	@bash scripts/gen-local-env.sh --sync || printf '[env-local-ensure] derived keys not all refreshed — inspect: bash scripts/gen-local-env.sh --check\n' >&2
 
+.PHONY: demo-login-ensure demo-login
+demo-login-ensure:
+## Wired into `make all` AFTER restore-if-empty. Sets the local demo account's password (dev.pro.photo@gmail.com) to DEMO_LOGIN_PASSWORD from ./.env.local — the snapshot's copy is an old, published one. No-op when it already matches; a missing var or account is a hard error.
+	@sh scripts/demo-login-ensure.sh
+
+demo-login:
+## Print the LOCAL demo login (email + password from ./.env.local). Local only: production accounts are not managed here.
+	@. scripts/lib/demo-login.sh && pw="$$(demo_login_password .env.local)" && printf '%s / %s\n' "$$DEMO_LOGIN_EMAIL" "$$pw"
+
 bootstrap:
 ## Thin alias kept for muscle memory — `make all` is now self-provisioning (it runs secrets-ensure + brings the backend up), so `make bootstrap` simply runs it. FROM-ZERO on a clean machine: copy ~/.config/42ctl/keystore.v42 over first (the only file in neither git nor the vault), then `make all`. The data restore is DESTRUCTIVE on an EMPTY stack only (restore-if-empty never wipes populated data).
 	@if [ ! -f "$(CTL_CFG_DIR)/keystore.v42" ] && [ -z "$${FT_PASSPHRASE:-}$${VAULT42_PASSPHRASE:-}" ]; then \
@@ -180,7 +189,7 @@ bootstrap:
 		echo '            (To restore the SHARED secrets + demo data instead, copy ~/.config/42ctl/keystore.v42 over first.)' >&2; \
 	fi
 	@$(MAKE) --no-print-directory all
-	@echo '✓ bootstrap complete — everything is back. Login: dev.pro.photo / Osionos123!'
+	@echo '✓ bootstrap complete — everything is back. Login: dev.pro.photo@gmail.com (password: make demo-login)'
 
 pulls:
 ## Fetch and pull the root repo plus every recursive submodule using configured upstreams.
@@ -267,3 +276,8 @@ pushes:
 			git -C "$$repo" push -u '$(GIT_PUSH_REMOTE)' "$$branch"; \
 		fi; \
 	done
+
+.PHONY: secrets-scan
+secrets-scan:
+## gitleaks (Docker, pinned) over every tracked file incl. submodules; fails on any finding not in the reviewed .gitleaksignore baseline. `bash scripts/gitleaks-gate.sh --list` shows all current fingerprints.
+	@bash scripts/gitleaks-gate.sh
