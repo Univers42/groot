@@ -276,3 +276,8 @@ pushes:
 			git -C "$$repo" push -u '$(GIT_PUSH_REMOTE)' "$$branch"; \
 		fi; \
 	done
+
+.PHONY: secrets-scan
+secrets-scan:
+## gitleaks (Docker, pinned) over every tracked file incl. submodules; fails on any finding not in the reviewed .gitleaksignore baseline. `bash scripts/gitleaks-gate.sh --list` shows all current fingerprints.
+	@bash scripts/gitleaks-gate.sh
