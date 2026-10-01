@@ -25,9 +25,8 @@ Three independent payloads carry the state — keep them straight:
   `scp -r OLD_HOST:~/.config/42ctl ~/.config/`. Alternatively recover the keystore via
   `make -C apps/grobase ctl-remote ARGS="keys recover --email <you>"` (email-OTP) then `auth login`
   for a fresh contract — but copying the dir is OTP-free. The keystore is unlocked by the passphrase below.
-- **vault42 passphrase: `Grobase-Vault-2026!`** (the two common mis-guesses `Osionos-Vault-2026!` /
-  `Vault-Osionos-2026!` are **wrong** — they will not unlock the keystore). It is *fake/demo* and
-  deliberately shared; rotate it if this ever holds anything real.
+- **vault42 passphrase:** the vault owner gives it to you out-of-band. It is never written in
+  this repo (the repo is public).
 
 ---
 
@@ -63,7 +62,7 @@ checks out an older grobase without the latest dumps. Cloning grobase **directly
 ```bash
 make vault42-pull-all                 # DRY-RUN: shows what would be written
 make vault42-pull-all APPLY=1         # actually restore the env tree (FORCE=1 to overwrite existing)
-# passphrase prompt (hidden): Grobase-Vault-2026!
+# passphrase prompt (hidden): the vault42 passphrase from the vault owner
 ```
 
 This restores the whole monorepo env tree (root + grobase + osionos + mail + opposite-osiris +
@@ -154,14 +153,14 @@ make all                # everything, from zero — self-provisions (prompts onc
 
 ```bash
 make syncro-submodule                                  # 1. correct source / images
-make vault42-pull-all APPLY=1                           # 2. secrets  (pass: Grobase-Vault-2026!)
+make vault42-pull-all APPLY=1                           # 2. secrets  (prompts for the vault42 passphrase)
 make -C apps/grobase up                                 # 3a. engines + network
 CONFIRM=1 apps/grobase/data-snapshots/restore-databases.sh   # 3b. data (DESTRUCTIVE drop-replace)
 docker restart mini-baas-minio mini-baas-realtime       # 3c. cache re-read
 make all                                                # 4. frontends
 ```
 
-Login `dev.pro.photo / Osionos123!`. If something is empty, the engine was down at restore time —
+Login `dev.pro.photo@gmail.com`, password from `make demo-login` (minted per machine). If something is empty, the engine was down at restore time —
 bring it up and re-run `restore-databases.sh` (idempotent drop-and-replace).
 
 > **`make bootstrap` vs `make all`:** `bootstrap` is the **one-time from-zero** command (it includes the

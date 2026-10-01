@@ -1,0 +1,89 @@
+# .gitleaksignore — the reviewed baseline for `make secrets-scan` (scripts/gitleaks-gate.sh).
+# Every line was triaged on 2026-10-01 (branch fix/remove-committed-secrets): none is a live
+# credential. Format is gitleaks' file:rule:line fingerprint. Add a line only for a fixture or
+# placeholder, under the group that gives its reason; a real secret is removed, never listed.
+
+# Public by design: browser-safe anon JWT (role=anon) / Supabase publishable key / storage-key names
+apps/grobase/vendor/vite-gourmand/scripts/supabase/setup-supabase.sh:generic-api-key:28
+apps/grobase/vendor/vite-gourmand/wiki/suppabase.md:generic-api-key:1
+apps/opposite-osiris/deploy/fly/fly.toml:jwt:25
+apps/opposite-osiris/src/data/legal.ts:generic-api-key:30
+apps/opposite-osiris/src/data/legal.ts:generic-api-key:31
+
+# Not a secret: SonarCloud project key (public identifier)
+QUALITY-SECURITY-TOOLING.md:generic-api-key:109
+apps/opposite-osiris/public/docs/fragment.html:generic-api-key:6880
+apps/opposite-osiris/public/docs/index.html:generic-api-key:6890
+apps/opposite-osiris/vault/platform/sonarcloud-quality.xmd:generic-api-key:38
+archive/wiki-2026-09/tools/02-sast-and-code-quality.md:generic-api-key:130
+archive/wiki-2026-09/tools/README.md:generic-api-key:81
+sonar-project.properties:generic-api-key:2
+
+# Test fixtures: throwaway keys for isolated verify/test stacks, labelled fake in place
+.github/workflows/mini-baas-security.yml:generic-api-key:425
+apps/grobase/scripts/ci/run-ci-local.sh:curl-auth-header:117
+apps/grobase/scripts/seed/nimbus-data-generate.mjs:generic-api-key:21
+apps/grobase/scripts/test/assemble-env-test.sh:generic-api-key:35
+apps/grobase/scripts/test/assemble-env-test.sh:github-pat:35
+apps/grobase/scripts/test/assemble-env-test.sh:github-pat:37
+apps/grobase/scripts/test/phase/phase1-smoke-test.sh:curl-auth-header:181
+apps/grobase/scripts/test/phase/phase12-rate-limiting-test.sh:curl-auth-header:136
+apps/grobase/scripts/test/phase/phase14-mongo-mvp-test.sh:curl-auth-header:132
+apps/grobase/scripts/test/phase/phase7-error-handling-test.sh:curl-auth-header:87
+apps/grobase/scripts/test/phase/phase7-error-handling-test.sh:curl-auth-header:96
+apps/grobase/scripts/test/phase/phase7-error-handling-test.sh:generic-api-key:89
+apps/grobase/scripts/test/phase/phase8-token-lifecycle-test.sh:curl-auth-header:246
+apps/grobase/scripts/verify/m130-custom-entitlement-enforced.sh:generic-api-key:80
+apps/grobase/scripts/verify/m131-selfserve-mount-create.sh:generic-api-key:62
+apps/grobase/scripts/verify/m132-ceiling-enforce.sh:generic-api-key:69
+apps/grobase/scripts/verify/m133-cross-tenant-safety.sh:generic-api-key:63
+apps/grobase/scripts/verify/m134-flag-off-parity.sh:generic-api-key:61
+apps/grobase/scripts/verify/m166-groups-environments.sh:generic-api-key:241
+apps/grobase/scripts/verify/m194-preflight-production.sh:generic-api-key:234
+apps/grobase/scripts/verify/m195-prod-overlay-hardening.sh:generic-api-key:399
+apps/grobase/scripts/verify/m59-graphql-live.sh:generic-api-key:66
+apps/grobase/scripts/verify/m65-vault-enforce.sh:generic-api-key:82
+apps/grobase/scripts/verify/m67-adapter-hmac.sh:generic-api-key:80
+apps/grobase/scripts/verify/m68-key-rotate.sh:generic-api-key:86
+apps/osionos/app/tests/bridge/bridge-public.test.mjs:generic-api-key:19
+apps/osionos/app/tests/bridge/bridge-push.test.mjs:generic-api-key:22
+apps/osionos/app/tests/bridge/ide-exec-parse.test.mjs:generic-api-key:35
+apps/osionos/app/tests/bridge/ide-exec-parse.test.mjs:generic-api-key:46
+
+# Doc examples: $VAR placeholders in curl lines, sample CLI output of local dev engines (archive),
+# SonarCloud issue ids, a public CI badge token
+apps/grobase/infra/config/audit/issues-all.json:generic-api-key:132
+apps/grobase/infra/config/audit/issues-all.json:generic-api-key:3
+apps/grobase/infra/config/audit/issues-all.json:generic-api-key:46
+apps/grobase/infra/config/audit/issues-all.json:generic-api-key:89
+apps/grobase/infra/config/audit/issues-minor.json:generic-api-key:132
+apps/grobase/infra/config/audit/issues-minor.json:generic-api-key:3
+apps/grobase/infra/config/audit/issues-minor.json:generic-api-key:46
+apps/grobase/infra/config/audit/issues-minor.json:generic-api-key:89
+apps/grobase/infra/docker/services/kong/README.md:curl-auth-header:65
+apps/grobase/infra/docker/services/kong/README.md:curl-auth-header:78
+apps/grobase/infra/docker/services/kong/README.md:curl-auth-header:87
+apps/grobase/infra/docker/services/kong/README.md:curl-auth-header:95
+apps/grobase/vendor/music-room/back/README.md:generic-api-key:5
+apps/grobase/wiki/operations/partner-demo-runbook.md:curl-auth-header:174
+apps/grobase/wiki/operations/partner-demo-runbook.md:curl-auth-header:183
+apps/grobase/wiki/operations/partner-demo-runbook.md:curl-auth-header:193
+apps/grobase/wiki/operations/partner-demo-runbook.md:curl-auth-header:74
+apps/grobase/wiki/operations/partner-demo-runbook.md:curl-auth-header:75
+apps/grobase/wiki/operations/partner-demo-runbook.md:curl-auth-header:76
+apps/osionos/app/docker/services/sonarqube/README.md:curl-auth-header:162
+apps/osionos/app/docker/services/sonarqube/README.md:curl-auth-header:166
+apps/osionos/app/docker/services/sonarqube/README.md:curl-auth-header:295
+apps/osionos/app/docker/services/sonarqube/README.md:curl-auth-header:306
+apps/osionos/app/docker/services/sonarqube/README.md:curl-auth-header:336
+apps/osionos/app/docker/services/sonarqube/README.md:curl-auth-header:345
+apps/osionos/app/src/shared/notion-database-sys/docker/services/sonarqube/README.md:curl-auth-header:159
+apps/osionos/app/src/shared/notion-database-sys/docker/services/sonarqube/README.md:curl-auth-header:163
+apps/osionos/app/src/shared/notion-database-sys/docker/services/sonarqube/README.md:curl-auth-header:293
+apps/osionos/app/src/shared/notion-database-sys/docker/services/sonarqube/README.md:curl-auth-header:304
+apps/osionos/app/src/shared/notion-database-sys/docker/services/sonarqube/README.md:curl-auth-header:334
+apps/osionos/app/src/shared/notion-database-sys/docker/services/sonarqube/README.md:curl-auth-header:343
+archive/wiki-2026-09/database-cli/dynamodb/03-query-scan.md:generic-api-key:199
+archive/wiki-2026-09/database-cli/minio/02-users-policies.md:generic-api-key:171
+archive/wiki-2026-09/database-cli/minio/02-users-policies.md:generic-api-key:172
+archive/wiki-2026-09/database-cli/mongodb/operations.md:generic-api-key:88
