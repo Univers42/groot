@@ -4,6 +4,11 @@
 # at the very end of `make all`.
 set -u
 
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=scripts/lib/demo-login.sh
+. "$REPO/scripts/lib/demo-login.sh"
+rc=0
+
 up() { docker ps --format '{{.Names}}' 2>/dev/null | grep -qE "$1"; }
 # link <label> <container-regex> <url> — print only if the backing container is up.
 link() { if up "$2"; then printf '    \033[32m●\033[0m %-16s \033[4;36m%s\033[0m\n' "$1" "$3"; fi; }
@@ -32,8 +37,16 @@ link 'grobase BaaS' 'mini-baas-kong' "http://127.0.0.1:$(hostport mini-baas-kong
 link 'LiveKit' '[-_]livekit' 'ws://127.0.0.1:7880'
 link 'Mailpit inbox' 'mini-baas-mailpit' "http://localhost:$(hostport mini-baas-mailpit 8025 8025)"
 link 'Grafana' 'mini-baas-grafana' "http://localhost:$(hostport mini-baas-grafana 3000 3010)"
-printf '\n  \033[2mLogin\033[0m  dev.pro.photo / Osionos123!\n'
+# The demo password is minted per machine (never committed); a missing one is reported, not
+# printed empty — the recap still lists every URL.
+if pw="$(demo_login_password "$REPO/.env.local")"; then
+  printf '\n  \033[2mLogin\033[0m  %s / %s\n' "$DEMO_LOGIN_EMAIL" "$pw"
+else
+  printf '\n  \033[2mLogin\033[0m  %s / \033[31m(DEMO_LOGIN_PASSWORD missing — see above)\033[0m\n' "$DEMO_LOGIN_EMAIL"
+  rc=1
+fi
 if [ -n "${SSH_CONNECTION:-}${VSCODE_IPC_HOOK_CLI:-}" ]; then
   printf '  \033[2m(remote/forwarded session: an auto-opened https://localhost:<port> may run outside this VM)\033[0m\n'
 fi
 printf '\n'
+exit "$rc"
