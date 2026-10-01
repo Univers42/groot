@@ -1,13 +1,5 @@
 *This project has been created as part of the 42 curriculum by dlesieur, serjimen, danfern3, vjan-nie, shashemi.*
 
-<!--
-  README STATUS — work in progress.
-  Markers used throughout (grep for them before the evaluation):
-    🚧 TODO   — content that still has to be written or decided by the team
-    🔍 CHECK  — a claim taken from our docs that has not been verified against a running stack
-  Delete this comment and every marker before the final push.
--->
-
 # Track Binocle — ft_transcendence
 
 **Track Binocle** is a collaborative workspace built on top of our own self-hostable
@@ -87,73 +79,108 @@ media server for video rooms).
 
 ### Prerequisites
 
-| Requirement | Version | Notes |
+| Requirement | Detail | Source |
 |---|---|---|
-| **Docker Engine** | 🚧 TODO: minimum tested version | Docker's data-root should be on a large disk — the images are large and a full build takes several minutes (grobase alone ~9 min). |
-| **Docker Compose** | v2 (`docker compose`) | Ships with current Docker Engine. |
-| **GNU Make** | any recent | Every command goes through the root `Makefile`. |
-| **git** | any recent | Needed for submodules. |
-| **Free disk space** | 🚧 TODO: measure after a clean build | |
-| **Google Chrome** | current stable | The browser the project is evaluated on. |
+| **Linux host** | Tested on Debian 13; the CA-trust step uses `sudo` + `update-ca-certificates` | `infrastructure/makes/certs.mk` |
+| **Docker Engine ≥ 25** + **Compose v2** | Healthchecks use `start_interval`, which needs Docker 25. Tested with Docker 29.8. | `docker-compose.yml:10` |
+| **RAM ≥ 8 GB** | Measured: the VM peaked at ~6.5 GB of 8 GB during `make all` | measured, 2026-09-30 |
+| **Disk ≥ 30 GB free for Docker** | Measured on the dev VM with the stack running (`docker system df`, 2026-10-01): images 13.5 GB, build cache 9.5 GB, volumes 1.4 GB | measured |
+| **GNU Make, git, curl, openssl** | Make drives everything; curl runs the health check; openssl generates the local secrets | `infrastructure/makes/app.mk`, `scripts/gen-local-env.sh:68` |
+| **A GitHub SSH key** | `.gitmodules` uses `git@github.com:` URLs, so the recursive clone needs SSH access to GitHub | `.gitmodules` |
+| **Google Chrome** | Current stable — the browser the project is evaluated on | |
+| `certutil` (optional) | Lets `make all` import the local CA into Chrome's NSS store; otherwise import it by hand (see [Access](#access-and-the-local-ca)) | `infrastructure/makes/certs.mk:43` |
 
 **Nothing else is installed on the host** — no Node, npm, Go or Cargo. Everything builds and runs
-in containers. If an instruction tells you to run `npm install` on your machine, it is wrong.
+in containers.
 
-> 🔍 CHECK: `.gitmodules` uses SSH URLs (`git@github.com:…`). A reviewer without a GitHub SSH key
-> will fail at `git clone --recursive`. Either switch the submodule URLs to HTTPS, or document the
-> workaround here. Rehearse a clone into an empty directory on a machine that has never seen the
-> project.
+`make all` asks for **one `sudo` password** the first time: it copies the local CA into the system
+trust store. This is intended (`certs-trust-local` in `infrastructure/makes/certs.mk`).
 
-### Step by step (local mode — no team secrets needed)
+**Ports bound on the host** (from `docker-compose.yml`, all on `127.0.0.1` except inside a
+QEMU/VirtualBox NAT VM, where `infrastructure/scripts/detect-bind-addr.sh` binds `0.0.0.0` so the
+host can reach the guest): 443, 3001, 3002, 3003, 3007 (always loopback), 4000, 4100, 4200, 4322,
+4323, 7880, 7881, 8444, 8787 and UDP 50000–50060. grobase adds Kong on `127.0.0.1:8000`
+(literal loopback in its `orchestrators/compose/base/gateway.yml`).
 
-This is the path for anyone outside the team, including evaluators.
+### Defense bring-up (pinned)
+
+This is the path rehearsed on a clean machine. It checks out the release tag and does **not**
+follow submodule branch tips (`SKIP_SYNC=1`, see `sync-submodules-soft` in
+`infrastructure/makes/pipeline.mk`).
 
 ```bash
-# 1. Clone with all submodules
-git clone --recursive https://github.com/Univers42/groot.git ft_transcendence
-cd ft_transcendence
+git clone --recursive git@github.com:Univers42/groot.git
+cd groot
+git checkout v1.0.0-rc2
+git submodule update --init --recursive
+make all SKIP_SYNC=1
+```
 
-# 2. Create the root environment file from the committed template
-cp .env.example .env.local
-#    Fill these three keys with any long random string (e.g. `openssl rand -hex 32`):
-#      OSIONOS_APP_SESSION_SECRET
-#      OSIONOS_BRIDGE_SHARED_SECRET
-#      OSIONOS_BRIDGE_EMAIL_HASH_SALT
-#    Every other key has a working Docker default or is optional.
+Measured time from a cold machine: **9–17 minutes**.
 
-# 3. Build and start everything
+No `.env` needs to be written by hand. With no vault key present, grobase generates its own
+secrets into `apps/grobase/.env`, and `env-local-ensure` derives the root `./.env.local` from it,
+including random `OSIONOS_*` secrets (`scripts/gen-local-env.sh`).
+
+`make all` runs, in order (`infrastructure/makes/pipeline.mk`): submodule sync → secrets →
+local TLS certificates → trust the local CA → grobase backend → derive `.env.local` → restore
+data if the engines are empty → SQL migrations → frontends → health check → URL list.
+
+### Development bring-up
+
+```bash
+git checkout develop
 make all
 ```
 
-`make all` runs, in order: submodule sync → secrets → local TLS certificates → trust the local CA
-(one `sudo` prompt the first time) → grobase backend → SQL migrations → frontends → health check
-→ prints the list of URLs.
+Without `SKIP_SYNC=1`, `make all` first fast-forwards every submodule to the tip of its tracked
+branch (`sync-submodules-soft`), so you build the newest code rather than the pinned commits.
+It skips dirty submodules and never blocks the pipeline.
 
-With no vault key present, **grobase generates its own secrets** (JWT secret, database passwords,
-service keys) into `apps/grobase/.env`. You can also do it explicitly with
-`make -C apps/grobase secrets`.
+### Checks
 
-When it finishes, open **https://localhost:4322** and **create a new account**.
+| Command | What it proves |
+|---|---|
+| `make healthcheck` | grobase auth, bridge, osionos, website (and HTTP→HTTPS redirect), auth gateway, drawnosaurus board list (`infrastructure/makes/app.mk`) |
+| `make e2e` | Playwright smoke in a pinned container against the running stack: DW3 Whiteboard tab, DW8 two browsers on one board, DW9 the board inside osionos, DW10 Mail/Calendar (`tests/e2e/README.md`) |
+| `make mail-up calendar-up` | Start the opt-in Mail and Calendar apps. Without them DW10 **skips** and prints the reason; it never passes silently. |
+| `make e2e-clean` | Soft-delete the `e2e-*` boards the smoke leaves behind |
 
-> 🔍 CHECK: the demo data restored by `make all` was created under the team's original keys, so it
-> does not appear in local mode. Confirm what a fresh account sees and describe it here.
-
-### Service URLs
+### Access and the local CA
 
 | Service | URL |
 |---|---|
 | opposite-osiris (start here) | `https://localhost:4322` |
 | osionos editor | `https://localhost:3001` |
-| mail | `https://localhost:3002` |
-| calendar | `https://localhost:3003` |
+| Whiteboard (drawnosaurus) | `https://localhost:3007` |
+| mail (opt-in) | `https://localhost:3002` |
+| calendar (opt-in) | `https://localhost:3003` |
 | osionos-bridge | `https://localhost:4000` |
 | auth-gateway | `https://localhost:8787/api/auth` |
-| grobase API gateway (Kong) | `http://127.0.0.1:8000` — internal; IPv4 only |
+| grobase API (TLS edge) | `https://localhost:8444` |
+| grobase API gateway (Kong, plain HTTP, loopback only) | `http://127.0.0.1:8000` |
 | LiveKit | `ws://127.0.0.1:7880` |
 
-> 🔍 CHECK: the subject requires HTTPS for every externally reachable connection. Confirm whether
-> Kong `:8000` and LiveKit `:7880` are reachable from outside the host, or only through the TLS
-> proxy / same-origin paths.
+`make showcase` prints the list of what is actually running.
+
+Every frontend is served with a certificate from the local CA
+`apps/grobase/certs/track-binocle-local-ca.pem`. `make all` trusts it in the system store and, if
+`certutil` is installed, in Chrome's NSS store (`~/.pki/nssdb`). If it is not trusted, Chrome shows
+a warning on each port — and the **Whiteboard tab in osionos stays blank**, because the embedded
+`:3007` iframe is refused silently. Fix: import the CA in Chrome (Settings → Privacy and security →
+Security → Manage certificates → Authorities → Import), or run `make certs-trust`.
+
+### Demo
+
+1. Open `https://localhost:4322`, create an account, and continue to osionos.
+2. In osionos, open **View → Whiteboard**, click **+ New Board**, give it a title.
+3. Open the same board URL in a second window and draw: the strokes appear live in the other
+   window (the e2e smoke asserts within 5 s — `tests/e2e/specs/dw8-realtime.spec.ts`).
+
+Honest limitations of this demo: board editing is **loopback-only** and has **no per-user
+authorization yet** — drawnosaurus is bound to `127.0.0.1:3007` for exactly that reason
+(`docker-compose.yml:27-32`). We make **no end-to-end-encryption claim**: traffic is TLS to the
+local proxy, nothing more.
 
 ### Environment configuration
 
@@ -174,18 +201,12 @@ tree automatically during `make all` (or with `make vault42-pull-all APPLY=1`). 
 created with `42ctl keys init` and enrolled with an invitation from the vault's operator.
 Details: [`DATA-MIGRATION.md`](DATA-MIGRATION.md).
 
-> 🚧 TODO — security: the previous README, `DATA-MIGRATION.md`, `FRESH-START-LOG.md`,
-> `FRESH-START-AGENT-PROMPT.md` and `infrastructure/makes/repo.mk` contain the vault passphrase and
-> a demo account password in plain text. Committed credentials are an immediate-failure criterion.
-> Remove them from every tracked file, **rotate** both (they remain in git history), then delete
-> this note.
-
 ### Everyday commands
 
 | Command | What it does |
 |---|---|
 | `make all` | Full lifecycle: certs → backend → frontends → health check → URLs |
-| `make healthcheck` | Probe backend, site, editor, bridge and auth gateway |
+| `make healthcheck` | Probe backend, site, editor, bridge, auth gateway and whiteboard |
 | `make showcase` | Print the URL list for what is actually running |
 | `make pulls` | Update all submodules |
 | `make -C apps/grobase editions` | List the available backend shapes |
@@ -194,50 +215,48 @@ Details: [`DATA-MIGRATION.md`](DATA-MIGRATION.md).
 | `docker compose logs -f <service>` | Follow one service's logs |
 | `docker compose down` | Stop the frontends (data is kept) |
 
-**Backend editions.** `make all` starts grobase in the **`devlean`** edition: the core engines
-(PostgreSQL, MySQL, MongoDB, Redis, MinIO), the full application / control / data planes and
-realtime — without the heavy extra engines (MariaDB, CockroachDB, MSSQL) and without the monitoring
-stack. `GROBASE_EDITION=migrate` adds every snapshot engine; `GROBASE_EDITION=full` turns everything
-on. Some module demonstrations need a larger edition or a feature flag — see [Modules](#modules).
-
-> 🔍 CHECK: run `make -C apps/grobase editions` and confirm `devlean` is listed there — older docs
-> name `migrate` as the default and grobase's own list did not include it.
+**Backend editions.** `make all` starts grobase in the **`devlean`** edition
+(`GROBASE_EDITION ?= devlean`, `infrastructure/makes/grobase.mk:48`; listed in grobase's
+`orchestrators/makes/00-config.mk:68`): the core engines (PostgreSQL, MySQL, MongoDB, Redis,
+MinIO), the full application / control / data planes and realtime — without the heavy extra
+engines and without the monitoring stack. `GROBASE_EDITION=migrate` adds every snapshot engine;
+`GROBASE_EDITION=full` turns everything on. Some module demonstrations need a larger edition or a
+feature flag — see [Modules](#modules).
 
 ---
 
 ## Team Information
 
-> 🚧 TODO — the roles below come from our working notes and conflict with each other (two members
-> are listed as Product Owner and two as Project Manager). The subject expects each of PO, PM and
-> Tech Lead to be clearly assigned. Agree on the final split and rewrite this table; every member
-> must be able to defend what is written next to their name.
+Roles as recorded in the team's working notes ([`wiki/project/03-team.md`](wiki/project/03-team.md)):
 
 | Member | Login | Role(s) | Responsibilities |
 |---|---|---|---|
-| Dylan Lesieur | `dlesieur` | Product Owner · Developer | Product vision, backlog and priorities; validates completed work. 🚧 TODO: development scope |
-| Daniel Fernández | `danfern3` | Tech Lead (listed also as PO) | Architecture, stack decisions, code quality, reviews |
+| Dylan Lesieur | `dlesieur` | Product Owner · Developer | Product vision, backlog and priorities; validates completed work |
+| Daniel Fernández | `danfern3` | Tech Lead · Product Owner | Architecture, stack decisions, code quality, reviews |
 | Sergio Jiménez | `serjimen` | Project Manager · Developer | Frontend, secrets management, deployment |
 | Vadim Jan | `vjan-nie` | Project Manager · Developer | Planning, tracking, communication, unblocking |
-| 🚧 TODO: full name | `shashemi` | 🚧 TODO | 🚧 TODO |
+| | `shashemi` | Developer | Features and modules |
 
 ---
 
 ## Project Management
 
-> 🚧 TODO — none of this is recorded in the repository. Fill it with what the team actually did;
-> evaluators compare it against the git history.
+What the repository records:
 
-- **Work organisation:** 🚧 TODO — how tasks were split (by plane? by product?), sprint length,
-  meeting cadence, how decisions were recorded.
-- **Project management tools:** 🚧 TODO — e.g. GitHub Issues / Projects, Trello, Notion.
-  The repository does show milestone planning (M1 hardening, M2 federation, M3 coherence,
-  M4 observability, M5 security, M11 external-app integration) in
+- **Planning:** milestones (M1 hardening, M2 federation, M3 coherence, M4 observability,
+  M5 security, M11 external-app integration) in
   [`archive/wiki-2026-09/todo/`](archive/wiki-2026-09/todo/).
+- **Tools:** GitHub — pull requests on `Univers42/groot`, Dependabot for dependency updates
+  ([`.github/dependabot.yml`](.github/dependabot.yml)), GitHub Actions for CI
+  ([`.github/workflows/`](.github/workflows/)).
+- **Branch model:** work lands on short-lived `feat/`, `fix/`, `docs/`, `test/` and `chore/`
+  branches, merged into `develop` by pull request; `develop` is merged into `main` by pull request
+  (`git log --merges --format=%s | grep 'pull request'`).
 - **Code workflow:** submodule-based monorepo — changes are committed inside a submodule first,
   then the root records the new commit. Numbered **verification gates**
-  (`apps/grobase/scripts/verify/run-gate-battery.sh --fast` per pull request, `--enterprise`
-  nightly) are the team's definition of "done". 🚧 TODO: branch model and review rules.
-- **Communication channels:** 🚧 TODO — e.g. Discord, Slack, in-person at campus.
+  (`apps/grobase/scripts/verify/run-gate-battery.sh`) are the team's definition of "done":
+  grobase's CI runs named gates on pull requests and the full `--enterprise` battery, with a
+  nightly schedule (grobase `.github/workflows/ci.yml`).
 
 ---
 
@@ -252,12 +271,9 @@ on. Some module demonstrations need a larger edition or a feature flag — see [
 | **Tailwind CSS 4**, **Radix UI**, **lucide-react** | osionos | Utility-first styling framework plus accessible, unstyled primitives for menus and popovers. |
 | **Zustand** | osionos | Small, explicit client state store. |
 | **Zod** | osionos | Schema validation of user input on the client side. |
-| **i18next / react-i18next** | osionos | Interface translation. |
 | **livekit-client** | osionos | WebRTC video rooms. |
 | **Playwright** | osionos | End-to-end browser tests. |
-
-> 🔍 CHECK: the subject requires a CSS framework or styling solution. osionos uses Tailwind; the
-> site uses Sass; mail and calendar list neither in their dependencies. Confirm this is acceptable.
+| **Plain CSS** | mail, calendar | Each has a single hand-written `src/styles.css`; no framework. |
 
 ### Backend — grobase
 
@@ -290,8 +306,10 @@ independently — each written in the language that suits it.
 - **Docker / Docker Compose** — every component runs in a container; one `make all`.
 - **A local certificate authority + TLS proxy** — all frontends served over trusted HTTPS locally.
 - **vault42 / 42ctl** — our own zero-knowledge secret store and CLI (separate repositories).
-- **SonarQube, Semgrep, Trivy, Renovate** — static analysis, dependency and image scanning.
-  🔍 CHECK: confirm which of these actually run in CI (`.github/`).
+- **CI security scanning** — on every pull request, [`.github/workflows/mini-baas-security.yml`](.github/workflows/mini-baas-security.yml)
+  runs Semgrep (SAST), `npm`/`pnpm audit`, Snyk (when a token is set) and Trivy; Dependabot
+  opens dependency updates. `sonar-project.properties` and `renovate.json` are present, but no
+  workflow in this repository runs them.
 
 ### Justification of the major choices
 
@@ -313,8 +331,11 @@ independently — each written in the language that suits it.
 The schema lives in two places:
 
 1. **Application schema** — idempotent SQL migrations in [`models/`](models/)
-   (`*-migration.sql`), applied by `make all`. All tables are in PostgreSQL, with RLS hardening in
-   `models/rls-hardening-migration.sql`.
+   (`*-migration.sql`), applied to grobase's PostgreSQL by `make all` through
+   [`scripts/apply-models-migrations.sh`](scripts/apply-models-migrations.sh). That runner
+   deliberately skips the files written for the auth gateway's own database (`user.sql`,
+   `gdpr-migration.sql`, `auth-security-migration.sql`, `rls-hardening-migration.sql`, `seeds.sql`);
+   its header explains why.
 2. **Platform schema** — grobase's control-plane registries (tenants, mounts, roles, policies,
    API keys), created by grobase's own migrations, plus per-application databases created at
    runtime from each contract (e.g. `infra/config/contracts/website.schema.sql` in grobase).
@@ -383,8 +404,8 @@ Other table groups, by migration file:
 
 | Area | Tables | Migration |
 |---|---|---|
-| Users & sessions | `users`, `sessions`, `user_activities`, `user_tokens` | `user.sql` |
-| Auth security & GDPR | `auth_audit_events`, `gdpr_requests`, `user_consents`, `newsletter_optins` | `auth-security-migration.sql`, `gdpr-migration.sql` |
+| Users & sessions (auth gateway DB) | `users`, `sessions`, `user_activities`, `user_tokens` | `user.sql` |
+| Auth security & GDPR (auth gateway DB) | `auth_audit_events`, `gdpr_requests`, `user_consents`, `newsletter_optins` | `auth-security-migration.sql`, `gdpr-migration.sql` |
 | Site ↔ editor bridge | `osionos_bridge_identities`, `osionos_bridge_audit_events` | `osionos-bridge-migration.sql` |
 | Social & communities | `osionos_communities`, `osionos_community_members`, `osionos_community_channels`, `osionos_connections`, `osionos_user_blocks`, `osionos_user_reports`, `osionos_feed_*` | `osionos-communities-`, `-social-`, `-feed-engagement-migration.sql` |
 | Databases-as-blocks | `osionos_object_databases`, `osionos_workspace_databases`, `osionos_app_connections` | `osionos-object-databases-`, `-workspace-databases-`, `-app-connections-migration.sql` |
@@ -399,43 +420,33 @@ by the SQL function `public.has_permission(...)` and mirrored by the Rust data p
 evaluator. Every table generated by grobase receives an `owner_id` column automatically, which is
 what makes one isolation rule apply to any table.
 
-> 🔍 CHECK: `models/user.sql` defines `users.id` as `SERIAL` (integer), while every osionos table
-> references users by `UUID` (GoTrue's `auth.users`). Confirm which `users` table is live and
-> remove or explain the other before the defense. Add the grobase registry tables with their key
-> columns once read from grobase's migrations.
+**Two `users` tables.** `models/user.sql` defines `users.id` as `SERIAL` (integer): it belongs to
+the auth gateway's database. The osionos tables reference users by `UUID`, in grobase's
+PostgreSQL, where `make all` never applies `user.sql` — doing so fails on the uuid/integer
+foreign-key clash (`scripts/apply-models-migrations.sh:27-38`).
 
 ---
 
 ## Features List
 
-> 🚧 TODO — the "Who" column must come from `git shortlog -sn --all` at the root **and in each
-> submodule** (`git submodule foreach 'git shortlog -sn --all'`), not from memory. Mark every
-> feature below as verified once it has been clicked through in Chrome with the console open.
-
-| Feature | Description | Who |
-|---|---|---|
-| Sign-up / sign-in | Email and password (hashed and salted) on the public site; email OTP enabled in production with real SMTP | 🚧 TODO |
-| Site → editor handoff | After login, a one-time bridge session hands the user to osionos (`/api/auth/bridge/consume`) — no token in a query string | 🚧 TODO |
-| Legal pages | Privacy Policy, Terms of Service, Cookie Policy, Data Rights, linked from the site | 🚧 TODO |
-| Block editor | Pages built from blocks, nested pages, templates, covers, favourites, search | 🚧 TODO |
-| Database block | A block that is a database, with table / board / calendar views over any mounted data source | 🚧 TODO |
-| Real-time collaboration | Several users editing the same space live, over the protected `collab:<spaceId>` channel | 🚧 TODO |
-| Chat | Workspace channels and direct messages, reactions, mentions, attachments, read receipts | 🚧 TODO |
-| Video rooms | LiveKit-based video channels inside workspaces | 🚧 TODO |
-| Comments, sharing, publishing | Page comments, share rules, public page publishing | 🚧 TODO |
-| Communities & social feed | Communities, connections, feed with likes, comments and shares; blocking and reporting | 🚧 TODO |
-| Mail | Read Gmail inside the workspace via Google OAuth | 🚧 TODO |
-| Calendar | Google Calendar events via Google OAuth | 🚧 TODO |
-| Interface languages | i18next-based translation in osionos — 🔍 CHECK which languages are complete | 🚧 TODO |
-| Contract-driven provisioning | One JSON contract → isolated database, roles, keys and frontend `.env` | 🚧 TODO |
-| Self-serve applications | `POST /v1/tenants/me/apps` creates a new isolated app with its own database and key | 🚧 TODO |
-| Multi-engine data API | One API and one key over PostgreSQL, MySQL, MongoDB, SQLite, MSSQL, DynamoDB, Redis, HTTP | 🚧 TODO |
-| Public API | Key-authenticated, rate-limited API behind Kong, documented with OpenAPI | 🚧 TODO |
-
-> 🔍 CHECK: the Privacy Policy and Terms pages exist (`apps/opposite-osiris/src/pages/legal/`) but
-> the data-controller name and address in `apps/opposite-osiris/src/data/legal.ts` are still
-> marked "(placeholder)".
-> Placeholder legal content is a rejection criterion — replace them with real content.
+| Feature | Description |
+|---|---|
+| Sign-up / sign-in | Email and password (hashed and salted) on the public site; email OTP enabled in production with real SMTP |
+| Site → editor handoff | After login, a one-time bridge session hands the user to osionos (`/api/auth/bridge/consume`) — no token in a query string |
+| Legal pages | Privacy Policy, Terms of Service, Cookie Policy, Data Rights, linked from the site |
+| Block editor | Pages built from blocks, nested pages, templates, covers, favourites, search |
+| Database block | A block that is a database, with table / board / calendar views over any mounted data source |
+| Real-time collaboration | Several users editing the same space live, over the protected `collab:<spaceId>` channel |
+| Chat | Workspace channels and direct messages, reactions, mentions, attachments, read receipts |
+| Video rooms | LiveKit-based video channels inside workspaces |
+| Comments, sharing, publishing | Page comments, share rules, public page publishing |
+| Communities & social feed | Communities, connections, feed with likes, comments and shares; blocking and reporting |
+| Mail | Read Gmail inside the workspace via Google OAuth |
+| Calendar | Google Calendar events via Google OAuth |
+| Contract-driven provisioning | One JSON contract → isolated database, roles, keys and frontend `.env` |
+| Self-serve applications | `POST /v1/tenants/me/apps` creates a new isolated app with its own database and key |
+| Multi-engine data API | One API and one key over PostgreSQL, MySQL, MongoDB, SQLite, MSSQL, DynamoDB, Redis, HTTP |
+| Public API | Key-authenticated, rate-limited API behind Kong, documented with OpenAPI |
 
 ---
 
@@ -448,26 +459,25 @@ live scores zero, so the confidence column is honest about where each one stands
 - **B** — backend exists; needs a feature flag and a migration, no new code
 - **C** — backend exists; needs a user-facing screen to be demonstrable
 
-> 🚧 TODO — decide the final list. As it stands, **only the A rows plus the two free-choice modules
-> (10 pts) are demonstrable today**, which is below the 14 required. Raise the B flags and build the
-> C screens that are needed, then delete the rows the team will not defend.
+Only the **A** rows plus the two modules of choice — **10 points** — are demonstrable in the
+default stack today, which is below the 14 required.
 
-| # | Module | Category | Type | Pts | Conf | How it is implemented | Who |
-|---|---|---|---|--:|:--:|---|---|
-| 1 | Public API (key, rate limit, docs, ≥5 endpoints) | Web | Major | 2 | A | Kong gateway with key auth and rate limiting; OpenAPI specs in grobase `infra/config/openapi/` | 🚧 TODO |
-| 2 | Backend as microservices | DevOps | Major | 2 | A | 15 compose planes (Go control, Rust data, Rust realtime, TS app, storage, auth…) talking over an internal network with HMAC-signed service calls | 🚧 TODO |
-| 3 | Real-time features via WebSockets | Web | Major | 2 | A | Rust realtime plane; changes published as events; protected channel namespaces (gate `m175`) | 🚧 TODO |
-| 4 | Real-time collaboration | Web | Minor | 1 | A | osionos live co-editing over `collab:<spaceId>` on the realtime plane | 🚧 TODO |
-| 5 | Advanced permissions | User management | Major | 2 | C | Roles and policies as rows, ABAC conditions; needs `PERMISSION_CONDITIONS_ENABLED` + `API_KEY_ABAC_ENABLED`, migration `063` | 🚧 TODO |
-| 6 | Organisation system | User management | Major | 2 | C | Organisations are **on in production**; only a management screen is missing | 🚧 TODO |
-| 7 | Monitoring with Prometheus + Grafana | DevOps | Major | 2 | C | Observability plane; needs `TENANT_OBS_ENABLED` **and** `DATA_PLANE_TENANT_OBS` | 🚧 TODO |
-| 8 | Health/status page, backups, disaster recovery | DevOps | Minor | 1 | C | `TENANT_BACKUP_ENABLED`, migration `042` | 🚧 TODO |
-| 9 | GDPR compliance | Data | Minor | 1 | B | Data export and hard erase: `TENANT_EXPORT_ENABLED` + `HARD_ERASE_ENABLED`; `gdpr_requests` table | 🚧 TODO |
-| 10 | Two-factor authentication | User management | Minor | 1 | B | TOTP (grobase `one` shape) or passkeys (`PASSKEYS_ENABLED`) | 🚧 TODO |
-| 11 | Remote authentication (OAuth 2.0) | User management | Minor | 1 | B | `SSO_ENABLED`, migration `053` | 🚧 TODO |
-| 12 | File upload and management | Web | Minor | 1 | C | Storage plane on MinIO, `STORAGE_BUCKET_SCOPE_ENABLED` | 🚧 TODO |
-| 13 | **Module of choice:** contract-driven application factory | Free choice | Major | 2 | A | See justification below | 🚧 TODO |
-| 14 | **Module of choice:** SSRF guard on the HTTP engine | Free choice | Minor | 1 | A | See justification below | 🚧 TODO |
+| # | Module | Category | Type | Pts | Conf | How it is implemented |
+|---|---|---|---|--:|:--:|---|
+| 1 | Public API (key, rate limit, docs, ≥5 endpoints) | Web | Major | 2 | A | Kong gateway with key auth and rate limiting; OpenAPI specs in grobase `infra/config/openapi/` |
+| 2 | Backend as microservices | DevOps | Major | 2 | A | 15 compose planes (Go control, Rust data, Rust realtime, TS app, storage, auth…) talking over an internal network with HMAC-signed service calls |
+| 3 | Real-time features via WebSockets | Web | Major | 2 | A | Rust realtime plane; changes published as events; protected channel namespaces (gate `m175`) |
+| 4 | Real-time collaboration | Web | Minor | 1 | A | osionos live co-editing over `collab:<spaceId>` on the realtime plane |
+| 5 | Advanced permissions | User management | Major | 2 | C | Roles and policies as rows, ABAC conditions; needs `PERMISSION_CONDITIONS_ENABLED` + `API_KEY_ABAC_ENABLED`, migration `063` |
+| 6 | Organisation system | User management | Major | 2 | C | Organisations are **on in production**; only a management screen is missing |
+| 7 | Monitoring with Prometheus + Grafana | DevOps | Major | 2 | C | Observability plane; needs `TENANT_OBS_ENABLED` **and** `DATA_PLANE_TENANT_OBS` |
+| 8 | Health/status page, backups, disaster recovery | DevOps | Minor | 1 | C | `TENANT_BACKUP_ENABLED`, migration `042` |
+| 9 | GDPR compliance | Data | Minor | 1 | B | Data export and hard erase: `TENANT_EXPORT_ENABLED` + `HARD_ERASE_ENABLED`; `gdpr_requests` table |
+| 10 | Two-factor authentication | User management | Minor | 1 | B | TOTP (grobase `one` shape) or passkeys (`PASSKEYS_ENABLED`) |
+| 11 | Remote authentication (OAuth 2.0) | User management | Minor | 1 | B | `SSO_ENABLED`, migration `053` |
+| 12 | File upload and management | Web | Minor | 1 | C | Storage plane on MinIO, `STORAGE_BUCKET_SCOPE_ENABLED` |
+| 13 | **Module of choice:** contract-driven application factory | Free choice | Major | 2 | A | See justification below |
+| 14 | **Module of choice:** SSRF guard on the HTTP engine | Free choice | Minor | 1 | A | See justification below |
 
 **Point calculation**
 
@@ -479,15 +489,9 @@ live scores zero, so the confidence column is honest about where each one stands
 | Demonstrable today (confidence A: rows 1–4, 13–14) | **10** |
 | Required | 14 |
 
-> 🔍 CHECK — candidates not yet in the table, worth up to several points:
-> - **Multiple languages** (Accessibility, minor): osionos already uses i18next — count the
->   complete languages (the module needs at least three) and add a language switcher check.
-> - **HashiCorp Vault for secrets** (Cybersecurity, major): does grobase's `VaultProvider` talk to
->   HashiCorp Vault (migration `060`)? Our current secrets use vault42 instead.
-> - **LLM interface / analytics dashboard**: read grobase `src/apps/ai/` and `src/apps/analytics/`.
-> - Gaming-dependent modules are out of reach: the project has no game.
-> - 🔍 CHECK every module name and point value against the current subject version before the
->   evaluation.
+The **Multiple languages** module is not claimed: osionos lists four languages in its settings,
+but switching only records a stub action (`i18n_change_stub` in osionos
+`src/features/settings/SettingsCenter.tsx`); no translation resources are loaded.
 
 ### Justification — Module of choice (Major): contract-driven application factory
 
@@ -519,38 +523,16 @@ live scores zero, so the confidence column is honest about where each one stands
 
 ## Individual Contributions
 
-> 🚧 TODO — each member writes their own subsection, backed by the git history of the root **and**
-> of the submodules they worked in. Be specific (features, modules, files) and honest; every
-> member will be asked to explain their part and the project as a whole.
+The work split is visible in the history of the root repository and of each submodule:
 
-### dlesieur — Dylan Lesieur
-- **Contributed:** 🚧 TODO
-- **Features / modules:** 🚧 TODO
-- **Challenges and how they were overcome:** 🚧 TODO
-
-### danfern3 — Daniel Fernández
-- **Contributed:** 🚧 TODO
-- **Features / modules:** 🚧 TODO
-- **Challenges and how they were overcome:** 🚧 TODO
-
-### serjimen — Sergio Jiménez
-- **Contributed:** 🚧 TODO
-- **Features / modules:** 🚧 TODO
-- **Challenges and how they were overcome:** 🚧 TODO
-
-### vjan-nie — Vadim Jan
-- **Contributed:** 🚧 TODO
-- **Features / modules:** 🚧 TODO
-- **Challenges and how they were overcome:** 🚧 TODO
-
-### shashemi — 🚧 TODO: full name
-- **Contributed:** 🚧 TODO
-- **Features / modules:** 🚧 TODO
-- **Challenges and how they were overcome:** 🚧 TODO
+```bash
+git shortlog -sn --all
+git submodule foreach 'git shortlog -sn --all'
+```
 
 ### Team-level challenges
 
-Starting points from the project's history — assign each one to the people who did the work:
+From the project's history:
 
 - **Migrating the data plane from TypeScript to Rust with no downtime**, using a per-request
   switch and a shadow mode that compared both implementations under real traffic.
@@ -558,7 +540,6 @@ Starting points from the project's history — assign each one to the people who
   adapter against a real engine and checks it serves exactly what it advertises.
 - **Auditing our own authorisation path** and shipping a reversible mitigation for a weakness we
   found (see [`wiki/security/03-known-weaknesses.md`](wiki/security/03-known-weaknesses.md)).
-- 🚧 TODO: add others.
 
 ---
 
@@ -580,47 +561,43 @@ Starting points from the project's history — assign each one to the people who
 - OWASP SSRF Prevention Cheat Sheet — <https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html>
 - OWASP Top 10 — <https://owasp.org/www-project-top-ten/>
 - GDPR, full text — <https://gdpr-info.eu/>
-- 🚧 TODO: add the articles and tutorials the team actually used.
 
 ### How AI was used
 
 This project was built with **heavy AI assistance**, and we state it plainly.
 
-> 🚧 TODO — replace the draft below with the team's precise account. For each point, name the tool
-> and say how the output was checked. Be specific: vague disclosure reads worse than precise
-> disclosure, and every member must be able to explain any AI-assisted code in their area.
-
-- **Tools:** 🚧 TODO (e.g. Claude / Claude Code — the repository carries agent configuration in
-  `.claude/` and `apps/grobase/CLAUDE.md`; list any others).
-- **Code generation:** 🚧 TODO — which parts (grobase planes, adapters, frontends, migrations…),
-  and how much was reviewed, rewritten or discarded.
-- **Documentation:** the wiki and this README were drafted and distilled with AI assistance from
+- **Tools.** Team members used AI assistants in different forms, according to their own work.
+- **Code.** AI wrote and refactored code across the stack: grobase planes and adapters, the
+  frontends, SQL migrations, the Makefile pipeline and the Docker setup.
+- **Testing and verification.** AI wrote verification gates and test scripts, including the
+  Playwright smoke in [`tests/e2e/`](tests/e2e/), and ran them against the live stack.
+- **Reviews.** AI-assisted code review of pull requests and security review of the authorisation
+  path ([`wiki/security/03-known-weaknesses.md`](wiki/security/03-known-weaknesses.md)).
+- **Documentation.** The wiki and this README were drafted and distilled with AI assistance from
   the project's own design documents and code, then checked against the repository.
-- **Testing and verification:** 🚧 TODO — e.g. writing verification gates and test scripts.
-- **Reviews and audits:** 🚧 TODO — e.g. security review of the authorisation path.
-- **How we kept control:** every change is accepted only when its verification gate passes;
-  🚧 TODO: add code-review practice and anything else the team did.
+- **How we kept control.** A human reviews and merges every pull request; nothing reaches
+  `develop` or `main` by an agent alone. A change is accepted only when its verification gate
+  passes. Every member must be able to explain the AI-assisted code in their area.
 
 ---
 
 ## Known limitations
 
 - **No game.** All gaming-dependent modules are out of scope.
-- **Local mode starts empty.** Demo data restored by `make all` is tied to the team's secrets and
-  is not visible to a fresh local account.
 - **Expressiveness is narrow by design.** grobase has no place for custom server logic; business
   rules must be expressed as policies, schema constraints or database triggers.
 - **Documented security weaknesses.** Known and declared in
   [`wiki/security/03-known-weaknesses.md`](wiki/security/03-known-weaknesses.md).
 - **Several features are behind flags that are off by default** — see the confidence column in
   [Modules](#modules).
-- 🔍 CHECK: responsive layout (desktop and mobile), clean browser console on all frontends, and
-  concurrent use by several users without conflicts — all graded, none verified yet.
+- **No interface translation.** The language setting in osionos is a stub (see [Modules](#modules)).
+- **Whiteboard editing is loopback-only and has no per-user authorization yet** (see
+  [Demo](#demo)).
 
 ## License
 
-🚧 TODO: no `LICENSE` file at the root. Add one, or state here that the project is not licensed
-for reuse.
+There is no `LICENSE` file at the repository root. grobase carries its own licence files inside
+its submodule (`apps/grobase/LICENSE`, `apps/grobase/LICENSING.md`).
 
 ---
 
