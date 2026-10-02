@@ -24,6 +24,10 @@
 # atomically, leaving every other line (minted secrets, hand edits, comments) as is.
 # An empty source value is never written. Run by `make all` (env-local-ensure) and by
 # vault42-team.sh after an applied pull.
+#
+# MINTED keys (DEMO_LOGIN_PASSWORD) are local-only secrets an older .env.local predates.
+# `--sync` mints one that is absent or empty and says so by name; `--check` reports it
+# as missing. scripts/demo-login-ensure.sh then applies the password to the account.
 set -eu
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -44,6 +48,8 @@ note() { printf '[gen-local-env] %s\n' "$1" >&2; }
 DERIVED="JWT_SECRET=JWT_SECRET ANON_KEY=ANON_KEY SERVICE_ROLE_KEY=SERVICE_ROLE_KEY \
 KONG_PUBLIC_API_KEY=KONG_PUBLIC_API_KEY|ANON_KEY KONG_SERVICE_API_KEY=KONG_SERVICE_API_KEY|SERVICE_ROLE_KEY \
 SB_KONG_KEY=KONG_PUBLIC_API_KEY|ANON_KEY ADAPTER_REGISTRY_SERVICE_TOKEN=ADAPTER_REGISTRY_SERVICE_TOKEN"
+# Minted once per machine, never derived; an absent or empty one is minted by --sync.
+MINTED="DEMO_LOGIN_PASSWORD"
 # NOT derived: VITE_BAAS_REALTIME_TOKEN — the generator seeds it with the anon key, but
 # `make seed-live-demo` (live-data-ensure) later replaces it with a tenant realtime token
 # minted from RT_JWT_SECRET; it travels as a team value (vault42-team.sh), never a derived one.
@@ -66,6 +72,24 @@ gsrc() {
 }
 # URL-safe random secret for the osionos-only app secrets.
 gen() { openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 48; }
+# 24 alphanumerics: typeable at the login form, above grobase's 12-char prod minimum.
+gen_password() { gen | head -c 24; }
+
+# minted_missing: names of MINTED keys absent or empty in $OUT, one per line.
+minted_missing() {
+  for key in $MINTED; do
+    [ -n "$(val "$OUT" "$key")" ] || printf '%s\n' "$key"
+  done
+}
+
+# mint_missing: write a fresh value for each MINTED key that is absent or empty, by name.
+mint_missing() {
+  for key in $(minted_missing); do
+    command -v openssl >/dev/null 2>&1 || { note "openssl required to mint $key"; exit 1; }
+    put_env "$OUT" "$key" "$(gen_password)"
+    note "minted $key (was absent) — make all applies it to the demo account; make demo-login prints it."
+  done
+}
 
 # drift_report: one line per derived key — "sync KEY" | "drift KEY" | "missing KEY" |
 # "unknown KEY" (source empty). Key names only. Returns 1 when anything is not in sync.
@@ -93,6 +117,8 @@ check_mode() {
   [ -f "$OUT" ] || { note "$(basename "$OUT") absent — run without --check to generate it."; exit 1; }
   rc=0
   report="$(drift_report)" || rc=$?
+  for key in $(minted_missing); do report="$report
+missing $key"; rc=1; done
   printf '%s\n' "$report" | sed 's/^/[gen-local-env]   /' >&2
   if [ "$rc" -eq 0 ]; then note "in sync with apps/grobase/.env (7 derived keys)."; else
     note "DRIFT — $(basename "$OUT") disagrees with apps/grobase/.env. Fix: bash scripts/gen-local-env.sh --sync"
@@ -105,6 +131,7 @@ check_mode() {
 sync_mode() {
   require_inputs
   [ -f "$OUT" ] || { note "$(basename "$OUT") absent — generating it."; generate; return; }
+  mint_missing
   rc=0
   report="$(drift_report)" || rc=$?
   [ "$rc" -ne 0 ] || { note "in sync with apps/grobase/.env — nothing to write."; exit 0; }
@@ -186,6 +213,8 @@ OSIONOS_APP_SESSION_SECRET=$(gen)
 OSIONOS_BRIDGE_EMAIL_HASH_SALT=$(gen)
 OSIONOS_BRIDGE_SHARED_SECRET=$(gen)
 OSIONOS_APP_SESSION_TTL_SECONDS=2592000
+# Local demo account (dev.pro.photo@gmail.com) password — applied by make all, shown by make demo-login.
+DEMO_LOGIN_PASSWORD=$(gen_password)
 OSIONOS_ALLOWED_ORIGIN=https://localhost:3001
 OSIONOS_APP_URL=https://localhost:3001
 PUBLIC_OSIONOS_APP_URL=https://localhost:3001

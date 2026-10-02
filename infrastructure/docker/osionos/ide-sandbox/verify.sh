@@ -92,7 +92,7 @@ echo "== Code runner (shared uid) =="
 # `kill -USR1 1` from uid 10001 made the server log "Debugger listening", i.e. any
 # user's program could attach to the broker of everyone's runs. The server must be
 # started with --disable-sigusr1. Probed on a THROWAWAY copy, never the live runner.
-RUNNER_IMAGE="${OSIONOS_RUNNER_IMAGE:-dlesieur/osionos-runner:latest}"
+RUNNER_IMAGE="${OSIONOS_RUNNER_IMAGE:-track-binocle/osionos-runner:local}"
 if docker image inspect "$RUNNER_IMAGE" >/dev/null 2>&1; then
   rp="ide-runner-sigusr1-probe"
   docker rm -f "$rp" >/dev/null 2>&1

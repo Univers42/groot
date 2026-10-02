@@ -24,9 +24,15 @@ SB_KONG_KEY=anon-A
 ADAPTER_REGISTRY_SERVICE_TOKEN=adapter-A
 VITE_BAAS_REALTIME_TOKEN=rt-tenant-token
 OSIONOS_BRIDGE_EMAIL_HASH_SALT=salt-keep
+DEMO_LOGIN_PASSWORD=demo-keep
 VITE_BAAS_URL=https://localhost:3001
 LOCAL
   chmod 600 "$OUT"
+  # openssl stub: minting needs randomness, not a real binary (the CI bats image has none).
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  printf '#!/bin/sh\nprintf "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVphYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5ejAxMjM0\\n"\n' > "$BATS_TEST_TMPDIR/bin/openssl"
+  chmod +x "$BATS_TEST_TMPDIR/bin/openssl"
+  export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
 }
 
 val() { sed -n "s/^$2=//p" "$1" | head -1; }
@@ -154,4 +160,44 @@ stale_kong() { sed -i 's/^SB_KONG_KEY=.*/SB_KONG_KEY=anon-OLD/' "$OUT"; }
   [ "$(val "$OUT" SB_KONG_KEY)" = "kong-K" ]
   [ "$(val "$OUT" KONG_PUBLIC_API_KEY)" = "kong-K" ]
   [ "$(val "$OUT" ANON_KEY)" = "anon-A" ]
+}
+
+@test "--sync: an .env.local without DEMO_LOGIN_PASSWORD gets one minted, named, never printed" {
+  sed -i '/^DEMO_LOGIN_PASSWORD=/d' "$OUT"
+  run bash "$SCRIPT" --sync
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"minted DEMO_LOGIN_PASSWORD"* ]]
+  minted="$(val "$OUT" DEMO_LOGIN_PASSWORD)"
+  [[ "$minted" =~ ^[A-Za-z0-9]{24}$ ]]
+  [[ "$output" != *"$minted"* ]]
+  [ "$(val "$OUT" OSIONOS_BRIDGE_EMAIL_HASH_SALT)" = salt-keep ]
+}
+
+@test "--sync: an EMPTY DEMO_LOGIN_PASSWORD is replaced, not kept" {
+  sed -i 's/^DEMO_LOGIN_PASSWORD=.*/DEMO_LOGIN_PASSWORD=/' "$OUT"
+  run bash "$SCRIPT" --sync
+  [ "$status" -eq 0 ]
+  [ -n "$(val "$OUT" DEMO_LOGIN_PASSWORD)" ]
+  [ "$(grep -c '^DEMO_LOGIN_PASSWORD=' "$OUT")" -eq 1 ]
+}
+
+@test "--sync: an existing DEMO_LOGIN_PASSWORD is never re-minted" {
+  run bash "$SCRIPT" --sync
+  [ "$status" -eq 0 ]
+  [ "$(val "$OUT" DEMO_LOGIN_PASSWORD)" = demo-keep ]
+}
+
+@test "--check: a missing DEMO_LOGIN_PASSWORD exits 1 and names it" {
+  sed -i '/^DEMO_LOGIN_PASSWORD=/d' "$OUT"
+  run bash "$SCRIPT" --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"missing DEMO_LOGIN_PASSWORD"* ]]
+}
+
+@test "generate: a fresh .env.local carries a 24-char DEMO_LOGIN_PASSWORD" {
+  rm -f "$OUT"
+  printf 'JWT_SECRET=jwt-A\nANON_KEY=anon-A\nSERVICE_ROLE_KEY=svc-A\n' > "$GRO_ENV"
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$(val "$OUT" DEMO_LOGIN_PASSWORD)" =~ ^[A-Za-z0-9]{24}$ ]]
 }
