@@ -37,6 +37,17 @@ grobase-e2e:
 # the recipe: `up -d --build` would otherwise build the web image against a missing pkg/.
 ROOT_FRONTENDS := osionos-bridge osionos-app auth-gateway opposite-osiris-web local-https-proxy livekit $(DRAWNOSAURUS_SERVICES)
 
+# The ROOT_FRONTENDS images this repo builds that also have a published Docker Hub tag.
+# `frontends-up PULL_PREBUILT=1` pulls these tags instead of building; an *_IMAGE already
+# set in the environment still wins.
+PREBUILT_SERVICES := osionos-bridge osionos-app auth-gateway opposite-osiris-web
+PREBUILT_IMAGE_EXPORTS := \
+	export OSIONOS_BRIDGE_IMAGE="$${OSIONOS_BRIDGE_IMAGE:-dlesieur/osionos-bridge:latest}" \
+	OSIONOS_APP_IMAGE="$${OSIONOS_APP_IMAGE:-dlesieur/osionos-app:latest}" \
+	OSIONOS_RUNNER_IMAGE="$${OSIONOS_RUNNER_IMAGE:-dlesieur/osionos-runner:latest}" \
+	AUTH_GATEWAY_IMAGE="$${AUTH_GATEWAY_IMAGE:-dlesieur/prismatica-auth-gateway:latest}" \
+	OPPOSITE_OSIRIS_WEB_IMAGE="$${OPPOSITE_OSIRIS_WEB_IMAGE:-dlesieur/opposite-osiris-web:latest}"
+
 # Engine set `make all` brings up on a fresh machine. Default `devlean` = the daily-dev
 # shape: every CORE engine (postgres mysql mongo redis minio, all public images — mysql lives
 # in the data plane) + full app/control/data plane + realtime, but WITHOUT the heavy à-la-carte
@@ -96,10 +107,24 @@ frontends-up: certs drawnosaurus-wasm
 ## ./.env.local records them as activated (see IDE-BACKLOG.md); fresh machines skip both.
 ## Builds only what it starts: the bake group (compose-build) makes :local images that
 ## nothing here runs, and a fresh machine has a 20-30 GB /var to share.
+## Our images build from source as track-binocle/*:local. PULL_PREBUILT=1 instead pulls the
+## published dlesieur/*:latest tags for them and starts everything with --no-build (services
+## with no published image are still built first). Nothing here ever pushes.
 	@$(MAKE) --no-print-directory docker-prefetch-images DOCKER_PREFETCH_SCOPE=frontends
-	TRACK_BINOCLE_BIND_ADDR="$$(sh infrastructure/scripts/detect-bind-addr.sh)" docker compose --env-file ./.env.local up -d --build --wait $(ROOT_FRONTENDS)
-	@grep -qs '^OSIONOS_RUNNER_URL=.' ./.env.local && \
-		COMPOSE_PROFILES=runner docker compose --env-file ./.env.local up -d osionos-runner || true
-	@grep -qs '^OSIONOS_IDE_SANDBOX=1' ./.env.local && \
-		COMPOSE_PROFILES=ide docker compose --env-file ./.env.local up -d osionos-ide-socket-proxy || true
+	@set -eu; \
+	compose='docker compose --env-file ./.env.local'; \
+	build=--build; \
+	if [ '$(PULL_PREBUILT)' = 1 ]; then \
+		$(PREBUILT_IMAGE_EXPORTS); \
+		$$compose pull $(PREBUILT_SERVICES); \
+		$$compose build $(filter-out $(PREBUILT_SERVICES),$(ROOT_FRONTENDS)); \
+		build=--no-build; \
+	fi; \
+	TRACK_BINOCLE_BIND_ADDR="$$(sh infrastructure/scripts/detect-bind-addr.sh)" $$compose up -d $$build --wait $(ROOT_FRONTENDS); \
+	if grep -qs '^OSIONOS_RUNNER_URL=.' ./.env.local; then \
+		COMPOSE_PROFILES=runner $$compose up -d osionos-runner || true; \
+	fi; \
+	if grep -qs '^OSIONOS_IDE_SANDBOX=1' ./.env.local; then \
+		COMPOSE_PROFILES=ide $$compose up -d osionos-ide-socket-proxy || true; \
+	fi
 	$(MAKE) compose-wait

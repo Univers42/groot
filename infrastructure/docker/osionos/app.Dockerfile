@@ -11,7 +11,7 @@
 # `pnpm run build` -> `bash scripts/docker-run.sh build`, but doesn't COPY that
 # script; the real build is just `vite build`, which we invoke directly here.
 #   docker build -f infrastructure/docker/osionos/app.Dockerfile \
-#     -t dlesieur/osionos-app ./apps/osionos/app
+#     -t track-binocle/osionos-web:local ./apps/osionos/app
 # ============================================================================
 FROM public.ecr.aws/docker/library/node:22-alpine AS builder
 ENV PNPM_HOME=/pnpm
