@@ -8,7 +8,7 @@
 #
 # Built from the osionos submodule WITHOUT modifying it (context = the submodule):
 #   docker build -f infrastructure/docker/osionos/bridge.Dockerfile \
-#     -t dlesieur/osionos-bridge ./apps/osionos/app
+#     -t track-binocle/osionos-bridge:local ./apps/osionos/app
 # ============================================================================
 FROM public.ecr.aws/docker/library/node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production

@@ -33,9 +33,10 @@ prefetch() {
 
 # The base images of everything frontends-up builds, named the way the prefetch tags them.
 frontend_bases() {
-  local d="$REPO/infrastructure/docker/osionos"
+  local d="$REPO/infrastructure/docker/osionos" o="$REPO/apps/opposite-osiris/docker/services"
   sed -n -e 's/^FROM \([^ ]*\).*/\1/p' -e 's/^# *syntax=\(.*\)/\1/p' \
     "$d/app.Dockerfile" "$d/bridge.Dockerfile" "$d/runner/Dockerfile" "$d/ide-socket-proxy/Dockerfile" \
+    "$o/api-gateway/Dockerfile" "$o/web/Dockerfile" \
     | sed 's#^public.ecr.aws/docker/library/##' | sort -u
 }
 
