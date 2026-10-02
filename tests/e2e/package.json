@@ -1,0 +1,14 @@
+{
+  "name": "groot-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "22.19.1",
+    "typescript": "5.9.3"
+  }
+}
