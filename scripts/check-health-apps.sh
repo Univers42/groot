@@ -70,4 +70,4 @@ calendar|https://localhost:3003|https://localhost:3003||
 EOF
 
 printf '\n  \033[2msummary:\033[0m  localhost \033[1m%s/%s\033[0m up    •    production \033[1m%s/%s\033[0m up\n' "$LUP" "$LT" "$PUP" "$PT"
-printf '  \033[2m(UP = server responded; auth-gated 401/403 counts as up. login: dev.pro.photo / Osionos123!)\033[0m\n\n'
+printf '  \033[2m(UP = server responded; auth-gated 401/403 counts as up. login: dev.pro.photo@gmail.com, password: make demo-login)\033[0m\n\n'

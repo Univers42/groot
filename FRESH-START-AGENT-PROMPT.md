@@ -24,17 +24,18 @@ on the host. The single entry point is `make all`, which is self-provisioning an
   Verify:  ls -l ~/.config/42ctl/keystore.v42 ~/.config/42ctl/contract-default.tok
 
 ## 2. Secrets / credentials
-- vault42 passphrase: Grobase-Vault-2026!  — pass it via the FT_PASSPHRASE env var so the vault pull
+- vault42 passphrase: ask the user (it is shared out-of-band, never committed) — pass it via the FT_PASSPHRASE env var so the vault pull
   is non-interactive (don't rely on the hidden prompt).
 - The cert-trust step needs ONE sudo (to install the local CA so HTTPS is trusted). You can't type
   the user's sudo password, so have the user run `sudo -v` first to cache it.
-- App login after it's up:  dev.pro.photo / Osionos123!
+- App login after it's up:  dev.pro.photo@gmail.com, password printed by `make demo-login`
 
 ## 3. Bring it up
     git clone --recursive https://github.com/Univers42/groot.git ft_transcendence
     cd ft_transcendence
     sudo -v                                          # user enters sudo password once (for CA trust)
-    FT_PASSPHRASE='Grobase-Vault-2026!' make all
+    read -rs FT_PASSPHRASE && export FT_PASSPHRASE   # paste the passphrase; kept out of shell history
+    make all
 
 `make all` will: sync submodules to latest -> pull every .env secret from vault42 -> generate + TRUST
 the local TLS CA -> start the grobase backend with all 6 engines (Postgres, MySQL, Mongo, MSSQL,
@@ -52,8 +53,8 @@ the login above — both must load over GREEN (trusted) HTTPS, no warning.
 
 ## 5. If something fails
 - Vault pull / "Unauthenticated: missing auth metadata" -> BOTH keystore.v42 AND contract-default.tok
-  must be in ~/.config/42ctl/ (the key alone is not enough). Passphrase is exactly
-  Grobase-Vault-2026!. The 42ctl image (docker.io/dlesieur/42ctl:latest) is public/auto-pulled.
+  must be in ~/.config/42ctl/ (the key alone is not enough). Passphrase is the one
+  the user gave you (case-sensitive). The 42ctl image (docker.io/dlesieur/42ctl:latest) is public/auto-pulled.
 - Backend won't start / disk full -> confirm Docker data-root is on the big disk; inspect
   `make -C apps/grobase up EDITION=migrate` and `docker compose logs`.
 - Data didn't restore -> `make all` restores ONLY into empty engines. To force from the committed

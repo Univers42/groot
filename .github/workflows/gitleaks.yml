@@ -1,0 +1,24 @@
+# gitleaks — fail a push or PR that adds a secret-like string not in the reviewed
+# .gitleaksignore baseline. Same gate as `make secrets-scan` (scripts/gitleaks-gate.sh).
+# Scans this repo's tracked files only: submodules are not checked out here; each has
+# its own repository and CI.
+name: gitleaks
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: secrets-scan (gitleaks, baseline-gated)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: make secrets-scan
+        run: make secrets-scan
