@@ -3,6 +3,7 @@ export const OSIONOS_URL = process.env.E2E_OSIONOS_URL ?? "https://localhost:300
 export const WHITEBOARD_URL = process.env.E2E_WHITEBOARD_URL ?? "https://localhost:3007";
 export const GATEWAY_URL = process.env.E2E_GATEWAY_URL ?? "https://localhost:8787";
 export const MAIL_URL = process.env.E2E_MAIL_URL ?? "https://localhost:3002";
+export const PRISMATICA_URL = process.env.E2E_PRISMATICA_URL ?? "https://localhost:4322";
 export const CALENDAR_URL = process.env.E2E_CALENDAR_URL ?? "https://localhost:3003";
 // One stable user, reused across runs: the gateway rate-limits login to 8/min per IP,
 // so a fresh account per run would trade a leftover for flakes.
