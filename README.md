@@ -111,10 +111,12 @@ follow submodule branch tips (`SKIP_SYNC=1`, see `sync-submodules-soft` in
 ```bash
 git clone --recursive git@github.com:Univers42/groot.git
 cd groot
-git checkout v1.0.0-rc2
+git checkout "$(git describe --tags --abbrev=0 origin/main)"
 git submodule update --init --recursive
 make all SKIP_SYNC=1
 ```
+
+The `git checkout` line checks out the latest release tag on `main`; `git tag -l 'v*'` lists them.
 
 Measured time from a cold machine: **9–17 minutes**.
 
