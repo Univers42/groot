@@ -176,7 +176,9 @@ enter_checkout() {
     git clone --recursive "$REPO_URL" "$CLONE_DIR" || die "git clone failed"
     cd "$CLONE_DIR" || die "cannot enter $CLONE_DIR"
   else
-    cd "$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git checkout (or use --clone DIR)"
+    local top
+    top=$(git rev-parse --show-toplevel 2>/dev/null) || die "not inside a git checkout (or use --clone DIR)"
+    cd "$top" || die "cannot enter $top"
   fi
 }
 
