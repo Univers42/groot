@@ -72,7 +72,7 @@ docker_held_ports() {
 
 # Run inside the checked-out TAG: the port list comes from its docker-compose.yml.
 check_ports() {
-  local ports held spec port proto flag busy=0
+  local ports held spec port proto flag busy=0 ours=0
   ports=$(compose_ports) || die "docker compose config failed — cannot read the port list"
   held=$(docker_held_ports | sort -u)
   for spec in $ports; do
@@ -81,7 +81,7 @@ check_ports() {
     [ "$proto" = udp ] && flag=-Hlun
     [ -z "$(ss "$flag" "sport = :$port")" ] && continue
     if grep -qx "$port" <<<"$held"; then
-      warn "port $port/$proto is held by a running container (assumed this stack; make all recreates it)"
+      ours=$((ours + 1))
     else
       printf '[fresh-bringup] port %s/%s is in use by a non-Docker process:\n' "$port" "$proto" >&2
       ss "$flag"p "sport = :$port" >&2
@@ -89,7 +89,8 @@ check_ports() {
     fi
   done
   [ "$busy" = 0 ] || die "required ports are taken (a QEMU VM forwarding them? another stack?)"
-  log "required ports free: $(tr '\n' ' ' <<<"$ports")"
+  [ "$ours" = 0 ] || warn "$ours required ports are held by running containers (assumed this stack; make all recreates them)"
+  log "required ports: none held by a non-Docker process"
 }
 
 check_resources() {
