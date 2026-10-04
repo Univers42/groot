@@ -71,3 +71,7 @@ certs-trust-local: certs
 	else \
 		$(TRUST_LOCAL_CA); \
 	fi
+
+certs-export:
+## Copy the local CA to DEST (default ./track-binocle-local-ca.pem) for a browser on another machine; prints its SHA-256 fingerprint and the host import commands. No sudo.
+	@bash scripts/certs-export.sh '$(LOCAL_CA_CERT)' '$(or $(DEST),track-binocle-local-ca.pem)'
