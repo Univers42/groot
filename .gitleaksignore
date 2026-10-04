@@ -20,7 +20,7 @@ archive/wiki-2026-09/tools/README.md:generic-api-key:81
 sonar-project.properties:generic-api-key:2
 
 # Test fixtures: throwaway keys for isolated verify/test stacks, labelled fake in place
-.github/workflows/mini-baas-security.yml:generic-api-key:425
+.github/workflows/mini-baas-security.yml:generic-api-key:428
 apps/grobase/scripts/ci/run-ci-local.sh:curl-auth-header:117
 apps/grobase/scripts/seed/nimbus-data-generate.mjs:generic-api-key:21
 apps/grobase/scripts/test/assemble-env-test.sh:generic-api-key:35
