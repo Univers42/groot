@@ -1,7 +1,6 @@
 import { expect, test as base, type Page } from "@playwright/test";
 
-// `allowed` matches the logged "<text> @ <url>" line; each use names the ticket it waits on.
-type Guard = { watch(page: Page, label: string, allowed?: RegExp): void };
+type Guard = { watch(page: Page, label: string): void };
 
 // Playwright's own injected scripts are refused by a sandboxed frame without allow-scripts,
 // and Chromium logs that as the page's error (microsoft/playwright#33343). Measured
@@ -15,10 +14,9 @@ export const test = base.extend<{ consoleGuard: Guard }>({
   consoleGuard: async ({}, use) => {
     const errors: string[] = [];
     await use({
-      watch(page, label, allowed) {
+      watch(page, label) {
         page.on("console", (m) => {
-          const line = `${m.text()} @ ${m.location().url}`;
-          if (m.type() === "error" && !HARNESS_NOISE.test(m.text()) && !allowed?.test(line)) errors.push(`${label} console: ${line}`);
+          if (m.type() === "error" && !HARNESS_NOISE.test(m.text())) errors.push(`${label} console: ${m.text()} @ ${m.location().url}`);
         });
         page.on("pageerror", (e) => errors.push(`${label} pageerror: ${e.message}`));
       },
