@@ -131,7 +131,9 @@ git config --global user.email "<you@example.com>"
   so born2root's QEMU forwards reach them without a tunnel (`vendor/born2root/setup/host/qemu_vm.sh:171`).
   That binding is open item T14. Once T14 binds them back to `127.0.0.1`, those forwards stop
   working (`vendor/born2root/setup/host/groot_host_access.sh:8-27`) and each port needs its own
-  `-L` like 3007. `make groot` already tunnels every published port, so its route is unchanged.
+  `-L` like 3007. `make groot` asks for every published port, but the dead forwards would still
+  hold the host ports: it releases them only when it finds the QEMU monitor socket, which the
+  2026-10-05 run did not exercise (it released none).
 
 *Tested route — `make groot`*, on the host, from `vendor/born2root`:
 
@@ -142,7 +144,20 @@ make groot_undo     # close the tunnel, remove the CA from the NSS stores
 
 What it changes on the host (`vendor/born2root/setup/host/groot_host_access.sh`):
 
-<!-- MAKE_GROOT_HOST_CHANGES -->
+| Change | 2026-10-05 run | Undone by |
+|---|---|---|
+| Background `ssh -f -N -L <port>:127.0.0.1:<port> … b2b` for every port the proxy publishes; pid in `~/.local/share/born2root/groot-tunnel.pid` | `✓ SSH tunnel up (pid 686674)`, 10 ports mapped | `make groot_undo` |
+| The guest's CA copied to `~/.local/share/born2root/track-binocle-local-ca.pem` | `✓ CA fetched: 30:57:55:81:BE:EB:E5:67…` | stays; overwritten next run |
+| In every NSS store found: delete `Track Binocle Local CA` and `Track Binocle Local Development CA`, import the new CA as `Track Binocle Local CA` | `✓ CA trusted in 2 NSS store(s)` | `make groot_undo` |
+| QEMU forwards on those ports released through the monitor socket, only when QEMU holds them on `127.0.0.1` | no `released … QEMU forward(s)` line: none released | next `make qemu_start` |
+| `certutil` unpacked into `~/.cache/born2root/nss` only when none is installed | — | stays |
+
+The tunnel uses `ExitOnForwardFailure=no`, so a `-L` whose host port a QEMU forward already
+holds does not bind and that port keeps going through the forward. In this run that is every
+port except 3007 and 8444, which QEMU does not forward (`vendor/born2root/setup/host/qemu_vm.sh:171`).
+The per-port check then passed on all 10: 200 on 4322, 3001, 8444, 3007; 404 on the 4000 and
+8787 roots; 502 on 3002, 4100, 3003, 4200 because Mail and Calendar are optional and were not
+started. A `✓` there means TLS verified against the CA, not that the app is up.
 
 Restart the browser completely afterwards: NSS is read at startup.
 
