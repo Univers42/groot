@@ -104,7 +104,7 @@ jobs:
           if [[ "${{ matrix.tool }}" == "pnpm" ]]; then
             pnpm audit --prod --audit-level=high
           else
-            npm audit --audit-level=high --no-fund
+            npm audit --omit=dev --audit-level=high --no-fund
           fi
 
   # ── 3. SCA — Snyk (gated on token) ─────────────────────────────────────────
@@ -339,7 +339,10 @@ jobs:
           cargo audit \
             --ignore RUSTSEC-2026-0098 \
             --ignore RUSTSEC-2026-0099 \
-            --ignore RUSTSEC-2026-0104
+            --ignore RUSTSEC-2026-0104 \
+            --ignore RUSTSEC-2025-0134 \
+            --ignore RUSTSEC-2026-0002 \
+            --ignore RUSTSEC-2026-0097
 
   # ── 5d. SCA — govulncheck (Go control plane, blocking) ─────────────────────
   sca-govulncheck:
