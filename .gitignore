@@ -81,3 +81,6 @@ screenshots/
 # 12G pre-extraction BaaS snapshot — never commit (git-status noise)
 apps/baas.bak/
 .vault42-local-mode
+
+# make certs-export default destination
+/track-binocle-local-ca.pem
