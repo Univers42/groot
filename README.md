@@ -118,6 +118,9 @@ make all SKIP_SYNC=1
 
 The `git checkout` line checks out the latest release tag on `main`; `git tag -l 'v*'` lists them.
 
+Requirements, the VM + host-browser case, the verify script (`scripts/verify/fresh-bringup.sh`) and
+troubleshooting: [`wiki/runbooks/fresh-machine.md`](wiki/runbooks/fresh-machine.md).
+
 Measured time from a cold machine: **9–17 minutes**.
 
 No `.env` needs to be written by hand. With no vault key present, grobase generates its own
