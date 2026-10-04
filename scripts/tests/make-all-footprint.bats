@@ -83,8 +83,9 @@ pulled() {
 # ends the run right there, so PULLS holds exactly the helpers it fetched up front.
 restore_until_first_stop() {
   local root="$BATS_TEST_TMPDIR/grobase" seeds="$BATS_TEST_TMPDIR/seeds"
-  mkdir -p "$root/scripts/ops" "$seeds"
+  mkdir -p "$root/scripts/ops" "$root/scripts/lib" "$seeds"
   cp "$REPO/apps/grobase/scripts/ops/vault-restore.sh" "$root/scripts/ops/"
+  [ -f "$REPO/apps/grobase/scripts/lib/lib-netseg.sh" ] && cp "$REPO/apps/grobase/scripts/lib/lib-netseg.sh" "$root/scripts/lib/"
   for f in postgres-all.sql.gz mysql-all.sql.gz mongo.archive.gz minio.tar.gz redis.rdb dynamodb-all.tar.gz; do
     : > "$seeds/$f"
   done
