@@ -11,7 +11,8 @@
 #   TAG              release to check out (default: latest tag on origin/main,
 #                    `git describe --tags --abbrev=0 origin/main`)
 #
-# Steps: preflight → checkout TAG → submodule update --init --recursive →
+# Steps: preflight (sudo -v first, so the one password prompt comes before
+# the build) → checkout TAG → submodule update --init --recursive →
 # make all SKIP_SYNC=1 → make healthcheck → make e2e → submodule drift check.
 # The evidence directory gets every log plus SUMMARY.txt; the exit status is
 # non-zero when any check in SUMMARY.txt is non-zero.
@@ -46,6 +47,24 @@ die() {
 check_docker() {
   docker info >/dev/null 2>&1 || die "docker is not reachable (is the daemon running, are you in the docker group?)"
   log "docker $(docker version --format '{{.Server.Version}}') reachable"
+}
+
+# make all trusts the local CA with one sudo (certs-trust-local). With its output in
+# make-all.log, that prompt lands alone on a quiet terminal minutes in, and the run
+# blocks until someone notices: ask here instead, and the cached credential covers it.
+# Ponytail: sudo caches for timestamp_timeout (15 min by default); if checkout plus
+# submodule update take longer than that, make all prompts mid-run after all.
+check_sudo() {
+  command -v sudo >/dev/null 2>&1 || {
+    warn "no sudo: make all will skip trusting the local CA in the system store"
+    return 0
+  }
+  if [ -t 0 ]; then
+    log "sudo: make all copies the local CA into the system store; asking for the password now, not mid-build"
+    sudo -v || die "sudo -v failed; the CA step of make all needs it (or run with TRACK_BINOCLE_SKIP_CERT_TRUST=1)"
+  else
+    sudo -n -v 2>/dev/null || warn "no terminal and no cached sudo: make all will skip the system CA trust"
+  fi
 }
 
 check_github_ssh() {
@@ -184,6 +203,7 @@ enter_checkout() {
 
 main() {
   parse_args "$@"
+  check_sudo
   check_docker
   check_github_ssh
   check_resources
