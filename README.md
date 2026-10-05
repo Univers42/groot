@@ -157,6 +157,8 @@ What the check does not do:
 - It ignores nested submodules and untracked files.
 - It reads `.gitmodules`, so a local `.git/config` `update` override is not seen.
 - It cannot guard a raw `docker compose build`.
+- It is not offline-safe: the first `make all` after the pin lands clones graph_render over HTTPS,
+  and fails if the network is down.
 
 The osionos pointer's own `branch = main` override is out of scope here (tracked with the pin audit).
 
