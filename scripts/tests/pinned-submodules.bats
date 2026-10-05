@@ -195,6 +195,15 @@ head_of() {
   [ "$output" = "apps/pinned" ]
 }
 
+@test "pin-submodules --list skips an update=none entry with no path and keeps listing" {
+  fixture none
+  cd "$W"
+  git config -f .gitmodules submodule.aaa-broken.update none
+  run sh "$REPO/scripts/pin-submodules.sh" --list
+  [ "$status" -eq 0 ]
+  [ "$output" = "apps/pinned" ]
+}
+
 @test "groot pins apps/graph_render over HTTPS with update=none and no branch" {
   m="$REPO/.gitmodules"
   cd "$T"

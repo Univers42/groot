@@ -27,7 +27,7 @@ pinned_paths() {
     while read -r key value; do
       [ "$value" = none ] || continue
       name=${key#submodule.}
-      git config -f .gitmodules --get "submodule.${name%.update}.path"
+      git config -f .gitmodules --get "submodule.${name%.update}.path" || continue
     done
 }
 
