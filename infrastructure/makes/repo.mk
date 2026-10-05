@@ -43,6 +43,16 @@ LOCAL_MODE_MARK := .vault42-local-mode
 CTL_IMAGE       ?= docker.io/dlesieur/42ctl:latest
 CTL_CFG_DIR     ?= $(HOME)/.config/42ctl
 
+# Pinned submodules (`update = none` in .gitmodules: apps/graph_render) are build inputs held at
+# their gitlink. The branch-following foreach loops below skip each one AND everything under it,
+# because `foreach --recursive` still descends into a submodule whose command exited 0.
+PIN_SUBMODULES := $(CURDIR)/scripts/pin-submodules.sh
+SKIP_IF_PINNED = for p in $$PINNED; do case "$$displaypath/" in "$$p"/*) exit 0 ;; esac; done;
+
+submodules-pinned:
+## Check out absent pinned submodules (`update = none`) at the commit groot records, then fail if any is elsewhere or edited. Never moves a checked-out one.
+	@sh $(PIN_SUBMODULES)
+
 syncro-submodule:
 ## Force EVERY submodule onto its stable branch at latest (fix detached HEADs, ff-pull) so a fresh start never builds the wrong image. Dirty submodules are skipped (never clobbered). Run `make all` after to rebuild.
 	@set -eu; \
@@ -52,8 +62,11 @@ syncro-submodule:
 	echo '[syncro] init + checkout all submodules at their recorded SHAs'; \
 	git submodule update --init --recursive; \
 	echo '[syncro] put each submodule on a real branch at latest stable'; \
+	PINNED=$$(sh $(PIN_SUBMODULES) --list | tr '\n' ' '); export PINNED; \
+	[ -z "$$PINNED" ] || echo "[syncro] pinned, left at their gitlink with everything under them: $$PINNED"; \
 	git submodule foreach --recursive ' \
 		set -eu; \
+		$(SKIP_IF_PINNED) \
 		if ! (git diff --quiet && git diff --cached --quiet) 2>/dev/null; then \
 			echo "  ! $$displaypath has local changes — skipping (commit/stash first)"; exit 0; \
 		fi; \
@@ -75,11 +88,11 @@ syncro-submodule:
 			echo "  ! $$displaypath: nested submodule init failed"; \
 	'; \
 	echo '[syncro] verify nothing is left detached…'; \
-	bad=$$(git submodule foreach --quiet --recursive 'git symbolic-ref -q HEAD >/dev/null 2>&1 || printf "%s " "$$displaypath"' || true); \
+	bad=$$(git submodule foreach --quiet --recursive '$(SKIP_IF_PINNED) git symbolic-ref -q HEAD >/dev/null 2>&1 || printf "%s " "$$displaypath"' || true); \
 	if [ -n "$$bad" ]; then echo "[syncro] STILL DETACHED (likely dirty/diverged): $$bad" >&2; fi; \
 	echo '[syncro] done. Now: make all   (rebuilds frontends from the synced source)'
 
-.PHONY: vault42-team-push vault42-team-pull
+.PHONY: submodules-pinned vault42-team-push vault42-team-pull
 vault42-team-push:
 ## vault42 TEAM: publish this whole checkout to the shared environment $(VAULT42_ORG)/$(VAULT42_PROJECT)/$(VAULT42_ENV) — sealed to the ENV key, so every member granted the project can open it (the personal `vault42-push-all` seals to you alone and is readable by nobody else). Run it from a complete checkout with ./secrets holding fresh dumps. NOTE: agents are blocked from sending secrets off-box — run this yourself.
 	@sh scripts/vault42-team.sh push
@@ -219,7 +232,9 @@ pulls:
 repair-detached:
 ## Re-attach every detached submodule HEAD: commit dirty state, merge onto main, push main + develop.
 	@set -eu; \
+	PINNED=$$(sh $(PIN_SUBMODULES) --list | tr '\n' ' '); export PINNED; \
 	git submodule foreach --recursive 'set -eu; \
+		$(SKIP_IF_PINNED) \
 		branch=$$(git symbolic-ref --short -q HEAD 2>/dev/null || true); \
 		if [ -n "$$branch" ]; then \
 			echo "[repair] $$displaypath already on $$branch — skipping"; \

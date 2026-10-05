@@ -101,7 +101,7 @@ apply-models-baseline:
 ## Adopt the migration ledger on an already-migrated DB: record every current models/*.sql as applied WITHOUT running it.
 	@sh scripts/apply-models.sh baseline
 
-frontends-up: certs drawnosaurus-wasm
+frontends-up: submodules-pinned certs drawnosaurus-wasm
 ## Build and start ONLY the root frontends against the running grobase backend. Also
 ## resurrects the IDE plane containers (runner / sandbox socket-proxy) — but ONLY when
 ## ./.env.local records them as activated (see IDE-BACKLOG.md); fresh machines skip both.
