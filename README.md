@@ -144,6 +144,22 @@ Without `SKIP_SYNC=1`, `make all` first fast-forwards every submodule to the tip
 branch (`sync-submodules-soft`), so you build the newest code rather than the pinned commits.
 It skips dirty submodules and never blocks the pipeline.
 
+The exception is any submodule that `.gitmodules` marks `update = none`, today `apps/graph_render`. Its
+gitlink is the build input, so neither mode moves it:
+- `git submodule update --recursive` skips it, which also keeps its SSH-only nested `SciGraphs` out;
+- the sync skips it and everything under it;
+- `frontends-up` runs `make submodules-pinned` (`scripts/pin-submodules.sh`), which checks it out
+  at the recorded commit if it is absent, and fails if it is anywhere else or has edits to tracked files.
+
+What the check does not do:
+- It does not move a checked-out copy. After a pointer bump, run the fix it prints:
+  `git submodule update --checkout -- apps/graph_render`.
+- It ignores nested submodules and untracked files.
+- It reads `.gitmodules`, so a local `.git/config` `update` override is not seen.
+- It cannot guard a raw `docker compose build`.
+
+The osionos pointer's own `branch = main` override is out of scope here (tracked with the pin audit).
+
 ### Checks
 
 | Command | What it proves |
