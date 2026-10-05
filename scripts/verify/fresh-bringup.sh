@@ -132,6 +132,9 @@ resolve_tag() {
 checkout_tag() {
   git checkout --quiet "$TAG" || die "git checkout $TAG failed (uncommitted changes?)"
   git submodule update --init --recursive || die "git submodule update failed"
+  # `update = none` submodules (graph_render) are skipped above; check them out now, so the
+  # drift snapshot starts from what make all builds. Tags older than the script have none.
+  [ ! -f scripts/pin-submodules.sh ] || sh scripts/pin-submodules.sh || die "pinned submodule check failed"
   log "checked out $TAG ($(git rev-parse --short HEAD))"
 }
 
