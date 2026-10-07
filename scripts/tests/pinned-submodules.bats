@@ -147,6 +147,16 @@ head_of() {
   [ ! -e "$W/apps/pinned/nested/.git" ]
 }
 
+@test "pin-submodules prints the exact command when it cannot clone (offline)" {
+  fixture none
+  git -C "$W" config submodule.apps/pinned.url "file://$T/offline.git"
+  cd "$W"
+  run sh "$REPO/scripts/pin-submodules.sh"
+  [ "$status" -ne 0 ]
+  [ ! -e "$W/apps/pinned/.git" ]
+  [[ "$output" == *"git submodule update --init --checkout -- apps/pinned"* ]]
+}
+
 @test "pin-submodules passes when the checkout is the gitlink" {
   fixture none
   populate_pinned
