@@ -39,6 +39,7 @@ check_out_if_absent() {
   [ ! -e "$1/.git" ] || return 0
   git submodule update --init --checkout -- "$1" || {
     echo "$TAG cannot check out $1 at $2 — see git's error above (network? URL?)" >&2
+    printf '  fix: once online, run make submodules-pinned (or: git submodule update --init --checkout -- %s)\n' "$1" >&2
     return 1
   }
 }
