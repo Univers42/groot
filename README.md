@@ -158,7 +158,8 @@ What the check does not do:
 - It reads `.gitmodules`, so a local `.git/config` `update` override is not seen.
 - It cannot guard a raw `docker compose build`.
 - It is not offline-safe: the first `make all` after the pin lands clones graph_render over HTTPS,
-  and fails if the network is down.
+  and fails if the network is down. A refused connection fails at once. A black-holed one waits
+  for the TCP connect timeout (~1.5 min per attempt, and git retries once) before it fails.
 
 The osionos pointer's own `branch = main` override is out of scope here (tracked with the pin audit).
 
