@@ -35,6 +35,9 @@ gitlink() {
   git ls-tree HEAD -- "$1" | awk '$2 == "commit" { print $3 }'
 }
 
+# Offline, a refused connection fails at once. A black-holed one waits for the TCP connect
+# timeout (~1.5 min measured, 2026-10-06) and git retries the clone once, so expect ~3 min of
+# silence before the failure. No timeout of our own: a slow but working clone must not be cut.
 check_out_if_absent() {
   [ ! -e "$1/.git" ] || return 0
   git submodule update --init --checkout -- "$1" || {
