@@ -47,6 +47,8 @@ on:
         default: "migrate"
       skip_sync:
         description: "1 = the pinned/defense path: make all SKIP_SYNC=1 builds every submodule at its gitlink (as scripts/verify/fresh-bringup.sh does); 0 = sync to branch tips first"
+        type: choice
+        options: ["0", "1"]
         default: "0"
 
 concurrency:
@@ -168,7 +170,14 @@ jobs:
           ls -la "$d"
 
       - name: "☄  make all   — provisions the whole machine from nothing"
-        run: make all SKIP_SYNC=${{ github.event.inputs.skip_sync || '0' }}
+        env:
+          SKIP_SYNC_INPUT: ${{ github.event.inputs.skip_sync }}
+        run: |
+          case "${SKIP_SYNC_INPUT:-0}" in
+            0|1) ;;
+            *) echo "::error::skip_sync must be 0 or 1, got '${SKIP_SYNC_INPUT}'"; exit 1 ;;
+          esac
+          make all SKIP_SYNC="${SKIP_SYNC_INPUT:-0}"
 
       - name: Prove the all-engine data restored (ASSERTS all 6 engines non-zero)
         if: success()
