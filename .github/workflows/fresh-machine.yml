@@ -45,6 +45,9 @@ on:
       grobase_edition:
         description: "grobase backend edition (migrate|full|prod|query)"
         default: "migrate"
+      skip_sync:
+        description: "1 = the pinned/defense path: make all SKIP_SYNC=1 builds every submodule at its gitlink (as scripts/verify/fresh-bringup.sh does); 0 = sync to branch tips first"
+        default: "0"
 
 concurrency:
   group: fresh-machine-${{ github.ref }}
@@ -165,7 +168,7 @@ jobs:
           ls -la "$d"
 
       - name: "☄  make all   — provisions the whole machine from nothing"
-        run: make all
+        run: make all SKIP_SYNC=${{ github.event.inputs.skip_sync || '0' }}
 
       - name: Prove the all-engine data restored (ASSERTS all 6 engines non-zero)
         if: success()
