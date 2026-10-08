@@ -221,6 +221,28 @@ jobs:
           echo "::error::core/engine/app containers still unhealthy after ~180s:"; printf '%s\n%s\n' "$bad" "$badexit"
           exit 1
 
+      # Through the real local-https-proxy :3001 → osionos-app, not an isolated container: the
+      # pinned graph_render pack must arrive byte-exact as application/wasm, a missing file must
+      # 404, and the SPA's index.html must name the pack base. -k: the proxy's cert is from the
+      # local CA, which TRACK_BINOCLE_SKIP_CERT_TRUST keeps out of the runner's trust store.
+      - name: Prove the graph_render pack is served through the proxy (:3001)
+        if: success()
+        run: |
+          set -euo pipefail
+          pin=$(git ls-tree HEAD apps/graph_render | awk '$2 == "commit" { print $3 }')
+          pack=$(sed -n 's/^ARG GRAPH_STUDIO_PACK=//p' infrastructure/docker/osionos/app.Dockerfile)
+          base="https://localhost:3001/graph-studio/$pin"
+          cid=$(docker create "$pack" none); docker cp "$cid:/pack/pack.json" "$RUNNER_TEMP/pack.json"; docker rm "$cid" >/dev/null
+          want=$(sed -n 's/.*"graph_wasm.wasm": *{[^}]*"sha256": *"\([0-9a-f]\{64\}\)".*/\1/p' "$RUNNER_TEMP/pack.json")
+          got=$(curl -sSk -o "$RUNNER_TEMP/w.wasm" -w '%{http_code} %{content_type}' "$base/graph_wasm.wasm")
+          sha=$(sha256sum "$RUNNER_TEMP/w.wasm" | cut -d' ' -f1)
+          echo "GET $base/graph_wasm.wasm → $got sha256=$sha (pack.json: $want)"
+          [ "$got" = "200 application/wasm" ] && [ "${#want}" -eq 64 ] && [ "$sha" = "$want" ]
+          miss=$(curl -sSk -o /dev/null -w '%{http_code}' "$base/nope.wasm")
+          echo "GET $base/nope.wasm → $miss"; [ "$miss" = 404 ]
+          meta=$(curl -sSk https://localhost:3001/ | grep -o '<meta name="graph-studio-base"[^>]*>')
+          echo "index.html: $meta"; [ "$meta" = "<meta name=\"graph-studio-base\" content=\"/graph-studio/$pin/\" />" ]
+
       - name: Postgres restore diagnostics
         if: failure()
         run: |
