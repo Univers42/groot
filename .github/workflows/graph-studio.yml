@@ -64,6 +64,8 @@ jobs:
         env:
           GS_IMAGE: track-binocle/osionos-web:local
           GS_BUILD: "1"
+        # explicit `shell: bash` adds -o pipefail: without it, tee's exit status hides a bats failure
+        shell: bash
         run: |
           bats tests/graph-studio | tee "$RUNNER_TEMP/bats.log"
           if grep -q '# skip' "$RUNNER_TEMP/bats.log"; then echo "::error::a graph-studio test was skipped"; exit 1; fi
