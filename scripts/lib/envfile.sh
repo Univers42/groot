@@ -6,9 +6,15 @@
 #                            missing key is appended. Every other byte is preserved. The
 #                            write is atomic (temp file beside FILE, then rename) and keeps
 #                            FILE's mode (0600 for a file it creates). Never echoes VALUE.
+#   get_env FILE KEY         Print the value of the first live KEY= line, the same line
+#                            put_env would rewrite (blanks around the name and before the
+#                            value dropped, a commented-out key skipped, '=' in the value
+#                            kept, quotes kept as written). Prints nothing and exits 1 when
+#                            FILE is missing or has no live KEY.
 #
 # Sourced by scripts/gen-local-env.sh and scripts/ensure-live-data-access.sh — both edit
-# ./.env.local, and two rewriters of the same secrets file drift apart (library-first).
+# ./.env.local, and two rewriters of the same secrets file drift apart (library-first) —
+# and by scripts/grobase-link.sh, which reads its ./.env.grobase-link and its state file.
 # POSIX sh + awk + mktemp + stat only; tested alone in scripts/tests/envfile.bats.
 
 # The rewrite itself: first live KEY= line replaced in place, later duplicates dropped,
@@ -41,4 +47,25 @@ put_env() {
 	fi
 	rm -f "$_pe_tmp"
 	return 1
+}
+
+get_env() {
+	[ -f "$1" ] || return 1
+	ENVFILE_KEY="$2" awk '
+	BEGIN { k = ENVIRON["ENVFILE_KEY"] }
+	{
+		line = $0
+		sub(/^[ \t]+/, "", line)
+		eq = index(line, "=")
+		if (line ~ /^#/ || eq < 2) next
+		name = substr(line, 1, eq - 1)
+		sub(/[ \t]+$/, "", name)
+		if (name != k) next
+		val = substr(line, eq + 1)
+		sub(/^[ \t]+/, "", val)
+		print val
+		found = 1
+		exit
+	}
+	END { exit !found }' "$1"
 }
