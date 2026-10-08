@@ -9,7 +9,7 @@ Then the Update button in osionos triggers a rebuild; without it, Update just re
 Bound to 127.0.0.1 only (loopback, dev-only). Python 3 stdlib only (the host has no node).
 
   REBUILD_PORT  default 7799
-  REBUILD_CMD   default "make all"  (e.g. 'COMPOSE_PROFILES=dev docker compose up -d --build osionos-app osionos-bridge' for a faster targeted rebuild)
+  REBUILD_CMD   default "make all"  (e.g. 'make update_web' for a faster targeted rebuild; a raw compose build of osionos-app also needs GRAPH_RENDER_SHA, see app.Dockerfile)
 """
 import json
 import os
