@@ -53,14 +53,14 @@ seed-live-demo:
 	@$(MAKE) -C apps/grobase seed-live-demo APP_ENV_FILE=$(CURDIR)/apps/osionos/app/.env
 	@$(MAKE) osionos-app-live
 
-osionos-app-live:
+osionos-app-live: submodules-pinned
 ## Rebuild + restart osionos-app with the VITE_BAAS_* values from the app .env
 ## (vite inlines env at build time; the seeder writes the live-demo keys there).
 ## Two --env-file flags: the root .env keeps its port interpolations, the app
 ## .env supplies the VITE_BAAS_* build args (later files win).
 	@test -f $(OSIONOS_APP_ENV) || { echo "missing $(OSIONOS_APP_ENV) — run make seed-live-demo first"; exit 1; }
 	@touch .env
-	docker compose --env-file .env --env-file $(OSIONOS_APP_ENV) build osionos-app
+	$(WITH_GRAPH_RENDER_SHA) docker compose --env-file .env --env-file $(OSIONOS_APP_ENV) build osionos-app
 	docker compose --env-file .env --env-file $(OSIONOS_APP_ENV) up -d osionos-app
 
 live-data-ensure:
