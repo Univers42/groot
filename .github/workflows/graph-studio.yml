@@ -1,0 +1,69 @@
+name: graph-studio pack in osionos-app
+
+# Builds osionos-app the way make does (compose, GRAPH_RENDER_SHA = the apps/graph_render
+# gitlink) and runs the built image: the pinned graph_render pack must be served byte-exact
+# under /graph-studio/<gitlink>/, a missing file there must 404 instead of falling back to the
+# SPA, index.html must name the base, and the build must refuse a pack from another commit.
+# No registry login: the pack has to be pullable anonymously, like on a fresh clone.
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - ".github/workflows/graph-studio.yml"
+      - "infrastructure/docker/osionos/app.Dockerfile"
+      - "infrastructure/docker/osionos/app.Dockerfile.dockerignore"
+      - "docker-compose.yml"
+      - "tests/graph-studio/**"
+      - "apps/graph_render"
+      - "apps/osionos/app"
+  pull_request:
+    paths:
+      - ".github/workflows/graph-studio.yml"
+      - "infrastructure/docker/osionos/app.Dockerfile"
+      - "infrastructure/docker/osionos/app.Dockerfile.dockerignore"
+      - "docker-compose.yml"
+      - "tests/graph-studio/**"
+      - "apps/graph_render"
+      - "apps/osionos/app"
+  workflow_dispatch:
+
+concurrency:
+  group: graph-studio-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  serve:
+    name: build osionos-app + serve the pack (bats)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: osionos checkout (the build context, with its nested packages)
+        run: |
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git submodule update --init --recursive apps/osionos/app
+      - name: build osionos-app as make does
+        run: |
+          GRAPH_RENDER_SHA="$(git ls-tree HEAD apps/graph_render | awk '$2 == "commit" { print $3 }')"
+          export GRAPH_RENDER_SHA
+          echo "GRAPH_RENDER_SHA=$GRAPH_RENDER_SHA"
+          docker compose --profile dev --progress plain build osionos-app
+      - name: image size and the layers the pack adds
+        run: |
+          img=track-binocle/osionos-web:local
+          docker image inspect -f 'image bytes: {{.Size}}' "$img"
+          docker history --format '{{.Size}}\t{{.CreatedBy}}' "$img" | sed -n 1,8p
+          docker run --rm --entrypoint du "$img" -sb /usr/share/nginx/html/graph-studio
+      - name: install bats
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bats
+      - name: bats tests/graph-studio (no skips allowed)
+        env:
+          GS_IMAGE: track-binocle/osionos-web:local
+          GS_BUILD: "1"
+        run: |
+          bats tests/graph-studio | tee "$RUNNER_TEMP/bats.log"
+          if grep -q '# skip' "$RUNNER_TEMP/bats.log"; then echo "::error::a graph-studio test was skipped"; exit 1; fi
