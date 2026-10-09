@@ -13,7 +13,10 @@ const port = Number(process.env.GS_PORT ?? 4317);
 if (!dir || !/^[0-9a-f]{40}$/.test(pin ?? "")) throw new Error("set GS_PACK_DIR and GS_PIN (40 hex)");
 
 const base = `/graph-studio/${pin}/`;
-const TYPES = { ".js": "text/javascript", ".wasm": "application/wasm", ".json": "application/json" };
+const TYPES = {
+  ".js": "text/javascript", ".wasm": "application/wasm", ".json": "application/json",
+  ".css": "text/css", ".map": "application/json",
+};
 const PAGE = `<!doctype html>
 <html><head><meta charset="utf-8"><title>graph-studio contract host</title>
 <meta name="graph-studio-base" content="${base}">
