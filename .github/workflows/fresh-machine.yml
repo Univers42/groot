@@ -255,6 +255,22 @@ jobs:
           meta=$(curl -sSk https://localhost:3001/ | grep -o '<meta name="graph-studio-base"[^>]*>')
           echo "index.html: $meta"; [ "$meta" = "<meta name=\"graph-studio-base\" content=\"/graph-studio/$pin/\" />" ]
 
+      # osionos's second brain on the live stack is graph_render's element fed by the bridge: the
+      # Home graph from the rail, ?home=graph and a stored variant; Enter on a page node opens it;
+      # a second user never sees the first user's pages; an index.html without the pack's meta says
+      # the graph is unavailable. tests/e2e/run.sh: the pinned Playwright image, --network host.
+      - name: e2e GR2 — osionos's second brain is graph_render (Playwright, live stack)
+        if: success()
+        run: bash tests/e2e/run.sh specs/gr2-osionos-graph.spec.ts
+
+      - name: Upload the e2e results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-test-results
+          path: tests/e2e/test-results
+          if-no-files-found: ignore
+
       - name: Postgres restore diagnostics
         if: failure()
         run: |
