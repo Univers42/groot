@@ -45,7 +45,7 @@ function templateRegex(template: string): RegExp {
 function refusalRegex(template: string): RegExp {
   const outer = CONTRACT.ingest.refusal_message.value.replace(/^`|`$/g, "");
   const inner = templateRegex(template).source.slice(1, -1);
-  return new RegExp(`^${templateRegex(outer).source.slice(1, -1).replace(/\.\+$/, inner)}`);
+  return new RegExp(`^${templateRegex(outer).source.slice(1, -1).replace(/\.\+$/, inner)}$`);
 }
 
 interface Recorded {
