@@ -11,8 +11,24 @@
 # `pnpm run build` -> `bash scripts/docker-run.sh build`, but doesn't COPY that
 # script; the real build is just `vite build`, which we invoke directly here.
 #   docker build -f infrastructure/docker/osionos/app.Dockerfile \
+#     --build-arg GRAPH_RENDER_SHA="$(git ls-tree HEAD apps/graph_render | awk '{print $3}')" \
 #     -t track-binocle/osionos-web:local ./apps/osionos/app
+#
+# It also serves graph_render's published pack under /graph-studio/<GRAPH_RENDER_SHA>/ and
+# names that base in index.html (<meta name="graph-studio-base">). GRAPH_RENDER_SHA is groot's
+# apps/graph_render gitlink; make's recipes pass it, a raw build must too. The build fails
+# unless the pinned pack was built from exactly that commit.
 # ============================================================================
+
+# The only place the pack is pinned. Bump it with the apps/graph_render pointer, in one commit:
+# a pack whose pack.json source_rev is not the gitlink fails the runtime stage below.
+# Ponytail: the served path is keyed by source_rev, not by this digest. A pack rebuilt from the
+# same commit (new toolchain, new digest) lands at an unchanged URL that browsers cache as
+# immutable for a year, so they keep the old bytes. Never bump the digest alone: a same-commit
+# rebuild needs its own path first.
+ARG GRAPH_STUDIO_PACK=ghcr.io/univers42/graph-studio-pack@sha256:13349d726600165b57abb2c128c66aac67bfa456634b1ee88ff25e04cdc6792a
+FROM ${GRAPH_STUDIO_PACK} AS graph-studio-pack
+
 FROM public.ecr.aws/docker/library/node:22-alpine AS builder
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
@@ -128,6 +144,43 @@ LABEL org.opencontainers.image.source="https://github.com/univers42/osionos"
 # Reuse the submodule's static+SPA nginx config (listens on :80).
 COPY docker/services/node/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/build /usr/share/nginx/html
+
+# ^~ outranks the regex asset location and keeps `location /` (the SPA fallback) out: a missing
+# pack file is a 404, never index.html, which would reach WebAssembly.compile as HTML. The path
+# is versioned by commit, so every file under it is immutable.
+COPY <<'NGINX' /etc/nginx/graph-studio.conf
+location ^~ /graph-studio/ {
+  expires 1y;
+  add_header Cache-Control "public, immutable";
+  try_files $uri =404;
+}
+NGINX
+
+ARG GRAPH_RENDER_SHA=
+COPY --from=graph-studio-pack /pack/ /usr/share/nginx/html/graph-studio/${GRAPH_RENDER_SHA}/
+# Ponytail: both seds match osionos's text — the `server {` line of its nginx.conf and the single
+# `</head>` of the built index.html. If osionos reformats either, the count check fails the build
+# (loud, never a silent miss); fix the pattern here. source_rev is read with sed too, so a
+# pack.json not written one key per line (studio-pack.sh's format) also fails the build.
+RUN <<'CHECK'
+set -eu
+fail() { echo "[graph-studio] $*" >&2; exit 1; }
+fix="build through make (frontends-up, update_web, osionos-app-live), or export GRAPH_RENDER_SHA=\$(git ls-tree HEAD apps/graph_render | awk '{print \$3}')"
+case "$GRAPH_RENDER_SHA" in
+  *[!0-9a-f]* | '') fail "GRAPH_RENDER_SHA must be the apps/graph_render gitlink (40 hex), got '$GRAPH_RENDER_SHA' — $fix" ;;
+esac
+[ "${#GRAPH_RENDER_SHA}" -eq 40 ] || fail "GRAPH_RENDER_SHA must be the apps/graph_render gitlink (40 hex), got '$GRAPH_RENDER_SHA' — $fix"
+html=/usr/share/nginx/html
+pack=$html/graph-studio/$GRAPH_RENDER_SHA
+rev=$(sed -n 's/^ *"source_rev": *"\([0-9a-f]*\)".*/\1/p' "$pack/pack.json")
+[ "$rev" = "$GRAPH_RENDER_SHA" ] || fail "pack source_rev ${rev:-<none>} is not the expected $GRAPH_RENDER_SHA — bump GRAPH_STUDIO_PACK in app.Dockerfile with the apps/graph_render pointer"
+gzip -9k "$pack"/*.js "$pack"/*.wasm
+sed -i '/^server {$/a\  include /etc/nginx/graph-studio.conf;' /etc/nginx/conf.d/default.conf
+[ "$(grep -c 'include /etc/nginx/graph-studio.conf;' /etc/nginx/conf.d/default.conf)" -eq 1 ] || fail "could not add the /graph-studio/ location to osionos's nginx.conf"
+sed -i "s|</head>|<meta name=\"graph-studio-base\" content=\"/graph-studio/$GRAPH_RENDER_SHA/\" />\n</head>|" "$html/index.html"
+[ "$(grep -o 'name="graph-studio-base"' "$html/index.html" | wc -l)" -eq 1 ] || fail "could not add the graph-studio-base meta to index.html"
+nginx -t
+CHECK
 EXPOSE 80
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=6 \
   CMD wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1
