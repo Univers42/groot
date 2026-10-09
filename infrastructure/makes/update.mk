@@ -16,12 +16,13 @@ OSIONOS_ELECTRON_DIR ?= apps/osionos-electron
 
 .PHONY: update_web update_app
 
-update_web:
+update_web: submodules-pinned
 ## Rebuild + restart the osionos web app after editing apps/osionos/app (incl. the
 ## graph-engine package). Bakes the app .env (VITE_BAAS_* build args) when present;
 ## --build is what makes the change actually land (the service has a baked image:).
 	@touch .env
-	@if [ -f "$(OSIONOS_APP_ENV)" ]; then \
+	@$(WITH_GRAPH_RENDER_SHA) \
+	if [ -f "$(OSIONOS_APP_ENV)" ]; then \
 		echo "[update_web] rebuilding osionos-app with app env $(OSIONOS_APP_ENV)…"; \
 		docker compose --env-file .env --env-file "$(OSIONOS_APP_ENV)" up -d --build osionos-app; \
 	else \

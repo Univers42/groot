@@ -45,6 +45,11 @@ on:
       grobase_edition:
         description: "grobase backend edition (migrate|full|prod|query)"
         default: "migrate"
+      skip_sync:
+        description: "1 = the pinned/defense path: make all SKIP_SYNC=1 builds every submodule at its gitlink (as scripts/verify/fresh-bringup.sh does); 0 = sync to branch tips first"
+        type: choice
+        options: ["0", "1"]
+        default: "0"
 
 concurrency:
   group: fresh-machine-${{ github.ref }}
@@ -165,7 +170,14 @@ jobs:
           ls -la "$d"
 
       - name: "☄  make all   — provisions the whole machine from nothing"
-        run: make all
+        env:
+          SKIP_SYNC_INPUT: ${{ github.event.inputs.skip_sync }}
+        run: |
+          case "${SKIP_SYNC_INPUT:-0}" in
+            0|1) ;;
+            *) echo "::error::skip_sync must be 0 or 1, got '${SKIP_SYNC_INPUT}'"; exit 1 ;;
+          esac
+          make all SKIP_SYNC="${SKIP_SYNC_INPUT:-0}"
 
       - name: Prove the all-engine data restored (ASSERTS all 6 engines non-zero)
         if: success()
@@ -220,6 +232,28 @@ jobs:
           echo "== final container state =="; docker ps -a --format '  {{.Names}}\t{{.Status}}' | sort
           echo "::error::core/engine/app containers still unhealthy after ~180s:"; printf '%s\n%s\n' "$bad" "$badexit"
           exit 1
+
+      # Through the real local-https-proxy :3001 → osionos-app, not an isolated container: the
+      # pinned graph_render pack must arrive byte-exact as application/wasm, a missing file must
+      # 404, and the SPA's index.html must name the pack base. -k: the proxy's cert is from the
+      # local CA, which TRACK_BINOCLE_SKIP_CERT_TRUST keeps out of the runner's trust store.
+      - name: Prove the graph_render pack is served through the proxy (:3001)
+        if: success()
+        run: |
+          set -euo pipefail
+          pin=$(git ls-tree HEAD apps/graph_render | awk '$2 == "commit" { print $3 }')
+          pack=$(sed -n 's/^ARG GRAPH_STUDIO_PACK=//p' infrastructure/docker/osionos/app.Dockerfile)
+          base="https://localhost:3001/graph-studio/$pin"
+          cid=$(docker create "$pack" none); docker cp "$cid:/pack/pack.json" "$RUNNER_TEMP/pack.json"; docker rm "$cid" >/dev/null
+          want=$(sed -n 's/.*"graph_wasm.wasm": *{[^}]*"sha256": *"\([0-9a-f]\{64\}\)".*/\1/p' "$RUNNER_TEMP/pack.json")
+          got=$(curl -sSk -o "$RUNNER_TEMP/w.wasm" -w '%{http_code} %{content_type}' "$base/graph_wasm.wasm")
+          sha=$(sha256sum "$RUNNER_TEMP/w.wasm" | cut -d' ' -f1)
+          echo "GET $base/graph_wasm.wasm → $got sha256=$sha (pack.json: $want)"
+          [ "$got" = "200 application/wasm" ] && [ "${#want}" -eq 64 ] && [ "$sha" = "$want" ]
+          miss=$(curl -sSk -o /dev/null -w '%{http_code}' "$base/nope.wasm")
+          echo "GET $base/nope.wasm → $miss"; [ "$miss" = 404 ]
+          meta=$(curl -sSk https://localhost:3001/ | grep -o '<meta name="graph-studio-base"[^>]*>')
+          echo "index.html: $meta"; [ "$meta" = "<meta name=\"graph-studio-base\" content=\"/graph-studio/$pin/\" />" ]
 
       - name: Postgres restore diagnostics
         if: failure()

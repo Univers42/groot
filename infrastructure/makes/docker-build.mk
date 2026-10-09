@@ -75,6 +75,7 @@ docker-prefetch-images:
 	fi; \
 	if [[ "$$scope" != 'vault' ]]; then \
 		start_pull public.ecr.aws/docker/library/node:22-bookworm-slim node:22-bookworm-slim; \
+		start_pull "$$(sed -n 's/^ARG GRAPH_STUDIO_PACK=//p' infrastructure/docker/osionos/app.Dockerfile)"; \
 	fi; \
 	if [[ "$$scope" == 'all' ]]; then \
 		start_pull public.ecr.aws/docker/library/postgres:16-alpine postgres:16-alpine; \

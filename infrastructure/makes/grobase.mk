@@ -120,6 +120,7 @@ frontends-up: submodules-pinned certs drawnosaurus-wasm
 		$$compose build $(filter-out $(PREBUILT_SERVICES),$(ROOT_FRONTENDS)); \
 		build=--no-build; \
 	fi; \
+	$(WITH_GRAPH_RENDER_SHA) \
 	TRACK_BINOCLE_BIND_ADDR="$$(sh infrastructure/scripts/detect-bind-addr.sh)" $$compose up -d $$build --wait $(ROOT_FRONTENDS); \
 	if grep -qs '^OSIONOS_RUNNER_URL=.' ./.env.local; then \
 		COMPOSE_PROFILES=runner $$compose up -d osionos-runner || true; \
