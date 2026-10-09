@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["playwright.config.ts", "lib", "specs"]
+  "include": ["playwright.config.ts", "graph-studio.config.ts", "lib", "specs", "graph-studio"]
 }
