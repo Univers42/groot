@@ -1,5 +1,5 @@
-import type { Locator, Page, Response } from "@playwright/test";
-import { BRIDGE_URL, E2E_EMAIL_B, E2E_PASSWORD_B, OSIONOS_URL } from "../lib/env";
+import type { BrowserContext, Locator, Page, Response } from "@playwright/test";
+import { BRIDGE_URL, E2E_EMAIL_B, E2E_PASSWORD_B } from "../lib/env";
 import { expect, test } from "../lib/fixtures";
 import { loginOrRegister, openOsionos } from "../lib/session";
 
@@ -51,9 +51,14 @@ async function bridge(page: Page, s: Session, method: string, path: string, body
 /** A parent page and its child in the user's active workspace; deleted by the returned cleanup. */
 async function pageTree(page: Page, s: Session, tag: string) {
   const stamp = `${tag}-${Date.now()}`;
-  const parent = await bridge(page, s, "POST", "/api/pages", { workspaceId: s.workspaceId, title: `e2e-graph-parent-${stamp}` });
+  const parentBody = `e2e-graph-body-${stamp}`;
+  const parent = await bridge(page, s, "POST", "/api/pages", {
+    workspaceId: s.workspaceId,
+    title: `e2e-graph-parent-${stamp}`,
+    content: [{ id: `e2e-b-${stamp}`, type: "paragraph", content: parentBody }],
+  });
   const child = await bridge(page, s, "POST", "/api/pages", { workspaceId: s.workspaceId, title: `e2e-graph-child-${stamp}`, parentPageId: parent._id });
-  const ids = { parent: String(parent._id), child: String(child._id), parentTitle: String(parent.title) };
+  const ids = { parent: String(parent._id), child: String(child._id), parentTitle: String(parent.title), parentBody };
   const cleanup = async () => {
     await bridge(page, s, "DELETE", `/api/pages/${ids.child}`);
     await bridge(page, s, "DELETE", `/api/pages/${ids.parent}`);
@@ -96,11 +101,13 @@ test("GR2 rail → Second Brain draws the user's pages with graph_render, and En
     const element = await expectNewGraph(page);
     expect(await focusNode(element, pageNode(tree.parent)), "the parent page is a node").toBe(true);
     expect(await focusNode(element, pageNode(tree.child)), "the child page is a node").toBe(true);
-    // node-open (via Enter on the selected node) opens that page in a tab.
+    // node-open (via Enter on the selected node) opens that page in a tab, with its content: the
+    // page was made through the bridge after osionos loaded, so the client store never held it.
     await element.evaluate((el, id) => (el as unknown as { selectNodes(ids: string[]): Promise<boolean> }).selectNodes([id]), pageNode(tree.parent));
     await element.focus();
     await page.keyboard.press("Enter");
     await expect(page.locator('textarea[aria-label="Page title"]:visible').first()).toHaveValue(tree.parentTitle, { timeout: 15_000 });
+    await expect(page.getByText(tree.parentBody), "the opened page shows its content").toBeVisible();
   } finally {
     await tree.cleanup();
     await context.close();
@@ -161,19 +168,50 @@ test("GR2 a second user's graph holds none of the first user's pages", async ({ 
     await a.context.close();
   }
 });
+/**
+ * Watches osionos's own index.html as it is parsed (no re-served document: Chromium's Local
+ * Network Access treats a fulfilled document as non-local and blocks the auth handoff) and,
+ * when `strip`, removes the graph-studio-base meta before the app can read it. Records each
+ * meta it saw in `__gsMetaSeen`, so both runs prove the real document carried one.
+ */
+function watchMeta(strip: boolean) {
+  return (context: BrowserContext) =>
+    context.addInitScript((remove) => {
+      const seen: string[] = [];
+      (globalThis as unknown as { __gsMetaSeen: string[] }).__gsMetaSeen = seen;
+      new MutationObserver((records) => {
+        for (const record of records) {
+          for (const node of record.addedNodes) {
+            if (node instanceof HTMLMetaElement && node.name === "graph-studio-base") {
+              seen.push(node.content);
+              if (remove) node.remove();
+            }
+          }
+        }
+      }).observe(document, { childList: true, subtree: true });
+    }, strip);
+}
+
+function metaSeen(page: Page): Promise<string[]> {
+  return page.evaluate(() => (globalThis as unknown as { __gsMetaSeen?: string[] }).__gsMetaSeen ?? []);
+}
+
 test("GR2 an index.html without the graph-studio-base meta says the graph is unavailable, never blank", async ({ browser, consoleGuard }) => {
-  const { context, page } = await openOsionos(browser, "?home=graph", {
-    setup: (ctx) =>
-      ctx.route((url) => url.origin === new URL(OSIONOS_URL).origin && url.pathname === "/", async (route) => {
-        const response = await route.fetch();
-        const body = (await response.text()).replace(/<meta name="graph-studio-base"[^>]*>/, "");
-        await route.fulfill({ response, body });
-      }),
-  });
+  const { context, page } = await openOsionos(browser, "?home=graph", { setup: watchMeta(true) });
   consoleGuard.watch(page, "osionos without meta");
   const view = page.locator(VIEW);
   await expect(view).toHaveAttribute("data-graph-state", "unavailable", { timeout: 30_000 });
-  await expect(view.getByRole("alert")).toContainText("Graph unavailable: this build serves no graph engine");
+  await expect(view.getByRole("alert")).toHaveText("Graph unavailable: this build serves no graph engine (no graph-studio-base meta)");
   await expect(view.locator("graph-studio")).toHaveCount(0);
+  expect(await metaSeen(page), "the real index.html carried the meta, and it was removed").toHaveLength(1);
+  expect(await page.locator('meta[name="graph-studio-base"]').count()).toBe(0);
+  await context.close();
+});
+
+test("GR2 control: the same watched index.html with the meta kept draws the graph", async ({ browser, consoleGuard }) => {
+  const { context, page } = await openOsionos(browser, "?home=graph", { setup: watchMeta(false) });
+  consoleGuard.watch(page, "osionos with meta watched");
+  await expectNewGraph(page);
+  expect(await metaSeen(page), "the observer saw the meta it would have removed").toHaveLength(1);
   await context.close();
 });
