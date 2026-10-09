@@ -77,7 +77,8 @@ jobs:
       - name: playwright tests/e2e/graph-studio
         run: |
           pin="$(git ls-tree HEAD apps/graph_render | awk '$2 == "commit" { print $3 }')"
-          docker run --rm --ipc=host \
+          # as the runner's user, so nothing root-owned is left in the checkout
+          docker run --rm --ipc=host --user "$(id -u):$(id -g)" -e HOME=/tmp \
             -v "$GITHUB_WORKSPACE:/repo" -v "$RUNNER_TEMP/pack:/pack:ro" -w /repo/tests/e2e \
             -e CI=1 -e GS_PACK_DIR=/pack -e GS_PIN="$pin" \
             "$PW_IMAGE" \
