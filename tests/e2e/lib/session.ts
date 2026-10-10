@@ -18,26 +18,34 @@ async function postJson(path: string, body: unknown, bearer?: string) {
   }
 }
 
-/** Logs the e2e user in at the gateway, registering it on first use. */
-export async function loginOrRegister(): Promise<string> {
-  const credentials = { email: E2E_EMAIL, password: E2E_PASSWORD, turnstileToken: TURNSTILE };
+export interface E2eUser {
+  email: string;
+  password: string;
+  username: string;
+}
+
+const DEFAULT_USER: E2eUser = { email: E2E_EMAIL, password: E2E_PASSWORD, username: "e2e-smoke" };
+
+/** Logs an e2e user (default: the suite's one) in at the gateway, registering it on first use. */
+export async function loginOrRegister(user: E2eUser = DEFAULT_USER): Promise<string> {
+  const credentials = { email: user.email, password: user.password, turnstileToken: TURNSTILE };
   let login = await postJson("/api/auth/login", credentials);
   if (login.status !== 200) {
-    const profile = { username: "e2e-smoke", confirmPassword: E2E_PASSWORD };
+    const profile = { username: user.username, confirmPassword: user.password };
     const reg = await postJson("/api/auth/register", { ...credentials, profile });
-    if (reg.status !== 200) throw new Error(`register ${E2E_EMAIL}: HTTP ${reg.status} ${String(reg.body.message)}`);
+    if (reg.status !== 200) throw new Error(`register ${user.email}: HTTP ${reg.status} ${String(reg.body.message)}`);
     login = await postJson("/api/auth/login", credentials);
   }
   const token = login.body.access_token;
   if (login.status !== 200 || typeof token !== "string") {
-    throw new Error(`login ${E2E_EMAIL}: HTTP ${login.status} ${String(login.body.message)}`);
+    throw new Error(`login ${user.email}: HTTP ${login.status} ${String(login.body.message)}`);
   }
   return token;
 }
 
 /** The real signed handoff: a one-time `#bridge_token=` URL that osionos consumes itself. */
-async function mintHandoff(): Promise<string> {
-  const token = readFileSync(TOKEN_FILE, "utf8").trim();
+async function mintHandoff(gatewayToken?: string): Promise<string> {
+  const token = gatewayToken ?? readFileSync(TOKEN_FILE, "utf8").trim();
   const res = await postJson("/api/auth/osionos-session", {}, token);
   const url = res.body.redirectUrl;
   if (res.status !== 200 || typeof url !== "string" || !url.startsWith(OSIONOS_URL)) {
@@ -46,11 +54,19 @@ async function mintHandoff(): Promise<string> {
   return url;
 }
 
+export interface OpenOptions {
+  /** A gateway token from loginOrRegister(user); default: the suite user's (global setup). */
+  token?: string;
+  /** Runs on the fresh context before the first navigation (routes, init scripts). */
+  setup?: (context: BrowserContext) => Promise<unknown>;
+}
+
 /** Opens `path` on osionos in a fresh context that has consumed its own handoff. */
-export async function openOsionos(browser: Browser, query = ""): Promise<{ context: BrowserContext; page: Page }> {
+export async function openOsionos(browser: Browser, query = "", options: OpenOptions = {}): Promise<{ context: BrowserContext; page: Page }> {
   const context = await browser.newContext();
+  await options.setup?.(context);
   const page = await context.newPage();
-  const handoff = new URL(await mintHandoff());
+  const handoff = new URL(await mintHandoff(options.token));
   handoff.search = query;
   await page.goto(handoff.toString());
   return { context, page };
