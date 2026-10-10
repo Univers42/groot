@@ -18,6 +18,7 @@
     {
       "description": "Keep Docker image updates reviewable",
       "matchManagers": ["dockerfile", "docker-compose"],
+      "minimumReleaseAge": "3 days",
       "groupName": "docker images"
     }
   ]

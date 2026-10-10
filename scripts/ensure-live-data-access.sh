@@ -34,6 +34,12 @@
 #      service auth), re-stamp every api-key:* principal in the demo databases
 #      onto it, and write it to ./.env.local + apps/osionos/app/.env.
 #
+#   3. LOCAL mode (the .vault42-local-mode marker) with no tenant to issue for — nothing
+#      was restored, so the demo databases and the tenant do not exist — is a notice and
+#      exit 0: the live mounts answer their 503 until the team data is restored or
+#      `make seed-live-demo` creates them. Outside LOCAL mode that tenant is missing data
+#      and stays a failure.
+#
 #   Engines that are not running are SKIPPED with a notice, never a failure:
 #   the devlean edition omits mssql/dynamodb, and their mounts simply stay
 #   unreadable until that edition brings them up (re-run this script then).
@@ -55,6 +61,7 @@ PG_CTN="${PG_CONTAINER:-mini-baas-postgres}"
 MYSQL_CTN="${MYSQL_CONTAINER:-mini-baas-mysql}"
 MONGO_CTN="${MONGO_CONTAINER:-mini-baas-mongo}"
 TC_CTN="${TENANT_CONTROL_CONTAINER:-mini-baas-tenant-control}"
+LOCAL_MODE_MARK="${LOCAL_MODE_MARK:-${REPO_ROOT}/.vault42-local-mode}"
 CHECK_ONLY=0
 [ "${1:-}" = "--check" ] && CHECK_ONLY=1
 
@@ -242,7 +249,14 @@ main() {
 			-H 'Content-Type: application/json' "${SVC_AUTH[@]}" -d "${body}")"
 		key="$(printf '%s' "${resp}" | sed -n 's/.*"key":"\([^"]*\)".*/\1/p')"
 		key_id="$(printf '%s' "${resp}" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1)"
-		if [ -z "${key}" ] || [ -z "${key_id}" ]; then die "key issue failed: ${resp}"; fi
+		if [ -z "${key}" ] || [ -z "${key_id}" ]; then
+			if [ -e "${LOCAL_MODE_MARK}" ] && printf '%s' "${resp}" | grep -q 'tenant not found'; then
+				note "tenant '${TENANT}' does not exist on this stack (LOCAL mode, nothing restored) — no live-database credential to issue."
+				note "  the Databases navigator answers 503 until the team data is restored (make vault42-pull-all APPLY=1 && make vault-restore) or seeded (make seed-live-demo); then: make live-data-ensure"
+				exit 0
+			fi
+			die "key issue failed: ${resp}"
+		fi
 		note "issued key ${key_id} (prefix $(printf '%s' "${key}" | cut -d_ -f2))"
 	fi
 

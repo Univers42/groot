@@ -1,0 +1,96 @@
+name: graph-studio contract
+
+# The <graph-studio> surface osionos relies on, at groot's apps/graph_render gitlink
+# (tests/graph-studio-contract). A pin bump that changes it fails here.
+#   static  — contract.json is what extract.mjs reads from graph_render at the gitlink (bats).
+#   runtime — the pack app.Dockerfile pins, fetched by digest, does in Chromium what contract.json
+#             says (Playwright). No live stack and no image build: tests/e2e/graph-studio/serve.mjs
+#             serves the pack the way osionos-app does.
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - ".github/workflows/graph-studio-contract.yml"
+      - "tests/graph-studio-contract/**"
+      - "tests/e2e/graph-studio/**"
+      - "tests/e2e/graph-studio.config.ts"
+      - "tests/e2e/package.json"
+      - "tests/e2e/package-lock.json"
+      - "apps/osionos/app"
+      - "infrastructure/docker/osionos/app.Dockerfile"
+      - "apps/graph_render"
+  pull_request:
+    paths:
+      - ".github/workflows/graph-studio-contract.yml"
+      - "tests/graph-studio-contract/**"
+      - "tests/e2e/graph-studio/**"
+      - "tests/e2e/graph-studio.config.ts"
+      - "tests/e2e/package.json"
+      - "tests/e2e/package-lock.json"
+      - "apps/osionos/app"
+      - "infrastructure/docker/osionos/app.Dockerfile"
+      - "apps/graph_render"
+  workflow_dispatch:
+
+concurrency:
+  group: graph-studio-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    name: static contract at the gitlink (bats)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: fetch graph_render at the gitlink (the submodule is update = none)
+        run: |
+          pin="$(git ls-tree HEAD apps/graph_render | awk '$2 == "commit" { print $3 }')"
+          url="$(git config -f .gitmodules submodule.apps/graph_render.url)"
+          echo "graph_render $pin from $url"
+          git init -q "$RUNNER_TEMP/graph_render"
+          git -C "$RUNNER_TEMP/graph_render" fetch -q --depth 1 "$url" "$pin"
+      - name: install bats
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bats
+      - name: bats tests/graph-studio-contract (no skips allowed)
+        env:
+          GR_SRC: ${{ runner.temp }}/graph_render
+        # explicit `shell: bash` adds -o pipefail: without it, tee's exit status hides a bats failure
+        shell: bash
+        run: |
+          bats tests/graph-studio-contract | tee "$RUNNER_TEMP/bats.log"
+          if grep -q '# skip' "$RUNNER_TEMP/bats.log"; then echo "::error::a contract test was skipped"; exit 1; fi
+
+  runtime:
+    name: runtime contract against the pinned pack (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # tests/e2e/Dockerfile's base, pinned by digest (v1.63.0-noble = @playwright/test in the lockfile)
+      PW_IMAGE: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+    steps:
+      - uses: actions/checkout@v7
+      - name: fetch the pinned pack by digest (no docker) and verify it
+        run: tests/graph-studio-contract/fetch-pack.sh "$RUNNER_TEMP/pack"
+      # C7 (c7-hierarchy.spec.ts) runs osionos's own graph adapter, not a copy of it.
+      - name: fetch osionos at the gitlink (no nested submodules; the adapter needs none)
+        run: |
+          pin="$(git ls-tree HEAD apps/osionos/app | awk '$2 == "commit" { print $3 }')"
+          url="$(git config -f .gitmodules submodule.apps/osionos/app.url | sed 's|^git@github.com:|https://github.com/|')"
+          echo "osionos $pin from $url"
+          git init -q "$RUNNER_TEMP/osionos"
+          git -C "$RUNNER_TEMP/osionos" fetch -q --depth 1 "$url" "$pin"
+          git -C "$RUNNER_TEMP/osionos" checkout -q FETCH_HEAD
+      - name: playwright tests/e2e/graph-studio
+        run: |
+          pin="$(git ls-tree HEAD apps/graph_render | awk '$2 == "commit" { print $3 }')"
+          # as the runner's user, so nothing root-owned is left in the checkout
+          docker run --rm --ipc=host --user "$(id -u):$(id -g)" -e HOME=/tmp \
+            -v "$GITHUB_WORKSPACE:/repo" -v "$RUNNER_TEMP/pack:/pack:ro" -v "$RUNNER_TEMP/osionos:/osionos:ro" -w /repo/tests/e2e \
+            -e CI=1 -e GS_PACK_DIR=/pack -e GS_PIN="$pin" -e OSIONOS_SRC=/osionos \
+            "$PW_IMAGE" \
+            bash -c 'npm ci --no-audit --no-fund && npx playwright test -c graph-studio.config.ts'

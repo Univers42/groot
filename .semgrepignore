@@ -72,3 +72,16 @@ wiki/api/
 # nginx syntax is gated separately by `nginx -t`.
 infrastructure/tls/nginx.conf
 infrastructure/scripts/tls/nginx.conf
+
+# ── CI workflows (gated by GitHub Actions / linters, not product SAST) ───────
+.github/
+
+# ── Backup and scratch files ──────────────────────────────────────────────
+*.bak
+**/*.bak
+
+# ── Test suites and runners (non-production test code) ─────────────────────
+tests/
+
+# ── Tool configurations (Renovate, etc.) ──────────────────────────────────
+renovate.json

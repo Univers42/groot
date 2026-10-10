@@ -48,6 +48,10 @@ CTL_CFG_DIR     ?= $(HOME)/.config/42ctl
 # because `foreach --recursive` still descends into a submodule whose command exited 0.
 PIN_SUBMODULES := $(CURDIR)/scripts/pin-submodules.sh
 SKIP_IF_PINNED = for p in $$PINNED; do case "$$displaypath/" in "$$p"/*) exit 0 ;; esac; done;
+# Prefix for every recipe that builds osionos-app: app.Dockerfile serves the graph_render pack only
+# when GRAPH_RENDER_SHA is the gitlink. Read when the recipe runs, not by an exported $(shell),
+# which common.mk documents as flaky under GNU Make 4.4.1.
+WITH_GRAPH_RENDER_SHA = export GRAPH_RENDER_SHA="$$(git ls-tree HEAD apps/graph_render | awk '$$2 == "commit" { print $$3 }')";
 
 submodules-pinned:
 ## Check out absent pinned submodules (`update = none`) at the commit groot records, then fail if any is elsewhere or edited. Never moves a checked-out one.

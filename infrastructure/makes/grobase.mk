@@ -59,7 +59,7 @@ PREBUILT_IMAGE_EXPORTS := \
 GROBASE_EDITION ?= devlean
 
 backend-up:
-## Ensure the grobase backend is up — START it if it's down (not just guard), so a bare `make all` reconstitutes a clean machine. Brings up GROBASE_EDITION (default migrate). With a vault key, secrets are pulled earlier by `secrets-ensure`; with NO vault key, grobase self-generates its secrets (no-vault local mode) and `env-local-ensure` derives the root ./.env.local afterward.
+## Ensure the grobase backend is up — START it if it's down (not just guard), so a bare `make all` reconstitutes a clean machine. Brings up GROBASE_EDITION (default devlean; CI passes migrate). With a vault key, secrets are pulled earlier by `secrets-ensure`; with NO vault key, grobase self-generates its secrets (no-vault local mode) and `env-local-ensure` derives the root ./.env.local afterward.
 	@if docker ps -q --filter label=com.docker.compose.service=grobase-link 2>/dev/null | grep -q .; then \
 		echo '[backend] the grobase-link relay is running: grobase is reached elsewhere (make link-status). Refusing to start a second one under the same names; make link-down first.' >&2; \
 		exit 1; \
@@ -124,6 +124,7 @@ frontends-up: submodules-pinned certs drawnosaurus-wasm
 		$$compose build $(filter-out $(PREBUILT_SERVICES),$(ROOT_FRONTENDS)); \
 		build=--no-build; \
 	fi; \
+	$(WITH_GRAPH_RENDER_SHA) \
 	TRACK_BINOCLE_BIND_ADDR="$$(sh infrastructure/scripts/detect-bind-addr.sh)" $$compose up -d $$build --wait $(ROOT_FRONTENDS); \
 	if grep -qs '^OSIONOS_RUNNER_URL=.' ./.env.local; then \
 		COMPOSE_PROFILES=runner $$compose up -d osionos-runner || true; \

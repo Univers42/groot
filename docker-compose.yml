@@ -241,6 +241,9 @@ services:
       context: ./apps/osionos/app
       dockerfile: ../../../infrastructure/docker/osionos/app.Dockerfile
       args:
+        # apps/graph_render's gitlink, set by make (WITH_GRAPH_RENDER_SHA in repo.mk). app.Dockerfile
+        # fails without it: it serves the graph_render pack built from exactly this commit.
+        GRAPH_RENDER_SHA: ${GRAPH_RENDER_SHA:-}
         VITE_API_URL: https://localhost:${OSIONOS_BRIDGE_HOST_PORT:-4000}
         VITE_PRISMATICA_URL: https://localhost:${OPPOSITE_OSIRIS_HOST_PORT:-4322}
         VITE_MAIL_APP_URL: https://localhost:${MAIL_HOST_PORT:-3002}

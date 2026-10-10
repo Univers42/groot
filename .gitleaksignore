@@ -7,8 +7,8 @@
 apps/grobase/vendor/vite-gourmand/scripts/supabase/setup-supabase.sh:generic-api-key:28
 apps/grobase/vendor/vite-gourmand/wiki/suppabase.md:generic-api-key:1
 apps/opposite-osiris/deploy/fly/fly.toml:jwt:25
-apps/opposite-osiris/src/data/legal.ts:generic-api-key:30
-apps/opposite-osiris/src/data/legal.ts:generic-api-key:31
+apps/opposite-osiris/src/data/legal.ts:generic-api-key:28
+apps/opposite-osiris/src/data/legal.ts:generic-api-key:29
 
 # Not a secret: SonarCloud project key (public identifier)
 QUALITY-SECURITY-TOOLING.md:generic-api-key:109
@@ -20,7 +20,7 @@ archive/wiki-2026-09/tools/README.md:generic-api-key:81
 sonar-project.properties:generic-api-key:2
 
 # Test fixtures: throwaway keys for isolated verify/test stacks, labelled fake in place
-.github/workflows/mini-baas-security.yml:generic-api-key:428
+.github/workflows/mini-baas-security.yml:generic-api-key:436
 apps/grobase/scripts/ci/run-ci-local.sh:curl-auth-header:117
 apps/grobase/scripts/seed/nimbus-data-generate.mjs:generic-api-key:21
 apps/grobase/scripts/test/assemble-env-test.sh:generic-api-key:35
@@ -39,7 +39,7 @@ apps/grobase/scripts/verify/m132-ceiling-enforce.sh:generic-api-key:69
 apps/grobase/scripts/verify/m133-cross-tenant-safety.sh:generic-api-key:63
 apps/grobase/scripts/verify/m134-flag-off-parity.sh:generic-api-key:61
 apps/grobase/scripts/verify/m166-groups-environments.sh:generic-api-key:241
-apps/grobase/scripts/verify/m194-preflight-production.sh:generic-api-key:234
+apps/grobase/scripts/verify/m194-preflight-production.sh:generic-api-key:247
 apps/grobase/scripts/verify/m195-prod-overlay-hardening.sh:generic-api-key:399
 apps/grobase/scripts/verify/m59-graphql-live.sh:generic-api-key:66
 apps/grobase/scripts/verify/m65-vault-enforce.sh:generic-api-key:82
