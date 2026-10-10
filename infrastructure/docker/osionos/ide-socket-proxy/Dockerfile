@@ -7,5 +7,7 @@ FROM node:22-bookworm-slim
 WORKDIR /app
 COPY proxy.mjs /app/proxy.mjs
 
+USER node
+
 EXPOSE 2375
 CMD ["node", "/app/proxy.mjs"]
