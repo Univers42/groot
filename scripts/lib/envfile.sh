@@ -1,6 +1,9 @@
 #!/bin/sh
 # envfile.sh — the ONE primitive for editing a KEY=VALUE env file in place.
 #
+#   get_env FILE KEY         Print KEY's value (surrounding quotes stripped); exit 1 and print
+#                            nothing when the file, the key or the value is absent. Never logs
+#                            the value.
 #   put_env FILE KEY VALUE   Set KEY to VALUE. The first live (non-comment) KEY= line is
 #                            rewritten where it stands, later duplicates are dropped, a
 #                            missing key is appended. Every other byte is preserved. The
@@ -29,6 +32,14 @@ BEGIN { k = ENVIRON["ENVFILE_KEY"]; v = ENVIRON["ENVFILE_VAL"] }
 END { if (!seen) print k "=" v }
 AWK
 )
+
+get_env() {
+	_ge_val=""
+	[ -f "$1" ] && _ge_val="$(sed -n "s/^$2=//p" "$1" | tail -1 |
+		sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
+	[ -n "$_ge_val" ] || return 1
+	printf '%s' "$_ge_val"
+}
 
 put_env() {
 	_pe_file="$1"

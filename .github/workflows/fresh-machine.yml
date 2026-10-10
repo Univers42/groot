@@ -5,9 +5,18 @@ name: Fresh-Machine Migration
 # A clean ubuntu-latest runner IS the new machine. The only thing that is NOT in the
 # clone — and cannot be, by zero-knowledge design — is the vault key, placed here from a
 # secret the way you'd copy ~/.config/42ctl/keystore.v42 once (like installing Docker).
-# `make all` then self-provisions: sync submodules → pull secrets from vault42 (no OTP) →
+# `make all` then self-provisions: sync submodules → pull secrets from vault42 (a saved 42ctl
+# session, no OTP: the CLI answers "not logged in" to keystore + contract alone since grobase's
+# 2026-10-07 vault42 rework, run 38014839046) →
 # start the grobase backend (all public-image engines) → restore the all-engine snapshot →
 # build+start the frontends → healthcheck. If this is red, the project isn't good enough.
+#
+# Two modes, decided by whether VAULT42_SESSION_B64 is set:
+#   team   the migration proper: vault pull, all-engine restore, data proven in 6 engines.
+#   local  the documented no-vault path (`make all` with no keystore): self-generated
+#          secrets, empty engines, demo account created by demo-login-ensure, full stack +
+#          healthcheck. The pull and the restore are NOT exercised and the summary says so:
+#          green here proves a clean machine comes up, not that the team data travels.
 
 on:
   push:
@@ -89,6 +98,7 @@ jobs:
     env:
       VAULT42_KEYSTORE_B64: ${{ secrets.VAULT42_KEYSTORE_B64 }}
       VAULT42_CONTRACT_B64: ${{ secrets.VAULT42_CONTRACT_B64 }}
+      VAULT42_SESSION_B64: ${{ secrets.VAULT42_SESSION_B64 }}
       VAULT42_PASSPHRASE: ${{ secrets.VAULT42_PASSPHRASE }}
       FT_PASSPHRASE: ${{ secrets.VAULT42_PASSPHRASE }}
       GROBASE_EDITION: ${{ github.event.inputs.grobase_edition || 'migrate' }}
@@ -105,12 +115,20 @@ jobs:
           sudo docker image prune -af >/dev/null 2>&1 || true
           echo "after:"; df -h / | tail -1
 
-      - name: Preconditions — the vault secrets (only non-clone inputs)
+      - name: Preconditions — the vault secrets (only non-clone inputs), and the mode
+        id: pre
         run: |
           [ -n "$VAULT42_KEYSTORE_B64" ] || { echo "::error::VAULT42_KEYSTORE_B64 secret is empty/unset"; exit 1; }
           [ -n "$VAULT42_PASSPHRASE" ]   || { echo "::error::VAULT42_PASSPHRASE secret is empty/unset"; exit 1; }
           [ -n "$VAULT42_CONTRACT_B64" ] || { echo "::error::VAULT42_CONTRACT_B64 secret is unset — set it once: base64 -w0 ~/.config/42ctl/contract-default.tok | gh secret set VAULT42_CONTRACT_B64 -R Univers42/groot"; exit 1; }
-          echo "vault secrets present (keystore + contract + passphrase)"
+          if [ -n "$VAULT42_SESSION_B64" ]; then
+            echo "mode=team" >> "$GITHUB_OUTPUT"
+            echo "vault secrets present (keystore + contract + session + passphrase) — TEAM mode: pull + all-engine restore"
+          else
+            echo "mode=local" >> "$GITHUB_OUTPUT"
+            echo "::warning title=no VAULT42_SESSION_B64 — LOCAL mode::make all runs with no vault identity: self-generated secrets, empty engines, demo account created locally. The vault pull and the data restore are NOT exercised by this run."
+            echo "::notice title=to exercise the vault path::on a logged-in machine (42ctl auth status): base64 -w0 ~/.config/42ctl/session-default.tok | gh secret set VAULT42_SESSION_B64 -R Univers42/groot — and seal infra/S3_KEY / infra/S3_SECRET so seeds above 4 MiB (minio.tar.gz) can travel."
+          fi
 
       # Order matters and used to be wrong: the rewrite that makes `git@github.com:` URLs
       # resolve without an SSH key was configured AFTER the recursive checkout that needs
@@ -145,7 +163,8 @@ jobs:
           [ "$n" -ge 20 ] || { echo "::error::expected >=20 submodules, got ${n}"; exit 1; }
           git submodule status --recursive | sed 's/^/  /'
 
-      - name: Place the vault identity (keystore + contract) — machine config
+      - name: Place the vault identity (keystore + contract + session) — machine config
+        if: steps.pre.outputs.mode == 'team'
         run: |
           d="$HOME/.config/42ctl"; mkdir -p "$d"
           echo "keystore secret: ${#VAULT42_KEYSTORE_B64} chars (≈664)   contract secret: ${#VAULT42_CONTRACT_B64} chars (≈244)"
@@ -167,20 +186,54 @@ jobs:
           c=$(wc -c < "$d/contract-default.tok"); echo "decoded contract bytes: $c (expect ~182)"
           [ "$c" -ge 50 ] || { echo "::error::contract decoded to $c bytes — secret content is wrong"; exit 1; }
           chmod 600 "$d/contract-default.tok"
+          # The saved session is what `42ctl auth login` writes; the pull is refused without it.
+          printf '%s' "$VAULT42_SESSION_B64" | tr -cd 'A-Za-z0-9+/=' | base64 -d > "$d/session-default.tok" 2>/dev/null || {
+            echo "::error::VAULT42_SESSION_B64 is not decodable base64"; exit 1; }
+          s=$(wc -c < "$d/session-default.tok"); echo "decoded session bytes: $s"
+          [ "$s" -ge 20 ] || { echo "::error::session decoded to $s bytes — secret content is wrong"; exit 1; }
+          chmod 600 "$d/session-default.tok"
           ls -la "$d"
 
       - name: "☄  make all   — provisions the whole machine from nothing"
         env:
           SKIP_SYNC_INPUT: ${{ github.event.inputs.skip_sync }}
+          # team: a failed pull FAILS make all at once, named. Unset, make all would fall back
+          # to LOCAL mode and this run would prove the wrong thing under the team label.
+          VAULT42_SOURCE: ${{ steps.pre.outputs.mode == 'team' && 'team' || '' }}
         run: |
           case "${SKIP_SYNC_INPUT:-0}" in
             0|1) ;;
             *) echo "::error::skip_sync must be 0 or 1, got '${SKIP_SYNC_INPUT}'"; exit 1 ;;
           esac
-          make all SKIP_SYNC="${SKIP_SYNC_INPUT:-0}"
+          set -o pipefail
+          make all SKIP_SYNC="${SKIP_SYNC_INPUT:-0}" 2>&1 | tee "$RUNNER_TEMP/make-all.log"
+
+      # The job log needs a token to read; check-run annotations do not (the public API serves
+      # them, and nothing on the dev box can read logs). So the tail of `make all` is emitted as
+      # ::error annotations: 6 lines each, 10 per step is GitHub's cap, values after =
+      # redacted in case a script ever echoes one.
+      - name: Name the failure in annotations (readable without a token)
+        if: failure()
+        run: |
+          test -s "$RUNNER_TEMP/make-all.log" || { echo "::error title=make all::no output captured"; exit 0; }
+          tail -n 60 "$RUNNER_TEMP/make-all.log" \
+            | sed -E 's/\x1b\[[0-9;]*m//g; s/([A-Z_]*(PASSWORD|SECRET|TOKEN|KEY|PASSPHRASE)[A-Z_]*=)[^ ]*/\1<redacted>/g' \
+            | awk '{ buf = buf $0 "%0A"; n++ } n == 6 { printf "::error title=make all tail %d::%s\n", ++c, buf; buf = ""; n = 0 } END { if (n) printf "::error title=make all tail %d::%s\n", ++c, buf }'
+
+      # The tail says where it died; these say which path got there — vault pull or LOCAL mode,
+      # submodule sync, which restore source, demo-login. Same redaction, ::warning so they
+      # read apart from the tail.
+      - name: Name the path in annotations (secrets, sync, restore, demo-login markers)
+        if: failure()
+        run: |
+          test -s "$RUNNER_TEMP/make-all.log" || exit 0
+          { grep -E '^\[(secrets|make all|restore-if-empty|demo-login|gen-local-env|sync|submodules?)\]|vault42|LOCAL mode|42ctl|not found|No such file' "$RUNNER_TEMP/make-all.log" || true; } \
+            | sed -E 's/\x1b\[[0-9;]*m//g; s/([A-Z_]*(PASSWORD|SECRET|TOKEN|KEY|PASSPHRASE)[A-Z_]*=)[^ ]*/\1<redacted>/g' \
+            | head -n 60 \
+            | awk '{ buf = buf $0 "%0A"; n++ } n == 6 { printf "::warning title=make all markers %d::%s\n", ++c, buf; buf = ""; n = 0 } END { if (n) printf "::warning title=make all markers %d::%s\n", ++c, buf }'
 
       - name: Prove the all-engine data restored (ASSERTS all 6 engines non-zero)
-        if: success()
+        if: success() && steps.pre.outputs.mode == 'team'
         run: |
           echo "== running engines =="
           docker ps --format '{{.Names}}' | grep -E 'mini-baas-(postgres|mysql|mongo|mssql|dynamodb|minio)' | sort
@@ -208,6 +261,24 @@ jobs:
           mnc=$(docker exec mini-baas-minio sh -c 'find /data -type f -not -path "*/.minio.sys/*" 2>/dev/null | wc -l' 2>/dev/null | tr -d '[:space:]')
           echo "minio objects = ${mnc:-<none>}"; gt0 "$mnc" || { echo "::error::minio objects empty"; fail=1; }
           [ "$fail" = 0 ] && echo "✓ ALL 6 engines restored with data (postgres mysql mongo mssql dynamodb minio)" || exit 1
+
+      # LOCAL mode has no data to prove; it proves the no-vault promise instead: the account
+      # demo-login-ensure created exists, and its password grant passes through Kong. Keys and
+      # password go through a curl config and stdin, never argv or the log.
+      - name: Prove the no-vault stack (LOCAL mode) — demo account exists and logs in
+        if: success() && steps.pre.outputs.mode == 'local'
+        run: |
+          set -euo pipefail
+          . scripts/lib/demo-login.sh
+          pw=$(demo_login_password .env.local)
+          key=$(sed -n 's/^SB_KONG_KEY=//p' .env.local | tail -1)
+          n=$(docker exec mini-baas-postgres psql -U postgres -d postgres -tAc "SELECT count(*) FROM auth.users WHERE email = '$DEMO_LOGIN_EMAIL'" | tr -d '[:space:]')
+          echo "auth.users rows for $DEMO_LOGIN_EMAIL: $n"; [ "$n" = 1 ]
+          port=$(docker port mini-baas-kong 8000/tcp | head -1 | sed 's/.*://')
+          printf 'header = "apikey: %s"\nheader = "Content-Type: application/json"\n' "$key" > "$RUNNER_TEMP/grant.cfg"
+          code=$(printf '{"email":"%s","password":"%s"}' "$DEMO_LOGIN_EMAIL" "$pw" \
+            | curl -sS -K "$RUNNER_TEMP/grant.cfg" --data-binary @- -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/auth/v1/token?grant_type=password")
+          echo "password grant through Kong → HTTP $code"; [ "$code" = 200 ]
 
       - name: Assert core/engine/app containers healthy (everything green)
         if: success()
@@ -271,18 +342,17 @@ jobs:
           path: tests/e2e/test-results
           if-no-files-found: ignore
 
+      # Only meaningful once the stack is up; a run that died before that has no container to
+      # ask. The pg_restore replay of apps/grobase/data-snapshots is gone with the snapshot
+      # (grobase de656694); the vault seeds are restored by vault-restore.sh, which logs itself.
       - name: Postgres restore diagnostics
         if: failure()
         run: |
+          docker ps --format '{{.Names}}' | grep -qx mini-baas-postgres || { echo "mini-baas-postgres is not running — nothing to diagnose"; exit 0; }
           P="docker exec mini-baas-postgres psql -U postgres"
           echo "== databases =="; $P -tAc "SELECT datname FROM pg_database WHERE datistemplate=false" 2>&1
           echo "== public tables in postgres DB =="; $P -d postgres -tAc "SELECT count(*) FROM pg_tables WHERE schemaname='public'" 2>&1
-          echo "== osionos_pages now? =="; $P -d postgres -tAc "SELECT to_regclass('public.osionos_pages')" 2>&1
-          echo "== commerce DB present (other postgres dump)? =="; $P -tAc "SELECT count(*) FROM pg_database WHERE datname='commerce'" 2>&1
-          echo "== RE-RUN db-postgres.dump restore, show errors =="
-          docker exec -i mini-baas-postgres pg_restore -U postgres --clean --if-exists --no-owner --no-privileges -d postgres \
-            < apps/grobase/data-snapshots/archives/postgres/db-postgres.dump 2>&1 | grep -iE 'error|fatal|denied|does not exist|cannot|permission' | head -25
-          echo "== osionos_pages + count after re-run =="; $P -d postgres -tAc "SELECT to_regclass('public.osionos_pages')" 2>&1
+          echo "== osionos_pages =="; $P -d postgres -tAc "SELECT to_regclass('public.osionos_pages')" 2>&1
           $P -d postgres -tAc "SELECT count(*) FROM osionos_pages" 2>&1 | head -1
 
       - name: Diagnostics on failure
@@ -306,6 +376,8 @@ jobs:
             echo "Simulates your other Ubuntu machine: a clean runner + the vault key (one-time machine"
             echo "config), then \`git clone --recursive\` + \`make all\` — nothing else. Green here means a"
             echo "fresh machine reconstitutes the whole stack (code → secrets → backend → data → frontends)."
+            echo ""
+            echo "Mode: **${{ steps.pre.outputs.mode }}** — team = vault pull + all-engine restore proven; local = the no-vault path, pull and restore NOT exercised."
           } >> "$GITHUB_STEP_SUMMARY"
 
 # rerun: secrets complete (keystore+contract+passphrase)

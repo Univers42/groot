@@ -64,7 +64,12 @@ load_service_auth() {
 	[ -f "${lib}" ] || die "missing ${lib}"
 	# shellcheck source=/dev/null
 	. "${lib}"
+	# grobase's compose maps the host-side ADAPTER_REGISTRY_SERVICE_TOKEN into the container
+	# as INTERNAL_SERVICE_TOKEN (orchestrators/compose/base/control-plane.yml:26); the old name
+	# only reaches the container via the monolith shape (env_file: [.env]) or an optional
+	# .env.adapter-registry-go (absent on grobase develop 7abe647d, measured 2026-10-10).
 	SERVICE_TOKEN="$(cenv "${REG_CTN}" ADAPTER_REGISTRY_SERVICE_TOKEN)"
+	[ -n "${SERVICE_TOKEN}" ] || SERVICE_TOKEN="$(cenv "${REG_CTN}" INTERNAL_SERVICE_TOKEN)"
 	export SERVICE_TOKEN
 	[ -n "${SERVICE_TOKEN}" ] || die "no adapter-registry service token — is ${REG_CTN} running?"
 }
