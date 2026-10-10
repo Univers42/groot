@@ -51,11 +51,29 @@ seeds() {
 
 run_script() { RUNNING="${RUNNING-mini-baas-postgres}" PG_PAGES="${PG_PAGES:-0}" run sh "$ROOT/scripts/restore-if-empty.sh"; }
 
-@test "a fresh machine without vault seeds gets the git snapshot" {
+@test "a fresh machine without vault seeds gets the git snapshot when the checkout has one" {
   run_script
   [ "$status" -eq 0 ]
   [ -e "$GIT_RESTORED" ]
   [ ! -e "$VAULT_RESTORED" ]
+}
+
+# grobase de656694 removed data-snapshots/: a checkout at that pin has neither source.
+@test "a fresh machine without vault seeds and without a git snapshot fails and names the pull" {
+  rm "$ROOT/apps/grobase/data-snapshots/restore-databases.sh"
+  run_script
+  [ "$status" -ne 0 ]
+  [ ! -e "$GIT_RESTORED" ] && [ ! -e "$VAULT_RESTORED" ]
+  [[ "$output" == *"nothing to restore"* ]]
+  [[ "$output" == *"make vault42-pull-all APPLY=1"* ]]
+  [[ "$output" != *"restore complete"* ]]
+}
+
+@test "a failing git snapshot restore fails make all instead of reporting complete" {
+  printf '#!/bin/sh\nexit 2\n' > "$ROOT/apps/grobase/data-snapshots/restore-databases.sh"
+  run_script
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"restore complete"* ]]
 }
 
 @test "a populated postgres is never overwritten" {
