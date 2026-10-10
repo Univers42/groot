@@ -84,7 +84,7 @@ done
 [ -n "$in" ] || in=/dev/stdin
 case $want in
 -subject) printf 'subject=%s\n' "$(grep -v '^-----' "$in" | head -n 1)" ;;
--fingerprint) printf 'sha256 Fingerprint=%s\n' "$(grep -v '^-----' "$in" | sha256sum | cut -d' ' -f1)" ;;
+-fingerprint) printf 'sha256 Fingerprint=%s\n' "$(grep -v -E '^-----|^$' "$in" | sha256sum | cut -d' ' -f1)" ;;
 esac
 STUB
   chmod +x "$1/openssl"
