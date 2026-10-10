@@ -146,8 +146,8 @@ store_state() { # <dir>
   while IFS="$US" read -r nick trust; do
     [ -n "$nick" ] || continue
     while IFS= read -r -d "$RS" pem; do
-      [ "$(subject <<<"$pem")" = "$CA_SUBJECT" ] || continue
-      if [ "$(fingerprint <<<"$pem")" != "$CA_FP" ]; then old=$((old + 1))
+      [ "$(printf '%s' "$pem" | subject)" = "$CA_SUBJECT" ] || continue
+      if [ "$(printf '%s' "$pem" | fingerprint)" != "$CA_FP" ]; then old=$((old + 1))
       elif ssl_trusted "$trust"; then fresh=$((fresh + 1))
       else weak=$((weak + 1)); fi
     done < <(nick_pem "$1" "$nick" | pem_blocks)

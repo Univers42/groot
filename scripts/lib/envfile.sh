@@ -56,7 +56,7 @@ get_env() {
 	END { exit !found }' "$1")" || return 1
 	[ -n "$_ge_raw" ] || return 1
 	_ge_val="$(printf '%s' "$_ge_raw" | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
-	printf '%s' "$_ge_val"
+	printf '%s\n' "$_ge_val"
 }
 
 put_env() {
