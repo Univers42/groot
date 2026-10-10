@@ -12,7 +12,10 @@ setup() {
   cp "$BATS_TEST_DIRNAME/../lib/demo-login.sh" "$BATS_TEST_DIRNAME/../lib/envfile.sh" "$ROOT/scripts/lib/"
   cp "$BATS_TEST_DIRNAME/../demo-login-ensure.sh" "$ROOT/scripts/"
   export ENV_LOCAL="$ROOT/.env.local"
-  printf 'OTHER=x\nDEMO_LOGIN_PASSWORD=pw-Sentinel-0123456789\n' >"$ENV_LOCAL"
+  # One definition of the fixture password: gitleaks reads a literal inside a JSON
+  # "password":"..." as a secret (main 8d111dae went red over it); the variable form is not.
+  export SENTINEL_PW=pw-Sentinel-0123456789
+  printf 'OTHER=x\nDEMO_LOGIN_PASSWORD=%s\n' "$SENTINEL_PW" >"$ENV_LOCAL"
   export ARGV_LOG="$BATS_TEST_TMPDIR/docker.argv" STDIN_LOG="$BATS_TEST_TMPDIR/docker.stdin"
   export PG_ANSWER=updated CURL_ANSWER=200 LOCAL_MODE_MARK="$ROOT/.vault42-local-mode"
   export CURL_CFG_LOG="$BATS_TEST_TMPDIR/curl.cfg" CURL_STDIN_LOG="$BATS_TEST_TMPDIR/curl.stdin"
@@ -42,7 +45,7 @@ STUB
 @test "demo_login_password prints the value from the file" {
   run sh -c '. "$1/scripts/lib/demo-login.sh"; demo_login_password "$2"' _ "$ROOT" "$ENV_LOCAL"
   [ "$status" -eq 0 ]
-  [ "$output" = "pw-Sentinel-0123456789" ]
+  [ "$output" = "$SENTINEL_PW" ]
 }
 
 @test "demo_login_password: an empty value is an error naming the fix, not an empty password" {
@@ -77,7 +80,7 @@ STUB
   grep -q -- '-e DEMO_LOGIN_PASSWORD -e DEMO_LOGIN_EMAIL' "$ARGV_LOG"
   grep -q '^\\getenv pw DEMO_LOGIN_PASSWORD$' "$STDIN_LOG"
   [ "$(grep -c 'pw-Sentinel' "$STDIN_LOG")" -eq 1 ]
-  grep -q '^env:pw-Sentinel-0123456789$' "$STDIN_LOG"
+  grep -qx "env:$SENTINEL_PW" "$STDIN_LOG"
 }
 
 @test "ensure: an already-matching password is reported as current, exit 0" {
@@ -105,7 +108,7 @@ STUB
   grep -q 'http://127.0.0.1:8000/auth/v1/admin/users' "$ARGV_LOG"
   grep -q '^header = "apikey: anon-Sentinel"$' "$CURL_CFG_LOG"
   grep -q '^header = "Authorization: Bearer service-Sentinel"$' "$CURL_CFG_LOG"
-  grep -q '"email":"dev.pro.photo@gmail.com","password":"pw-Sentinel-0123456789","email_confirm":true' "$CURL_STDIN_LOG"
+  grep -qF "\"email\":\"dev.pro.photo@gmail.com\",\"password\":\"$SENTINEL_PW\",\"email_confirm\":true" "$CURL_STDIN_LOG"
 }
 
 @test "ensure: LOCAL mode without the BaaS keys in .env.local fails before calling the API" {
