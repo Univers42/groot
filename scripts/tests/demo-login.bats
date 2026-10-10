@@ -9,21 +9,33 @@
 setup() {
   ROOT="$BATS_TEST_TMPDIR/repo"
   mkdir -p "$ROOT/scripts/lib" "$BATS_TEST_TMPDIR/bin"
-  cp "$BATS_TEST_DIRNAME/../lib/demo-login.sh" "$ROOT/scripts/lib/"
+  cp "$BATS_TEST_DIRNAME/../lib/demo-login.sh" "$BATS_TEST_DIRNAME/../lib/envfile.sh" "$ROOT/scripts/lib/"
   cp "$BATS_TEST_DIRNAME/../demo-login-ensure.sh" "$ROOT/scripts/"
   export ENV_LOCAL="$ROOT/.env.local"
   printf 'OTHER=x\nDEMO_LOGIN_PASSWORD=pw-Sentinel-0123456789\n' >"$ENV_LOCAL"
   export ARGV_LOG="$BATS_TEST_TMPDIR/docker.argv" STDIN_LOG="$BATS_TEST_TMPDIR/docker.stdin"
-  export PG_ANSWER=updated
+  export PG_ANSWER=updated CURL_ANSWER=200 LOCAL_MODE_MARK="$ROOT/.vault42-local-mode"
+  export CURL_CFG_LOG="$BATS_TEST_TMPDIR/curl.cfg" CURL_STDIN_LOG="$BATS_TEST_TMPDIR/curl.stdin"
   cat >"$BATS_TEST_TMPDIR/bin/docker" <<'STUB'
 #!/bin/sh
 printf '%s\n' "$*" >>"$ARGV_LOG"
 case "$1" in
 ps) printf 'mini-baas-postgres\n' ;;
+port) printf '0.0.0.0:8000\n' ;;
 exec) cat >>"$STDIN_LOG"; printf 'env:%s\n' "${DEMO_LOGIN_PASSWORD:-}" >>"$STDIN_LOG"; printf '%s\n' "$PG_ANSWER" ;;
 esac
 STUB
   chmod +x "$BATS_TEST_TMPDIR/bin/docker"
+  # curl stub: records argv, the -K config file and the body; answers the status code only.
+  cat >"$BATS_TEST_TMPDIR/bin/curl" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" >>"$ARGV_LOG"
+cfg=""; while [ $# -gt 0 ]; do case "$1" in -K) cfg="$2"; shift ;; esac; shift; done
+[ -n "$cfg" ] && cat "$cfg" >>"$CURL_CFG_LOG"
+cat >>"$CURL_STDIN_LOG"
+printf '%s' "$CURL_ANSWER"
+STUB
+  chmod +x "$BATS_TEST_TMPDIR/bin/curl"
   export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
 }
 
@@ -74,10 +86,42 @@ STUB
   [[ "$output" == *"already matches"* ]]
 }
 
-@test "ensure: a missing account is a hard error" {
+@test "ensure: a missing account outside LOCAL mode is a hard error, nothing is created" {
   PG_ANSWER=missing run sh "$ROOT/scripts/demo-login-ensure.sh"
   [ "$status" -eq 1 ]
   [[ "$output" == *"not in auth.users"* ]]
+  [ ! -e "$CURL_STDIN_LOG" ]
+}
+
+# LOCAL mode has no team data and (since grobase de656694) no snapshot: the account is minted.
+@test "ensure: LOCAL mode creates a missing account through the admin API, nothing secret on argv" {
+  touch "$LOCAL_MODE_MARK"
+  printf 'SB_KONG_KEY=anon-Sentinel\nSERVICE_ROLE_KEY="service-Sentinel"\n' >>"$ENV_LOCAL"
+  PG_ANSWER=missing run sh "$ROOT/scripts/demo-login-ensure.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"LOCAL mode"*"created with the password from ./.env.local"* ]]
+  [[ "$output" != *"Sentinel"* ]]
+  ! grep -q 'Sentinel' "$ARGV_LOG"
+  grep -q 'http://127.0.0.1:8000/auth/v1/admin/users' "$ARGV_LOG"
+  grep -q '^header = "apikey: anon-Sentinel"$' "$CURL_CFG_LOG"
+  grep -q '^header = "Authorization: Bearer service-Sentinel"$' "$CURL_CFG_LOG"
+  grep -q '"email":"dev.pro.photo@gmail.com","password":"pw-Sentinel-0123456789","email_confirm":true' "$CURL_STDIN_LOG"
+}
+
+@test "ensure: LOCAL mode without the BaaS keys in .env.local fails before calling the API" {
+  touch "$LOCAL_MODE_MARK"
+  PG_ANSWER=missing run sh "$ROOT/scripts/demo-login-ensure.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"SB_KONG_KEY is not set"* ]]
+  [ ! -e "$CURL_STDIN_LOG" ]
+}
+
+@test "ensure: LOCAL mode create refused by GoTrue is a hard error naming the status" {
+  touch "$LOCAL_MODE_MARK"
+  printf 'SB_KONG_KEY=anon\nSERVICE_ROLE_KEY=service\n' >>"$ENV_LOCAL"
+  CURL_ANSWER=422 PG_ANSWER=missing run sh "$ROOT/scripts/demo-login-ensure.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"HTTP 422"* ]]
 }
 
 @test "ensure: a stopped postgres is a hard error that names the fix" {

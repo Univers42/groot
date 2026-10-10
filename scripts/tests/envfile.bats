@@ -67,3 +67,16 @@ setup() {
   put_env "$F" A x
   [ "$(ls -A "$BATS_TEST_TMPDIR" | wc -l)" -eq 1 ]
 }
+
+@test "get_env: prints the value with surrounding quotes stripped, never a missing one" {
+  f="$BATS_TEST_TMPDIR/g.env"
+  printf '# c\nA=1\nB="two words"\nC=\n' >"$f"
+  run sh -c '. "$1"; get_env "$2" B' _ "$BATS_TEST_DIRNAME/../lib/envfile.sh" "$f"
+  [ "$status" -eq 0 ] && [ "$output" = "two words" ]
+  run sh -c '. "$1"; get_env "$2" C' _ "$BATS_TEST_DIRNAME/../lib/envfile.sh" "$f"
+  [ "$status" -eq 1 ] && [ -z "$output" ]
+  run sh -c '. "$1"; get_env "$2" NOPE' _ "$BATS_TEST_DIRNAME/../lib/envfile.sh" "$f"
+  [ "$status" -eq 1 ] && [ -z "$output" ]
+  run sh -c '. "$1"; get_env "$2/absent" A' _ "$BATS_TEST_DIRNAME/../lib/envfile.sh" "$BATS_TEST_TMPDIR"
+  [ "$status" -eq 1 ]
+}
