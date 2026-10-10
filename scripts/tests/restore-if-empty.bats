@@ -59,12 +59,12 @@ run_script() { RUNNING="${RUNNING-mini-baas-postgres}" PG_PAGES="${PG_PAGES:-0}"
 }
 
 # grobase de656694 removed data-snapshots/: a checkout at that pin has neither source.
-@test "a fresh machine without vault seeds and without a git snapshot fails and names the pull" {
+@test "a fresh machine without vault seeds and without a git snapshot restores nothing, says so, and lets make all go on" {
   rm "$ROOT/apps/grobase/data-snapshots/restore-databases.sh"
   run_script
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 0 ]
   [ ! -e "$GIT_RESTORED" ] && [ ! -e "$VAULT_RESTORED" ]
-  [[ "$output" == *"nothing to restore"* ]]
+  [[ "$output" == *"NOTHING restored"* ]]
   [[ "$output" == *"make vault42-pull-all APPLY=1"* ]]
   [[ "$output" != *"restore complete"* ]]
 }
