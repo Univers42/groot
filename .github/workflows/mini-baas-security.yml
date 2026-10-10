@@ -165,6 +165,7 @@ jobs:
           scan-type: fs
           scan-ref: .
           severity: HIGH,CRITICAL
+          limit-severities-for-sarif: true
           ignore-unfixed: true
           format: sarif
           output: trivy-fs.sarif
@@ -208,6 +209,7 @@ jobs:
         with:
           image-ref: mini-baas/query-router:ci
           severity: HIGH,CRITICAL
+          limit-severities-for-sarif: true
           ignore-unfixed: true
           format: sarif
           output: trivy-image.sarif
