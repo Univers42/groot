@@ -3,7 +3,12 @@
 # RUNNING primary engine (postgres osionos, mysql ops, mongo activity) is CONFIRMED empty.
 # FAIL-SAFE: an engine with data aborts the restore — it never wipes a populated stack.
 # The source is the 42ctl vault seeds in ./secrets when they are on disk (pulled by
-# `make all`'s secrets-ensure: newest data, all 7 engines), else the committed git snapshot.
+# `make all`'s secrets-ensure: newest data, all 7 engines), else a git-committed snapshot —
+# which grobase removed in de656694 (2026-10-07, "drop ... committed app data"). With no
+# seeds there is nothing to restore: the engines stay EMPTY and this says so loudly (the old
+# path ran a missing script and printed "restore complete"). `make all` goes on — in LOCAL
+# mode demo-login-ensure then creates the demo account, so a no-vault machine still ends
+# with a working login; a vault machine whose pull brought no seeds fails there, named.
 # grobase `up` is DETACHED (no --wait), so on a fresh machine the engines are still booting
 # when we arrive; we WAIT for docker health first, otherwise a transient "not ready" is
 # misread as "uncertain" and the restore is WRONGLY skipped (the bug that left a fresh
@@ -98,11 +103,21 @@ restore_from_vault() {
   note "vault restore complete."
 }
 
-# restore_from_git: no vault seeds on disk (no vault key / LOCAL mode) — the committed snapshot.
+# restore_from_git: no vault seeds on disk (no vault key / LOCAL mode) — the committed snapshot,
+# if a checkout still has one. Its absence or failure is a failed restore, never "complete".
 restore_from_git() {
+  if [ ! -x "$RESTORE" ]; then
+    note "no vault seeds in ./secrets and no git snapshot at $RESTORE — NOTHING restored, the engines stay empty."
+    note "  grobase dropped data-snapshots/ (de656694); the vault seeds are the only data source."
+    note "  to load the team data later:  make vault42-pull-all APPLY=1 && make vault-restore"
+    return 0
+  fi
   note "all running primary engines empty → restoring the full snapshot (all engines)…"
   note "source: git-committed snapshot apps/grobase/data-snapshots, taken $(snapshot_vintage) — no vault seeds in ./secrets"
-  CONFIRM=1 "$RESTORE"
+  if ! CONFIRM=1 "$RESTORE"; then
+    note "git snapshot restore FAILED — nothing was marked restored."
+    exit 1
+  fi
   # The pg --clean restore swaps the schema under the postgres-connected services, leaving
   # them stale/unhealthy — bounce them (and the storage/realtime CDC) so they reconnect.
   docker restart mini-baas-minio mini-baas-realtime mini-baas-postgrest mini-baas-supavisor >/dev/null 2>&1 || true
