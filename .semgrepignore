@@ -82,3 +82,6 @@ infrastructure/scripts/tls/nginx.conf
 
 # ── Test suites and runners (non-production test code) ─────────────────────
 tests/
+
+# ── Tool configurations (Renovate, etc.) ──────────────────────────────────
+renovate.json
