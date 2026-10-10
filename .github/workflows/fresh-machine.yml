@@ -192,6 +192,18 @@ jobs:
             | sed -E 's/\x1b\[[0-9;]*m//g; s/([A-Z_]*(PASSWORD|SECRET|TOKEN|KEY|PASSPHRASE)[A-Z_]*=)[^ ]*/\1<redacted>/g' \
             | awk '{ buf = buf $0 "%0A"; n++ } n == 6 { printf "::error title=make all tail %d::%s\n", ++c, buf; buf = ""; n = 0 } END { if (n) printf "::error title=make all tail %d::%s\n", ++c, buf }'
 
+      # The tail says where it died; these say which path got there — vault pull or LOCAL mode,
+      # submodule sync, which restore source, demo-login. Same redaction, ::warning so they
+      # read apart from the tail.
+      - name: Name the path in annotations (secrets, sync, restore, demo-login markers)
+        if: failure()
+        run: |
+          test -s "$RUNNER_TEMP/make-all.log" || exit 0
+          { grep -E '^\[(secrets|make all|restore-if-empty|demo-login|gen-local-env|sync|submodules?)\]|vault42|LOCAL mode|42ctl|not found|No such file' "$RUNNER_TEMP/make-all.log" || true; } \
+            | sed -E 's/\x1b\[[0-9;]*m//g; s/([A-Z_]*(PASSWORD|SECRET|TOKEN|KEY|PASSPHRASE)[A-Z_]*=)[^ ]*/\1<redacted>/g' \
+            | head -n 60 \
+            | awk '{ buf = buf $0 "%0A"; n++ } n == 6 { printf "::warning title=make all markers %d::%s\n", ++c, buf; buf = ""; n = 0 } END { if (n) printf "::warning title=make all markers %d::%s\n", ++c, buf }'
+
       - name: Prove the all-engine data restored (ASSERTS all 6 engines non-zero)
         if: success()
         run: |
