@@ -177,7 +177,20 @@ jobs:
             0|1) ;;
             *) echo "::error::skip_sync must be 0 or 1, got '${SKIP_SYNC_INPUT}'"; exit 1 ;;
           esac
-          make all SKIP_SYNC="${SKIP_SYNC_INPUT:-0}"
+          set -o pipefail
+          make all SKIP_SYNC="${SKIP_SYNC_INPUT:-0}" 2>&1 | tee "$RUNNER_TEMP/make-all.log"
+
+      # The job log needs a token to read; check-run annotations do not (the public API serves
+      # them, and nothing on the dev box can read logs). So the tail of `make all` is emitted as
+      # ::error annotations: 6 lines each, 10 per step is GitHub's cap, values after =
+      # redacted in case a script ever echoes one.
+      - name: Name the failure in annotations (readable without a token)
+        if: failure()
+        run: |
+          test -s "$RUNNER_TEMP/make-all.log" || { echo "::error title=make all::no output captured"; exit 0; }
+          tail -n 60 "$RUNNER_TEMP/make-all.log" \
+            | sed -E 's/\x1b\[[0-9;]*m//g; s/([A-Z_]*(PASSWORD|SECRET|TOKEN|KEY|PASSPHRASE)[A-Z_]*=)[^ ]*/\1<redacted>/g' \
+            | awk '{ buf = buf $0 "%0A"; n++ } n == 6 { printf "::error title=make all tail %d::%s\n", ++c, buf; buf = ""; n = 0 } END { if (n) printf "::error title=make all tail %d::%s\n", ++c, buf }'
 
       - name: Prove the all-engine data restored (ASSERTS all 6 engines non-zero)
         if: success()
