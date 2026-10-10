@@ -5,7 +5,9 @@ name: Fresh-Machine Migration
 # A clean ubuntu-latest runner IS the new machine. The only thing that is NOT in the
 # clone — and cannot be, by zero-knowledge design — is the vault key, placed here from a
 # secret the way you'd copy ~/.config/42ctl/keystore.v42 once (like installing Docker).
-# `make all` then self-provisions: sync submodules → pull secrets from vault42 (no OTP) →
+# `make all` then self-provisions: sync submodules → pull secrets from vault42 (a saved 42ctl
+# session, no OTP: the CLI answers "not logged in" to keystore + contract alone since grobase's
+# 2026-10-07 vault42 rework, run 38014839046) →
 # start the grobase backend (all public-image engines) → restore the all-engine snapshot →
 # build+start the frontends → healthcheck. If this is red, the project isn't good enough.
 
@@ -89,7 +91,12 @@ jobs:
     env:
       VAULT42_KEYSTORE_B64: ${{ secrets.VAULT42_KEYSTORE_B64 }}
       VAULT42_CONTRACT_B64: ${{ secrets.VAULT42_CONTRACT_B64 }}
+      VAULT42_SESSION_B64: ${{ secrets.VAULT42_SESSION_B64 }}
       VAULT42_PASSPHRASE: ${{ secrets.VAULT42_PASSPHRASE }}
+      # team: a failed pull FAILS make all here. The default fell back to LOCAL mode, booted
+      # grobase on self-generated secrets with no data, and the committed snapshot that used to
+      # hide that is gone (grobase de656694) — three days of red named only "exit code 2".
+      VAULT42_SOURCE: team
       FT_PASSPHRASE: ${{ secrets.VAULT42_PASSPHRASE }}
       GROBASE_EDITION: ${{ github.event.inputs.grobase_edition || 'migrate' }}
       TRACK_BINOCLE_SKIP_CERT_TRUST: "1"
@@ -110,7 +117,12 @@ jobs:
           [ -n "$VAULT42_KEYSTORE_B64" ] || { echo "::error::VAULT42_KEYSTORE_B64 secret is empty/unset"; exit 1; }
           [ -n "$VAULT42_PASSPHRASE" ]   || { echo "::error::VAULT42_PASSPHRASE secret is empty/unset"; exit 1; }
           [ -n "$VAULT42_CONTRACT_B64" ] || { echo "::error::VAULT42_CONTRACT_B64 secret is unset — set it once: base64 -w0 ~/.config/42ctl/contract-default.tok | gh secret set VAULT42_CONTRACT_B64 -R Univers42/groot"; exit 1; }
-          echo "vault secrets present (keystore + contract + passphrase)"
+          [ -n "$VAULT42_SESSION_B64" ]  || {
+            echo "::error::VAULT42_SESSION_B64 secret is unset. The vault pull needs a saved 42ctl session: with keystore + contract alone the CLI answers 'not logged in' (run 38014839046) and make all would fall back to LOCAL mode with no data."
+            echo "::error::Mint it once on a machine that is logged in (42ctl auth status): base64 -w0 ~/.config/42ctl/session-default.tok | gh secret set VAULT42_SESSION_B64 -R Univers42/groot"
+            echo "::error::Also seal the object-store credential so seeds above 4 MiB (minio.tar.gz) can travel: 42ctl vault set infra/S3_KEY / infra/S3_SECRET — the pull warns when they are absent."
+            exit 1; }
+          echo "vault secrets present (keystore + contract + session + passphrase)"
 
       # Order matters and used to be wrong: the rewrite that makes `git@github.com:` URLs
       # resolve without an SSH key was configured AFTER the recursive checkout that needs
@@ -167,6 +179,12 @@ jobs:
           c=$(wc -c < "$d/contract-default.tok"); echo "decoded contract bytes: $c (expect ~182)"
           [ "$c" -ge 50 ] || { echo "::error::contract decoded to $c bytes — secret content is wrong"; exit 1; }
           chmod 600 "$d/contract-default.tok"
+          # The saved session is what `42ctl auth login` writes; the pull is refused without it.
+          printf '%s' "$VAULT42_SESSION_B64" | tr -cd 'A-Za-z0-9+/=' | base64 -d > "$d/session-default.tok" 2>/dev/null || {
+            echo "::error::VAULT42_SESSION_B64 is not decodable base64"; exit 1; }
+          s=$(wc -c < "$d/session-default.tok"); echo "decoded session bytes: $s"
+          [ "$s" -ge 20 ] || { echo "::error::session decoded to $s bytes — secret content is wrong"; exit 1; }
+          chmod 600 "$d/session-default.tok"
           ls -la "$d"
 
       - name: "☄  make all   — provisions the whole machine from nothing"
