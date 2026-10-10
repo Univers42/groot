@@ -12,8 +12,13 @@ docker build -q -t "$image" "$here" >/dev/null
 mkdir -p "$here/test-results"
 env_args=()
 while IFS= read -r name; do env_args+=(-e "$name"); done < <(compgen -e | grep '^E2E_' || true)
+# Rootless Docker maps the host user to the container's root and nothing else, so --user
+# fails there ("cannot setuid to unmapped uid"); root inside already is this user outside,
+# and test-results come back owned by them either way.
+user_args=(--user "$(id -u):$(id -g)")
+if docker info -f '{{.SecurityOptions}}' 2>/dev/null | grep -q rootless; then user_args=(); fi
 exec docker run --rm -e NPM_CONFIG_UPDATE_NOTIFIER=false --init --network host --ipc host \
-  --user "$(id -u):$(id -g)" -e HOME=/tmp/e2e-home \
+  "${user_args[@]}" -e HOME=/tmp/e2e-home \
   "${env_args[@]}" \
   -v "$ca:/certs/local-ca.pem:ro" \
   -v "$here/specs:/e2e/specs:ro" -v "$here/lib:/e2e/lib:ro" \

@@ -60,7 +60,11 @@ GROBASE_EDITION ?= devlean
 
 backend-up:
 ## Ensure the grobase backend is up — START it if it's down (not just guard), so a bare `make all` reconstitutes a clean machine. Brings up GROBASE_EDITION (default devlean; CI passes migrate). With a vault key, secrets are pulled earlier by `secrets-ensure`; with NO vault key, grobase self-generates its secrets (no-vault local mode) and `env-local-ensure` derives the root ./.env.local afterward.
-	@if docker network ls --format '{{.Name}}' 2>/dev/null | grep -q '^mini-baas_mini-baas$$' \
+	@if docker ps -q --filter label=com.docker.compose.service=grobase-link 2>/dev/null | grep -q .; then \
+		echo '[backend] the grobase-link relay is running: grobase is reached elsewhere (make link-status). Refusing to start a second one under the same names; make link-down first.' >&2; \
+		exit 1; \
+	fi; \
+	if docker network ls --format '{{.Name}}' 2>/dev/null | grep -q '^mini-baas_mini-baas$$' \
 		&& docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^mini-baas-kong$$'; then \
 		exit 0; \
 	fi; \
