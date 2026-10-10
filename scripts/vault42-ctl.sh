@@ -15,6 +15,10 @@ set -eu
 
 CTL_IMAGE="${CTL_IMAGE:-docker.io/dlesieur/42ctl:latest}"
 CTL_CFG_DIR="${CTL_CFG_DIR:-$HOME/.config/42ctl}"
+# CTL_USER is the uid:gid the container runs as. Default: the caller, so files it writes are
+# theirs. On ROOTLESS Docker the caller's uid has no mapping inside the container ("cannot
+# setuid to unmapped uid") and the image's own user (65532) cannot read the 700 identity dir;
+# there CTL_USER=0:0 is the equivalent, since container root IS the caller outside.
 
 [ -d "$CTL_CFG_DIR" ] || {
 	printf 'vault42-ctl: no keystore directory at %s\n' "$CTL_CFG_DIR" >&2
@@ -42,6 +46,6 @@ if [ -z "${FT_PASSPHRASE:-}" ]; then
 fi
 export FT_PASSPHRASE
 
-exec docker run --rm -i --user "$(id -u):$(id -g)" \
+exec docker run --rm -i --user "${CTL_USER:-$(id -u):$(id -g)}" \
 	-e FT_CONFIG=/cfg/config.json -e FT_KEYSTORE=/cfg/keystore.v42 -e FT_PASSPHRASE \
 	-v "$CTL_CFG_DIR:/cfg" "$CTL_IMAGE" "$@"
