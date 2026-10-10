@@ -1,0 +1,45 @@
+# grobase-link: the relay that answers to grobase's names on the mini-baas network when
+# grobase does not run on this daemon. scripts/grobase-link.sh explains the modes and
+# writes GROBASE_LINK_DIR/routes, one "<listen port> <socat address>" per line; the relay
+# starts one socat per line. Added through COMPOSE_FILE by infrastructure/makes/
+# grobase-link.mk; a plain `docker compose` never reads this file.
+#
+# nginx (infrastructure/tls/nginx.conf) resolves mini-baas-kong through Docker DNS at
+# request time, and the other frontends take the names from docker-compose.yml defaults
+# (OSIONOS_BAAS_URL, PUBLIC_BAAS_URL, SMTP_HOST, REDIS_URL, REALTIME_PUBLISH_URL), so a
+# network alias is the one thing that reaches all of them without touching their config.
+services:
+  grobase-link:
+    image: alpine/socat:1.8.0.1
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        [ -s /link/routes ] || { echo 'grobase-link: no routes; run: make link' >&2; exit 1; }
+        while read -r port target; do
+          [ -n "$$port" ] && socat TCP-LISTEN:$$port,fork,reuseaddr "$$target" &
+        done </link/routes
+        wait
+    volumes:
+      - ${GROBASE_LINK_DIR:?set by make link}:/link
+    networks:
+      mini-baas:
+        aliases:
+          - mini-baas-kong
+          - mini-baas-redis
+          - mini-baas-mailpit
+          - mailpit
+          - mini-baas-realtime
+    # A real request through the relay to Kong: a dead tunnel or a moved container shows
+    # here, a listening socat alone would not.
+    healthcheck:
+      test:
+        - CMD
+        - sh
+        - -c
+        - printf 'GET / HTTP/1.0\r\n\r\n' | timeout 5 socat - TCP:127.0.0.1:8000 | grep -q '^HTTP/'
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 10s
+      start_interval: 2s
+    restart: unless-stopped

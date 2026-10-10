@@ -1,9 +1,10 @@
 #!/bin/sh
 # envfile.sh — the ONE primitive for editing a KEY=VALUE env file in place.
 #
-#   get_env FILE KEY         Print KEY's value (surrounding quotes stripped); exit 1 and print
-#                            nothing when the file, the key or the value is absent. Never logs
-#                            the value.
+#   get_env FILE KEY         Print KEY's value (the same line put_env rewrites; blanks
+#                            around name dropped, '=' in value kept, surrounding quotes
+#                            stripped); exit 1 and print nothing when the file, key or
+#                            value is absent. Never logs the value.
 #   put_env FILE KEY VALUE   Set KEY to VALUE. The first live (non-comment) KEY= line is
 #                            rewritten where it stands, later duplicates are dropped, a
 #                            missing key is appended. Every other byte is preserved. The
@@ -11,7 +12,8 @@
 #                            FILE's mode (0600 for a file it creates). Never echoes VALUE.
 #
 # Sourced by scripts/gen-local-env.sh and scripts/ensure-live-data-access.sh — both edit
-# ./.env.local, and two rewriters of the same secrets file drift apart (library-first).
+# ./.env.local, and two rewriters of the same secrets file drift apart (library-first) —
+# and by scripts/grobase-link.sh, which reads its ./.env.grobase-link and its state file.
 # POSIX sh + awk + mktemp + stat only; tested alone in scripts/tests/envfile.bats.
 
 # The rewrite itself: first live KEY= line replaced in place, later duplicates dropped,
@@ -34,11 +36,27 @@ AWK
 )
 
 get_env() {
-	_ge_val=""
-	[ -f "$1" ] && _ge_val="$(sed -n "s/^$2=//p" "$1" | tail -1 |
-		sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
-	[ -n "$_ge_val" ] || return 1
-	printf '%s' "$_ge_val"
+	[ -f "$1" ] || return 1
+	_ge_raw="$(ENVFILE_KEY="$2" awk '
+	BEGIN { k = ENVIRON["ENVFILE_KEY"] }
+	{
+		line = $0
+		sub(/^[ \t]+/, "", line)
+		eq = index(line, "=")
+		if (line ~ /^#/ || eq < 2) next
+		name = substr(line, 1, eq - 1)
+		sub(/[ \t]+$/, "", name)
+		if (name != k) next
+		val = substr(line, eq + 1)
+		sub(/^[ \t]+/, "", val)
+		print val
+		found = 1
+		exit
+	}
+	END { exit !found }' "$1")" || return 1
+	[ -n "$_ge_raw" ] || return 1
+	_ge_val="$(printf '%s' "$_ge_raw" | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
+	printf '%s\n' "$_ge_val"
 }
 
 put_env() {
