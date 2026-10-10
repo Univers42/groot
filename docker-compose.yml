@@ -213,6 +213,17 @@ services:
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${LIVEKIT_HOST_PORT:-7880}:7880"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${LIVEKIT_TCP_HOST_PORT:-7881}:7881"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:50000-50060:50000-50060/udp"
+    # 7880 is not an env var here: it is `port:` in the mounted infrastructure/livekit/livekit.yaml.
+    # Ponytail: timeout 5s (siblings use 3s) because one measured reply took 2.06 s under load;
+    # a reply slower than 5 s is still counted as a failure even though the SFU is alive.
+    healthcheck:
+      test:
+        ["CMD-SHELL", "wget -qO- http://127.0.0.1:7880/ >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      start_interval: 2s
+      timeout: 5s
+      start_period: 20s
+      retries: 12
     restart: unless-stopped
     mem_limit: 512m
 
@@ -783,6 +794,20 @@ services:
         # them here would mean editing drawnosaurus, so the containers answer to both names
         # instead. Without this the gateway 502s on "lookup api ... server misbehaving".
         aliases: [api]
+    # $$PORT is the container's own PORT above (escaped so compose does not interpolate it): the probe follows PORT if it changes.
+    # Ponytail: 3 s per probe (auth-gateway's value): a Node start slower than that on a loaded
+    # host counts as unhealthy until a probe within the 12 retries makes it.
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "fetch(''http://127.0.0.1:$$PORT/healthz'').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"',
+        ]
+      interval: 30s
+      start_interval: 2s
+      timeout: 3s
+      start_period: 20s
+      retries: 12
     restart: unless-stopped
     mem_limit: 512m
 
@@ -823,6 +848,20 @@ services:
     networks:
       drawnosaurus-internal:
         aliases: [web]   # see drawnosaurus-api
+    # $$PORT is the container's own PORT above (escaped so compose does not interpolate it): the probe follows PORT if it changes.
+    # Ponytail: 3 s per probe (auth-gateway's value): a Node start slower than that on a loaded
+    # host counts as unhealthy until a probe within the 12 retries makes it.
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "fetch(''http://127.0.0.1:$$PORT/'').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"',
+        ]
+      interval: 30s
+      start_interval: 2s
+      timeout: 3s
+      start_period: 20s
+      retries: 12
     restart: unless-stopped
     mem_limit: 512m
 
@@ -842,6 +881,18 @@ services:
       - "80"
     networks:
       - drawnosaurus-internal
+    # Ponytail: 3 s per probe; web:3000 answering slower than that reads as the gateway unhealthy.
+    # :80 is not an env var here: it is the `:80 {` site block in the mounted
+    # apps/drawnosaurus/docker/gateway/Caddyfile. `/` proxies to web:3000, so a green
+    # check also means the gateway can reach the page the osionos iframe loads.
+    healthcheck:
+      test:
+        ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/ >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      start_interval: 2s
+      timeout: 3s
+      start_period: 20s
+      retries: 12
     restart: unless-stopped
     mem_limit: 256m
 

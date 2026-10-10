@@ -38,16 +38,24 @@ drawnosaurus-assert-engine:
 		exit 1; fi; \
 	echo "[drawnosaurus] engine at $$expected — ok"
 
+# Who cargo runs as inside drawnosaurus-wasm. The artifact lands on a bind mount, so on a
+# ROOTFUL daemon the container must run as the invoking user, else engine/pkg comes out
+# root-owned on the host and the next build cannot overwrite it. On a ROOTLESS daemon the
+# container's root already IS the invoking user (the daemon runs as them), and the host
+# uid/gid pair is unmapped inside its user namespace: --user there fails the run with
+# "cannot setuid to unmapped uid" (seen 2026-10-08 on a 42 workstation). Recursive, so the
+# `docker info` call only runs when drawnosaurus-wasm does.
+DRAWNOSAURUS_RUN_USER = $(shell if docker info -f '{{.SecurityOptions}}' 2>/dev/null | grep -q rootless; \
+	then echo ""; else echo "--user $$(id -u):$$(id -g)"; fi)
+
 drawnosaurus-wasm: drawnosaurus-assert-engine
 ## Build engine/pkg (the Rust->wasm artifact web.Dockerfile requires). Depends on the assert.
-## --user: this daemon is rootful, and the artifact lands on a bind mount — without it
-## engine/pkg is root-owned on the host and the next build cannot overwrite it.
 ## CARGO_BUILD_JOBS is passed with -e: nice/ionice on the compose CLI do NOT reach cargo,
 ## which runs under dockerd, so the job cap is the only control that actually lands.
 	docker compose --profile drawnosaurus build drawnosaurus-wasm
 	docker compose --profile drawnosaurus run --rm --no-deps \
 		-e CARGO_BUILD_JOBS=$(DRAWNOSAURUS_CARGO_JOBS) \
-		--user "$(shell id -u):$(shell id -g)" drawnosaurus-wasm
+		$(DRAWNOSAURUS_RUN_USER) drawnosaurus-wasm
 
 drawnosaurus-up: drawnosaurus-wasm
 ## Start drawnosaurus (wasm first, then images). Services are named explicitly: this compose
