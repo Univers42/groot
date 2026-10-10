@@ -25,4 +25,8 @@ e2e-clean:
 	if [ -z "$$api" ]; then echo '[e2e-clean] drawnosaurus-api is not running' >&2; exit 1; fi; \
 	docker exec -i "$$api" node --input-type=module - $(if $(DRY_RUN),--dry-run) < tests/e2e/clean-boards.mjs
 
-.PHONY: e2e e2e-preflight e2e-clean
+roundtrip:
+## Prove persistence end to end through the TLS edge: register, sign in, bridge into osionos, write a page, read the rows back from grobase's postgres (adapts to the link mode); exit 1 on any FAIL.
+	@GROBASE_LINK_DIR='$(GROBASE_LINK_DIR)' LOCAL_CA_CERT='$(LOCAL_CA_CERT)' bash scripts/verify/account-roundtrip.sh
+
+.PHONY: e2e e2e-preflight e2e-clean roundtrip

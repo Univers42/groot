@@ -71,9 +71,10 @@ tag=v1.0.0-rc4 make_all=0 secs=616 healthcheck=0 e2e=0 drift=0 dlesieur_images=0
 
 ## Case A — browser on the same machine
 
-Nothing beyond the bring-up. `make all` trusts the CA in the system store and, when `certutil`
-is installed, in every NSS database it finds (Chrome `~/.pki/nssdb`, Firefox profiles) —
-`infrastructure/makes/certs.mk:43-50`.
+Nothing beyond the bring-up. `make all` trusts the CA in the system store and, through
+`scripts/certs-trust-user.sh`, in every browser NSS store of this user; relaunch the browser
+afterwards. `make certs-trust-check` lists the stores and their state (README, "Access and the
+local CA").
 
 ## Case B — stack in a born2root VM, browser on the host
 

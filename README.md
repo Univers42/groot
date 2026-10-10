@@ -88,13 +88,15 @@ media server for video rooms).
 | **GNU Make, git, curl, openssl** | Make drives everything; curl runs the health check; openssl generates the local secrets | `infrastructure/makes/app.mk`, `scripts/gen-local-env.sh:68` |
 | **A GitHub SSH key** | `.gitmodules` uses `git@github.com:` URLs, so the recursive clone needs SSH access to GitHub | `.gitmodules` |
 | **Google Chrome** | Current stable — the browser the project is evaluated on | |
-| `certutil` (optional) | Lets `make all` import the local CA into Chrome's NSS store; otherwise import it by hand (see [Access](#access-and-the-local-ca)) | `infrastructure/makes/certs.mk:43` |
+| `certutil` (optional) | Imports the local CA into the browsers' NSS stores. Absent, `make certs-trust-user` unpacks `libnss3-tools` into `~/.cache/born2root/nss` without root; if that fails it warns and exits 0, and the CA is imported by hand (see [Access](#access-and-the-local-ca)) | `scripts/certs-trust-user.sh` |
 
 **Nothing else is installed on the host** — no Node, npm, Go or Cargo. Everything builds and runs
 in containers.
 
 `make all` asks for **one `sudo` password** the first time: it copies the local CA into the system
-trust store. This is intended (`certs-trust-local` in `infrastructure/makes/certs.mk`).
+trust store. This is intended (`certs-trust-local` in `infrastructure/makes/certs.mk`). Without
+sudo, `CERT_TRUST_MODE=user` trusts the browsers only and `skip` trusts nothing (see
+[Access](#access-and-the-local-ca)).
 
 **Ports bound on the host** (from `docker-compose.yml`, all on `127.0.0.1` except inside a
 QEMU/VirtualBox NAT VM, where `infrastructure/scripts/detect-bind-addr.sh` binds `0.0.0.0` so the
@@ -120,6 +122,16 @@ The `git checkout` line checks out the latest release tag on `main`; `git tag -l
 
 Requirements, the VM + host-browser case, the verify script (`scripts/verify/fresh-bringup.sh`) and
 troubleshooting: [`wiki/runbooks/fresh-machine.md`](wiki/runbooks/fresh-machine.md).
+
+grobase on another machine (the born2root VM, a LAN box, a VPS, a Kong URL) with the frontends
+here, no sudo: put the kind of connection in `./.env.grobase-link` (`GROBASE_TARGET=ssh://b2b`;
+`.env.grobase-link.example` lists the kinds), then `make link` and `make link-frontends-up`. The
+latter also applies `models/*.sql` to that grobase (`make link-models-migrate`) and trusts the
+local CA in this user's browser stores (`make certs-trust-user`, no sudo). Both end with
+`make link-verify`: one request per grobase service from inside every frontend, the TLS edge,
+then the browser stores — [`wiki/runbooks/grobase-link.md`](wiki/runbooks/grobase-link.md).
+`make roundtrip` then proves persistence (account, sign-in, editor hand-off, a page, the rows
+in postgres) and `make link-e2e` runs the Playwright smoke through the link.
 
 Measured time from a cold machine: **9–17 minutes**.
 
@@ -190,11 +202,47 @@ The osionos pointer's own `branch = main` override is out of scope here (tracked
 `make showcase` prints the list of what is actually running.
 
 Every frontend is served with a certificate from the local CA
-`apps/grobase/certs/track-binocle-local-ca.pem`. `make all` trusts it in the system store and, if
-`certutil` is installed, in Chrome's NSS store (`~/.pki/nssdb`). If it is not trusted, Chrome shows
-a warning on each port — and the **Whiteboard tab in osionos stays blank**, because the embedded
-`:3007` iframe is refused silently. Fix: import the CA in Chrome (Settings → Privacy and security →
-Security → Manage certificates → Authorities → Import), or run `make certs-trust`.
+`apps/grobase/certs/track-binocle-local-ca.pem`. `make all` trusts it in two places: the system
+store (one `sudo`) and every browser store this user owns, through `scripts/certs-trust-user.sh`
+(no sudo). That script covers Chrome and Chromium (`~/.pki/nssdb`, snap Chromium's
+`~/snap/chromium/current/.pki/nssdb`) and every Firefox profile under `~/.mozilla/firefox`, the snap
+and the flatpak locations. It matches old copies by the CA's subject, not by nickname, replaces
+them, and adds the current file as "Track Binocle Local Development CA".
+
+- `make certs-trust-check` prints one line per store (`ok|FAIL <kind> <path>  current|stale|missing`)
+  and exits 1 if any store is not current. Without `certutil` it fails.
+- `make certs-trust-user` fixes the stores without sudo; it mints the CA first only if it is missing.
+- `CERT_TRUST_MODE=system|user|skip` (or `TRACK_BINOCLE_CERT_TRUST`) picks what `certs-trust-local`
+  does: system store plus browsers (default), browsers only, or nothing.
+- **Relaunch the browser afterwards.** A browser reads its store at launch only; the script never
+  restarts one. `vendor/born2root/setup/host/restart_browsers.sh` does it with session restore.
+
+If the CA is not trusted, the browser shows a warning on each port, and the **Whiteboard tab in
+osionos stays blank**, because the embedded `:3007` iframe is refused silently. Two causes of a
+warning while `curl --cacert` succeeds:
+
+- **The CA was regenerated.** `make certs` on a fresh tree mints a new CA, and a store still holding
+  an older copy does not trust it. On 2026-10-08 the CA was regenerated at 17:06 and 7 stores were
+  stale and 1 missing:
+
+  ```text
+  $ make certs-trust-check
+  FAIL chrome   /home/dlesieur/.pki/nssdb  stale
+  FAIL chrome   /home/dlesieur/snap/chromium/current/.pki/nssdb  stale
+  FAIL firefox  /home/dlesieur/snap/firefox/common/.mozilla/firefox/pqdn9c63.default-release-1  stale
+  FAIL firefox  /home/dlesieur/.var/app/org.mozilla.firefox/config/mozilla/firefox/2vgnvz7b.default  missing
+  [certs] 8 browser store(s) do not hold the current CA; run: make certs-trust-user, then relaunch the browser
+  ```
+
+- **A snap refresh.** Snap Chromium's `HOME` is the revision directory behind
+  `~/snap/chromium/current`, so a new revision (3507 to 3551 overnight) starts without the store.
+  `make certs-trust-check` reports it missing; `make certs-trust-user` recreates it.
+
+Flatpak Firefox profiles can exist without the flatpak installed; they are imported too, harmlessly.
+The script does not restart browsers, does not touch Safari or the macOS and Windows stores, and
+does not trust the CA on another machine (see `wiki/runbooks/fresh-machine.md` for a browser on the
+host of a VM). To import by hand: Chrome Settings → Privacy and security → Security → Manage
+certificates → Authorities → Import, or run `make certs-trust`.
 
 ### Demo
 

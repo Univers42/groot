@@ -12,9 +12,10 @@
 
 # Certificate generation and trust targets.
 # Generation is delegated to the standalone apps/grobase stack (it owns the CA +
-# localhost cert under apps/grobase/certs). Trust is a small inline import of the
-# grobase CA into the system store (+ NSS via certutil when available), guarded so
-# it no-ops gracefully when sudo/certutil are missing.
+# localhost cert under apps/grobase/certs). Trust has two halves: the system store
+# (one sudo, inline below, for curl/Electron/system-trust clients) and this user's
+# browser stores (scripts/certs-trust-user.sh: Chrome's NSS db and every Firefox
+# profile, no sudo). Both no-op with a message when sudo/certutil are missing.
 certs:
 ## Generate the local HTTPS CA and localhost certificate (delegated to apps/grobase).
 	$(MAKE) -C apps/grobase certs
@@ -40,14 +41,8 @@ define TRUST_LOCAL_CA
 	else \
 		echo '[certs] update-ca-certificates/sudo not available; skipping system CA trust'; \
 	fi; \
-	if command -v certutil >/dev/null 2>&1; then \
-		for db in "$$HOME/.pki/nssdb" $$HOME/.mozilla/firefox/*.default* $$HOME/snap/firefox/common/.mozilla/firefox/*.default* $$HOME/.var/app/org.mozilla.firefox/.mozilla/firefox/*.default*; do \
-			[[ -d "$$db" ]] || continue; \
-			certutil -D -n 'Track Binocle Local CA' -d "sql:$$db" >/dev/null 2>&1 || true; \
-			certutil -A -n 'Track Binocle Local CA' -t 'C,,' -i "$$src" -d "sql:$$db" >/dev/null 2>&1 \
-				&& echo "[certs] grobase CA imported into NSS db $$db" || true; \
-		done; \
-	fi
+	bash scripts/certs-trust-user.sh "$$src" \
+		|| echo '[certs] a browser store import FAILED (above); re-run: make certs-trust-user'
 endef
 
 certs-trust: certs
@@ -62,12 +57,25 @@ certs-trust-browser-host: certs
 ## No-op at root: forwarded-browser-host trust moved with the backend to apps/grobase.
 	@echo '[skip] certs-trust-browser-host now lives in apps/grobase'
 
+# `certs` only when the CA is missing: with one present nothing in apps/grobase is touched,
+# so this works where that target does not (an NFS tree refuses the WAF gid, runbook).
+certs-trust-user:
+## Trust the local CA in THIS user's browser stores, no sudo: Chrome/Chromium's NSS db and every Firefox profile (deb, snap, flatpak), replacing any copy from an older tree. A running browser sees it after a relaunch. Mints the CA first when there is none.
+	@[ -f '$(LOCAL_CA_CERT)' ] || $(MAKE) --no-print-directory certs
+	@bash scripts/certs-trust-user.sh '$(LOCAL_CA_CERT)'
+
+certs-trust-check:
+## One line per browser store: does it hold the CURRENT local CA (ok|FAIL kind path state); exit 1 when one is stale or missing.
+	@bash scripts/certs-trust-user.sh --check '$(LOCAL_CA_CERT)'
+
 certs-trust-local: certs
-## Trust the grobase CA for developer browsers and system-trust clients; skipped in CI.
+## Trust the grobase CA for developer browsers and system-trust clients; skipped in CI. CERT_TRUST_MODE / TRACK_BINOCLE_CERT_TRUST = system (default, one sudo + browsers) | user (browsers only, no sudo) | skip.
 	@if [[ "$${CI:-}" == 'true' || "$${GITHUB_ACTIONS:-}" == 'true' || "$${TRACK_BINOCLE_SKIP_CERT_TRUST:-}" == '1' ]]; then \
 		echo '[certs] skipping browser trust import in CI/noninteractive mode'; \
 	elif [[ "$${TRACK_BINOCLE_CERT_TRUST:-$(CERT_TRUST_MODE)}" == 'skip' ]]; then \
 		echo '[certs] skipping local CA trust import because TRACK_BINOCLE_CERT_TRUST=skip'; \
+	elif [[ "$${TRACK_BINOCLE_CERT_TRUST:-$(CERT_TRUST_MODE)}" == 'user' ]]; then \
+		bash scripts/certs-trust-user.sh '$(LOCAL_CA_CERT)'; \
 	else \
 		$(TRUST_LOCAL_CA); \
 	fi

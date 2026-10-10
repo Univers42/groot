@@ -62,6 +62,13 @@ zero per-project server code.
 | [04-troubleshooting](operations/04-troubleshooting.md) | When it looks green but isn't |
 | [05-secrets](operations/05-secrets.md) | vault42, 42ctl, bootstrapping your key |
 
+### [runbooks/](runbooks/) — step by step, with the evidence
+
+| Page | What it answers |
+|---|---|
+| [fresh-machine](runbooks/fresh-machine.md) | From nothing to a verified demo on a machine that never ran the stack |
+| [grobase-link](runbooks/grobase-link.md) | Frontends here, grobase elsewhere (VM, LAN, cloud): `make link`, no sudo |
+
 ### [quality/](quality/)
 
 | Page | What it answers |

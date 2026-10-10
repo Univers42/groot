@@ -2,7 +2,8 @@
 # scripts/lib/envfile.sh — put_env is the one primitive that edits ./.env.local in place
 # (gen-local-env.sh --sync and ensure-live-data-access.sh both call it). It must touch only
 # the named key, keep every other byte, keep the file's mode, never echo the value, and
-# never leave a temp file behind. Synthetic files only.
+# never leave a temp file behind. get_env reads the same line put_env would rewrite
+# (grobase-link.sh reads its settings and state with it). Synthetic files only.
 #
 # Run: docker run --rm -v "$PWD:/code" -w /code bats/bats:1.11.1 scripts/tests/envfile.bats
 
@@ -66,6 +67,23 @@ setup() {
 @test "no temp file is left beside the target" {
   put_env "$F" A x
   [ "$(ls -A "$BATS_TEST_TMPDIR" | wc -l)" -eq 1 ]
+}
+
+@test "get_env: first live value, blanks around name and value dropped, '=' in the value kept" {
+  [ "$(get_env "$F" A)" = 1 ]
+  [ "$(get_env "$F" B)" = 2 ]
+  printf '#A=zz\nX=a=b\n' > "$F"
+  [ "$(get_env "$F" X)" = "a=b" ]
+}
+
+@test "get_env: a commented-out or absent key, or a missing file, prints nothing and exits 1" {
+  printf '#A=zz\n' > "$F"
+  run get_env "$F" A
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  run get_env "$BATS_TEST_TMPDIR/none" A
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
 }
 
 @test "get_env: prints the value with surrounding quotes stripped, never a missing one" {
