@@ -11,6 +11,9 @@
 # (`conf`), so make asks it for the one it needs rather than parsing the file a second time.
 GROBASE_TARGET ?=
 GROBASE_LINK_DIR ?= $(or $(XDG_RUNTIME_DIR),/tmp)/track-binocle-link
+# PATHS overrides the configured targets for `make link-paths`: space-separated list of
+# https://... URLs and ssh targets (ssh://..., user@host, alias). Empty = use config.
+PATHS ?=
 GROBASE_LINK_HOST_PORT ?= $(shell bash scripts/grobase-link.sh conf GROBASE_LINK_HOST_PORT)
 # 443 needs a privileged bind, which rootless Docker cannot do (ip_unprivileged_port_start).
 LINK_VHOST_HTTPS_PORT ?= $(shell if docker info -f '{{.SecurityOptions}}' 2>/dev/null | grep -q rootless \
@@ -107,3 +110,7 @@ E2E_SPECS ?=
 link-e2e: link-healthcheck
 ## link-healthcheck, then the Playwright smoke (tests/e2e) in its pinned container against the frontends served here through the linked grobase; the stack must already be up (link-frontends-up).
 	@bash tests/e2e/run.sh $(E2E_SPECS)
+
+link-paths:
+## Which ways this device reaches the grobase data center: each WAF URL (TLS verified against GROBASE_CA_FILE) and each ssh target (grobase's Kong running there). PATHS="url|ssh-target ..." overrides the configured ones.
+	@bash scripts/grobase-paths.sh $(PATHS)
