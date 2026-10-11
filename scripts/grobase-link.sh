@@ -1,14 +1,8 @@
 #!/usr/bin/env bash
-# grobase-link.sh — let the root frontends reach grobase wherever it runs, by the names
-# they already use (mini-baas-kong, mini-baas-redis, mailpit, mini-baas-realtime).
-# Modes: local (this Docker daemon: Docker DNS, nothing added), ssh (any machine ssh
-# reaches: ssh ControlMaster -> unix sockets in LINK_DIR -> the grobase-link relay of
-# docker-compose.grobase-link.yml) and direct (a Kong URL reachable from a container, TLS
-# when https; Kong only). GROBASE_TARGET names the target and its scheme the kind of
-# connection; it is read from the environment (make's command line), else from this
-# machine's ./.env.grobase-link, else it is `auto`. scripts/lib/grobase-link-target.sh
-# turns it into a mode. After `up`, `verify` (scripts/lib/grobase-link-verify.sh) proves
-# the path from inside every frontend. Design and rationale: wiki/runbooks/grobase-link.md.
+# grobase-link.sh — let the root frontends reach grobase wherever it runs, by the names they
+# already use. Modes: local (this daemon), ssh (ControlMaster -> unix sockets in LINK_DIR -> the
+# grobase-link relay) and direct (a Kong URL, Kong only); GROBASE_TARGET (environment, else
+# ./.env.grobase-link, else auto) picks it. Design and rationale: wiki/runbooks/grobase-link.md.
 #
 # Ponytail: in ssh mode a remote service without a published port is forwarded to its
 # container IP, which changes when that container is recreated; the forward then connects
@@ -30,6 +24,7 @@ LINK_DIR="${GROBASE_LINK_DIR:-${XDG_RUNTIME_DIR:-/tmp}/track-binocle-link}"
 TARGET=$(setting GROBASE_TARGET auto)
 HOST_PORT=$(setting GROBASE_LINK_HOST_PORT 28000) # loopback copy of Kong for host tools; 0 disables
 REMOTE_DIR=$(setting GROBASE_REMOTE_DIR /opt/grobase)
+API_URL=$(setting GROBASE_API_URL "") # the WAF clients call; empty = derived from TARGET
 REMOTE_ENV="${GROBASE_REMOTE_ENV:-$REPO/.env.grobase-remote}"
 CTL="$LINK_DIR/ssh.ctl"
 STATE="$LINK_DIR/state"
@@ -240,11 +235,12 @@ cmd_env() {
 # The settings as `up` will use them, so make and the user read one resolution, not the file.
 cmd_conf() {
   case "${1:-}" in
-  "") printf 'GROBASE_TARGET=%s\nGROBASE_LINK_HOST_PORT=%s\nGROBASE_REMOTE_DIR=%s\n' "$TARGET" "$HOST_PORT" "$REMOTE_DIR" ;;
+  "") printf 'GROBASE_TARGET=%s\nGROBASE_LINK_HOST_PORT=%s\nGROBASE_REMOTE_DIR=%s\nGROBASE_API_URL=%s\n' "$TARGET" "$HOST_PORT" "$REMOTE_DIR" "$API_URL" ;;
   GROBASE_TARGET) printf '%s\n' "$TARGET" ;;
   GROBASE_LINK_HOST_PORT) printf '%s\n' "$HOST_PORT" ;;
   GROBASE_REMOTE_DIR) printf '%s\n' "$REMOTE_DIR" ;;
-  *) die "conf: no setting named $1 (GROBASE_TARGET, GROBASE_LINK_HOST_PORT, GROBASE_REMOTE_DIR)" ;;
+  GROBASE_API_URL) printf '%s\n' "$API_URL" ;;
+  *) die "conf: no setting named $1 (GROBASE_TARGET, GROBASE_LINK_HOST_PORT, GROBASE_REMOTE_DIR, GROBASE_API_URL)" ;;
   esac
 }
 
@@ -265,7 +261,7 @@ cmd_docker_host() {
 
 usage() {
   cat <<'USAGE'
-usage: grobase-link.sh up|down|status|env|verify|mode|conf [KEY]|docker-host     (wiki/runbooks/grobase-link.md)
+usage: grobase-link.sh up|down|status|env|verify|mode|conf [KEY]|api-url|docker-host    (wiki/runbooks/grobase-link.md)
   up      resolve GROBASE_TARGET, open the path to grobase and write LINK_DIR/routes
   down    close it (ssh master, forwards, sockets, routes, state)
   status  exit 0 when the link is open and Kong answers through it
@@ -275,11 +271,13 @@ usage: grobase-link.sh up|down|status|env|verify|mode|conf [KEY]|docker-host    
   mode    print the active mode: local, ssh or direct
   conf    print the effective settings, one (KEY) or all (KEY=value lines)
   docker-host  DOCKER_HOST of the daemon running the linked grobase ("" = this one; direct: exit 1)
+  api-url  print the HTTPS URL of the grobase API (the WAF) for clients
 Settings: the environment (make link KEY=value) wins, then ./.env.grobase-link (KEY=value,
   git-ignored; .env.grobase-link.example documents it), then the default.
   GROBASE_TARGET          auto | local | ssh://[user@]host[:port] | <ssh alias|user@host|host>
                           | http(s)://host[:port]      -- the scheme is the kind of connection
   GROBASE_LINK_HOST_PORT  28000 (0 = none)        GROBASE_REMOTE_DIR  /opt/grobase
+  GROBASE_API_URL         the WAF URL clients call, https://<vm>.<tailnet>.ts.net:8443; ssh/auto need it
 Environment only: GROBASE_LINK_DIR (XDG_RUNTIME_DIR/track-binocle-link), GROBASE_LINK_CONF
   (another settings file), GROBASE_REMOTE_ENV, B2B_DIR.
 Exit codes: 0 success, 1 failure or misuse.
@@ -292,6 +290,7 @@ up | down | status | env | verify) "cmd_$1" ;;
 conf) cmd_conf "${2:-}" ;;
 mode) state_get mode | grep . || die "no link" ;;
 docker-host) cmd_docker_host ;;
+api-url) api_url "$TARGET" "$API_URL" || die "no API URL for target $TARGET; set GROBASE_API_URL to the WAF URL, e.g. https://<vm>.<tailnet>.ts.net:8443" ;;
 -h | --help) usage ;;
 *) usage >&2 && exit 1 ;;
 esac

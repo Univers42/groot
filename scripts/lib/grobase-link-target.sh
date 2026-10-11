@@ -31,6 +31,19 @@ url_hostport() { # http(s)://host[:port][/...] -> "host port"
   case "$hp" in *:*) port=${hp##*:} ;; esac
   printf '%s %s\n' "${hp%%:*}" "$port"
 }
+# api_url TARGET EXPLICIT -> the HTTPS URL clients call for the grobase API (the WAF):
+# EXPLICIT when set, else TARGET's own URL, else the loopback WAF; exit 1 when it has none.
+api_url() {
+  local url=${2:-}
+  if [ -z "$url" ]; then
+    case "$1" in
+    http://* | https://*) url=$1 ;;
+    local) url=https://127.0.0.1:8443 ;;
+    *) return 1 ;;
+    esac
+  fi
+  printf '%s\n' "${url%/}"
+}
 url_reachable() { # from a container of this daemon, where the frontends run
   local host port addr
   read -r host port < <(url_hostport "$1")
