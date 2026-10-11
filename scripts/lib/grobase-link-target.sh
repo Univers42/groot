@@ -143,18 +143,23 @@ resolve_host() { # a bare host or alias: ssh first, then Kong's plain port, then
 # publish_env MODE ENV_LOCAL — where the bridge publishes realtime events and reaches
 # query-router. ssh and local reach the realtime gateway by name (empty = docker-compose.yml's
 # default); direct mode has only the edge, whose /realtime/v1/publish admits the service_role
-# key alone (grobase kong.yml). No remote kind relays query-router (SERVICES in grobase-link.sh),
-# so ssh and direct reach it on Kong's /query/v1; empty = the bridge's container-DNS default.
+# key alone (grobase kong.yml). No remote kind relays query-router or the adapter-registry
+# (SERVICES in grobase-link.sh), so ssh and direct reach them on Kong's /query/v1 and
+# service_role-only /admin/v1; empty = the bridge's container-DNS defaults.
 publish_env() {
-  local url="" key="" query=""
+  local url="" key="" query="" registry=""
   if [ "$1" = direct ]; then
     url=http://mini-baas-kong:8000/realtime
     key=$(get_env "$2" SERVICE_ROLE_KEY) || key=""
   fi
-  [ "$1" = local ] || query=http://mini-baas-kong:8000/query/v1
+  if [ "$1" != local ]; then
+    query=http://mini-baas-kong:8000/query/v1
+    registry=http://mini-baas-kong:8000/admin/v1
+  fi
   put_env "$2" REALTIME_PUBLISH_URL "$url"
   put_env "$2" REALTIME_PUBLISH_APIKEY "$key"
   put_env "$2" OSIONOS_QUERY_ROUTER_URL "$query"
+  put_env "$2" OSIONOS_ADAPTER_REGISTRY_URL "$registry"
 }
 
 # The node program rt_token_ensure runs: keeps the current token when its HS256 signature
