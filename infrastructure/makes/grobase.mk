@@ -93,6 +93,38 @@ vault-restore:
 	$(MAKE) -C apps/grobase vault-restore SEED_DIR="$(CURDIR)/secrets" \
 		$(if $(FETCH),FETCH=$(FETCH),) EDITION="$(or $(EDITION),$(GROBASE_EDITION))"
 
+# The import CLI refuses a missing ID or DEST itself (exit 2), so these only forward; recipes are
+# silent so stdout stays the CLI's (a path, or status JSON for jq). The b2b
+# ssh alias carries port forwards that collide with a running link; a transfer needs none.
+GROBASE_IMPORT = RSYNC_RSH="$${RSYNC_RSH:-ssh -o ClearAllForwardings=yes -o LogLevel=ERROR}" \
+	bash apps/grobase/scripts/ops/grobase-import.sh
+
+.PHONY: import-pack import-push import-status
+import-pack:
+## Stage ./secrets (or SEED_DIR=) as a checksummed import dir holding only the captured dumps, under ~/.local/state/grobase/import. ID= names it (default seeds-<utc>), FORCE=1 replaces it. Touches no database.
+	@$(GROBASE_IMPORT) pack "$(or $(SEED_DIR),$(CURDIR)/secrets)" $(if $(ID),--id '$(ID)',) $(if $(FORCE),--force,)
+
+import-push:
+## Re-verify import ID= here, then rsync it to DEST=host:/path (else the GROBASE_IMPORT_DEST env var), e.g. DEST=b2b:/var/lib/grobase-import. Never sends state/. DRY=1 lists the files and sends nothing.
+	@$(GROBASE_IMPORT) push '$(ID)' $(if $(DEST),--dest '$(DEST)',) $(if $(DRY),--dry-run,)
+
+import-status:
+## Print import ID='s manifest and per-packet state as one JSON object.
+	@$(GROBASE_IMPORT) status '$(ID)'
+
+.PHONY: import-rebind import-apply import-rollback
+import-rebind:
+## Derive import NEW= from import ID= for the data center TARGET= (ssh host, e.g. b2b): every mount row this host's VAULT_ENC_KEY opens is re-sealed under the target's key, with the target's engine passwords. Keys are read over ssh, never printed. Touches no database.
+	@bash apps/grobase/scripts/ops/grobase-import-rebind.sh '$(ID)' '$(NEW)' $(if $(TARGET),--target-ssh '$(TARGET)',) $(if $(FORCE),--force,)
+
+import-apply:
+## Replay pushed import ID= into the data center's engines (DEST=host:/path, else GROBASE_IMPORT_DEST). Prints the plan only, unless CONFIRM=1: stop its stack, snapshot the engine volumes, restore, check counts, migrate, restart what ran. FORCE=1 re-applies.
+	@bash scripts/grobase-import-remote.sh apply '$(ID)' $(if $(DEST),--dest '$(DEST)',) $(if $(CONFIRM),--confirm,) $(if $(FORCE),--force,)
+
+import-rollback:
+## Put the data center's engine volumes back from import ID='s apply snapshot, then restart what ran before apply. Plan only, unless CONFIRM=1.
+	@bash scripts/grobase-import-remote.sh rollback '$(ID)' $(if $(DEST),--dest '$(DEST)',) $(if $(CONFIRM),--confirm,)
+
 apply-models:
 ## Apply pending root-app models/*.sql migrations to the live DB (checksum-tracked; applies only new/changed files). MANUAL ONLY — deliberately NOT in `make all`: on an EMPTY database it runs all files in alphabetical order, and the notification-type migrations (comments / feed-engagement / tasks) are order-sensitive, so the result silently drops `page_comment`; user.sql / gdpr / auth-security also fail there against the uuid `users` table. CAUTION: on a populated database with an empty ledger it ADOPTS — records every file as applied WITHOUT running it — which is how 23 tables came to be missing while the ledger said all 34 had run. Check the objects exist before trusting it. Logic in scripts/apply-models.sh.
 	@sh scripts/apply-models.sh apply
