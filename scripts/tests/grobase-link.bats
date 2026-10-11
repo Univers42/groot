@@ -125,3 +125,20 @@ resolve_target() { run env GROBASE_TARGET="$1" bash -c "source '$SCRIPT' && reso
   [ "$status" -eq 1 ]
   [[ "$output" == *"no postgres"* ]]
 }
+
+@test "own_link_dir: an empty LINK_DIR another user made (dockerd after a reboot) is replaced by ours" {
+  [ "$(id -u)" -eq 0 ] || skip "needs root to make a dir owned by someone else (the bats container runs as root)"
+  mkdir -p "$GROBASE_LINK_DIR" && chown 65534 "$GROBASE_LINK_DIR"
+  helper 'own_link_dir && stat -c "%u %a" "$LINK_DIR"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "0 700" ]
+}
+
+@test "own_link_dir: a foreign LINK_DIR that is not empty is refused, named, and left alone" {
+  [ "$(id -u)" -eq 0 ] || skip "needs root to make a dir owned by someone else (the bats container runs as root)"
+  mkdir -p "$GROBASE_LINK_DIR" && touch "$GROBASE_LINK_DIR/keep" && chown -R 65534 "$GROBASE_LINK_DIR"
+  helper 'own_link_dir'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"is not empty"* ]]
+  [ -e "$GROBASE_LINK_DIR/keep" ]
+}
