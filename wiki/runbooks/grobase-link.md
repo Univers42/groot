@@ -188,7 +188,7 @@ installs three systemd user units from `infrastructure/systemd/user/`:
 
 | Unit | Does |
 |---|---|
-| `grobase-link.service` | `make link` at boot, after `b2b-vm-baas.service`; the ssh master lives in its cgroup |
+| `grobase-link.service` | `make link` at boot, after `b2b-vm-baas.service`, retried every 20 s until the data center answers; the ssh master lives in its cgroup |
 | `grobase-link-heal.timer` → `.service` | 3 min after boot, then every 2 min: `make link-status`; on failure restart `grobase-link.service`. With the LAN edge installed, also probe `https://<LAN IP>:8443/auth/v1/health` and restart the edge on no answer (`scripts/grobase-link-heal.sh`) |
 | `grobase-lan-edge.service` | only with `LAN_IF=<iface>`: the LAN edge above |
 
@@ -467,7 +467,8 @@ graph.
   minutes plus one `make link` (10 s measured) after the data center or the network comes back.
   It sees only what `link-status` sees — the path is open and Kong answers — so a link whose
   relay is up but whose frontends fail for another reason is not re-opened. A link that cannot
-  open (VM still booting) fails the unit and is retried on the next tick, forever, quietly:
+  open (the VM still booting: `b2b-vm-baas.service` is done when QEMU starts, not when the guest
+  answers) fails the unit, which re-runs `make link` every 20 s, forever, quietly:
   `journalctl --user -u grobase-link.service` is where to look.
 - **Container-IP forwards go stale.** A remote service with no published port is forwarded to
   its container IP; recreate that container on the remote and the forward points at nothing
