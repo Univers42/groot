@@ -42,7 +42,8 @@ install_units() {
 	if ! systemctl --user -q is-active grobase-link.service; then
 		echo "[autostart] handing the link to grobase-link.service (link-down, then the unit opens it)"
 		make -C "$groot" --no-print-directory link-down
-		systemctl --user start grobase-link.service
+		systemctl --user start grobase-link.service ||
+			echo "[autostart] the first make link failed; the unit retries every 20 s (journalctl --user -u grobase-link.service)" >&2
 	fi
 	systemctl --user start grobase-link-heal.timer
 	[ "$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null)" = yes ] ||
