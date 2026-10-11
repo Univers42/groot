@@ -168,3 +168,50 @@ bring it up and re-run `restore-databases.sh` (idempotent drop-and-replace).
 > → health) — on an existing machine the Docker volumes persist, so `make all` already brings everything
 > back without touching data. If `make all` errors that the backend is down, it now points you to
 > `make bootstrap`.
+
+## 7. 2026-10-11 — the b2b data center and this machine's older database
+
+The b2b data center (`wiki/runbooks/grobase-link.md`) was seeded from the vault snapshot of
+2026-09-19. This machine's volume `mini-baas_postgres-data` (last shut down 2026-09-27) is a
+sibling lineage, not an ancestor: a key-by-key diff found rows only it held. They were merged into
+the data center on 2026-10-11, insert-only plus newest-wins on `updated_at`. The merge was
+rehearsed on a physical clone with a byte-identical undo, and a `devil` verdict was reached
+before it touched live data:
+
+| | rows |
+|---|---|
+| inserted | 258 — 56 osionos pages of `dev.pro.photo@gmail.com` (Dev Hub, Sprint Board, Architecture Notes, Deploy Runbook, Daily Notes, portfolio, club and course pages), 55 object databases, 53 page configurations, 51 bridge audit events, comments, favorites, reactions, notifications, one workspace and its member; tasks and page links rebuilt by the page triggers |
+| refreshed (old copy newer) | 15 — 10 page configurations, a page, a workspace, a member, a bridge identity, a user's `last_sign_in_at` |
+| left out on purpose | 19 e2e accounts (`@example.com`/`.org`) and every row naming them (217 ids); auth sessions, refresh tokens, MFA claims, audit log; `auth.osionos_pages_header_backup_20260713` (a July backup table); one object database that the data center already holds, newer, under another id |
+| not merged | `commerce.edges` (+998 rows): generated playground data from a different loader run; vault42: travels by 42ctl (§4) |
+
+After the merge, every row only the old database holds is in the left-out set. That was checked
+key by key. Undo is a ledger: schema `merge_20261011` on the data center (`ledger` holds the
+inserted and updated keys, `replaced` holds the overwritten rows). `merge-old-local.sh live --undo`
+reverses it, but only while nobody has edited the restored pages: the foreign keys cascade.
+Everything sits in `/var/lib/grobase-import/merge-20261011/` on the VM, with sha256s:
+- the pre-merge dump of the live database;
+- dumps of the old `postgres` and `commerce` databases;
+- the script, the ledger and the replaced rows.
+
+The volume itself is untouched; keep it until you have looked at the restored pages.
+
+The other engines were counted against this machine's volumes the same day. None needed a merge;
+two needed loading:
+
+| engine | data center | this machine |
+|---|---|---|
+| MySQL `ops` | projects 40, tasks 2000, tickets 3000, time entries 6000 (the 11,040 of §4) | same |
+| Mongo | activity events 30000, product reviews 8000, notes 400 | same |
+| MSSQL `finance` | cost centers 12, GL accounts 20, invoices 600, invoice lines 603, payments 400 | same (counted on a throwaway copy of `mini-baas_mssql-data`) |
+| DynamoDB | was **empty**: the 2026-09-19 `secrets/MANIFEST.json` lists `dynamodb` as skipped, so `make import-pack` left it out of the import. Loaded on 2026-10-11 from the older `secrets/dynamodb-all.tar.gz` (captured 2026-09-17): alerts 250, device events 1200, devices 200 | no volume; that seed is the only copy |
+| MinIO `chat` | 54 objects | 57: the 4 extra belong to excluded e2e accounts (one fixture PNG uploaded by three of them); 1 object is newer on the data center |
+| SQLite `osionos-restaurant` | was empty (`no such table`); **regenerated**, not restored, by `seed_sqlite` of `scripts/seed/osionos-extra-engines.sh`: 1045 rows | `secrets/sqlite-data.tar.gz` holds an empty 4 KB file |
+| MariaDB, CockroachDB | no user tables | no volume |
+
+The whiteboard boards stay in the local `drawnosaurus-mongo` by design: drawnosaurus runs on this machine, not in grobase (`wiki/runbooks/grobase-link.md`).
+
+Until 2026-10-11 the data center's data plane did not serve DynamoDB at all. It now does: the four
+`.env` values grobase documents for it, and the `:latest-dynamodb` router image. The `.env` before
+that change is `/opt/grobase/.env.bak-dynamo-20261011T180948Z` on the VM. The next `vault-seed.sh`
+run with `dynamodb-local` up captures DynamoDB again, so a fresh import carries it.
