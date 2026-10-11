@@ -12,7 +12,7 @@ the frontends and without a hardcoded address. One target, resolved at `make lin
 |---|---|---|---|
 | `local` | `mini-baas-kong` runs on this daemon | Nothing. Docker DNS already resolves the names; a running relay is removed | `scripts/grobase-link.sh:155-169` (`cmd_up`), `infrastructure/makes/grobase-link.mk:30-32` |
 | `ssh` | The target is `ssh://…`, an ssh alias, `user@host`, or a bare host whose `docker ps` over ssh shows `mini-baas-kong` | One ssh ControlMaster; one unix-socket forward per grobase port into `LINK_DIR`; the `grobase-link` relay container that serves the names | `scripts/grobase-link.sh:97-140`, `docker-compose.grobase-link.yml` |
-| `direct` | The target is `http(s)://host[:port]`, or a bare host that answers on `:8000` or `:443` from a container | The relay with a single route to Kong (TLS when https, verified against the system CA bundle) | `scripts/grobase-link.sh:142-153` (`up_direct`) |
+| `direct` | The target is `http(s)://host[:port]`, or a bare host that answers on `:8000` or `:443` from a container | The relay with one route to Kong: `GROBASE_CA_FILE`'s PEM goes to `LINK_DIR/ca.pem` and to the relay as `cafile=` (empty = the relay image's system store), the URL's name is resolved here (`getent ahostsv4`) and the relay connects to that IPv4 while verifying the certificate against the name. Redis and Mailpit are local stand-ins; realtime publishes reach the edge through the data center's service_role key | `scripts/grobase-link.sh` (`up_direct`), `scripts/lib/grobase-link-target.sh` (`resolve_ipv4`, `kong_addr`, `direct_routes`) |
 
 `GROBASE_TARGET=auto` (the default) takes `local` when this daemon has grobase, else probes every
 `Host` of `~/.ssh/config` (no wildcards) and every born2root VM whose `ports.env` records an
@@ -40,6 +40,103 @@ The direction does not matter: whichever machine runs the frontends runs `make l
 the machine that runs grobase. Exposing the frontends themselves to other machines is a separate
 knob, `TRACK_BINOCLE_BIND_ADDR` (`infrastructure/makes/grobase.mk:127`,
 `infrastructure/scripts/detect-bind-addr.sh`).
+
+## From another device — every path
+
+The data center is the born2root QEMU VM `b2b` running grobase at `/opt/grobase` on a host whose
+LAN address is `192.168.1.132` (wifi/ethernet `enp7s0`, DHCP). The VM runs grobase branch
+`feat/b2b-datacenter` (commit `4eb80e0c`), the same commit groot pins at `apps/grobase`.
+
+| Path | URL for the API / CLI (the WAF) | ssh target for `make link` |
+|---|---|---|
+| same host | `https://127.0.0.1:8443` or `https://localhost:8443` | `ssh://b2b` (alias = `dlesieur@127.0.0.1:4242`) |
+| Tailscale (any network) | `https://dlesieur42-1.tail10f2ea.ts.net:8443` or `https://100.94.119.97:8443` | `ssh://dlesieur@100.94.119.97:4242` |
+| LAN / wifi without Tailscale | `https://grobase.track-binocle.test:8443` after adding `192.168.1.132 grobase.track-binocle.test` to the device's hosts file | none: ssh is not exposed on the LAN (join Tailscale for ssh) |
+
+A fresh clone for the data center: clone groot at branch `feat/grobase-datacenter-link` with
+`--recursive`, then never run plain `make all` — it fast-forwards every submodule to its tracked
+branch (`sync-submodules-soft`), which drops the pinned grobase and osionos commits the link needs
+(the bridge's realtime key, the WAF content rule, an XSS fix). Use `make all SKIP_SYNC=1`, or skip
+`make all` and run `make link` then `make link-frontends-up`.
+
+**Same host** (the machine running the VM): `ssh://b2b` reaches it, and
+`https://127.0.0.1:8443` is the WAF for the CLI and curl. Local mode does not apply — grobase runs
+inside the VM, not on this host's docker daemon. For `make link` use `ssh://b2b` or the Tailscale
+URL below (measured here); a direct URL that resolves to `127.x` points the relay, which runs in a
+container, at itself.
+
+**Tailscale, any network**: the WAF answers at `https://100.94.119.97:8443` (or the tailnet name
+`https://dlesieur42-1.tail10f2ea.ts.net:8443`), and ssh reaches `ssh://dlesieur@100.94.119.97:4242`
+once the device's key is on the VM — once, over Tailscale:
+`ssh-copy-id -p 4242 dlesieur@100.94.119.97` (BatchMode never prompts for a password).
+
+```sh
+GROBASE_TARGET=https://100.94.119.97:8443
+GROBASE_CA_FILE=./grobase-ca.pem
+make link
+```
+
+**LAN / wifi without Tailscale**: add `192.168.1.132 grobase.track-binocle.test` to the device's
+hosts file, then the same two keys with the URL as the name (the certificate does not carry the
+LAN IP; it carries `*.track-binocle.test`, so the hosts file is the fix, not `curl -k`):
+
+```sh
+GROBASE_TARGET=https://grobase.track-binocle.test:8443
+GROBASE_CA_FILE=./grobase-ca.pem
+make link
+```
+
+There is no ssh from the LAN path; over it the link is Kong plus the local Redis and Mailpit
+stand-ins — the same direct mode `make link-e2e` passed on the Tailscale URL, but a link over the
+LAN name itself has not been run (only the CLI has). Any of the three paths can be the
+standing choice in `./.env.grobase-link` (git-ignored), or one run with
+`make link GROBASE_TARGET=… GROBASE_CA_FILE=…`.
+
+**The CA.** The WAF certificate is signed by the VM's own CA ("Track Binocle Local Development
+CA", `/opt/grobase/certs/track-binocle-local-ca.pem` on the VM), a different CA from the one a
+local `make certs` mints. Copy it to the device — the certificate is public, its key never leaves
+the VM — then verify the copy against the value the data center prints for the same file:
+
+```sh
+scp -P 4242 dlesieur@100.94.119.97:/opt/grobase/certs/track-binocle-local-ca.pem ~/grobase-ca.pem
+openssl x509 -noout -fingerprint -sha256 -in ~/grobase-ca.pem        # this device
+openssl x509 -noout -fingerprint -sha256 -in /opt/grobase/certs/track-binocle-local-ca.pem  # VM
+```
+
+`GROBASE_CA_FILE` is the CA PEM, read from the environment then `./.env.grobase-link`; it is
+copied to `LINK_DIR/ca.pem` and handed to the relay as `cafile=/link/ca.pem`. Empty means the
+relay image's system store, which does not know this CA. Any copy channel works, the fingerprint
+check is what makes it safe; never `curl -k` and never `verify=0`. The certificate's SANs are
+`localhost`, `host.docker.internal`, `local-https-proxy`, `track-binocle.test`,
+`*.track-binocle.test`, `127.0.0.1`, `dlesieur42-1.tail10f2ea.ts.net`, `100.94.119.97` and `::1`
+— not the LAN IP, hence the hosts file. The IPv6 SANs come last on purpose: socat 1.8 (the relay
+image, `alpine/socat 1.8.0.1`) aborts verification at the first IPv6 SAN when it connects to an
+IPv4 literal, and grobase's cert generator orders them that way and re-issues an older cert.
+
+**Secrets.** Direct mode cannot fetch them. The first `make link` over ssh (Tailscale) writes the
+data center's `.env` to `./.env.grobase-remote` (mode 600), and later direct-mode links on that
+device reuse it. Direct mode takes `REALTIME_PUBLISH_APIKEY` from `./.env.local`'s
+`SERVICE_ROLE_KEY` (`publish_env`); with no key there it writes it empty, and the edge refuses
+bridge publishes. Never
+copy grobase secrets anywhere else, and never push them by hand.
+
+**The grobase CLI** (`github.com/Univers42/grobase-cli`) works against all four URLs, with the CA
+file you copied and the password on stdin:
+
+```sh
+grobase context add dc --url https://100.94.119.97:8443 --ca-file ~/grobase-ca.pem --yes
+grobase login --email <email> --password-stdin
+grobase whoami
+grobase doctor
+```
+
+The credential store is mode 600; `doctor`'s only WARN is that the CA is not a system root.
+
+**The LAN edge** is a host user unit, `~/.config/systemd/user/grobase-lan-edge.service`, which
+forwards `192.168.1.132:8443` to `127.0.0.1:8443` (the VM's WAF) — port 8443 only. Rollback:
+`systemctl --user disable --now grobase-lan-edge`. Its address is read at start, so after a DHCP
+change run `systemctl --user restart grobase-lan-edge` (or pin the lease), and without linger it
+runs only while that user is logged in on the host: the LAN path disappears at logout.
 
 ## Commands
 
@@ -224,21 +321,57 @@ The matrix each time: `track-binocle-auth-gateway-1`, `-local-https-proxy-1`, `-
 `mini-baas-realtime:4000` (`HTTP/1.0 200`), then `edge https://127.0.0.1:8444/auth/v1/health Kong HTTP 401`.
 Those four are the containers on `mini-baas_mini-baas`; `osionos-app`, `livekit` and `drawnosaurus-*`
 are not on it (the browser reaches Kong through the vhost), so they are not probed.
-Not exercised on this host: a working `direct` link (no Kong URL is reachable from a rootless
-container here: `*.ts.net` does not resolve, QEMU hostfwds bind `127.0.0.1`, and Tailscale Funnel
-would publish grobase) and a working `local` link (grobase would have to run on this daemon).
+Not exercised on this host: a working `local` link (grobase would have to run on this daemon).
+A working `direct` link is no longer in that case — see the next subsection.
+
+### Every path, 2026-10-11
+
+Measured on the data center host, direct mode to `https://100.94.119.97:8443` with the VM's CA in
+`GROBASE_CA_FILE`, against the linked grobase (`feat/b2b-datacenter`, `4eb80e0c`):
+
+| What | Result |
+|---|---|
+| `make link` | `verify: 9 frontends reach grobase through the direct link to https://100.94.119.97:8443` |
+| `make link-e2e` | 11 passed: mail and calendar embeds, whiteboard realtime between two contexts, graph, a second user's graph holding none of the first user's pages, landing sign-in |
+| the same run before grobase rule 10110 | 2 passed, 9 failed — every page save 403 from the WAF |
+
+The grobase CLI (`github.com/Univers42/grobase-cli`), with the VM's CA as `--ca-file`, exits 0 on
+all four URLs: `context add`, `status`, `login`, `whoami` and `doctor` each of them
+(`https://127.0.0.1:8443`, `https://100.94.119.97:8443`,
+`https://dlesieur42-1.tail10f2ea.ts.net:8443`, and `https://grobase.track-binocle.test:8443` with
+the hosts entry). The credential store is mode 600; `doctor`'s only WARN is that the CA is not a
+system root.
+
+Not run: `make link` over the LAN name (only the CLI used it) and from a second device; the ssh
+path relays the names with no WAF in the way, at the price of the device's key on the VM.
 
 ## What it gets wrong
 
+- **The LAN edge carries one port and needs its host.** `grobase-lan-edge.service` forwards
+  `192.168.1.132:8443` to `127.0.0.1:8443`, port 8443 only: no Redis, no Mailpit, no ssh, so
+  that path is a Kong URL and nothing else. It reads its address at start, so a DHCP change
+  leaves it bound to a stale address until `systemctl --user restart grobase-lan-edge`, and
+  without linger it runs only while that user is logged in on the host — the LAN path stops
+  with the logout.
 - **Container-IP forwards go stale.** A remote service with no published port is forwarded to
   its container IP; recreate that container on the remote and the forward points at nothing
   until the next `make link` (`grobase-link.sh:12-14`).
 - **`auto` is first-match, not nearest.** Each candidate costs up to 5 s when down. Set
   `GROBASE_TARGET` when two machines have grobase (`scripts/lib/grobase-link-target.sh:9-11`).
-- **`direct` is Kong only.** Redis, Mailpit and realtime are not published behind a Kong URL:
-  auth-gateway keeps sessions in memory, no mail is captured, bridge publishes are dropped
-  (`up_direct`, `:151-152`). It cannot fetch secrets either; put that grobase's `.env` at
-  `./.env.grobase-remote` before `make link`.
+- **`direct` is not all five names, and it does not reach the data center's Redis or Mailpit.**
+  Redis and Mailpit are local stand-ins (`grobase-link-redis`, `grobase-link-mailpit`,
+  compose profile `link-direct`, no published ports), so sessions and captured mail stay on this
+  device and grobase's own are never exposed (`direct_routes`). Realtime does go through the
+  edge: `make link` writes `REALTIME_PUBLISH_URL=http://mini-baas-kong:8000/realtime` and
+  `REALTIME_PUBLISH_APIKEY` (the data center's service_role key) into `./.env.local`
+  (`publish_env`), the key that grobase's edge admits on its own on
+  `/realtime/v1/publish`. The URL's host is resolved here and only as IPv4: a name that
+  resolves to `127.x` on the device points the relay at itself — on the data center host use
+  `ssh://b2b` or the Tailscale URL. It cannot fetch secrets, so a first ssh link must have written
+  `./.env.grobase-remote`. And the WAF is still in the way on that path: rule 10110 lifts the
+  injection rule families on POST/PATCH/PUT to `/rest/v1/osionos_<table>` only, so an
+  attack-shaped value written to any other route, or a read that looks like one, is still
+  refused with 403.
 - **Do not probe Kong with `socat` on stdin.** Kong/nginx aborts a proxied request when the
   client half-closes after sending, so `printf … | socat - TCP:mini-baas-kong:8000` prints 0
   bytes for every upstream route while `curl` gets 200. Kong's own `/` 404 is unaffected,
