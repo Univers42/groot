@@ -138,17 +138,64 @@ eval "$(grobase context env dc)"                                   # GROBASE_TAR
 ```
 
 The credential store is mode 600; `doctor`'s only WARN is that the CA is not a system root.
+
+**One context for every network, no CA file and no hosts file**: pin the WAF's leaf certificate
+instead (`--pin-sha256`, the SHA-256 of the leaf's DER). A pin checks the certificate itself, not
+the name in the URL, so the bare LAN IP works where `--ca-file` needs the hosts entry. Check the
+value against the data center before trusting it, then list the paths in the order to try them:
+
+```sh
+ssh -p 4242 dlesieur@100.94.119.97 openssl x509 -noout -fingerprint -sha256 -in /opt/grobase/certs/localhost.pem
+grobase context add b2b --url https://100.94.119.97:8443 --url https://192.168.1.132:8443 \
+  --url https://127.0.0.1:8443 --url https://127.0.0.1:18443 \
+  --pin-sha256 28e27b66a18a90d701a406fbb479c071a26d08cc2fe250a7bb329d327e780c7a
+grobase doctor        # the reachability row names the URL in use: "200 in 3ms via https://…"
+```
+
+The four URLs are Tailscale (any network: home wifi, mobile data, another site's network, a
+VPN that leaves the tailnet up), the LAN edge (same wifi, no Tailscale), the host itself, and an
+ssh tunnel for a network that lets only ssh out:
+`ssh -N -L 127.0.0.1:18443:127.0.0.1:8443 -p 4242 dlesieur@100.94.119.97` (the tunnel's far end
+is the VM, whose WAF is on its own `127.0.0.1:8443`). A URL that does not answer costs
+`GROBASE_PROBE_TIMEOUT` (2 s) before the next one. The pin breaks when the leaf is re-issued
+(this one expires 2027-11-12): `doctor` then FAILs the TLS row with both fingerprints; check the
+new one the same way, then `grobase context pin b2b`. Use CLI `2ffd17d` or later: before it `doctor` checked TLS on
+the first URL even when an alternate was the one answering, so away from the LAN a working
+context reported FAIL.
+
+There is no path from the public internet without Tailscale: the WAF listens on the host's
+loopback, Tailscale and LAN addresses only. Funnel or a router port-forward would publish it,
+which is a decision for the owner, not a link setting.
 `grobase api … --input FILE` labels the body `application/json` when it parses (the WAF refuses a
 body with no content type). `grobase realtime subscribe pg/<table>/<inserted|updated|deleted>`
 prints database changes live; `realtime publish` from a user session is dropped by the gateway
 (a GoTrue token carries no `can_publish` claim, which the gateway defaults to false) — publish
 needs a minted token.
 
-**The LAN edge** is a host user unit, `~/.config/systemd/user/grobase-lan-edge.service`, which
-forwards `192.168.1.132:8443` to `127.0.0.1:8443` (the VM's WAF) — port 8443 only. Rollback:
-`systemctl --user disable --now grobase-lan-edge`. Its address is read at start, so after a DHCP
-change run `systemctl --user restart grobase-lan-edge` (or pin the lease), and without linger it
-runs only while that user is logged in on the host: the LAN path disappears at logout.
+**The LAN edge** is a host user unit, `grobase-lan-edge.service`, installed from
+`infrastructure/systemd/user/grobase-lan-edge.service.in` by `make link-autostart LAN_IF=enp7s0`.
+It forwards `<LAN IP>:8443` to the VM's https forward as QEMU actually bound it (`https=` in the
+VM's `ports.env`) — port 8443 only (`scripts/grobase-lan-edge.sh`). Rollback:
+`make link-autostart-off`. It reads the address and the target at start; the heal timer below
+restarts it when the LAN URL stops answering TLS, so a DHCP change or a VM restart on another port
+heals within two minutes. Without linger it runs only while that user is logged in on the host.
+
+## After a reboot — `make link-autostart`
+
+The link's state lives in `XDG_RUNTIME_DIR`, so a reboot of this host loses it, and a restart of
+the data center or a network drop kills the ssh master. `make link-autostart` (once per host)
+installs three systemd user units from `infrastructure/systemd/user/`:
+
+| Unit | Does |
+|---|---|
+| `grobase-link.service` | `make link` at boot, after `b2b-vm-baas.service`; the ssh master lives in its cgroup |
+| `grobase-link-heal.timer` → `.service` | 3 min after boot, then every 2 min: `make link-status`; on failure restart `grobase-link.service`. With the LAN edge installed, also probe `https://<LAN IP>:8443/auth/v1/health` and restart the edge on no answer (`scripts/grobase-link-heal.sh`) |
+| `grobase-lan-edge.service` | only with `LAN_IF=<iface>`: the LAN edge above |
+
+The units start at boot only with linger on (`loginctl enable-linger $USER`; the script warns when
+it is off). In local mode the heal does nothing. `make link-autostart-off` removes them and leaves
+the link as it is. A unit that differs from the rendered one is backed up as `<unit>.bak-<time>`
+before it is replaced.
 
 ## Commands
 
@@ -158,6 +205,8 @@ runs only while that user is logged in on the host: the LAN path disappears at l
 | `make link-verify` | The connectivity test (next section): one request per grobase name from inside every frontend on grobase's network, the browser's path through the TLS edge, then the browser-trust check; exit 1 on any FAIL | `grobase-link.mk:48-50`, `scripts/lib/grobase-link-verify.sh` |
 | `make link-status` | Exit 0 when the path is open and Kong answers through it | `grobase-link.mk:44-46`, `grobase-link.sh:173-194` |
 | `make link-down` | Stop the relay, cancel the forwards, close the ssh master, forget the state | `grobase-link.mk:52-55` |
+| `make link-autostart [LAN_IF=<iface>]` | Install the systemd user units that re-open the link after a reboot, a data center restart or a network drop, and (with `LAN_IF`) the LAN edge; hands the open link over to the unit | `grobase-link.mk` (`link-autostart`), `scripts/grobase-link-autostart.sh` |
+| `make link-autostart-off` | Remove those units; the link stays open | `scripts/grobase-link-autostart.sh remove` |
 | `make link-models-migrate` | What `make all` does with `models-migrate`, over the link: groot's `models/*.sql` land in the postgres of the linked grobase (local = this daemon; ssh = the target's daemon through docker's ssh transport, `grobase-link.sh docker-host`; direct = refused, no database). Idempotent; ~2 min over ssh. Runs inside `link-frontends-up` | `grobase-link.mk` (`link-models-migrate`), `scripts/apply-models-migrations.sh` |
 | `make link-demo-login-ensure` | What `make all` does with `demo-login-ensure`, over the link: the demo account in the linked grobase gets `./.env.local`'s `DEMO_LOGIN_PASSWORD` (`make demo-login` prints it); postgres through `grobase-link.sh docker-host`, Kong (only to create a missing account in LOCAL mode) through the link's loopback port. Idempotent. Runs inside `link-frontends-up` | `grobase-link.mk` (`link-demo-login-ensure`), `scripts/demo-login-ensure.sh` |
 | `make link-live-data-ensure` | What `make all` does with `live-data-ensure`, over the link: `scripts/ensure-live-data-access.sh` verifies `./.env.local`'s `OSIONOS_BAAS_API_KEY` with the linked tenant-control (ssh mode: through `tenant-control-3022.sock`), or issues one, and re-stamps the demo rows owned by any other `api-key:` principal onto it — postgres `commerce agency`, mysql `ops`, mongo `activity`, mssql `finance` (`scripts/lib/owner-restamp.sh`). Idempotent; a converged grobase is one line. Runs inside `link-frontends-up` | `grobase-link.mk` (`link-live-data-ensure`) |
@@ -383,14 +432,43 @@ Tailscale WAF (anon key 403, no key 401).
 Not run: `make link` over the LAN name (only the CLI used it) and from a second device; the ssh
 path relays the names with no WAF in the way, at the price of the device's key on the VM.
 
+### After the host reboot, 2026-10-12
+
+The host rebooted. The VM came back with its https forward on `127.0.0.1:8445`, not `8443`:
+born2root's port check counted the LAN edge's `192.168.1.132:8443` as a conflict for a
+`127.0.0.1` bind, and every LAN client hit a dead port. That check is fixed in born2root
+(`utils/host_ports.sh`, `HOST_PORT_BIND`, branch `fix/host-port-bind`) and takes effect at the
+VM's next start. Until then the LAN edge follows `ports.env`.
+
+CLI `2ffd17d`, context `b2b` pinned as above, `grobase doctor` from this host:
+
+| Path | `doctor` | Round trip |
+|---|---|---|
+| Tailscale `https://100.94.119.97:8443` | 8 pass, 1 warn (no credentials stored) | 3 ms |
+| LAN edge `https://192.168.1.132:8443` | same | 43 ms |
+| localhost `https://127.0.0.1:8445` | same | 2 ms |
+| ssh tunnel over Tailscale `https://127.0.0.1:18443` | same | 4 ms |
+| first URL a dead port, then an alternate | same, `via` names the alternate | 2 s (the probe timeout) |
+
+Self-heal drill: `make link-down` at 01:11:25. The heal timer found `link-status` failing at
+01:13:42 and restarted `grobase-link.service`, whose `make link` ended `verify: 6 frontends reach
+grobase through the ssh link to ssh://b2b` at 01:13:52; `link-status` exit 0. DB1
+(`tests/e2e/specs/db1-mounted-databases.spec.ts`) passed after the reboot with the 8738-node
+graph.
+
 ## What it gets wrong
 
 - **The LAN edge carries one port and needs its host.** `grobase-lan-edge.service` forwards
-  `192.168.1.132:8443` to `127.0.0.1:8443`, port 8443 only: no Redis, no Mailpit, no ssh, so
-  that path is a Kong URL and nothing else. It reads its address at start, so a DHCP change
-  leaves it bound to a stale address until `systemctl --user restart grobase-lan-edge`, and
-  without linger it runs only while that user is logged in on the host — the LAN path stops
-  with the logout.
+  `<LAN IP>:8443` to the VM's https forward, port 8443 only: no Redis, no Mailpit, no ssh, so
+  that path is a Kong URL and nothing else. It reads its address and target at start, so a DHCP
+  change or a VM restart on another port leaves it stale until the heal timer restarts it (up to
+  two minutes), and without linger it runs only while that user is logged in on the host.
+- **The heal is a two-minute poll on `link-status`.** The frontends can be cut off for up to two
+  minutes plus one `make link` (10 s measured) after the data center or the network comes back.
+  It sees only what `link-status` sees — the path is open and Kong answers — so a link whose
+  relay is up but whose frontends fail for another reason is not re-opened. A link that cannot
+  open (VM still booting) fails the unit and is retried on the next tick, forever, quietly:
+  `journalctl --user -u grobase-link.service` is where to look.
 - **Container-IP forwards go stale.** A remote service with no published port is forwarded to
   its container IP; recreate that container on the remote and the forward points at nothing
   until the next `make link` (`grobase-link.sh:12-14`).
@@ -452,8 +530,10 @@ path relays the names with no WAF in the way, at the price of the device's key o
 | `[backend] the grobase-link relay is running` | By design | `make link-down`, then `make backend-up` |
 | `drawnosaurus-wasm`: `cannot setuid to unmapped uid <uid> in user namespace` | A rootless daemon has no mapping for the host uid that `--user` asked for; the flag only exists to keep `engine/pkg` user-owned on a rootful daemon, where container root would write it as root | Fixed 2026-10-08: `DRAWNOSAURUS_RUN_USER` (`infrastructure/makes/drawnosaurus.mk`) drops `--user` when `docker info` reports `rootless`. Container root already is the invoking user there |
 | `make link GROBASE_TARGET=local`: `no mini-baas-kong on this daemon` | The monolithic kind is taken as given but still checked: without grobase here the frontends would start against a name that resolves to nothing | `make backend-up` first, or set the target to the machine that runs grobase |
-| After this machine reboots: `track-binocle-grobase-link-1` restarting, the frontends get no answer from grobase | The ssh master and `LINK_DIR` (in `XDG_RUNTIME_DIR`) do not survive a reboot; dockerd re-creates the relay's bind source as root when it restarts the relay, and `make link` replaces that empty directory with this user's (`own_link_dir`) | `make link` |
-| `link-status`: `master to … is gone` | The remote rebooted or the network dropped; `ControlPersist` does not reconnect | `make link` again |
+| After this machine reboots: `track-binocle-grobase-link-1` restarting, the frontends get no answer from grobase | The ssh master and `LINK_DIR` (in `XDG_RUNTIME_DIR`) do not survive a reboot; dockerd re-creates the relay's bind source as root when it restarts the relay, and `make link` replaces that empty directory with this user's (`own_link_dir`) | `make link`; `make link-autostart` once makes it heal on its own |
+| `link-status`: `master to … is gone` | The remote rebooted or the network dropped; `ControlPersist` does not reconnect | `make link` again (the heal timer does it within two minutes when `link-autostart` is installed) |
+| LAN clients time out on `https://<LAN IP>:8443` while `https://100.94.119.97:8443` answers | The VM's https forward is not on `127.0.0.1:8443` (`https=` in the VM's `ports.env`; it was `8445` after the 2026-10-12 reboot) and the edge forwards to the old port | `systemctl --user restart grobase-lan-edge` (the heal timer does it); born2root `fix/host-port-bind` keeps the forward on 8443 at the next VM start |
+| `grobase doctor`: TLS FAIL `pin sha256:… does not match the presented sha256:…` | The WAF's leaf was re-issued | Read the new fingerprint on the data center (`openssl x509 -noout -fingerprint -sha256 -in /opt/grobase/certs/localhost.pem`), compare it with the presented one, then `grobase context pin b2b` |
 | Browser: certificate warning on `https://localhost:9443` (or any frontend) while `curl --cacert` is fine | A browser store holds an older CA: `make certs` on a fresh tree mints a new one | `make certs-trust-check` to see the stale or missing stores, `make certs-trust-user`, then relaunch the browser |
 | Snap Chromium warns (`ERR_CERT_AUTHORITY_INVALID`) after a snap refresh | Its `HOME` is the revision directory behind `~/snap/chromium/current`; the new revision has no store | `make certs-trust-check` reports it missing; `make certs-trust-user` recreates it; relaunch |
 | Every `/query/v1` call answers 502 `An invalid response was received from the upstream server` right after `query-router` was recreated on the data center, while `query-router` answers from Kong's network | Kong keeps the old container's address for the upstream | `docker restart mini-baas-kong` on the data center (measured 2026-10-11: 502 on all seven mounts before, 200 after) |

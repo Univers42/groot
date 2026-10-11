@@ -70,6 +70,14 @@ link-down:
 	@$(LINK_COMPOSE) rm -sf grobase-link grobase-link-redis grobase-link-mailpit grobase-link-hostport >/dev/null 2>&1 || true
 	@$(LINK_SCRIPT) down
 
+link-autostart:
+## Bring the link back on its own after a reboot, a data center restart or a network drop: systemd user units open it once the VM is up and a 2-minute timer re-opens it when link-status fails. LAN_IF=<iface> also keeps the WAF on the LAN (https://<LAN IP>:8443). Undo: make link-autostart-off.
+	@LAN_IF='$(LAN_IF)' bash scripts/grobase-link-autostart.sh install
+
+link-autostart-off:
+## Remove the link-autostart units (the link itself stays open until make link-down).
+	@bash scripts/grobase-link-autostart.sh remove
+
 # What `make all` does with models-migrate, driven over the link: groot's models/*.sql land
 # in the postgres of the grobase the frontends talk to (2026-10-09: 7 osionos tables were
 # missing in the VM's grobase because nothing had ever run it there). Idempotent; slow over
