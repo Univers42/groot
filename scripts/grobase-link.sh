@@ -147,9 +147,19 @@ up_direct() {
   note "auth-gateway keeps sessions in memory, no mail is captured and bridge publishes are dropped."
 }
 
+# own_link_dir — LINK_DIR, made by and private to this user. A reboot empties XDG_RUNTIME_DIR,
+# and dockerd, restarting the relay, re-creates the relay's bind source as root (2026-10-11:
+# `make link` then died on chmod). An empty dir in a parent this user owns is ours to remove.
+own_link_dir() {
+  if [ -d "$LINK_DIR" ] && [ ! -O "$LINK_DIR" ]; then
+    rmdir "$LINK_DIR" 2>/dev/null || die "$LINK_DIR belongs to $(stat -c %U "$LINK_DIR") and is not empty; remove it, then make link"
+  fi
+  mkdir -p "$LINK_DIR" && chmod 700 "$LINK_DIR"
+}
+
 cmd_up() {
   local mode target
-  mkdir -p "$LINK_DIR" && chmod 700 "$LINK_DIR"
+  own_link_dir
   [ -n "${GROBASE_TARGET:-}" ] || ! get_env "$CONF" GROBASE_TARGET >/dev/null || note "target $TARGET, from ${CONF#"$REPO"/}"
   read -r mode target < <(resolve)
   case "$mode" in
