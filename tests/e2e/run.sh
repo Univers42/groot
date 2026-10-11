@@ -10,6 +10,18 @@ ca="$root/apps/grobase/certs/track-binocle-local-ca.pem"
 [[ -r "$ca" ]] || { echo "[e2e] no local CA at $ca — run: make certs" >&2; exit 2; }
 docker build -q -t "$image" "$here" >/dev/null
 mkdir -p "$here/test-results"
+# The demo account owns the workspaces the live databases are mounted on (DB1, DB2). Its
+# password is minted per machine into ./.env.local; demo-login.sh is its one reader. Absent,
+# those specs skip and say why.
+if [[ -z "${E2E_DEMO_PASSWORD:-}" ]]; then
+  # shellcheck source=scripts/lib/demo-login.sh
+  . "$root/scripts/lib/demo-login.sh"
+  if E2E_DEMO_PASSWORD="$(demo_login_password "$root/.env.local" 2>/dev/null)"; then
+    export E2E_DEMO_PASSWORD E2E_DEMO_EMAIL="${E2E_DEMO_EMAIL:-$DEMO_LOGIN_EMAIL}"
+  else
+    unset E2E_DEMO_PASSWORD
+  fi
+fi
 env_args=()
 while IFS= read -r name; do env_args+=(-e "$name"); done < <(compgen -e | grep '^E2E_' || true)
 # Rootless Docker maps the host user to the container's root and nothing else, so --user
