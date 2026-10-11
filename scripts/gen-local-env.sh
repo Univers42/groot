@@ -32,6 +32,7 @@ set -eu
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 GRO_ENV="${GRO_ENV:-$REPO/apps/grobase/.env}"
+SRC="${GRO_ENV#"$REPO/"}" # names the real source in notes (a linked VM: .env.grobase-remote)
 OUT="${OUT:-$REPO/.env.local}"
 FORCE="${FORCE:-0}"
 MODE="${1:-generate}"
@@ -110,7 +111,7 @@ drift_report() {
 }
 
 require_inputs() {
-  [ -f "$GRO_ENV" ] || { note "apps/grobase/.env not found — bring the backend up first (make backend-up)."; exit 1; }
+  [ -f "$GRO_ENV" ] || { note "$SRC not found — bring the backend up first (make backend-up)."; exit 1; }
 }
 
 check_mode() {
@@ -121,8 +122,8 @@ check_mode() {
   for key in $(minted_missing); do report="$report
 missing $key"; rc=1; done
   printf '%s\n' "$report" | sed 's/^/[gen-local-env]   /' >&2
-  if [ "$rc" -eq 0 ]; then note "in sync with apps/grobase/.env (8 derived keys)."; else
-    note "DRIFT — $(basename "$OUT") disagrees with apps/grobase/.env. Fix: bash scripts/gen-local-env.sh --sync"
+  if [ "$rc" -eq 0 ]; then note "in sync with $SRC (8 derived keys)."; else
+    note "DRIFT — $(basename "$OUT") disagrees with $SRC. Fix: bash scripts/gen-local-env.sh --sync"
   fi
   exit "$rc"
 }
@@ -135,7 +136,7 @@ sync_mode() {
   mint_missing
   rc=0
   report="$(drift_report)" || rc=$?
-  [ "$rc" -ne 0 ] || { note "in sync with apps/grobase/.env — nothing to write."; exit 0; }
+  [ "$rc" -ne 0 ] || { note "in sync with $SRC — nothing to write."; exit 0; }
   changed=""
   unknown=""
   for pair in $DERIVED; do
@@ -146,8 +147,8 @@ sync_mode() {
       changed="$changed $dst"
     fi
   done
-  [ -z "$changed" ] || note "synced from apps/grobase/.env:$changed"
-  [ -z "$unknown" ] || { note "left as is (EMPTY source in apps/grobase/.env — is the backend healthy?):$unknown"; exit 1; }
+  [ -z "$changed" ] || note "synced from $SRC:$changed"
+  [ -z "$unknown" ] || { note "left as is (EMPTY source in $SRC — is the backend healthy?):$unknown"; exit 1; }
 }
 
 generate() {
