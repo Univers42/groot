@@ -35,14 +35,19 @@ LINK_COMPOSE_ENV = GROBASE_LINK_DIR='$(GROBASE_LINK_DIR)' COMPOSE_FILE='docker-c
 LINK_COMPOSE = $(LINK_COMPOSE_ENV) docker compose --env-file ./.env.local
 
 link:
-## Reach grobase wherever it runs: open the path, derive ./.env.local from that grobase's secrets, start the relay (or stop it in local mode), then verify it from inside every frontend already running. The target and its kind come from GROBASE_TARGET=auto|local|ssh://…|<alias>|http(s)://… on this line, else from ./.env.grobase-link.
+## Reach grobase wherever it runs: open the path, derive ./.env.local from that grobase's secrets, start the relay (in direct mode with the local Redis/Mailpit stand-ins; or stop it in local mode), then verify it from inside every frontend already running. The target and its kind come from GROBASE_TARGET=auto|local|ssh://…|<alias>|http(s)://… on this line, else from ./.env.grobase-link.
 	@$(LINK_SCRIPT) up
 	@if [ "$$($(LINK_SCRIPT) mode)" = local ]; then \
-		docker ps -q --filter label=com.docker.compose.service=grobase-link | grep -q . && $(LINK_COMPOSE) rm -sf grobase-link; \
+		docker ps -q --filter label=com.docker.compose.service=grobase-link | grep -q . && $(LINK_COMPOSE) rm -sf grobase-link grobase-link-redis grobase-link-mailpit; \
 		echo '[link] local mode: nothing to relay; the monolithic pipeline (make all / backend-up) applies.' >&2; \
 	else \
 		$(LINK_SCRIPT) env; \
 		docker network inspect mini-baas_mini-baas >/dev/null 2>&1 || docker network create mini-baas_mini-baas >/dev/null; \
+		if [ "$$($(LINK_SCRIPT) mode)" = direct ]; then \
+			$(LINK_COMPOSE) up -d --wait grobase-link-redis grobase-link-mailpit; \
+		else \
+			$(LINK_COMPOSE) rm -sf grobase-link-redis grobase-link-mailpit >/dev/null 2>&1; \
+		fi; \
 		$(LINK_COMPOSE) up -d --force-recreate --wait grobase-link; \
 	fi
 	@LINK_VERIFY_TRUST=note $(LINK_VERIFY)
@@ -57,7 +62,7 @@ link-verify:
 
 link-down:
 ## Close the link: stop the relay, the ssh master and its forwards. The frontends lose the backend until `make link` or `make backend-up`.
-	@$(LINK_COMPOSE) rm -sf grobase-link >/dev/null 2>&1 || true
+	@$(LINK_COMPOSE) rm -sf grobase-link grobase-link-redis grobase-link-mailpit >/dev/null 2>&1 || true
 	@$(LINK_SCRIPT) down
 
 # What `make all` does with models-migrate, driven over the link: groot's models/*.sql land

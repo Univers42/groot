@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# grobase-link.sh — let the root frontends reach grobase wherever it runs, by the names they
-# already use. Modes: local (this daemon), ssh (ControlMaster -> unix sockets in LINK_DIR -> the
-# grobase-link relay) and direct (a Kong URL, Kong only); GROBASE_TARGET (environment, else
-# ./.env.grobase-link, else auto) picks it. Design and rationale: wiki/runbooks/grobase-link.md.
-#
+# grobase-link.sh — let the root frontends reach grobase wherever it runs, by the names they already use.
+# Modes: local (this daemon), ssh (ControlMaster -> unix sockets in LINK_DIR -> the grobase-link relay) and
+# direct (a Kong URL; Redis and Mailpit stood in here); GROBASE_TARGET picks it (wiki/runbooks/grobase-link.md).
 # Ponytail: in ssh mode a remote service without a published port is forwarded to its
 # container IP, which changes when that container is recreated; the forward then connects
 # to nothing until the next `up` re-points it.
@@ -25,6 +23,7 @@ TARGET=$(setting GROBASE_TARGET auto)
 HOST_PORT=$(setting GROBASE_LINK_HOST_PORT 28000) # loopback copy of Kong for host tools; 0 disables
 REMOTE_DIR=$(setting GROBASE_REMOTE_DIR /opt/grobase)
 API_URL=$(setting GROBASE_API_URL "") # the WAF clients call; empty = derived from TARGET
+CA_FILE=$(setting GROBASE_CA_FILE "") # direct targets only: the CA signing that Kong's certificate
 REMOTE_ENV="${GROBASE_REMOTE_ENV:-$REPO/.env.grobase-remote}"
 CTL="$LINK_DIR/ssh.ctl"
 STATE="$LINK_DIR/state"
@@ -132,17 +131,20 @@ up_ssh() {
 }
 
 up_direct() {
-  local host port addr
-  read -r host port < <(url_hostport "$1")
+  local cafile
   url_reachable "$1" || die "$1 does not answer from a container of this daemon"
   cmd_down_ssh # only once the URL answers: a dead target must not cost the link that works
-  case "$1" in
-  https://*) addr="OPENSSL:$host:$port,verify=1,cafile=/etc/ssl/certs/ca-certificates.crt" ;;
-  *) addr="TCP:$host:$port" ;;
-  esac
-  printf '8000 %s\n' "$addr" >"$ROUTES"
-  note "direct link to $1: Kong only. Redis, Mailpit and realtime are not published there, so"
-  note "auth-gateway keeps sessions in memory, no mail is captured and bridge publishes are dropped."
+  if [ -n "$CA_FILE" ]; then
+    [ -r "$CA_FILE" ] || die "GROBASE_CA_FILE=$CA_FILE is not a readable file"
+    install -m 644 "$CA_FILE" "$LINK_DIR/ca.pem" # that is /link/ca.pem in the relay
+    cafile=/link/ca.pem
+  else
+    rm -f "$LINK_DIR/ca.pem" # a copy from an earlier target would keep a CA we dropped
+    cafile=/etc/ssl/certs/ca-certificates.crt
+  fi
+  direct_routes "$1" "$cafile" >"$ROUTES"
+  note "direct link to $1: Kong over the URL, bridge publishes through its service_role-only route;"
+  note "Redis and Mailpit are local stand-ins (sessions and captured mail stay on this machine)."
 }
 
 # own_link_dir — LINK_DIR, made by and private to this user. A reboot empties XDG_RUNTIME_DIR,
@@ -233,17 +235,19 @@ cmd_env() {
   esac
   [ ! -f "$REPO/.env.local" ] || sync=--sync
   GRO_ENV="$src" bash "$REPO/scripts/gen-local-env.sh" ${sync:+"$sync"}
+  publish_env "$mode" "$REPO/.env.local"
 }
 
 # The settings as `up` will use them, so make and the user read one resolution, not the file.
 cmd_conf() {
   case "${1:-}" in
-  "") printf 'GROBASE_TARGET=%s\nGROBASE_LINK_HOST_PORT=%s\nGROBASE_REMOTE_DIR=%s\nGROBASE_API_URL=%s\n' "$TARGET" "$HOST_PORT" "$REMOTE_DIR" "$API_URL" ;;
+  "") printf 'GROBASE_TARGET=%s\nGROBASE_LINK_HOST_PORT=%s\nGROBASE_REMOTE_DIR=%s\nGROBASE_API_URL=%s\nGROBASE_CA_FILE=%s\n' "$TARGET" "$HOST_PORT" "$REMOTE_DIR" "$API_URL" "$CA_FILE" ;;
   GROBASE_TARGET) printf '%s\n' "$TARGET" ;;
   GROBASE_LINK_HOST_PORT) printf '%s\n' "$HOST_PORT" ;;
   GROBASE_REMOTE_DIR) printf '%s\n' "$REMOTE_DIR" ;;
   GROBASE_API_URL) printf '%s\n' "$API_URL" ;;
-  *) die "conf: no setting named $1 (GROBASE_TARGET, GROBASE_LINK_HOST_PORT, GROBASE_REMOTE_DIR, GROBASE_API_URL)" ;;
+  GROBASE_CA_FILE) printf '%s\n' "$CA_FILE" ;;
+  *) die "conf: no setting named $1 (GROBASE_TARGET, GROBASE_LINK_HOST_PORT, GROBASE_REMOTE_DIR, GROBASE_API_URL, GROBASE_CA_FILE)" ;;
   esac
 }
 
@@ -269,20 +273,17 @@ usage: grobase-link.sh up|down|status|env|verify|mode|conf [KEY]|api-url|docker-
   down    close it (ssh master, forwards, sockets, routes, state)
   status  exit 0 when the link is open and Kong answers through it
   env     copy the remote grobase .env (ssh mode) and derive ./.env.local from it
-  verify  one request per grobase name from inside every frontend on grobase's network,
-          then the browser's path through the TLS edge; exit 1 on any FAIL
+  verify  one request per grobase name from inside every frontend on grobase's network, then the browser's TLS edge; exit 1 on any FAIL
   mode    print the active mode: local, ssh or direct
   conf    print the effective settings, one (KEY) or all (KEY=value lines)
   docker-host  DOCKER_HOST of the daemon running the linked grobase ("" = this one; direct: exit 1)
   api-url  print the HTTPS URL of the grobase API (the WAF) for clients
-Settings: the environment (make link KEY=value) wins, then ./.env.grobase-link (KEY=value,
-  git-ignored; .env.grobase-link.example documents it), then the default.
-  GROBASE_TARGET          auto | local | ssh://[user@]host[:port] | <ssh alias|user@host|host>
-                          | http(s)://host[:port]      -- the scheme is the kind of connection
+Settings: the environment (make link KEY=value) wins, then ./.env.grobase-link (KEY=value, git-ignored; .env.grobase-link.example documents it), then the default.
+  GROBASE_TARGET          auto | local | ssh://[user@]host[:port] | <ssh alias|user@host|host> | http(s)://host[:port]  -- the scheme is the kind of connection
   GROBASE_LINK_HOST_PORT  28000 (0 = none)        GROBASE_REMOTE_DIR  /opt/grobase
   GROBASE_API_URL         the WAF URL clients call, https://<vm>.<tailnet>.ts.net:8443; ssh/auto need it
-Environment only: GROBASE_LINK_DIR (XDG_RUNTIME_DIR/track-binocle-link), GROBASE_LINK_CONF
-  (another settings file), GROBASE_REMOTE_ENV, B2B_DIR.
+  GROBASE_CA_FILE         direct targets only: the PEM CA signing that Kong's certificate; empty = the relay's system store
+Environment only: GROBASE_LINK_DIR (XDG_RUNTIME_DIR/track-binocle-link), GROBASE_LINK_CONF (another settings file), GROBASE_REMOTE_ENV, B2B_DIR.
 Exit codes: 0 success, 1 failure or misuse.
 USAGE
 }
