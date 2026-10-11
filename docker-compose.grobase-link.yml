@@ -8,6 +8,9 @@
 # request time, and the other frontends take the names from docker-compose.yml defaults
 # (OSIONOS_BAAS_URL, PUBLIC_BAAS_URL, SMTP_HOST, REDIS_URL, REALTIME_PUBLISH_URL), so a
 # network alias is the one thing that reaches all of them without touching their config.
+# In direct mode the relay also routes 6379/1025/8025 to the two stand-ins below: sessions
+# and captured mail live on this device, never published (no ports, no aliases — the relay
+# owns grobase's names — and a plain `up` never starts them: profile link-direct).
 services:
   grobase-link:
     image: alpine/socat:1.8.0.1
@@ -43,3 +46,36 @@ services:
       start_period: 10s
       start_interval: 2s
     restart: unless-stopped
+  grobase-link-redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    profiles: [link-direct]
+    networks:
+      - mini-baas
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 10s
+      start_interval: 2s
+  grobase-link-mailpit:
+    image: axllent/mailpit:v1.22.3
+    profiles: [link-direct]
+    networks:
+      - mini-baas
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - /mailpit
+        - readyz
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 10s
+      start_interval: 2s

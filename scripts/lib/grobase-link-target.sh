@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # grobase-link-target.sh — how grobase-link.sh turns GROBASE_TARGET into "<mode> <target>":
 # the parsers (ssh_args, url_hostport), the probes (local daemon, `docker ps` over ssh, a
-# TCP/TLS connect from a container) and the resolvers (explicit scheme, bare host, auto).
+# TCP/TLS connect from a container), the relay's addresses for a direct target
+# (resolve_ipv4, kong_addr, direct_routes) and the resolvers (explicit scheme, bare host, auto).
 # Sourced by scripts/grobase-link.sh, which defines note, die, TARGET, SOCAT_IMG and REPO
 # before sourcing; define-only, sets no shell option. Tested alone by
 # scripts/tests/grobase-link.bats (parsers and resolve: no ssh, no docker, no network).
@@ -31,6 +32,14 @@ url_hostport() { # http(s)://host[:port][/...] -> "host port"
   case "$hp" in *:*) port=${hp##*:} ;; esac
   printf '%s %s\n' "${hp%%:*}" "$port"
 }
+# Ponytail: IPv4 only; an IPv6-only name is passed through unresolved, and the relay's Docker
+# DNS (no /etc/hosts, no mDNS) must resolve it. A name resolving to 127.x here points the
+# relay at itself: on the data center host use local mode.
+resolve_ipv4() { # HOST -> its first IPv4 address, or HOST itself when getent knows none
+  local ip
+  ip=$(getent ahostsv4 "$1" | awk 'NR == 1 { print $1 }') || true
+  printf '%s\n' "${ip:-$1}"
+}
 # api_url TARGET EXPLICIT -> the HTTPS URL clients call for the grobase API (the WAF):
 # EXPLICIT when set, else TARGET's own URL, else the loopback WAF; exit 1 when it has none.
 api_url() {
@@ -45,10 +54,38 @@ api_url() {
   printf '%s\n' "${url%/}"
 }
 url_reachable() { # from a container of this daemon, where the frontends run
-  local host port addr
+  local host port ip addr
   read -r host port < <(url_hostport "$1")
-  case "$1" in https://*) addr="OPENSSL:$host:$port,verify=0" ;; *) addr="TCP:$host:$port" ;; esac
+  ip=$(resolve_ipv4 "$host")
+  case "$1" in
+  https://*) addr="OPENSSL:$ip:$port,verify=0,snihost=$host" ;; # a reachability probe, not a trust decision
+  *) addr="TCP:$ip:$port" ;;
+  esac
   docker run --rm "$SOCAT_IMG" -T5 /dev/null "$addr,connect-timeout=5" >/dev/null 2>&1
+}
+# kong_addr URL CAFILE -> the relay's socat address for Kong. The name is resolved HERE and
+# the relay connects to that IP: its Docker DNS reads neither /etc/hosts nor mDNS, so a LAN
+# name would not resolve there. The certificate is still verified against the URL's own name
+# (commonname and snihost), which is what its SAN covers, not against the IP.
+kong_addr() {
+  local host port ip
+  read -r host port < <(url_hostport "$1")
+  ip=$(resolve_ipv4 "$host")
+  case "$1" in
+  https://*) printf 'OPENSSL:%s:%s,verify=1,cafile=%s,commonname=%s,snihost=%s\n' "$ip" "$port" "$2" "$host" "$host" ;;
+  *) printf 'TCP:%s:%s\n' "$ip" "$port" ;;
+  esac
+}
+# The relay reads "<listen port> <socat address>" per line, one socat per line. Redis and
+# Mailpit go to stand-in containers on THIS machine (grobase-link-redis and
+# grobase-link-mailpit; another unit adds them), so sessions and captured mail stay local.
+direct_routes() {
+  local addr
+  addr=$(kong_addr "$1" "$2")
+  printf '%s\n' "8000 $addr" \
+    '6379 TCP:grobase-link-redis:6379' \
+    '8025 TCP:grobase-link-mailpit:8025' \
+    '1025 TCP:grobase-link-mailpit:1025'
 }
 
 # Every ~/.ssh/config alias, then every born2root VM whose ports.env records an ssh forward.
@@ -99,4 +136,16 @@ resolve_host() { # a bare host or alias: ssh first, then Kong's plain port, then
   else
     die "$1: ssh shows no mini-baas-kong there and neither http://$1:8000 nor https://$1 answers from a container"
   fi
+}
+# publish_env MODE ENV_LOCAL — where the bridge publishes realtime events. ssh and local reach
+# the gateway by name (empty = docker-compose.yml's default); direct mode has only the edge,
+# whose /realtime/v1/publish admits the service_role key alone (grobase kong.yml).
+publish_env() {
+  local url="" key=""
+  if [ "$1" = direct ]; then
+    url=http://mini-baas-kong:8000/realtime
+    key=$(get_env "$2" SERVICE_ROLE_KEY) || key=""
+  fi
+  put_env "$2" REALTIME_PUBLISH_URL "$url"
+  put_env "$2" REALTIME_PUBLISH_APIKEY "$key"
 }
