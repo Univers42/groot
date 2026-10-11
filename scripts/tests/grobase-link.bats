@@ -232,7 +232,7 @@ resolve_target() { run env GROBASE_TARGET="$1" bash -c "source '$SCRIPT' && reso
   [ ! -e "$GROBASE_LINK_DIR/routes" ]
 }
 
-@test "publish_env: direct sends bridge publishes to the edge with the service key; other modes clear both; remote kinds reach query-router through Kong" {
+@test "publish_env: direct sends bridge publishes to the edge with the service key; other modes clear both; remote kinds reach query-router and the registry through Kong" {
   env_local="$BATS_TEST_TMPDIR/env.local"
   printf 'SERVICE_ROLE_KEY=svc-1\nKEEP=1\n' >"$env_local"
   helper "publish_env direct '$env_local'"
@@ -240,11 +240,14 @@ resolve_target() { run env GROBASE_TARGET="$1" bash -c "source '$SCRIPT' && reso
   [ "$(sed -n 's/^REALTIME_PUBLISH_APIKEY=//p' "$env_local")" = svc-1 ]
   [[ "$output" != *"svc-1"* ]]
   grep -qx 'OSIONOS_QUERY_ROUTER_URL=http://mini-baas-kong:8000/query/v1' "$env_local"
+  grep -qx 'OSIONOS_ADAPTER_REGISTRY_URL=http://mini-baas-kong:8000/admin/v1' "$env_local"
   helper "publish_env ssh '$env_local'"
   grep -qx 'REALTIME_PUBLISH_URL=' "$env_local"
   grep -qx 'REALTIME_PUBLISH_APIKEY=' "$env_local"
   grep -qx 'OSIONOS_QUERY_ROUTER_URL=http://mini-baas-kong:8000/query/v1' "$env_local"
+  grep -qx 'OSIONOS_ADAPTER_REGISTRY_URL=http://mini-baas-kong:8000/admin/v1' "$env_local"
   grep -qx 'KEEP=1' "$env_local"
   helper "publish_env local '$env_local'"
   grep -qx 'OSIONOS_QUERY_ROUTER_URL=' "$env_local"
+  grep -qx 'OSIONOS_ADAPTER_REGISTRY_URL=' "$env_local"
 }

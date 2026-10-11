@@ -370,6 +370,16 @@ MSSQL finance, SQLite restaurant, MySQL ops, Mongo activity, Postgres commerce a
 paging every row gives DynamoDB 250 / 1200 / 200 and SQLite 1045. Before, DynamoDB answered 400
 `Unsupported engine 'dynamodb'` and SQLite 502 `no such table: restaurant`.
 
+In osionos, linked over `ssh://b2b`, the demo account's account-wide data graph
+(`/api/graph/data?scope=account`, read in Playwright after a real login) held 367 nodes, all notes:
+the bridge's `http://mini-baas-query-router:4001` is not relayed. With `OSIONOS_QUERY_ROUTER_URL`
+pointed at Kong's `/query/v1` (`publish_env`, osionos `0cfa815`) it holds 8738, from every engine:
+DynamoDB 200 / 400 / 250, MSSQL 400 / 400 / 400 / 20 / 12, SQLite 8 / 8 / 65 / 300 / 400 / 56,
+MySQL 400 / 400 / 40 / 400, Mongo 400 / 400 / 400 (the graph takes at most 400 rows per table).
+The database list read the adapter-registry the same way, so it failed too; through Kong's
+`/admin/v1` with the service key it lists the tenant's 7 databases over the ssh link and over the
+Tailscale WAF (anon key 403, no key 401).
+
 Not run: `make link` over the LAN name (only the CLI used it) and from a second device; the ssh
 path relays the names with no WAF in the way, at the price of the device's key on the VM.
 
@@ -400,6 +410,22 @@ path relays the names with no WAF in the way, at the price of the device's key o
   injection rule families on POST/PATCH/PUT to `/rest/v1/osionos_<table>` only, so an
   attack-shaped value written to any other route, or a read that looks like one, is still
   refused with 403.
+- **Behind a link osionos reaches query-router and the adapter-registry through Kong.** No remote
+  kind relays either, so `make link` writes `OSIONOS_QUERY_ROUTER_URL=http://mini-baas-kong:8000/query/v1`
+  and `OSIONOS_ADAPTER_REGISTRY_URL=http://mini-baas-kong:8000/admin/v1` (blank in local mode,
+  which `docker-compose.yml` turns back into the container-DNS defaults). The bridge sends the anon
+  key on the first and its service_role key on the second, the only key `/admin/v1` admits. Three
+  limits come with it:
+  - In direct mode the WAF sits on both routes: an insert whose value holds `console.log(` and
+    `' OR 1=1` was refused 403, a plain one passed (2026-10-11, one sample per shape).
+  - Direct mode reaches `/admin/v1` only because the data center runs without grobase's prod
+    overlay: Kong sees the WAF's address, so its private-ranges `ip-restriction` admits a tailnet
+    client (grobase N-23, `wiki/security/remediation-tracker-2025-07-14.md`). With the prod overlay
+    (`KONG_TRUSTED_IPS`) a device linked over Tailscale gets 403 there and the database list fails;
+    a LAN 192.168.x device keeps working. Opening 100.64.0.0/10 on that allowlist would open the
+    service_role admin routes to the whole tailnet — that is grobase's decision, not the link's.
+  - Kong limits both routes per client IP (`/admin/v1` 60/min, `/query/v1` 300/min), and every
+    bridge behind one relay or one WAF is one client: past the limit the panel shows a 429 error.
 - **Do not probe Kong with `socat` on stdin.** Kong/nginx aborts a proxied request when the
   client half-closes after sending, so `printf … | socat - TCP:mini-baas-kong:8000` prints 0
   bytes for every upstream route while `curl` gets 200. Kong's own `/` 404 is unaffected,
