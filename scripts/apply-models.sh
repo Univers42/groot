@@ -52,6 +52,10 @@ require_pg() {
 	fi
 }
 
+# The ledger sits in public, where grobase's default privileges grant anon and
+# authenticated everything: without RLS the public anon key could rewrite it through
+# PostgREST and mark a migration applied (2026-10-11, measured on the VM). RLS with no
+# policy shuts both roles out; this runner is the postgres superuser and bypasses it.
 ledger_ensure() {
 	psql_do -q >/dev/null <<'SQL'
 CREATE TABLE IF NOT EXISTS public.osionos_model_migrations (
@@ -59,6 +63,16 @@ CREATE TABLE IF NOT EXISTS public.osionos_model_migrations (
   sha256     text NOT NULL,
   applied_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE public.osionos_model_migrations ENABLE ROW LEVEL SECURITY;
+DO $$
+DECLARE r text;
+BEGIN
+  FOREACH r IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
+      EXECUTE format('REVOKE ALL ON public.osionos_model_migrations FROM %I', r);
+    END IF;
+  END LOOP;
+END $$;
 SQL
 }
 
