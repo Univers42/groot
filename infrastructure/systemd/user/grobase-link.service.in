@@ -1,0 +1,19 @@
+# Rendered and installed by `make link-autostart` (scripts/grobase-link-autostart.sh).
+# Opens the link once the data center VM is up, so the frontends reach grobase after a reboot
+# without anyone typing `make link`. Stays active so the ssh master it starts lives in this
+# unit, not in whichever terminal happened to run `make link`.
+[Unit]
+Description=grobase link: this host's frontends reach the data center (make link)
+Documentation=file://@GROOT@/wiki/runbooks/grobase-link.md
+After=b2b-vm-baas.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=@GROOT@
+ExecStart=/usr/bin/make --no-print-directory link
+ExecStop=/usr/bin/make --no-print-directory link-down
+TimeoutStartSec=900
+
+[Install]
+WantedBy=default.target

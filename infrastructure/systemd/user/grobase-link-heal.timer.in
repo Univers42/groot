@@ -1,0 +1,11 @@
+# Rendered and installed by `make link-autostart`. Two minutes is the longest the frontends
+# stay cut off after the data center or the network comes back.
+[Unit]
+Description=grobase link self-heal every two minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=2min
+
+[Install]
+WantedBy=timers.target
