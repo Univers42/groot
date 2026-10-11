@@ -105,6 +105,7 @@ forward_host_port() {
   fi
 }
 
+# tenant-control 3022 also gets a socket, in no route: host scripts only (link-live-data-ensure).
 up_ssh() {
   local endpoints relay svc cport ep sock kong=""
   open_master "$1"
@@ -124,6 +125,8 @@ up_ssh() {
     [ "$svc:$cport" = kong:8000 ] && kong=$ep
   done <<<"$SERVICES"
   [ -n "$kong" ] || die "Kong is not running on $1; nothing to link"
+  ep=$(awk '$1 == "tenant-control" && $2 == 3022 { print $3; exit }' <<<"$endpoints")
+  [ -z "$ep" ] || forward "$LINK_DIR/tenant-control-3022.sock" "$ep"
   mv "$ROUTES.tmp" "$ROUTES"
   note "ssh link to $1: $(wc -l <"$ROUTES") ports relayed, Kong at $kong$(forward_host_port "$kong")"
 }

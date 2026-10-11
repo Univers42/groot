@@ -57,9 +57,13 @@ ENV_LOCAL="${ENV_LOCAL:-${REPO_ROOT}/.env.local}"
 APP_ENV="${APP_ENV:-${REPO_ROOT}/apps/osionos/app/.env}"
 TENANT="${OSIONOS_BAAS_TENANT_ID:-agency}"
 TC_URL="${TENANT_CONTROL_URL:-http://127.0.0.1:3022}"
+# Set when tenant-control runs on another machine: make link-live-data-ensure points it at
+# the link's host-only socket, and every control-plane call goes through it.
+TC_SOCKET="${TENANT_CONTROL_SOCKET:-}"
 PG_CTN="${PG_CONTAINER:-mini-baas-postgres}"
 MYSQL_CTN="${MYSQL_CONTAINER:-mini-baas-mysql}"
 MONGO_CTN="${MONGO_CONTAINER:-mini-baas-mongo}"
+MSSQL_CTN="${MSSQL_CONTAINER:-mini-baas-mssql}"
 TC_CTN="${TENANT_CONTROL_CONTAINER:-mini-baas-tenant-control}"
 LOCAL_MODE_MARK="${LOCAL_MODE_MARK:-${REPO_ROOT}/.vault42-local-mode}"
 CHECK_ONLY=0
@@ -73,6 +77,7 @@ die()  { printf '[live-data] ✗ %s\n' "$*" >&2; exit 1; }
 PG_DBS="commerce agency"
 MYSQL_DBS="ops"
 MONGO_DBS="activity"
+MSSQL_DBS="finance"
 
 # ── service auth ────────────────────────────────────────────────────────────
 # service-auth.sh is bash (it returns a SVC_AUTH array), which is why this
@@ -97,13 +102,15 @@ read_key_from_env() {
 	sed -n "s/^${2}=//p" "$1" | head -1
 }
 
+tc_curl() { curl -s ${TC_SOCKET:+--unix-socket "${TC_SOCKET}"} "$@"; }
+
 # Verify a key against the control plane. Echoes the key's uuid on success.
 verify_key() {
 	local key="$1" body resp
 	[ -n "${key}" ] || return 1
 	body="$(printf '{"key":"%s"}' "${key}")"
 	svc_auth POST /v1/keys/verify "${body}"
-	resp="$(curl -s --max-time 10 -X POST "${TC_URL}/v1/keys/verify" \
+	resp="$(tc_curl --max-time 10 -X POST "${TC_URL}/v1/keys/verify" \
 		-H 'Content-Type: application/json' "${SVC_AUTH[@]}" -d "${body}" 2>/dev/null || true)"
 	printf '%s' "${resp}" | grep -q '"key_id"\|"id"' || return 1
 	printf '%s' "${resp}" | sed -n 's/.*"key_id":"\([^"]*\)".*/\1/p;s/.*"id":"\([^"]*\)".*/\1/p' | head -1
@@ -131,7 +138,7 @@ main() {
 	fi
 
 	if [ -n "${key_id}" ]; then
-		stale="$(stale_pg "api-key:${key_id}")"
+		stale=$(($(stale_pg "api-key:${key_id}") + $(stale_mssql "api-key:${key_id}")))
 		if [ "${stale:-0}" -eq 0 ]; then
 			note "converged — key ${key_id} valid, demo rows already owned by it"
 			exit 0
@@ -142,7 +149,7 @@ main() {
 	fi
 
 	if [ "${CHECK_ONLY}" -eq 1 ]; then
-		note "repair needed — run: make live-data-ensure"
+		note "repair needed — run: make live-data-ensure (make link-live-data-ensure for a linked grobase)"
 		exit 1
 	fi
 
@@ -151,7 +158,7 @@ main() {
 		local body resp
 		body='{"name":"osionos-app","scopes":["read","write"]}'
 		svc_auth POST "/v1/tenants/${TENANT}/keys" "${body}"
-		resp="$(curl -s --max-time 15 -X POST "${TC_URL}/v1/tenants/${TENANT}/keys" \
+		resp="$(tc_curl --max-time 15 -X POST "${TC_URL}/v1/tenants/${TENANT}/keys" \
 			-H 'Content-Type: application/json' "${SVC_AUTH[@]}" -d "${body}")"
 		key="$(printf '%s' "${resp}" | sed -n 's/.*"key":"\([^"]*\)".*/\1/p')"
 		key_id="$(printf '%s' "${resp}" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1)"
@@ -171,6 +178,7 @@ main() {
 	restamp_pg "${principal}"
 	restamp_mysql "${principal}"
 	restamp_mongo "${principal}"
+	restamp_mssql "${principal}"
 
 	put_env "${ENV_LOCAL}" OSIONOS_BAAS_API_KEY "${key}"
 	put_env "${APP_ENV}"   VITE_BAAS_API_KEY    "${key}"
