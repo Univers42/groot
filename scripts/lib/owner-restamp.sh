@@ -3,7 +3,7 @@
 # picks the daemon). Sourced by scripts/ensure-live-data-access.sh, which sets the container
 # names (*_CTN), the databases (*_DBS) and note(); this file defines functions only.
 #
-#   stale_pg WANT                 rows whose owner_id is api-key:* but not WANT
+#   stale_pg|stale_mssql WANT     rows whose owner_id is api-key:* but not WANT
 #   restamp_<engine> WANT         set those rows' owner_id to WANT; notes the count
 #
 # An engine whose container is not running counts 0 stale rows and is skipped on restamp.
@@ -100,4 +100,37 @@ restamp_mongo() {
 			" 2>/dev/null | tail -1)"
 		note "mongo ${db}: re-stamped ${out:-0} documents"
 	done
+}
+
+# mssql_sql DB SQL — sqlcmd as sa inside the container. The password is the container's own
+# MSSQL_SA_PASSWORD, handed to sqlcmd there, so it is on no argv and in no output here.
+mssql_sql() {
+	docker exec -e "Q=SET NOCOUNT ON; $2" "${MSSQL_CTN}" sh -c \
+		'PATH="/opt/mssql-tools18/bin:/opt/mssql-tools/bin:$PATH" SQLCMDPASSWORD="$MSSQL_SA_PASSWORD" \
+		sqlcmd -S localhost -U sa -C -b -d "$0" -h -1 -W -Q "$Q"' "$1"
+}
+
+# mssql_per_owner_table WANT count|restamp — over every owner_id table of MSSQL_DBS, the rows
+# another api-key principal owns (count), or how many of them moved onto WANT (restamp).
+mssql_per_owner_table() {
+	local stale="owner_id LIKE 'api-key:%' AND owner_id <> '$1'" db t
+	for db in ${MSSQL_DBS}; do
+		while read -r t; do
+			[ -z "${t}" ] || case "$2" in
+			count) mssql_sql "${db}" "SELECT count(*) FROM ${t} WHERE ${stale};" ;;
+			restamp) mssql_sql "${db}" "UPDATE ${t} SET owner_id = '$1' WHERE ${stale}; SELECT @@ROWCOUNT;" ;;
+			esac
+		done < <(mssql_sql "${db}" "SELECT QUOTENAME(TABLE_SCHEMA) + '.' + QUOTENAME(TABLE_NAME)
+			FROM INFORMATION_SCHEMA.COLUMNS WHERE COLUMN_NAME = 'owner_id';")
+	done | awk '{s+=$1} END {print s+0}'
+}
+
+stale_mssql() {
+	running "${MSSQL_CTN}" || { printf '0'; return; }
+	mssql_per_owner_table "$1" count
+}
+
+restamp_mssql() {
+	running "${MSSQL_CTN}" || { note "mssql not running — skipped"; return; }
+	note "mssql: re-stamped $(mssql_per_owner_table "$1" restamp) rows in ${MSSQL_DBS}"
 }

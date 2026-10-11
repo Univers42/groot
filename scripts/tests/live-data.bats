@@ -51,3 +51,39 @@ STUB
   [[ "$output" == *"key issue failed"*"tenant not found"* ]]
 }
 
+# A key the control plane accepts, no postgres, and an mssql finance table whose 600 rows
+# belong to another api-key principal; every UPDATE the script sends lands in $MSSQL_LOG.
+stub_stale_mssql() {
+  export MSSQL_LOG="$BATS_TEST_TMPDIR/mssql.log" CURL_LOG="$BATS_TEST_TMPDIR/curl.log"
+  printf 'OSIONOS_BAAS_API_KEY=mbk_stub\n' >"$ENV_LOCAL"
+  cat >"$BATS_TEST_TMPDIR/bin/docker" <<'STUB'
+#!/bin/sh
+case "$1 $2" in
+"ps "*) printf 'mini-baas-tenant-control\nmini-baas-mssql\n' ;;
+"exec -e")
+  case "$3" in
+  *INFORMATION_SCHEMA*) printf '[dbo].[invoices]\n' ;;
+  *UPDATE*) printf '%s\n' "$3" >>"$MSSQL_LOG" && printf '600\n' ;;
+  *"count(*)"*) printf '600\n' ;;
+  esac ;;
+esac
+STUB
+  printf '#!/bin/sh\nprintf "%%s\\n" "$*" >>"$CURL_LOG"\nprintf %s "{\\"key_id\\":\\"k1\\"}"\n' >"$BATS_TEST_TMPDIR/bin/curl"
+}
+
+@test "mssql rows owned by another key are stale: --check counts them and changes nothing" {
+  stub_stale_mssql
+  run bash "$ROOT/scripts/ensure-live-data-access.sh" --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"key k1 is valid but 600 rows carry a STALE principal"* ]]
+  [ ! -e "$MSSQL_LOG" ]
+}
+
+@test "repair re-stamps mssql onto the key, and reaches tenant-control through TENANT_CONTROL_SOCKET" {
+  stub_stale_mssql
+  TENANT_CONTROL_SOCKET=/run/tc.sock run bash "$ROOT/scripts/ensure-live-data-access.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"mssql: re-stamped 600 rows in finance"* ]]
+  grep -q "UPDATE \[dbo\].\[invoices\] SET owner_id = 'api-key:k1' WHERE owner_id LIKE 'api-key:%' AND owner_id <> 'api-key:k1'" "$MSSQL_LOG"
+  grep -q -- '--unix-socket /run/tc.sock' "$CURL_LOG"
+}

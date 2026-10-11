@@ -50,6 +50,8 @@ knob, `TRACK_BINOCLE_BIND_ADDR` (`infrastructure/makes/grobase.mk:127`,
 | `make link-status` | Exit 0 when the path is open and Kong answers through it | `grobase-link.mk:44-46`, `grobase-link.sh:173-194` |
 | `make link-down` | Stop the relay, cancel the forwards, close the ssh master, forget the state | `grobase-link.mk:52-55` |
 | `make link-models-migrate` | What `make all` does with `models-migrate`, over the link: groot's `models/*.sql` land in the postgres of the linked grobase (local = this daemon; ssh = the target's daemon through docker's ssh transport, `grobase-link.sh docker-host`; direct = refused, no database). Idempotent; ~2 min over ssh. Runs inside `link-frontends-up` | `grobase-link.mk` (`link-models-migrate`), `scripts/apply-models-migrations.sh` |
+| `make link-demo-login-ensure` | What `make all` does with `demo-login-ensure`, over the link: the demo account in the linked grobase gets `./.env.local`'s `DEMO_LOGIN_PASSWORD` (`make demo-login` prints it); postgres through `grobase-link.sh docker-host`, Kong (only to create a missing account in LOCAL mode) through the link's loopback port. Idempotent. Runs inside `link-frontends-up` | `grobase-link.mk` (`link-demo-login-ensure`), `scripts/demo-login-ensure.sh` |
+| `make link-live-data-ensure` | What `make all` does with `live-data-ensure`, over the link: `scripts/ensure-live-data-access.sh` verifies `./.env.local`'s `OSIONOS_BAAS_API_KEY` with the linked tenant-control (ssh mode: through `tenant-control-3022.sock`), or issues one, and re-stamps the demo rows owned by any other `api-key:` principal onto it — postgres `commerce agency`, mysql `ops`, mongo `activity`, mssql `finance` (`scripts/lib/owner-restamp.sh`). Idempotent; a converged grobase is one line. Runs inside `link-frontends-up` | `grobase-link.mk` (`link-live-data-ensure`) |
 | `make link-frontends-up` | `make link`, then `frontends-up` with the relay overlay, the vhost on `LINK_VHOST_HTTPS_PORT`, then `certs-trust-user` (the CA into this user's browser stores, no sudo), then `link-verify` from inside every frontend | `grobase-link.mk:57-64` |
 | `make link-healthcheck` | `link-verify`, then the stack healthcheck with the backend probed through the host loopback copy of Kong | `grobase-link.mk:66-73` |
 | `make link-e2e [E2E_SPECS=specs/<file>]` | `link-healthcheck`, then the Playwright smoke (`tests/e2e/run.sh`, pinned container, `--network host`) against the frontends served here through the linked grobase; the stack must already be up | `grobase-link.mk` (`link-e2e`), `tests/e2e/run.sh` |
@@ -108,7 +110,9 @@ specs per mode, the consumer filter, the verdicts, the exit codes) are
 3. **One unix socket per port.** For each row of `SERVICES` (`:38-42`: kong 8000, redis 6379,
    mailpit 8025 and 1025, realtime 4000) a `-L $LINK_DIR/<svc>-<port>.sock:<ip:port>` forward
    (`up_ssh`, `:119-140`). A missing service is reported and its name refuses connections
-   instead of pointing at something else.
+   instead of pointing at something else. tenant-control 3022 gets one more socket,
+   `tenant-control-3022.sock`, in no route: only host scripts use it
+   (`make link-live-data-ensure`), no frontend can name it.
 4. **The relay.** `alpine/socat:1.8.0.1` reads `/link/routes` (`<port> <socat address>`) and
    runs `socat TCP-LISTEN:<port>,fork,reuseaddr <address>` per line; it carries the aliases
    `mini-baas-kong mini-baas-redis mini-baas-mailpit mailpit mini-baas-realtime` on

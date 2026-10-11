@@ -61,13 +61,31 @@ link-down:
 # in the postgres of the grobase the frontends talk to (2026-10-09: 7 osionos tables were
 # missing in the VM's grobase because nothing had ever run it there). Idempotent; slow over
 # ssh (one docker exec per file through docker's ssh transport, ~2 min).
+LINK_ON_TARGET = host="$$($(LINK_SCRIPT) docker-host)"; [ -z "$$host" ] || export DOCKER_HOST="$$host";
+
 link-models-migrate:
 ## Apply groot's models/*.sql to the LINKED grobase's postgres (local = this daemon, ssh = the target's daemon through docker's ssh transport; direct mode has no database and refuses). Idempotent, part of link-frontends-up.
-	@host="$$($(LINK_SCRIPT) docker-host)"; \
-	if [ -n "$$host" ]; then DOCKER_HOST="$$host" $(MAKE) --no-print-directory models-migrate; else $(MAKE) --no-print-directory models-migrate; fi
+	@$(LINK_ON_TARGET) $(MAKE) --no-print-directory models-migrate
 
-link-frontends-up: link link-models-migrate
-## Build and start the root frontends here against the linked grobase (after link-models-migrate; frontends-up, in a non-local mode with the relay overlay and the vhost on LINK_VHOST_HTTPS_PORT), trust the local CA in this user's browser stores (no sudo; certs-trust-user), then verify the link and that trust from inside every frontend.
+# What `make all` does with demo-login-ensure, driven over the link: the demo account in the
+# LINKED grobase gets this machine's DEMO_LOGIN_PASSWORD (2026-10-11: after the seed import
+# the VM held the account with the snapshot's old hash, so no one here could sign in). Kong
+# is reached through the link's loopback port, the one this machine can open in every mode.
+link-demo-login-ensure:
+## Set the demo account's password in the LINKED grobase to ./.env.local's DEMO_LOGIN_PASSWORD (make demo-login prints it). Idempotent, part of link-frontends-up.
+	@$(LINK_ON_TARGET) BAAS_URL='http://127.0.0.1:$(GROBASE_LINK_HOST_PORT)' sh scripts/demo-login-ensure.sh
+
+# What `make all` does with live-data-ensure, driven over the link: the app's API key is
+# verified (or issued) by the LINKED tenant-control, through the link's host-only socket, and
+# the demo rows are re-stamped onto it (2026-10-11: the VM's 1635 finance rows in mssql were
+# owned by another agency key, so the finance mount listed nothing).
+link-live-data-ensure:
+## Converge the app's live-database key and the demo rows' owner on the LINKED grobase (scripts/ensure-live-data-access.sh; ssh mode reaches tenant-control through the link). Idempotent, part of link-frontends-up.
+	@$(LINK_ON_TARGET) sock='$(GROBASE_LINK_DIR)/tenant-control-3022.sock'; \
+		[ ! -S "$$sock" ] || export TENANT_CONTROL_SOCKET="$$sock"; bash scripts/ensure-live-data-access.sh
+
+link-frontends-up: link link-models-migrate link-demo-login-ensure link-live-data-ensure
+## Build and start the root frontends here against the linked grobase (after link-models-migrate, link-demo-login-ensure and link-live-data-ensure; frontends-up, in a non-local mode with the relay overlay and the vhost on LINK_VHOST_HTTPS_PORT), trust the local CA in this user's browser stores (no sudo; certs-trust-user), then verify the link and that trust from inside every frontend.
 	@if [ "$$($(LINK_SCRIPT) mode)" = local ]; then \
 		$(MAKE) --no-print-directory frontends-up certs-trust-user; \
 	else \
