@@ -74,8 +74,6 @@ PG_DBS="commerce agency"
 MYSQL_DBS="ops"
 MONGO_DBS="activity"
 
-running() { docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$1"; }
-
 # ── service auth ────────────────────────────────────────────────────────────
 # service-auth.sh is bash (it returns a SVC_AUTH array), which is why this
 # script is bash and not sh.
@@ -111,101 +109,10 @@ verify_key() {
 	printf '%s' "${resp}" | sed -n 's/.*"key_id":"\([^"]*\)".*/\1/p;s/.*"id":"\([^"]*\)".*/\1/p' | head -1
 }
 
-# ── stale-principal detection ───────────────────────────────────────────────
-# Any api-key:* principal in the demo data that is NOT the one we hold is
-# stale: rows the app can authenticate for but never see.
-stale_pg() {
-	local want="$1" db n=0 t
-	running "${PG_CTN}" || { printf '0'; return; }
-	for db in ${PG_DBS}; do
-		docker exec "${PG_CTN}" psql -U postgres -d "${db}" -tAc \
-			"SELECT table_name FROM information_schema.columns
-			  WHERE column_name='owner_id' AND table_schema='public';" 2>/dev/null \
-		| while read -r t; do
-			[ -n "${t}" ] || continue
-			docker exec "${PG_CTN}" psql -U postgres -d "${db}" -tAc \
-				"SELECT count(*) FROM public.\"${t}\"
-				  WHERE owner_id LIKE 'api-key:%' AND owner_id <> '${want}';" 2>/dev/null
-		done | awk '{s+=$1} END {print s+0}'
-	done | awk '{s+=$1} END {print s+0}'
-}
-
-restamp_pg() {
-	local want="$1" db t total=0 n
-	running "${PG_CTN}" || { note "postgres not running — skipped"; return; }
-	for db in ${PG_DBS}; do
-		while read -r t; do
-			[ -n "${t}" ] || continue
-			n="$(docker exec "${PG_CTN}" psql -U postgres -d "${db}" -tAc \
-				"UPDATE public.\"${t}\" SET owner_id='${want}'
-				  WHERE owner_id LIKE 'api-key:%' AND owner_id <> '${want}';" 2>/dev/null \
-				| sed -n 's/^UPDATE //p')"
-			total=$((total + ${n:-0}))
-		done < <(docker exec "${PG_CTN}" psql -U postgres -d "${db}" -tAc \
-			"SELECT table_name FROM information_schema.columns
-			  WHERE column_name='owner_id' AND table_schema='public';" 2>/dev/null)
-	done
-	note "postgres: re-stamped ${total} rows"
-}
-
-mysql_pw() {
-	docker inspect "${MYSQL_CTN}" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
-		| sed -n 's/^MYSQL_ROOT_PASSWORD=//p' | head -1
-}
-
-restamp_mysql() {
-	local want="$1" db pw t total=0 n
-	running "${MYSQL_CTN}" || { note "mysql not running — skipped"; return; }
-	pw="$(mysql_pw)"
-	for db in ${MYSQL_DBS}; do
-		while read -r t; do
-			[ -n "${t}" ] || continue
-			docker exec "${MYSQL_CTN}" mysql -uroot -p"${pw}" -N -B -e \
-				"UPDATE \`${db}\`.\`${t}\` SET owner_id='${want}'
-				  WHERE owner_id LIKE 'api-key:%' AND owner_id <> '${want}';" 2>/dev/null || true
-			n="$(docker exec "${MYSQL_CTN}" mysql -uroot -p"${pw}" -N -B -e \
-				"SELECT ROW_COUNT();" 2>/dev/null || echo 0)"
-			total=$((total + ${n:-0}))
-		done < <(docker exec "${MYSQL_CTN}" mysql -uroot -p"${pw}" -N -B -e \
-			"SELECT table_name FROM information_schema.columns
-			  WHERE column_name='owner_id' AND table_schema='${db}';" 2>/dev/null)
-	done
-	note "mysql: re-stamped rows in ${MYSQL_DBS}"
-}
-
-mongo_args() {
-	local u p
-	u="$(docker inspect "${MONGO_CTN}" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
-		| sed -n 's/^MONGO_INITDB_ROOT_USERNAME=//p' | head -1)"
-	p="$(docker inspect "${MONGO_CTN}" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
-		| sed -n 's/^MONGO_INITDB_ROOT_PASSWORD=//p' | head -1)"
-	printf '%s\n%s\n' "${u}" "${p}"
-}
-
-restamp_mongo() {
-	local want="$1" db u p out
-	running "${MONGO_CTN}" || { note "mongo not running — skipped"; return; }
-	{ read -r u; read -r p; } < <(mongo_args)
-	for db in ${MONGO_DBS}; do
-		out="$(docker exec "${MONGO_CTN}" mongosh --quiet -u "${u}" -p "${p}" \
-			--authenticationDatabase admin --eval "
-				const d = db.getSiblingDB('${db}');
-				let n = 0;
-				d.getCollectionNames().forEach(c => {
-					n += d[c].updateMany(
-						{ owner_id: { \$regex: '^api-key:', \$ne: '${want}' } },
-						{ \$set: { owner_id: '${want}' } }
-					).modifiedCount;
-				});
-				print(n);
-			" 2>/dev/null | tail -1)"
-		note "mongo ${db}: re-stamped ${out:-0} documents"
-	done
-}
+# shellcheck source=scripts/lib/owner-restamp.sh
+. "${REPO_ROOT}/scripts/lib/owner-restamp.sh"
 
 # ── env emission ────────────────────────────────────────────────────────────
-# Rewrite KEY=VALUE in place (or append), preserving the file's mode. Never
-# echoes the value.
 # put_env FILE KEY VALUE — the shared env-file primitive (in place, atomic, mode kept,
 # never echoes the value). One implementation for every writer of ./.env.local.
 # shellcheck source=scripts/lib/envfile.sh
@@ -213,7 +120,6 @@ restamp_mongo() {
 
 main() {
 	command -v docker >/dev/null 2>&1 || die "docker is required"
-	command -v python3 >/dev/null 2>&1 || die "python3 is required"
 	running "${TC_CTN}" || { note "${TC_CTN} not running — backend is down, skipping"; exit 0; }
 	load_service_auth
 
