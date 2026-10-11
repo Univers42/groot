@@ -37,7 +37,7 @@ PROBE_SH='rc=0
 for spec in "$@"; do
   host=${spec%%:*}; rest=${spec#*:}; port=${rest%%:*}; kind=${rest#*:}
   case $kind in
-  http) req="GET / HTTP/1.0\r\n\r\n"; pat="HTTP/*" ;;
+  http) req="GET / HTTP/1.0\r\nHost: $host\r\n\r\n"; pat="HTTP/*" ;;
   redis) req="PING\r\n"; pat="[+-]*" ;;
   smtp) req=""; pat="220*" ;;
   *) req=""; pat="?*" ;;
