@@ -235,7 +235,7 @@ cmd_env() {
   esac
   [ ! -f "$REPO/.env.local" ] || sync=--sync
   GRO_ENV="$src" bash "$REPO/scripts/gen-local-env.sh" ${sync:+"$sync"}
-  publish_env "$mode" "$REPO/.env.local"
+  publish_env "$mode" "$REPO/.env.local" && { [ "$mode" = local ] || rt_token_ensure "$REPO/.env.local" "$src"; }
 }
 
 # The settings as `up` will use them, so make and the user read one resolution, not the file.
