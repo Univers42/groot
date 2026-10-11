@@ -34,6 +34,23 @@ resolve_target() { run env GROBASE_TARGET="$1" bash -c "source '$SCRIPT' && reso
   [ "$output" = $'kong.lan 80\napi.example.org 443\n10.1.2.3 8443' ]
 }
 
+@test "api_url: explicit wins, http(s) targets pass through, local maps to the WAF, others fail" {
+  helper 'api_url ssh://b2b https://vm.example.ts.net:8443/'
+  [ "$status" -eq 0 ]
+  [ "$output" = "https://vm.example.ts.net:8443" ]
+  helper 'api_url https://kong.example.org/ ""'
+  [ "$status" -eq 0 ]
+  [ "$output" = "https://kong.example.org" ]
+  helper 'api_url local ""'
+  [ "$output" = "https://127.0.0.1:8443" ]
+  helper 'api_url ssh://b2b ""'
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  helper 'api_url auto ""'
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+}
+
 @test "resolve: an explicit target is taken as given, nothing is probed" {
   resolve_target local
   [ "$output" = "local local" ]
@@ -57,12 +74,12 @@ resolve_target() { run env GROBASE_TARGET="$1" bash -c "source '$SCRIPT' && reso
   [ "$status" -eq 1 ]
 }
 
-@test "conf: without a file every setting is its default; no key lists all three" {
+@test "conf: without a file every setting is its default; no key lists all four" {
   run bash "$SCRIPT" conf GROBASE_TARGET
   [ "$output" = auto ]
   run bash "$SCRIPT" conf
   [ "$status" -eq 0 ]
-  [ "$output" = $'GROBASE_TARGET=auto\nGROBASE_LINK_HOST_PORT=28000\nGROBASE_REMOTE_DIR=/opt/grobase' ]
+  [ "$output" = $'GROBASE_TARGET=auto\nGROBASE_LINK_HOST_PORT=28000\nGROBASE_REMOTE_DIR=/opt/grobase\nGROBASE_API_URL=' ]
 }
 
 @test "resolve: the file's target is resolved like one from the environment" {
@@ -91,7 +108,7 @@ resolve_target() { run env GROBASE_TARGET="$1" bash -c "source '$SCRIPT' && reso
 @test "--help exits 0 and names every verb; misuse exits 1" {
   run bash "$SCRIPT" --help
   [ "$status" -eq 0 ]
-  for verb in up down status env verify mode conf docker-host; do [[ "$output" == *" $verb "* ]]; done
+  for verb in up down status env verify mode conf api-url docker-host; do [[ "$output" == *" $verb "* ]]; done
   run bash "$SCRIPT" bogus
   [ "$status" -eq 1 ]
   run bash "$SCRIPT"
@@ -124,6 +141,15 @@ resolve_target() { run env GROBASE_TARGET="$1" bash -c "source '$SCRIPT' && reso
   run bash "$SCRIPT" docker-host
   [ "$status" -eq 1 ]
   [[ "$output" == *"no postgres"* ]]
+}
+
+@test "api-url: the setting beats derivation; an ssh target without it exits 1 naming GROBASE_API_URL" {
+  run env GROBASE_TARGET=ssh://b2b bash "$SCRIPT" api-url
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"GROBASE_API_URL"* ]]
+  run env GROBASE_TARGET=ssh://b2b GROBASE_API_URL=https://vm.example.ts.net:8443/ bash "$SCRIPT" api-url
+  [ "$status" -eq 0 ]
+  [ "$output" = "https://vm.example.ts.net:8443" ]
 }
 
 @test "own_link_dir: an empty LINK_DIR another user made (dockerd after a reboot) is replaced by ours" {
