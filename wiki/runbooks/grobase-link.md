@@ -120,17 +120,29 @@ device reuse it. Direct mode takes `REALTIME_PUBLISH_APIKEY` from `./.env.local`
 bridge publishes. Never
 copy grobase secrets anywhere else, and never push them by hand.
 
-**The grobase CLI** (`github.com/Univers42/grobase-cli`) works against all four URLs, with the CA
-file you copied and the password on stdin:
+**The grobase CLI** (`github.com/Univers42/grobase-cli`, main `5b5aac7` or later) works against
+all four URLs, with the CA file you copied and secrets on stdin. One context can hold every path:
+`--url` repeats, the first URL that answers `GET /auth/v1/health` is used (probe timeout
+`GROBASE_PROBE_TIMEOUT`, default 2s), so the same context works at home on the LAN and away over
+Tailscale:
 
 ```sh
-grobase context add dc --url https://100.94.119.97:8443 --ca-file ~/grobase-ca.pem --yes
-grobase login --email <email> --password-stdin
+grobase context add dc --url https://grobase.track-binocle.test:8443 \
+  --url https://dlesieur42-1.tail10f2ea.ts.net:8443 --url https://100.94.119.97:8443 \
+  --ca-file ~/grobase-ca.pem --yes
+grobase signup --email <email> --password-stdin --anon-key-stdin   # first time; signed in at once (the VM auto-confirms)
+grobase login --email <email> --password-stdin                     # later
 grobase whoami
 grobase doctor
+eval "$(grobase context env dc)"                                   # GROBASE_TARGET / GROBASE_CA_FILE for make link
 ```
 
 The credential store is mode 600; `doctor`'s only WARN is that the CA is not a system root.
+`grobase api … --input FILE` labels the body `application/json` when it parses (the WAF refuses a
+body with no content type). `grobase realtime subscribe pg/<table>/<inserted|updated|deleted>`
+prints database changes live; `realtime publish` from a user session is dropped by the gateway
+(a GoTrue token carries no `can_publish` claim, which the gateway defaults to false) — publish
+needs a minted token.
 
 **The LAN edge** is a host user unit, `~/.config/systemd/user/grobase-lan-edge.service`, which
 forwards `192.168.1.132:8443` to `127.0.0.1:8443` (the VM's WAF) — port 8443 only. Rollback:
@@ -342,6 +354,22 @@ all four URLs: `context add`, `status`, `login`, `whoami` and `doctor` each of t
 the hosts entry). The credential store is mode 600; `doctor`'s only WARN is that the CA is not a
 system root.
 
+2026-10-11, CLI `5b5aac7` from a fresh config in a clean alpine container (`--add-host` standing
+in for the device's hosts file and MagicDNS): `signup` over the LAN name, `login` of that account
+over the Tailscale name and IP; as the demo account a page created over the LAN, read over the
+Tailscale name, edited over localhost, read back over the Tailscale IP; a context whose first URL
+is a blackhole address fell through to the LAN URL; a LAN `realtime subscribe
+pg/osionos_pages/updated` printed the rename made over the Tailscale IP. Playwright then found
+that page in osionos (served here, linked over `ssh://b2b`).
+
+The osionos data mounts, read with the app's key through the WAF and Kong over the Tailscale IP
+after the data center was given the DynamoDB pieces (the four `.env` values of
+`orchestrators/compose/base/data-plane.yml` and `control-plane.yml`, image
+`grobase-data-plane-router:latest-dynamodb`): `/schema` answers 200 on all seven (DynamoDB IoT,
+MSSQL finance, SQLite restaurant, MySQL ops, Mongo activity, Postgres commerce and agency), and
+paging every row gives DynamoDB 250 / 1200 / 200 and SQLite 1045. Before, DynamoDB answered 400
+`Unsupported engine 'dynamodb'` and SQLite 502 `no such table: restaurant`.
+
 Not run: `make link` over the LAN name (only the CLI used it) and from a second device; the ssh
 path relays the names with no WAF in the way, at the price of the device's key on the VM.
 
@@ -402,3 +430,4 @@ path relays the names with no WAF in the way, at the price of the device's key o
 | `link-status`: `master to … is gone` | The remote rebooted or the network dropped; `ControlPersist` does not reconnect | `make link` again |
 | Browser: certificate warning on `https://localhost:9443` (or any frontend) while `curl --cacert` is fine | A browser store holds an older CA: `make certs` on a fresh tree mints a new one | `make certs-trust-check` to see the stale or missing stores, `make certs-trust-user`, then relaunch the browser |
 | Snap Chromium warns (`ERR_CERT_AUTHORITY_INVALID`) after a snap refresh | Its `HOME` is the revision directory behind `~/snap/chromium/current`; the new revision has no store | `make certs-trust-check` reports it missing; `make certs-trust-user` recreates it; relaunch |
+| Every `/query/v1` call answers 502 `An invalid response was received from the upstream server` right after `query-router` was recreated on the data center, while `query-router` answers from Kong's network | Kong keeps the old container's address for the upstream | `docker restart mini-baas-kong` on the data center (measured 2026-10-11: 502 on all seven mounts before, 200 after) |
