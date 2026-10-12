@@ -71,8 +71,8 @@ link-down:
 	@$(LINK_SCRIPT) down
 
 link-autostart:
-## Bring the link back on its own after a reboot, a data center restart or a network drop: systemd user units open it once the VM is up and a 2-minute timer re-opens it when link-status fails. LAN_IF=<iface> also keeps the WAF on the LAN (https://<LAN IP>:8443). Undo: make link-autostart-off.
-	@LAN_IF='$(LAN_IF)' bash scripts/grobase-link-autostart.sh install
+## Bring the link back on its own after a reboot, a data center restart or a network drop: systemd user units open it once the VM is up and a 2-minute timer re-opens it when link-status fails. LAN_IF=<iface> also keeps the WAF on the LAN (https://<LAN IP>:8443); with LAN_SSH=1, the VM's password ssh too (<LAN IP>:4242). Undo: make link-autostart-off.
+	@LAN_IF='$(LAN_IF)' LAN_SSH='$(LAN_SSH)' bash scripts/grobase-link-autostart.sh install
 
 link-autostart-off:
 ## Remove the link-autostart units (the link itself stays open until make link-down).
