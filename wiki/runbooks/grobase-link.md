@@ -51,7 +51,7 @@ LAN address is `192.168.1.132` (wifi/ethernet `enp7s0`, DHCP). The VM runs groba
 |---|---|---|
 | same host | `https://127.0.0.1:8443` or `https://localhost:8443` | `ssh://b2b` (alias = `dlesieur@127.0.0.1:4242`) |
 | Tailscale (any network) | `https://dlesieur42-1.tail10f2ea.ts.net:8443` or `https://100.94.119.97:8443` | `ssh://dlesieur@100.94.119.97:4242` |
-| LAN / wifi without Tailscale | `https://grobase.track-binocle.test:8443` after adding `192.168.1.132 grobase.track-binocle.test` to the device's hosts file | none: ssh is not exposed on the LAN (join Tailscale for ssh) |
+| LAN / wifi without Tailscale | `https://grobase.track-binocle.test:8443` after adding `192.168.1.132 grobase.track-binocle.test` to the device's hosts file | `ssh://dlesieur@192.168.1.132:4242` once `make link-autostart LAN_IF=enp7s0 LAN_SSH=1` put the VM's password ssh on the LAN; otherwise none |
 
 A fresh clone for the data center: clone groot at branch `feat/grobase-datacenter-link` with
 `--recursive`, then never run plain `make all` — it fast-forwards every submodule to its tracked
@@ -86,8 +86,8 @@ GROBASE_CA_FILE=./grobase-ca.pem
 make link
 ```
 
-There is no ssh from the LAN path; over it the link is Kong plus the local Redis and Mailpit
-stand-ins — the same direct mode `make link-e2e` passed on the Tailscale URL, but a link over the
+Without `LAN_SSH=1` there is no ssh from the LAN path; over it the link is Kong plus the local
+Redis and Mailpit stand-ins — the same direct mode `make link-e2e` passed on the Tailscale URL, but a link over the
 LAN name itself has not been run (only the CLI has). Any of the three paths can be the
 standing choice in `./.env.grobase-link` (git-ignored), or one run with
 `make link GROBASE_TARGET=… GROBASE_CA_FILE=…`.
@@ -175,8 +175,10 @@ needs a minted token.
 **The LAN edge** is a host user unit, `grobase-lan-edge.service`, installed from
 `infrastructure/systemd/user/grobase-lan-edge.service.in` by `make link-autostart LAN_IF=enp7s0`.
 It forwards `<LAN IP>:8443` to the VM's https forward as QEMU actually bound it (`https=` in the
-VM's `ports.env`) — port 8443 only (`scripts/grobase-lan-edge.sh`). Rollback:
-`make link-autostart-off`. It reads the address and the target at start; the heal timer below
+VM's `ports.env`). With `LAN_SSH=1` a second unit, `grobase-lan-ssh.service`, forwards
+`<LAN IP>:4242` to the VM's sshd (`ssh=` in `ports.env`), which accepts passwords: anyone on the
+LAN can try them (the owner's choice, 2026-10-12; `scripts/grobase-lan-edge.sh`). An install
+without `LAN_SSH=1` removes that unit. Rollback: `make link-autostart-off`. It reads the address and the target at start; the heal timer below
 restarts it when the LAN URL stops answering TLS, so a DHCP change or a VM restart on another port
 heals within two minutes. Without linger it runs only while that user is logged in on the host.
 
@@ -456,11 +458,28 @@ grobase through the ssh link to ssh://b2b` at 01:13:52; `link-status` exit 0. DB
 (`tests/e2e/specs/db1-mounted-databases.spec.ts`) passed after the reboot with the 8738-node
 graph.
 
+### Afternoon, 2026-10-12: the link as another device runs it
+
+- `make link-e2e` over `ssh://b2b`: 18 passed, 5 failed. The DB2 tests logged the demo user
+  in once each and the gateway allows 8 logins a minute per IP (`RATE_LIMITS.login`); the
+  helper then tried to register and surfaced the 422 instead of the 429. `tests/e2e/lib/session.ts`
+  now logs each user in once per worker and reports a refused login as such: 23 passed.
+- Direct link over Tailscale (`GROBASE_TARGET=https://100.94.119.97:8443`, the VM's CA):
+  `verify: 9 frontends`; `make link-e2e` 22 passed, AC1 failed — the WAF refused
+  `PATCH /rest/v1/osionos_bridge_identities` at score 10 (CRS 930120 read the key
+  `json.profile.headline` as the file `.profile`). grobase `3411157f` drops that one rule on
+  argument names of `osionos_*` writes (m227 passes in the VM, mutant included); the VM's WAF
+  image was rebuilt (rollback tag `grobase-waf:pre-930120`): 23 passed.
+- LAN ssh: password-only login (`PubkeyAuthentication=no`) from a bridge-network container,
+  whose packets reach `192.168.1.132:4242` through the host's ufw like a LAN device's, through
+  `grobase-lan-ssh.service`: `password-login-ok: dlesieur42`. The heal check finds both
+  forwards answering.
+
 ## What it gets wrong
 
-- **The LAN edge carries one port and needs its host.** `grobase-lan-edge.service` forwards
-  `<LAN IP>:8443` to the VM's https forward, port 8443 only: no Redis, no Mailpit, no ssh, so
-  that path is a Kong URL and nothing else. It reads its address and target at start, so a DHCP
+- **The LAN edge carries at most two ports and needs its host.** `grobase-lan-edge.service`
+  forwards `<LAN IP>:8443` to the VM's https forward and, with `LAN_SSH=1`,
+  `grobase-lan-ssh.service` forwards `<LAN IP>:4242` to its sshd: no Redis, no Mailpit. It reads its address and target at start, so a DHCP
   change or a VM restart on another port leaves it stale until the heal timer restarts it (up to
   two minutes), and without linger it runs only while that user is logged in on the host.
 - **The heal is a two-minute poll on `link-status`.** The frontends can be cut off for up to two
