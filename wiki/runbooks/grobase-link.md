@@ -44,8 +44,9 @@ knob, `TRACK_BINOCLE_BIND_ADDR` (`infrastructure/makes/grobase.mk:127`,
 ## From another device — every path
 
 The data center is the born2root QEMU VM `b2b` running grobase at `/opt/grobase` on a host whose
-LAN address is `192.168.1.132` (wifi/ethernet `enp7s0`, DHCP). The VM runs grobase branch
-`feat/b2b-datacenter` (commit `4eb80e0c`), the same commit groot pins at `apps/grobase`.
+LAN address is `192.168.1.132` (wifi/ethernet `enp7s0`, DHCP). The VM runs grobase `main`, the
+branch groot pins at `apps/grobase`. The whole procedure for another device, every network
+included, with its test plan: [another-device](another-device.md).
 
 | Path | URL for the API / CLI (the WAF) | ssh target for `make link` |
 |---|---|---|
@@ -164,9 +165,11 @@ new one the same way, then `grobase context pin b2b`. Use CLI `2ffd17d` or later
 the first URL even when an alternate was the one answering, so away from the LAN a working
 context reported FAIL.
 
-There is no path from the public internet without Tailscale: the WAF listens on the host's
-loopback, Tailscale and LAN addresses only. Funnel or a router port-forward would publish it,
-which is a decision for the owner, not a link setting.
+From the public internet without Tailscale, the one path is Tailscale Funnel, which the owner
+turned on: `https://dlesieur42-1.tail10f2ea.ts.net` (port 443, a public certificate, so no CA
+file and no pin). The CLI passed login and whoami over it from a container on the public
+internet (2026-10-12); a `make link` over it has not been run
+([another-device](another-device.md) §11).
 `grobase api … --input FILE` labels the body `application/json` when it parses (the WAF refuses a
 body with no content type). `grobase realtime subscribe pg/<table>/<inserted|updated|deleted>`
 prints database changes live; `realtime publish` from a user session is dropped by the gateway
