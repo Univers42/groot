@@ -215,3 +215,32 @@ Until 2026-10-11 the data center's data plane did not serve DynamoDB at all. It 
 `.env` values grobase documents for it, and the `:latest-dynamodb` router image. The `.env` before
 that change is `/opt/grobase/.env.bak-dynamo-20261011T180948Z` on the VM. The next `vault-seed.sh`
 run with `dynamodb-local` up captures DynamoDB again, so a fresh import carries it.
+
+## 8. 2026-10-12 — the June track-binocle database
+
+The older `track-binocle` volume (a dump of 2026-06-12) held accounts the data center never had,
+among them `dylan@gmail.com`. 258 of that account's 280 June pages were already in the data center
+under `dev.pro.photo@gmail.com`. The rest was merged on 2026-10-12 at 17:17 UTC with §7's tool and
+rules: insert only, e2e accounts left out, and a user whose email the data center already holds
+under another id left out. The tool now takes `MERGE_SCHEMA`, so this run's ledger is
+`merge_20261012` and §7's ledger stays untouched.
+
+| table | inserted |
+|---|---|
+| `auth.users`, `auth.identities` | 18 each |
+| `public.osionos_pages` | 44 |
+| `public.osionos_page_configurations` | 35 |
+| `public.osionos_workspace_members` | 25 |
+| `public.osionos_page_action_events` | 22 |
+| `public.osionos_bridge_identities` | 16 |
+| `public.osionos_workspaces` | 14 |
+| `public.osionos_bridge_audit_events` | 82 |
+
+Nothing was overwritten (`merge_20261012.replaced` is empty). The merged accounts keep their June
+password hashes. `dylan@gmail.com`'s June password is in this public repository's history, and the
+Funnel serves sign-in to the internet, so change it once its pages are where you want them.
+
+Undo: `MERGE_SCHEMA=merge_20261012 merge-old-local.sh live --undo`. As in §7, it works only while
+nobody has edited the merged pages. The pre-merge dump, the June dump, the script, the ledger and
+the dry-run and commit outputs are in `/var/lib/grobase-import/merge-20261012/` on the VM, with
+sha256s.
