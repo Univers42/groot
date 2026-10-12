@@ -244,3 +244,9 @@ Undo: `MERGE_SCHEMA=merge_20261012 merge-old-local.sh live --undo`. As in §7, i
 nobody has edited the merged pages. The pre-merge dump, the June dump, the script, the ledger and
 the dry-run and commit outputs are in `/var/lib/grobase-import/merge-20261012/` on the VM, with
 sha256s.
+
+`higueraslp@gmail.com` came from neither source with a password anyone knew (`dev.pro.photo`'s
+and `dylan@gmail.com`'s known values both failed against its hash). On 2026-10-12 its password
+was replaced through `grobase users update --password-stdin` with the service-role key, so the
+owner can sign in to that account. The replaced hash is in `merge_20261012.password_resets` on
+the data center; writing it back into `auth.users.encrypted_password` restores the old password.
