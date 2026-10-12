@@ -1,18 +1,19 @@
-import { request, type Locator, type Page } from "@playwright/test";
+import { type Locator, type Page } from "@playwright/test";
 import { CALENDAR_URL, MAIL_URL } from "../lib/env";
 import { expect, test } from "../lib/fixtures";
 import { openOsionos } from "../lib/session";
 
-/** "" when the app answers; otherwise why not. The proxy answers 502 for a stopped app. */
+/** "" when the app answers; otherwise why not. The proxy answers 502 for a stopped app.
+ *  Node's fetch, not Playwright's request client: in the e2e container that client never
+ *  answers for a hostname URL (https://localhost:3002 times out, https://127.0.0.1:3002 is
+ *  200 in 16 ms; plain http too), while DNS, TCP and TLS from Node are instant (2026-10-11).
+ *  Ponytail: root cause not found; a hang there made DW10 SKIP as if the apps were down. */
 async function unreachable(url: string): Promise<string> {
-  const api = await request.newContext();
   try {
-    const res = await api.get(url, { timeout: 5_000, maxRedirects: 0 });
-    return res.status() < 500 ? "" : `${url} answered HTTP ${res.status()}`;
+    const res = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(5_000) });
+    return res.status < 500 ? "" : `${url} answered HTTP ${res.status}`;
   } catch (error) {
     return `${url} unreachable: ${(error as Error).message.split("\n")[0]}`;
-  } finally {
-    await api.dispose();
   }
 }
 
