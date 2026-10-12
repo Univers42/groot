@@ -12,6 +12,15 @@
 # that same password, so a no-vault `make all` still ends with a working login. Outside
 # LOCAL mode a missing account means the restore failed, and that stays a hard error.
 #
+# A LINKED grobase is one account shared by every machine linked to it, and each machine
+# minted its own password: every `make link-frontends-up` took the account over, so the
+# value `make demo-login` printed on the other machine stopped working, and the sign-in said
+# "wrong password" (2026-10-12). With DEMO_LOGIN_SHARED=1 the first machine to set it is
+# recorded in raw_app_meta_data.demo_login_by (a hash of its machine id, never the id) and
+# holds it; another machine gets 'held' and a note instead of a reset, unless
+# DEMO_LOGIN_FORCE=1 takes it over. A machine's own grobase ignores the marker: a snapshot
+# restored there may carry another machine's.
+#
 # The value never touches argv or SQL text: docker exec forwards it by NAME (-e VAR) and
 # psql reads it with \getenv, so a failed statement cannot echo it back.
 set -eu
@@ -72,32 +81,52 @@ create_account() {
 }
 
 DEMO_LOGIN_PASSWORD="$(demo_login_password "$ENV_LOCAL")" || exit 1
-export DEMO_LOGIN_PASSWORD DEMO_LOGIN_EMAIL
+DEMO_LOGIN_SHARED="${DEMO_LOGIN_SHARED:-0}"
+DEMO_LOGIN_FORCE="${DEMO_LOGIN_FORCE:-0}"
+DEMO_LOGIN_MACHINE="$({ cat /etc/machine-id 2>/dev/null || hostname; } | sed 's/^/groot-demo-login:/' | sha256sum | cut -c1-16)"
+export DEMO_LOGIN_PASSWORD DEMO_LOGIN_EMAIL DEMO_LOGIN_SHARED DEMO_LOGIN_FORCE DEMO_LOGIN_MACHINE
 
 docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$PG_CONTAINER" || {
 	note "$PG_CONTAINER is not running — bring the backend up (make backend-up), then re-run make demo-login-ensure."
 	exit 1
 }
 
-state="$(docker exec -i -e DEMO_LOGIN_PASSWORD -e DEMO_LOGIN_EMAIL "$PG_CONTAINER" \
+state="$(docker exec -i -e DEMO_LOGIN_PASSWORD -e DEMO_LOGIN_EMAIL -e DEMO_LOGIN_SHARED \
+	-e DEMO_LOGIN_FORCE -e DEMO_LOGIN_MACHINE "$PG_CONTAINER" \
 	psql -U postgres -d postgres -X -q -tA <<'SQL'
 \set ON_ERROR_STOP 1
 \set VERBOSITY terse
 \getenv pw DEMO_LOGIN_PASSWORD
 \getenv email DEMO_LOGIN_EMAIL
+\getenv shared DEMO_LOGIN_SHARED
+\getenv force DEMO_LOGIN_FORCE
+\getenv machine DEMO_LOGIN_MACHINE
 SET search_path = public, extensions;
 WITH account AS (
-  SELECT id, coalesce(encrypted_password = crypt(:'pw', encrypted_password), false) AS current
+  SELECT id, coalesce(encrypted_password = crypt(:'pw', encrypted_password), false) AS current,
+    raw_app_meta_data->>'demo_login_by' AS holder
   FROM auth.users WHERE email = :'email'
+), claim AS (
+  SELECT id, current FROM account
+  WHERE :'shared' <> '1' OR :'force' = '1' OR holder IS NULL OR holder = :'machine'
 ), reset AS (
-  UPDATE auth.users SET encrypted_password = crypt(:'pw', gen_salt('bf', 10)), updated_at = now()
-  WHERE id IN (SELECT id FROM account WHERE NOT current)
-  RETURNING id
+  UPDATE auth.users u SET
+    encrypted_password = CASE WHEN c.current THEN u.encrypted_password
+      ELSE crypt(:'pw', gen_salt('bf', 10)) END,
+    raw_app_meta_data = CASE WHEN :'shared' = '1'
+      THEN coalesce(u.raw_app_meta_data, '{}'::jsonb) || jsonb_build_object('demo_login_by', :'machine')
+      ELSE u.raw_app_meta_data END,
+    updated_at = now()
+  FROM claim c
+  WHERE u.id = c.id AND (NOT c.current
+    OR (:'shared' = '1' AND (u.raw_app_meta_data->>'demo_login_by') IS DISTINCT FROM :'machine'))
+  RETURNING c.current
 )
 SELECT CASE
   WHEN NOT EXISTS (SELECT 1 FROM account) THEN 'missing'
-  WHEN EXISTS (SELECT 1 FROM reset) THEN 'updated'
-  ELSE 'current' END;
+  WHEN EXISTS (SELECT 1 FROM reset WHERE NOT current) THEN 'updated'
+  WHEN EXISTS (SELECT 1 FROM account WHERE current) THEN 'current'
+  ELSE 'held' END;
 SQL
 )" || {
 	note "could not set the demo password on $PG_CONTAINER (see the psql error above)."
@@ -107,6 +136,11 @@ SQL
 case "$state" in
 updated) note "$DEMO_LOGIN_EMAIL: password set from ./.env.local (make demo-login prints it)." ;;
 current) note "$DEMO_LOGIN_EMAIL: password already matches ./.env.local." ;;
+held)
+	note "$DEMO_LOGIN_EMAIL: another machine linked to this grobase set its password first, so this machine's make demo-login value will NOT sign in."
+	note "  Sign in with that machine's value (make demo-login there; put it in ./.env.local as DEMO_LOGIN_PASSWORD to make it this machine's too),"
+	note "  or take the account over: make link-demo-login-ensure DEMO_LOGIN_FORCE=1 (the other machine's value then stops working)."
+	;;
 missing)
 	if [ -e "$LOCAL_MODE_MARK" ]; then
 		note "$DEMO_LOGIN_EMAIL is not in auth.users and this machine is in LOCAL mode (no team data) — creating it."
