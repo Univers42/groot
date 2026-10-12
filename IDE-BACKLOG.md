@@ -7,7 +7,8 @@
 > scattered narrative in commit messages and the infra runbook
 > (`infrastructure/docker/osionos/ide-sandbox/README.md`), which it now reconciles.
 >
-> Last reconciled: **2026-07-20** (commit `e93d3154`, formerly branch `feat/ide-full-mode`, merged into `main`).
+> Last reconciled: **2026-07-20** (commit `e93d3154`, formerly branch `feat/ide-full-mode`, merged into `main`);
+> §3.2, §3.4, §4.1–4.4 and §5 corrected on **2026-10-13** (see the changelog entry of that date).
 
 ---
 
@@ -81,7 +82,11 @@ every gate, and a misconfigured frontend can never open an execution path on its
 - **The file tree *is* the page tree**, filtered + sorted folders-first
   (`src/features/ide/model/ideFileTree.ts`).
 - **The page tree is the sync manifest** — path↔pageId is *derived* (`idePaths.ts`
-  `pathForPage`), so there is no `.osio/manifest.json` to keep in step.
+  `pathForPage`), so there is no `.osio/manifest.json` to keep in step. This holds for
+  code and folder pages today. **Superseded for block pages by the Proposed
+  [ADR-004](docs/ide/ADR-004-page-files.md):** a `.omd` file carries its own page `id` in
+  its front-matter, and that `id` — not the path — identifies the page, so a rename or move
+  in the shell is detected by `id`. Raw code files keep the derived path↔id mapping.
 - The bridge already whitelists the surface: `PAGE_SURFACE_VALUES` includes `'code'`
   (`scripts/bridge-api.mjs:104`), applied on read + write; no DB `CHECK` constraint blocks
   it — a created code page survives reload.
@@ -120,14 +125,22 @@ Documented in full in `infrastructure/docker/osionos/ide-sandbox/README.md`. The
 
 ### 3.4 Frontend design choices
 
-- **CodeMirror 6, not Monaco** (`src/features/ide/model/codeMirrorSetup.ts`). CodeMirror
-  themes entirely through the app's `--osio-*` CSS variables, so the editor follows all 7
-  palettes + light/dark with zero JS theme-branching. Uncontrolled document (caret never
-  jumps); debounced writeback (1200 ms); Compartments reconfigure language/LSP without
-  rebuilding the view; editor-scoped `Prec.highest` keymaps so IDE chords never collide
-  with the global automations dispatcher. **Deliberately no autocomplete / no in-editor
-  lint panel** in the base editor ("colors + write code, no intellisense") — LSP adds the
-  intelligence in IDE mode.
+- **Standalone Monaco 0.56, not CodeMirror** (`src/features/ide/model/monacoRuntime.ts`,
+  `monaco-editor` pinned `0.56.0` in `package.json:54`). This section previously described
+  CodeMirror 6 (`codeMirrorSetup.ts`); no CodeMirror import remains under `src/` (the
+  surviving mentions are comments recording the old behaviour: `monacoRuntime.ts:15`,
+  `useMonacoEditor.ts:42`). `monacoRuntime.ts` is the one place the tree-shakeable core
+  enters the bundle and opts editor features in one by one (`monacoRuntime.ts:25-54`); only
+  the base editor worker is registered (`monacoRuntime.ts:56-60`), so there are no
+  TS/JSON/CSS/HTML language services. It is reached only through `LazyCodeFileView`, never
+  the warm pane path. Posture kept from the CodeMirror editor: no minimap, no word-based
+  suggestions, no sticky scroll (`useMonacoEditor.ts:42-67`). Theming goes through the app
+  palette: `monacoTheme.ts` reads the `--osio-code-*` tokens from the editor host's computed
+  style and redefines the `osio` theme when `data-theme`, `data-palette` or the OS scheme
+  change. Document writeback is debounced from the model change event, 1200 ms
+  (`useMonacoEditor.ts:19`). The LSP adapter registers Monaco providers
+  (`lspMonaco.ts:178`). What this does **not** do: it is not the VS Code workbench
+  (`@codingame/monaco-vscode-api` is not used); ADR-004 records why that stays true.
 - **xterm.js** terminal, lazy-loaded so it never lands in the warm chunk; PTY geometry sent
   **out-of-band** as an APC control frame (`ESC _ osio-resize:COLS,ROWS ESC \`).
 - **Small single-purpose zustand stores:** `ideModeStore` (persisted, per-workspace IDE
@@ -139,7 +152,7 @@ Documented in full in `infrastructure/docker/osionos/ide-sandbox/README.md`. The
   *mode* — `IdeShell` (`widgets/ide-shell/`) that **reuses `WorkspaceGrid` verbatim** as
   its editor area, wrapped in activity bar / side panel / terminal strip / status bar.
 - **Pervasive code-splitting** (perf is a first-class concern): the whole `IdeShell`, each
-  language grammar, each Prettier plugin, xterm, and `@codemirror/lsp-client` are all
+  language grammar, each Prettier plugin, xterm, and the Monaco runtime are all
   separate lazy chunks.
 
 ### 3.5 The transport map
@@ -177,7 +190,7 @@ The history uses **three overlapping axes**. This table is the reconciliation.
 | Phase | Scope | Status | Proof |
 |---|---|---|---|
 | P1 | Stateless code runner | `DONE` (built) | `infrastructure/docker/osionos/runner/{Dockerfile,server.mjs}`, `bridge-runner.mjs` |
-| P2 | Hardened isolated sandbox plane | `DONE` (built + activated + verified) | commit `4b835e9e`; live corpus 15/15 in `19b324dd` |
+| P2 | Hardened isolated sandbox plane | `DONE` (built + activated + verified) | commit `4b835e9e`; live corpus 15/15 in `19b324dd` (15 checks then; `verify.sh` runs 16 since `3043ab92`) |
 | P3 | Interactive PTY shell | `DONE` | `bridge-ide-exec.mjs`, WS `/api/ide/pty`; commit `c760e1ba`/`3d17e518` |
 | P4 | fs-agent + bidirectional live sync | `DONE` | commits `22e2b017`, `9c6fee17`; `osio-fs-agent.mjs`, `useIdeFsSync.ts` |
 | P5 | LSP relay (TypeScript + Pyright) | `DONE` (2 servers only) | `bridge-ide-exec.mjs` `LSP_SERVERS`; `lspClient.ts` |
@@ -190,9 +203,9 @@ The history uses **three overlapping axes**. This table is the reconciliation.
 |---|---|---|
 | A | Infra — isolated `docker-ide` daemon | `DONE` (`3d17e518`) |
 | B | Terminal — xterm.js | `DONE` |
-| C | LSP — CodeMirror lsp-client | `DONE` |
+| C | LSP — own JSON-RPC client (`lspProtocol.ts`) + Monaco adapter (`lspMonaco.ts`) | `DONE` |
 | D | Bidirectional pages↔sandbox sync | `DONE` (`9c6fee17`) |
-| E | **Live activation** (host prep + `verify.sh` 15/15 + e2e) | `DONE in code/commit` `19b324dd` — but **not performed on every machine**; must be re-run per host |
+| E | **Live activation** (host prep + `verify.sh` all checks green — 16 today — + e2e) | `DONE in code/commit` `19b324dd` — but **not performed on every machine**; must be re-run per host |
 
 ### 4.3 Frontend e2e "P0/P1" (unrelated to backend P-phases)
 
@@ -208,12 +221,22 @@ The history uses **three overlapping axes**. This table is the reconciliation.
   → Live activation is **done in code**; it must simply be **re-run on each new host**.
 - The runbook's **condition 12** ("PAT scoped + short-lived") reads *"deferred to P6"* — but
   **P6 shipped** (request-scoped per-op PAT, `config` denied). → Effectively addressed.
-- The runbook prose says **"16/16 corpus"**; `verify.sh` actually emits **15 PASS** lines
-  (some conditions are proven offline via unit tests / `--selfcheck`, condition 12 is
-  deferred). → The live gate is **15/15**, not 16/16.
+- **Verify count, corrected 2026-10-13.** This note used to say `verify.sh` emits 15 PASS
+  lines and the gate is 15/15, not 16/16. That was right on 2026-07-20 and is wrong now:
+  commit `3043ab92` (2026-09-16) added the runner SIGUSR1 probe, so `verify.sh` runs **16**
+  checks and ends `RESULT: 16 passed, 0 failed`. Count from the source: 4 direct-egress
+  denies (`verify.sh:46-49`) + 3 proxy checks (`:52,:53,:55`) + 4 isolation (`:58-61`) +
+  2 resource caps (`:64,:65`) + 2 `--selfcheck`s (`:73-84`) + 1 runner probe (`:95-111`) = 16.
+  A missing runner image still records one FAIL, so the total stays 16 unless the probe
+  sandbox fails to start (the script exits 2 at `:41`). `ACTIVATE-dlesieur42.sh` ("must print
+  'RESULT: 16 passed, 0 failed'") is right; the historical "15/15" entries below were true
+  when written. **Read from the script, not executed** — a run needs the live daemon, which
+  this host lacks (G-SOCKDIR). The 16 checks do not map 1:1 onto the runbook's 16 conditions.
 
 > **Action item (docs):** edit `ide-sandbox/README.md` to match §4.4. Tracked as gap
-> `G-DOC` below.
+> `G-DOC` below. Partly done 2026-10-13: the README's Activation section now carries the
+> verify count and the recovery steps; its "Remaining to finish" list and the condition-12
+> row are still stale.
 
 ---
 
@@ -242,6 +265,7 @@ The history uses **three overlapping axes**. This table is the reconciliation.
 | G-WSCAP | WS message cap 1 MiB, no permessage-deflate — a very large LSP payload closes the socket | `ide-ws.mjs:25` | polish |
 | ~~G-RUNSTDIN~~ | ✅ **RESOLVED (interactive run)** — the one-shot runner still has no stdin (`input()` → EOFError), but in IDE Workspace mode the **Run** action now executes the file in the real sandbox **PTY** (`terminalRunBus` → `useIdeTerminal` → `ws.send`), where `input()` works. Playwright-verified: interactive `input()` over the live PTY reads input and prints the result (no EOFError). | `terminalRunBus.ts`, `CodeFileView.tsx`, `useIdeTerminal.ts` | fixed |
 | G-DOC | Runbook doc-lag (see §4.4) | `ide-sandbox/README.md` | docs |
+| G-SOCKDIR | IDE console dead on a host where `docker-ide.service` was never installed: compose created `/run/docker-ide.sock` as a root-owned **directory** (`docker-compose.yml:733`), the socket proxy answers 502, the bridge closes sandbox sockets with 4004. Verified 2026-10-13: `ls -ld /run/docker-ide.sock` → `drwxr-xr-x 2 root root`; `systemctl is-enabled docker-ide` → `not-found`. The fix needs sudo: follow **Activation → Before step 1** in `ide-sandbox/README.md` (also gates on free space and `prjquota`). The app-side half (one non-looping "sandbox unavailable" state) is not built yet | `ide-sandbox/README.md`, `ACTIVATE-dlesieur42.sh` | blocker on this host |
 
 ---
 
@@ -362,7 +386,7 @@ sudo sh infrastructure/docker/osionos/ide-sandbox/ide-egress-nat.sh up
 COMPOSE_PROFILES=ide docker compose up -d osionos-ide-socket-proxy
 # 5. Seed the pre-built images + networks into docker-ide:
 sudo sh infrastructure/docker/osionos/ide-sandbox/bootstrap.sh
-# 6. HOSTILE-CORPUS GATE — must print 15 PASS before enabling:
+# 6. HOSTILE-CORPUS GATE — must end `RESULT: 16 passed, 0 failed` before enabling:
 sudo sh infrastructure/docker/osionos/ide-sandbox/verify.sh
 # 7. Flip the bridge double-gate, then recreate the bridge:
 #    add to ./.env.local:  OSIONOS_IDE_SANDBOX=1
@@ -376,6 +400,22 @@ After step 7: open a workspace in IDE mode → the terminal (`bash -l`), multi-l
 starts automatically (self-gated until now).
 
 ## Changelog
+
+- **2026-10-13** — **Docs reconciled with the code; workbench design recorded (docs only,
+  no source touched).** (1) §3.4 said CodeMirror; the editor is standalone Monaco 0.56
+  (`monacoRuntime.ts`) — rewritten, plus the §4.2 row C and the lazy-chunk list. (2) The
+  verify count is 16, not 15: `3043ab92` added the runner probe; counted line by line in
+  §4.4. Fixed §4.1, §4.2 and the appendix; the 15/15 mentions in the 2026-07 changelog and
+  Epic 0 are left as history. (3) New gap **G-SOCKDIR** in §5 and a recovery runbook in
+  `ide-sandbox/README.md` (Activation → "Before step 1"): the socket became a directory, and
+  the data-root needs a free-space and `prjquota` check first. Both were checked on this host
+  (`ls -ld /run/docker-ide.sock` → directory; `findmnt /var/lib/docker-ide` → not mounted;
+  `df -h /var` → 21G free). The recovery itself needs sudo and was **not** executed.
+  (4) §3.2: "the page tree is the manifest" now points at the Proposed
+  [ADR-004](docs/ide/ADR-004-page-files.md) (`.omd` front-matter `id` identifies a page
+  file). (5) ADR-001 gained addendum 3 (the `workspace://` switching mount). Nothing here
+  claims the workbench is built: the `page-file` and `workspaceMounts` modules in the app
+  are interface stubs (several functions throw `not implemented`).
 
 - **2026-07-28 (h)** — **Phase 3 slice 3: the VS Code entry points + tasks v1.** A
   TERMINAL menu in the top menu bar (after View, flag-gated) with the full set — New
