@@ -87,7 +87,7 @@ without Go, docker builds it. Tailscale is needed only for N4 in §3.
 | N3 | wifi | same wifi as the host | as N2 | as N2 | a wifi that does not isolate its clients |
 | N4 | Tailscale | any network | `https://100.94.119.97:8443` or `https://dlesieur42-1.tail10f2ea.ts.net:8443`, with the pin | `ssh://dlesieur@100.94.119.97:4242`, or `https://100.94.119.97:8443` with the CA file | Tailscale in tailnet `tail10f2ea.ts.net` |
 | N5 | ssh tunnel | where ssh reaches the VM but `:8443` does not | `https://127.0.0.1:18443` with the pin | already covered: ssh mode *is* ssh (N2/N4) | an ssh path: N2 or N4 |
-| N6 | internet, no Tailscale | anywhere | `https://dlesieur42-1.tail10f2ea.ts.net` (Funnel) | `https://dlesieur42-1.tail10f2ea.ts.net`, no CA file | nothing; **never run with groot yet** (§11) |
+| N6 | internet, no Tailscale | anywhere | `https://dlesieur42-1.tail10f2ea.ts.net` (Funnel) | `https://dlesieur42-1.tail10f2ea.ts.net`, no CA file; user plane only (§11) | nothing; **never run with groot yet** (§11) |
 
 **N1, localhost.** Only on the host that runs the VM. Local mode does not apply: grobase runs
 inside the VM, not on the host's docker daemon. `ssh://b2b` is the host's alias for
@@ -421,7 +421,10 @@ internet):
 - N1: T1, T2, T5;
 - N2: T1;
 - N4: T1, T2, and T5 direct;
-- N6: T1 and T2.
+- N6: T1 and T2, from a container resolving through `1.1.1.1` to Funnel's `176.58.90.145`.
+  The same container then got 403 from WAF rule 10130 on `/admin/v1/tenants`, `/admin/v1/keys`,
+  `/meta/v1/tables` and `/realtime/v1/publish`, while `/auth/v1/health` reached Kong (401
+  without a key). Over the tailnet and the LAN, the same private paths still reach Kong.
 
 **Never run before this page:** N3 from a physical wifi device, N5 with groot, N6 with groot,
 and N4 in userspace mode with groot.
@@ -458,6 +461,7 @@ branch and stop: the human merges it (develop, then main).
 | `direct mode cannot fetch secrets` | no `./.env.grobase-remote` | one ssh-mode `make link` first (N2/N4), or the owner's vault pull |
 | vault42: `no manifest for project groot` | a personal pull (`VAULT42_ORG` or `VAULT42_ENV` blank), or the project is not granted | leave both at their defaults; ask an org admin for the grant |
 | vault42: `HTTP 401`, or `auth status` "logged in" but `auth me` 401 | the server expired the session | `scripts/vault42-ctl.sh auth login --password --email <you>` |
+| N6: an admin command (`db migrate`, `functions`) or the bridge's publish answers 403, while login works | WAF rule 10130 refuses Kong's private routes through Funnel (§11) | N4, or an ssh path (N2, N5) |
 | seeded users fail to log in "with the right password" | `./.env.local` lacks the team keys | §6.3 again, then `make link` |
 
 More symptoms: CONNECTING.md §7 and [grobase-link](grobase-link.md) "Troubleshooting".
@@ -467,9 +471,20 @@ More symptoms: CONNECTING.md §7 and [grobase-link](grobase-link.md) "Troublesho
 - **No physical second device has run it.** The routes were proven from the host and from
   stand-ins (CONNECTING.md §8). §9 on a real device is the first such run, and a wifi that
   isolates clients or a network that blocks Tailscale's relays has not been met.
-- **N6 with groot has never run.** Kong admits its admin routes from private source ranges
-  only, and Funnel traffic reaches the WAF from the VM's own `tailscaled`. Whether the
-  direct link's bridge-publish route answers there is unknown; T5 on N6 will say.
+- **N6 carries the user plane only, by design.** Funnel reaches the WAF from the VM's own
+  loopback, which Kong's allow list on its private routes admits, so until 2026-10-12 the
+  internet reached `/admin/v1`, `/meta/v1` and `/realtime/v1/publish` as if it were local.
+  grobase WAF rule 10130 (grobase `1aaac82e`, deployed on the VM the same day) now refuses
+  those three prefixes to any request that tailscaled marks `Tailscale-Funnel-Request`.
+  Over N6, therefore:
+  - login, `whoami`, `doctor`, `/rest/v1`, `/auth/v1` and realtime subscriptions work;
+  - `grobase db migrate`, `functions` and every other service-role admin command answer
+    403;
+  - a direct `make link` loses the bridge's realtime publish and its adapter registry
+    (`scripts/lib/grobase-link-target.sh` `publish_env`).
+
+  Use N4 (Tailscale works from any network) for the full link. N6 with groot has never
+  run; T5 there is expected to report those two paths.
 - **Userspace Tailscale with groot is expected to fail.** The relay runs in a container, and
   containers do not see a userspace Tailscale's SOCKS proxy. Expect `make link` to fail there
   while the CLI works.
