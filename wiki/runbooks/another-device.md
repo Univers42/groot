@@ -367,11 +367,17 @@ The modes:
 **8.2 Up and verify:**
 
 ```sh
-make link-frontends-up     # opens the link, starts the frontends with the relay, puts the edge CA
-                           # into this user's browser stores (no sudo), then runs link-verify
+make link-frontends-start  # opens the link, starts the frontends with the relay, puts the edge CA
+                           # into this user's browser stores (no sudo), then runs link-verify;
+                           # writes nothing to the data center (§0)
 make link-verify           # last line: "[grobase-link] verify: N frontends reach grobase through the ... link to ..."
 make link-status           # exit 0 while the path is open and Kong answers through it
 ```
+
+`make link-frontends-up` is the owner's variant: it first runs the three writes §0 lists, then
+`link-frontends-start`. Its demo-password step no longer takes the account from another machine.
+The machine that set the password first keeps it, and the others get a note saying whose value
+signs in.
 
 `link-verify` sends one request per grobase name (Kong, Redis, Mailpit smtp and http,
 realtime) from inside every frontend, then the browser's path through the TLS edge, then
