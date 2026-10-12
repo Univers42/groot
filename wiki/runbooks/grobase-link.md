@@ -53,11 +53,12 @@ LAN address is `192.168.1.132` (wifi/ethernet `enp7s0`, DHCP). The VM runs groba
 | Tailscale (any network) | `https://dlesieur42-1.tail10f2ea.ts.net:8443` or `https://100.94.119.97:8443` | `ssh://dlesieur@100.94.119.97:4242` |
 | LAN / wifi without Tailscale | `https://grobase.track-binocle.test:8443` after adding `192.168.1.132 grobase.track-binocle.test` to the device's hosts file | `ssh://dlesieur@192.168.1.132:4242` once `make link-autostart LAN_IF=enp7s0 LAN_SSH=1` put the VM's password ssh on the LAN; otherwise none |
 
-A fresh clone for the data center: clone groot at branch `feat/grobase-datacenter-link` with
-`--recursive`, then never run plain `make all` — it fast-forwards every submodule to its tracked
-branch (`sync-submodules-soft`), which drops the pinned grobase and osionos commits the link needs
-(the bridge's realtime key, the WAF content rule, an XSS fix). Use `make all SKIP_SYNC=1`, or skip
-`make all` and run `make link` then `make link-frontends-up`.
+A fresh clone for the data center: clone groot's `main` with `--recursive`. Plain `make all`
+fast-forwards every submodule to its tracked branch (`sync-submodules-soft`); grobase and osionos
+are pinned at their own `main`, so the commits the link needs (the bridge's realtime key, the WAF
+content rule, an XSS fix) survive it. opposite-osiris is pinned ahead of its `main`, and the sync
+moves the portal back to it. `make all SKIP_SYNC=1` builds exactly the pins; or skip `make all`
+and run `make link` then `make link-frontends-up`.
 
 **Same host** (the machine running the VM): `ssh://b2b` reaches it, and
 `https://127.0.0.1:8443` is the WAF for the CLI and curl. Local mode does not apply — grobase runs
