@@ -277,3 +277,16 @@ Raw SQL (`grobase query run`) does not reach these mounts, and that is by design
 runner serves only `tenant_owned` postgres mounts, with `QUERY_ROUTER_SQL_RO` on. Both postgres
 mounts here are `shared_rls`, where raw SQL would bypass row ownership. Count through
 `query crud`/`api` instead.
+
+## 10. 2026-10-13 — legacy workspace permissions
+
+Rows copied as they were carry their era's vocabulary. Thirteen `osionos_workspace_members`
+rows from June 2026 held `{read,write}`, and the bridge grants nothing for `write`, so an
+editor of Binocle Intelligence Agency or Acme Operations got "addPage: create failed —
+Workspace permission denied." on every device. One of those rows came with §8's merge.
+`models/osionos-workspace-permissions-migration.sql` maps `write` to create, update and
+delete. `models-migrate` applies it to every grobase, and it was applied to the data center
+on 2026-10-13. The old values are in `fix_20261013.workspace_member_permissions`, whose table
+comment holds the one-statement undo.
+
+A merge that copies rows from an older database should run `models-migrate` afterwards.
