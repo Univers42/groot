@@ -54,12 +54,15 @@ mux() { ssh -F /dev/null -S "$CTL" -o BatchMode=yes -o LogLevel=ERROR "$@"; }
 # "<service> <container port> <ip:port reachable from the remote's sshd>" per tcp port of
 # every mini-baas-* container; a published port (0.0.0.0/:: -> 127.0.0.1) beats the
 # container IP on its first network.
+# The host group has no empty alternative: with `(...|)?`, mawk 1.3.4 20260129 (Ubuntu 26.04)
+# drops the ^ anchor and rewrote 127.0.0.1:8000 as 127.0.0.1127.0.0.1:8000, so every
+# loopback-published port forwarded to nothing (2026-10-12, relay unhealthy 5/5 checks).
 remote_endpoints() {
   mux x 'sh -s' <<'EOF' | awk '
     $1 == "N" && !($2 in ip) { ip[$2] = $3 }
     $1 == "P" && $3 ~ /\/tcp$/ {
       sub(/\/tcp$/, "", $3); ep = $4
-      if (ep == "-") ep = ip[$2] ":" $3; else sub(/^(0\.0\.0\.0|::|\[::\]|)?:/, "127.0.0.1:", ep)
+      if (ep == "-") ep = ip[$2] ":" $3; else sub(/^(0\.0\.0\.0|::|\[::\])?:/, "127.0.0.1:", ep)
       name = $2; sub(/^\/?mini-baas-/, "", name); print name, $3, ep }'
 docker ps --filter name=^mini-baas- --format '{{.Names}}' | xargs -r docker inspect -f '{{$n := .Name}}{{range .NetworkSettings.Networks}}N {{$n}} {{.IPAddress}}
 {{end}}{{range $p, $b := .NetworkSettings.Ports}}P {{$n}} {{$p}} {{if $b}}{{(index $b 0).HostIp}}:{{(index $b 0).HostPort}}{{else}}-{{end}}

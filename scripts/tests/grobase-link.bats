@@ -186,6 +186,16 @@ resolve_target() { run env GROBASE_TARGET="$1" bash -c "source '$SCRIPT' && reso
   [ -e "$GROBASE_LINK_DIR/keep" ]
 }
 
+# Red on mawk 1.3.4 20260129 before the fix (127.0.0.1127.0.0.1:8000); busybox awk, which
+# the bats image ships, never showed it, so this guards the hosts whose awk is mawk.
+@test "remote_endpoints: a loopback publish is kept, a wildcard publish becomes loopback, no publish takes the container IP" {
+  helper 'mux() { cat >/dev/null; printf "%s\n" "N /mini-baas-kong 172.18.0.28" "P /mini-baas-kong 8000/tcp 127.0.0.1:8000" \
+    "N /mini-baas-waf 172.18.0.30" "P /mini-baas-waf 443/tcp 0.0.0.0:8443" "P /mini-baas-waf 80/tcp :::8880" \
+    "N /mini-baas-realtime 172.18.0.26" "P /mini-baas-realtime 4000/tcp -"; }; remote_endpoints'
+  [ "$status" -eq 0 ]
+  [ "$output" = $'kong 8000 127.0.0.1:8000\nwaf 443 127.0.0.1:8443\nwaf 80 127.0.0.1:8880\nrealtime 4000 172.18.0.26:4000' ]
+}
+
 @test "resolve_ipv4: the first IPv4 getent gives; the name itself when getent knows none" {
   stub getent 'printf "192.168.1.132   STREAM grobase.track-binocle.test\n10.9.9.9 STREAM x\n"'
   helper 'resolve_ipv4 grobase.track-binocle.test'
