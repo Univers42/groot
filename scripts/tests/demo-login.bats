@@ -25,7 +25,9 @@ printf '%s\n' "$*" >>"$ARGV_LOG"
 case "$1" in
 ps) printf 'mini-baas-postgres\n' ;;
 port) printf '0.0.0.0:8000\n' ;;
-exec) cat >>"$STDIN_LOG"; printf 'env:%s\n' "${DEMO_LOGIN_PASSWORD:-}" >>"$STDIN_LOG"; printf '%s\n' "$PG_ANSWER" ;;
+exec) cat >>"$STDIN_LOG"; printf 'env:%s\n' "${DEMO_LOGIN_PASSWORD:-}" >>"$STDIN_LOG"
+  printf 'shared:%s force:%s machine:%s\n' "${DEMO_LOGIN_SHARED-unset}" "${DEMO_LOGIN_FORCE-unset}" "${DEMO_LOGIN_MACHINE-unset}" >>"$STDIN_LOG"
+  printf '%s\n' "$PG_ANSWER" ;;
 esac
 STUB
   chmod +x "$BATS_TEST_TMPDIR/bin/docker"
@@ -87,6 +89,25 @@ STUB
   PG_ANSWER=current run sh "$ROOT/scripts/demo-login-ensure.sh"
   [ "$status" -eq 0 ]
   [[ "$output" == *"already matches"* ]]
+}
+
+# Two machines linked to one grobase used to reset the shared account in turn (2026-10-12).
+@test "ensure: an account another linked machine holds is reported as held, exit 0, with both ways out" {
+  PG_ANSWER=held DEMO_LOGIN_SHARED=1 run sh "$ROOT/scripts/demo-login-ensure.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"another machine"*"will NOT sign in"* ]]
+  [[ "$output" == *"make demo-login there"* ]]
+  [[ "$output" == *"DEMO_LOGIN_FORCE=1"* ]]
+  grep -qx 'shared:1 force:0 machine:[0-9a-f]\{16\}' "$STDIN_LOG"
+}
+
+@test "ensure: the holder marker is a hash, never the machine id, and sharing is off by default" {
+  run sh "$ROOT/scripts/demo-login-ensure.sh"
+  [ "$status" -eq 0 ]
+  grep -q -- '-e DEMO_LOGIN_SHARED -e DEMO_LOGIN_FORCE -e DEMO_LOGIN_MACHINE' "$ARGV_LOG"
+  grep -qx 'shared:0 force:0 machine:[0-9a-f]\{16\}' "$STDIN_LOG"
+  grep -q '^\\getenv machine DEMO_LOGIN_MACHINE$' "$STDIN_LOG"
+  if [ -r /etc/machine-id ]; then ! grep -qF "$(cat /etc/machine-id)" "$STDIN_LOG"; fi
 }
 
 @test "ensure: a missing account outside LOCAL mode is a hard error, nothing is created" {
