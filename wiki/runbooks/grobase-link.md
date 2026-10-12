@@ -168,8 +168,11 @@ context reported FAIL.
 From the public internet without Tailscale, the one path is Tailscale Funnel, which the owner
 turned on: `https://dlesieur42-1.tail10f2ea.ts.net` (port 443, a public certificate, so no CA
 file and no pin). The CLI passed login and whoami over it from a container on the public
-internet (2026-10-12); a `make link` over it has not been run
-([another-device](another-device.md) §11).
+internet (2026-10-12). Funnel carries the user plane only. Since grobase `1aaac82e`, WAF
+rule 10130 answers 403 on `/admin/v1`, `/meta/v1` and `/realtime/v1/publish` for any request
+Funnel delivers, because Funnel reaches Kong from loopback, which its allow list admits. A
+direct link over Funnel therefore loses the bridge's publish and the adapter registry, and has
+not been run ([another-device](another-device.md) §11).
 `grobase api … --input FILE` labels the body `application/json` when it parses (the WAF refuses a
 body with no content type). `grobase realtime subscribe pg/<table>/<inserted|updated|deleted>`
 prints database changes live; `realtime publish` from a user session is dropped by the gateway
