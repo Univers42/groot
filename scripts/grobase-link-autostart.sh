@@ -5,7 +5,9 @@
 #
 #   install   render the units with this clone's path, enable grobase-link.service and
 #             grobase-link-heal.timer, and hand the link over to the unit (link-down + start)
-#             LAN_IF=<iface> also installs grobase-lan-edge.service (WAF on the LAN, 8443 only)
+#             LAN_IF=<iface> also installs grobase-lan-edge.service (WAF on the LAN, 8443)
+#             LAN_SSH=1 with LAN_IF also installs grobase-lan-ssh.service (the VM's password ssh on
+#             the LAN, 4242); an install without it removes that unit, so the last call decides
 #   remove    disable and delete them; the link itself stays as it is
 # Exit: 0 done, 1 a step failed, 2 usage.
 set -euo pipefail
@@ -33,11 +35,21 @@ install_units() {
 	render grobase-link-heal.service
 	render grobase-link-heal.timer
 	[ -z "${LAN_IF:-}" ] || render grobase-lan-edge.service
+	if [ -n "${LAN_IF:-}" ] && [ "${LAN_SSH:-}" = 1 ]; then
+		render grobase-lan-ssh.service
+	elif [ -e "$unitdir/grobase-lan-ssh.service" ]; then
+		drop_unit grobase-lan-ssh.service
+		echo "[autostart] removed grobase-lan-ssh.service (no LAN_SSH=1): ssh is off the LAN"
+	fi
 	systemctl --user daemon-reload
 	systemctl --user enable grobase-link.service grobase-link-heal.timer
 	if [ -n "${LAN_IF:-}" ]; then
 		systemctl --user enable grobase-lan-edge.service
 		systemctl --user restart grobase-lan-edge.service
+	fi
+	if [ -e "$unitdir/grobase-lan-ssh.service" ]; then
+		systemctl --user enable grobase-lan-ssh.service
+		systemctl --user restart grobase-lan-ssh.service
 	fi
 	if ! systemctl --user -q is-active grobase-link.service; then
 		echo "[autostart] handing the link to grobase-link.service (link-down, then the unit opens it)"
@@ -50,12 +62,16 @@ install_units() {
 		echo "[autostart] linger is off: the units start at login, not at boot (loginctl enable-linger $(id -un))" >&2
 }
 
+drop_unit() { # drop_unit <unit>: disable, stop and delete one unit
+	systemctl --user disable "$1" >/dev/null 2>&1 || true
+	[ "$1" = grobase-link.service ] || systemctl --user stop "$1" >/dev/null 2>&1 || true
+	rm -f "$unitdir/$1"
+}
+
 remove_units() {
 	local unit
-	for unit in grobase-link-heal.timer grobase-link-heal.service grobase-lan-edge.service grobase-link.service; do
-		systemctl --user disable "$unit" >/dev/null 2>&1 || true
-		[ "$unit" = grobase-link.service ] || systemctl --user stop "$unit" >/dev/null 2>&1 || true
-		rm -f "$unitdir/$unit"
+	for unit in grobase-link-heal.timer grobase-link-heal.service grobase-lan-ssh.service grobase-lan-edge.service grobase-link.service; do
+		drop_unit "$unit"
 	done
 	systemctl --user daemon-reload
 	echo "[autostart] removed; the link stays as it is (make link-down closes it)"
@@ -64,9 +80,9 @@ remove_units() {
 case "${1:-}" in
 install) install_units ;;
 remove) remove_units ;;
--h | --help) sed -n '2,10p' "$0" ;;
+-h | --help) sed -n '2,12p' "$0" ;;
 *)
-	sed -n '2,10p' "$0" >&2
+	sed -n '2,12p' "$0" >&2
 	exit 2
 	;;
 esac

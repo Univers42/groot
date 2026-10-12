@@ -31,4 +31,18 @@ if systemctl --user -q is-enabled grobase-lan-edge.service 2>/dev/null; then
 		systemctl --user --no-block restart grobase-lan-edge.service
 	fi
 fi
+
+if systemctl --user -q is-enabled grobase-lan-ssh.service 2>/dev/null; then
+	lan_if=$(systemctl --user show grobase-lan-ssh.service -p Environment --value | tr ' ' '\n' | awk -F= '$1 == "LAN_IF" { print $2 }')
+	ip=$(ip -4 -o addr show dev "${lan_if:-none}" 2>/dev/null | awk '{ split($4, a, "/"); print a[1]; exit }')
+	# shellcheck disable=SC2016 # $1 and $l belong to the inner bash -c
+	banner=$([ -z "$ip" ] || timeout 8 bash -c 'exec 3<>"/dev/tcp/$1/4242" && IFS= read -r -t 6 l <&3 && printf %s "$l"' _ "$ip" 2>/dev/null) || banner=""
+	case "$banner" in
+	SSH-*) ;;
+	*)
+		echo "grobase-link-heal: LAN ssh gives no banner on ${ip:-<no address on ${lan_if:-?}>}:4242, restarting it"
+		systemctl --user --no-block restart grobase-lan-ssh.service
+		;;
+	esac
+fi
 exit 0

@@ -54,6 +54,34 @@ setup() {
   [[ "$output" == *"socat TCP-LISTEN:8443,bind=192.168.1.132,fork,reuseaddr TCP:127.0.0.1:8445"* ]]
 }
 
+@test "LAN_SSH=1 installs the ssh unit, forwarding to the ssh port in ports.env" {
+  LAN_IF=enp7s0 LAN_SSH=1 VM_PORTS_FILE=/vm/ports.env run bash "$REPO/scripts/grobase-link-autostart.sh" install
+  [ "$status" -eq 0 ]
+  [ -f "$UNITS/grobase-lan-ssh.service" ]
+  ! grep -q '@[A-Z_]*@' "$UNITS/grobase-lan-ssh.service"
+  grep -q 'grobase-lan-edge.sh ssh$' "$UNITS/grobase-lan-ssh.service"
+  grep -q "systemctl --user enable grobase-lan-ssh.service" "$BATS_TEST_TMPDIR/calls"
+  printf 'ssh=4243\nhttps=8445\n' >"$BATS_TEST_TMPDIR/ports.env"
+  LAN_IF=enp7s0 VM_PORTS_FILE=$BATS_TEST_TMPDIR/ports.env run bash "$REPO/scripts/grobase-lan-edge.sh" ssh
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"socat TCP-LISTEN:4242,bind=192.168.1.132,fork,reuseaddr TCP:127.0.0.1:4243"* ]]
+}
+
+@test "an install without LAN_SSH=1 takes ssh back off the LAN" {
+  LAN_IF=enp7s0 LAN_SSH=1 run bash "$REPO/scripts/grobase-link-autostart.sh" install
+  [ -f "$UNITS/grobase-lan-ssh.service" ]
+  LAN_IF=enp7s0 run bash "$REPO/scripts/grobase-link-autostart.sh" install
+  [ "$status" -eq 0 ]
+  [ ! -e "$UNITS/grobase-lan-ssh.service" ]
+  [ -f "$UNITS/grobase-lan-edge.service" ]
+  grep -q "systemctl --user disable grobase-lan-ssh.service" "$BATS_TEST_TMPDIR/calls"
+}
+
+@test "the LAN edge refuses an unknown forward" {
+  LAN_IF=enp7s0 run bash "$REPO/scripts/grobase-lan-edge.sh" redis
+  [ "$status" -eq 2 ]
+}
+
 @test "the LAN edge falls back to 8443 with no ports file" {
   LAN_IF=enp7s0 VM_PORTS_FILE=$BATS_TEST_TMPDIR/absent run bash "$REPO/scripts/grobase-lan-edge.sh"
   [ "$status" -eq 0 ]
