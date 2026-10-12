@@ -1,0 +1,18 @@
+# Rendered and installed by `make link-autostart LAN_IF=<iface> LAN_SSH=1` (opt-in: it puts the
+# VM's sshd, which accepts passwords, on this host's LAN). Rollback: make link-autostart without
+# LAN_SSH=1, or make link-autostart-off. Why and at what cost: scripts/grobase-lan-edge.sh.
+[Unit]
+Description=born2root VM ssh on the LAN (4242)
+After=network-online.target b2b-vm-baas.service
+
+[Service]
+Environment=LAN_IF=@LAN_IF@
+Environment=VM_PORTS_FILE=@VM_PORTS_FILE@
+ExecStart=/usr/bin/bash @GROOT@/scripts/grobase-lan-edge.sh ssh
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target

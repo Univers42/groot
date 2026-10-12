@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# gen-local-env.sh derives seven BaaS keys in ./.env.local from apps/grobase/.env. When
+# gen-local-env.sh derives eight BaaS keys in ./.env.local from apps/grobase/.env. When
 # that source changes under an existing .env.local (vault pull, JWT rotation, LOCAL-mode
 # regeneration) the frontends and `make healthcheck` present a key Kong no longer knows.
 # `--check` must name the drifted KEYS (never a value) and `--sync` must rewrite only
@@ -21,6 +21,7 @@ SERVICE_ROLE_KEY=svc-A
 KONG_PUBLIC_API_KEY=anon-A
 KONG_SERVICE_API_KEY=svc-A
 SB_KONG_KEY=anon-A
+VITE_BAAS_KONG_KEY=anon-A
 ADAPTER_REGISTRY_SERVICE_TOKEN=adapter-A
 VITE_BAAS_REALTIME_TOKEN=rt-tenant-token
 OSIONOS_BRIDGE_EMAIL_HASH_SALT=salt-keep
@@ -200,4 +201,15 @@ stale_kong() { sed -i 's/^SB_KONG_KEY=.*/SB_KONG_KEY=anon-OLD/' "$OUT"; }
   run bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [[ "$(val "$OUT" DEMO_LOGIN_PASSWORD)" =~ ^[A-Za-z0-9]{24}$ ]]
+}
+
+@test "--check/--sync: VITE_BAAS_KONG_KEY follows the linked grobase's Kong key" {
+  sed -i 's/^VITE_BAAS_KONG_KEY=.*/VITE_BAAS_KONG_KEY=anon-TEAM/' "$OUT"
+  run bash "$SCRIPT" --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"drift VITE_BAAS_KONG_KEY"* ]]
+  [[ "$output" != *"anon-TEAM"* ]]
+  run bash "$SCRIPT" --sync
+  [ "$status" -eq 0 ]
+  [ "$(val "$OUT" VITE_BAAS_KONG_KEY)" = "anon-A" ]
 }

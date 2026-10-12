@@ -102,8 +102,17 @@ services:
       PERMS_TENANT_ID: ${PERMS_TENANT_ID:-agency}
       PERMS_PEOPLE_ENV: /seeds/.agency-people.env
       # Chat/feed realtime publishes (scripts/bridge-chat.mjs, bridge-feed.mjs)
-      # go server-side to the Rust realtime gateway: POST /v1/publish.
+      # go server-side to the Rust realtime gateway: POST /v1/publish. Over a
+      # direct link (scripts/grobase-link.sh) they cross grobase's edge instead:
+      # Kong's service_role-only /realtime route, keyed by REALTIME_PUBLISH_APIKEY.
       REALTIME_PUBLISH_URL: ${REALTIME_PUBLISH_URL:-http://mini-baas-realtime:4000}
+      REALTIME_PUBLISH_APIKEY: ${REALTIME_PUBLISH_APIKEY:-}
+      # Behind a link no remote kind relays query-router or the adapter-registry, so
+      # `make link` points these at Kong's /query/v1 and service_role-only /admin/v1;
+      # blank (a local grobase) = container DNS, also for a bridge image older than
+      # osionos 0cfa815, which would read a blank value as an empty URL.
+      OSIONOS_QUERY_ROUTER_URL: ${OSIONOS_QUERY_ROUTER_URL:-http://mini-baas-query-router:4001}
+      OSIONOS_ADAPTER_REGISTRY_URL: ${OSIONOS_ADAPTER_REGISTRY_URL:-http://mini-baas-adapter-registry-go:3021}
       # Agency org workspace: scopes /api/people + default feed topic.
       OSIONOS_ORG_WORKSPACE_ID: ${OSIONOS_ORG_WORKSPACE_ID:-b1a0c1e5-0000-4000-a000-000000000001}
       # IDE code runner (P3) — DOUBLE-GATED, default DISABLED. The /api/ide/run

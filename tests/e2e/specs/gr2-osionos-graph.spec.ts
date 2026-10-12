@@ -90,7 +90,7 @@ async function graphNodeIds(response: Response): Promise<string[]> {
 
 test("GR2 rail → Second Brain draws the user's pages with graph_render, and Enter opens one", async ({ browser, consoleGuard }) => {
   const { context, page } = await openOsionos(browser);
-  consoleGuard.watch(page, "osionos");
+  const unwatch = consoleGuard.watch(page, "osionos");
   const s = await session(page);
   const tree = await pageTree(page, s, "rail");
   try {
@@ -109,6 +109,7 @@ test("GR2 rail → Second Brain draws the user's pages with graph_render, and En
     await expect(page.locator('textarea[aria-label="Page title"]:visible').first()).toHaveValue(tree.parentTitle, { timeout: 15_000 });
     await expect(page.getByText(tree.parentBody), "the opened page shows its content").toBeVisible();
   } finally {
+    unwatch();
     await tree.cleanup();
     await context.close();
   }

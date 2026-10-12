@@ -16,7 +16,7 @@
 # vault-pulled or hand-edited file) unless FORCE=1. OUT=<path> redirects output
 # (used by the self-check to validate without touching the real file).
 #
-# --check / --sync: the seven BaaS keys below are DERIVED from apps/grobase/.env, and
+# --check / --sync: the eight BaaS keys below are DERIVED from apps/grobase/.env, and
 # that file changes under an existing ./.env.local (a vault pull, a JWT rotation, a
 # backend regenerated in LOCAL mode). A stale copy is the recurring "Kong says 401 /
 # the app's anon token does not match" failure. `--check` reports drift by KEY NAME
@@ -32,6 +32,7 @@ set -eu
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 GRO_ENV="${GRO_ENV:-$REPO/apps/grobase/.env}"
+SRC="${GRO_ENV#"$REPO/"}" # names the real source in notes (a linked VM: .env.grobase-remote)
 OUT="${OUT:-$REPO/.env.local}"
 FORCE="${FORCE:-0}"
 MODE="${1:-generate}"
@@ -41,13 +42,14 @@ note() { printf '[gen-local-env] %s\n' "$1" >&2; }
 . "$REPO/scripts/lib/envfile.sh"
 
 # The declared mapping — <key in ./.env.local>=<key in apps/grobase/.env>. Only these
-# seven are derived; --check/--sync never look at any other key.
+# eight are derived; --check/--sync never look at any other key.
 # A "|" lists fallbacks: the Kong-facing keys follow KONG_PUBLIC_API_KEY — the credential
 # Kong actually runs (generate-env.sh: KONG_PUBLIC_API_KEY=${ANON_KEY}) — and only then the
 # JWT it aliases, so --check is authoritative for the 401, not merely self-consistent.
 DERIVED="JWT_SECRET=JWT_SECRET ANON_KEY=ANON_KEY SERVICE_ROLE_KEY=SERVICE_ROLE_KEY \
 KONG_PUBLIC_API_KEY=KONG_PUBLIC_API_KEY|ANON_KEY KONG_SERVICE_API_KEY=KONG_SERVICE_API_KEY|SERVICE_ROLE_KEY \
-SB_KONG_KEY=KONG_PUBLIC_API_KEY|ANON_KEY ADAPTER_REGISTRY_SERVICE_TOKEN=ADAPTER_REGISTRY_SERVICE_TOKEN"
+SB_KONG_KEY=KONG_PUBLIC_API_KEY|ANON_KEY VITE_BAAS_KONG_KEY=KONG_PUBLIC_API_KEY|ANON_KEY \
+ADAPTER_REGISTRY_SERVICE_TOKEN=ADAPTER_REGISTRY_SERVICE_TOKEN"
 # Minted once per machine, never derived; an absent or empty one is minted by --sync.
 MINTED="DEMO_LOGIN_PASSWORD"
 # NOT derived: VITE_BAAS_REALTIME_TOKEN — the generator seeds it with the anon key, but
@@ -109,7 +111,7 @@ drift_report() {
 }
 
 require_inputs() {
-  [ -f "$GRO_ENV" ] || { note "apps/grobase/.env not found — bring the backend up first (make backend-up)."; exit 1; }
+  [ -f "$GRO_ENV" ] || { note "$SRC not found — bring the backend up first (make backend-up)."; exit 1; }
 }
 
 check_mode() {
@@ -120,8 +122,8 @@ check_mode() {
   for key in $(minted_missing); do report="$report
 missing $key"; rc=1; done
   printf '%s\n' "$report" | sed 's/^/[gen-local-env]   /' >&2
-  if [ "$rc" -eq 0 ]; then note "in sync with apps/grobase/.env (7 derived keys)."; else
-    note "DRIFT — $(basename "$OUT") disagrees with apps/grobase/.env. Fix: bash scripts/gen-local-env.sh --sync"
+  if [ "$rc" -eq 0 ]; then note "in sync with $SRC (8 derived keys)."; else
+    note "DRIFT — $(basename "$OUT") disagrees with $SRC. Fix: bash scripts/gen-local-env.sh --sync"
   fi
   exit "$rc"
 }
@@ -134,7 +136,7 @@ sync_mode() {
   mint_missing
   rc=0
   report="$(drift_report)" || rc=$?
-  [ "$rc" -ne 0 ] || { note "in sync with apps/grobase/.env — nothing to write."; exit 0; }
+  [ "$rc" -ne 0 ] || { note "in sync with $SRC — nothing to write."; exit 0; }
   changed=""
   unknown=""
   for pair in $DERIVED; do
@@ -145,8 +147,8 @@ sync_mode() {
       changed="$changed $dst"
     fi
   done
-  [ -z "$changed" ] || note "synced from apps/grobase/.env:$changed"
-  [ -z "$unknown" ] || { note "left as is (EMPTY source in apps/grobase/.env — is the backend healthy?):$unknown"; exit 1; }
+  [ -z "$changed" ] || note "synced from $SRC:$changed"
+  [ -z "$unknown" ] || { note "left as is (EMPTY source in $SRC — is the backend healthy?):$unknown"; exit 1; }
 }
 
 generate() {
@@ -194,6 +196,9 @@ SERVICE_ROLE_KEY=$SERVICE
 KONG_PUBLIC_API_KEY=$PUBLIC
 KONG_SERVICE_API_KEY=$SERVICE
 SB_KONG_KEY=$PUBLIC
+# The browser's Kong apikey, baked into the osionos bundle (baasFetch.ts). Derived: a team
+# overlay once left the team grobase's anon key here while the link pointed elsewhere.
+VITE_BAAS_KONG_KEY=$PUBLIC
 ADAPTER_REGISTRY_SERVICE_TOKEN=$ADAPTER
 # Browser-facing BaaS origin — baked into the bundle by vite, so it must be a URL a
 # BROWSER can reach. Deliberately the APP'S OWN origin: the proxy mounts Kong's

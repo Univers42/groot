@@ -1,0 +1,25 @@
+# Rendered and installed by `make link-autostart` (scripts/grobase-link-autostart.sh).
+# Opens the link once the data center VM is up, so the frontends reach grobase after a reboot
+# without anyone typing `make link`. Stays active so the ssh master it starts lives in this
+# unit, not in whichever terminal happened to run `make link`.
+# b2b-vm-baas.service is done when QEMU starts, before the guest boots (2026-10-12: unit done
+# 00:52:06, guest kernel up ~00:53:40), so the first try at boot fails; Restart= re-runs
+# `make link` (idempotent: a live master to the same host is reused) until the data center answers.
+# Ponytail: it retries forever, one journal failure per 20 s while the data center is down.
+[Unit]
+Description=grobase link: this host's frontends reach the data center (make link)
+Documentation=file://@GROOT@/wiki/runbooks/grobase-link.md
+After=b2b-vm-baas.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=@GROOT@
+ExecStart=/usr/bin/make --no-print-directory link
+ExecStop=/usr/bin/make --no-print-directory link-down
+TimeoutStartSec=900
+Restart=on-failure
+RestartSec=20
+
+[Install]
+WantedBy=default.target

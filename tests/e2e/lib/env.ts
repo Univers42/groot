@@ -16,3 +16,8 @@ export const BOARD_PREFIX = "e2e-";
 export const E2E_EMAIL_B = process.env.E2E_EMAIL_B ?? "e2e-smoke-b@example.com";
 export const E2E_PASSWORD_B = process.env.E2E_PASSWORD_B ?? "E2e-Smoke-Pass-B-2026!";
 export const TOKEN_FILE = "test-results/.e2e-access-token";
+// The demo account owns the workspaces the live databases are mounted on; run.sh reads its
+// per-machine password from ./.env.local. Empty = the specs that need it skip, saying so.
+export const E2E_DEMO_EMAIL = process.env.E2E_DEMO_EMAIL ?? "";
+export const E2E_DEMO_PASSWORD = process.env.E2E_DEMO_PASSWORD ?? "";
+export const DEMO_SKIP_REASON = "E2E_DEMO_PASSWORD unset: run.sh reads DEMO_LOGIN_PASSWORD from ./.env.local (make link-frontends-up or make all mint it)";

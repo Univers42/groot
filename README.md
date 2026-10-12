@@ -126,7 +126,9 @@ troubleshooting: [`wiki/runbooks/fresh-machine.md`](wiki/runbooks/fresh-machine.
 grobase on another machine (the born2root VM, a LAN box, a VPS, a Kong URL) with the frontends
 here, no sudo: put the kind of connection in `./.env.grobase-link` (`GROBASE_TARGET=ssh://b2b`;
 `.env.grobase-link.example` lists the kinds), then `make link` and `make link-frontends-up`. The
-latter also applies `models/*.sql` to that grobase (`make link-models-migrate`) and trusts the
+latter also applies `models/*.sql` to that grobase (`make link-models-migrate`), sets the demo
+account's password there (`make link-demo-login-ensure`; `make demo-login` prints it), hands the
+demo rows to the app's API key (`make link-live-data-ensure`) and trusts the
 local CA in this user's browser stores (`make certs-trust-user`, no sudo). Both end with
 `make link-verify`: one request per grobase service from inside every frontend, the TLS edge,
 then the browser stores — [`wiki/runbooks/grobase-link.md`](wiki/runbooks/grobase-link.md).

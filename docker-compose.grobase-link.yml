@@ -8,6 +8,12 @@
 # request time, and the other frontends take the names from docker-compose.yml defaults
 # (OSIONOS_BAAS_URL, PUBLIC_BAAS_URL, SMTP_HOST, REDIS_URL, REALTIME_PUBLISH_URL), so a
 # network alias is the one thing that reaches all of them without touching their config.
+# In direct mode the relay also routes 6379/1025/8025 to the two stand-ins below: sessions
+# and captured mail live on this device, never published (no ports, no aliases — the relay
+# owns grobase's names — and a plain `up` never starts them: profile link-direct).
+# grobase-link-hostport is direct mode's Kong copy on 127.0.0.1:GROBASE_LINK_HOST_PORT for
+# host tools (healthcheck, demo-login), the ssh forward's job in ssh mode; a service of its
+# own so a taken port costs the host tools, never the relay.
 services:
   grobase-link:
     image: alpine/socat:1.8.0.1
@@ -36,10 +42,53 @@ services:
         - CMD
         - sh
         - -c
-        - printf 'GET / HTTP/1.0\r\n\r\n' | timeout 5 socat - TCP:127.0.0.1:8000 | grep -q '^HTTP/'
+        - >-
+          printf 'GET / HTTP/1.0\r\nHost: localhost\r\n\r\n' | timeout 5 socat - TCP:127.0.0.1:8000 | grep -q '^HTTP/'
       interval: 30s
       timeout: 8s
       retries: 3
       start_period: 10s
       start_interval: 2s
+    restart: unless-stopped
+  grobase-link-redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    profiles: [link-direct]
+    networks:
+      - mini-baas
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 10s
+      start_interval: 2s
+  grobase-link-mailpit:
+    image: axllent/mailpit:v1.22.3
+    profiles: [link-direct]
+    networks:
+      - mini-baas
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - /mailpit
+        - readyz
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 10s
+      start_interval: 2s
+  grobase-link-hostport:
+    image: alpine/socat:1.8.0.1
+    command: ["TCP-LISTEN:8000,fork,reuseaddr", "TCP:mini-baas-kong:8000"]
+    profiles: [link-direct]
+    ports:
+      - 127.0.0.1:${GROBASE_LINK_HOST_PORT:-28000}:8000
+    networks:
+      - mini-baas
     restart: unless-stopped

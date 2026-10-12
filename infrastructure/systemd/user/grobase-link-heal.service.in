@@ -1,0 +1,9 @@
+# Rendered and installed by `make link-autostart`; run by grobase-link-heal.timer.
+[Unit]
+Description=grobase link self-heal: re-open the link and the LAN edge when a probe fails
+After=grobase-link.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=@GROOT@
+ExecStart=/usr/bin/bash @GROOT@/scripts/grobase-link-heal.sh

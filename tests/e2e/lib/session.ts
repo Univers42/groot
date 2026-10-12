@@ -26,10 +26,32 @@ export interface E2eUser {
 
 const DEFAULT_USER: E2eUser = { email: E2E_EMAIL, password: E2E_PASSWORD, username: "e2e-smoke" };
 
+// One login per user per worker. The gateway allows 8 logins a minute per IP (RATE_LIMITS.login in
+// apps/opposite-osiris/scripts/auth-gateway.mjs) and the suite opened every DB test with a fresh
+// demo login, so a full `make link-e2e` got 429 from the sixth demo login on (2026-10-12).
+// Caveat: a token is reused for TOKEN_REUSE_MS; one revoked server-side inside that window
+// (logout, password change) fails the next test that reuses it instead of logging in again.
+const TOKEN_REUSE_MS = 10 * 60 * 1000;
+const tokens = new Map<string, { token: string; at: number }>();
+
 /** Logs an e2e user (default: the suite's one) in at the gateway, registering it on first use. */
 export async function loginOrRegister(user: E2eUser = DEFAULT_USER): Promise<string> {
+  const cached = tokens.get(user.email);
+  if (cached && Date.now() - cached.at < TOKEN_REUSE_MS) return cached.token;
+  const token = await freshLogin(user);
+  tokens.set(user.email, { token, at: Date.now() });
+  return token;
+}
+
+async function freshLogin(user: E2eUser): Promise<string> {
   const credentials = { email: user.email, password: user.password, turnstileToken: TURNSTILE };
   let login = await postJson("/api/auth/login", credentials);
+  // Only an unknown account is registered. Any other refusal (a 429 rate limit, a 5xx) used to
+  // fall through to register and surface as its 422 "already registered", hiding the real cause
+  // (2026-10-12: five DB2 tests failed that way).
+  if (login.status !== 200 && login.status !== 400 && login.status !== 401) {
+    throw new Error(`login ${user.email}: HTTP ${login.status} ${String(login.body.message)}`);
+  }
   if (login.status !== 200) {
     const profile = { username: user.username, confirmPassword: user.password };
     const reg = await postJson("/api/auth/register", { ...credentials, profile });

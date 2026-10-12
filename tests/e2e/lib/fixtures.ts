@@ -1,6 +1,6 @@
-import { expect, test as base, type Page } from "@playwright/test";
+import { expect, test as base, type ConsoleMessage, type Page } from "@playwright/test";
 
-type Guard = { watch(page: Page, label: string): void };
+type Guard = { watch(page: Page, label: string): () => void };
 
 // Playwright's own injected scripts are refused by a sandboxed frame without allow-scripts,
 // and Chromium logs that as the page's error (microsoft/playwright#33343). Measured
@@ -9,16 +9,24 @@ type Guard = { watch(page: Page, label: string): void };
 const HARNESS_NOISE = /^Blocked script execution in 'about:(srcdoc|blank)' because the document's frame is sandboxed and the 'allow-scripts' permission is not set\.$/;
 
 // Zero console errors is an assertion in every spec: each watched page's errors and
-// uncaught exceptions (frames included) are checked when the test ends.
+// uncaught exceptions (frames included) are checked when the test ends. watch returns the
+// call that stops watching, for a spec whose cleanup (not under test) deletes what the page
+// still shows: the page refetching it logs a 404 that only remote-backend latency lets land.
 export const test = base.extend<{ consoleGuard: Guard }>({
   consoleGuard: async ({}, use) => {
     const errors: string[] = [];
     await use({
       watch(page, label) {
-        page.on("console", (m) => {
+        const onConsole = (m: ConsoleMessage) => {
           if (m.type() === "error" && !HARNESS_NOISE.test(m.text())) errors.push(`${label} console: ${m.text()} @ ${m.location().url}`);
-        });
-        page.on("pageerror", (e) => errors.push(`${label} pageerror: ${e.message}`));
+        };
+        const onPageError = (e: Error) => errors.push(`${label} pageerror: ${e.message}`);
+        page.on("console", onConsole);
+        page.on("pageerror", onPageError);
+        return () => {
+          page.off("console", onConsole);
+          page.off("pageerror", onPageError);
+        };
       },
     });
     expect(errors, "console errors").toEqual([]);

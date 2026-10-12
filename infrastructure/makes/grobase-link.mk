@@ -11,6 +11,9 @@
 # (`conf`), so make asks it for the one it needs rather than parsing the file a second time.
 GROBASE_TARGET ?=
 GROBASE_LINK_DIR ?= $(or $(XDG_RUNTIME_DIR),/tmp)/track-binocle-link
+# PATHS overrides the configured targets for `make link-paths`: space-separated list of
+# https://... URLs and ssh targets (ssh://..., user@host, alias). Empty = use config.
+PATHS ?=
 GROBASE_LINK_HOST_PORT ?= $(shell bash scripts/grobase-link.sh conf GROBASE_LINK_HOST_PORT)
 # 443 needs a privileged bind, which rootless Docker cannot do (ip_unprivileged_port_start).
 LINK_VHOST_HTTPS_PORT ?= $(shell if docker info -f '{{.SecurityOptions}}' 2>/dev/null | grep -q rootless \
@@ -27,20 +30,30 @@ LINK_VERIFY = $(LINK_SCRIPT) verify
 # run only when a link-* target uses them, not on every `make`.
 # MINI_BAAS_WAF_TLS_GID=none: grobase's WAF, the one reader of the TLS key that needs gid 101,
 # runs where grobase runs, not here; the local key stays 0600 for local-https-proxy alone.
-LINK_COMPOSE_ENV = GROBASE_LINK_DIR='$(GROBASE_LINK_DIR)' COMPOSE_FILE='docker-compose.yml:docker-compose.grobase-link.yml' \
+LINK_COMPOSE_ENV = GROBASE_LINK_DIR='$(GROBASE_LINK_DIR)' GROBASE_LINK_HOST_PORT='$(GROBASE_LINK_HOST_PORT)' COMPOSE_FILE='docker-compose.yml:docker-compose.grobase-link.yml' \
 	TRACK_BINOCLE_VHOST_HTTPS_PORT='$(LINK_VHOST_HTTPS_PORT)' MINI_BAAS_WAF_TLS_GID=none
 LINK_COMPOSE = $(LINK_COMPOSE_ENV) docker compose --env-file ./.env.local
 
 link:
-## Reach grobase wherever it runs: open the path, derive ./.env.local from that grobase's secrets, start the relay (or stop it in local mode), then verify it from inside every frontend already running. The target and its kind come from GROBASE_TARGET=auto|local|ssh://…|<alias>|http(s)://… on this line, else from ./.env.grobase-link.
+## Reach grobase wherever it runs: open the path, derive ./.env.local from that grobase's secrets, start the relay (in direct mode with the local Redis/Mailpit stand-ins and the loopback Kong port; or stop it in local mode), then verify it from inside every frontend already running. The target and its kind come from GROBASE_TARGET=auto|local|ssh://…|<alias>|http(s)://… on this line, else from ./.env.grobase-link.
+	@$(LINK_COMPOSE) rm -sf grobase-link-hostport >/dev/null 2>&1 || true # an ssh link forwards that port itself
 	@$(LINK_SCRIPT) up
 	@if [ "$$($(LINK_SCRIPT) mode)" = local ]; then \
-		docker ps -q --filter label=com.docker.compose.service=grobase-link | grep -q . && $(LINK_COMPOSE) rm -sf grobase-link; \
+		docker ps -q --filter label=com.docker.compose.service=grobase-link | grep -q . && $(LINK_COMPOSE) rm -sf grobase-link grobase-link-redis grobase-link-mailpit; \
 		echo '[link] local mode: nothing to relay; the monolithic pipeline (make all / backend-up) applies.' >&2; \
 	else \
 		$(LINK_SCRIPT) env; \
 		docker network inspect mini-baas_mini-baas >/dev/null 2>&1 || docker network create mini-baas_mini-baas >/dev/null; \
+		if [ "$$($(LINK_SCRIPT) mode)" = direct ]; then \
+			$(LINK_COMPOSE) up -d --wait grobase-link-redis grobase-link-mailpit; \
+		else \
+			$(LINK_COMPOSE) rm -sf grobase-link-redis grobase-link-mailpit >/dev/null 2>&1; \
+		fi; \
 		$(LINK_COMPOSE) up -d --force-recreate --wait grobase-link; \
+		if [ "$$($(LINK_SCRIPT) mode)" = direct ] && [ '$(GROBASE_LINK_HOST_PORT)' != 0 ]; then \
+			$(LINK_COMPOSE) up -d grobase-link-hostport >/dev/null 2>&1 || \
+				echo '[link] 127.0.0.1:$(GROBASE_LINK_HOST_PORT) is taken; host tools get no Kong port (GROBASE_LINK_HOST_PORT=<free port>)' >&2; \
+		fi; \
 	fi
 	@LINK_VERIFY_TRUST=note $(LINK_VERIFY)
 
@@ -54,20 +67,46 @@ link-verify:
 
 link-down:
 ## Close the link: stop the relay, the ssh master and its forwards. The frontends lose the backend until `make link` or `make backend-up`.
-	@$(LINK_COMPOSE) rm -sf grobase-link >/dev/null 2>&1 || true
+	@$(LINK_COMPOSE) rm -sf grobase-link grobase-link-redis grobase-link-mailpit grobase-link-hostport >/dev/null 2>&1 || true
 	@$(LINK_SCRIPT) down
+
+link-autostart:
+## Bring the link back on its own after a reboot, a data center restart or a network drop: systemd user units open it once the VM is up and a 2-minute timer re-opens it when link-status fails. LAN_IF=<iface> also keeps the WAF on the LAN (https://<LAN IP>:8443); with LAN_SSH=1, the VM's password ssh too (<LAN IP>:4242). Undo: make link-autostart-off.
+	@LAN_IF='$(LAN_IF)' LAN_SSH='$(LAN_SSH)' bash scripts/grobase-link-autostart.sh install
+
+link-autostart-off:
+## Remove the link-autostart units (the link itself stays open until make link-down).
+	@bash scripts/grobase-link-autostart.sh remove
 
 # What `make all` does with models-migrate, driven over the link: groot's models/*.sql land
 # in the postgres of the grobase the frontends talk to (2026-10-09: 7 osionos tables were
 # missing in the VM's grobase because nothing had ever run it there). Idempotent; slow over
 # ssh (one docker exec per file through docker's ssh transport, ~2 min).
+LINK_ON_TARGET = host="$$($(LINK_SCRIPT) docker-host)"; [ -z "$$host" ] || export DOCKER_HOST="$$host";
+
 link-models-migrate:
 ## Apply groot's models/*.sql to the LINKED grobase's postgres (local = this daemon, ssh = the target's daemon through docker's ssh transport; direct mode has no database and refuses). Idempotent, part of link-frontends-up.
-	@host="$$($(LINK_SCRIPT) docker-host)"; \
-	if [ -n "$$host" ]; then DOCKER_HOST="$$host" $(MAKE) --no-print-directory models-migrate; else $(MAKE) --no-print-directory models-migrate; fi
+	@$(LINK_ON_TARGET) $(MAKE) --no-print-directory models-migrate
 
-link-frontends-up: link link-models-migrate
-## Build and start the root frontends here against the linked grobase (after link-models-migrate; frontends-up, in a non-local mode with the relay overlay and the vhost on LINK_VHOST_HTTPS_PORT), trust the local CA in this user's browser stores (no sudo; certs-trust-user), then verify the link and that trust from inside every frontend.
+# What `make all` does with demo-login-ensure, driven over the link: the demo account in the
+# LINKED grobase gets this machine's DEMO_LOGIN_PASSWORD (2026-10-11: after the seed import
+# the VM held the account with the snapshot's old hash, so no one here could sign in). Kong
+# is reached through the link's loopback port, the one this machine can open in every mode.
+link-demo-login-ensure:
+## Set the demo account's password in the LINKED grobase to ./.env.local's DEMO_LOGIN_PASSWORD (make demo-login prints it). Idempotent, part of link-frontends-up.
+	@$(LINK_ON_TARGET) BAAS_URL='http://127.0.0.1:$(GROBASE_LINK_HOST_PORT)' sh scripts/demo-login-ensure.sh
+
+# What `make all` does with live-data-ensure, driven over the link: the app's API key is
+# verified (or issued) by the LINKED tenant-control, through the link's host-only socket, and
+# the demo rows are re-stamped onto it (2026-10-11: the VM's 1635 finance rows in mssql were
+# owned by another agency key, so the finance mount listed nothing).
+link-live-data-ensure:
+## Converge the app's live-database key and the demo rows' owner on the LINKED grobase (scripts/ensure-live-data-access.sh; ssh mode reaches tenant-control through the link). Idempotent, part of link-frontends-up.
+	@$(LINK_ON_TARGET) sock='$(GROBASE_LINK_DIR)/tenant-control-3022.sock'; \
+		[ ! -S "$$sock" ] || export TENANT_CONTROL_SOCKET="$$sock"; bash scripts/ensure-live-data-access.sh
+
+link-frontends-up: link link-models-migrate link-demo-login-ensure link-live-data-ensure
+## Build and start the root frontends here against the linked grobase (after link-models-migrate, link-demo-login-ensure and link-live-data-ensure; frontends-up, in a non-local mode with the relay overlay and the vhost on LINK_VHOST_HTTPS_PORT), trust the local CA in this user's browser stores (no sudo; certs-trust-user), then verify the link and that trust from inside every frontend.
 	@if [ "$$($(LINK_SCRIPT) mode)" = local ]; then \
 		$(MAKE) --no-print-directory frontends-up certs-trust-user; \
 	else \
@@ -89,3 +128,7 @@ E2E_SPECS ?=
 link-e2e: link-healthcheck
 ## link-healthcheck, then the Playwright smoke (tests/e2e) in its pinned container against the frontends served here through the linked grobase; the stack must already be up (link-frontends-up).
 	@bash tests/e2e/run.sh $(E2E_SPECS)
+
+link-paths:
+## Which ways this device reaches the grobase data center: each WAF URL (TLS verified against GROBASE_CA_FILE) and each ssh target (grobase's Kong running there). PATHS="url|ssh-target ..." overrides the configured ones.
+	@bash scripts/grobase-paths.sh $(PATHS)
