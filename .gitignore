@@ -85,3 +85,4 @@ apps/baas.bak/
 
 # make certs-export default destination
 /track-binocle-local-ca.pem
+secrets
