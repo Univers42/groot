@@ -250,3 +250,30 @@ and `dylan@gmail.com`'s known values both failed against its hash). On 2026-10-1
 was replaced through `grobase users update --password-stdin` with the service-role key, so the
 owner can sign in to that account. The replaced hash is in `merge_20261012.password_resets` on
 the data center; writing it back into `auth.users.encrypted_password` restores the old password.
+
+## 9. 2026-10-12 — every mount checked through grobase-cli
+
+The agency tenant's seven mounts were read back through `grobase` (grobase-cli 112a848), with
+the osionos app's own API key, so the check is what the app sees. Nothing needed loading:
+
+| mount | engine | through the tailnet (rows, paged 500 at a time) |
+|---|---|---|
+| mysql-ops | mysql | projects 40, tasks 2000, tickets 3000, time_entries 6000 — all equal to §7 |
+| osionos-finance | mssql | cost_centers 12, gl_accounts 20, invoices 600, invoice_lines 603, payments 400 — all equal to §7 |
+| mongo-activity | mongodb | events 30000, product_reviews 8000, notes 400 — all equal to §7 |
+| osionos-iot | dynamodb | alerts 250, device_events 1200, devices 200 — all equal to §7 |
+| osionos-restaurant | sqlite | restaurant 8, menu 8, dish 65, working_hours 56, restaurant_order 300, order_item 608 |
+| pg-commerce | postgresql | customers 5000, products 1200, orders 25000, order_items 74822, employees 60, inventory 2644, edges 6544 |
+| agency-db | postgresql | cases 40, subjects 60, transactions 150 (12 tables in all) |
+
+Through the Funnel, from a container that resolves the name in public DNS, every one of those
+31 tables returned a row. `grobase db test` lists each mount's resources. `grobase db migrate`
+applied `20261012_grobase_cli_check` (`SELECT 1;`) to mysql-ops, pg-commerce and agency-db,
+and a second run reported it `skipped`. That file's row in each mount's `_baas_migrations` is
+the only thing the check wrote. mongo-activity refuses migrations with a 422 (no `ddl`
+capability), as documented.
+
+Raw SQL (`grobase query run`) does not reach these mounts, and that is by design. grobase's SQL
+runner serves only `tenant_owned` postgres mounts, with `QUERY_ROUTER_SQL_RO` on. Both postgres
+mounts here are `shared_rls`, where raw SQL would bypass row ownership. Count through
+`query crud`/`api` instead.
