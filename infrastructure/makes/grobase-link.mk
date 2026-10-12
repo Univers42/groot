@@ -92,9 +92,11 @@ link-models-migrate:
 # LINKED grobase gets this machine's DEMO_LOGIN_PASSWORD (2026-10-11: after the seed import
 # the VM held the account with the snapshot's old hash, so no one here could sign in). Kong
 # is reached through the link's loopback port, the one this machine can open in every mode.
+# A grobase on another daemon is shared, so the first machine to set the password holds it
+# (DEMO_LOGIN_SHARED, scripts/demo-login-ensure.sh); DEMO_LOGIN_FORCE=1 takes it over.
 link-demo-login-ensure:
-## Set the demo account's password in the LINKED grobase to ./.env.local's DEMO_LOGIN_PASSWORD (make demo-login prints it). Idempotent, part of link-frontends-up.
-	@$(LINK_ON_TARGET) BAAS_URL='http://127.0.0.1:$(GROBASE_LINK_HOST_PORT)' sh scripts/demo-login-ensure.sh
+## Set the demo account's password in the LINKED grobase to ./.env.local's DEMO_LOGIN_PASSWORD (make demo-login prints it), unless another linked machine holds it (DEMO_LOGIN_FORCE=1 takes it over). Idempotent, part of link-frontends-up.
+	@$(LINK_ON_TARGET) DEMO_LOGIN_SHARED="$${DOCKER_HOST:+1}" BAAS_URL='http://127.0.0.1:$(GROBASE_LINK_HOST_PORT)' sh scripts/demo-login-ensure.sh
 
 # What `make all` does with live-data-ensure, driven over the link: the app's API key is
 # verified (or issued) by the LINKED tenant-control, through the link's host-only socket, and
