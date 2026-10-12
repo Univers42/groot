@@ -107,8 +107,14 @@ link-live-data-ensure:
 	@$(LINK_ON_TARGET) sock='$(GROBASE_LINK_DIR)/tenant-control-3022.sock'; \
 		[ ! -S "$$sock" ] || export TENANT_CONTROL_SOCKET="$$sock"; bash scripts/ensure-live-data-access.sh
 
-link-frontends-up: link link-models-migrate link-demo-login-ensure link-live-data-ensure
-## Build and start the root frontends here against the linked grobase (after link-models-migrate, link-demo-login-ensure and link-live-data-ensure; frontends-up, in a non-local mode with the relay overlay and the vhost on LINK_VHOST_HTTPS_PORT), trust the local CA in this user's browser stores (no sudo; certs-trust-user), then verify the link and that trust from inside every frontend.
+link-frontends-up: link link-models-migrate link-demo-login-ensure link-live-data-ensure link-frontends-start
+## Converge the LINKED grobase (link-models-migrate, link-demo-login-ensure, link-live-data-ensure), then link-frontends-start.
+
+# The half that writes nothing to the data center: what an agent on another device may run
+# (wiki/runbooks/another-device.md §0). Before 2026-10-12 it existed only inside
+# link-frontends-up, so the device test rebuilt it by hand from this recipe.
+link-frontends-start: link
+## Build and start the root frontends here against the linked grobase without writing to it (frontends-up, in a non-local mode with the relay overlay and the vhost on LINK_VHOST_HTTPS_PORT), trust the local CA in this user's browser stores (no sudo; certs-trust-user), then verify the link and that trust from inside every frontend.
 	@if [ "$$($(LINK_SCRIPT) mode)" = local ]; then \
 		$(MAKE) --no-print-directory frontends-up certs-trust-user; \
 	else \
