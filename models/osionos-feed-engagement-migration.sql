@@ -77,7 +77,8 @@ BEGIN
     ALTER TABLE public.osionos_notifications DROP CONSTRAINT IF EXISTS osionos_notifications_type_check;
     ALTER TABLE public.osionos_notifications ADD CONSTRAINT osionos_notifications_type_check
       CHECK (type IN ('mention','dm','reply','reaction','connection','system',
-                      'feed_reaction','feed_comment','feed_share'));
+                      'feed_reaction','feed_comment','feed_share','task_due',
+                      'page_comment'));
   END IF;
 END $$;
 
