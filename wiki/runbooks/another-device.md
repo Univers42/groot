@@ -367,11 +367,17 @@ The modes:
 **8.2 Up and verify:**
 
 ```sh
-make link-frontends-up     # opens the link, starts the frontends with the relay, puts the edge CA
-                           # into this user's browser stores (no sudo), then runs link-verify
+make link-frontends-start  # opens the link, starts the frontends with the relay, puts the edge CA
+                           # into this user's browser stores (no sudo), then runs link-verify;
+                           # writes nothing to the data center (§0)
 make link-verify           # last line: "[grobase-link] verify: N frontends reach grobase through the ... link to ..."
 make link-status           # exit 0 while the path is open and Kong answers through it
 ```
+
+`make link-frontends-up` is the owner's variant: it first runs the three writes §0 lists, then
+`link-frontends-start`. Its demo-password step no longer takes the account from another machine.
+The machine that set the password first keeps it, and the others get a note saying whose value
+signs in.
 
 `link-verify` sends one request per grobase name (Kong, Redis, Mailpit smtp and http,
 realtime) from inside every frontend, then the browser's path through the TLS edge, then
@@ -490,3 +496,104 @@ More symptoms: CONNECTING.md §7 and [grobase-link](grobase-link.md) "Troublesho
   while the CLI works.
 - **The pin and the addresses are 2026-10-12's.** Re-check §5 every time; never adjust the
   expected values to match what you see.
+
+### dlesieur (laptop on the wifi), 2026-10-12
+
+Ubuntu 26.04.1 LTS (kernel 7.0.0-31), `mawk 1.3.4 20260129` as `awk`; Docker 29.1.3, rootful;
+groot `5eb54d5b`; `grobase version` prints `version dev`, `go1.26.9` (`go install` of grobase-cli
+`7f422de`, which does not stamp a version). Run by an AI agent, no human at the keyboard. The
+device is on the wifi (`192.168.1.135`) and in the tailnet (kernel mode, relayed:
+`pong ... via DERP(mad)`, no direct connection).
+
+| Test | N1 | N2 | N3 | N4 IP | N4 MagicDNS | N5 | N6 |
+|---|---|---|---|---|---|---|---|
+| T1 reach | SKIP: not the data-center host | SKIP: on wifi, no cable | SKIP: the agent was not permitted to run `check-routes.sh` | SKIP: as N3 | SKIP: as N3 | SKIP: no check-routes route | SKIP: as N3 |
+| T2 doctor | SKIP: as T1 | SKIP: as T1 | PASS | PASS | PASS | PASS | PASS |
+| T3 identity | SKIP: as T1 | SKIP: as T1 | PASS | PASS | PASS | PASS | PASS |
+| T4 ssh | SKIP: as T1 | SKIP: as T1 | FAIL: ssh exits 0; `host health` cannot resolve the alias `dc-tailnet` | FAIL: as N3 | FAIL: as N3 | FAIL: as N3 | SKIP: Funnel carries no ssh |
+| T5 link | SKIP: as T1 | SKIP: as T1 | PASS with the fix below (ssh) | FAIL at `5eb54d5b`; PASS with the fix below (ssh, and direct with the CA file) | PASS with the fix below (ssh, and direct with the CA file) | SKIP: no link target of its own (§3) | PASS over the tailnet only; the public ingress was not exercised |
+| T6 browser | SKIP: as T1 | SKIP: as T1 | SKIP: no human has signed in yet | SKIP: as N3 | SKIP: as N3 | SKIP: as N3 | SKIP: as N3 |
+
+How each cell was obtained, and what it does not show:
+
+- **T1.** Not run on any route. T2 and T3 below make the script's checks (reachability, TLS,
+  login, `whoami`) one route at a time, but they are not the script.
+- **T2, T3.** `dc` holds four URLs and uses the first that answers, here always the Tailscale IP.
+  So N3, N4 MagicDNS and N5 each got a temporary context holding only that route's URL and the
+  pin, with its own login; it was removed afterwards. Every `doctor` read
+  `10 pass, 0 warn, 0 fail, 0 skip` and named its URL; every `whoami` printed
+  `device-dlesieur-20261012@example.com`. N5 was the §3 tunnel to `127.0.0.1:18443`, opened over
+  `100.94.119.97`.
+- **N6, T2 and T3.** With Tailscale up, this device resolves `dlesieur42-1.tail10f2ea.ts.net` to
+  `100.94.119.97`, so `dc-public` here travels the tailnet to the VM's `:443`, not the internet.
+  The same three commands were therefore also run from a container using public DNS
+  (`--dns 1.1.1.1`), where the name resolves to Tailscale's Funnel ingress: login, `whoami` and
+  `doctor` (`10 pass`, 201 ms) passed there too. The cell is that second run.
+- **T4.** `ssh -o BatchMode=yes -p 4242 dlesieur@<addr> true` exits 0 on `192.168.1.132`,
+  `100.94.119.97` and the MagicDNS name. `grobase --context dc host health` fails on every
+  network alike, because §4's two aliases are not in `~/.ssh/config`: the agent was not permitted
+  to edit that file. Not a data-center fault.
+- **T5.** The frontends were started without `make link-frontends-up`: that target's
+  prerequisites are `link-models-migrate`, `link-demo-login-ensure` and `link-live-data-ensure`,
+  the three writes §0 forbids. `make link` was followed by `frontends-up certs-trust-user` under
+  the same compose environment, then `make link-verify`. Every PASS is
+  `verify: 4 frontends reach grobase through the ssh link to ...` (24 probes ok) or, in direct
+  mode, `verify: 7 frontends reach grobase through the direct link to ...` (32 probes ok), exit 0.
+- **T5 on N6.** `make link GROBASE_TARGET=https://dlesieur42-1.tail10f2ea.ts.net`, no CA file,
+  passed, the first run of groot against that URL. But the relay's route was
+  `OPENSSL:100.94.119.97:443,verify=1`: `kong_addr` resolves the name on the device, so the link
+  went over the tailnet. §11's question was then put to both paths with unauthenticated `GET`s:
+
+  | Path | `/auth/v1/health` | `/realtime/v1/publish` | `/admin/v1/` |
+  |---|---|---|---|
+  | the link (tailnet, `:443`) | 401 | 401 | 401 |
+  | the public ingress (`curl --doh-url`) | 401 | 403 | 403 |
+
+  The public ingress refuses the bridge's publish and adapter-registry routes before any key is
+  read. A link that really crosses the internet would lose both. No request carried the
+  service-role key, so what that key gets there is not known.
+- **T6.** Open. The local CA is in this user's Chrome, Chromium and Firefox stores
+  (`link-verify`: `current` on all three); a browser that was running needs a relaunch.
+
+Three things this run found:
+
+1. **ssh mode fails on a device whose `awk` is mawk 1.3.4 20260129** (Ubuntu 26.04). In
+   `scripts/grobase-link.sh`, `sub(/^(0\.0\.0\.0|::|\[::\]|)?:/, ...)` loses its `^` anchor there
+   and rewrites `127.0.0.1:8000` as `127.0.0.1127.0.0.1:8000`. Every loopback-published port
+   (Kong, Redis, Mailpit http, tenant-control) is then forwarded to nothing. Removing the empty
+   alternative fixes it; the fix and a regression test are on the branch
+   `fix/grobase-link-mawk-anchor`. First `make link`, unmodified:
+
+   ```text
+    Container track-binocle-grobase-link-1  Waiting
+   container track-binocle-grobase-link-1 is unhealthy
+   make: *** [infrastructure/makes/grobase-link.mk:41: link] Error 1
+   ```
+
+2. **`ssh://dlesieur@dlesieur42-1.tail10f2ea.ts.net:4242` fails on its first use.** §4 has the
+   device connect by IP only, so `known_hosts` has no entry for the name and `BatchMode` cannot
+   ask. One interactive `ssh -p 4242 dlesieur@dlesieur42-1.tail10f2ea.ts.net` fixes it; the VM
+   offers the same host key (`SHA256:nQYu8hIBfzs66GrpGamKD13Rc5DfW6TOIffu/s9eGhE`) on all three
+   addresses.
+
+   ```text
+   [grobase-link] ssh cannot open a master to ssh://dlesieur@dlesieur42-1.tail10f2ea.ts.net:4242 (key in ssh-agent or passwordless? try: ssh dlesieur@dlesieur42-1.tail10f2ea.ts.net -p 4242)
+   make: *** [infrastructure/makes/grobase-link.mk:40: link] Error 1
+   ```
+
+3. **§8.2 contradicts §0**, as described under T5.
+
+Not done on this device:
+
+- **§6.2 and §6.3, the vault pull.** The agent had no terminal for the passphrase prompt and was
+  not permitted to read it from a file. `./.env.local` was derived by `make link` alone, so it
+  carries locally generated values where the team keys belong; expect seeded accounts to fail to
+  sign in from here until the pull has run, followed by `make link` and a restart of the
+  frontends.
+- **§4, the `~/.ssh/config` aliases**, see T4.
+
+`host health`, as it failed:
+
+```text
+error: ssh dc-tailnet: ssh: Could not resolve hostname dc-tailnet: Temporary failure in name resolution
+```
