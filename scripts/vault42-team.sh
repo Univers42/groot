@@ -66,6 +66,10 @@ done
 # not itself `*.local`, so a push would publish it to every member — measured on the first
 # team push: .env.local.bak went out SHARED. Every .bak stays private, whatever it backs up.
 [ "$verb" = push ] && set -- "$@" --private '*.bak'
+# ./.env.grobase-remote is the data center's assembled .env, refreshed by `make link`: its
+# JWT_SECRET, SERVICE_ROLE_KEY and database passwords are production's, not the shared dev
+# stack's, and it carries FLY_TOKEN and PAT_DOCKER. Kept in the vault, sealed to the pusher.
+[ "$verb" = push ] && set -- "$@" --private '.env.grobase-remote'
 
 VAULT_ENV_ORG="$ORG" VAULT_ENV_PROJECT="$PROJECT" VAULT_ENV_NAME="$ENVNAME" \
 	REPO_DIR="$REPO" CTL_IMAGE="$CTL_IMAGE" CTL_CFG_DIR="$CTL_CFG_DIR" \
