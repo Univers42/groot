@@ -133,13 +133,62 @@ document called it "rootless"; it is not, and the difference is load-bearing:
 
 ## Activation
 
+### Before step 1 — check the host, and clear a socket that became a directory
+
+Run from the repo root. Two things must hold before the daemon is installed; the first
+one has already broken a host.
+
+**A. `/run/docker-ide.sock` must not exist as a directory.** `docker-compose.yml:733`
+bind-mounts `${OSIONOS_IDE_DOCKER_SOCK:-/run/docker-ide.sock}` into
+`osionos-ide-socket-proxy`. If that container starts before `docker-ide.service` exists,
+Docker creates the missing path as an empty root-owned *directory*, and `dockerd` then
+cannot bind its socket there. Symptoms, in order: the proxy answers `502 daemon
+unreachable` (`ide-socket-proxy/proxy.mjs:115`); the bridge closes every sandbox WebSocket
+with `4004` (`apps/osionos/app/scripts/bridge-ide-exec.mjs:204,238`); the IDE console never
+gets a prompt. Confirm and clear it:
+
+```sh
+ls -ld /run/docker-ide.sock        # "d" in the first column = the bug
+systemctl is-enabled docker-ide    # "not-found" = the unit was never installed
+docker compose --env-file ./.env.local --profile ide rm -sf osionos-ide-socket-proxy
+sudo rmdir /run/docker-ide.sock && test ! -e /run/docker-ide.sock
+```
+
+The proxy goes first because it is the process holding the bind-mount; it stays down
+until `test -S /run/docker-ide.sock` succeeds (step 2 below). `rmdir` refuses a non-empty directory, which
+is the intended failure: stop and look at what is inside.
+`ACTIVATE-dlesieur42.sh` performs the same two commands (its "socket path must be FREE"
+block) between the image builds and the data-root.
+
+**B. Disk and quota.** Check free space before creating or growing the data-root, then
+confirm the mount carries `prjquota`:
+
+```sh
+df -h /var /
+findmnt /var/lib/docker-ide        # no output (exit 1) = not mounted yet: do host-prep item 1
+findmnt -no OPTIONS /var/lib/docker-ide | grep prjquota
+```
+
+The sandbox image is about 2.8 GB; `bootstrap.sh` loads it with `docker save | docker load`,
+which needs roughly twice that on the data-root, and building it needs about 3.5 GB on
+`/var` (measurements and the refuse-below-3.5 G guard: `ACTIVATE-dlesieur42.sh` header and
+`VAR_MIN_KB`). `STORAGE-dlesieur42.sh` is the owner script for the LV/loopback choice.
+If `findmnt` shows the mount without `prjquota`, stop: `ACTIVATE-dlesieur42.sh` refuses to
+continue in that state.
+
+This section is a runbook for the failure; it does not repair `docker-ide.service` or the
+mount. After a reboot the same sequence applies if the proxy was started first.
+
+### Steps
+
 ```sh
 # 1. Build the three images on the MAIN daemon.
 docker build -t osionos-ide-egress:latest        infrastructure/docker/osionos/ide-egress-proxy
 docker build -t osionos-ide-socket-proxy:latest  infrastructure/docker/osionos/ide-socket-proxy
 docker build -t osionos-ide-sandbox:latest       infrastructure/docker/osionos/ide-sandbox
 
-# 2. After the host-prep above, bring up the filter (talks to /run/docker-ide.sock).
+# 2. After the host-prep above AND `test -S /run/docker-ide.sock` succeeds, bring up the
+#    filter (talks to /run/docker-ide.sock). Starting it earlier recreates the directory.
 COMPOSE_PROFILES=ide docker compose up -d osionos-ide-socket-proxy
 
 # 3. One-time seed of images + networks + egress proxy into docker-ide (sudo:
@@ -148,7 +197,10 @@ COMPOSE_PROFILES=ide docker compose up -d osionos-ide-socket-proxy
 #    from step 1. To keep it: sudo OSIONOS_IDE_KEEP_MAIN_COPY=1 sh <this script>
 sudo sh infrastructure/docker/osionos/ide-sandbox/bootstrap.sh
 
-# 4. Run the FULL 16-condition hostile corpus (must be green before enabling).
+# 4. Run the hostile corpus (must be green before enabling). It runs 16 checks and
+#    ends with `RESULT: 16 passed, 0 failed`. The checks do not map 1:1 onto the 16
+#    conditions: several conditions are proven offline, and one check is the runner
+#    SIGUSR1 probe (verify.sh:88-112), which the file does not tie to a condition.
 sudo sh infrastructure/docker/osionos/ide-sandbox/verify.sh
 
 # 5. Enable on the bridge (double-gate): set on the osionos-bridge service and
@@ -199,7 +251,7 @@ writeback → page CRUD with ignore-set + sha256 echo-suppression), and the
 4. **fly-machines provider (P7):** a drop-in behind `ide-docker`'s interface —
    deferred (YAGNI until a fly deploy is attempted).
 5. **Live activation (Part E):** the isolated daemon still needs the host sudo
-   prep below; then `verify.sh` 16/16 + the terminal/LSP/sync/git end-to-end run.
+   prep below; then `verify.sh` (`RESULT: 16 passed, 0 failed`) + the terminal/LSP/sync/git end-to-end run.
 
 ## Trade-off notes
 
