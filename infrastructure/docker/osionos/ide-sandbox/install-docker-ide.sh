@@ -29,17 +29,16 @@ DATA_ROOT=/var/lib/docker-ide
 
 ok=0
 fail=0
-skip=0
 
 ide() { docker -H "$SOCK_URL" "$@"; }
 
 pass()  { printf 'ok  %s\n' "$1"; ok=$((ok + 1)); }
 fail_() { printf 'FAIL  %s\n' "$1"; fail=$((fail + 1)); }
-skip_() { printf 'skip  %s\n' "$1"; skip=$((skip + 1)); }
 
 main() {
   refuse_unless_root
   refuse_unless_prjquota
+  refuse_unless_main_on_iptables
   srcdir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
   before=$(mktemp)
   trap 'rm -f "$before"' EXIT
@@ -47,7 +46,7 @@ main() {
   install_units
   bring_up_daemon
   verify "$before"
-  printf 'RESULT: %d ok, %d failed, %d skipped\n' "$ok" "$fail" "$skip"
+  printf 'RESULT: %d ok, %d failed\n' "$ok" "$fail"
   [ "$fail" -eq 0 ] || exit 1
 }
 
@@ -67,6 +66,18 @@ refuse_unless_prjquota() {
     *,prjquota,*) ;;
     *) echo "refusing: $DATA_ROOT is not mounted with prjquota (options: $opts)" >&2; exit 1 ;;
   esac
+}
+
+# A dockerd started with --iptables=false deletes the `docker-bridges` nftables tables on start
+# (measured on baas, Docker 29.9.0: "Deleting nftables IPv6 rules"). Those tables are the main
+# daemon's rules when it runs the nftables firewall backend, so docker-ide would strip them.
+refuse_unless_main_on_iptables() {
+  backend=$(docker info --format '{{.FirewallBackend.Driver}}' 2>/dev/null || true)
+  [ "$backend" = iptables ] || {
+    echo "refusing: the main daemon's firewall backend is '${backend:-unknown}', not iptables;" \
+      "docker-ide would delete its nftables tables on start" >&2
+    exit 1
+  }
 }
 
 install_units() {
@@ -126,16 +137,21 @@ verify() {
     fail_ "docker-ide CgroupDriver is not systemd"
   fi
 
-  if command -v ctr >/dev/null 2>&1; then
-    if ctr namespaces ls -q 2>/dev/null | grep -qx osionos-ide \
-      && ctr namespaces ls -q 2>/dev/null | grep -qx moby; then
-      pass "containerd namespaces list osionos-ide and moby"
-    else
-      fail_ "containerd namespaces do not list osionos-ide and moby"
-    fi
-  else
-    skip_ "containerd namespace check (no ctr)"
-  fi
+  # Read from the daemons, not `ctr namespaces ls`: containerd creates a namespace only when the
+  # first container starts in it, and userns-remap suffixes the name (osionos-ide-100000.100000).
+  ns_fmt='{{.Containerd.Namespaces.Containers}}'
+  ide_ns=$(ide info --format "$ns_fmt" 2>/dev/null || true)
+  main_ns=$(docker info --format "$ns_fmt" 2>/dev/null || true)
+  case "$ide_ns" in
+    osionos-ide*)
+      if [ "$ide_ns" != "$main_ns" ]; then
+        pass "docker-ide containerd namespace $ide_ns is not the main daemon's ($main_ns)"
+      else
+        fail_ "docker-ide shares the main daemon's containerd namespace"
+      fi
+      ;;
+    *) fail_ "docker-ide containerd namespace is '${ide_ns:-unknown}', not osionos-ide*" ;;
+  esac
 }
 
 main "$@"
