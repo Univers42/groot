@@ -8,6 +8,17 @@
 # This image adds the toolchains + language servers + the PAT-broker credential
 # helper. Everything that needs npm/apt egress runs BEFORE the HTTP_PROXY ENV
 # block below — on the build daemon the in-daemon egress proxy does not exist.
+# Go and gopls come from the official golang image, not go.dev/dl: dl.google.com
+# and proxy.golang.org's toolchain downloads answer 403/404 on some networks
+# (measured 2026-10-13), while module downloads still work. Go and gopls are pinned
+# together because an unpinned gopls@latest outgrew the Go here (v0.23.0 needs
+# go >= 1.26) and made go fetch a toolchain. CGO_ENABLED=0 keeps gopls static: the
+# golang image is trixie and this sandbox is bookworm. GOTOOLCHAIN=local turns a
+# future mismatch into a plain "requires go" error instead of a download.
+FROM golang:1.26.9 AS gotools
+ARG GOPLS_VERSION=v0.23.0
+RUN CGO_ENABLED=0 GOTOOLCHAIN=local GOBIN=/out go install "golang.org/x/tools/gopls@${GOPLS_VERSION}"
+
 FROM debian:bookworm-slim
 
 # Base tools + `ripgrep` (the /api/ide/search backend: `rg --json`) + node/npm
@@ -33,21 +44,18 @@ RUN npm install -g --no-audit --no-fund \
 
 # Compiled-language language servers (P5, extended) — matches bridge-ide-exec.mjs
 # LSP_SERVERS: go → gopls, rust → rust-analyzer, c/cpp → clangd (from apt above).
-# gopls needs a modern Go (bookworm apt Go is too old for gopls@latest), so pull
-# Go from the official tarball; rust-analyzer ships a self-contained release
-# binary. All of this needs egress and MUST stay ABOVE the HTTP_PROXY ENV block
-# below (on the build daemon the in-daemon egress proxy does not exist yet).
-ARG GO_VERSION=1.23.4
-RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tgz \
-    && tar -C /usr/local -xzf /tmp/go.tgz && rm /tmp/go.tgz
-ENV PATH="/usr/local/go/bin:${PATH}"
+# Go and gopls come from the gotools stage above (bookworm apt Go is too old);
+# rust-analyzer ships a self-contained release binary. Its download needs egress
+# and MUST stay ABOVE the HTTP_PROXY ENV block below (on the build daemon the
+# in-daemon egress proxy does not exist yet).
+COPY --from=gotools /usr/local/go /usr/local/go
+COPY --from=gotools /out/gopls /usr/local/bin/gopls
+ENV PATH="/usr/local/go/bin:${PATH}" GOTOOLCHAIN=local
 # Symlink go/gofmt into /usr/local/bin: the interactive sandbox shell is `bash -l`,
 # whose /etc/profile resets PATH and drops the ENV addition above — but keeps
 # /usr/local/bin. Without this, `go` is "command not found" in the terminal.
-RUN GOBIN=/usr/local/bin go install golang.org/x/tools/gopls@latest \
-    && ln -s /usr/local/go/bin/go /usr/local/bin/go \
-    && ln -s /usr/local/go/bin/gofmt /usr/local/bin/gofmt \
-    && rm -rf /root/go /root/.cache/go-build
+RUN ln -s /usr/local/go/bin/go /usr/local/bin/go \
+    && ln -s /usr/local/go/bin/gofmt /usr/local/bin/gofmt
 RUN curl -fsSL "https://github.com/rust-lang/rust-analyzer/releases/latest/download/rust-analyzer-x86_64-unknown-linux-gnu.gz" \
       | gunzip -c > /usr/local/bin/rust-analyzer \
     && chmod +x /usr/local/bin/rust-analyzer
