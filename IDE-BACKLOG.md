@@ -414,6 +414,28 @@ starts automatically (self-gated until now).
 
 ## Changelog
 
+- **2026-10-14** — **The IDE line merged into develop.** osionos `develop` (22 commits:
+  rail beside the panel, one Conversations space, the edge peek, wiki pages, pane zoom,
+  workspace Private/Shared, media search fixes) was merged into the IDE line. Decisions taken in
+  the 20 conflicts: (1) P3 had deleted the legacy sidebar, so develop's edits to it were carried
+  into what replaced it, not revived — the explorer already draws a wiki's own icon; the wiki
+  page list's child selector moved to `src/store/childPages.ts`; the sidebar-only
+  Private/Shared split (`workspaceSpaces.ts`) has no consumer in the workbench explorer and was
+  dropped, while its store and bridge halves (a child of a private page is private; another
+  member's private page is a 404) were kept. (2) develop's grouped rail is kept, with the
+  workbench panels as a fourth group (Workspace, Workbench, Conversations, Apps) and lazy,
+  prefetched like the others. (3) Page readability uses SEC1–SEC5's `canReadPageRow`; develop's
+  parallel `isPageReadableBy` differed only on owner-less legacy rows, of which the data center
+  holds none (2026-10-14: 816 private, 28 shared, 24 public, all with an owner). (4) Both sides
+  fixed emoji outside the icon catalog; the IDE side's direct drawing (`drawableEmojiOf`) won
+  and the live wiki emoji joined its test. (5) The perf specs leave the parallel suite (they
+  time input → paint and load inflates p95) and run only through `test:e2e:perf`; the rail
+  re-open budget moved 29 → 38 ms because it sat below this host's 30.8 ms frame floor.
+  **C3b5 ruling:** an archived page found by inbound sync stays a conflict entry rather than
+  "vanished" — the direction that loses nothing. Deploy gates read on the data center
+  (read-only): D1 RPC present, `parent_page_id` FK `ON DELETE SET NULL`; 26 private record
+  notes, one owner — making them shared is a data decision left to the operator.
+
 - **2026-10-14** — **Docs reconciled with the deployed IDE plane (docs only, no source
   touched).** (1) **The plane is on the VM.** The control plane —
   `osionos-ide-socket-proxy` + `osionos-ide-server`, compose profile `ide`, project
