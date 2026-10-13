@@ -112,13 +112,13 @@ df -h "$MNT" | tail -1
 sudo TMPDIR=/var/tmp sh "$SB/bootstrap.sh"
 df -h /var "$MNT" | tail -2
 
-say "[C9] the 16-condition corpus — must print 'RESULT: 16 passed, 0 failed'; anything else: STOP and report which line failed"
+say "[C9] the hostile corpus — verify.sh pins 42 checks; on the VM expect 'RESULT: 41 passed, 0 failed, 1 skipped (expected 42)' (the skip is the runner probe: no runner image is present there); anything else: STOP and report which line failed"
 sudo sh "$SB/verify.sh"
 
 say "[C8] filter back up — ONLY now that the socket is a socket (bringing it up earlier recreates the directory bug)"
 test -S /run/docker-ide.sock || { echo "socket missing — STOP"; exit 1; }
 COMPOSE_PROFILES=ide docker compose --env-file ./.env.local up -d osionos-ide-socket-proxy
-docker compose --env-file ./.env.local restart osionos-bridge
+COMPOSE_PROFILES=ide docker compose --env-file ./.env.local up -d osionos-ide-server
 docker inspect track-binocle-osionos-ide-socket-proxy --format 'socket-proxy: {{.State.Status}}'
 echo
 echo "[C7] Record in README.md's condition-15 row: data-root ${DATAROOT_DEV} (12 G LV / or the loopback size you chose), ext4 prjquota,"
