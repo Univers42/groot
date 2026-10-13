@@ -182,6 +182,41 @@ else
   fi
 fi
 
+# ----- osionos-ide-socket-proxy -----
+# Long syntax with create_host_path: false — a missing host socket must fail the
+# start, never become a directory docker-ide can no longer bind (README, step A).
+# Ponytail: compose v2.36 renders that `false` as an EMPTY bind object, so a bind
+# block must be PRESENT and say false-or-nothing; no block at all = FAIL.
+sockproxy=$(svc "osionos-ide-socket-proxy")
+if [ -z "$sockproxy" ]; then
+  fail "osionos-ide-socket-proxy: service missing"
+else
+  # sp_check DESC FILTER — ok when FILTER holds on the rendered service.
+  sp_check() {
+    if echo "$sockproxy" | jq -e "$2" >/dev/null; then
+      ok "osionos-ide-socket-proxy: $1"
+    else
+      fail "osionos-ide-socket-proxy: $1"
+    fi
+  }
+  # sp_check DESC VOLUME-FILTER — FILTER must hold on the one volume entry.
+  sp_vol() { sp_check "$1" "(.volumes | type) == \"array\" and (.volumes | length) == 1 and any(.volumes[]; $2)"; }
+  sp_check "no ports" '.ports == null or .ports == []'
+  sp_check "networks exact" '.networks | (keys | sort) == ["osionos-ide-control-net"]'
+  sp_check "read_only true" '.read_only == true'
+  sp_check "cap_drop ALL" '.cap_drop | sort == ["ALL"]'
+  sp_check "security_opt no-new-privileges" 'any(.security_opt[]?; . == "no-new-privileges:true")'
+  sp_check "mem_limit set" '.mem_limit != null and .mem_limit != ""'
+  sp_check "pids_limit set" '.pids_limit != null'
+  sp_check "exactly one volume" '(.volumes | type) == "array" and (.volumes | length) == 1'
+  sp_vol "bind of /dind-run/docker.sock" '.type == "bind" and .target == "/dind-run/docker.sock"'
+  sp_vol "create_host_path false" '(.bind | type) == "object" and (.bind.create_host_path // false) == false'
+  # The proxy refuses a create whose image differs from its own setting, so it must render the
+  # same value as the ide-server for whatever pin the environment carries.
+  srv_image=$(svc "osionos-ide-server" | jq -r '.environment.OSIONOS_IDE_SANDBOX_IMAGE // empty')
+  sp_check "sandbox image equals the ide-server's" ".environment.OSIONOS_IDE_SANDBOX_IMAGE == \"${srv_image:-unset}\""
+fi
+
 # ----- networks are internal: true -----
 # Read compose's real network key from the config JSON (project-prefixed or .name)
 edge_net_key=$(jq -r '.networks | keys[] | select(. | endswith("osionos-ide-edge-net") or . == "osionos-ide-edge-net")' "$cfg_file" | head -1)
