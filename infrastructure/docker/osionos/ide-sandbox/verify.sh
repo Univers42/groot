@@ -18,7 +18,7 @@
 # CapDrop ALL, no-new-privileges, tmpfs /tmp 64m + /home/coder 64m,
 # pids 512, memory 1 GiB swap equal, 1 CPU). Positive controls run first
 # so a broken probe tool never reads as a pass; every probe prints exactly
-# one ok/bad line, and the RESULT line checks the total against EXPECTED.
+# one PASS/FAIL/SKIP line, and the RESULT line checks the total against EXPECTED.
 # Ponytail: flags are copied by hand from buildContainerSpec — the proxy
 # parity test (scripts/tests/ide-proxy-parity.mjs) catches drift in the
 # bridge, this copy can still lag it.
@@ -31,7 +31,7 @@ BOX_A=ide-probe-a
 BOX_B=ide-probe-b
 RUNNER_PROBE=ide-runner-sigusr1-probe
 NAT_CHECK=/usr/local/sbin/osionos-ide-egress-nat
-pass=0; fail=0
+pass=0; fail=0; skipped=0
 EXPECTED=40
 # The VM's default gateway (user-mode QEMU: 10.0.2.2 is the physical host's loopback, where 4242
 # is the VM's own forwarded ssh). Elsewhere set a port that listens on that gateway.
@@ -39,6 +39,9 @@ GATEWAY_PORT="${OSIONOS_IDE_VERIFY_GATEWAY_PORT:-4242}"
 
 ok()   { printf '  \033[0;32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
 bad()  { printf '  \033[0;31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
+# A probe whose subject is not deployed on this host. Counted toward EXPECTED and printed in the
+# RESULT line, so a skip is never read as a pass.
+skip() { printf '  \033[0;33mSKIP\033[0m %s\n' "$1"; skipped=$((skipped+1)); }
 # in-box exec (on the isolated docker-ide daemon, box A)
 sx()   { $IDE exec "$BOX_A" sh -c "$1" 2>/dev/null; }
 # expect the in-box command to FAIL (non-zero) — the safe outcome
@@ -245,9 +248,17 @@ echo "== Socket-proxy body filter (conditions 8,9) =="
 # wget across the internal control-net (the proxy is not host-reachable).
 # `--network none`: the selfcheck runs pure assertions, needs no network — and
 # avoids depending on the main daemon's default bridge.
-if docker run --rm --network none "${OSIONOS_IDE_SOCKET_PROXY_IMAGE:-osionos-ide-socket-proxy:latest}" node /app/proxy.mjs --selfcheck >/dev/null 2>&1; then ok "socket-proxy body filter + endpoint allowlist (--selfcheck)"; else bad "socket-proxy body filter + endpoint allowlist (--selfcheck)"; fi
+# Shipped images (ship-images.sh) exist only in docker-ide, built ones on the main daemon:
+# run the selfcheck on whichever daemon holds the image.
+selfcheck() {
+  if $IDE image inspect "$1" >/dev/null 2>&1; then run_on="$IDE"
+  elif docker image inspect "$1" >/dev/null 2>&1; then run_on=docker
+  else skip "$2: image $1 is on neither daemon"; return; fi
+  if $run_on run --rm --network none "$1" node /app/proxy.mjs --selfcheck >/dev/null 2>&1; then ok "$2"; else bad "$2"; fi
+}
+selfcheck "${OSIONOS_IDE_SOCKET_PROXY_IMAGE:-osionos-ide-socket-proxy:latest}" "socket-proxy body filter + endpoint allowlist (--selfcheck)"
 # Egress proxy deny-tables (metadata/RFC1918/IPv6 ULA) — condition 5,6.
-if docker run --rm --network none "${OSIONOS_IDE_EGRESS_IMAGE:-osionos-ide-egress:latest}" node /app/proxy.mjs --selfcheck >/dev/null 2>&1; then ok "egress-proxy deny tables + IP revalidation (--selfcheck)"; else bad "egress-proxy deny tables + IP revalidation (--selfcheck)"; fi
+selfcheck "${OSIONOS_IDE_EGRESS_IMAGE:-osionos-ide-egress:latest}" "egress-proxy deny tables + IP revalidation (--selfcheck)"
 
 echo "== Code runner (shared uid) =="
 # The runner executes every user's code in ONE container, as the SAME uid as its own
@@ -272,14 +283,14 @@ if docker image inspect "$RUNNER_IMAGE" >/dev/null 2>&1; then
   fi
   docker rm -f "$rp" >/dev/null 2>&1
 else
-  bad "runner image $RUNNER_IMAGE not present — cannot verify"
+  skip "runner image $RUNNER_IMAGE not present — the code runner is not deployed on this host"
 fi
 
 echo ""
 # Pinned count (see EXPECTED above): exit 1 when a check failed OR
 # when the line count misses EXPECTED — a probe that silently did
 # not run is a failure, not a pass.
-printf 'RESULT: %d passed, %d failed (expected %d)\n' "$pass" "$fail" "$EXPECTED"
-if [ "$fail" -gt 0 ] || [ $((pass + fail)) -ne "$EXPECTED" ]; then
+printf 'RESULT: %d passed, %d failed, %d skipped (expected %d)\n' "$pass" "$fail" "$skipped" "$EXPECTED"
+if [ "$fail" -gt 0 ] || [ $((pass + fail + skipped)) -ne "$EXPECTED" ]; then
   exit 1
 fi
