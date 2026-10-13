@@ -31,7 +31,8 @@ LINK_VERIFY = $(LINK_SCRIPT) verify
 # MINI_BAAS_WAF_TLS_GID=none: grobase's WAF, the one reader of the TLS key that needs gid 101,
 # runs where grobase runs, not here; the local key stays 0600 for local-https-proxy alone.
 LINK_COMPOSE_ENV = GROBASE_LINK_DIR='$(GROBASE_LINK_DIR)' GROBASE_LINK_HOST_PORT='$(GROBASE_LINK_HOST_PORT)' COMPOSE_FILE='docker-compose.yml:docker-compose.grobase-link.yml' \
-	TRACK_BINOCLE_VHOST_HTTPS_PORT='$(LINK_VHOST_HTTPS_PORT)' MINI_BAAS_WAF_TLS_GID=none
+	TRACK_BINOCLE_VHOST_HTTPS_PORT='$(LINK_VHOST_HTTPS_PORT)' MINI_BAAS_WAF_TLS_GID=none \
+	GROBASE_LINK_UID="$$(id -u)" GROBASE_LINK_GID="$$(id -g)"
 LINK_COMPOSE = $(LINK_COMPOSE_ENV) docker compose --env-file ./.env.local
 
 link:
@@ -39,17 +40,28 @@ link:
 	@$(LINK_COMPOSE) rm -sf grobase-link-hostport >/dev/null 2>&1 || true # an ssh link forwards that port itself
 	@$(LINK_SCRIPT) up
 	@if [ "$$($(LINK_SCRIPT) mode)" = local ]; then \
-		docker ps -q --filter label=com.docker.compose.service=grobase-link | grep -q . && $(LINK_COMPOSE) rm -sf grobase-link grobase-link-redis grobase-link-mailpit; \
+		docker ps -q --filter label=com.docker.compose.service=grobase-link | grep -q . && $(LINK_COMPOSE) rm -sf grobase-link grobase-link-redis grobase-link-mailpit grobase-link-ide; \
+		$(LINK_COMPOSE) rm -sf grobase-link-ide >/dev/null 2>&1 || true; \
 		echo '[link] local mode: nothing to relay; the monolithic pipeline (make all / backend-up) applies.' >&2; \
 	else \
 		$(LINK_SCRIPT) env; \
 		docker network inspect mini-baas_mini-baas >/dev/null 2>&1 || docker network create mini-baas_mini-baas >/dev/null; \
 		if [ "$$($(LINK_SCRIPT) mode)" = direct ]; then \
 			$(LINK_COMPOSE) up -d --wait grobase-link-redis grobase-link-mailpit; \
+			$(LINK_COMPOSE) rm -sf grobase-link-ide >/dev/null 2>&1 || true; \
 		else \
 			$(LINK_COMPOSE) rm -sf grobase-link-redis grobase-link-mailpit >/dev/null 2>&1; \
 		fi; \
 		$(LINK_COMPOSE) up -d --force-recreate --wait grobase-link; \
+		if [ "$$($(LINK_SCRIPT) mode)" = ssh ]; then \
+			if $(LINK_SCRIPT) ide-linked; then \
+				COMPOSE_PROFILES=link-ide $(LINK_COMPOSE) up -d --force-recreate grobase-link-ide; \
+			else \
+				$(LINK_COMPOSE) rm -sf grobase-link-ide >/dev/null 2>&1; \
+			fi; \
+		else \
+			$(LINK_COMPOSE) rm -sf grobase-link-ide >/dev/null 2>&1 || true; \
+		fi; \
 		if [ "$$($(LINK_SCRIPT) mode)" = direct ] && [ '$(GROBASE_LINK_HOST_PORT)' != 0 ]; then \
 			$(LINK_COMPOSE) up -d grobase-link-hostport >/dev/null 2>&1 || \
 				echo '[link] 127.0.0.1:$(GROBASE_LINK_HOST_PORT) is taken; host tools get no Kong port (GROBASE_LINK_HOST_PORT=<free port>)' >&2; \

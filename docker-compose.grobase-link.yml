@@ -92,3 +92,43 @@ services:
     networks:
       - mini-baas
     restart: unless-stopped
+  # Separate from grobase-link: that relay joins mini-baas and answers to
+  # grobase's names there, so giving it the IDE name would answer to the IDE
+  # on grobase's network too; this relay joins only osionos-ide-edge-net and
+  # answers to osionos-ide-server there.
+  grobase-link-ide:
+    image: alpine/socat:1.8.0.1
+    profiles: [link-ide]
+    command: ["TCP-LISTEN:4100,fork,reuseaddr", "UNIX-CONNECT:/link-ide/ide-server-4100.sock"]
+    volumes:
+      - ${GROBASE_LINK_DIR:?set by make link}/ide:/link-ide:ro
+    networks:
+      osionos-ide-edge-net:
+        aliases:
+          - osionos-ide-server
+    # The link owner's uid (make link sets it): ssh makes the forwarded socket 0600 in a 0700 dir,
+    # and root without CAP_DAC_OVERRIDE gets EACCES on it (measured 2026-10-13).
+    user: "${GROBASE_LINK_UID:-1000}:${GROBASE_LINK_GID:-1000}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    # Ponytail: 32m and 64 pids cap a burst of parallel IDE sessions; more
+    # concurrent previews than that fail until the caps are raised.
+    mem_limit: 32m
+    pids_limit: 64
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - sh
+        - -c
+        - >-
+          printf 'GET /healthz HTTP/1.0\r\nHost: localhost\r\n\r\n' | timeout 5 socat - TCP:127.0.0.1:4100 | grep -q '^HTTP/1\.[01] 200'
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 10s
+      start_interval: 2s
+
+networks:
+  osionos-ide-edge-net:
