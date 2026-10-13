@@ -20,7 +20,10 @@
 # Talks to docker-ide's OWN socket directly (not the filtered runtime proxy).
 #
 # Usage:  sudo sh infrastructure/docker/osionos/ide-sandbox/bootstrap.sh
-# Pre:    docker-ide.service running; the two images built on the MAIN daemon.
+# Pre:    docker-ide.service running; the two images either shipped into docker-ide
+#         ahead of time (ship-images.sh — OSIONOS_IDE_SANDBOX_IMAGE /
+#         OSIONOS_IDE_EGRESS_IMAGE then hold the pinned sha256: ids it printed) or
+#         built on the MAIN daemon (README, Activation step 1).
 #         ide-egress-nat.sh up may run before or after this script (its iptables rules
 #         match addresses), but its bridge table filters only once osio-ide-sbx exists:
 #         on a fresh host run this script first, then `up`.
@@ -68,17 +71,39 @@ ensure_network() {
 # 1. Reachable?
 $IDE info >/dev/null 2>&1 || { log "docker-ide daemon not reachable at ${IDE_SOCK} — is docker-ide.service up?"; exit 1; }
 
-# 2. Seed the two images: build on the MAIN daemon, pipe into docker-ide. The
-#    ONLY image transfer; the runtime path never loads images.
+# 2. Seed the two images into docker-ide. Two ways in: the operator ships them
+#    from the build machine with ship-images.sh (the variables then hold the
+#    pinned ids docker-ide reported), or — backward compatible — they are built
+#    on the MAIN daemon and piped in here. The ONLY image transfer; the runtime
+#    path never loads images. A pinned id that docker-ide lacks cannot be
+#    `docker save`d from the main daemon (an id only docker-ide knows): refuse
+#    and name ship-images.sh.
+missing_from_ide=0
+loaded_from_main=0
 for img in "$SANDBOX_IMAGE" "$EGRESS_IMAGE"; do
-  docker image inspect "$img" >/dev/null 2>&1 || {
-    log "$img is not on the main daemon — build it first: docker build -t $img <context> (README, Activation step 1)"
-    exit 1
-  }
+  $IDE image inspect "$img" >/dev/null 2>&1 && continue
+  missing_from_ide=1
+  case "$img" in
+    sha256:*)
+      log "$img is a pinned id that docker-ide lacks — ship it first: IDE_SHIP_HOST=${IDE_SHIP_HOST:-<this vm>} sh infrastructure/docker/osionos/ide-sandbox/ship-images.sh"
+      exit 1
+      ;;
+  esac
 done
-log "seeding images into docker-ide…"
-docker save "$SANDBOX_IMAGE" | $IDE load
-docker save "$EGRESS_IMAGE" | $IDE load
+if [ "$missing_from_ide" = 0 ]; then
+  log "images already in docker-ide (shipped); not loading from the main daemon"
+else
+  for img in "$SANDBOX_IMAGE" "$EGRESS_IMAGE"; do
+    docker image inspect "$img" >/dev/null 2>&1 || {
+      log "$img is not on the main daemon — build it first: docker build -t $img <context> (README, Activation step 1)"
+      exit 1
+    }
+  done
+  log "seeding images into docker-ide…"
+  docker save "$SANDBOX_IMAGE" | $IDE load
+  docker save "$EGRESS_IMAGE" | $IDE load
+  loaded_from_main=1
+fi
 
 # 3. Networks — sandbox-net is `--internal` (sandboxes get NO off-box route,
 #    only the egress proxy on the same net); egress-net is egress-capable (the
@@ -107,8 +132,9 @@ $IDE network connect "$EGRESS_NET" ide-egress
 #    largest image on the machine) goes once docker-ide confirms it has it; the build
 #    cache keeps a rebuild quick. Cleanup only: a refusal is reported, never fatal.
 #    `sudo OSIONOS_IDE_KEEP_MAIN_COPY=1 sh bootstrap.sh` keeps it. The egress image
-#    stays: verify.sh runs its selfcheck on the main daemon.
-if [ "${OSIONOS_IDE_KEEP_MAIN_COPY:-0}" != 1 ]; then
+#    stays: verify.sh runs its selfcheck on the main daemon. Only when step 2
+#    loaded the images from the main daemon — a shipped image was never there.
+if [ "$loaded_from_main" = 1 ] && [ "${OSIONOS_IDE_KEEP_MAIN_COPY:-0}" != 1 ]; then
   if $IDE image inspect "$SANDBOX_IMAGE" >/dev/null 2>&1 && docker image rm "$SANDBOX_IMAGE" >/dev/null; then
     log "removed the main daemon's copy of $SANDBOX_IMAGE (docker-ide has it)"
   else
