@@ -12,23 +12,32 @@
 # the backend). The sandbox network is `--internal` (L2 only, no NAT needed); the
 # in-daemon egress proxy's outbound NAT is a single scoped rule installed
 # separately (ide-egress-nat.sh), never via this daemon.
+# `--containerd-namespace=osionos-ide` (plus the separate plugins namespace
+# `osionos-ide-plugins`) keeps this daemon's containers in their own containerd
+# namespaces on the SHARED system containerd, so the two daemons never see each
+# other's containers at the containerd level; and
+# `--config-file=/etc/docker-ide/daemon.json` keeps it from reading the MAIN
+# daemon's /etc/docker/daemon.json. The whole plane (daemon + every box) is
+# capped as one group by osionos-ide.slice.
 #
 # Install (operator, once):
-#   sudo cp infrastructure/docker/osionos/ide-sandbox/docker-ide.service \
-#     /etc/systemd/system/docker-ide.service
-#   sudo systemctl daemon-reload && sudo systemctl enable --now docker-ide
+#   sudo sh infrastructure/docker/osionos/ide-sandbox/install-docker-ide.sh
 # Requires the loopback prjquota data-root mounted at /var/lib/docker-ide first
 # (see README.md "Activation").
 
 [Unit]
 Description=osionos IDE isolated Docker daemon
 After=network-online.target
+After=osionos-ide.slice
 Wants=network-online.target
+Requires=osionos-ide.slice
 # Must not start before the quota-backed data-root is mounted.
 RequiresMountsFor=/var/lib/docker-ide
 
 [Service]
 Type=notify
+# The daemon itself counts against the slice's memory/CPU/IO cap.
+Slice=osionos-ide.slice
 ExecStart=/usr/bin/dockerd \
   --data-root=/var/lib/docker-ide \
   --exec-root=/run/docker-ide \
@@ -40,7 +49,11 @@ ExecStart=/usr/bin/dockerd \
   --bridge=none \
   --default-address-pool base=10.202.0.0/16,size=24 \
   --storage-driver=overlay2 \
-  --group=docker
+  --group=docker \
+  --cgroup-parent=osionos-ide.slice \
+  --containerd-namespace=osionos-ide \
+  --containerd-plugins-namespace=osionos-ide-plugins \
+  --config-file=/etc/docker-ide/daemon.json
 ExecReload=/bin/kill -s HUP $MAINPID
 Restart=on-failure
 RestartSec=3
