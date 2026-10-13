@@ -129,6 +129,9 @@ services:
       OSIONOS_IDE_SANDBOX: ${OSIONOS_IDE_SANDBOX:-}
       OSIONOS_IDE_DOCKER_HOST: ${OSIONOS_IDE_DOCKER_HOST:-}
       OSIONOS_IDE_EGRESS_GIT_HOSTS: ${OSIONOS_IDE_EGRESS_GIT_HOSTS:-github.com}
+      # Comma-separated account ids allowed a sandbox (a sandbox is a shell on a shared
+      # host, so access is opt-in). Empty = nobody, even with the two gates above set.
+      OSIONOS_IDE_ALLOWED_SUBJECTS: ${OSIONOS_IDE_ALLOWED_SUBJECTS:-}
       HOME: ${OSIONOS_BRIDGE_HOME:-/tmp}
       PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     expose:
