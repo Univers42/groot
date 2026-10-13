@@ -22,7 +22,12 @@
 #     leave by the uplink only, never toward RFC1918 / loopback / link-local / CGNAT (tailnet).
 #   - raw PREROUTING: the host itself (bridge gateway, LAN and tailnet addresses) is INPUT,
 #     which no FORWARD rule sees. raw runs before conntrack and NAT, so this also covers a
-#     DNAT to a published host port.
+#     DNAT to a published host port. `! -i lo`: the host's own connection to a pool gateway
+#     (10.202.0.1) leaves with that address as its source and re-enters through lo, so
+#     without it the host could not reach its own sshd there (verify.sh's control, measured
+#     on baas 2026-10-13). A box's packets arrive on its bridge, never on lo. This holds while
+#     no host-side process dials addresses a box supplies: such a relay's connections
+#     would leave from lo and share the exemption.
 #   - bridge family nft table: br_netfilter is not loaded, so frames between two boxes on the
 #     shared sandbox bridge never reach iptables. On that bridge a box may talk to the egress
 #     proxy's port and nothing else; ARP passes so the proxy stays resolvable.
@@ -100,6 +105,7 @@ EOF_BRIDGE
 
 # What the previous version of this script put straight into FORWARD.
 remove_legacy() {
+  del raw PREROUTING -s "$POOL" -m addrtype --dst-type LOCAL -j DROP
   for cidr in $BLOCK; do del filter FORWARD -s "$POOL" -d "$cidr" -j DROP; done
   del filter FORWARD -s "$POOL" -o "$UPLINK" -j ACCEPT
   del filter FORWARD -d "$POOL" -i "$UPLINK" -m state --state RELATED,ESTABLISHED -j ACCEPT
@@ -114,7 +120,7 @@ up() {
   ensure_first filter FORWARD -j DOCKER-USER
   ensure_first filter DOCKER-USER -s "$POOL" -j OSIO-IDE
   ensure_first filter DOCKER-USER -d "$POOL" -j OSIO-IDE
-  ensure_first raw PREROUTING -s "$POOL" -m addrtype --dst-type LOCAL -j DROP
+  ensure_first raw PREROUTING -s "$POOL" ! -i lo -m addrtype --dst-type LOCAL -j DROP
   iptables -t nat -C POSTROUTING -s "$POOL" ! -d "$POOL" -o "$UPLINK" -j MASQUERADE 2>/dev/null \
     || iptables -t nat -A POSTROUTING -s "$POOL" ! -d "$POOL" -o "$UPLINK" -j MASQUERADE
   bridge_rules | nft -f -
@@ -129,7 +135,7 @@ down() {
   del filter DOCKER-USER -d "$POOL" -j OSIO-IDE
   iptables -F OSIO-IDE 2>/dev/null || true
   iptables -X OSIO-IDE 2>/dev/null || true
-  del raw PREROUTING -s "$POOL" -m addrtype --dst-type LOCAL -j DROP
+  del raw PREROUTING -s "$POOL" ! -i lo -m addrtype --dst-type LOCAL -j DROP
   del nat POSTROUTING -s "$POOL" ! -d "$POOL" -o "$UPLINK" -j MASQUERADE
   nft delete table bridge osio_ide 2>/dev/null || true
   remove_legacy
@@ -157,7 +163,7 @@ check() {
   probe "FORWARD -> DOCKER-USER" iptables -C FORWARD -j DOCKER-USER
   probe "DOCKER-USER -s pool -> OSIO-IDE" iptables -C DOCKER-USER -s "$POOL" -j OSIO-IDE
   probe "DOCKER-USER -d pool -> OSIO-IDE" iptables -C DOCKER-USER -d "$POOL" -j OSIO-IDE
-  probe "raw drops pool -> host addresses" iptables -t raw -C PREROUTING -s "$POOL" -m addrtype --dst-type LOCAL -j DROP
+  probe "raw drops pool -> host addresses" iptables -t raw -C PREROUTING -s "$POOL" ! -i lo -m addrtype --dst-type LOCAL -j DROP
   probe "nat MASQUERADE pool out $UPLINK" iptables -t nat -C POSTROUTING -s "$POOL" ! -d "$POOL" -o "$UPLINK" -j MASQUERADE
   probe "bridge $SANDBOX_BRIDGE isolated" bridge_isolated
   [ "$CHECK_FAILED" -eq 0 ] || exit 1
