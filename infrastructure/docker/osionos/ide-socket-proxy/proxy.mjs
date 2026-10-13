@@ -15,9 +15,12 @@
 // UNIX socket and exposes a filtered TCP endpoint that:
 //   - allowlists exactly the endpoints the provisioner needs (containers/exec/
 //     volumes/networks/ping) and DENIES /build, /images, /commit, /system, etc.;
-//   - inspects POST /containers/create and REJECTS a body carrying Privileged,
-//     host Binds/Mounts, host NetworkMode/PidMode/IpcMode/UTSMode, CapAdd, or
-//     Devices — so even a compromised provisioner cannot escalate;
+//   - matches the POST /containers/create and POST /containers/<id>/exec BODIES
+//     against the bridge's own shape (create-shape.mjs): only the fields the
+//     spec builders emit are accepted, every other shape gets a reason back;
+//   - keeps the escalation denylist (Privileged, host Binds/Mounts, host
+//     NetworkMode/PidMode/IpcMode/UTSMode, CapAdd, Devices) as a second layer
+//     UNDER that shape check, so a spec that drifts is still covered;
 //   - pins every container-scoped path id to the `ide-<32hex>` shape, so an exec
 //     can never target `mini-baas-postgres` or a foreign container.
 // Off-the-shelf socket proxies gate endpoints but not the create BODY; that gap
@@ -26,20 +29,25 @@
 import http from "node:http";
 import net from "node:net";
 import { fileURLToPath } from "node:url";
+import { createShapeViolation, execShapeViolation, shapeLimits } from "./create-shape.mjs";
 
 const LISTEN_PORT = Number(process.env.IDE_SOCKET_PROXY_PORT || 2375);
 const DOCKER_SOCK = process.env.IDE_DOCKER_SOCK || "/dind-run/docker.sock";
 const ID = "ide-[0-9a-f]{32}";
+const EXEC_PATH = new RegExp(`^/(v[\\d.]+/)?containers/${ID}/exec$`);
+const VOLUME_NAME_RE = /^osio-ide-vol-[0-9a-f]{32}$/;
+const MANAGED_LABEL = "osio.ide.managed";
+const LIMITS = shapeLimits(process.env);
 
 // Allowed (METHOD, path-regex). Anything not listed is denied.
 const ALLOW = [
   ["GET", /^\/_ping$/],
   ["GET", /^\/(v[\d.]+\/)?containers\/json(\?.*)?$/],
-  ["POST", /^\/(v[\d.]+\/)?containers\/create(\?.*)?$/],
+  ["POST", /^\/(v[\d.]+\/)?containers\/create\?name=ide-[0-9a-f]{32}$/],
   ["GET", new RegExp(`^/(v[\\d.]+/)?containers/${ID}/json$`)],
   ["POST", new RegExp(`^/(v[\\d.]+/)?containers/${ID}/start$`)],
   ["POST", new RegExp(`^/(v[\\d.]+/)?containers/${ID}/stop(\\?.*)?$`)],
-  ["POST", new RegExp(`^/(v[\\d.]+/)?containers/${ID}/exec$`)],
+  ["POST", EXEC_PATH],
   ["DELETE", new RegExp(`^/(v[\\d.]+/)?containers/${ID}(\\?.*)?$`)],
   ["POST", /^\/(v[\d.]+\/)?exec\/[a-f0-9]+\/start$/],
   // PTY geometry only — resizes an already-created exec's TTY. No new
@@ -76,13 +84,25 @@ export function unsafeCreateBody(body) {
  *  rejects `Mounts[].Type === "bind"` — so a `local` volume created with
  *  `DriverOpts {type:none, o:bind, device:/}` and then mounted as `Type:"volume"` bound
  *  the daemon host's filesystem into a sandbox. The provisioner only ever sends
- *  `{Name, Driver:"local", Labels}`, so any driver option or other driver is refused. */
+ *  `{Name, Driver:"local", Labels}`, so any driver option or other driver is refused.
+ *  Name and Labels are pinned to the bridge's own shape too: `osio-ide-vol-<32hex>`
+ *  derived from the same digest as the container, and exactly the managed label —
+ *  otherwise a second volume carrying someone else's identity could be mounted. */
 export function unsafeVolumeBody(body) {
   const driver = String(body?.Driver ?? "local");
   if (driver !== "local") return "Driver";
   const opts = body?.DriverOpts;
   if (opts && typeof opts === "object" && Object.keys(opts).length) return "DriverOpts";
+  if (!VOLUME_NAME_RE.test(String(body?.Name ?? ""))) return "Name";
+  if (!isManagedLabels(body?.Labels)) return "Labels";
   return null;
+}
+
+/** Labels must be exactly the one managed key — compared as a key array, never by
+ *  copying body keys onto an object. */
+function isManagedLabels(labels) {
+  const keys = Object.keys(labels ?? {});
+  return keys.length === 1 && keys[0] === MANAGED_LABEL && labels[MANAGED_LABEL] === "1";
 }
 
 /** Reject a network create that leaves the isolated bridge model (condition 8).
@@ -94,12 +114,24 @@ export function unsafeNetworkBody(body) {
   return null;
 }
 
-/** The body vetter for a create endpoint, or null when the endpoint carries no body risk. */
+/** The body vetter for a POST endpoint, or null when the endpoint carries no body risk.
+ *  A create body must match the bridge's shape FIRST, then survive the escalation
+ *  denylist — the two cover different directions, so both run. */
 function bodyVetter(path) {
-  if (/\/containers\/create/.test(path)) return unsafeCreateBody;
+  if (/\/containers\/create/.test(path)) {
+    return (body) => createShapeViolation(body, path, LIMITS) ?? unsafeCreateBody(body);
+  }
+  if (EXEC_PATH.test(path)) return execShapeViolation;
   if (/\/volumes\/create$/.test(path)) return unsafeVolumeBody;
   if (/\/networks\/create$/.test(path)) return unsafeNetworkBody;
   return null;
+}
+
+// Ponytail: the 2 MiB exec ceiling is a guess at the largest base64 file write
+// (the bridge caps its own request body at 1 MiB, so a write larger than this is
+// refused with 413) and the 256 KiB create ceiling predates it; both move by hand.
+function bodyCap(path) {
+  return EXEC_PATH.test(path) ? 2 * 1024 * 1024 : 256 * 1024;
 }
 
 function deny(res, code, message) {
@@ -117,27 +149,38 @@ function forward(clientReq, clientRes, bodyBuffer) {
   else clientReq.pipe(upstream);
 }
 
+/** Buffer a vetted body, refuse an oversized one with a status the client can read.
+ *  Over the cap the request is drained instead of destroyed — a destroyed request
+ *  takes the socket with it and leaves the caller waiting with no answer. */
+function vetBody(req, res, vet, cap) {
+  const chunks = [];
+  let size = 0;
+  let over = false;
+  req.on("data", (c) => {
+    size += c.length;
+    if (size > cap) { over = true; chunks.length = 0; return; }
+    chunks.push(c);
+  });
+  req.on("end", () => {
+    if (over) return deny(res, 413, "body too large");
+    const raw = Buffer.concat(chunks);
+    let body;
+    try { body = JSON.parse(raw.toString("utf8") || "{}"); } catch { return deny(res, 400, "invalid create body"); }
+    const bad = vet(body);
+    if (bad) return deny(res, 403, `create rejected: ${bad}`);
+    forward(req, res, raw);
+  });
+}
+
 const server = http.createServer((req, res) => {
   const method = (req.method || "GET").toUpperCase();
   const path = req.url || "/";
   if (!isAllowed(method, path)) return deny(res, 403, `endpoint not allowed: ${method} ${path}`);
 
-  // Every create (container, volume, network) has its body vetted before it reaches the daemon.
+  // Every create (container, volume, network) and every exec create has its body
+  // vetted before it reaches the daemon.
   const vet = method === "POST" ? bodyVetter(path) : null;
-  if (vet) {
-    const chunks = [];
-    let size = 0;
-    req.on("data", (c) => { size += c.length; if (size > 256 * 1024) req.destroy(); chunks.push(c); });
-    req.on("end", () => {
-      const raw = Buffer.concat(chunks);
-      let body;
-      try { body = JSON.parse(raw.toString("utf8") || "{}"); } catch { return deny(res, 400, "invalid create body"); }
-      const bad = vet(body);
-      if (bad) return deny(res, 403, `create rejected: ${bad}`);
-      forward(req, res, raw);
-    });
-    return;
-  }
+  if (vet) return vetBody(req, res, vet, bodyCap(path));
   forward(req, res, null);
 });
 
@@ -165,6 +208,11 @@ const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 if (isMain && process.argv.includes("--selfcheck")) {
   const fail = [];
   const chk = (label, got, want) => { if (got !== want) fail.push(`${label}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`); };
+  const refuse = (label, got) => { if (got === null) fail.push(`${label}: accepted, want a refusal reason`); };
+
+  // The canonical bridge body and its one-field variants live with the shape cases.
+  const { DIGEST, CANON_PATH, mk, host } = await import("./create-shape.selfcheck.mjs");
+
   chk("allow create", isAllowed("POST", "/containers/create?name=ide-" + "a".repeat(32)), true);
   chk("allow start", isAllowed("POST", "/containers/ide-" + "a".repeat(32) + "/start"), true);
   chk("allow resize", isAllowed("POST", "/exec/deadbeef01/resize?w=120&h=40"), true);
@@ -173,6 +221,8 @@ if (isMain && process.argv.includes("--selfcheck")) {
   chk("deny build", isAllowed("POST", "/build"), false);
   chk("deny foreign exec", isAllowed("POST", "/containers/mini-baas-postgres/exec"), false);
   chk("deny foreign start", isAllowed("POST", "/containers/mini-baas-postgres/start"), false);
+  chk("deny create without name", isAllowed("POST", "/containers/create"), false);
+  chk("deny create with short name", isAllowed("POST", "/containers/create?name=x"), false);
   chk("privileged rejected", unsafeCreateBody({ HostConfig: { Privileged: true } }), "Privileged");
   chk("binds rejected", unsafeCreateBody({ HostConfig: { Binds: ["/:/host"] } }), "Binds");
   chk("host net rejected", unsafeCreateBody({ HostConfig: { NetworkMode: "host" } }), "NetworkMode");
@@ -181,11 +231,17 @@ if (isMain && process.argv.includes("--selfcheck")) {
   chk("clean body ok", unsafeCreateBody({ HostConfig: { CapDrop: ["ALL"], Mounts: [{ Type: "volume" }] } }), null);
   chk("host-bind volume rejected", unsafeVolumeBody({ Name: "x", Driver: "local", DriverOpts: { type: "none", o: "bind", device: "/" } }), "DriverOpts");
   chk("foreign volume driver rejected", unsafeVolumeBody({ Name: "x", Driver: "vieux/sshfs" }), "Driver");
-  chk("provisioner volume ok", unsafeVolumeBody({ Name: "ide-vol", Driver: "local", Labels: { "osio.ide.managed": "1" } }), null);
+  chk("provisioner volume ok", unsafeVolumeBody({ Name: `osio-ide-vol-${DIGEST}`, Driver: "local", Labels: { [MANAGED_LABEL]: "1" } }), null);
+  chk("unmanaged volume name rejected", unsafeVolumeBody({ Name: "other", Driver: "local" }), "Name");
+  chk("empty volume labels rejected", unsafeVolumeBody({ Name: `osio-ide-vol-${DIGEST}`, Driver: "local", Labels: {} }), "Labels");
   chk("macvlan network rejected", unsafeNetworkBody({ Name: "x", Driver: "macvlan" }), "Driver");
   chk("provisioner network ok", unsafeNetworkBody({ Name: "ide-net", Driver: "bridge", Internal: true }), null);
   chk("volume create is vetted", bodyVetter("/v1.47/volumes/create") === unsafeVolumeBody, true);
   chk("network create is vetted", bodyVetter("/networks/create") === unsafeNetworkBody, true);
+  chk("create vetter runs the shape check", bodyVetter(CANON_PATH)(mk()), null);
+  refuse("create vetter refuses Privileged", bodyVetter(CANON_PATH)(host({ Privileged: true })));
+  chk("exec create is vetted", bodyVetter(`/containers/ide-${DIGEST}/exec`)({ User: "10001:10001" }), "WorkingDir");
+
   if (fail.length) { process.stderr.write(`selfcheck FAIL:\n${fail.join("\n")}\n`); process.exit(1); }
   process.stdout.write("selfcheck OK: socket-proxy allow/deny + body filter correct\n");
   process.exit(0);
