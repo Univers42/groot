@@ -1,8 +1,8 @@
 -- Communities for the osionos messenger — server-side groupings of chat
 -- channels with their own membership/roles. Same discipline as
--- osionos-chat-migration.sql: idempotent DDL, RLS on, service_role FOR ALL,
--- authenticated member SELECT. The bridge talks PostgREST with the service key
--- and enforces membership itself; RLS is defence in depth.
+-- osionos-chat-migration.sql: idempotent DDL, RLS on, service_role FOR ALL.
+-- The bridge (service_role) is the only reader and writer; it talks PostgREST
+-- with the service key and enforces membership itself.
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
@@ -39,23 +39,12 @@ ALTER TABLE public.osionos_communities         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.osionos_community_channels  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.osionos_community_members   ENABLE ROW LEVEL SECURITY;
 
--- Members of a community may read it.
+-- The bridge (service_role) is the only reader and writer; nobody else gets a grant.
 DROP POLICY IF EXISTS osionos_communities_select_member ON public.osionos_communities;
-CREATE POLICY osionos_communities_select_member ON public.osionos_communities
-  FOR SELECT TO authenticated USING (
-    EXISTS (SELECT 1 FROM public.osionos_community_members m
-            WHERE m.community_id = id AND m.user_id = auth.uid()));
 
 DROP POLICY IF EXISTS osionos_community_members_select_own ON public.osionos_community_members;
-CREATE POLICY osionos_community_members_select_own ON public.osionos_community_members
-  FOR SELECT TO authenticated USING (user_id = auth.uid());
 
 DROP POLICY IF EXISTS osionos_community_channels_select_member ON public.osionos_community_channels;
-CREATE POLICY osionos_community_channels_select_member ON public.osionos_community_channels
-  FOR SELECT TO authenticated USING (
-    EXISTS (SELECT 1 FROM public.osionos_community_members m
-            WHERE m.community_id = osionos_community_channels.community_id
-              AND m.user_id = auth.uid()));
 
 DROP POLICY IF EXISTS osionos_communities_service_role_all ON public.osionos_communities;
 CREATE POLICY osionos_communities_service_role_all ON public.osionos_communities
@@ -69,9 +58,6 @@ DROP POLICY IF EXISTS osionos_community_members_service_role_all ON public.osion
 CREATE POLICY osionos_community_members_service_role_all ON public.osionos_community_members
   FOR ALL TO service_role USING (true) WITH CHECK (true);
 
-GRANT SELECT ON public.osionos_communities        TO authenticated;
-GRANT SELECT ON public.osionos_community_channels  TO authenticated;
-GRANT SELECT ON public.osionos_community_members   TO authenticated;
 GRANT ALL    ON public.osionos_communities         TO service_role;
 GRANT ALL    ON public.osionos_community_channels  TO service_role;
 GRANT ALL    ON public.osionos_community_members   TO service_role;

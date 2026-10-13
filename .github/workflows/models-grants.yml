@@ -1,0 +1,47 @@
+# Models grants gate — models/*.sql must leave every public.osionos_* relation reachable
+# by service_role and by nothing else. Runs the two throwaway scenarios of
+# scripts/verify/models-grants.sh, each in its own --network none container, so nothing
+# here needs a stack, a secret or a ghcr login (grobase-postgres is public).
+name: Models grants
+
+on:
+  pull_request:
+    paths:
+      - "models/**"
+      - "scripts/apply-models-migrations.sh"
+      - "scripts/verify/models-grants*"
+      - "scripts/verify/models-grants/**"
+      - "infrastructure/makes/baas.mk"
+      - ".github/workflows/models-grants.yml"
+  push:
+    branches: ["main", "develop", "feat/**", "fix/**"]
+    paths:
+      - "models/**"
+      - "scripts/apply-models-migrations.sh"
+      - "scripts/verify/models-grants*"
+      - "scripts/verify/models-grants/**"
+      - "infrastructure/makes/baas.mk"
+      - ".github/workflows/models-grants.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: models-grants-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  catalog:
+    name: osionos_* relations are service_role-only
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+      - name: Check out grobase submodule
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+        run: |
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          git submodule update --init apps/grobase
+      - name: Verify grants, policies and the service_role round trip
+        run: make models-grants-verify
