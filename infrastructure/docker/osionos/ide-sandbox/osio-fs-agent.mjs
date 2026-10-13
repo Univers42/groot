@@ -6,7 +6,7 @@
 //    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         //
 //                                                 +#+#+#+#+#+   +#+            //
 //    Created: 2026/07/19 00:00:00 by dlesieur          #+#    #+#              //
-//    Updated: 2026/07/19 00:00:00 by dlesieur         ###   ########.fr        //
+//    Updated: 2026/10/13 00:00:00 by dlesieur         ###   ########.fr        //
 //                                                                              //
 // **************************************************************************** //
 
@@ -132,8 +132,12 @@ function startWatch() {
     const abs = path.join(absDir, String(filename));
     const rel = relOf(abs);
     if (!rel || isIgnored(rel, extraDirs)) return;
+    // A gone path returns undefined instead of throwing: one exception per delete event was
+    // 60% of the CPU to drain a bulk rm -rf (13063 events, two 7-run medians: 161/162 →
+    // 64/77 ms).
     let stat;
-    try { stat = fs.statSync(abs); } catch { emit("delete", rel); return; }
+    try { stat = fs.statSync(abs, { throwIfNoEntry: false }); } catch { /* ENOTDIR, EACCES: gone too */ }
+    if (!stat) { emit("delete", rel); return; }
     if (stat.isDirectory()) { addTree(abs, true); return; } // new subtree → watch + surface its files
     const meta = readMeta(abs);
     if (meta) emit("write", rel, meta);
