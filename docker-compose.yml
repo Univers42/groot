@@ -737,6 +737,11 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    # The image runs as `node`; the socket is 0660 root:<docker gid of the HOST>, so the proxy
+    # joins that numeric gid (deploy-plane.sh reads it with `stat -c %g` on the socket). Unset,
+    # 0 grants nothing: every call answers 502 "daemon unreachable" (measured on the VM).
+    group_add:
+      - "${OSIONOS_IDE_DOCKER_GID:-0}"
     # Ponytail: one Node process relaying streams fits in 64m and 64 pids; a burst
     # of many concurrent PTY attaches needs more — raise both together.
     mem_limit: 64m

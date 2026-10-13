@@ -208,6 +208,7 @@ else
   sp_check "security_opt no-new-privileges" 'any(.security_opt[]?; . == "no-new-privileges:true")'
   sp_check "mem_limit set" '.mem_limit != null and .mem_limit != ""'
   sp_check "pids_limit set" '.pids_limit != null'
+  sp_check "group_add is one numeric gid" '(.group_add | length) == 1 and (.group_add[0] | tostring | test("^[0-9]+$"))'
   sp_check "exactly one volume" '(.volumes | type) == "array" and (.volumes | length) == 1'
   sp_vol "bind of /dind-run/docker.sock" '.type == "bind" and .target == "/dind-run/docker.sock"'
   sp_vol "create_host_path false" '(.bind | type) == "object" and (.bind.create_host_path // false) == false'
