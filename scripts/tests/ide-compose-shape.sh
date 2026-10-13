@@ -218,39 +218,52 @@ else
   fi
 fi
 
-# ----- Image closure: the static ./x.mjs import closure of each server entry is in the bridge image -----
-# Ponytail: follows `from './x.mjs'` and `import './x.mjs'` text only. A dynamic
-# import(), a ../ path or a bare package specifier is invisible, so a module reached
-# that way can be missing from the image without a FAIL here.
-app_scripts="$REPO_ROOT/apps/osionos/app/scripts"
-dockerfile="$REPO_ROOT/infrastructure/docker/osionos/bridge.Dockerfile"
+# ----- Image closure: every module an image's entries import is a COPY source of its Dockerfile -----
+# Ponytail: follows `from './x.mjs'`, `import './x.mjs'` and `import("./x.mjs")` text
+# only, and compares basenames (one source directory per image). A computed import(), a
+# ../ path or a bare package specifier is invisible, so a module reached that way can be
+# missing from the image without a FAIL here.
 
-if [ ! -f "$app_scripts/ide-server.mjs" ]; then
-  printf 'SKIP image closure (submodule not checked out)\n'
-else
-  # The COPY instruction that ships the bridge, continuation lines joined.
-  copied=$(sed ':a;/\\$/N;s/\\\n/ /;ta' "$dockerfile" | grep -E '^COPY .*scripts/bridge-api\.mjs' \
-    | tr -s ' \t' '\n' | grep -E '^scripts/[^/]+\.mjs$' | sort -u)
-  queue=(ide-server.mjs bridge-api.mjs)
-  seen=" "
-  idx=0
-  closure_ok=true
+# copied_modules DOCKERFILE — basenames of every .mjs a COPY instruction sources (its
+# destination, the last word, dropped), continuation lines joined.
+copied_modules() {
+  sed ':a;/\\$/N;s/\\\n/ /;ta' "$1" \
+    | awk '$1 == "COPY" { for (i = 2; i < NF; i++) if ($i ~ /\.mjs$/) { n = split($i, part, "/"); print part[n] } }' \
+    | sort -u
+}
+
+# local_imports FILE — the ./x.mjs modules FILE imports, statically or by a literal import().
+local_imports() {
+  grep -oE "(from|import)[[:space:]]*\(?[[:space:]]*['\"]\./[^'\"/]+\.mjs['\"]" "$1" \
+    | sed -E "s/.*['\"]\.\/([^'\"]+)['\"]$/\1/"
+}
+
+# image_closure SRC_DIR DOCKERFILE "ENTRY…" — FAIL for each module of the closure the
+# Dockerfile does not copy or SRC_DIR does not hold.
+image_closure() {
+  local copied queue seen=" " idx=0 mod closure_ok=true label
+  label=${2#"$REPO_ROOT"/}
+  copied=$(copied_modules "$2")
+  read -r -a queue <<< "$3"
   while [ "$idx" -lt "${#queue[@]}" ]; do
     mod="${queue[$idx]}"
     idx=$((idx + 1))
     case "$seen" in *" $mod "*) continue ;; esac
     seen="$seen$mod "
-    if ! grep -qxF "scripts/$mod" <<< "$copied"; then
-      closure_ok=false
-      fail "image closure: scripts/$mod missing from bridge.Dockerfile COPY"
-    fi
-    [ -f "$app_scripts/$mod" ] || { closure_ok=false; fail "image closure: scripts/$mod imported but absent"; continue; }
-    while IFS= read -r dep; do
-      queue+=("$dep")
-    done < <(grep -oE "(from|import)[[:space:]]*['\"]\./[^'\"/]+\.mjs['\"]" "$app_scripts/$mod" \
-      | sed -E "s/.*['\"]\.\/([^'\"]+)['\"]$/\1/")
+    grep -qxF "$mod" <<< "$copied" || { closure_ok=false; fail "image closure: $mod missing from $label COPY"; }
+    [ -f "$1/$mod" ] || { closure_ok=false; fail "image closure: $mod imported but absent"; continue; }
+    while IFS= read -r dep; do queue+=("$dep"); done < <(local_imports "$1/$mod")
   done
-  [ "$closure_ok" = false ] || ok "image closure: $(wc -w <<< "$seen") modules, all in bridge.Dockerfile COPY"
+  [ "$closure_ok" = false ] || ok "image closure: $(wc -w <<< "$seen") modules, all in $label COPY"
+}
+
+osionos_docker="$REPO_ROOT/infrastructure/docker/osionos"
+image_closure "$osionos_docker/ide-socket-proxy" "$osionos_docker/ide-socket-proxy/Dockerfile" "proxy.mjs"
+image_closure "$osionos_docker/ide-egress-proxy" "$osionos_docker/ide-egress-proxy/Dockerfile" "proxy.mjs"
+if [ ! -f "$REPO_ROOT/apps/osionos/app/scripts/ide-server.mjs" ]; then
+  printf 'SKIP image closure of bridge.Dockerfile (submodule not checked out)\n'
+else
+  image_closure "$REPO_ROOT/apps/osionos/app/scripts" "$osionos_docker/bridge.Dockerfile" "ide-server.mjs bridge-api.mjs"
 fi
 
 exit "$failed"
