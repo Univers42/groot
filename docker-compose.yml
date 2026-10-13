@@ -723,7 +723,8 @@ services:
   # The filtering docker-socket proxy — the ONLY path from the provisioner to the
   # docker-ide daemon (condition 2). It bind-mounts the host /run/docker-ide.sock
   # and exposes a filtered TCP endpoint that allowlists endpoints AND vets the
-  # create body (condition 8). Reachable only by the bridge on the control net.
+  # create body (condition 8). Reachable only by osionos-ide-server on the control
+  # net (C17 moved the provisioner there).
   osionos-ide-socket-proxy:
     build:
       context: infrastructure/docker/osionos/ide-socket-proxy
@@ -736,11 +737,25 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    # Ponytail: one Node process relaying streams fits in 64m and 64 pids; a burst
+    # of many concurrent PTY attaches needs more — raise both together.
+    mem_limit: 64m
+    pids_limit: 64
     environment:
       IDE_DOCKER_SOCK: /dind-run/docker.sock
+      # The create-body vetting allows exactly this image; it must be the one osionos-ide-server
+      # asks for, so both interpolate the same variable (a pinned sha256 id from ship-images.sh).
+      OSIONOS_IDE_SANDBOX_IMAGE: ${OSIONOS_IDE_SANDBOX_IMAGE:-osionos-ide-sandbox:latest}
     volumes:
-      # Host bind of the isolated daemon's socket (docker-ide.service).
-      - ${OSIONOS_IDE_DOCKER_SOCK:-/run/docker-ide.sock}:/dind-run/docker.sock
+      # Host bind of the isolated daemon's socket (docker-ide.socket owns the file,
+      # so a daemon restart keeps the inode this mount holds). Long syntax so the
+      # start fails when the socket is absent: a missing host path must never
+      # become a directory docker-ide can no longer bind (README, step A).
+      - type: bind
+        source: ${OSIONOS_IDE_DOCKER_SOCK:-/run/docker-ide.sock}
+        target: /dind-run/docker.sock
+        bind:
+          create_host_path: false
     expose:
       - "2375"
     networks:

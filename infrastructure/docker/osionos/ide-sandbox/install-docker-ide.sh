@@ -24,7 +24,8 @@ set -eu
 
 UNIT_DIR=/etc/systemd/system
 CONF_DIR=/etc/docker-ide
-SOCK_URL=unix:///run/docker-ide.sock
+SOCK_PATH=/run/docker-ide.sock
+SOCK_URL=unix://$SOCK_PATH
 DATA_ROOT=/var/lib/docker-ide
 
 ok=0
@@ -82,19 +83,32 @@ refuse_unless_main_on_iptables() {
 
 install_units() {
   install -o root -g root -m 0644 "$srcdir/docker-ide.service" "$UNIT_DIR/docker-ide.service"
+  # A host that installed the old set has no socket unit, and without it dockerd
+  # goes back to creating (and re-creating on restart) the socket itself.
+  install -o root -g root -m 0644 "$srcdir/docker-ide.socket" "$UNIT_DIR/docker-ide.socket"
   install -o root -g root -m 0644 "$srcdir/osionos-ide.slice" "$UNIT_DIR/osionos-ide.slice"
   install -d -m 0755 "$CONF_DIR"
   install -o root -g root -m 0644 "$srcdir/docker-ide.daemon.json" "$CONF_DIR/daemon.json"
 }
 
+# The order is written for a host where the OLD unit is still running and dockerd
+# itself owns $SOCK_PATH: the daemon must let go of the path before systemd can
+# take the socket over, and the socket must exist before the daemon that
+# inherits it starts.
 bring_up_daemon() {
   systemctl daemon-reload
-  systemctl enable --now docker-ide
-  wait_for_daemon "enable --now"
+  # Releases the old socket file (a no-op when the service is already stopped,
+  # which is what a fresh host looks like after install_units above).
+  systemctl stop docker-ide.service
+  # From here on systemd owns the socket, so every later restart reuses one inode.
+  systemctl enable --now docker-ide.socket
+  systemctl enable docker-ide.service
+  systemctl restart docker-ide.service
+  wait_for_daemon "start"
   # The restart re-reads the new unit — slice, containerd namespaces, own
   # config file — so the final state is proven, not just the first start.
-  systemctl restart docker-ide
-  wait_for_daemon "restart"
+  systemctl restart docker-ide.service
+  wait_for_daemon "second restart"
 }
 
 wait_for_daemon() {
@@ -112,6 +126,14 @@ wait_for_daemon() {
 }
 
 verify() {
+  verify_daemon_plane "$1"
+  verify_socket_unit
+  verify_socket_outlives_restart
+}
+
+# What the RUNNING daemon reports. A value it cannot give (unreachable daemon,
+# failing `ide info`) comes back empty, and empty is a FAIL — never a pass.
+verify_daemon_plane() {
   if docker ps -q --no-trunc | sort | cmp -s - "$1"; then
     pass "main daemon running containers byte-identical"
   else
@@ -137,8 +159,12 @@ verify() {
     fail_ "docker-ide CgroupDriver is not systemd"
   fi
 
-  # Read from the daemons, not `ctr namespaces ls`: containerd creates a namespace only when the
-  # first container starts in it, and userns-remap suffixes the name (osionos-ide-100000.100000).
+  verify_containerd_ns
+}
+
+# Read from the daemons, not `ctr namespaces ls`: containerd creates a namespace only when the
+# first container starts in it, and userns-remap suffixes the name (osionos-ide-100000.100000).
+verify_containerd_ns() {
   ns_fmt='{{.Containerd.Namespaces.Containers}}'
   ide_ns=$(ide info --format "$ns_fmt" 2>/dev/null || true)
   main_ns=$(docker info --format "$ns_fmt" 2>/dev/null || true)
@@ -152,6 +178,55 @@ verify() {
       ;;
     *) fail_ "docker-ide containerd namespace is '${ide_ns:-unknown}', not osionos-ide*" ;;
   esac
+}
+
+sock_inode() { stat -c %i "$SOCK_PATH" 2>/dev/null || true; }
+
+# Why these three: the proxy bind-mounts this path, so a directory where a socket
+# should be, or a mode other than the socket unit's, is what "someone made this
+# file by hand" looks like — and the old unit made it by hand on every restart.
+verify_socket_unit() {
+  state=$(systemctl is-active docker-ide.socket 2>/dev/null || true)
+  if [ "$state" = active ]; then
+    pass "docker-ide.socket is active"
+  else
+    fail_ "docker-ide.socket is '${state:-unknown}', not active"
+  fi
+
+  if [ -S "$SOCK_PATH" ]; then
+    pass "$SOCK_PATH is a socket"
+  else
+    fail_ "$SOCK_PATH is not a socket"
+    return
+  fi
+
+  # One stat for mode, owner and group: any of the three off is the same failure.
+  attrs=$(stat -c '%a %U %G' "$SOCK_PATH" 2>/dev/null || true)
+  if [ "$attrs" = "660 root docker" ]; then
+    pass "$SOCK_PATH is 660 root:docker"
+  else
+    fail_ "$SOCK_PATH is '${attrs:-unknown}', not 660 root:docker"
+  fi
+}
+
+# The proxy bind-mounts this one inode, so a daemon restart that gives the socket
+# a new inode leaves the proxy talking to a file nothing listens on.
+verify_socket_outlives_restart() {
+  inode_before=$(sock_inode)
+  systemctl restart docker-ide.service
+  wait_for_daemon "restart for the inode check"
+  inode_after=$(sock_inode)
+  if [ -n "$inode_before" ] && [ "$inode_before" = "$inode_after" ]; then
+    pass "$SOCK_PATH keeps inode $inode_before across a daemon restart"
+  else
+    fail_ "$SOCK_PATH inode changed across a restart (${inode_before:-none} -> ${inode_after:-none})"
+  fi
+
+  if ide version >/dev/null 2>&1; then
+    pass "ide version answers after the restart"
+  else
+    fail_ "ide version does not answer after the restart"
+  fi
 }
 
 main "$@"
