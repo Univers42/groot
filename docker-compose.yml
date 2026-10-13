@@ -264,9 +264,6 @@ services:
         VITE_REQUIRE_BRIDGE_SESSION: "true"
         VITE_ALLOW_OFFLINE_MODE: "false"
         VITE_PAGE_ACTION_SYNC_ENABLED: "true"
-        # IDE / Dev-Mode surface (code files + CodeMirror editor + IDE shell).
-        # Empty default keeps it OFF for the public web image; the app .env sets =1.
-        VITE_OSIO_IDE: ${VITE_OSIO_IDE:-}
         # mini-baas live-database + graph wiring (Vite inlines at build).
         # Empty defaults keep those surfaces dormant; `make seed-live-demo`
         # at the repo root rebuilds this image with the values from the app
