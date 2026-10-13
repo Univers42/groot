@@ -92,6 +92,8 @@ ARG VITE_CHAT_WS=true
 # Giphy search key (GIPHY_API in .env.local). Public beta-style key, client-side
 # by design; empty = the GIF picker shows a "not configured" toast.
 ARG VITE_GIPHY_API_KEY=
+# IDE server browser origin. Baked at build; empty = the IDE shows "not configured".
+ARG VITE_OSIONOS_IDE_URL=
 # osionos's build-time gate for the legacy second brain (src/shared/config/legacySecondBrain.ts;
 # vite.config.ts `define` reads it from the build env). "false" = every second-brain entry
 # point opens graph_render's <graph-studio>, served below under /graph-studio/<sha>/.
@@ -119,7 +121,8 @@ ENV VITE_API_URL=$VITE_API_URL \
     VITE_BAAS_LIVE_MOUNTS=$VITE_BAAS_LIVE_MOUNTS \
     VITE_BAAS_REALTIME_TOKEN=$VITE_BAAS_REALTIME_TOKEN \
     VITE_BAAS_TENANT_ID=$VITE_BAAS_TENANT_ID \
-    VITE_LEGACY_SECOND_BRAIN=$VITE_LEGACY_SECOND_BRAIN
+    VITE_LEGACY_SECOND_BRAIN=$VITE_LEGACY_SECOND_BRAIN \
+    VITE_OSIONOS_IDE_URL=$VITE_OSIONOS_IDE_URL
 
 # vite's import.meta.env OBJECT (whole-object reads in the vendored realtime
 # plane + wsTransport) is populated ONLY from .env FILES, not the Dockerfile ENV,
