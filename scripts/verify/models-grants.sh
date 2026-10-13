@@ -1,0 +1,297 @@
+#!/bin/sh
+# **************************************************************************** #
+#                                                                              #
+#    models-grants.sh                                                          #
+#                                                                              #
+#    Prove every public.osionos_* relation is reachable by service_role        #
+#    (the bridge) and by nothing else, on two throwaway databases.             #
+#                                                                              #
+# **************************************************************************** #
+#
+# WHY THIS EXISTS
+#   models/*.sql is replayed on every boot (`make models-migrate`, and the desktop
+#   edition's firstrun.mjs). Each file carries GRANTs, and nothing re-reads the ACL
+#   they leave: a file that widens a grant, or an upgraded install still carrying an
+#   old db-bootstrap's blanket grant, converges silently. Only asking a FRESH
+#   database what anon and authenticated can reach catches it.
+#
+# WHAT IT RUNS  (both scenarios drive the REAL runner, never a re-typed file list)
+#   fresh   roles -> grobase 001_initial_schema -> shim -> runner -> checks
+#   legacy  roles -> the pre-1e407614 default privileges -> 001 -> shim -> runner
+#           -> an old-bootstrap boot (blanket GRANT, DEFAULT revoked) -> runner -> checks
+#   Checks: c no anon/authenticated privilege on an osionos_% relation · d no policy
+#   for PUBLIC/anon/authenticated · e1/e2 service_role has full CRUD and round-trips a
+#   row · f six probes refused with 42501 · h no SECURITY DEFINER osionos_% function
+#   they may execute · g a second runner pass changes no ACL, policy or RLS flag
+#
+# ISOLATION
+#   Throwaway containers only (--rm --network none, no port, no volume); the live
+#   mini-baas / osionos containers are never touched. A trap removes each container
+#   on every exit path. The image is grobase's postgres: models/*.sql needs pgvector.
+#
+# Usage:  [GROBASE_PG_IMAGE=…] [MODELS_DIR=…] sh scripts/verify/models-grants.sh
+#
+# Exit:  0 every check passed · 1 a check, fixture, image or runner failed (a missing
+#        image is a FAIL, never a SKIP) · 2 docker is not installed
+#
+# Ponytail: shim.sql stands in for GoTrue's auth.users, user_profiles.display_name and a unique
+#   index on user_profiles.user_id; a real-stack difference in those objects is not seen here.
+# Ponytail: roles.sql mirrors apps/grobase/scripts/db/db-bootstrap.psql:1-43 by hand; a role or
+#   default-privilege change there is not seen until this copy is updated.
+# Ponytail: the f probes are six statements, not every statement. They sample one
+#   table and one view as anon/authenticated; check c is the exhaustive sweep, and
+#   a path that only exists through an osionos function's EXECUTE grant is caught
+#   only when that function is SECURITY DEFINER (check h).
+set -eu
+
+REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+FIX="${REPO}/scripts/verify/models-grants"
+RUNNER="${REPO}/scripts/apply-models-migrations.sh"
+GROBASE_INIT="${REPO}/apps/grobase/scripts/migrations/postgresql/001_initial_schema.sql"
+IMAGE="${GROBASE_PG_IMAGE:-ghcr.io/univers42/grobase-postgres:latest}"
+MODELS_DIR="${MODELS_DIR:-${REPO}/models}"
+READY_TIMEOUT=60
+PG_USER=postgres
+PG_DB=postgres
+
+CTN=''
+WORK=''
+passed=0
+failed=0
+
+note() { printf '[models-grants] %s\n' "$*" >&2; }
+
+pass() { passed=$((passed + 1)) && printf 'PASS %s %s %s\n' "$1" "$2" "$3"; }
+fail() { failed=$((failed + 1)) && printf 'FAIL %s %s %s\n' "$1" "$2" "$3"; }
+
+# A failed precondition stops the run; the RESULT line still closes the log.
+die() {
+	fail "$@"
+	finish 1
+}
+
+finish() {
+	printf 'RESULT: %s passed, %s failed\n' "${passed}" "${failed}"
+	exit "$1"
+}
+
+drop_container() {
+	if [ -n "${CTN}" ]; then
+		docker rm -f "${CTN}" >/dev/null 2>&1 || true
+	fi
+	CTN=''
+}
+trap 'drop_container; rm -rf "${WORK}"' EXIT INT TERM
+
+psql_stdin() {
+	docker exec -i "${CTN}" psql -U "${PG_USER}" -d "${PG_DB}" -v ON_ERROR_STOP=1 -q
+}
+
+# -At: one '|'-joined line per tuple, so cut/grep can read the rows back.
+psql_rows() {
+	docker exec -i "${CTN}" psql -U "${PG_USER}" -d "${PG_DB}" -v ON_ERROR_STOP=1 -q -At
+}
+
+# Apply a fixture; on failure echo psql's stderr verbatim.
+apply() {
+	if psql_stdin <"$1" >"${WORK}/apply.log" 2>&1; then
+		return 0
+	fi
+	note "psql rejected $(basename "$1")"
+	sed 's/^/  | /' "${WORK}/apply.log" >&2
+	return 1
+}
+
+wait_ready() {
+	i=0
+	while [ "${i}" -lt "${READY_TIMEOUT}" ]; do
+		if docker exec "${CTN}" pg_isready -U "${PG_USER}" -d "${PG_DB}" >/dev/null 2>&1; then
+			return 0
+		fi
+		i=$((i + 1))
+		sleep 1
+	done
+	return 1
+}
+
+# run_runner <scenario> <tag> — the real runner. Clean = exit 0 AND a ` 0 failed`
+# summary, which catches a runner that exits 0 while reporting a failure.
+run_runner() {
+	log="${WORK}/runner-$1-$2.log"
+	if PG_CONTAINER="${CTN}" MODELS_DIR="${MODELS_DIR}" sh "${RUNNER}" >"${log}" 2>&1; then
+		rc=0
+	else
+		rc=$?
+	fi
+	last="$(awk 'NF { l = $0 } END { print l }' "${log}")"
+	summary_clean=no
+	if [ "${rc}" -eq 0 ]; then
+		case "${last}" in
+		*' 0 failed'*) summary_clean=yes ;;
+		esac
+	fi
+	if [ "${summary_clean}" = "no" ]; then
+		rc=99
+	fi
+	if [ "${rc}" -ne 0 ]; then
+		fail "$1" "runner/$2" "exit ${rc} — ${last}"
+		grep -h 'FAILED:' "${log}" | sed 's/^/  | /' >&2 || true
+		finish 1
+	fi
+	note "$1: ${last}"
+}
+
+# check_count <scenario> <id> <label> — a `<label>|<count>|<detail>` row from checks.sql.
+check_count() {
+	line="$(grep "^$3|" "${WORK}/checks-$1.out" || true)"
+	if [ -z "${line}" ]; then
+		fail "$1" "$2" "checks.sql printed no ${3} row"
+		return 0
+	fi
+	n="$(printf '%s\n' "${line}" | cut -d'|' -f2)"
+	detail="$(printf '%s\n' "${line}" | cut -d'|' -f3-)"
+	if [ "${n}" = "0" ]; then
+		pass "$1" "$2" "0"
+	else
+		fail "$1" "$2" "${n} — ${detail}"
+	fi
+}
+
+check_svc() {
+	n="$(grep '^svc_rows|' "${WORK}/checks-$1.out" | cut -d'|' -f2 || true)"
+	if [ "${n}" = "1" ]; then
+		pass "$1" "e2" "1"
+	else
+		fail "$1" "e2" "bridge round trip saw ${n:-no} row(s)"
+	fi
+}
+
+# probe <scenario> <id> <role> <statement> — a rolled-back transaction that must be
+# refused with exactly SQLSTATE 42501; success and any other code are both a FAIL.
+probe() {
+	claims=''
+	if [ "$3" = "authenticated" ]; then
+		claims="SELECT set_config('request.jwt.claims','{\"sub\":\"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb\",\"role\":\"authenticated\"}', true);"
+	fi
+	err="${WORK}/probe-$1-$2.err"
+	# Every line ends in ';' so a statement is never glued to the ROLLBACK.
+	if printf '%s\n' '\set VERBOSITY sqlstate' 'BEGIN;' "SET LOCAL ROLE $3;" "${claims}" "$4;" 'ROLLBACK;' |
+		psql_stdin >"${WORK}/probe-$1-$2.out" 2>"${err}"; then
+		rc=0
+	else
+		rc=$?
+	fi
+	codes="$(sed -n 's/^ERROR:  \([0-9A-Z]\{5\}\).*/\1/p' "${err}" | sort -u)"
+	if [ "${rc}" -ne 0 ] && [ "${codes}" = "42501" ]; then
+		pass "$1" "$2" "42501"
+	else
+		if [ "${rc}" -eq 0 ]; then
+			reason="statement SUCCEEDED as $3"
+		elif [ -n "${codes}" ]; then
+			reason="sqlstate ${codes} — $(head -1 "${err}" || true)"
+		else
+			reason="exit ${rc} with no SQLSTATE — $(head -1 "${err}" || true)"
+		fi
+		fail "$1" "$2" "${reason}"
+	fi
+}
+
+# check_idempotent <scenario> — snapshot, replay the runner, snapshot again: a
+# migration that re-grants on every boot shows as a changed line.
+check_idempotent() {
+	if ! psql_rows <"${FIX}/snapshot.sql" >"${WORK}/snap1-$1.out" 2>"${WORK}/snap1-$1.err"; then
+		note "snapshot failed before the replay"
+		sed 's/^/  | /' "${WORK}/snap1-$1.err" >&2
+		fail "$1" "g" "snapshot.sql failed before the replay"
+		return 0
+	fi
+	run_runner "$1" "idempotency"
+	if ! psql_rows <"${FIX}/snapshot.sql" >"${WORK}/snap2-$1.out" 2>"${WORK}/snap2-$1.err"; then
+		note "snapshot failed after the replay"
+		sed 's/^/  | /' "${WORK}/snap2-$1.err" >&2
+		fail "$1" "g" "snapshot.sql failed after the replay"
+		return 0
+	fi
+	if diff -u "${WORK}/snap1-$1.out" "${WORK}/snap2-$1.out" >"${WORK}/diff-$1.out" 2>&1; then
+		pass "$1" "g" "no ACL/RLS drift on the replay"
+	else
+		fail "$1" "g" "$(grep -c '^[-+][^-+]' "${WORK}/diff-$1.out" || true) line(s) of drift:"
+		sed 's/^/  | /' "${WORK}/diff-$1.out" >&2
+	fi
+}
+
+run_checks() {
+	# A checks.sql error is echoed, then read back anyway: a missing row is a FAIL.
+	if ! psql_rows <"${FIX}/checks.sql" >"${WORK}/checks-$1.out" 2>"${WORK}/checks-$1.err"; then
+		note "checks.sql did not run to completion"
+		sed 's/^/  | /' "${WORK}/checks-$1.err" >&2
+	fi
+	check_count "$1" c privileged
+	check_count "$1" d member_policies
+	check_count "$1" e1 service_role_gaps
+	check_svc "$1"
+	probe "$1" T1 authenticated "SELECT count(*) FROM public.osionos_pages"
+	probe "$1" T2 authenticated "DELETE FROM public.osionos_pages"
+	probe "$1" T3 authenticated "UPDATE public.osionos_pages SET owner_id='cccccccc-cccc-cccc-cccc-cccccccccccc', visibility='public'"
+	probe "$1" V1 anon "SELECT user_id, display_name FROM public.osionos_directory"
+	probe "$1" V4 anon "UPDATE public.osionos_directory SET display_name='x'"
+	probe "$1" V5 anon "DELETE FROM public.osionos_directory"
+	check_count "$1" h secdef_exec
+	check_idempotent "$1"
+}
+
+run_scenario() {
+	CTN="models-grants-$1-$$"
+	note "scenario $1 — container ${CTN}"
+	docker run --rm --network none --name "${CTN}" -e POSTGRES_HOST_AUTH_METHOD=trust \
+		-d "${IMAGE}" >/dev/null 2>&1 || die "scenario" "setup/$1" "${IMAGE} did not start"
+	wait_ready || die "scenario" "setup/$1" "pg_isready never answered in ${READY_TIMEOUT}s"
+	apply "${FIX}/roles.sql" || die "scenario" "setup/$1" "roles.sql"
+	if [ "$1" = "legacy" ]; then
+		apply "${FIX}/legacy-default.sql" || die "scenario" "setup/$1" "legacy-default.sql"
+	fi
+	# grobase applies 001 with fly; its '#' lines are not SQL, so psql gets them stripped.
+	grep -v '^#' "${GROBASE_INIT}" >"${WORK}/001.sql" ||
+		die "scenario" "setup/$1" "could not read ${GROBASE_INIT}"
+	apply "${WORK}/001.sql" || die "scenario" "setup/$1" "001_initial_schema.sql"
+	apply "${FIX}/shim.sql" || die "scenario" "setup/$1" "shim.sql"
+	run_runner "$1" first
+	if [ "$1" = "legacy" ]; then
+		apply "${FIX}/legacy-reboot.sql" || die "scenario" "setup/$1" "legacy-reboot.sql"
+		run_runner "$1" reboot
+	fi
+	run_checks "$1"
+	drop_container
+}
+
+ensure_image() {
+	if docker image inspect "${IMAGE}" >/dev/null 2>&1; then
+		return 0
+	fi
+	note "pulling ${IMAGE}"
+	if docker pull "${IMAGE}" >/dev/null 2>&1; then
+		return 0
+	fi
+	printf 'FAIL image %s\n' "${IMAGE}"
+	exit 1
+}
+
+main() {
+	command -v docker >/dev/null 2>&1 || {
+		note "docker is required"
+		exit 2
+	}
+	[ -f "${RUNNER}" ] || die "setup" "runner" "no ${RUNNER}"
+	[ -f "${GROBASE_INIT}" ] || die "setup" "grobase" "no ${GROBASE_INIT} — check out the apps/grobase submodule"
+	[ -d "${MODELS_DIR}" ] || die "setup" "models" "no ${MODELS_DIR}"
+	ensure_image
+	WORK="$(mktemp -d "${TMPDIR:-/tmp}/models-grants.XXXXXX")"
+	run_scenario fresh
+	run_scenario legacy
+	if [ "${failed}" -eq 0 ]; then
+		finish 0
+	fi
+	finish 1
+}
+
+main "$@"

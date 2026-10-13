@@ -80,54 +80,13 @@ ALTER TABLE public.osionos_message_reactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.osionos_feed_likes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.osionos_feed_comments ENABLE ROW LEVEL SECURITY;
 
--- Authenticated read access mirrors the bridge's own checks (defence in depth):
--- channel rows for members of the channel or its workspace (public text only).
+-- The bridge (service_role) is the only reader and writer; nobody else gets a grant.
 DROP POLICY IF EXISTS osionos_channels_select_member ON public.osionos_channels;
-CREATE POLICY osionos_channels_select_member ON public.osionos_channels
-  FOR SELECT TO authenticated USING (
-    EXISTS (
-      SELECT 1 FROM public.osionos_channel_members cm
-      WHERE cm.channel_id = id AND cm.user_id = auth.uid()
-    )
-    OR (
-      NOT is_private AND kind <> 'dm'
-      AND EXISTS (
-        SELECT 1 FROM public.osionos_workspace_members wm
-        WHERE wm.workspace_id = public.osionos_channels.workspace_id AND wm.user_id = auth.uid()
-      )
-    )
-  );
-
 DROP POLICY IF EXISTS osionos_channel_members_select_own ON public.osionos_channel_members;
-CREATE POLICY osionos_channel_members_select_own ON public.osionos_channel_members
-  FOR SELECT TO authenticated USING (user_id = auth.uid());
-
 DROP POLICY IF EXISTS osionos_messages_select_member ON public.osionos_messages;
-CREATE POLICY osionos_messages_select_member ON public.osionos_messages
-  FOR SELECT TO authenticated USING (
-    EXISTS (
-      SELECT 1 FROM public.osionos_channel_members cm
-      WHERE cm.channel_id = public.osionos_messages.channel_id AND cm.user_id = auth.uid()
-    )
-  );
-
 DROP POLICY IF EXISTS osionos_message_reactions_select_member ON public.osionos_message_reactions;
-CREATE POLICY osionos_message_reactions_select_member ON public.osionos_message_reactions
-  FOR SELECT TO authenticated USING (
-    EXISTS (
-      SELECT 1 FROM public.osionos_messages m
-      JOIN public.osionos_channel_members cm ON cm.channel_id = m.channel_id
-      WHERE m.id = message_id AND cm.user_id = auth.uid()
-    )
-  );
-
 DROP POLICY IF EXISTS osionos_feed_likes_select_all ON public.osionos_feed_likes;
-CREATE POLICY osionos_feed_likes_select_all ON public.osionos_feed_likes
-  FOR SELECT TO authenticated USING (true);
-
 DROP POLICY IF EXISTS osionos_feed_comments_select_all ON public.osionos_feed_comments;
-CREATE POLICY osionos_feed_comments_select_all ON public.osionos_feed_comments
-  FOR SELECT TO authenticated USING (true);
 
 DROP POLICY IF EXISTS osionos_channels_service_role_all ON public.osionos_channels;
 CREATE POLICY osionos_channels_service_role_all ON public.osionos_channels
@@ -153,12 +112,6 @@ DROP POLICY IF EXISTS osionos_feed_comments_service_role_all ON public.osionos_f
 CREATE POLICY osionos_feed_comments_service_role_all ON public.osionos_feed_comments
   FOR ALL TO service_role USING (true) WITH CHECK (true);
 
-GRANT SELECT ON public.osionos_channels TO authenticated;
-GRANT SELECT ON public.osionos_channel_members TO authenticated;
-GRANT SELECT ON public.osionos_messages TO authenticated;
-GRANT SELECT ON public.osionos_message_reactions TO authenticated;
-GRANT SELECT ON public.osionos_feed_likes TO authenticated;
-GRANT SELECT ON public.osionos_feed_comments TO authenticated;
 GRANT ALL ON public.osionos_channels TO service_role;
 GRANT ALL ON public.osionos_channel_members TO service_role;
 GRANT ALL ON public.osionos_messages TO service_role;

@@ -4,9 +4,9 @@
 --
 -- Same discipline as osionos-chat-migration.sql: fully idempotent DDL
 -- (CREATE TABLE / ADD COLUMN IF NOT EXISTS, DROP POLICY IF EXISTS before
--- CREATE POLICY), RLS enabled everywhere, authenticated SELECT (mirrors
--- osionos_feed_comments_select_all), and service_role for ALL — every write
--- goes through the service-role bridge, which forces user_id to the session.
+-- CREATE POLICY), RLS enabled everywhere, and service_role for ALL — every
+-- write goes through the service-role bridge, which forces user_id to the
+-- session. The bridge is the only reader and writer.
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
@@ -43,15 +43,10 @@ CREATE INDEX IF NOT EXISTS osionos_feed_shares_page_idx ON public.osionos_feed_s
 ALTER TABLE public.osionos_feed_reactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.osionos_feed_shares ENABLE ROW LEVEL SECURITY;
 
--- Authenticated read access mirrors osionos_feed_comments_select_all: any signed-in
--- user can read the aggregate reaction/share signal on a post.
+-- The bridge (service_role) is the only reader and writer; nobody else gets a grant.
 DROP POLICY IF EXISTS osionos_feed_reactions_select_all ON public.osionos_feed_reactions;
-CREATE POLICY osionos_feed_reactions_select_all ON public.osionos_feed_reactions
-  FOR SELECT TO authenticated USING (true);
 
 DROP POLICY IF EXISTS osionos_feed_shares_select_all ON public.osionos_feed_shares;
-CREATE POLICY osionos_feed_shares_select_all ON public.osionos_feed_shares
-  FOR SELECT TO authenticated USING (true);
 
 -- Writes go only through the service-role bridge (it forces user_id = session).
 DROP POLICY IF EXISTS osionos_feed_reactions_service_role_all ON public.osionos_feed_reactions;
@@ -62,8 +57,6 @@ DROP POLICY IF EXISTS osionos_feed_shares_service_role_all ON public.osionos_fee
 CREATE POLICY osionos_feed_shares_service_role_all ON public.osionos_feed_shares
   FOR ALL TO service_role USING (true) WITH CHECK (true);
 
-GRANT SELECT ON public.osionos_feed_reactions TO authenticated;
-GRANT SELECT ON public.osionos_feed_shares TO authenticated;
 GRANT ALL ON public.osionos_feed_reactions TO service_role;
 GRANT ALL ON public.osionos_feed_shares TO service_role;
 

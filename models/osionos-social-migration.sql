@@ -4,7 +4,7 @@
 --
 -- Same discipline as osionos-bridge/chat migrations: idempotent DDL, RLS enabled
 -- everywhere, service_role FOR ALL (the bridge talks PostgREST with the service
--- key and enforces membership itself), authenticated SELECT for defence in depth,
+-- key and enforces membership itself), the bridge is the only reader and writer,
 -- gen_random_uuid() pks. Depends on osionos-bridge + osionos-chat migrations.
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -45,11 +45,9 @@ CREATE OR REPLACE VIEW public.osionos_directory AS
          profile->'avatar' AS avatar, last_seen_at, directory_opt_out
   FROM public.osionos_bridge_identities
   WHERE directory_opt_out = false;
-GRANT SELECT ON public.osionos_directory TO authenticated, service_role;
+GRANT SELECT ON public.osionos_directory TO service_role;
 
 DROP POLICY IF EXISTS osionos_bridge_identities_select_directory ON public.osionos_bridge_identities;
-CREATE POLICY osionos_bridge_identities_select_directory ON public.osionos_bridge_identities
-  FOR SELECT TO authenticated USING (directory_opt_out = false);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 2. Connections — directed request carrying an intro message; one row per pair
@@ -161,7 +159,7 @@ CREATE INDEX IF NOT EXISTS osionos_join_requests_workspace_idx
   ON public.osionos_join_requests (workspace_id, status);
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- 7. RLS — enable + authenticated-read (defence in depth) + service_role FOR ALL
+-- 7. RLS — enable + service_role FOR ALL (the bridge is the only reader and writer)
 -- ─────────────────────────────────────────────────────────────────────────────
 ALTER TABLE public.osionos_connections      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.osionos_message_receipts ENABLE ROW LEVEL SECURITY;
@@ -170,30 +168,14 @@ ALTER TABLE public.osionos_user_reports     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.osionos_join_requests    ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS osionos_connections_select_party ON public.osionos_connections;
-CREATE POLICY osionos_connections_select_party ON public.osionos_connections
-  FOR SELECT TO authenticated USING (requester_id = auth.uid() OR addressee_id = auth.uid());
 
 DROP POLICY IF EXISTS osionos_receipts_select_party ON public.osionos_message_receipts;
-CREATE POLICY osionos_receipts_select_party ON public.osionos_message_receipts
-  FOR SELECT TO authenticated USING (
-    user_id = auth.uid() OR EXISTS (
-      SELECT 1 FROM public.osionos_messages m
-      WHERE m.id = message_id AND m.author_id = auth.uid()));
 
 DROP POLICY IF EXISTS osionos_blocks_select_own ON public.osionos_user_blocks;
-CREATE POLICY osionos_blocks_select_own ON public.osionos_user_blocks
-  FOR SELECT TO authenticated USING (blocker_id = auth.uid());
 
 DROP POLICY IF EXISTS osionos_reports_select_own ON public.osionos_user_reports;
-CREATE POLICY osionos_reports_select_own ON public.osionos_user_reports
-  FOR SELECT TO authenticated USING (reporter_id = auth.uid());
 
 DROP POLICY IF EXISTS osionos_join_requests_select_party ON public.osionos_join_requests;
-CREATE POLICY osionos_join_requests_select_party ON public.osionos_join_requests
-  FOR SELECT TO authenticated USING (
-    requester_id = auth.uid() OR EXISTS (
-      SELECT 1 FROM public.osionos_workspaces w
-      WHERE w.id = workspace_id AND w.owner_id = auth.uid()));
 
 DROP POLICY IF EXISTS osionos_connections_service_role_all ON public.osionos_connections;
 CREATE POLICY osionos_connections_service_role_all ON public.osionos_connections
@@ -211,9 +193,6 @@ DROP POLICY IF EXISTS osionos_join_requests_service_role_all ON public.osionos_j
 CREATE POLICY osionos_join_requests_service_role_all ON public.osionos_join_requests
   FOR ALL TO service_role USING (true) WITH CHECK (true);
 
-GRANT SELECT ON public.osionos_connections, public.osionos_message_receipts,
-               public.osionos_user_blocks, public.osionos_user_reports,
-               public.osionos_join_requests TO authenticated;
 GRANT ALL ON public.osionos_connections, public.osionos_message_receipts,
              public.osionos_user_blocks, public.osionos_user_reports,
              public.osionos_join_requests TO service_role;

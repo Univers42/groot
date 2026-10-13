@@ -69,9 +69,11 @@ FROM public.users u
 LEFT JOIN public.user_profiles up ON up.user_id = u.id
 LEFT JOIN public.osionos_bridge_identities bi ON bi.user_id = u.id;
 
--- The bridge reads with the service-role key; authenticated kept for parity with
--- public.osionos_directory. The view exposes only the safe columns above.
-GRANT SELECT ON public.osionos_people_directory TO authenticated, service_role;
+-- The bridge reads with the service-role key. The view exposes only the safe
+-- columns above.
+--
+-- The bridge (service_role) is the only reader and writer; nobody else gets a grant.
+GRANT SELECT ON public.osionos_people_directory TO service_role;
 
 COMMIT;
 
