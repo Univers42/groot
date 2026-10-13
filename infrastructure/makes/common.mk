@@ -79,9 +79,13 @@ DRAWNOSAURUS_URL := https://localhost:$(if $(DRAWNOSAURUS_HOST_PORT),$(DRAWNOSAU
 # health gate against a backend that is perfectly healthy — measured: Kong published on 8001
 # while this said 8000, and `make all` died at healthcheck after a clean build.
 # Deferred (=) like BAAS_HEALTH_KEY below: resolved at recipe time, once the backend is up.
-# Falls back to 8000 when the container is not running yet, so the message stays the obvious
+# A linked machine (make link, ssh or direct) runs no Kong of its own: the link's loopback copy
+# on GROBASE_LINK_HOST_PORT answers there (0 = none), so `make healthcheck` probes the remote
+# grobase instead of failing on a local 8000 nobody listens on (measured 2026-10-13).
+# Falls back to 8000 when neither answers yet, so the message stays the obvious
 # "could not connect to 8000" rather than a make error about an empty URL.
-BAAS_PORT = $(shell docker port mini-baas-kong 8000/tcp 2>/dev/null | head -1 | sed 's/.*://')
+LINK_KONG_PORT = $(if $(filter ssh direct,$(shell bash scripts/grobase-link.sh mode 2>/dev/null)),$(filter-out 0,$(GROBASE_LINK_HOST_PORT)))
+BAAS_PORT = $(or $(shell docker port mini-baas-kong 8000/tcp 2>/dev/null | head -1 | sed 's/.*://'),$(LINK_KONG_PORT))
 BAAS_URL = http://127.0.0.1:$(or $(BAAS_PORT),8000)
 # grobase Kong gates /auth/v1/* with key-auth, so the BaaS health probe must
 # present the anon apikey (read from the consolidated root .env.local).
