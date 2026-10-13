@@ -120,8 +120,10 @@ export function watchTable() {
 // Ponytail: identity is (dev, ino, birth time); ext4 hands a deleted dir's inode to the
 // next mkdir. Where the filesystem has no birth time (statx btime → 0) this degrades to
 // (dev, ino), and a `rm -rf d1; mkdir d1` handled late keeps a dead watch: files in the
-// new d1 go unsynced until the next attach (under-reports). Without statx (Linux < 4.11)
-// libuv reports ctime instead, so a chmod reads as a new dir (over-reports a re-emit).
+// new d1 go unsynced until the next attach (under-reports). Without statx (Linux < 4.11,
+// or a seccomp profile that refuses it) libuv reports ctime instead: a chmod or touch on a
+// dir then emits `delete <dir>` plus a full re-emit, which the client applies as archiving
+// and re-creating every page under that dir (over-reports, and it is visible).
 function identityOf(abs) {
   try {
     const st = fs.statSync(abs, { bigint: true, throwIfNoEntry: false });
