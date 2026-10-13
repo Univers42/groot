@@ -4,7 +4,9 @@
 -- This table is the metadata/ownership/dedup record + the per-conversation gallery
 -- source. The denormalized copy also rides osionos_messages.attachments JSONB (which
 -- the bridge already round-trips). Same discipline as osionos-chat-migration.sql:
--- idempotent DDL, RLS on, service_role FOR ALL, authenticated member SELECT.
+-- idempotent DDL, RLS on, service_role FOR ALL.
+--
+-- The bridge (service_role) is the only reader and writer; nobody else gets a grant.
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
@@ -37,19 +39,12 @@ CREATE INDEX IF NOT EXISTS osionos_msg_attach_sha_idx
 
 ALTER TABLE public.osionos_message_attachments ENABLE ROW LEVEL SECURITY;
 
--- Channel members may read attachments (mirrors osionos_messages_select_member).
 DROP POLICY IF EXISTS osionos_msg_attach_select_member ON public.osionos_message_attachments;
-CREATE POLICY osionos_msg_attach_select_member ON public.osionos_message_attachments
-  FOR SELECT TO authenticated USING (
-    EXISTS (SELECT 1 FROM public.osionos_channel_members cm
-            WHERE cm.channel_id = osionos_message_attachments.channel_id
-              AND cm.user_id = auth.uid()));
 
 DROP POLICY IF EXISTS osionos_msg_attach_service_role_all ON public.osionos_message_attachments;
 CREATE POLICY osionos_msg_attach_service_role_all ON public.osionos_message_attachments
   FOR ALL TO service_role USING (true) WITH CHECK (true);
 
-GRANT SELECT ON public.osionos_message_attachments TO authenticated;
 GRANT ALL    ON public.osionos_message_attachments TO service_role;
 
 NOTIFY pgrst, 'reload schema';

@@ -1,7 +1,8 @@
 -- Block-anchored page comments. Reads/writes are bridge-mediated (service_role
--- scopes by verified page access); the authenticated RLS policy is own-row
--- defence in depth. Same discipline as osionos-engagement-migration.sql.
--- Idempotent.
+-- scopes by verified page access). Same discipline as
+-- osionos-engagement-migration.sql. Idempotent.
+--
+-- The bridge (service_role) is the only reader and writer; nobody else gets a grant.
 
 CREATE TABLE IF NOT EXISTS public.osionos_page_comments (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -25,12 +26,9 @@ END $$;
 
 ALTER TABLE public.osionos_page_comments ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS osionos_page_comments_select_own ON public.osionos_page_comments;
-CREATE POLICY osionos_page_comments_select_own ON public.osionos_page_comments
-  FOR SELECT TO authenticated USING (author_id = auth.uid());
 DROP POLICY IF EXISTS osionos_page_comments_service_role_all ON public.osionos_page_comments;
 CREATE POLICY osionos_page_comments_service_role_all ON public.osionos_page_comments
   FOR ALL TO service_role USING (true) WITH CHECK (true);
-GRANT SELECT ON public.osionos_page_comments TO authenticated;
 GRANT ALL    ON public.osionos_page_comments TO service_role;
 
 NOTIFY pgrst, 'reload schema';
