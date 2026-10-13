@@ -25,9 +25,10 @@
 # An empty source value is never written. Run by `make all` (env-local-ensure) and by
 # vault42-team.sh after an applied pull.
 #
-# MINTED keys (DEMO_LOGIN_PASSWORD) are local-only secrets an older .env.local predates.
-# `--sync` mints one that is absent or empty and says so by name; `--check` reports it
-# as missing. scripts/demo-login-ensure.sh then applies the password to the account.
+# MINTED keys (DEMO_LOGIN_PASSWORD, OSIONOS_IDE_TOKEN_SECRET) are local-only secrets an
+# older .env.local predates. `--sync` mints one that is absent or empty and says so by
+# name; `--check` reports it as missing. scripts/demo-login-ensure.sh then applies the
+# password to the account.
 set -eu
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -51,7 +52,7 @@ KONG_PUBLIC_API_KEY=KONG_PUBLIC_API_KEY|ANON_KEY KONG_SERVICE_API_KEY=KONG_SERVI
 SB_KONG_KEY=KONG_PUBLIC_API_KEY|ANON_KEY VITE_BAAS_KONG_KEY=KONG_PUBLIC_API_KEY|ANON_KEY \
 ADAPTER_REGISTRY_SERVICE_TOKEN=ADAPTER_REGISTRY_SERVICE_TOKEN"
 # Minted once per machine, never derived; an absent or empty one is minted by --sync.
-MINTED="DEMO_LOGIN_PASSWORD"
+MINTED="DEMO_LOGIN_PASSWORD OSIONOS_IDE_TOKEN_SECRET"
 # NOT derived: VITE_BAAS_REALTIME_TOKEN — the generator seeds it with the anon key, but
 # `make seed-live-demo` (live-data-ensure) later replaces it with a tenant realtime token
 # minted from RT_JWT_SECRET; it travels as a team value (vault42-team.sh), never a derived one.
@@ -85,11 +86,19 @@ minted_missing() {
 }
 
 # mint_missing: write a fresh value for each MINTED key that is absent or empty, by name.
+# DEMO_LOGIN_PASSWORD gets a 24-char typeable password; OSIONOS_IDE_TOKEN_SECRET gets
+# 48 alphanumerics (ide-token.mjs requires >=32 bytes and refuses the app secret).
 mint_missing() {
   for key in $(minted_missing); do
     command -v openssl >/dev/null 2>&1 || { note "openssl required to mint $key"; exit 1; }
-    put_env "$OUT" "$key" "$(gen_password)"
-    note "minted $key (was absent) — make all applies it to the demo account; make demo-login prints it."
+    case "$key" in
+      OSIONOS_IDE_TOKEN_SECRET)
+        put_env "$OUT" "$key" "$(gen)"
+        note "minted $key (was absent) — restart osionos-bridge and osionos-ide-server to use it." ;;
+      *)
+        put_env "$OUT" "$key" "$(gen_password)"
+        note "minted $key (was absent) — make all applies it to the demo account; make demo-login prints it." ;;
+    esac
   done
 }
 
@@ -215,6 +224,9 @@ VITE_CHAT_WS=true
 
 # ── osionos app secrets (local-only, freshly minted) ──
 OSIONOS_APP_SESSION_SECRET=$(gen)
+# OSIONOS_IDE_TOKEN_SECRET: its own key, at least 32 bytes and never the app
+# secret, because ide-token.mjs refuses to start otherwise.
+OSIONOS_IDE_TOKEN_SECRET=$(gen)
 OSIONOS_BRIDGE_EMAIL_HASH_SALT=$(gen)
 OSIONOS_BRIDGE_SHARED_SECRET=$(gen)
 OSIONOS_APP_SESSION_TTL_SECONDS=2592000
