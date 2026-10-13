@@ -6,8 +6,9 @@
 -- (a route collision) — so it had no real backend. This table gives connections a
 -- durable, owner-isolated home: ONE row per (owner, provider). The bridge
 -- (service-role key) stamps `owner_id` from the verified app-session token and
--- scopes every read/write by it; the RLS below is defense-in-depth for a
--- hypothetical direct/anon connection, mirroring osionos_object_databases.
+-- scopes every read/write by it.
+--
+-- The bridge (service_role) is the only reader and writer; nobody else gets a grant.
 
 create extension if not exists "pgcrypto";
 
@@ -38,15 +39,8 @@ create policy osionos_app_connections_service_role_all
 	on public.osionos_app_connections for all
 	to service_role using (true) with check (true);
 
--- Defense-in-depth: an authenticated (non-service-role) connection may only touch
--- its OWN connections. The live bridge path uses the service-role key and enforces
--- owner scoping in the handler; this keeps a direct/anon read private.
 drop policy if exists osionos_app_connections_owner_all on public.osionos_app_connections;
-create policy osionos_app_connections_owner_all
-	on public.osionos_app_connections for all
-	to authenticated using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
-grant select, insert, update, delete on public.osionos_app_connections to authenticated;
 grant all on public.osionos_app_connections to service_role;
 
 notify pgrst, 'reload schema';

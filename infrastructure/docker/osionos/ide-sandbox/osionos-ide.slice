@@ -1,0 +1,23 @@
+# osionos IDE sandboxes, capped as ONE group.
+#
+# WHY: every sandbox box has its own memory/CPU limit, but N boxes together are
+# uncapped — a fleet of runaway boxes could starve the production databases that
+# share this host with the IDE plane. This slice caps docker-ide itself plus
+# every box it runs, so the whole plane stays inside one memory/CPU/IO budget.
+#
+# Ponytail: MemoryMax/CPUQuota/IOWeight are estimates for a 14 GiB host that
+# also runs the 35-container production stack; a heavier workload needs the
+# numbers re-measured.
+
+[Unit]
+Description=osionos IDE sandboxes (docker-ide and every box it runs), capped as one group
+Before=slices.target
+
+[Slice]
+MemoryAccounting=yes
+MemoryMax=3G
+MemorySwapMax=0
+CPUAccounting=yes
+CPUQuota=200%
+IOAccounting=yes
+IOWeight=50

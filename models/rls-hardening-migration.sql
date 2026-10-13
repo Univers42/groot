@@ -8,6 +8,7 @@
 -- enables/forces RLS on the two open internal tables, strips the blanket
 -- anon/authenticated CRUD grants, role-scopes tenant_databases, caps anon
 -- enumeration of users, and FORCEs RLS everywhere for defense in depth.
+-- Osionos relations are service_role-only. The bridge (service_role) is the only reader and writer; nobody else gets a grant.
 --
 -- EXISTENCE-GUARDED so it runs cleanly on BOTH the full local stack AND a LEAN
 -- fresh install (objects that only exist in the heavier BaaS planes — e.g.
@@ -93,29 +94,24 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
   REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLES FROM anon, authenticated;
 
 -- ---------------------------------------------------------------------
--- F7: per-table grant hygiene — revoke anon; re-grant authenticated exactly the
--- verbs each table's policies use (writes mostly flow through service_role RPCs).
+-- F7: per-table grant hygiene — osionos relations are service_role-only.
+-- The bridge (service_role) is the only reader and writer; nobody else gets a grant.
+-- Non-osionos tables below keep their verbs because their policies still allow those roles.
 -- ---------------------------------------------------------------------
 DO $$
 BEGIN
   IF to_regclass('public.osionos_bridge_identities') IS NOT NULL THEN
-    REVOKE ALL ON public.osionos_bridge_identities FROM anon, authenticated;
-    GRANT SELECT ON public.osionos_bridge_identities TO authenticated; END IF;
+    REVOKE ALL ON public.osionos_bridge_identities FROM anon, authenticated; END IF;
   IF to_regclass('public.osionos_workspaces') IS NOT NULL THEN
-    REVOKE ALL ON public.osionos_workspaces FROM anon, authenticated;
-    GRANT SELECT ON public.osionos_workspaces TO authenticated; END IF;
+    REVOKE ALL ON public.osionos_workspaces FROM anon, authenticated; END IF;
   IF to_regclass('public.osionos_workspace_members') IS NOT NULL THEN
-    REVOKE ALL ON public.osionos_workspace_members FROM anon, authenticated;
-    GRANT SELECT ON public.osionos_workspace_members TO authenticated; END IF;
+    REVOKE ALL ON public.osionos_workspace_members FROM anon, authenticated; END IF;
   IF to_regclass('public.osionos_pages') IS NOT NULL THEN
-    REVOKE ALL ON public.osionos_pages FROM anon, authenticated;
-    GRANT SELECT, INSERT, UPDATE, DELETE ON public.osionos_pages TO authenticated; END IF;
+    REVOKE ALL ON public.osionos_pages FROM anon, authenticated; END IF;
   IF to_regclass('public.osionos_page_configurations') IS NOT NULL THEN
-    REVOKE ALL ON public.osionos_page_configurations FROM anon, authenticated;
-    GRANT SELECT, INSERT, UPDATE ON public.osionos_page_configurations TO authenticated; END IF;
+    REVOKE ALL ON public.osionos_page_configurations FROM anon, authenticated; END IF;
   IF to_regclass('public.osionos_page_action_events') IS NOT NULL THEN
-    REVOKE ALL ON public.osionos_page_action_events FROM anon, authenticated;
-    GRANT SELECT, INSERT ON public.osionos_page_action_events TO authenticated; END IF;
+    REVOKE ALL ON public.osionos_page_action_events FROM anon, authenticated; END IF;
   IF to_regclass('public.osionos_bridge_audit_events') IS NOT NULL THEN
     REVOKE ALL ON public.osionos_bridge_audit_events FROM anon, authenticated; END IF;
   IF to_regclass('public.gdpr_requests') IS NOT NULL THEN

@@ -35,16 +35,24 @@ services:
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${GROBASE_TLS_HOST_PORT:-8444}:8444"
       # Shared vhost entry point for every *.track-binocle.test app (the :443 server block).
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${TRACK_BINOCLE_VHOST_HTTPS_PORT:-443}:443"
+      # osionos-ide-server TLS edge on 8446. LITERAL 127.0.0.1 like drawnosaurus:
+      # TRACK_BINOCLE_BIND_ADDR resolves to 0.0.0.0 on this host. The IDE is a shell
+      # on a shared host; exposing it beyond loopback is a later, separate step
+      # (different hostname, not port) — tracked in C21.
+      - "127.0.0.1:${OSIONOS_IDE_HOST_PORT:-8446}:8446"
     # `mini-baas` (external) is required by the :8444 server block — its upstream is the
     # grobase container name `mini-baas-kong`, which resolves only on that network.
     # `drawnosaurus-internal` is joined the same way osionos-bridge joins
     # osionos-runner-net: the CLIENT reaches into the isolated network, and the isolated
     # services never join the shared one. That is what keeps drawnosaurus-gateway (which
     # stamps Caddy's `host` role on everything) unreachable from the other containers.
+    # `osionos-ide-edge-net` is internal: only local-https-proxy and osionos-ide-server
+    # join it, so the browser's only way in is this TLS edge.
     networks:
       - default
       - mini-baas
       - drawnosaurus-internal
+      - osionos-ide-edge-net
     healthcheck:
       test: ["CMD-SHELL", "nginx -t >/dev/null 2>&1"]
       interval: 30s
@@ -121,14 +129,20 @@ services:
       # human go-ahead). Enable locally: OSIONOS_RUNNER_URL=http://osionos-runner:7900
       # plus `COMPOSE_PROFILES=runner`.
       OSIONOS_RUNNER_URL: ${OSIONOS_RUNNER_URL:-}
-      # IDE workspace sandbox (P2–P7) — DOUBLE-GATED, default DISABLED. All
-      # /api/ide/{session,pty,lsp,fsync,git,search,fs} routes stay 404 unless BOTH
-      # are set AND the `ide` profile (socket-proxy) is up. Ships EMPTY on purpose.
-      # Enable locally: OSIONOS_IDE_SANDBOX=1 +
-      # OSIONOS_IDE_DOCKER_HOST=osionos-ide-socket-proxy:2375 + COMPOSE_PROFILES=ide.
-      OSIONOS_IDE_SANDBOX: ${OSIONOS_IDE_SANDBOX:-}
-      OSIONOS_IDE_DOCKER_HOST: ${OSIONOS_IDE_DOCKER_HOST:-}
-      OSIONOS_IDE_EGRESS_GIT_HOSTS: ${OSIONOS_IDE_EGRESS_GIT_HOSTS:-github.com}
+      # IDE workspace sandbox (P2–P7) — the bridge only mints the token now
+      # (POST /api/ide/token). The sandbox control plane moved to the dedicated
+      # osionos-ide-server container, which owns OSIONOS_IDE_SANDBOX and
+      # OSIONOS_IDE_DOCKER_HOST. .env.local (the bridge's env_file) sets both, so
+      # they are pinned empty here: an environment: entry overrides env_file.
+      OSIONOS_IDE_SANDBOX: ""
+      OSIONOS_IDE_DOCKER_HOST: ""
+      # Comma-separated account ids allowed a sandbox (a sandbox is a shell on a shared
+      # host, so access is opt-in). Empty = nobody. The mint route checks this.
+      OSIONOS_IDE_ALLOWED_SUBJECTS: ${OSIONOS_IDE_ALLOWED_SUBJECTS:-}
+      # Signs the 15-minute IDE token the mint route issues. At least 32 bytes and
+      # never OSIONOS_APP_SESSION_SECRET (ide-token.mjs refuses otherwise); the IDE
+      # server verifies with the same value.
+      OSIONOS_IDE_TOKEN_SECRET: ${OSIONOS_IDE_TOKEN_SECRET:-}
       HOME: ${OSIONOS_BRIDGE_HOME:-/tmp}
       PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     expose:
@@ -141,9 +155,6 @@ services:
       # Reaches the (optional, profile-gated) code runner over an internal-only
       # network — no effect until the `runner` profile is up + OSIONOS_RUNNER_URL set.
       - osionos-runner-net
-      # IDE control plane → the filtering socket-proxy (OSIONOS_IDE_DOCKER_HOST).
-      # Internal-only; no effect until the `ide` profile is up + the envs above set.
-      - osionos-ide-control-net
     healthcheck:
       test:
         [
@@ -261,12 +272,11 @@ services:
         # the tab is gated by the osio.whiteboard flag (default OFF), not by this being
         # empty — see featureFlags.ts. Turn on per-session with ?osio.whiteboard=1.
         VITE_WHITEBOARD_APP_URL: https://localhost:${DRAWNOSAURUS_HOST_PORT:-3007}
+        # IDE server browser origin. Baked at build; empty = the IDE shows "not configured".
+        VITE_OSIONOS_IDE_URL: ${VITE_OSIONOS_IDE_URL:-https://localhost:8446}
         VITE_REQUIRE_BRIDGE_SESSION: "true"
         VITE_ALLOW_OFFLINE_MODE: "false"
         VITE_PAGE_ACTION_SYNC_ENABLED: "true"
-        # IDE / Dev-Mode surface (code files + CodeMirror editor + IDE shell).
-        # Empty default keeps it OFF for the public web image; the app .env sets =1.
-        VITE_OSIO_IDE: ${VITE_OSIO_IDE:-}
         # mini-baas live-database + graph wiring (Vite inlines at build).
         # Empty defaults keep those surfaces dormant; `make seed-live-demo`
         # at the repo root rebuilds this image with the values from the app
@@ -713,7 +723,8 @@ services:
   # The filtering docker-socket proxy — the ONLY path from the provisioner to the
   # docker-ide daemon (condition 2). It bind-mounts the host /run/docker-ide.sock
   # and exposes a filtered TCP endpoint that allowlists endpoints AND vets the
-  # create body (condition 8). Reachable only by the bridge on the control net.
+  # create body (condition 8). Reachable only by osionos-ide-server on the control
+  # net (C17 moved the provisioner there).
   osionos-ide-socket-proxy:
     build:
       context: infrastructure/docker/osionos/ide-socket-proxy
@@ -726,15 +737,88 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    # The image runs as `node`; the socket is 0660 root:<docker gid of the HOST>, so the proxy
+    # joins that numeric gid (deploy-plane.sh reads it with `stat -c %g` on the socket). Unset,
+    # 0 grants nothing: every call answers 502 "daemon unreachable" (measured on the VM).
+    group_add:
+      - "${OSIONOS_IDE_DOCKER_GID:-0}"
+    # Ponytail: one Node process relaying streams fits in 64m and 64 pids; a burst
+    # of many concurrent PTY attaches needs more — raise both together.
+    mem_limit: 64m
+    pids_limit: 64
     environment:
       IDE_DOCKER_SOCK: /dind-run/docker.sock
+      # The create-body vetting allows exactly this image; it must be the one osionos-ide-server
+      # asks for, so both interpolate the same variable (a pinned sha256 id from ship-images.sh).
+      OSIONOS_IDE_SANDBOX_IMAGE: ${OSIONOS_IDE_SANDBOX_IMAGE:-osionos-ide-sandbox:latest}
     volumes:
-      # Host bind of the isolated daemon's socket (docker-ide.service).
-      - ${OSIONOS_IDE_DOCKER_SOCK:-/run/docker-ide.sock}:/dind-run/docker.sock
+      # Host bind of the isolated daemon's socket (docker-ide.socket owns the file,
+      # so a daemon restart keeps the inode this mount holds). Long syntax so the
+      # start fails when the socket is absent: a missing host path must never
+      # become a directory docker-ide can no longer bind (README, step A).
+      - type: bind
+        source: ${OSIONOS_IDE_DOCKER_SOCK:-/run/docker-ide.sock}
+        target: /dind-run/docker.sock
+        bind:
+          create_host_path: false
     expose:
       - "2375"
     networks:
       - osionos-ide-control-net
+
+  # osionos-ide-server — the IDE sandbox control plane (P2–P7). Serves every
+  # sandbox route (/api/ide/session|fs|git|search|ports|preview/session), the
+  # /api/ide/pty|lsp|fsync upgrades, and the preview at /p/<cap>/…. Accepts
+  # only the 15-minute, one-workspace IDE token minted by the bridge
+  # (POST /api/ide/token). Runs from the bridge image (no second build) with
+  # a different entrypoint. The secret arrives via Compose interpolation from
+  # the project .env / shell; `make` passes --env-file ./.env.local, so the
+  # IDE server never uses env_file and the bridge's .env.local (which holds DB
+  # credentials) is not read here.
+  osionos-ide-server:
+    image: ${OSIONOS_BRIDGE_IMAGE:-track-binocle/osionos-bridge:local}
+    profiles: ["ide"]
+    restart: unless-stopped
+    command: ["node", "scripts/ide-server.mjs"]
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 384m
+    pids_limit: 256
+    environment:
+      NODE_ENV: production
+      OSIONOS_IDE_SERVER_PORT: 4100
+      OSIONOS_IDE_TOKEN_SECRET: ${OSIONOS_IDE_TOKEN_SECRET:-}
+      OSIONOS_IDE_ALLOWED_ORIGIN: ${OSIONOS_IDE_ALLOWED_ORIGIN:-https://localhost:3001}
+      OSIONOS_IDE_PUBLIC_URL: ${OSIONOS_IDE_PUBLIC_URL:-https://localhost:8446}
+      OSIONOS_IDE_SANDBOX: ${OSIONOS_IDE_SANDBOX:-}
+      OSIONOS_IDE_DOCKER_HOST: ${OSIONOS_IDE_DOCKER_HOST:-}
+      OSIONOS_IDE_ALLOWED_SUBJECTS: ${OSIONOS_IDE_ALLOWED_SUBJECTS:-}
+      OSIONOS_IDE_SANDBOX_IMAGE: ${OSIONOS_IDE_SANDBOX_IMAGE:-osionos-ide-sandbox:latest}
+      OSIONOS_IDE_STORAGE_QUOTA: ${OSIONOS_IDE_STORAGE_QUOTA:-}
+    expose:
+      - "4100"
+    networks:
+      - osionos-ide-control-net
+      - osionos-ide-edge-net
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "fetch(''http://127.0.0.1:4100/healthz'').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"',
+        ]
+      interval: 30s
+      start_interval: 2s
+      timeout: 3s
+      start_period: 10s
+      retries: 6
+    depends_on:
+      osionos-ide-socket-proxy:
+        condition: service_started
 
   # ---------------------------------------------------------------------------
   # drawnosaurus — opt-in collaborative whiteboard (apps/drawnosaurus, pinned).
@@ -960,10 +1044,13 @@ networks:
   # API as Caddy's privileged `host` role.
   drawnosaurus-internal:
     internal: true
-  # IDE control plane (bridge ↔ socket-proxy): internal, no egress — the control
-  # path never needs the internet. The bridge joins this to reach the filter at
-  # osionos-ide-socket-proxy:2375 (OSIONOS_IDE_DOCKER_HOST). The sandbox networks
-  # (internal sandbox-net + the egress proxy) live INSIDE the docker-ide daemon,
-  # created by bootstrap.sh — not here.
+  # IDE control plane (socket-proxy ↔ ide-server): internal, no egress — the control
+  # path never needs the internet. Only osionos-ide-socket-proxy and osionos-ide-server
+  # join it; the bridge no longer attaches. The sandbox networks (internal sandbox-net +
+  # the egress proxy) live INSIDE the docker-ide daemon, created by bootstrap.sh — not here.
   osionos-ide-control-net:
+    internal: true
+  # IDE TLS edge network: internal, no egress. Only local-https-proxy and osionos-ide-server
+  # join it, so the browser reaches the IDE server exclusively through the TLS proxy on 8446.
+  osionos-ide-edge-net:
     internal: true

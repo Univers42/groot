@@ -51,12 +51,9 @@ ON CONFLICT (source_page_id, target_page_id) DO NOTHING;
 
 ALTER TABLE public.osionos_page_links ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS osionos_page_links_select_own ON public.osionos_page_links;
-CREATE POLICY osionos_page_links_select_own ON public.osionos_page_links
-  FOR SELECT TO authenticated USING (owner_id = auth.uid());
 DROP POLICY IF EXISTS osionos_page_links_service_role_all ON public.osionos_page_links;
 CREATE POLICY osionos_page_links_service_role_all ON public.osionos_page_links
   FOR ALL TO service_role USING (true) WITH CHECK (true);
-GRANT SELECT ON public.osionos_page_links TO authenticated;
 GRANT ALL    ON public.osionos_page_links TO service_role;
 
 NOTIFY pgrst, 'reload schema';

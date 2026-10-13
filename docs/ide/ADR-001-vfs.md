@@ -99,6 +99,50 @@ mid-walk, names with spaces/quotes/newlines/emoji/RTL.
    separators, reserved names) live in provider capabilities and normalization at the
    boundary, never in the UI.
 
+## Addendum 3 — the `workspace://` switching mount (2026-10-13, PROPOSED)
+
+Design: [ADR-004](ADR-004-page-files.md). This addendum is only the mount-table part.
+
+**What it adds.** One scheme, `workspace://<workspaceId>/<path>`, that every workbench
+consumer (explorer, search, file ops, editors) resolves, instead of choosing between
+`osionos://` and `sandbox://`. The interface is already on disk as a stub:
+`WORKSPACE_SCHEME`, `workspaceUri`, `getWorkspaceMounts`, `subscribeWorkspaceMounts` in
+`apps/osionos/app/src/features/ide/vfs/workspaceMounts.ts`. Today (the stub) the scheme is
+bound to the existing page provider over the code/folder facade only; the switching below
+is not implemented.
+
+**Who resolves, and when.** The consumer, on every call, through
+`mountTable.resolve(uri)` (`mountTable.ts:36`); nobody caches a provider. The binding
+behind the scheme is chosen from the sandbox health store (`sandboxHealthStore.ts`):
+
+| Health state | `workspace://<ws>` is served by |
+|---|---|
+| `online` | the sandbox provider (`sandbox://`, the real `/workspace` volume) |
+| `unknown`, `stopped`, `disabled`, `unavailable` | the page-file provider: every readable page as its `.omd` text, over the page store (the DB replica) |
+
+`subscribeWorkspaceMounts` notifies consumers when the binding flips so they re-list.
+The binding follows the health state; the spec does not say what a single failed call does, and this ADR does not define it.
+
+**What degraded mode serves.** Listing, reading and writing pages and code/folder pages as
+files, from the page store; writes go through the existing outbox to the database.
+Explorer, search and page editing keep working and are labelled "Degraded — DB replica".
+
+**What it does not serve.**
+- Files that exist only in the sandbox (created by the shell, `git clone` output,
+  `node_modules`): invisible while degraded. Same as before this change.
+- The terminal, ports, LSP, run and git: they need the sandbox and show one
+  "sandbox unavailable" state. There is no host fallback.
+- Database records and schema as files (they stay in Postgres), comments, `sortOrder`
+  (see ADR-004, known-lossy fields).
+- Sync between the two bindings while degraded. On the next attach, `reconcileOnAttach`
+  compares sandbox and replica; a divergence is a surfaced conflict, never a silent
+  overwrite (decision 7 above still holds).
+- A per-collaborator shared folder: each user has their own sandbox, so the database stays
+  the convergence point.
+
+**Conformance.** The page-file provider joins `vfs-conformance.test.ts` as a fourth target
+(spec, P1 gate). That test file exists; the fourth target does not yet.
+
 ## What would falsify this decision
 
 - If block-level collaborative editing must operate live on files *inside* a

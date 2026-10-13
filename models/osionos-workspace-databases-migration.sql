@@ -8,9 +8,8 @@
 -- Access enforcement lives in the bridge (it holds the tenant api-key and composes
 -- the graph): every /api/databases/* handler now joins osionos_workspace_members →
 -- osionos_workspaces → this table before proxying, so a caller can only reach a
--- mount linked to a workspace they own or belong to. The authenticated SELECT
--- policy below is defense-in-depth for a direct (non-service-role) connection —
--- it scopes to membership instead of full deny, mirroring osionos_workspaces.
+-- mount linked to a workspace they own or belong to.
+-- The bridge (service_role) is the only reader and writer; nobody else gets a grant.
 -- ponytail: per-mount database_members + ABAC inside grobase is the deeper
 -- data-plane layer (a later m<NN>); the bridge join is the immediate guard.
 
@@ -40,25 +39,5 @@ create policy osionos_workspace_databases_service_role_all
 	on public.osionos_workspace_databases for all
 	to service_role using (true) with check (true);
 
--- Defense-in-depth: an authenticated connection may SELECT a mount only when it
--- owns or is a member of the linking workspace (mirrors osionos_workspaces_select_
--- member). The live bridge path uses the service-role key above; this guards any
--- future direct/anon data-plane read so databases stay personal-unless-invited.
 drop policy if exists osionos_workspace_databases_select_member
 	on public.osionos_workspace_databases;
-create policy osionos_workspace_databases_select_member
-	on public.osionos_workspace_databases for select
-	to authenticated using (
-		exists (
-			select 1 from public.osionos_workspaces ws
-			where ws.id = osionos_workspace_databases.workspace_id
-				and (
-					ws.owner_id = auth.uid()
-					or exists (
-						select 1 from public.osionos_workspace_members member
-						where member.workspace_id = ws.id
-							and member.user_id = auth.uid()
-					)
-				)
-		)
-	);
