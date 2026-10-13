@@ -52,11 +52,30 @@ probe_url() { # URL CA
   row PASS url "$url" "$detail"
 }
 
+# ssh_failure STDERR — why ssh failed, from OpenSSH's own message. A changed or unknown host
+# key used to read "refused or timed out" and sent people debugging the network instead.
+ssh_failure() {
+  case "$1" in
+  *"REMOTE HOST IDENTIFICATION HAS CHANGED"* | *"Host key verification failed"*)
+    echo "host key unknown or changed: check known_hosts (ssh-keygen -R HOST), never just accept it" ;;
+  *"Permission denied"*) echo "no key accepted (BatchMode never prompts: ssh-add one)" ;;
+  *"Connection refused"*) echo "ssh refused" ;;
+  *"timed out"* | *"No route to host"*) echo "ssh timed out" ;;
+  "") echo "ssh refused or timed out" ;;
+  *) echo "ssh failed: $(tail -n1 <<<"$1")" ;;
+  esac
+}
+
 probe_ssh() { # TARGET
-  local names
+  local names err
+  err=$(mktemp) || die "mktemp failed"
   # shellcheck disable=SC2046 # ssh_args prints a dest and an optional -p port, never spaces
-  names=$(ssh_once $(ssh_args "$1") "docker ps --format '{{.Names}}'" 2>/dev/null) ||
-    { row FAIL ssh "$1" "ssh refused or timed out" && return 1; }
+  if ! names=$(ssh_once $(ssh_args "$1") "docker ps --format '{{.Names}}'" 2>"$err"); then
+    row FAIL ssh "$1" "$(ssh_failure "$(cat "$err")")"
+    rm -f "$err"
+    return 1
+  fi
+  rm -f "$err"
   grep -qx mini-baas-kong <<<"$names" || { row FAIL ssh "$1" "no mini-baas-kong running there" && return 1; }
   row PASS ssh "$1" ""
 }

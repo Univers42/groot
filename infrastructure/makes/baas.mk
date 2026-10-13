@@ -102,5 +102,15 @@ models-check:
 ## Report unapplied models migrations; non-zero if any. Changes nothing.
 	@sh scripts/apply-models-migrations.sh --check
 
+models-grants-verify:
+## Prove on a throwaway database that every public.osionos_* relation is reachable by
+## service_role ONLY — the bridge (service_role) is the only reader and writer. Two
+## scenarios (fresh, and an upgraded install still carrying the old blanket grants), both
+## driven by the REAL runner; anon/authenticated must get no privilege, no policy and
+## 42501 on six live probes. Changes nothing outside its own containers; non-zero on any
+## failure, and a missing image is a FAIL rather than a SKIP.
+	@sh scripts/verify/models-grants.sh
+
 .PHONY: seed-live-demo osionos-app-live live-data-ensure live-data-check \
-        mounts-reencrypt mounts-check models-migrate models-check
+        mounts-reencrypt mounts-check models-migrate models-check \
+        models-grants-verify

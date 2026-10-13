@@ -50,6 +50,8 @@ mux() { ssh -F /dev/null -S "$CTL" -o BatchMode=yes -o LogLevel=ERROR "$@"; }
 . "$REPO/scripts/lib/grobase-link-target.sh"
 # shellcheck source=scripts/lib/grobase-link-verify.sh
 . "$REPO/scripts/lib/grobase-link-verify.sh"
+# shellcheck source=scripts/lib/grobase-link-ide.sh
+. "$REPO/scripts/lib/grobase-link-ide.sh"
 
 # "<service> <container port> <ip:port reachable from the remote's sshd>" per tcp port of
 # every mini-baas-* container; a published port (0.0.0.0/:: -> 127.0.0.1) beats the
@@ -74,7 +76,7 @@ cancel_forwards() {
   local f
   [ -f "$FORWARDS" ] || return 0
   while read -r f; do [ -z "$f" ] || mux -O cancel -L "$f" x 2>/dev/null || true; done <"$FORWARDS"
-  rm -f "$FORWARDS" "$LINK_DIR"/*.sock
+  rm -f "$FORWARDS" "$LINK_DIR"/*.sock "$LINK_DIR"/ide/*.sock
 }
 # Reuses a live master only when it goes to the same host: the control socket has one
 # path, so a new target would otherwise silently keep talking to the previous machine.
@@ -130,6 +132,7 @@ up_ssh() {
   ep=$(awk '$1 == "tenant-control" && $2 == 3022 { print $3; exit }' <<<"$endpoints")
   [ -z "$ep" ] || forward "$LINK_DIR/tenant-control-3022.sock" "$ep"
   mv "$ROUTES.tmp" "$ROUTES"
+  link_ide_plane
   note "ssh link to $1: $(wc -l <"$ROUTES") ports relayed, Kong at $kong$(forward_host_port "$kong")"
 }
 
@@ -298,6 +301,7 @@ conf) cmd_conf "${2:-}" ;;
 mode) state_get mode | grep . || die "no link" ;;
 docker-host) cmd_docker_host ;;
 api-url) api_url "$TARGET" "$API_URL" || die "no API URL for target $TARGET; set GROBASE_API_URL to the WAF URL, e.g. https://<vm>.<tailnet>.ts.net:8443" ;;
+ide-linked) ide_linked ;;
 -h | --help) usage ;;
 *) usage >&2 && exit 1 ;;
 esac

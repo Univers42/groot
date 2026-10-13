@@ -7,7 +7,9 @@
 > scattered narrative in commit messages and the infra runbook
 > (`infrastructure/docker/osionos/ide-sandbox/README.md`), which it now reconciles.
 >
-> Last reconciled: **2026-07-20** (commit `e93d3154`, formerly branch `feat/ide-full-mode`, merged into `main`).
+> Last reconciled: **2026-07-20** (commit `e93d3154`, formerly branch `feat/ide-full-mode`, merged into `main`);
+> §3.2, §3.4, §4.1–4.4 and §5 corrected on **2026-10-13** (see the changelog entry of that date);
+> §4.1, §4.2, §4.4, §5 and the Appendix corrected on **2026-10-14** (see the changelog entry of that date).
 
 ---
 
@@ -61,11 +63,11 @@ languages, rich language servers, a debugger, tests, tasks) that also runs in th
 | **A — code runner** | one-shot `POST /api/ide/run` (SSE) + `/api/ide/format` | `track-binocle-osionos-runner`, `osionos-runner-net` (`internal`, no egress) | bridge `OSIONOS_RUNNER_URL` + compose profile `runner` | **No** |
 | **B — persistent sandbox** | shell (PTY), LSP, live file-sync, git, ripgrep search | per-`(user,workspace)` container on an **isolated 2nd Docker daemon**, fronted by `osionos-ide-socket-proxy` on `osionos-ide-control-net` | bridge `OSIONOS_IDE_SANDBOX=1` **and** `OSIONOS_IDE_DOCKER_HOST` **and** compose profile `ide` | **Yes** (2nd daemon host prep) |
 
-A **third, frontend** gate — the `osio.ide` feature flag (`featureFlags.ts:174`, default
-**OFF**) — controls whether any IDE UI is even reachable. It is explicitly **not** a
-security control (execution is server-gated); it just keeps the additive feature off the
-normal block-editor surface. Turn on with `?osio.ide=1`, the `osio.ide` localStorage key,
-or `VITE_OSIO_IDE=1` at build time.
+There is no frontend gate since the P3 cut-over (osionos `21cda98`, 2026-10-13): the
+`osio.ide` flag, the per-workspace IDE mode and the `VITE_OSIO_IDE` build arg are gone, and
+every workspace opens in the one workbench (`src/widgets/workbench/`). The flag was never a
+security control; execution is still gated server-side by the two planes above. With the
+sandbox unreachable the workbench degrades to the DB replica (`sandboxHealthStore`).
 
 **Why "everything ships OFF + double/triple-gated":** the persistent sandbox is a real
 code-execution + egress surface. Safe-by-default means an operator must consciously flip
@@ -81,7 +83,11 @@ every gate, and a misconfigured frontend can never open an execution path on its
 - **The file tree *is* the page tree**, filtered + sorted folders-first
   (`src/features/ide/model/ideFileTree.ts`).
 - **The page tree is the sync manifest** — path↔pageId is *derived* (`idePaths.ts`
-  `pathForPage`), so there is no `.osio/manifest.json` to keep in step.
+  `pathForPage`), so there is no `.osio/manifest.json` to keep in step. This holds for
+  code and folder pages today. **Superseded for block pages by the Proposed
+  [ADR-004](docs/ide/ADR-004-page-files.md):** a `.omd` file carries its own page `id` in
+  its front-matter, and that `id` — not the path — identifies the page, so a rename or move
+  in the shell is detected by `id`. Raw code files keep the derived path↔id mapping.
 - The bridge already whitelists the surface: `PAGE_SURFACE_VALUES` includes `'code'`
   (`scripts/bridge-api.mjs:104`), applied on read + write; no DB `CHECK` constraint blocks
   it — a created code page survives reload.
@@ -120,26 +126,36 @@ Documented in full in `infrastructure/docker/osionos/ide-sandbox/README.md`. The
 
 ### 3.4 Frontend design choices
 
-- **CodeMirror 6, not Monaco** (`src/features/ide/model/codeMirrorSetup.ts`). CodeMirror
-  themes entirely through the app's `--osio-*` CSS variables, so the editor follows all 7
-  palettes + light/dark with zero JS theme-branching. Uncontrolled document (caret never
-  jumps); debounced writeback (1200 ms); Compartments reconfigure language/LSP without
-  rebuilding the view; editor-scoped `Prec.highest` keymaps so IDE chords never collide
-  with the global automations dispatcher. **Deliberately no autocomplete / no in-editor
-  lint panel** in the base editor ("colors + write code, no intellisense") — LSP adds the
-  intelligence in IDE mode.
+- **Standalone Monaco 0.56, not CodeMirror** (`src/features/ide/model/monacoRuntime.ts`,
+  `monaco-editor` pinned `0.56.0` in `package.json:54`). This section previously described
+  CodeMirror 6 (`codeMirrorSetup.ts`); no CodeMirror import remains under `src/` (the
+  surviving mentions are comments recording the old behaviour: `monacoRuntime.ts:15`,
+  `useMonacoEditor.ts:42`). `monacoRuntime.ts` is the one place the tree-shakeable core
+  enters the bundle and opts editor features in one by one (`monacoRuntime.ts:25-54`); only
+  the base editor worker is registered (`monacoRuntime.ts:56-60`), so there are no
+  TS/JSON/CSS/HTML language services. It is reached only through `LazyCodeFileView`, never
+  the warm pane path. Posture kept from the CodeMirror editor: no minimap, no word-based
+  suggestions, no sticky scroll (`useMonacoEditor.ts:42-67`). Theming goes through the app
+  palette: `monacoTheme.ts` reads the `--osio-code-*` tokens from the editor host's computed
+  style and redefines the `osio` theme when `data-theme`, `data-palette` or the OS scheme
+  change. Document writeback is debounced from the model change event, 1200 ms
+  (`useMonacoEditor.ts:19`). The LSP adapter registers Monaco providers
+  (`lspMonaco.ts:178`). What this does **not** do: it is not the VS Code workbench
+  (`@codingame/monaco-vscode-api` is not used); ADR-004 records why that stays true.
 - **xterm.js** terminal, lazy-loaded so it never lands in the warm chunk; PTY geometry sent
   **out-of-band** as an APC control frame (`ESC _ osio-resize:COLS,ROWS ESC \`).
-- **Small single-purpose zustand stores:** `ideModeStore` (persisted, per-workspace IDE
-  mode + active panel), `useDevMode` (persisted), `diagnosticsStore` (transient, keyed by
+- **Small single-purpose zustand stores:** `workbenchStore` (persisted as
+  `osio.workbench.v1`: dock open/tab/height, status bar; imports the legacy `osio.ide.mode`
+  blob once), `useDevMode` (persisted), `diagnosticsStore` (transient, keyed by
   URI → Problems panel). The page store (`usePageStore`) stays the single source of truth;
   all IDE state derives from it.
-- **Two layers of the shell:** (1) a page *surface* — `PaneContent.tsx` swaps in
-  `CodeFileView` for `code` pages (double-guarded on surface AND flag); (2) a workspace
-  *mode* — `IdeShell` (`widgets/ide-shell/`) that **reuses `WorkspaceGrid` verbatim** as
-  its editor area, wrapped in activity bar / side panel / terminal strip / status bar.
-- **Pervasive code-splitting** (perf is a first-class concern): the whole `IdeShell`, each
-  language grammar, each Prettier plugin, xterm, and `@codemirror/lsp-client` are all
+- **One workbench** (`widgets/workbench/`, since the P3 cut-over): `TopBar`, the activity
+  rail + side panel, **`WorkspaceGrid`** as the editor area with a resizable dock
+  (terminal / problems / output / ports) and one status bar. `PaneContent.tsx` opens
+  `code` pages in `CodeFileView` (Monaco) unconditionally; `.omd` pages open in the block
+  editor.
+- **Pervasive code-splitting** (perf is a first-class concern): the workbench, each
+  language grammar, each Prettier plugin, xterm, and the Monaco runtime are all
   separate lazy chunks.
 
 ### 3.5 The transport map
@@ -177,7 +193,7 @@ The history uses **three overlapping axes**. This table is the reconciliation.
 | Phase | Scope | Status | Proof |
 |---|---|---|---|
 | P1 | Stateless code runner | `DONE` (built) | `infrastructure/docker/osionos/runner/{Dockerfile,server.mjs}`, `bridge-runner.mjs` |
-| P2 | Hardened isolated sandbox plane | `DONE` (built + activated + verified) | commit `4b835e9e`; live corpus 15/15 in `19b324dd` |
+| P2 | Hardened isolated sandbox plane | `DONE` (built + activated + verified) | commit `4b835e9e`; live corpus 15/15 in `19b324dd` (15 checks then; the corpus grew to 16 with `3043ab92` and to 42 with the control-plane reachability probes — see §4.4) |
 | P3 | Interactive PTY shell | `DONE` | `bridge-ide-exec.mjs`, WS `/api/ide/pty`; commit `c760e1ba`/`3d17e518` |
 | P4 | fs-agent + bidirectional live sync | `DONE` | commits `22e2b017`, `9c6fee17`; `osio-fs-agent.mjs`, `useIdeFsSync.ts` |
 | P5 | LSP relay (TypeScript + Pyright) | `DONE` (2 servers only) | `bridge-ide-exec.mjs` `LSP_SERVERS`; `lspClient.ts` |
@@ -190,9 +206,9 @@ The history uses **three overlapping axes**. This table is the reconciliation.
 |---|---|---|
 | A | Infra — isolated `docker-ide` daemon | `DONE` (`3d17e518`) |
 | B | Terminal — xterm.js | `DONE` |
-| C | LSP — CodeMirror lsp-client | `DONE` |
+| C | LSP — own JSON-RPC client (`lspProtocol.ts`) + Monaco adapter (`lspMonaco.ts`) | `DONE` |
 | D | Bidirectional pages↔sandbox sync | `DONE` (`9c6fee17`) |
-| E | **Live activation** (host prep + `verify.sh` 15/15 + e2e) | `DONE in code/commit` `19b324dd` — but **not performed on every machine**; must be re-run per host |
+| E | **Live activation** (host prep + `verify.sh` all checks green — 42 today — + e2e) | `DONE in code/commit` `19b324dd` — but **not performed on every machine**; must be re-run per host |
 
 ### 4.3 Frontend e2e "P0/P1" (unrelated to backend P-phases)
 
@@ -208,12 +224,22 @@ The history uses **three overlapping axes**. This table is the reconciliation.
   → Live activation is **done in code**; it must simply be **re-run on each new host**.
 - The runbook's **condition 12** ("PAT scoped + short-lived") reads *"deferred to P6"* — but
   **P6 shipped** (request-scoped per-op PAT, `config` denied). → Effectively addressed.
-- The runbook prose says **"16/16 corpus"**; `verify.sh` actually emits **15 PASS** lines
-  (some conditions are proven offline via unit tests / `--selfcheck`, condition 12 is
-  deferred). → The live gate is **15/15**, not 16/16.
+- **Verify count, corrected again 2026-10-14.** `verify.sh` pins `EXPECTED=42` and every
+  probe prints exactly one PASS/FAIL/SKIP line. The section "Control plane reachability"
+  adds two probes: a box must not open TCP to `osionos-ide-server`:4100 (on EVERY address
+  the container has) nor `osionos-ide-socket-proxy`:2375, each target first shown to accept
+  connections from the host; both SKIP where the plane is not deployed on that host. A
+  missing runner image makes the code-runner probe SKIP (it is no longer a FAIL), and the
+  RESULT line reports the skip count against the pinned total, so a skip never reads as a
+  pass. Measured on the VM (2026-10-14): `RESULT: 41 passed, 0 failed, 1 skipped
+  (expected 42)`; the skip is the runner probe (`runner image ... not present` — the code
+  runner is not deployed there). The earlier 15/15 and 16-check readings were true when
+  written and are corrected here; `ACTIVATE-dlesieur42.sh`'s [C9] line now carries the
+  42-check expectation. The checks do not map 1:1 onto the runbook's 16 conditions.
 
 > **Action item (docs):** edit `ide-sandbox/README.md` to match §4.4. Tracked as gap
-> `G-DOC` below.
+> `G-DOC` below. Partly done 2026-10-13; **closed 2026-10-14** — the runbook now carries the
+> 42-check corpus, the plane's placement on the VM and the socket-activation notes.
 
 ---
 
@@ -235,13 +261,20 @@ The history uses **three overlapping axes**. This table is the reconciliation.
 | G-GIT | Git panel = status/commit/push only; no branch/stash/diff-view | `useIdeGit.ts:36-38` | polish |
 | G-FLY | fly-machines provider deferred; `/api/ide/*` 404s on fly/Vercel (Docker-only today) | `ide-docker.mjs` | feature |
 | G-QUOTA | Per-sandbox block quota off by default (needs xfs+pquota data-root; `OSIONOS_IDE_STORAGE_QUOTA` unset) | `ide-sandbox-spec.mjs:56-60` | hardening |
-| G-FSW | fs-watch: 512 KiB file cap, binaries skipped, **no rename event** (rename = delete+write), no debounce, unbounded watcher-map growth | `osio-fs-agent.mjs` | polish |
+| G-FSW | fs-watch: 512 KiB file cap, binaries skipped, **no rename event** (rename = delete+write), no debounce, symlinks out of the root are followed (watcher-map growth on deletes fixed by G-FSWSTALE) | `osio-fs-agent.mjs` | polish |
 | G-CREATEUI | Sidebar "New code file" uses a native `window.prompt`; the Explorer uses a proper inline input — inconsistent | `SidebarPageTree.tsx:391-393` | polish |
 | G-LSPRE | No LSP reconnect beyond client-eviction-on-close + next-open | `lspClient.ts:85-95` | polish |
 | G-TERMRE | No terminal auto-reconnect (relies on panel remount) | `useIdeTerminal.ts:35` | polish |
 | G-WSCAP | WS message cap 1 MiB, no permessage-deflate — a very large LSP payload closes the socket | `ide-ws.mjs:25` | polish |
 | ~~G-RUNSTDIN~~ | ✅ **RESOLVED (interactive run)** — the one-shot runner still has no stdin (`input()` → EOFError), but in IDE Workspace mode the **Run** action now executes the file in the real sandbox **PTY** (`terminalRunBus` → `useIdeTerminal` → `ws.send`), where `input()` works. Playwright-verified: interactive `input()` over the live PTY reads input and prints the result (no EOFError). | `terminalRunBus.ts`, `CodeFileView.tsx`, `useIdeTerminal.ts` | fixed |
-| G-DOC | Runbook doc-lag (see §4.4) | `ide-sandbox/README.md` | docs |
+| ~~G-DOC~~ | ✅ **RESOLVED 2026-10-14** — `ide-sandbox/README.md` reconciled with the deployed plane (42-check corpus, placement on the VM, socket activation) | `ide-sandbox/README.md` | docs |
+| G-SOCKDIR | IDE console dead on a host where `docker-ide.service` was never installed: compose created `/run/docker-ide.sock` as a root-owned **directory** (`docker-compose.yml:733`), the socket proxy answers 502, the bridge closes sandbox sockets with 4004. Verified 2026-10-13: `ls -ld /run/docker-ide.sock` → `drwxr-xr-x 2 root root`; `systemctl is-enabled docker-ide` → `not-found`. The fix needs sudo: follow **Activation → Before step 1** in `ide-sandbox/README.md` (also gates on free space and `prjquota`). The app-side half (one non-looping "sandbox unavailable" state) is not built yet | `ide-sandbox/README.md`, `ACTIVATE-dlesieur42.sh` | blocker on this host |
+| G-FSWSTALE | After a shell `mv d1 d2` the agent's watcher map keeps the old path: every edit under `d2/` also emits a spurious `delete d1/…`, and a recreated `d1/` is never watched, so files created there never sync until the next attach. Measured 2026-10-13 on node 18.20.8 (`mv` + `mkdir d1` + new file → no event). `rm -rf d1; mkdir d1` reuses the inode on ext4, so the fix keys watchers by (dev, ino, birthtime) — devil verdict PROCEED-WITH-CONDITIONS. **Fixed 2026-10-13** (`fix/fs-agent-stale-watch`, merged into feat/ide): 0/33051 real deletes lost on a 3000×10 bulk delete, drain CPU 163 → 69 ms. No CI job runs the test yet: `docker run --rm --cpus=1 -v "$PWD":/agent:ro -v fsw-vol:/vol -e TMPDIR=/vol node:18-bookworm-slim node --test /agent/osio-fs-agent.move.test.mjs` | `osio-fs-agent.mjs`, `osio-fs-agent.move.test.mjs`, `osio-fs-agent.harness.mjs` | done |
+| G-FSWLINK | The agent follows symlinks out of `/workspace`: `ln -s /etc etclink` synced 117 container files into pages (measured 2026-10-13). Needs a security review — what the agent's uid can read that the shell user cannot | `osio-fs-agent.mjs` `readMeta`/`addTree` | hardening |
+| G-FSWOVF | Huge deletes overflow inotify: a 60k-file `rm -rf` emitted 77085 and 76292 of 78153 events (measured 2026-10-13). libuv drops the overflow notice, so the agent cannot ask for a resync; the next attach reconciles | `osio-fs-agent.mjs` | correctness |
+| G-FSWCI | No CI job runs the agent's move test; it runs locally only: `docker run --rm -v "$PWD":/agent:ro node:18-bookworm-slim node --test /agent/osio-fs-agent.move.test.mjs` | `.github/workflows/` | gate |
+| G-UPDWB | The page-file writer writes the front-matter `updated` key back on every save, so each page save costs one extra sandbox write (and its echo). Kept on purpose for the attach tiebreak; revisit if write volume shows up in the sync bench | osionos `pageFileWriter.ts` | perf |
+| G-LINTSCOPE | osionos `quality` lints `src/` and `packages/` only; the bridge (`scripts/*.mjs`, IDE routes included) and `tests/` are neither linted nor type-checked — they are proven only by `test-bridge` loading and passing | osionos `scripts/docker-run.sh` `quality`, `eslint.config.js` | gate |
 
 ---
 
@@ -362,13 +395,17 @@ sudo sh infrastructure/docker/osionos/ide-sandbox/ide-egress-nat.sh up
 COMPOSE_PROFILES=ide docker compose up -d osionos-ide-socket-proxy
 # 5. Seed the pre-built images + networks into docker-ide:
 sudo sh infrastructure/docker/osionos/ide-sandbox/bootstrap.sh
-# 6. HOSTILE-CORPUS GATE — must print 15 PASS before enabling:
+# 6. HOSTILE-CORPUS GATE — verify.sh pins 42 checks; on the VM: `RESULT: 41 passed, 0 failed, 1 skipped (expected 42)`:
 sudo sh infrastructure/docker/osionos/ide-sandbox/verify.sh
 # 7. Flip the bridge double-gate, then recreate the bridge:
 #    add to ./.env.local:  OSIONOS_IDE_SANDBOX=1
 #                          OSIONOS_IDE_DOCKER_HOST=osionos-ide-socket-proxy:2375
 #                          OSIONOS_IDE_EGRESS_GIT_HOSTS=github.com
 docker compose --env-file ./.env.local up -d osionos-bridge
+# (2026-10-14: step 7 is superseded — the plane runs on the VM's MAIN daemon as project
+#  osionos-ide-plane, deployed from the build machine by deploy-plane.sh and proven by
+#  check-plane.sh; the bridge's IDE gates stay pinned empty and it only mints the token.
+#  See the runbook's Activation steps and the 2026-10-14 changelog entry.)
 ```
 
 After step 7: open a workspace in IDE mode → the terminal (`bash -l`), multi-language LSP
@@ -376,6 +413,99 @@ After step 7: open a workspace in IDE mode → the terminal (`bash -l`), multi-l
 starts automatically (self-gated until now).
 
 ## Changelog
+
+- **2026-10-14** — **The IDE line merged into develop.** osionos `develop` (22 commits:
+  rail beside the panel, one Conversations space, the edge peek, wiki pages, pane zoom,
+  workspace Private/Shared, media search fixes) was merged into the IDE line. Decisions taken in
+  the 20 conflicts: (1) P3 had deleted the legacy sidebar, so develop's edits to it were carried
+  into what replaced it, not revived — the explorer already draws a wiki's own icon; the wiki
+  page list's child selector moved to `src/store/childPages.ts`; the sidebar-only
+  Private/Shared split (`workspaceSpaces.ts`) has no consumer in the workbench explorer and was
+  dropped, while its store and bridge halves (a child of a private page is private; another
+  member's private page is a 404) were kept. (2) develop's grouped rail is kept, with the
+  workbench panels as a fourth group (Workspace, Workbench, Conversations, Apps) and lazy,
+  prefetched like the others. (3) Page readability uses SEC1–SEC5's `canReadPageRow`; develop's
+  parallel `isPageReadableBy` differed only on owner-less legacy rows, of which the data center
+  holds none (2026-10-14: 816 private, 28 shared, 24 public, all with an owner). (4) Both sides
+  fixed emoji outside the icon catalog; the IDE side's direct drawing (`drawableEmojiOf`) won
+  and the live wiki emoji joined its test. (5) The perf specs leave the parallel suite (they
+  time input → paint and load inflates p95) and run only through `test:e2e:perf`; the rail
+  re-open budget moved 29 → 38 ms because it sat below this host's 30.8 ms frame floor.
+  **C3b5 ruling:** an archived page found by inbound sync stays a conflict entry rather than
+  "vanished" — the direction that loses nothing. Deploy gates read on the data center
+  (read-only): D1 RPC present, `parent_page_id` FK `ON DELETE SET NULL`; 26 private record
+  notes, one owner — making them shared is a data decision left to the operator.
+
+- **2026-10-14** — **Docs reconciled with the deployed IDE plane (docs only, no source
+  touched).** (1) **The plane is on the VM.** The control plane —
+  `osionos-ide-socket-proxy` + `osionos-ide-server`, compose profile `ide`, project
+  `osionos-ide-plane` — runs on the VM's MAIN daemon next to `docker-ide`, so the raw
+  docker-ide API never leaves the VM; both containers sit only on `osionos-ide-edge-net` /
+  `osionos-ide-control-net` and publish no host port, and the bridge no longer hosts
+  sandboxes (its IDE gates are pinned empty in compose; it only mints the IDE token, the
+  ide-server runs from the bridge image). Deployed from the build machine — the VM never
+  builds — by `deploy-plane.sh` (reads the gid owning `/run/docker-ide.sock`, refuses root
+  or none; ships an image only when the VM lacks the same config + layers; `up -d
+  --no-build --pull never --wait` over `DOCKER_HOST=ssh://…`; containers pinned to the VM's
+  image ids) and proven read-only by `check-plane.sh`: one ok|FAIL line per condition
+  (C1 image equality by config + layers, C2 the token secret in no VM home file, C4 the
+  socket-proxy caps, C6 a mini-baas box cannot dial ide-server:4100 or proxy:2375 while the
+  VM host can, C7 no host-net container + the docker group's only member is the operator,
+  C8 both plane subnets private and outside 10.202/16, C10 no host port) —
+  `RESULT: 7 ok, 0 failed`. `ship-images.sh` seeds docker-ide with the sandbox + egress
+  images and prints the `sha256:` pins. Images are compared by **config + layers, not
+  `.Id`**: the VM's containerd store ids an image by its manifest digest, a classic store
+  by its config digest, so the same image has two ids (measured: identical config and
+  layers, different ids). (2) **Socket activation.** `docker-ide.socket` owns
+  `/run/docker-ide.sock` (mode 0660, group `docker`) and `docker-ide.service` runs
+  `--host=fd://` with `Requires=`/`After=docker-ide.socket`, so the socket's inode survives
+  `systemctl restart docker-ide` and the proxy is never recreated (measured: the proxy ping
+  answered 0 s after a restart; the proxy container was not restarted).
+  `install-docker-ide.sh` performs the migration. (3) **The proxy's group.** The proxy runs
+  as user `node`; compose `group_add` adds the gid that owns the socket, read on the VM with
+  `stat -c %g` by `deploy-plane.sh` — without it the proxy answers "daemon unreachable". The
+  proxy's bind is long syntax with `create_host_path: false`, so a missing socket can no
+  longer become a directory (G-SOCKDIR's directory cause cannot recur; its app-side half is
+  still open). (4) **Client machine.** `make link`
+  (ssh mode) forwards `$LINK_DIR/ide/ide-server-4100.sock` to the ide-server's edge address
+  on the VM; the `grobase-link-ide` socat relay (the link owner's uid, cap_drop ALL,
+  read-only, edge network only, network alias `osionos-ide-server`, TCP `nodelay`) puts it
+  on the local `osionos-ide-edge-net`, where `local-https-proxy` serves it at
+  `https://localhost:8446`; `make link-verify` probes `ide-dns`, `ide-healthz`,
+  `ide-isolation`. Measured PTY round trip through the relay: p50 0.6 ms (41.9 ms before
+  `nodelay`: Nagle + delayed ACK). (5) **Real session, end to end.** login 200 → token 200
+  (`POST /api/ide/token`, ≤ 900 s, one workspace; bridge and ide-server share
+  `OSIONOS_IDE_TOKEN_SECRET` ≥ 32 bytes, never `OSIONOS_APP_SESSION_SECRET`;
+  `OSIONOS_IDE_ALLOWED_SUBJECTS` is the user-id allowlist checked on both sides) →
+  `POST /api/ide/session` 200 → the PTY evaluates `$((6*7))`. (6) **Corpus.** `verify.sh`
+  pins `EXPECTED=42`; the "Control plane reachability" section adds two probes (SKIP where
+  the plane is not deployed) and on the VM: `RESULT: 41 passed, 0 failed, 1 skipped
+  (expected 42)` — the skip is the code-runner probe. §4.1, §4.2, §4.4, §5 and the Appendix
+  corrected; the runbook `ide-sandbox/README.md` gained "Placement — the plane on the VM"
+  and the socket-activation notes. `G-DOC` closed.
+
+- **2026-10-13 (b)** — **Six gaps added to §5, measured this day.**
+  G-FSWSTALE (stale fs-agent watchers after a directory move),
+  G-FSWLINK (symlinks out of the root are followed),
+  G-FSWOVF (inotify overflow on huge deletes),
+  G-FSWCI (the agent's move test has no CI job),
+  G-UPDWB (the `updated` write-back on every page save) and
+  G-LINTSCOPE (the bridge and tests are not linted). Docs only.
+- **2026-10-13** — **Docs reconciled with the code; workbench design recorded (docs only,
+  no source touched).** (1) §3.4 said CodeMirror; the editor is standalone Monaco 0.56
+  (`monacoRuntime.ts`) — rewritten, plus the §4.2 row C and the lazy-chunk list. (2) The
+  verify count is 16, not 15: `3043ab92` added the runner probe; counted line by line in
+  §4.4. Fixed §4.1, §4.2 and the appendix; the 15/15 mentions in the 2026-07 changelog and
+  Epic 0 are left as history. (3) New gap **G-SOCKDIR** in §5 and a recovery runbook in
+  `ide-sandbox/README.md` (Activation → "Before step 1"): the socket became a directory, and
+  the data-root needs a free-space and `prjquota` check first. Both were checked on this host
+  (`ls -ld /run/docker-ide.sock` → directory; `findmnt /var/lib/docker-ide` → not mounted;
+  `df -h /var` → 21G free). The recovery itself needs sudo and was **not** executed.
+  (4) §3.2: "the page tree is the manifest" now points at the Proposed
+  [ADR-004](docs/ide/ADR-004-page-files.md) (`.omd` front-matter `id` identifies a page
+  file). (5) ADR-001 gained addendum 3 (the `workspace://` switching mount). Nothing here
+  claims the workbench is built: the `page-file` and `workspaceMounts` modules in the app
+  are interface stubs (several functions throw `not implemented`).
 
 - **2026-07-28 (h)** — **Phase 3 slice 3: the VS Code entry points + tasks v1.** A
   TERMINAL menu in the top menu bar (after View, flag-gated) with the full set — New

@@ -26,6 +26,7 @@ ADAPTER_REGISTRY_SERVICE_TOKEN=adapter-A
 VITE_BAAS_REALTIME_TOKEN=rt-tenant-token
 OSIONOS_BRIDGE_EMAIL_HASH_SALT=salt-keep
 DEMO_LOGIN_PASSWORD=demo-keep
+OSIONOS_IDE_TOKEN_SECRET=ide-secret-keep
 VITE_BAAS_URL=https://localhost:3001
 LOCAL
   chmod 600 "$OUT"
@@ -201,6 +202,40 @@ stale_kong() { sed -i 's/^SB_KONG_KEY=.*/SB_KONG_KEY=anon-OLD/' "$OUT"; }
   run bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [[ "$(val "$OUT" DEMO_LOGIN_PASSWORD)" =~ ^[A-Za-z0-9]{24}$ ]]
+}
+
+@test "--sync: an .env.local without OSIONOS_IDE_TOKEN_SECRET gets one minted, named, never printed" {
+  sed -i '/^OSIONOS_IDE_TOKEN_SECRET=/d' "$OUT"
+  printf 'OSIONOS_APP_SESSION_SECRET=app-secret-keep\n' >> "$OUT"
+  run bash "$SCRIPT" --sync
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"minted OSIONOS_IDE_TOKEN_SECRET"* ]]
+  minted="$(val "$OUT" OSIONOS_IDE_TOKEN_SECRET)"
+  [[ "$minted" =~ ^[A-Za-z0-9]{48}$ ]]
+  [[ "$output" != *"$minted"* ]]
+  [ "$minted" != "$(val "$OUT" OSIONOS_APP_SESSION_SECRET)" ]
+  [ "$(val "$OUT" DEMO_LOGIN_PASSWORD)" = demo-keep ]
+}
+
+@test "--sync: an existing OSIONOS_IDE_TOKEN_SECRET is never re-minted" {
+  run bash "$SCRIPT" --sync
+  [ "$status" -eq 0 ]
+  [ "$(val "$OUT" OSIONOS_IDE_TOKEN_SECRET)" = "ide-secret-keep" ]
+}
+
+@test "--check: a missing OSIONOS_IDE_TOKEN_SECRET exits 1 and names it" {
+  sed -i '/^OSIONOS_IDE_TOKEN_SECRET=/d' "$OUT"
+  run bash "$SCRIPT" --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"missing OSIONOS_IDE_TOKEN_SECRET"* ]]
+}
+
+@test "generate: a fresh .env.local carries a 48-char OSIONOS_IDE_TOKEN_SECRET" {
+  rm -f "$OUT"
+  printf 'JWT_SECRET=jwt-A\nANON_KEY=anon-A\nSERVICE_ROLE_KEY=svc-A\n' > "$GRO_ENV"
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$(val "$OUT" OSIONOS_IDE_TOKEN_SECRET)" =~ ^[A-Za-z0-9]{48}$ ]]
 }
 
 @test "--check/--sync: VITE_BAAS_KONG_KEY follows the linked grobase's Kong key" {

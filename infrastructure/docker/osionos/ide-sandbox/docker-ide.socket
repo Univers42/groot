@@ -1,0 +1,28 @@
+# osionos IDE isolated Docker daemon — the socket the proxy bind-mounts.
+#
+# WHY systemd owns this file and dockerd does not: dockerd used to create
+# /run/docker-ide.sock itself (`--host=unix://…`), so a `systemctl restart
+# docker-ide.service` replaced the file with a new inode while the
+# osionos-ide-socket-proxy container kept bind-mounting the old one — every call
+# through the proxy then failed until the container was recreated. A socket unit
+# keeps ONE listening file open in the systemd fdstore and hands the SAME file to
+# each new dockerd (`--host=fd://`), so a restart changes the daemon, never the
+# socket the proxy holds. It is enabled by install-docker-ide.sh beside
+# docker-ide.service.
+
+[Unit]
+Description=osionos IDE isolated Docker daemon socket
+# The main daemon starts osionos-ide-socket-proxy, which bind-mounts this path:
+# by the time it does, the path must already BE a socket. A missing path makes
+# the main daemon create an empty directory there, and dockerd can then no longer
+# bind the socket (README "socket-directory recovery").
+Before=docker.service
+
+[Socket]
+ListenStream=/run/docker-ide.sock
+SocketMode=0660
+SocketUser=root
+SocketGroup=docker
+
+[Install]
+WantedBy=sockets.target
