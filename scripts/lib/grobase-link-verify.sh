@@ -108,6 +108,54 @@ probe_edge() {
   esac
 }
 
+# The IDE plane: when linked, osionos-ide-server answers only on the edge
+# network through the grobase-link-ide relay. (a) its name resolves to one
+# address from the edge, (b) GET /healthz answers 200 there, (c) nothing
+# answers on grobase's network. One ok|FAIL line each; skipped with one line
+# when no plane is linked, not counted as a pass.
+# Ponytail: the 5 s budgets match the other probes; a slow edge under load
+# reads as FAIL until a re-run, and a non-IPv4 edge address reads as FAIL.
+probe_ide() {
+  local id out ip n rc=0
+  ide_linked || {
+    printf 'skip ide: no IDE plane linked\n'
+    return 0
+  }
+  id=$(docker ps -q --filter "label=com.docker.compose.service=$EDGE_SERVICE" | head -n1)
+  if [ -z "$id" ]; then
+    printf 'FAIL ide-dns  %s is not running; cannot probe the IDE\n' "$EDGE_SERVICE"
+    printf 'FAIL ide-healthz  %s is not running; cannot probe the IDE\n' "$EDGE_SERVICE"
+    rc=1
+  else
+    out=$(docker run --rm --network "container:$id" --entrypoint sh "$SOCAT_IMG" -c 'getent hosts osionos-ide-server' 2>/dev/null || true)
+    n=$(printf '%s\n' "$out" | grep -c . || true)
+    ip=$(printf '%s\n' "$out" | awk 'NR == 1 { print $1 }')
+    if [ "$n" -eq 1 ] && printf '%s' "$ip" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+      printf 'ok   ide-dns  osionos-ide-server resolves to %s\n' "$ip"
+    else
+      printf 'FAIL ide-dns  osionos-ide-server resolves to %s (want one address)\n' "${out:-nothing}"
+      rc=1
+    fi
+    out=$(docker run --rm --network "container:$id" --entrypoint sh "$SOCAT_IMG" -c 'printf "GET /healthz HTTP/1.0\r\nHost: osionos-ide-server\r\n\r\n" | socat -T5 -t1 - "TCP:osionos-ide-server:4100,connect-timeout=5" 2>/dev/null | head -c 120 | tr -d "\r"' 2>/dev/null || true)
+    case "$out" in
+    HTTP/1.0\ 200* | HTTP/1.1\ 200*)
+      printf 'ok   ide-healthz  osionos-ide-server:4100 answers %s\n' "$(printf '%s' "$out" | head -n1 | cut -c1-48)"
+      ;;
+    *)
+      printf 'FAIL ide-healthz  osionos-ide-server:4100 answers %s\n' "$(printf '%s' "${out:-no answer}" | head -n1 | cut -c1-48)"
+      rc=1
+      ;;
+    esac
+  fi
+  if docker run --rm --network "$LINK_NET" "$SOCAT_IMG" -T5 /dev/null "TCP:mini-baas-kong:4100,connect-timeout=5" >/dev/null 2>&1; then
+    printf 'FAIL ide-isolation  mini-baas-kong:4100 answers on %s\n' "$LINK_NET"
+    rc=1
+  else
+    printf 'ok   ide-isolation  mini-baas-kong:4100 refuses on %s\n' "$LINK_NET"
+  fi
+  return "$rc"
+}
+
 # The browser's trust: the CA the edge serves must be the one in this user's browser stores
 # (scripts/certs-trust-user.sh --check): a copy from an older tree is the usual cause of a
 # red padlock on a stack curl is happy with. Skipped with a note before `make certs`.
@@ -169,6 +217,7 @@ cmd_verify() {
     awk -v c="$c" '{ printf "  %-38s %s\n", c, $0 }' "$VERIFY_DIR/$c.out"
   done <<<"$consumers"
   probe_edge | sed 's/^/  /' || fails=$((fails + 1))
+  probe_ide | sed 's/^/  /' || fails=$((fails + 1))
   probe_trust | sed 's/^/  /' || trust_failed
   verify_summary "$n" "$fails"
 }
