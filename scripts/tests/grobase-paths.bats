@@ -26,8 +26,9 @@ CURL_STUB
   cat >"$BIN_DIR/ssh" <<'SSH_STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$SSH_LOG"
-# Env: SSH_EXIT (default 0), SSH_OUTPUT (default "mini-baas-kong\nother")
+# Env: SSH_EXIT (default 0), SSH_OUTPUT (default "mini-baas-kong\nother"), SSH_STDERR
 printf '%s\n' "${SSH_OUTPUT:-mini-baas-kong}"
+[ -z "${SSH_STDERR:-}" ] || printf '%s\n' "$SSH_STDERR" >&2
 exit "${SSH_EXIT:-0}"
 SSH_STUB
   chmod +x "$BIN_DIR/ssh"
@@ -93,6 +94,24 @@ SSH_STUB
   [[ "$output" =~ FAIL\ +ssh\ +ssh://alice@10\.0\.0\.7:2222 ]]
   [[ "$output" == *"ssh refused or timed out"* ]]
   [[ "$output" == *"0/1 paths work"* ]]
+}
+
+@test "ssh host key changed -> FAIL names the host key, not the network" {
+  export SSH_EXIT=255
+  export SSH_STDERR="@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@
+Host key verification failed."
+  run bash "$SCRIPT" ssh://alice@10.0.0.7:2222
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"host key unknown or changed"* ]]
+  [[ "$output" != *"refused or timed out"* ]]
+}
+
+@test "ssh key not accepted -> FAIL says so" {
+  export SSH_EXIT=255
+  export SSH_STDERR="alice@10.0.0.7: Permission denied (publickey)."
+  run bash "$SCRIPT" ssh://alice@10.0.0.7:2222
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no key accepted"* ]]
 }
 
 @test "--ca pointing to missing file -> exit 2" {
