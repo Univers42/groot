@@ -93,28 +93,77 @@ function readMeta(absPath) {
   }
 }
 
+/** Watched directories by absolute path plus a parent→children index, so dropping a
+ *  subtree costs O(subtree). Scanning every watch on each failed stat instead lost a
+ *  third of a 3000-dir `rm -rf` to inotify overflow on one CPU (25503-25609 events vs
+ *  39153; 19558-19657 of 30000 file deletes, 4 runs). */
+export function watchTable() {
+  const entries = new Map(); // absDir -> { watcher, id }
+  const kids = new Map(); // absDir -> Set of watched child absDirs
+  function add(abs, entry) {
+    entries.set(abs, entry);
+    const parent = path.dirname(abs);
+    if (!kids.has(parent)) kids.set(parent, new Set());
+    kids.get(parent).add(abs);
+  }
+  // Walks `kids` even past a missing entry: an error handler removes the entry alone.
+  function drop(abs) {
+    entries.get(abs)?.watcher.close();
+    entries.delete(abs);
+    kids.get(path.dirname(abs))?.delete(abs);
+    for (const child of kids.get(abs) ?? []) drop(child);
+    kids.delete(abs);
+  }
+  return { entries, kids, add, drop };
+}
+
+// Ponytail: identity is (dev, ino, birth time); ext4 hands a deleted dir's inode to the
+// next mkdir. Where the filesystem has no birth time (statx btime → 0) this degrades to
+// (dev, ino), and a `rm -rf d1; mkdir d1` handled late keeps a dead watch: files in the
+// new d1 go unsynced until the next attach (under-reports). Without statx (Linux < 4.11)
+// libuv reports ctime instead, so a chmod reads as a new dir (over-reports a re-emit).
+function identityOf(abs) {
+  try {
+    const st = fs.statSync(abs, { bigint: true, throwIfNoEntry: false });
+    return st ? `${st.dev}:${st.ino}:${st.birthtimeNs}` : null;
+  } catch {
+    return null;
+  }
+}
+
 // Hand-rolled recursive watch: `fs.watch(dir, {recursive:true})` is unavailable
 // on Linux before node 20 (the sandbox runs node 18), so we watch each directory
 // and grow the watch set as subdirs appear. When a NEW subtree lands (e.g. a
 // `git pull` creating dirs), its existing files are emitted too — a plain watch
-// would miss files created before we attached.
+// would miss files created before we attached. A watch is keyed by path but bound
+// to an inode, so every event naming a watched path re-checks the inode first.
 function startWatch() {
   const extraDirs = loadExtraIgnore(ROOT);
-  const watchers = new Map(); // absDir -> FSWatcher
+  const table = watchTable();
   const relOf = (abs) => path.relative(ROOT, abs).replaceAll("\\", "/");
 
   const dirIgnored = (relDir) =>
     Boolean(relDir) && relDir.split("/").some((seg) => DEFAULT_IGNORE_DIRS.has(seg) || extraDirs.has(seg));
 
+  // Identity is statted BEFORE fs.watch: a swap in between leaves the old identity on
+  // the new inode's watch, and the swap's own parent event replaces it. Statted after,
+  // the new identity would vouch for a watch on the moved inode.
+  function watchDir(absDir) {
+    const id = identityOf(absDir);
+    let watcher;
+    try { watcher = fs.watch(absDir, (_t, filename) => onEvent(absDir, filename)); }
+    catch { return false; }
+    watcher.on("error", () => {
+      try { watcher.close(); } catch { /* gone */ }
+      if (table.entries.get(absDir)?.watcher === watcher) table.entries.delete(absDir);
+    });
+    table.add(absDir, { watcher, id });
+    return true;
+  }
+
   function addTree(absDir, emitExisting) {
     if (dirIgnored(relOf(absDir))) return;
-    if (!watchers.has(absDir)) {
-      let watcher;
-      try { watcher = fs.watch(absDir, (_t, filename) => onEvent(absDir, filename)); }
-      catch { return; }
-      watcher.on("error", () => { try { watcher.close(); } catch { /* gone */ } watchers.delete(absDir); });
-      watchers.set(absDir, watcher);
-    }
+    if (!table.entries.has(absDir) && !watchDir(absDir)) return;
     let entries;
     try { entries = fs.readdirSync(absDir, { withFileTypes: true }); } catch { return; }
     for (const entry of entries) {
@@ -131,6 +180,12 @@ function startWatch() {
     if (!filename) return;
     const abs = path.join(absDir, String(filename));
     const rel = relOf(abs);
+    // A watched path now naming another inode (or none) holds a stale watch that libuv
+    // keeps reporting under the old name. Checked before the ignore return: a dir with
+    // a file-ignored name (`assets.map/`) is watched when present at attach.
+    const known = table.entries.get(abs);
+    const replaced = Boolean(known) && known.id !== identityOf(abs);
+    if (replaced) table.drop(abs);
     if (!rel || isIgnored(rel, extraDirs)) return;
     // A gone path returns undefined instead of throwing: one exception per delete event was
     // 60% of the CPU to drain a bulk rm -rf (13063 events, two 7-run medians: 161/162 →
@@ -138,6 +193,7 @@ function startWatch() {
     let stat;
     try { stat = fs.statSync(abs, { throwIfNoEntry: false }); } catch { /* ENOTDIR, EACCES: gone too */ }
     if (!stat) { emit("delete", rel); return; }
+    if (replaced) emit("delete", rel); // the old dir left: same stream as an unraced mv
     if (stat.isDirectory()) { addTree(abs, true); return; } // new subtree → watch + surface its files
     const meta = readMeta(abs);
     if (meta) emit("write", rel, meta);
