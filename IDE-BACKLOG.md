@@ -266,6 +266,12 @@ The history uses **three overlapping axes**. This table is the reconciliation.
 | ~~G-RUNSTDIN~~ | ✅ **RESOLVED (interactive run)** — the one-shot runner still has no stdin (`input()` → EOFError), but in IDE Workspace mode the **Run** action now executes the file in the real sandbox **PTY** (`terminalRunBus` → `useIdeTerminal` → `ws.send`), where `input()` works. Playwright-verified: interactive `input()` over the live PTY reads input and prints the result (no EOFError). | `terminalRunBus.ts`, `CodeFileView.tsx`, `useIdeTerminal.ts` | fixed |
 | G-DOC | Runbook doc-lag (see §4.4) | `ide-sandbox/README.md` | docs |
 | G-SOCKDIR | IDE console dead on a host where `docker-ide.service` was never installed: compose created `/run/docker-ide.sock` as a root-owned **directory** (`docker-compose.yml:733`), the socket proxy answers 502, the bridge closes sandbox sockets with 4004. Verified 2026-10-13: `ls -ld /run/docker-ide.sock` → `drwxr-xr-x 2 root root`; `systemctl is-enabled docker-ide` → `not-found`. The fix needs sudo: follow **Activation → Before step 1** in `ide-sandbox/README.md` (also gates on free space and `prjquota`). The app-side half (one non-looping "sandbox unavailable" state) is not built yet | `ide-sandbox/README.md`, `ACTIVATE-dlesieur42.sh` | blocker on this host |
+| G-FSWSTALE | After a shell `mv d1 d2` the agent's watcher map keeps the old path: every edit under `d2/` also emits a spurious `delete d1/…`, and a recreated `d1/` is never watched, so files created there never sync until the next attach. Measured 2026-10-13 on node 18.20.8 (`mv` + `mkdir d1` + new file → no event). `rm -rf d1; mkdir d1` reuses the inode on ext4, so the fix keys watchers by (dev, ino, birthtime) — devil verdict PROCEED-WITH-CONDITIONS, fix in progress on groot `fix/fs-agent-stale-watch` | `osio-fs-agent.mjs:107-116`, `osio-fs-agent.move.test.mjs` | correctness |
+| G-FSWLINK | The agent follows symlinks out of `/workspace`: `ln -s /etc etclink` synced 117 container files into pages (measured 2026-10-13). Needs a security review — what the agent's uid can read that the shell user cannot | `osio-fs-agent.mjs` `readMeta`/`addTree` | hardening |
+| G-FSWOVF | Huge deletes overflow inotify: a 60k-file `rm -rf` emitted 77085 and 76292 of 78153 events (measured 2026-10-13). libuv drops the overflow notice, so the agent cannot ask for a resync; the next attach reconciles | `osio-fs-agent.mjs` | correctness |
+| G-FSWCI | No CI job runs the agent's move test; it runs locally only: `docker run --rm -v "$PWD":/agent:ro node:18-bookworm-slim node --test /agent/osio-fs-agent.move.test.mjs` | `.github/workflows/` | gate |
+| G-UPDWB | The page-file writer writes the front-matter `updated` key back on every save, so each page save costs one extra sandbox write (and its echo). Kept on purpose for the attach tiebreak; revisit if write volume shows up in the sync bench | osionos `pageFileWriter.ts` | perf |
+| G-LINTSCOPE | osionos `quality` lints `src/` and `packages/` only; the bridge (`scripts/*.mjs`, IDE routes included) and `tests/` are neither linted nor type-checked — they are proven only by `test-bridge` loading and passing | osionos `scripts/docker-run.sh` `quality`, `eslint.config.js` | gate |
 
 ---
 
@@ -401,6 +407,13 @@ starts automatically (self-gated until now).
 
 ## Changelog
 
+- **2026-10-13 (b)** — **Six gaps added to §5, measured this day.**
+  G-FSWSTALE (stale fs-agent watchers after a directory move),
+  G-FSWLINK (symlinks out of the root are followed),
+  G-FSWOVF (inotify overflow on huge deletes),
+  G-FSWCI (the agent's move test has no CI job),
+  G-UPDWB (the `updated` write-back on every page save) and
+  G-LINTSCOPE (the bridge and tests are not linted). Docs only.
 - **2026-10-13** — **Docs reconciled with the code; workbench design recorded (docs only,
   no source touched).** (1) §3.4 said CodeMirror; the editor is standalone Monaco 0.56
   (`monacoRuntime.ts`) — rewritten, plus the §4.2 row C and the lazy-chunk list. (2) The
