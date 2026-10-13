@@ -62,11 +62,11 @@ languages, rich language servers, a debugger, tests, tasks) that also runs in th
 | **A — code runner** | one-shot `POST /api/ide/run` (SSE) + `/api/ide/format` | `track-binocle-osionos-runner`, `osionos-runner-net` (`internal`, no egress) | bridge `OSIONOS_RUNNER_URL` + compose profile `runner` | **No** |
 | **B — persistent sandbox** | shell (PTY), LSP, live file-sync, git, ripgrep search | per-`(user,workspace)` container on an **isolated 2nd Docker daemon**, fronted by `osionos-ide-socket-proxy` on `osionos-ide-control-net` | bridge `OSIONOS_IDE_SANDBOX=1` **and** `OSIONOS_IDE_DOCKER_HOST` **and** compose profile `ide` | **Yes** (2nd daemon host prep) |
 
-A **third, frontend** gate — the `osio.ide` feature flag (`featureFlags.ts:174`, default
-**OFF**) — controls whether any IDE UI is even reachable. It is explicitly **not** a
-security control (execution is server-gated); it just keeps the additive feature off the
-normal block-editor surface. Turn on with `?osio.ide=1`, the `osio.ide` localStorage key,
-or `VITE_OSIO_IDE=1` at build time.
+There is no frontend gate since the P3 cut-over (osionos `21cda98`, 2026-10-13): the
+`osio.ide` flag, the per-workspace IDE mode and the `VITE_OSIO_IDE` build arg are gone, and
+every workspace opens in the one workbench (`src/widgets/workbench/`). The flag was never a
+security control; execution is still gated server-side by the two planes above. With the
+sandbox unreachable the workbench degrades to the DB replica (`sandboxHealthStore`).
 
 **Why "everything ships OFF + double/triple-gated":** the persistent sandbox is a real
 code-execution + egress surface. Safe-by-default means an operator must consciously flip
@@ -143,15 +143,17 @@ Documented in full in `infrastructure/docker/osionos/ide-sandbox/README.md`. The
   (`@codingame/monaco-vscode-api` is not used); ADR-004 records why that stays true.
 - **xterm.js** terminal, lazy-loaded so it never lands in the warm chunk; PTY geometry sent
   **out-of-band** as an APC control frame (`ESC _ osio-resize:COLS,ROWS ESC \`).
-- **Small single-purpose zustand stores:** `ideModeStore` (persisted, per-workspace IDE
-  mode + active panel), `useDevMode` (persisted), `diagnosticsStore` (transient, keyed by
+- **Small single-purpose zustand stores:** `workbenchStore` (persisted as
+  `osio.workbench.v1`: dock open/tab/height, status bar; imports the legacy `osio.ide.mode`
+  blob once), `useDevMode` (persisted), `diagnosticsStore` (transient, keyed by
   URI → Problems panel). The page store (`usePageStore`) stays the single source of truth;
   all IDE state derives from it.
-- **Two layers of the shell:** (1) a page *surface* — `PaneContent.tsx` swaps in
-  `CodeFileView` for `code` pages (double-guarded on surface AND flag); (2) a workspace
-  *mode* — `IdeShell` (`widgets/ide-shell/`) that **reuses `WorkspaceGrid` verbatim** as
-  its editor area, wrapped in activity bar / side panel / terminal strip / status bar.
-- **Pervasive code-splitting** (perf is a first-class concern): the whole `IdeShell`, each
+- **One workbench** (`widgets/workbench/`, since the P3 cut-over): `TopBar`, the activity
+  rail + side panel, **`WorkspaceGrid`** as the editor area with a resizable dock
+  (terminal / problems / output / ports) and one status bar. `PaneContent.tsx` opens
+  `code` pages in `CodeFileView` (Monaco) unconditionally; `.omd` pages open in the block
+  editor.
+- **Pervasive code-splitting** (perf is a first-class concern): the workbench, each
   language grammar, each Prettier plugin, xterm, and the Monaco runtime are all
   separate lazy chunks.
 
