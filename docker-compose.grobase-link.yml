@@ -99,7 +99,10 @@ services:
   grobase-link-ide:
     image: alpine/socat:1.8.0.1
     profiles: [link-ide]
-    command: ["TCP-LISTEN:4100,fork,reuseaddr", "UNIX-CONNECT:/link-ide/ide-server-4100.sock"]
+    # nodelay: a terminal writes many small chunks, and with Nagle on this hop every PTY round trip
+    # waited out the peer's delayed ACK — p50 41.9 ms vs 0.6 ms with it (20 echo round trips,
+    # measured 2026-10-13; the ssh hop alone is 0.5 ms).
+    command: ["TCP-LISTEN:4100,fork,reuseaddr,nodelay", "UNIX-CONNECT:/link-ide/ide-server-4100.sock"]
     volumes:
       - ${GROBASE_LINK_DIR:?set by make link}/ide:/link-ide:ro
     networks:

@@ -293,6 +293,23 @@ image_closure() {
   [ "$closure_ok" = false ] || ok "image closure: $(wc -w <<< "$seen") modules, all in $label COPY"
 }
 
+# ----- grobase-link-ide (docker-compose.grobase-link.yml, profile link-ide) -----
+# The relay that answers to osionos-ide-server on the edge net: that net only, the link owner's
+# numeric uid (the forwarded socket is 0600), and TCP_NODELAY (PTY latency, see the file).
+link_ide=$(GROBASE_LINK_DIR=/nonexistent timeout 60 docker compose --env-file /dev/null -f docker-compose.yml \
+  -f docker-compose.grobase-link.yml --profile link-ide config --format json --no-env-resolution 2>/dev/null |
+  jq -c '.services["grobase-link-ide"] // empty')
+if [ -z "$link_ide" ]; then
+  fail "grobase-link-ide: service missing"
+else
+  li_check() { if jq -e "$2" >/dev/null <<<"$link_ide"; then ok "grobase-link-ide: $1"; else fail "grobase-link-ide: $1"; fi; }
+  li_check "no ports" '.ports == null or .ports == []'
+  li_check "edge net only, as osionos-ide-server" '(.networks | keys) == ["osionos-ide-edge-net"] and .networks["osionos-ide-edge-net"].aliases == ["osionos-ide-server"]'
+  li_check "read_only, cap_drop ALL" '.read_only == true and .cap_drop == ["ALL"]'
+  li_check "numeric user" '(.user // "") | test("^[0-9]+:[0-9]+$")'
+  li_check "listens with nodelay" '.command[0] | test("^TCP-LISTEN:4100,(.*,)?nodelay(,|$)")'
+fi
+
 osionos_docker="$REPO_ROOT/infrastructure/docker/osionos"
 image_closure "$osionos_docker/ide-socket-proxy" "$osionos_docker/ide-socket-proxy/Dockerfile" "proxy.mjs"
 image_closure "$osionos_docker/ide-egress-proxy" "$osionos_docker/ide-egress-proxy/Dockerfile" "proxy.mjs"
