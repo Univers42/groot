@@ -8,7 +8,8 @@
 > (`infrastructure/docker/osionos/ide-sandbox/README.md`), which it now reconciles.
 >
 > Last reconciled: **2026-07-20** (commit `e93d3154`, formerly branch `feat/ide-full-mode`, merged into `main`);
-> §3.2, §3.4, §4.1–4.4 and §5 corrected on **2026-10-13** (see the changelog entry of that date).
+> §3.2, §3.4, §4.1–4.4 and §5 corrected on **2026-10-13** (see the changelog entry of that date);
+> §4.1, §4.2, §4.4, §5 and the Appendix corrected on **2026-10-14** (see the changelog entry of that date).
 
 ---
 
@@ -192,7 +193,7 @@ The history uses **three overlapping axes**. This table is the reconciliation.
 | Phase | Scope | Status | Proof |
 |---|---|---|---|
 | P1 | Stateless code runner | `DONE` (built) | `infrastructure/docker/osionos/runner/{Dockerfile,server.mjs}`, `bridge-runner.mjs` |
-| P2 | Hardened isolated sandbox plane | `DONE` (built + activated + verified) | commit `4b835e9e`; live corpus 15/15 in `19b324dd` (15 checks then; `verify.sh` runs 16 since `3043ab92`) |
+| P2 | Hardened isolated sandbox plane | `DONE` (built + activated + verified) | commit `4b835e9e`; live corpus 15/15 in `19b324dd` (15 checks then; the corpus grew to 16 with `3043ab92` and to 42 with the control-plane reachability probes — see §4.4) |
 | P3 | Interactive PTY shell | `DONE` | `bridge-ide-exec.mjs`, WS `/api/ide/pty`; commit `c760e1ba`/`3d17e518` |
 | P4 | fs-agent + bidirectional live sync | `DONE` | commits `22e2b017`, `9c6fee17`; `osio-fs-agent.mjs`, `useIdeFsSync.ts` |
 | P5 | LSP relay (TypeScript + Pyright) | `DONE` (2 servers only) | `bridge-ide-exec.mjs` `LSP_SERVERS`; `lspClient.ts` |
@@ -207,7 +208,7 @@ The history uses **three overlapping axes**. This table is the reconciliation.
 | B | Terminal — xterm.js | `DONE` |
 | C | LSP — own JSON-RPC client (`lspProtocol.ts`) + Monaco adapter (`lspMonaco.ts`) | `DONE` |
 | D | Bidirectional pages↔sandbox sync | `DONE` (`9c6fee17`) |
-| E | **Live activation** (host prep + `verify.sh` all checks green — 16 today — + e2e) | `DONE in code/commit` `19b324dd` — but **not performed on every machine**; must be re-run per host |
+| E | **Live activation** (host prep + `verify.sh` all checks green — 42 today — + e2e) | `DONE in code/commit` `19b324dd` — but **not performed on every machine**; must be re-run per host |
 
 ### 4.3 Frontend e2e "P0/P1" (unrelated to backend P-phases)
 
@@ -223,22 +224,22 @@ The history uses **three overlapping axes**. This table is the reconciliation.
   → Live activation is **done in code**; it must simply be **re-run on each new host**.
 - The runbook's **condition 12** ("PAT scoped + short-lived") reads *"deferred to P6"* — but
   **P6 shipped** (request-scoped per-op PAT, `config` denied). → Effectively addressed.
-- **Verify count, corrected 2026-10-13.** This note used to say `verify.sh` emits 15 PASS
-  lines and the gate is 15/15, not 16/16. That was right on 2026-07-20 and is wrong now:
-  commit `3043ab92` (2026-09-16) added the runner SIGUSR1 probe, so `verify.sh` runs **16**
-  checks and ends `RESULT: 16 passed, 0 failed`. Count from the source: 4 direct-egress
-  denies (`verify.sh:46-49`) + 3 proxy checks (`:52,:53,:55`) + 4 isolation (`:58-61`) +
-  2 resource caps (`:64,:65`) + 2 `--selfcheck`s (`:73-84`) + 1 runner probe (`:95-111`) = 16.
-  A missing runner image still records one FAIL, so the total stays 16 unless the probe
-  sandbox fails to start (the script exits 2 at `:41`). `ACTIVATE-dlesieur42.sh` ("must print
-  'RESULT: 16 passed, 0 failed'") is right; the historical "15/15" entries below were true
-  when written. **Read from the script, not executed** — a run needs the live daemon, which
-  this host lacks (G-SOCKDIR). The 16 checks do not map 1:1 onto the runbook's 16 conditions.
+- **Verify count, corrected again 2026-10-14.** `verify.sh` pins `EXPECTED=42` and every
+  probe prints exactly one PASS/FAIL/SKIP line. The section "Control plane reachability"
+  adds two probes: a box must not open TCP to `osionos-ide-server`:4100 (on EVERY address
+  the container has) nor `osionos-ide-socket-proxy`:2375, each target first shown to accept
+  connections from the host; both SKIP where the plane is not deployed on that host. A
+  missing runner image makes the code-runner probe SKIP (it is no longer a FAIL), and the
+  RESULT line reports the skip count against the pinned total, so a skip never reads as a
+  pass. Measured on the VM (2026-10-14): `RESULT: 41 passed, 0 failed, 1 skipped
+  (expected 42)`; the skip is the runner probe (`runner image ... not present` — the code
+  runner is not deployed there). The earlier 15/15 and 16-check readings were true when
+  written and are corrected here; `ACTIVATE-dlesieur42.sh`'s [C9] line now carries the
+  42-check expectation. The checks do not map 1:1 onto the runbook's 16 conditions.
 
 > **Action item (docs):** edit `ide-sandbox/README.md` to match §4.4. Tracked as gap
-> `G-DOC` below. Partly done 2026-10-13: the README's Activation section now carries the
-> verify count and the recovery steps; its "Remaining to finish" list and the condition-12
-> row are still stale.
+> `G-DOC` below. Partly done 2026-10-13; **closed 2026-10-14** — the runbook now carries the
+> 42-check corpus, the plane's placement on the VM and the socket-activation notes.
 
 ---
 
@@ -266,7 +267,7 @@ The history uses **three overlapping axes**. This table is the reconciliation.
 | G-TERMRE | No terminal auto-reconnect (relies on panel remount) | `useIdeTerminal.ts:35` | polish |
 | G-WSCAP | WS message cap 1 MiB, no permessage-deflate — a very large LSP payload closes the socket | `ide-ws.mjs:25` | polish |
 | ~~G-RUNSTDIN~~ | ✅ **RESOLVED (interactive run)** — the one-shot runner still has no stdin (`input()` → EOFError), but in IDE Workspace mode the **Run** action now executes the file in the real sandbox **PTY** (`terminalRunBus` → `useIdeTerminal` → `ws.send`), where `input()` works. Playwright-verified: interactive `input()` over the live PTY reads input and prints the result (no EOFError). | `terminalRunBus.ts`, `CodeFileView.tsx`, `useIdeTerminal.ts` | fixed |
-| G-DOC | Runbook doc-lag (see §4.4) | `ide-sandbox/README.md` | docs |
+| ~~G-DOC~~ | ✅ **RESOLVED 2026-10-14** — `ide-sandbox/README.md` reconciled with the deployed plane (42-check corpus, placement on the VM, socket activation) | `ide-sandbox/README.md` | docs |
 | G-SOCKDIR | IDE console dead on a host where `docker-ide.service` was never installed: compose created `/run/docker-ide.sock` as a root-owned **directory** (`docker-compose.yml:733`), the socket proxy answers 502, the bridge closes sandbox sockets with 4004. Verified 2026-10-13: `ls -ld /run/docker-ide.sock` → `drwxr-xr-x 2 root root`; `systemctl is-enabled docker-ide` → `not-found`. The fix needs sudo: follow **Activation → Before step 1** in `ide-sandbox/README.md` (also gates on free space and `prjquota`). The app-side half (one non-looping "sandbox unavailable" state) is not built yet | `ide-sandbox/README.md`, `ACTIVATE-dlesieur42.sh` | blocker on this host |
 | G-FSWSTALE | After a shell `mv d1 d2` the agent's watcher map keeps the old path: every edit under `d2/` also emits a spurious `delete d1/…`, and a recreated `d1/` is never watched, so files created there never sync until the next attach. Measured 2026-10-13 on node 18.20.8 (`mv` + `mkdir d1` + new file → no event). `rm -rf d1; mkdir d1` reuses the inode on ext4, so the fix keys watchers by (dev, ino, birthtime) — devil verdict PROCEED-WITH-CONDITIONS. **Fixed 2026-10-13** (`fix/fs-agent-stale-watch`, merged into feat/ide): 0/33051 real deletes lost on a 3000×10 bulk delete, drain CPU 163 → 69 ms. No CI job runs the test yet: `docker run --rm --cpus=1 -v "$PWD":/agent:ro -v fsw-vol:/vol -e TMPDIR=/vol node:18-bookworm-slim node --test /agent/osio-fs-agent.move.test.mjs` | `osio-fs-agent.mjs`, `osio-fs-agent.move.test.mjs`, `osio-fs-agent.harness.mjs` | done |
 | G-FSWLINK | The agent follows symlinks out of `/workspace`: `ln -s /etc etclink` synced 117 container files into pages (measured 2026-10-13). Needs a security review — what the agent's uid can read that the shell user cannot | `osio-fs-agent.mjs` `readMeta`/`addTree` | hardening |
@@ -394,13 +395,17 @@ sudo sh infrastructure/docker/osionos/ide-sandbox/ide-egress-nat.sh up
 COMPOSE_PROFILES=ide docker compose up -d osionos-ide-socket-proxy
 # 5. Seed the pre-built images + networks into docker-ide:
 sudo sh infrastructure/docker/osionos/ide-sandbox/bootstrap.sh
-# 6. HOSTILE-CORPUS GATE — must end `RESULT: 16 passed, 0 failed` before enabling:
+# 6. HOSTILE-CORPUS GATE — verify.sh pins 42 checks; on the VM: `RESULT: 41 passed, 0 failed, 1 skipped (expected 42)`:
 sudo sh infrastructure/docker/osionos/ide-sandbox/verify.sh
 # 7. Flip the bridge double-gate, then recreate the bridge:
 #    add to ./.env.local:  OSIONOS_IDE_SANDBOX=1
 #                          OSIONOS_IDE_DOCKER_HOST=osionos-ide-socket-proxy:2375
 #                          OSIONOS_IDE_EGRESS_GIT_HOSTS=github.com
 docker compose --env-file ./.env.local up -d osionos-bridge
+# (2026-10-14: step 7 is superseded — the plane runs on the VM's MAIN daemon as project
+#  osionos-ide-plane, deployed from the build machine by deploy-plane.sh and proven by
+#  check-plane.sh; the bridge's IDE gates stay pinned empty and it only mints the token.
+#  See the runbook's Activation steps and the 2026-10-14 changelog entry.)
 ```
 
 After step 7: open a workspace in IDE mode → the terminal (`bash -l`), multi-language LSP
@@ -408,6 +413,54 @@ After step 7: open a workspace in IDE mode → the terminal (`bash -l`), multi-l
 starts automatically (self-gated until now).
 
 ## Changelog
+
+- **2026-10-14** — **Docs reconciled with the deployed IDE plane (docs only, no source
+  touched).** (1) **The plane is on the VM.** The control plane —
+  `osionos-ide-socket-proxy` + `osionos-ide-server`, compose profile `ide`, project
+  `osionos-ide-plane` — runs on the VM's MAIN daemon next to `docker-ide`, so the raw
+  docker-ide API never leaves the VM; both containers sit only on `osionos-ide-edge-net` /
+  `osionos-ide-control-net` and publish no host port, and the bridge no longer hosts
+  sandboxes (its IDE gates are pinned empty in compose; it only mints the IDE token, the
+  ide-server runs from the bridge image). Deployed from the build machine — the VM never
+  builds — by `deploy-plane.sh` (reads the gid owning `/run/docker-ide.sock`, refuses root
+  or none; ships an image only when the VM lacks the same config + layers; `up -d
+  --no-build --pull never --wait` over `DOCKER_HOST=ssh://…`; containers pinned to the VM's
+  image ids) and proven read-only by `check-plane.sh`: one ok|FAIL line per condition
+  (C1 image equality by config + layers, C2 the token secret in no VM home file, C4 the
+  socket-proxy caps, C6 a mini-baas box cannot dial ide-server:4100 or proxy:2375 while the
+  VM host can, C7 no host-net container + the docker group's only member is the operator,
+  C8 both plane subnets private and outside 10.202/16, C10 no host port) —
+  `RESULT: 7 ok, 0 failed`. `ship-images.sh` seeds docker-ide with the sandbox + egress
+  images and prints the `sha256:` pins. Images are compared by **config + layers, not
+  `.Id`**: the VM's containerd store ids an image by its manifest digest, a classic store
+  by its config digest, so the same image has two ids (measured: identical config and
+  layers, different ids). (2) **Socket activation.** `docker-ide.socket` owns
+  `/run/docker-ide.sock` (mode 0660, group `docker`) and `docker-ide.service` runs
+  `--host=fd://` with `Requires=`/`After=docker-ide.socket`, so the socket's inode survives
+  `systemctl restart docker-ide` and the proxy is never recreated (measured: the proxy ping
+  answered 0 s after a restart; the proxy container was not restarted).
+  `install-docker-ide.sh` performs the migration. (3) **The proxy's group.** The proxy runs
+  as user `node`; compose `group_add` adds the gid that owns the socket, read on the VM with
+  `stat -c %g` by `deploy-plane.sh` — without it the proxy answers "daemon unreachable". The
+  proxy's bind is long syntax with `create_host_path: false`, so a missing socket can no
+  longer become a directory (G-SOCKDIR's directory cause cannot recur; its app-side half is
+  still open). (4) **Client machine.** `make link`
+  (ssh mode) forwards `$LINK_DIR/ide/ide-server-4100.sock` to the ide-server's edge address
+  on the VM; the `grobase-link-ide` socat relay (the link owner's uid, cap_drop ALL,
+  read-only, edge network only, network alias `osionos-ide-server`, TCP `nodelay`) puts it
+  on the local `osionos-ide-edge-net`, where `local-https-proxy` serves it at
+  `https://localhost:8446`; `make link-verify` probes `ide-dns`, `ide-healthz`,
+  `ide-isolation`. Measured PTY round trip through the relay: p50 0.6 ms (41.9 ms before
+  `nodelay`: Nagle + delayed ACK). (5) **Real session, end to end.** login 200 → token 200
+  (`POST /api/ide/token`, ≤ 900 s, one workspace; bridge and ide-server share
+  `OSIONOS_IDE_TOKEN_SECRET` ≥ 32 bytes, never `OSIONOS_APP_SESSION_SECRET`;
+  `OSIONOS_IDE_ALLOWED_SUBJECTS` is the user-id allowlist checked on both sides) →
+  `POST /api/ide/session` 200 → the PTY evaluates `$((6*7))`. (6) **Corpus.** `verify.sh`
+  pins `EXPECTED=42`; the "Control plane reachability" section adds two probes (SKIP where
+  the plane is not deployed) and on the VM: `RESULT: 41 passed, 0 failed, 1 skipped
+  (expected 42)` — the skip is the code-runner probe. §4.1, §4.2, §4.4, §5 and the Appendix
+  corrected; the runbook `ide-sandbox/README.md` gained "Placement — the plane on the VM"
+  and the socket-activation notes. `G-DOC` closed.
 
 - **2026-10-13 (b)** — **Six gaps added to §5, measured this day.**
   G-FSWSTALE (stale fs-agent watchers after a directory move),
