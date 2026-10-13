@@ -25,14 +25,16 @@
 
 set -u
 IDE="docker -H unix://${OSIONOS_IDE_DOCKER_SOCK:-/run/docker-ide.sock}"
+MAIN="docker -H unix:///var/run/docker.sock"
 SANDBOX_NET="osio-ide-sandbox-net"
 SANDBOX_IMAGE="${OSIONOS_IDE_SANDBOX_IMAGE:-osionos-ide-sandbox:latest}"
 BOX_A=ide-probe-a
 BOX_B=ide-probe-b
 RUNNER_PROBE=ide-runner-sigusr1-probe
 NAT_CHECK=/usr/local/sbin/osionos-ide-egress-nat
+PLANE_PROJECT=osionos-ide-plane
 pass=0; fail=0; skipped=0
-EXPECTED=40
+EXPECTED=42
 # The VM's default gateway (user-mode QEMU: 10.0.2.2 is the physical host's loopback, where 4242
 # is the VM's own forwarded ssh). Elsewhere set a port that listens on that gateway.
 GATEWAY_PORT="${OSIONOS_IDE_VERIFY_GATEWAY_PORT:-4242}"
@@ -61,6 +63,31 @@ no_reach() {
   if ! host_reach "$1" "$2"; then bad "control: $1:$2 accepts no connection from the host either — probe a listening port"
   elif reach "$1" "$2"; then bad "box reaches $1:$2"
   else ok "box cannot reach $1:$2"; fi
+}
+
+# A box must not reach a control-plane service on the main daemon (selected by compose labels);
+# every address the container has is controlled from the host first, like no_reach. One line.
+plane_no_reach() {
+  service=$1; port=$2
+  if ! ids=$($MAIN ps -q --filter "label=com.docker.compose.project=$PLANE_PROJECT" \
+      --filter "label=com.docker.compose.service=$service" 2>/dev/null); then
+    bad "$service: the main daemon did not answer"; return
+  fi
+  count=$(printf '%s\n' "$ids" | grep -c .)
+  if [ "$count" -eq 0 ]; then skip "$service:$port: IDE plane not deployed on this host"; return; fi
+  if [ "$count" -gt 1 ]; then bad "$service: $count plane containers; expected one"; return; fi
+  ips=$($MAIN inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "$ids" 2>/dev/null \
+    | tr ' ' '\n' | grep .)
+  if [ -z "$ips" ]; then bad "$service has no IPv4 address on any network"; return; fi
+  verdict=$(printf '%s\n' "$ips" | while read -r ip; do
+    if ! host_reach "$ip" "$port"; then printf 'uncontrolled %s\n' "$ip"; break; fi
+    if reach "$ip" "$port"; then printf 'reached %s\n' "$ip"; break; fi
+  done)
+  case "$verdict" in
+    reached*) bad "box reaches $service ${verdict#reached }:$port" ;;
+    uncontrolled*) bad "control: $service ${verdict#uncontrolled }:$port accepts no connection from the host either" ;;
+    *) ok "box cannot reach $service ($(printf '%s\n' "$ips" | tr '\n' ' ' | sed 's/ $//')):$port" ;;
+  esac
 }
 
 # Cleanup on ANY exit (early ones included): both probe boxes, both
@@ -176,6 +203,13 @@ else
     *) ok "box cannot reach host global addresses on 4242 ($named)" ;;
   esac
 fi
+
+echo "== Control plane reachability =="
+# The IDE control plane (osionos-ide-server:4100, osionos-ide-socket-proxy:2375)
+# runs on the MAIN daemon in the osionos-ide-plane compose project. A box on the
+# isolated docker-ide daemon must not reach either service.
+plane_no_reach osionos-ide-server 4100
+plane_no_reach osionos-ide-socket-proxy 2375
 
 echo "== Neighbour box =="
 # Box B listens on 9999 (python3 in image), detached 30s.
