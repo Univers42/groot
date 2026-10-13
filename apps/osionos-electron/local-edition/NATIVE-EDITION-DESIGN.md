@@ -71,7 +71,8 @@ All in **`apps/osionos-electron/`** (NOT the constrained submodule):
    structured logs, crash-restart, clean teardown on app quit.
 2. **`native/firstrun.js`** (new) — on first launch: init `PGDATA` under `app.getPath('userData')`,
    generate secrets, apply `models/{osionos-bridge,osionos-folder-surface,rls-hardening,auth-security}-migration.sql`
-   + `user.sql` (osionos-only subset — skip mail/calendar), create the single user + private workspace.
+   + `user.sql` (osionos-only subset — skip mail/calendar), create the single user + private workspace,
+   then `osionos-service-role-only-migration.sql` last.
 3. **`build.sh`** — a new `--native` edition: bundle the 3 binaries as `extraResources`, set the app
    to "native" mode (frontend `API_URL=http://127.0.0.1:4000`, `BAAS_URL=""`, already supported).
 4. **`package.json`** — `extraResources` for the binaries; keep `deb`/`AppImage`/`nsis` targets.
@@ -80,7 +81,7 @@ All in **`apps/osionos-electron/`** (NOT the constrained submodule):
 
 Migrations to bundle (osionos-only): `models/osionos-bridge-migration.sql`,
 `osionos-folder-surface-migration.sql`, `rls-hardening-migration.sql`, `auth-security-migration.sql`,
-`user.sql`. **Skip** `mail-migration.sql`, `calendar-migration.sql`, and the cloud-only `gdpr`
+`user.sql`, `osionos-service-role-only-migration.sql`. **Skip** `mail-migration.sql`, `calendar-migration.sql`, and the cloud-only `gdpr`
 pieces unless needed.
 
 ## De-risk PoC — RESULTS (validated 2026-06-09, throwaway containers, `make all` untouched)
@@ -98,7 +99,8 @@ pg_net — is all mini-baas machinery osionos never touches). Bootstrap needed b
 
 ✅ **Migration order matters** (the one gotcha found): apply in this order —
 `osionos-bridge-migration` → `osionos-folder-surface-migration` → **`user.sql`** →
-`auth-security-migration` → `rls-hardening-migration`. `user.sql` must precede `auth-security`
+`auth-security-migration` → `rls-hardening-migration` → `osionos-service-role-only-migration`.
+`user.sql` must precede `auth-security`
 (`auth_audit_events` FKs `public.users(id)`). `rls-hardening` is self-guarding (skips absent gdpr fns).
 Result: **12 tables** land clean — `osionos_pages`, `osionos_workspaces`, `osionos_workspace_members`,
 `osionos_bridge_identities`, `osionos_bridge_audit_events`, `osionos_page_configurations`,

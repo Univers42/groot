@@ -69,12 +69,9 @@ END $$;
 
 ALTER TABLE public.osionos_tasks ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS osionos_tasks_select_own ON public.osionos_tasks;
-CREATE POLICY osionos_tasks_select_own ON public.osionos_tasks
-  FOR SELECT TO authenticated USING (owner_id = auth.uid());
 DROP POLICY IF EXISTS osionos_tasks_service_role_all ON public.osionos_tasks;
 CREATE POLICY osionos_tasks_service_role_all ON public.osionos_tasks
   FOR ALL TO service_role USING (true) WITH CHECK (true);
-GRANT SELECT ON public.osionos_tasks TO authenticated;
 GRANT ALL    ON public.osionos_tasks TO service_role;
 
 NOTIFY pgrst, 'reload schema';

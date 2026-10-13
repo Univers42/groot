@@ -9,9 +9,9 @@
 -- name AND records — as JSONB (`state`).
 --
 -- The bridge (service-role key) is the enforcement boundary; it stamps `owner_id`
--- from the verified app-session token and scopes every read/write by it. The RLS
--- below is defense-in-depth for a hypothetical direct/anon connection — owner-only,
--- mirroring the per-user pattern of osionos_page_configurations.
+-- from the verified app-session token and scopes every read/write by it.
+--
+-- The bridge (service_role) is the only reader and writer; nobody else gets a grant.
 
 create extension if not exists "pgcrypto";
 
@@ -40,16 +40,9 @@ create policy osionos_object_databases_service_role_all
 	on public.osionos_object_databases for all
 	to service_role using (true) with check (true);
 
--- Defense-in-depth: an authenticated (non-service-role) connection may only touch
--- its OWN object databases. The live bridge path uses the service-role key above
--- and enforces owner scoping in the handler; this keeps a direct/anon read private.
 drop policy if exists osionos_object_databases_owner_all
 	on public.osionos_object_databases;
-create policy osionos_object_databases_owner_all
-	on public.osionos_object_databases for all
-	to authenticated using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
-grant select, insert, update, delete on public.osionos_object_databases to authenticated;
 grant all on public.osionos_object_databases to service_role;
 
 notify pgrst, 'reload schema';

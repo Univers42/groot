@@ -79,6 +79,9 @@
 #   regression here will NOT show as a `--check` gap on a converged database.
 #   The only real detector is a full apply on a from-scratch database.
 #
+#   osionos-service-role-only-migration.sql runs LAST (ORDERED_LAST), after
+#   everything: it revokes what earlier files and older boots granted.
+#
 # Usage:  sh scripts/apply-models-migrations.sh [--check]
 #           --check  report unapplied DDL and exit non-zero; change nothing.
 
@@ -98,6 +101,7 @@ trap 'rm -f "${ERR_FILE}"' EXIT
 # alphabetical pass reaches its dependent. Space-separated: no filename here
 # contains a space or glob character.
 ORDERED_FIRST="auth-gateway-users-reconcile-migration.sql osionos-bridge-migration.sql osionos-chat-migration.sql osionos-social-migration.sql osionos-engagement-migration.sql osionos-page-search-migration.sql"
+ORDERED_LAST="osionos-service-role-only-migration.sql"
 
 note() { printf '[models] %s\n' "$*" >&2; }
 
@@ -123,6 +127,13 @@ is_ordered() {
 	return 1
 }
 
+is_ordered_last() {
+	case " ${ORDERED_LAST} " in
+	*" $1 "*) return 0 ;;
+	esac
+	return 1
+}
+
 psql_in() {
 	docker exec -i "${PG_CTN}" psql -U postgres -d "${PG_DB}" -v ON_ERROR_STOP=1
 }
@@ -135,11 +146,13 @@ psql_in() {
 first_error() {
 	line="$(grep -m1 'ERROR:' "$1" 2>/dev/null || true)"
 	[ -n "${line}" ] && {
-		printf '%s\n' "${line}"; return
+		printf '%s\n' "${line}"
+		return
 	}
 	line="$(awk 'NF{l=$0} END{print l}' "$1" 2>/dev/null || true)"
 	[ -n "${line}" ] && {
-		printf '%s\n' "${line}"; return
+		printf '%s\n' "${line}"
+		return
 	}
 	printf 'psql exited %s with no stderr output\n' "$2"
 }
@@ -159,7 +172,8 @@ pending() {
 		hit="$(docker exec "${PG_CTN}" psql -U postgres -d "${PG_DB}" -tAc \
 			"SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='${t}' LIMIT 1" 2>/dev/null)"
 		[ "${hit}" = "1" ] || {
-			echo "${t}"; return 0
+			echo "${t}"
+			return 0
 		}
 	done
 }
@@ -183,13 +197,16 @@ apply_one() {
 
 main() {
 	command -v docker >/dev/null 2>&1 || {
-		note "docker is required"; exit 1
+		note "docker is required"
+		exit 1
 	}
 	docker ps --format '{{.Names}}' | grep -qx "${PG_CTN}" || {
-		note "${PG_CTN} not running — skipping"; exit 0
+		note "${PG_CTN} not running — skipping"
+		exit 0
 	}
 	[ -d "${MODELS_DIR}" ] || {
-		note "no ${MODELS_DIR} — skipping"; exit 0
+		note "no ${MODELS_DIR} — skipping"
+		exit 0
 	}
 
 	if [ "${CHECK_ONLY}" -eq 1 ]; then
@@ -229,6 +246,17 @@ main() {
 		base="$(basename "${f}")"
 		skipped "${base}" && continue
 		is_ordered "${base}" && continue
+		is_ordered_last "${base}" && continue
+		apply_one "${f}"
+	done
+
+	for base in ${ORDERED_LAST}; do
+		f="${MODELS_DIR}/${base}"
+		if [ ! -f "${f}" ]; then
+			note "FAILED: ${base} listed in ORDERED_LAST but not found in ${MODELS_DIR}"
+			failed=$((failed + 1))
+			continue
+		fi
 		apply_one "${f}"
 	done
 

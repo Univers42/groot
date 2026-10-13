@@ -1,6 +1,7 @@
 -- Shared BaaS schema for the Prismatica -> osionos bridge.
 -- The browser receives only app-scoped session metadata; this schema keeps the
--- durable identity/workspace mapping inside Postgres behind PostgREST/service-role access.
+-- durable identity/workspace mapping inside Postgres.
+-- The bridge (service_role) is the only reader and writer; nobody else gets a grant.
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE SCHEMA IF NOT EXISTS auth;
@@ -155,117 +156,28 @@ ALTER TABLE public.osionos_page_action_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.osionos_bridge_audit_events ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS osionos_bridge_identities_select_own ON public.osionos_bridge_identities;
-CREATE POLICY osionos_bridge_identities_select_own ON public.osionos_bridge_identities
-  FOR SELECT TO authenticated USING (auth.uid() = user_id);
 
 DROP POLICY IF EXISTS osionos_workspaces_select_member ON public.osionos_workspaces;
-CREATE POLICY osionos_workspaces_select_member ON public.osionos_workspaces
-  FOR SELECT TO authenticated USING (
-    owner_id = auth.uid()
-    OR EXISTS (
-      SELECT 1 FROM public.osionos_workspace_members member
-      WHERE member.workspace_id = id AND member.user_id = auth.uid()
-    )
-  );
 
 DROP POLICY IF EXISTS osionos_workspace_members_select_own ON public.osionos_workspace_members;
-CREATE POLICY osionos_workspace_members_select_own ON public.osionos_workspace_members
-  FOR SELECT TO authenticated USING (user_id = auth.uid());
 
 DROP POLICY IF EXISTS osionos_pages_select_member ON public.osionos_pages;
-CREATE POLICY osionos_pages_select_member ON public.osionos_pages
-  FOR SELECT TO authenticated USING (
-    EXISTS (
-      SELECT 1 FROM public.osionos_workspace_members member
-      WHERE member.workspace_id = public.osionos_pages.workspace_id
-        AND member.user_id = auth.uid()
-        AND member.permissions && ARRAY['read', 'admin']::TEXT[]
-    )
-  );
 
 DROP POLICY IF EXISTS osionos_pages_insert_member ON public.osionos_pages;
-CREATE POLICY osionos_pages_insert_member ON public.osionos_pages
-  FOR INSERT TO authenticated WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM public.osionos_workspace_members member
-      WHERE member.workspace_id = public.osionos_pages.workspace_id
-        AND member.user_id = auth.uid()
-        AND member.permissions && ARRAY['create', 'admin']::TEXT[]
-    )
-  );
 
 DROP POLICY IF EXISTS osionos_pages_update_member ON public.osionos_pages;
-CREATE POLICY osionos_pages_update_member ON public.osionos_pages
-  FOR UPDATE TO authenticated USING (
-    EXISTS (
-      SELECT 1 FROM public.osionos_workspace_members member
-      WHERE member.workspace_id = public.osionos_pages.workspace_id
-        AND member.user_id = auth.uid()
-        AND member.permissions && ARRAY['update', 'admin']::TEXT[]
-    )
-  ) WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM public.osionos_workspace_members member
-      WHERE member.workspace_id = public.osionos_pages.workspace_id
-        AND member.user_id = auth.uid()
-        AND member.permissions && ARRAY['update', 'admin']::TEXT[]
-    )
-  );
 
 DROP POLICY IF EXISTS osionos_pages_delete_member ON public.osionos_pages;
-CREATE POLICY osionos_pages_delete_member ON public.osionos_pages
-  FOR DELETE TO authenticated USING (
-    EXISTS (
-      SELECT 1 FROM public.osionos_workspace_members member
-      WHERE member.workspace_id = public.osionos_pages.workspace_id
-        AND member.user_id = auth.uid()
-        AND member.permissions && ARRAY['delete', 'admin']::TEXT[]
-    )
-  );
 
 DROP POLICY IF EXISTS osionos_page_configurations_select_own ON public.osionos_page_configurations;
-CREATE POLICY osionos_page_configurations_select_own ON public.osionos_page_configurations
-  FOR SELECT TO authenticated USING (user_id = auth.uid());
 
 DROP POLICY IF EXISTS osionos_page_configurations_insert_own ON public.osionos_page_configurations;
-CREATE POLICY osionos_page_configurations_insert_own ON public.osionos_page_configurations
-  FOR INSERT TO authenticated WITH CHECK (
-    user_id = auth.uid()
-    AND EXISTS (
-      SELECT 1 FROM public.osionos_workspace_members member
-      WHERE member.workspace_id = public.osionos_page_configurations.workspace_id
-        AND member.user_id = auth.uid()
-        AND member.permissions && ARRAY['update', 'admin']::TEXT[]
-    )
-  );
 
 DROP POLICY IF EXISTS osionos_page_configurations_update_own ON public.osionos_page_configurations;
-CREATE POLICY osionos_page_configurations_update_own ON public.osionos_page_configurations
-  FOR UPDATE TO authenticated USING (user_id = auth.uid()) WITH CHECK (
-    user_id = auth.uid()
-    AND EXISTS (
-      SELECT 1 FROM public.osionos_workspace_members member
-      WHERE member.workspace_id = public.osionos_page_configurations.workspace_id
-        AND member.user_id = auth.uid()
-        AND member.permissions && ARRAY['update', 'admin']::TEXT[]
-    )
-  );
 
 DROP POLICY IF EXISTS osionos_page_action_events_select_own ON public.osionos_page_action_events;
-CREATE POLICY osionos_page_action_events_select_own ON public.osionos_page_action_events
-  FOR SELECT TO authenticated USING (user_id = auth.uid());
 
 DROP POLICY IF EXISTS osionos_page_action_events_insert_own ON public.osionos_page_action_events;
-CREATE POLICY osionos_page_action_events_insert_own ON public.osionos_page_action_events
-  FOR INSERT TO authenticated WITH CHECK (
-    user_id = auth.uid()
-    AND EXISTS (
-      SELECT 1 FROM public.osionos_workspace_members member
-      WHERE member.workspace_id = public.osionos_page_action_events.workspace_id
-        AND member.user_id = auth.uid()
-        AND member.permissions && ARRAY['update', 'admin']::TEXT[]
-    )
-  );
 
 DROP POLICY IF EXISTS osionos_bridge_identities_service_role_all ON public.osionos_bridge_identities;
 CREATE POLICY osionos_bridge_identities_service_role_all ON public.osionos_bridge_identities
@@ -295,12 +207,6 @@ DROP POLICY IF EXISTS osionos_bridge_audit_events_service_role_all ON public.osi
 CREATE POLICY osionos_bridge_audit_events_service_role_all ON public.osionos_bridge_audit_events
   FOR ALL TO service_role USING (true) WITH CHECK (true);
 
-GRANT SELECT ON public.osionos_bridge_identities TO authenticated;
-GRANT SELECT ON public.osionos_workspaces TO authenticated;
-GRANT SELECT ON public.osionos_workspace_members TO authenticated;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.osionos_pages TO authenticated;
-GRANT SELECT, INSERT, UPDATE ON public.osionos_page_configurations TO authenticated;
-GRANT SELECT, INSERT ON public.osionos_page_action_events TO authenticated;
 GRANT ALL ON public.osionos_bridge_identities TO service_role;
 GRANT ALL ON public.osionos_workspaces TO service_role;
 GRANT ALL ON public.osionos_workspace_members TO service_role;

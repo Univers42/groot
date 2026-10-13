@@ -26,6 +26,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // (separate apps). bootstrap.sql (roles) runs before all of these. object-databases
 // last — it needs osionos_workspaces (from osionos-bridge) and is otherwise standalone;
 // it gives the offline edition the same server-side home for `/database` blocks.
+// osionos-service-role-only-migration.sql runs after everything: it revokes what
+// earlier files and older boots granted, closing /rest/v1 and /graphql/v1 for
+// osionos_* to anon and authenticated.
+const SERVICE_ROLE_ONLY = "osionos-service-role-only-migration.sql";
 const MIGRATIONS = [
   "user.sql",
   "gdpr-migration.sql",
@@ -39,6 +43,7 @@ const MIGRATIONS = [
   "osionos-page-search-migration.sql",
   "osionos-app-connections-migration.sql",
   "osionos-code-surface-migration.sql",
+  SERVICE_ROLE_ONLY,
 ];
 
 function signJwt(payload, secret) {
@@ -89,6 +94,9 @@ export async function firstRun(cfg) {
     if (bootstrapped) {
       await client.query(readFileSync(join(HERE, "bootstrap.sql"), "utf8"));
       for (const m of MIGRATIONS) await client.query(readFileSync(join(cfg.migrationsDir, m), "utf8"));
+    } else {
+      // Existing installs keep the grants they received at their first launch.
+      await client.query(readFileSync(join(cfg.migrationsDir, SERVICE_ROLE_ONLY), "utf8"));
     }
     await client.query(`ALTER ROLE authenticator LOGIN PASSWORD '${secrets.authenticatorPassword}'`);
     return { secrets, bootstrapped };
