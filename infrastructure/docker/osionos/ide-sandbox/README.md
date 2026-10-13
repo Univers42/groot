@@ -226,7 +226,7 @@ provisioner. Bridge modules, no new deps (WebSocket is hand-rolled: `ide-ws.mjs`
 | POST `/api/ide/search` | P7 | `rg --json`, query after `--` (no flag injection) | parser + argv tests |
 | POST `/api/ide/fs` | P4 | editor→container write (base64 argv, path-traversal guarded) | argv test |
 
-Frontend shipped (all behind `osio.ide`, static-verified — typecheck + eslint +
+Frontend shipped (always on since the P3 cut-over removed `osio.ide`; static-verified — typecheck + eslint +
 canvas suite green): **terminal** (xterm.js over `/api/ide/pty`, lazy-loaded, PTY
 resize propagated), **LSP** (a dependency-free JSON-RPC client — `lspProtocol.ts` —
 over `/api/ide/lsp` through a Content-Length codec, surfaced in the Monaco editor as
