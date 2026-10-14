@@ -13,7 +13,7 @@ const { spawn } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
 const { existsSync, statSync, mkdirSync, readFileSync, writeFileSync } = require("node:fs");
 const crypto = require("node:crypto");
-const { isExternalHttpUrl, isAppPageUrl, isAllowedSubframeUrl, senderAllowed, baasResponseHeaders, inlineScriptHashes, frameOriginsFrom, rendererCsp, CSP_HEADER_NAME } = require("./desktop-guards");
+const { isExternalHttpUrl, isAppPageUrl, isAllowedSubframeUrl, senderAllowed, baasResponseHeaders, inlineScriptHashes, frameOriginsFrom, rendererCsp, editionOf, cspHeaderName, webSecurityFor } = require("./desktop-guards");
 
 // The local mini-baas query-router speaks plain HTTP. The renderer runs from the
 // secure `app://` origin, where a direct http://localhost:8002 fetch is upgraded
@@ -32,7 +32,7 @@ const BAAS_TARGET = (process.env.OSIONOS_BAAS_URL || "http://127.0.0.1:8000")
 
 // Serve the bundled renderer from a stable app:// origin (so the bridge's CORS
 // can allow it) instead of file:// (origin "null", which CORS rejects). Must be
-// registered before the app is ready. webSecurity is still off (see webPreferences).
+// registered before the app is ready. webSecurity depends on the edition (see EDITION).
 protocol.registerSchemesAsPrivileged([
   { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
 ]);
@@ -89,6 +89,11 @@ function bootSuite() {
 // supervise embedded postgres + postgrest + gateway + bridge as child processes.
 const NATIVE_DIR = path.join(process.resourcesPath || __dirname, "native-runtime");
 const IS_NATIVE = existsSync(path.join(NATIVE_DIR, "native", "supervisor.mjs"));
+// WHY: FULL enforces the CSP and turns webSecurity on after its clean C15 smoke; LOCAL/NATIVE wait for theirs.
+// Ponytail: the edition is inferred, not declared — a LOCAL build launched without
+// OSIONOS_LOCAL_COMPOSE reads as FULL and gets the stricter settings (fails toward
+// enforcement; its :4000 calls then rely on the bridge's CORS). Escape hatch: set the env.
+const EDITION = editionOf({ isNative: IS_NATIVE, localCompose: process.env.OSIONOS_LOCAL_COMPOSE });
 let nativeHandle = null;
 
 // Boot the bundled backend (no Docker). Node children run under Electron's own
@@ -166,12 +171,11 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       spellcheck: true,
-      // Still off: the renderer calls the local bridge (:4000) cross-origin from
-      // app://osionos. It turns on only after the Electron smoke run (S4 C15) proves
-      // every edition works with it. Until then the navigation/window-open guards
-      // (web-contents-created) keep foreign pages out of this window, and authz
-      // stays in the auth-gateway + Postgres RLS.
-      webSecurity: false,
+      // WHY: on in FULL (its C15 smoke ran clean; the bridge allows app://osionos
+      // by CORS), off in LOCAL/NATIVE until their smoke runs (C15). While off, the
+      // navigation/window-open guards (web-contents-created) keep foreign pages out
+      // of this window, and authz stays in the auth-gateway + Postgres RLS.
+      webSecurity: webSecurityFor(EDITION),
     },
   });
   mainWindow = win;
@@ -215,7 +219,7 @@ app.whenReady().then(async () => {
   // global-menu integration otherwise spams LIBDBUSMENU-GLIB-WARNING on Linux.
   Menu.setApplicationMenu(null);
   const rendererDir = path.join(__dirname, "renderer");
-  // WHY: the file responses carry this Report-Only CSP; [] hashes on read failure keeps the header present.
+  // WHY: the file responses carry this CSP (enforced in FULL, Report-Only elsewhere); [] hashes on read failure keeps the header present.
   const frameOrigins = frameOriginsFrom(process.env.OSIONOS_FRAME_ORIGINS);
   let rendererPolicy = rendererCsp({ scriptHashes: [], frameOrigins });
   try {
@@ -258,10 +262,10 @@ app.whenReady().then(async () => {
     if (pathname === "/" || pathname === "") pathname = "/index.html";
     let filePath = path.join(rendererDir, pathname);
     if (!filePath.startsWith(rendererDir) || !existsSync(filePath)) filePath = path.join(rendererDir, "index.html");
-    // WHY: every app:// file response (including the index fallback) carries the Report-Only CSP; enforcement is a later unit after the C15 smoke run.
+    // WHY: every app:// file response (including the index fallback) carries the CSP (enforced in FULL, Report-Only in LOCAL/NATIVE whose C15 smoke is pending).
     const res = await net.fetch(pathToFileURL(filePath).toString());
     const headers = new Headers(res.headers);
-    headers.set(CSP_HEADER_NAME, rendererPolicy);
+    headers.set(cspHeaderName(EDITION), rendererPolicy);
     return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
   });
   if (IS_NATIVE) {
