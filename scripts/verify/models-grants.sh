@@ -16,13 +16,16 @@
 #   database what anon and authenticated can reach catches it.
 #
 # WHAT IT RUNS  (both scenarios drive the REAL runner, never a re-typed file list)
-#   fresh   roles -> grobase 001_initial_schema -> shim -> runner -> checks
+#   fresh   roles -> grobase 001_initial_schema + 012 realtime hook -> shim -> runner -> checks
 #   legacy  roles -> the pre-1e407614 default privileges -> 001 -> shim -> runner
 #           -> an old-bootstrap boot (blanket GRANT, DEFAULT revoked) -> runner -> checks
 #   Checks: c no anon/authenticated privilege on an osionos_% relation · d no policy
 #   for PUBLIC/anon/authenticated · e1/e2 service_role has full CRUD and round-trips a
 #   row · f six probes refused with 42501 · h no SECURITY DEFINER osionos_% function
-#   they may execute · g a second runner pass changes no ACL, policy or RLS flag
+#   they may execute · g a second runner pass changes no ACL, policy or RLS flag ·
+#   n the final notifications type CHECK admits every type the models files declare ·
+#   r no public table keeps a realtime_notify() trigger (it broadcasts rows past every grant) ·
+#   rt grobase's CREATE TABLE hook that re-arms new tables exists and is disabled
 #
 # ISOLATION
 #   Throwaway containers only (--rm --network none, no port, no volume); the live
@@ -48,6 +51,8 @@ REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 FIX="${REPO}/scripts/verify/models-grants"
 RUNNER="${REPO}/scripts/apply-models-migrations.sh"
 GROBASE_INIT="${REPO}/apps/grobase/scripts/migrations/postgresql/001_initial_schema.sql"
+# 012 installs the CREATE TABLE hook that gives every new public table a realtime trigger, as live.
+GROBASE_REALTIME="${REPO}/apps/grobase/scripts/migrations/postgresql/012_realtime_triggers_all_tables.sql"
 IMAGE="${GROBASE_PG_IMAGE:-ghcr.io/univers42/grobase-postgres:latest}"
 MODELS_DIR="${MODELS_DIR:-${REPO}/models}"
 READY_TIMEOUT=60
@@ -237,6 +242,9 @@ run_checks() {
 	probe "$1" V4 anon "UPDATE public.osionos_directory SET display_name='x'"
 	probe "$1" V5 anon "DELETE FROM public.osionos_directory"
 	check_count "$1" h secdef_exec
+	check_count "$1" n notify_types_missing
+	check_count "$1" r realtime_triggers
+	check_count "$1" rt realtime_event_trigger
 	check_idempotent "$1"
 }
 
@@ -254,6 +262,9 @@ run_scenario() {
 	grep -v '^#' "${GROBASE_INIT}" >"${WORK}/001.sql" ||
 		die "scenario" "setup/$1" "could not read ${GROBASE_INIT}"
 	apply "${WORK}/001.sql" || die "scenario" "setup/$1" "001_initial_schema.sql"
+	grep -v '^#' "${GROBASE_REALTIME}" >"${WORK}/012.sql" ||
+		die "scenario" "setup/$1" "could not read ${GROBASE_REALTIME}"
+	apply "${WORK}/012.sql" || die "scenario" "setup/$1" "012_realtime_triggers_all_tables.sql"
 	apply "${FIX}/shim.sql" || die "scenario" "setup/$1" "shim.sql"
 	run_runner "$1" first
 	if [ "$1" = "legacy" ]; then

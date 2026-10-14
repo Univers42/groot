@@ -1,6 +1,7 @@
 // Preload bridge: exposes a tiny, safe window-control API to the renderer so
 // the shared titlebar (chrome/titlebar.html) can drive the frameless window.
 // contextIsolation is on, so nothing else from Node leaks into the page.
+// C12: the main process accepts win:* only from the main window's top frame at app://osionos/.
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("osionosDesktop", {

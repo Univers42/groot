@@ -101,7 +101,7 @@ trap 'rm -f "${ERR_FILE}"' EXIT
 # alphabetical pass reaches its dependent. Space-separated: no filename here
 # contains a space or glob character.
 ORDERED_FIRST="auth-gateway-users-reconcile-migration.sql osionos-bridge-migration.sql osionos-chat-migration.sql osionos-social-migration.sql osionos-engagement-migration.sql osionos-page-search-migration.sql"
-ORDERED_LAST="osionos-service-role-only-migration.sql"
+ORDERED_LAST="osionos-service-role-only-migration.sql realtime-cdc-off-migration.sql"
 
 note() { printf '[models] %s\n' "$*" >&2; }
 
@@ -178,6 +178,22 @@ pending() {
 	done
 }
 
+# What still broadcasts rows on `pg/<table>`: public tables carrying a realtime_notify()
+# trigger, plus the event trigger if it is enabled (it re-arms every new table). Empty =
+# closed. A grobase `up` re-enables the event trigger (012:133-134), so this is checked
+# after every run and by --check; a query error is reported as armed (unknown = fail).
+realtime_armed() {
+	docker exec "${PG_CTN}" psql -U postgres -d "${PG_DB}" -tA -v ON_ERROR_STOP=1 -c \
+		"SELECT coalesce(string_agg(x, ' ' ORDER BY x), '') FROM (
+		   SELECT c.relname AS x FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
+		    WHERE c.relnamespace = 'public'::regnamespace AND NOT t.tgisinternal
+		      AND t.tgfoid = to_regproc('public.realtime_notify')
+		   UNION ALL
+		   SELECT evtname || '(enabled)' FROM pg_event_trigger
+		    WHERE evtname = 'realtime_auto_trigger_on_create' AND evtenabled <> 'D') armed" \
+		2>/dev/null || echo "(query failed)"
+}
+
 apply_one() {
 	f="$1"
 	base="$(basename "${f}")"
@@ -221,6 +237,11 @@ main() {
 				gaps=$((gaps + 1))
 			fi
 		done
+		armed="$(realtime_armed)"
+		if [ -n "${armed}" ]; then
+			note "realtime row broadcasts armed: ${armed}"
+			gaps=$((gaps + 1))
+		fi
 		if [ "${gaps}" -gt 0 ]; then
 			note "${gaps} migration(s) pending — run: make models-migrate"
 			exit 1
@@ -259,6 +280,12 @@ main() {
 		fi
 		apply_one "${f}"
 	done
+
+	armed="$(realtime_armed)"
+	if [ -n "${armed}" ]; then
+		note "FAILED: realtime row broadcasts still armed after realtime-cdc-off-migration.sql: ${armed}"
+		failed=$((failed + 1))
+	fi
 
 	note "done — ${applied} newly applied, ${failed} failed, rest converged"
 	[ "${failed}" -eq 0 ] || exit 1

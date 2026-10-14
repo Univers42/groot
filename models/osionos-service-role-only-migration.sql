@@ -18,8 +18,10 @@
 --   * last, by explicit list (ORDERED_LAST in scripts/apply-models-migrations.sh);
 --   * on every desktop launch (apps/osionos-electron/native/firstrun.mjs).
 --
--- What it closes: /rest/v1 and /graphql/v1 for osionos_*. What it does NOT close:
--- realtime broadcasts, storage, and /query/v1.
+-- What it closes: /rest/v1 and /graphql/v1 for osionos_*. A REVOKE alone does not
+-- close the realtime row broadcasts (`pg/<table>`): realtime-cdc-off-migration.sql,
+-- which runs after this file, drops those for every public table.
+-- What it does NOT close: bridge-published realtime topics, storage, and /query/v1.
 --
 -- Ponytail: name-pattern based — a relation the bridge serves without the osionos_
 -- prefix is not covered; a new table needs the prefix or its own REVOKE.
