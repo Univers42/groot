@@ -29,7 +29,7 @@ FROM debian:bookworm-slim
 #   clangd → the C/C++ language server (P5).  Go + its LSP land below (tarball).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       bash ca-certificates curl git python3 python3-pip python3-venv \
-      procps iproute2 ripgrep nodejs npm \
+      procps iproute2 ripgrep nodejs npm tini \
       gcc g++ clang clangd make rustc cargo default-jdk-headless \
     && rm -rf /var/lib/apt/lists/*
 
@@ -170,6 +170,11 @@ RUN if find / -xdev \( -uid +65535 -o -gid +65535 \) -print -quit | grep -q .; t
 
 WORKDIR /workspace
 USER coder
-# Keep-alive PID 1; shells + tools attach via `docker exec`. P4 replaces this
-# with the fs-agent (which also keeps the container alive).
+# PID 1 is tini, which reaps every orphan reparented to it. With `sleep infinity`
+# as PID 1 none was reaped: hellish's `make -j8` (its spinner orphans a `sleep`
+# per tick) left 469 zombies that filled pids.max until every fork failed,
+# `/bin/sh: Cannot fork` (2026-10-14). The keep-alive stays `sleep infinity`, as
+# tini's child: the socket proxy requires that Cmd (create-shape.mjs). Shells and
+# tools attach via `docker exec`.
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["sleep", "infinity"]
