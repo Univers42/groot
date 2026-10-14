@@ -40,3 +40,13 @@ SELECT 'secdef_exec', count(*), coalesce(string_agg(p.oid::regprocedure::text, '
   FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
  WHERE n.nspname = 'public' AND p.prosecdef AND p.proname LIKE 'osionos\_%'
    AND (has_function_privilege('anon', p.oid, 'EXECUTE') OR has_function_privilege('authenticated', p.oid, 'EXECUTE'));
+-- notify_types_missing: types the final notifications CHECK refuses. Three models files redefine
+-- the cumulative list and the last one applied wins, so a short list there drops a type silently.
+-- Ponytail: matches quoted literals in pg_get_constraintdef — a CHECK rewritten as anything but an
+-- IN-list reports every type missing (a false FAIL, never a false pass).
+SELECT 'notify_types_missing', count(*), coalesce(string_agg(t, ' ' ORDER BY t), '')
+  FROM unnest(ARRAY['mention','dm','reply','reaction','connection','system','feed_reaction',
+                    'feed_comment','feed_share','task_due','page_comment']) AS t
+ WHERE NOT EXISTS (SELECT 1 FROM pg_constraint
+                    WHERE conname = 'osionos_notifications_type_check'
+                      AND pg_get_constraintdef(oid) LIKE '%''' || t || '''%');
