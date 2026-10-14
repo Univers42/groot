@@ -50,3 +50,10 @@ SELECT 'notify_types_missing', count(*), coalesce(string_agg(t, ' ' ORDER BY t),
  WHERE NOT EXISTS (SELECT 1 FROM pg_constraint
                     WHERE conname = 'osionos_notifications_type_check'
                       AND pg_get_constraintdef(oid) LIKE '%''' || t || '''%');
+
+-- realtime_triggers: osionos_% tables whose row changes grobase's realtime_notify() broadcasts
+-- (SECURITY DEFINER, full row, no grant or RLS check at the gateway).
+SELECT 'realtime_triggers', count(*), coalesce(string_agg(c.relname, ' ' ORDER BY c.relname), '')
+  FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
+ WHERE c.relnamespace = 'public'::regnamespace AND c.relname LIKE 'osionos\_%'
+   AND NOT t.tgisinternal AND t.tgfoid = to_regproc('public.realtime_notify');
