@@ -451,8 +451,9 @@ starts automatically (self-gated until now).
   (C1 image equality by config + layers, C2 the token secret in no VM home file, C4 the
   socket-proxy caps, C6 a mini-baas box cannot dial ide-server:4100 or proxy:2375 while the
   VM host can, C7 no host-net container + the docker group's only member is the operator,
-  C8 both plane subnets private and outside 10.202/16, C10 no host port) —
-  `RESULT: 7 ok, 0 failed`. `ship-images.sh` seeds docker-ide with the sandbox + egress
+  C8 both plane subnets private and outside 10.202/16, C10 no host port, C21 no tailscale
+  serve/funnel target or extra container on the plane networks) — `RESULT: 8 ok, 0 failed`.
+  Public exposure (C21) was declined 2026-10-14: link-only. `ship-images.sh` seeds docker-ide with the sandbox + egress
   images and prints the `sha256:` pins. Images are compared by **config + layers, not
   `.Id`**: the VM's containerd store ids an image by its manifest digest, a classic store
   by its config digest, so the same image has two ids (measured: identical config and

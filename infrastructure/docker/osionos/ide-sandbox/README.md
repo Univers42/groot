@@ -84,6 +84,9 @@ compose; the ide-server runs from the bridge image with a different entrypoint.
   `OSIONOS_APP_SESSION_SECRET`); `OSIONOS_IDE_ALLOWED_SUBJECTS` is the user-id
   allowlist, checked on both sides. Measured end to end with a real session: login 200 →
   token 200 → `POST /api/ide/session` 200 → the PTY evaluates `$((6*7))`.
+- Exposure: link-only. Public exposure (C21) was declined on 2026-10-14: no caller needs it, and
+  a public listener would leave a code-execution service one leaked secret from the internet.
+  `check-plane.sh` C21 proves no tailscale serve/funnel target or extra container reaches it.
 
 ## The 16 conditions — verification status
 
@@ -248,8 +251,9 @@ sudo sh infrastructure/docker/osionos/ide-sandbox/verify.sh
 #    — C1 image equality by config + layers, C2 the token secret in no VM home file, C4 the
 #    socket-proxy caps non-zero, C6 no mini-baas box dials ide-server:4100 or proxy:2375 while the VM
 #    host can, C7 no host-net container + docker group = operator only, C8 both plane subnets private
-#    and outside 10.202/16, C10 no host port — measured `RESULT: 7 ok, 0 failed`. The bridge needs no
-#    env change (its IDE gates are pinned empty in compose — see Placement).
+#    and outside 10.202/16, C10 no host port, C21 no tailscale serve/funnel target and no extra
+#    container on the plane networks — measured `RESULT: 8 ok, 0 failed`. The bridge needs no env
+#    change (its IDE gates are pinned empty in compose — see Placement).
 # 6. On the client machine: `make link` (ssh mode), then `make link-verify` — see Placement.
 ```
 
@@ -278,14 +282,11 @@ status/commit/push, graceful "no sandbox" offline).
 
 ## Remaining to finish
 
-1–3. ~~Terminal (P3)~~, ~~LSP client (P5)~~, ~~live sync loop (P4)~~ — **done**;
-   see the routes table and the frontend paragraph above.
+1–3. ~~Terminal (P3)~~, ~~LSP client (P5)~~, ~~live sync loop (P4)~~ — **done** (routes table).
 4. **fly-machines provider (P7):** a drop-in behind `ide-docker`'s interface —
    deferred (YAGNI until a fly deploy is attempted).
-5. ~~Live activation (Part E)~~ — **done on the VM (2026-10-14)**: `verify.sh` gave
-   `RESULT: 41 passed, 0 failed, 1 skipped (expected 42)` (the skip is the runner probe), and a
-   real session got a token, a session and a PTY that evaluated `$((6*7))`. Another host still
-   needs the host prep above first.
+5. ~~Live activation (Part E)~~ — **done on the VM (2026-10-14)**: `verify.sh` 41 passed, 0 failed,
+   1 skipped (the runner probe); real-session PTY green. Another host needs the host prep first.
 
 ## Trade-off notes
 
