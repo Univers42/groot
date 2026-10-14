@@ -24,7 +24,8 @@
 #   row · f six probes refused with 42501 · h no SECURITY DEFINER osionos_% function
 #   they may execute · g a second runner pass changes no ACL, policy or RLS flag ·
 #   n the final notifications type CHECK admits every type the models files declare ·
-#   r no osionos_% table keeps a realtime_notify() trigger (it broadcasts rows past every grant)
+#   r no public table keeps a realtime_notify() trigger (it broadcasts rows past every grant) ·
+#   rt grobase's CREATE TABLE hook that re-arms new tables exists and is disabled
 #
 # ISOLATION
 #   Throwaway containers only (--rm --network none, no port, no volume); the live
@@ -243,6 +244,7 @@ run_checks() {
 	check_count "$1" h secdef_exec
 	check_count "$1" n notify_types_missing
 	check_count "$1" r realtime_triggers
+	check_count "$1" rt realtime_event_trigger
 	check_idempotent "$1"
 }
 
