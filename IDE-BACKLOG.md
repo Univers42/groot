@@ -255,7 +255,7 @@ The history uses **three overlapping axes**. This table is the reconciliation.
 | ~~G-RUNLANG~~ | ✅ **RESOLVED** — all 13 runner languages installed + verified running | `runner/Dockerfile` | fixed |
 | ~~G-EXEC~~ | ✅ **RESOLVED** — runner `/work` was `noexec` → every compiled language failed; made exec-able | `docker-compose.yml` | fixed |
 | ~~G-SBXLANG~~ | ✅ **BUILT** (runtime pends Plane B) — gcc/g++/clang/make/go/rust/jdk added to the sandbox image | `ide-sandbox/Dockerfile` | fixed (built) |
-| ~~G-LSP~~ | ◑ **PARTIAL** — go/rust/clangd added + wired (built); **Java (jdtls) still TODO** | `bridge-ide-exec.mjs`, `lspClient.ts`, `ide-sandbox/Dockerfile` | mostly fixed |
+| ~~G-LSP~~ | ◑ **PARTIAL** — go/rust/clangd added + wired (built); jdtls in the image, **Java wiring still TODO** | `bridge-ide-exec.mjs`, `lspClient.ts`, `ide-sandbox/Dockerfile` | mostly fixed |
 | ◑ G-DEBUG | Run panel now live (`IdeRunPanel` — streams the runner); **DAP debugger + test-runner + tasks still TODO** | `src/features/ide/ui/IdeRunPanel.tsx` | partial (Epic 3) |
 | G-SEARCH | Frontend search is in-memory browser grep; the container `rg --json` route (`/api/ide/search`) exists but is unused by the UI | `browserSearch.ts`, `IdeSearchPanel.tsx` | polish |
 | G-GIT | Git panel = status/commit/push only; no branch/stash/diff-view | `useIdeGit.ts:36-38` | polish |
@@ -331,7 +331,14 @@ re-run the `verify.sh` gate.
       language→server map (`go`/`rust`/`c`/`cpp`) — `DONE` (quality + 89 bridge tests green).
 - [x] Reused the exec-attach relay + `lspFraming.ts` codec unchanged.
 - **Acceptance:** editing `.go`/`.rs`/`.c`/`.cpp` yields diagnostics/completion ⏳ (Plane B).
-- **Follow-up:** add `jdtls` (Java LSP); wire `java` into the two maps once it lands.
+- [x] `jdtls` 1.61.0 in the image (2026-10-14) on its own Temurin JRE 21 at `/opt/jre21` (user `java`
+      stays 17), started by `jdtls-launch` (oom_score_adj 1000, config/data under `/workspace/.osio/jdtls`).
+      Measured in a box with the sandbox limits: `initialize` 3.1–3.6 s, first diagnostics +2.0–2.1 s,
+      container `memory.peak` 580 MiB with fs-agent + a shell; under OOM an indexed jdtls is killed
+      first and the shell and fs-agent survive. rust-analyzer is now pinned by version + sha256.
+- **Follow-up:** wire `java` into the two maps (`LSP_SERVERS`, `lspClient.ts`) and show exit 137 as
+      "Java language server stopped (out of memory)". Plain javac projects only: Maven/Gradle
+      resolution needs Maven Central, which the egress allowlist does not carry.
 
 ### Epic 3 — Debugger / tests / tasks — Run panel `DONE`; debugger `TODO` — gap G-DEBUG
 - [x] **Run panel** `DONE` — replaced the `IdeSidePanel` placeholder with `IdeRunPanel`
