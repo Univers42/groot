@@ -40,3 +40,27 @@ SELECT 'secdef_exec', count(*), coalesce(string_agg(p.oid::regprocedure::text, '
   FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
  WHERE n.nspname = 'public' AND p.prosecdef AND p.proname LIKE 'osionos\_%'
    AND (has_function_privilege('anon', p.oid, 'EXECUTE') OR has_function_privilege('authenticated', p.oid, 'EXECUTE'));
+-- notify_types_missing: types the final notifications CHECK refuses. Three models files redefine
+-- the cumulative list and the last one applied wins, so a short list there drops a type silently.
+-- Ponytail: matches quoted literals in pg_get_constraintdef — a CHECK rewritten as anything but an
+-- IN-list reports every type missing (a false FAIL, never a false pass).
+SELECT 'notify_types_missing', count(*), coalesce(string_agg(t, ' ' ORDER BY t), '')
+  FROM unnest(ARRAY['mention','dm','reply','reaction','connection','system','feed_reaction',
+                    'feed_comment','feed_share','task_due','page_comment']) AS t
+ WHERE NOT EXISTS (SELECT 1 FROM pg_constraint
+                    WHERE conname = 'osionos_notifications_type_check'
+                      AND pg_get_constraintdef(oid) LIKE '%''' || t || '''%');
+
+-- realtime_triggers: public tables whose row changes grobase's realtime_notify() broadcasts
+-- (SECURITY DEFINER, full row, no grant or RLS check at the gateway).
+SELECT 'realtime_triggers', count(*), coalesce(string_agg(c.relname, ' ' ORDER BY c.relname), '')
+  FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
+ WHERE c.relnamespace = 'public'::regnamespace
+   AND NOT t.tgisinternal AND t.tgfoid = to_regproc('public.realtime_notify');
+
+-- realtime_event_trigger: 1 when grobase's CREATE TABLE hook would arm the next table, or when
+-- it is missing — both scenarios apply 012, so a missing hook means this check proves nothing.
+SELECT 'realtime_event_trigger',
+       CASE WHEN coalesce(min(evtenabled::text), 'missing') = 'D' THEN 0 ELSE 1 END,
+       coalesce(min(evtenabled::text), 'missing')
+  FROM pg_event_trigger WHERE evtname = 'realtime_auto_trigger_on_create';

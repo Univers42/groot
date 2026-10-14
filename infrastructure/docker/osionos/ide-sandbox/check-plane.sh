@@ -11,7 +11,7 @@
 #                                                                            #
 # ************************************************************************** #
 # Read-only placement proof of the IDE plane on the VM's main daemon, from the build
-# machine: one ok|FAIL line per condition (C1,C2,C4,C6,C7,C8,C10), then a RESULT tally.
+# machine: one ok|FAIL line per condition (C1,C2,C4,C6,C7,C8,C10,C21), then a RESULT tally.
 # Never writes the VM, never prints a secret; an undecidable check fails with a reason.
 set -eu
 HOST="${IDE_SHIP_HOST:-}"
@@ -194,7 +194,27 @@ c10() {
   fi
 }
 
+# C21 - public exposure declined 2026-10-14 (link-only): the VM's tailscale serve/funnel
+# config names no IDE port or plane address, and only the two plane containers sit on the
+# plane networks. Ponytail: a substring match on the serve JSON - a target spelt any other
+# way (a DNS name with no port) is missed; an unrelated "...:4100" fails safe.
+c21() {
+  ts="$(remote 'tailscale serve status --json && tailscale funnel status --json')" || ts=''
+  if [ -z "$ts" ] || [ -z "$proxy_cid" ] || [ -z "$server_cid" ]; then
+    bad "C21 cannot-decide(tailscale status or a plane container missing)"; return
+  fi
+  det=''
+  for a in :4100 :8446 :2375 $(d inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}: {{end}}' "$proxy_cid" "$server_cid"); do
+    case "$ts" in *"$a"*) det="$det serve->$a" ;; esac
+  done
+  plane=" $(d inspect -f '{{.Name}}' "$proxy_cid" "$server_cid" | tr -d / | tr '\n' ' ')"
+  for m in $(d network inspect "$CTRL_NET" "$EDGE_NET" -f '{{range .Containers}}{{.Name}} {{end}}'); do
+    case "$plane" in *" $m "*) ;; *) det="$det extra-on-plane-net:$m" ;; esac
+  done
+  if [ -z "$det" ]; then ok "C21 no tailscale serve/funnel target and no extra container reach the IDE plane"; else bad "C21 exposed:$det"; fi
+}
+
 find_plane
-c1; c2; c4; c6; c7; c8; c10
+c1; c2; c4; c6; c7; c8; c10; c21
 printf 'RESULT: %d ok, %d failed\n' "$okn" "$failed"
 [ "$failed" -eq 0 ]

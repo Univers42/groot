@@ -255,7 +255,7 @@ The history uses **three overlapping axes**. This table is the reconciliation.
 | ~~G-RUNLANG~~ | ✅ **RESOLVED** — all 13 runner languages installed + verified running | `runner/Dockerfile` | fixed |
 | ~~G-EXEC~~ | ✅ **RESOLVED** — runner `/work` was `noexec` → every compiled language failed; made exec-able | `docker-compose.yml` | fixed |
 | ~~G-SBXLANG~~ | ✅ **BUILT** (runtime pends Plane B) — gcc/g++/clang/make/go/rust/jdk added to the sandbox image | `ide-sandbox/Dockerfile` | fixed (built) |
-| ~~G-LSP~~ | ◑ **PARTIAL** — go/rust/clangd added + wired (built); **Java (jdtls) still TODO** | `bridge-ide-exec.mjs`, `lspClient.ts`, `ide-sandbox/Dockerfile` | mostly fixed |
+| ~~G-LSP~~ | ◑ **PARTIAL** — go/rust/clangd added + wired (built); jdtls in the image, **Java wiring still TODO** | `bridge-ide-exec.mjs`, `lspClient.ts`, `ide-sandbox/Dockerfile` | mostly fixed |
 | ◑ G-DEBUG | Run panel now live (`IdeRunPanel` — streams the runner); **DAP debugger + test-runner + tasks still TODO** | `src/features/ide/ui/IdeRunPanel.tsx` | partial (Epic 3) |
 | G-SEARCH | Frontend search is in-memory browser grep; the container `rg --json` route (`/api/ide/search`) exists but is unused by the UI | `browserSearch.ts`, `IdeSearchPanel.tsx` | polish |
 | G-GIT | Git panel = status/commit/push only; no branch/stash/diff-view | `useIdeGit.ts:36-38` | polish |
@@ -331,7 +331,16 @@ re-run the `verify.sh` gate.
       language→server map (`go`/`rust`/`c`/`cpp`) — `DONE` (quality + 89 bridge tests green).
 - [x] Reused the exec-attach relay + `lspFraming.ts` codec unchanged.
 - **Acceptance:** editing `.go`/`.rs`/`.c`/`.cpp` yields diagnostics/completion ⏳ (Plane B).
-- **Follow-up:** add `jdtls` (Java LSP); wire `java` into the two maps once it lands.
+- [x] `jdtls` 1.61.0 in the image (2026-10-14) on its own Temurin JRE 21 at `/opt/jre21` (user `java`
+      stays 17), started by `jdtls-launch` (oom_score_adj 1000, config/data under `/workspace/.osio/jdtls`).
+      Measured in a box with the sandbox limits: `initialize` 3.1–3.6 s, first diagnostics +2.0–2.1 s,
+      box `memory.peak` 842 MiB (budget 900) with the J3 baseline — pyright after one analysis,
+      fs-agent, bash, both tmpfs mounts full (126 MiB); one-file project, so a larger one has
+      ~58 MiB of headroom before the kernel reclaims or kills. Under OOM an indexed jdtls is killed
+      first and the shell and fs-agent survive. rust-analyzer is now pinned by version + sha256.
+- **Follow-up:** wire `java` into the two maps (`LSP_SERVERS`, `lspClient.ts`) and show exit 137 as
+      "Java language server stopped (out of memory)". Plain javac projects only: Maven/Gradle
+      resolution needs Maven Central, which the egress allowlist does not carry.
 
 ### Epic 3 — Debugger / tests / tasks — Run panel `DONE`; debugger `TODO` — gap G-DEBUG
 - [x] **Run panel** `DONE` — replaced the `IdeSidePanel` placeholder with `IdeRunPanel`
@@ -369,6 +378,21 @@ re-run the `verify.sh` gate.
       but the language registry declares `gofmt`/`rustfmt`/`shfmt`/`google-java-format`. Add
       them (gofmt ships with Go; `rustfmt`/`shfmt` are one apt package each) so the Format
       button works for Go/Rust/Shell/Java, not just Python/C/C++.
+
+### Epic 6 — Desktop over the real OS (S4) — `RULED 2026-10-14`
+The desktop edition (Electron) edits a real folder and later a local terminal through the same
+`FsProvider` / terminal seams as the sandbox. Ruled by the risk review on 2026-10-14: **BLOCK**
+overall, S4U1 and S4U2 may start. Details, conditions and falsifiers:
+[docs/ide/ADR-005-desktop-host-providers.md](docs/ide/ADR-005-desktop-host-providers.md).
+Nothing here is shipped; `scripts/host-fs-ops.mjs` is not merged.
+
+| Unit | What | Verdict | Conditions | Status |
+|---|---|---|---|---|
+| U1 | Host-fs transport (pure Node) + `host(node)` conformance target | PROCEED-WITH-CONDITIONS | C1–C10 | in progress |
+| U2 | Electron hardening (CSP, guards, sender check, sandbox) | PROCEED-WITH-CONDITIONS | C11–C18 | not started; C17, C18 fixed in the web app on an unmerged branch |
+| U3 | fs IPC into Electron main, root binding, watch | BLOCK | C19–C28 | not started |
+| U4 | Renderer wiring | seams PROCEED-WITH-CONDITIONS; third backend BLOCK with U3 | C29–C31 | not started |
+| U5 | Local PTY | BLOCK | own ruling | not started |
 
 ---
 
@@ -414,6 +438,15 @@ starts automatically (self-gated until now).
 
 ## Changelog
 
+- **2026-10-14** — **S4 (desktop over the real OS) ruled; docs only, no source touched.**
+  [ADR-005](docs/ide/ADR-005-desktop-host-providers.md) records the risk ruling: overall BLOCK;
+  S4U1 (host-fs transport, C1–C10) and S4U2 (Electron hardening, C11–C18) PROCEED-WITH-CONDITIONS;
+  S4U3 (fs IPC, C19–C28) and S4U5 (local PTY) BLOCKED; S4U4 split (seams C29–C31, third backend
+  waits for U3). Drivers: a `.` path could make a recursive delete wipe the bound folder, the
+  renderer can win a rename-swap race on its own, writes into `.git` run code, and host watch
+  events must never be ingested into pages. C17 (mermaid strict) and C18 (embed URLs http/https
+  only) were fixed in the web app on an unmerged osionos branch. Epic 6 added to §6.
+
 - **2026-10-14** — **The IDE line merged into develop.** osionos `develop` (22 commits:
   rail beside the panel, one Conversations space, the edge peek, wiki pages, pane zoom,
   workspace Private/Shared, media search fixes) was merged into the IDE line. Decisions taken in
@@ -451,8 +484,9 @@ starts automatically (self-gated until now).
   (C1 image equality by config + layers, C2 the token secret in no VM home file, C4 the
   socket-proxy caps, C6 a mini-baas box cannot dial ide-server:4100 or proxy:2375 while the
   VM host can, C7 no host-net container + the docker group's only member is the operator,
-  C8 both plane subnets private and outside 10.202/16, C10 no host port) —
-  `RESULT: 7 ok, 0 failed`. `ship-images.sh` seeds docker-ide with the sandbox + egress
+  C8 both plane subnets private and outside 10.202/16, C10 no host port, C21 no tailscale
+  serve/funnel target or extra container on the plane networks) — `RESULT: 8 ok, 0 failed`.
+  Public exposure (C21) was declined 2026-10-14: link-only. `ship-images.sh` seeds docker-ide with the sandbox + egress
   images and prints the `sha256:` pins. Images are compared by **config + layers, not
   `.Id`**: the VM's containerd store ids an image by its manifest digest, a classic store
   by its config digest, so the same image has two ids (measured: identical config and

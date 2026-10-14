@@ -8,6 +8,7 @@
   "license": "MIT",
   "homepage": "https://github.com/Univers42/prismatica",
   "scripts": {
+    "test": "node --test test/*.test.js",
     "start": "electron .",
     "dist": "electron-builder --linux deb AppImage",
     "dist:win": "electron-builder --win nsis",
@@ -23,7 +24,7 @@
     "productName": "osionos",
     "executableName": "osionos",
     "directories": { "output": "dist" },
-    "files": ["main.js", "preload.js", "renderer/**/*"],
+    "files": ["main.js", "preload.js", "desktop-guards.js", "renderer/**/*"],
     "linux": {
       "target": ["deb", "AppImage"],
       "category": "Office",

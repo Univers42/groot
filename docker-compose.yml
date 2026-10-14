@@ -37,8 +37,8 @@ services:
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${TRACK_BINOCLE_VHOST_HTTPS_PORT:-443}:443"
       # osionos-ide-server TLS edge on 8446. LITERAL 127.0.0.1 like drawnosaurus:
       # TRACK_BINOCLE_BIND_ADDR resolves to 0.0.0.0 on this host. The IDE is a shell
-      # on a shared host; exposing it beyond loopback is a later, separate step
-      # (different hostname, not port) — tracked in C21.
+      # on a shared host: it stays on loopback; public exposure was declined
+      # (C21, 2026-10-14 — ide-sandbox README, Placement).
       - "127.0.0.1:${OSIONOS_IDE_HOST_PORT:-8446}:8446"
     # `mini-baas` (external) is required by the :8444 server block — its upstream is the
     # grobase container name `mini-baas-kong`, which resolves only on that network.
@@ -800,6 +800,9 @@ services:
       OSIONOS_IDE_ALLOWED_SUBJECTS: ${OSIONOS_IDE_ALLOWED_SUBJECTS:-}
       OSIONOS_IDE_SANDBOX_IMAGE: ${OSIONOS_IDE_SANDBOX_IMAGE:-osionos-ide-sandbox:latest}
       OSIONOS_IDE_STORAGE_QUOTA: ${OSIONOS_IDE_STORAGE_QUOTA:-}
+      # Boxes running at once (bridge-ide-sandbox.mjs maxRunningBoxes, default 2): size it with
+      # osionos-ide.slice MemoryMax at 1 GiB a box.
+      OSIONOS_IDE_MAX_BOXES: ${OSIONOS_IDE_MAX_BOXES:-}
     expose:
       - "4100"
     networks:

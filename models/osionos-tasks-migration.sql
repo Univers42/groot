@@ -59,12 +59,14 @@ FROM public.osionos_pages p, public.osionos_page_blocks(p.content) AS b
 WHERE b ->> 'type' = 'to_do' AND b ? 'id'
 ON CONFLICT (page_id, block_id) DO NOTHING;
 
--- Widen the notification type CHECK (cumulative list) for due reminders.
+-- Widen the notification type CHECK (cumulative list) for due reminders. This file applies
+-- after the comments and feed-engagement files, so its list is the one that stays: it must
+-- carry every earlier type (page_comment was missing, which dropped comment notifications).
 DO $$ BEGIN
   ALTER TABLE public.osionos_notifications DROP CONSTRAINT IF EXISTS osionos_notifications_type_check;
   ALTER TABLE public.osionos_notifications ADD CONSTRAINT osionos_notifications_type_check
     CHECK (type IN ('mention','dm','reply','reaction','connection','system',
-                    'feed_reaction','feed_comment','feed_share','task_due'));
+                    'feed_reaction','feed_comment','feed_share','task_due','page_comment'));
 END $$;
 
 ALTER TABLE public.osionos_tasks ENABLE ROW LEVEL SECURITY;

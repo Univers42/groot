@@ -6,7 +6,7 @@
 # prints the token secret (it only confirms the env file carries one), never
 # removes an image, and never touches a container outside project
 # osionos-ide-plane. check-plane.sh is its read-only placement proof: one
-# ok|FAIL line per risk condition C1/C2/C4/C6/C7/C8/C10, then a RESULT tally.
+# ok|FAIL line per risk condition C1/C2/C4/C6/C7/C8/C10/C21, then a RESULT tally.
 # The fakes exercise the same remote-quoting discipline as ide-ship-images.bats:
 # the fake ssh runs commands against the fake docker (exporting DOCKER_REMOTE, or
 # left to the sh -c it execs); the fake docker treats a call as VM-side when
@@ -79,6 +79,7 @@ if [ "$1" = ps ]; then
 fi
 
 if [ "$1" = network ] && [ "$2" = inspect ]; then
+  case "$*" in *Containers*) echo "${PLANE_MEMBERS-plane-proxy plane-server}"; exit 0 ;; esac
   case " $3 " in
     *control-net*) echo "${CTRL_SUBNET:-172.19.0.0/16}" ;;
     *edge-net*) echo "${EDGE_SUBNET:-172.20.0.0/16}" ;;
@@ -96,6 +97,8 @@ if [ "$1" = inspect ]; then
     *HostConfig.PidsLimit*) [ "$role" = proxy ] && echo "${PROXY_PIDS:-128}" || echo "${SERVER_PIDS:-256}" ;;
     *.HostConfig.PortBindings*) [ "$role" = proxy ] && echo "${PROXY_PB:-{}}" || echo "${SERVER_PB:-{}}" ;;
     *.NetworkSettings.Ports*) [ "$role" = proxy ] && echo "${PROXY_NP:-{}}" || echo "${SERVER_NP:-{}}" ;;
+    *'{{.Name}}'*) printf '/plane-proxy\n/plane-server\n' ;;
+    *'{{.IPAddress}}: '*) echo "${PROXY_CTRL_IP:-172.19.0.7}: ${SERVER_CTRL_IP:-172.19.0.8}:" ;;
     *.NetworkSettings.Networks*) [ "$role" = proxy ] && echo "${PROXY_CTRL_IP:-172.19.0.7}" || echo "${SERVER_CTRL_IP:-172.19.0.8}" ;;
   esac
   exit 0
@@ -133,6 +136,11 @@ case " $* " in
   *"nc -z -w 3"*) [ "${HOST_REACH:-1}" = 0 ] && exit 1; exit 0 ;;
   *"id -un"*) printf '%s\n' "${OPERATOR:-oper}" ;;
   *"getent group docker"*) printf '%s\n' "${DOCKER_GROUP:-docker:x:998:oper}" ;;
+  *"tailscale serve status"*)
+    [ "${TS_RC:-0}" = 0 ] || exit "$TS_RC"
+    ts_default='{"Web":{"h:443":{"Handlers":{"/":{"Proxy":"https+insecure://127.0.0.1:8443"}}}}}'
+    printf '%s\n' "${TS_JSON:-$ts_default}"
+    ;;
   *) export DOCKER_REMOTE=1; exec sh -c "$*" ;;
 esac
 FAKE
@@ -229,11 +237,11 @@ BOTH='osionos-ide-socket-proxy:latest track-binocle/osionos-bridge:local'
 }
 
 # ----------------------------------------------------------------- check-plane
-@test "an all-good placement reports 7 ok, 0 failed and exits 0" {
+@test "an all-good placement reports 8 ok, 0 failed and exits 0" {
   valid_env
   IDE_SHIP_HOST=vm OSIONOS_IDE_ENV_FILE="$ENV_FILE" check
   [ "$status" -eq 0 ]
-  [[ "$output" == *"RESULT: 7 ok, 0 failed"* ]]
+  [[ "$output" == *"RESULT: 8 ok, 0 failed"* ]]
   [[ "$output" != *"$SECRET"* ]]
 }
 
@@ -274,4 +282,34 @@ BOTH='osionos-ide-socket-proxy:latest track-binocle/osionos-bridge:local'
   [ "$status" -eq 1 ]
   [[ "$output" == *"FAIL C2"*"cannot-decide(grep rc=2)"* ]]
   [[ "$output" != *"$SECRET"* ]]
+}
+
+@test "a tailscale serve target on the ide-server port fails C21" {
+  valid_env
+  IDE_SHIP_HOST=vm OSIONOS_IDE_ENV_FILE="$ENV_FILE" \
+    TS_JSON='{"Web":{"h:443":{"Handlers":{"/":{"Proxy":"http://osionos-ide-server:4100"}}}}}' check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL C21 exposed: serve->:4100"* ]]
+}
+
+@test "a serve target at a plane container address fails C21" {
+  valid_env
+  IDE_SHIP_HOST=vm OSIONOS_IDE_ENV_FILE="$ENV_FILE" \
+    TS_JSON='{"Web":{"h:443":{"Handlers":{"/":{"Proxy":"http://172.19.0.8:80"}}}}}' check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL C21 exposed: serve->172.19.0.8:"* ]]
+}
+
+@test "a third container on a plane network fails C21, naming it" {
+  valid_env
+  IDE_SHIP_HOST=vm OSIONOS_IDE_ENV_FILE="$ENV_FILE" PLANE_MEMBERS='plane-proxy ts-sidecar plane-server' check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL C21 exposed: extra-on-plane-net:ts-sidecar"* ]]
+}
+
+@test "an unreadable tailscale status is undecided, never a pass" {
+  valid_env
+  IDE_SHIP_HOST=vm OSIONOS_IDE_ENV_FILE="$ENV_FILE" TS_RC=1 check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL C21 cannot-decide"* ]]
 }
