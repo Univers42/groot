@@ -3,7 +3,7 @@
   "productName": "osionos",
   "executableName": "osionos",
   "directories": { "output": "dist-native" },
-  "files": ["main.js", "preload.js", "renderer/**/*"],
+  "files": ["main.js", "preload.js", "desktop-guards.js", "renderer/**/*"],
   "extraResources": [{ "from": "native-runtime", "to": "native-runtime" }],
   "linux": {
     "target": ["deb", "AppImage"],
