@@ -72,6 +72,45 @@ function emit(event, relPath, extra = {}) {
   process.stdout.write(`${JSON.stringify({ event, path: relPath, ...extra })}\n`);
 }
 
+// Through a pipe, process.stdout queues in memory whatever a stalled consumer leaves unread:
+// +0.53 MB per 400 KB event, 48 -> 208 MB after 300 rewrites with the reader stopped (devil C1,
+// 2026-10-14). Past BACKLOG_BYTES queued, a file's write waits as its path alone and is read
+// again once the queue drains, so a file rewritten 300 times is sent once, as it is then; a
+// delete still goes out at once and the drained read of a gone path sends nothing. Blocking
+// instead, as under the TTY, lost 18977 of 33051 deletes of a bulk rm -rf to inotify overflow
+// while the reader paused (move test C5; the unblocked agent lost none).
+// Caveat: deletes and the queue's own lines are not capped, ~100 bytes each: a consumer stalled
+// through millions of deletes still grows the agent, by their count, not by file sizes.
+const BACKLOG_BYTES = 1024 * 1024; // over one event at the 512 KiB cap (683 KB in base64)
+const waiting = new Set(); // relative paths whose write waits for the queue to drain
+let drainArmed = false;
+
+function emitFile(relPath, absPath) {
+  if (waiting.size > 0 || process.stdout.writableLength >= BACKLOG_BYTES) {
+    waiting.add(relPath);
+    armDrain();
+    return;
+  }
+  const meta = readMeta(absPath);
+  if (meta) emit("write", relPath, meta);
+}
+
+function armDrain() {
+  if (drainArmed) return;
+  drainArmed = true;
+  process.stdout.once("drain", sendWaiting);
+}
+
+function sendWaiting() {
+  drainArmed = false;
+  for (const relPath of waiting) {
+    if (process.stdout.writableLength >= BACKLOG_BYTES) { armDrain(); return; }
+    waiting.delete(relPath);
+    const meta = readMeta(path.join(ROOT, relPath));
+    if (meta) emit("write", relPath, meta);
+  }
+}
+
 /** A file is treated as binary (and NOT synced to a page) if a NUL byte appears
  *  in its leading bytes — pages hold code/text, never binaries. */
 export function looksBinary(buffer) {
@@ -173,7 +212,7 @@ function startWatch() {
       if (entry.isDirectory()) addTree(abs, emitExisting);
       else if (emitExisting) {
         const rel = relOf(abs);
-        if (!isIgnored(rel, extraDirs)) { const meta = readMeta(abs); if (meta) emit("write", rel, meta); }
+        if (!isIgnored(rel, extraDirs)) emitFile(rel, abs);
       }
     }
   }
@@ -197,8 +236,7 @@ function startWatch() {
     if (!stat) { emit("delete", rel); return; }
     if (replaced) emit("delete", rel); // the old dir left: same stream as an unraced mv
     if (stat.isDirectory()) { addTree(abs, true); return; } // new subtree → watch + surface its files
-    const meta = readMeta(abs);
-    if (meta) emit("write", rel, meta);
+    emitFile(rel, abs);
   }
 
   addTree(ROOT, false); // initial scan doesn't re-emit already-materialized files
