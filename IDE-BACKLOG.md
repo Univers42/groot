@@ -334,7 +334,9 @@ re-run the `verify.sh` gate.
 - [x] `jdtls` 1.61.0 in the image (2026-10-14) on its own Temurin JRE 21 at `/opt/jre21` (user `java`
       stays 17), started by `jdtls-launch` (oom_score_adj 1000, config/data under `/workspace/.osio/jdtls`).
       Measured in a box with the sandbox limits: `initialize` 3.1–3.6 s, first diagnostics +2.0–2.1 s,
-      container `memory.peak` 580 MiB with fs-agent + a shell; under OOM an indexed jdtls is killed
+      box `memory.peak` 842 MiB (budget 900) with the J3 baseline — pyright after one analysis,
+      fs-agent, bash, both tmpfs mounts full (126 MiB); one-file project, so a larger one has
+      ~58 MiB of headroom before the kernel reclaims or kills. Under OOM an indexed jdtls is killed
       first and the shell and fs-agent survive. rust-analyzer is now pinned by version + sha256.
 - **Follow-up:** wire `java` into the two maps (`LSP_SERVERS`, `lspClient.ts`) and show exit 137 as
       "Java language server stopped (out of memory)". Plain javac projects only: Maven/Gradle
