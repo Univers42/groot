@@ -94,8 +94,7 @@ test("GR2 rail → Second Brain draws the user's pages with graph_render, and En
   const s = await session(page);
   const tree = await pageTree(page, s, "rail");
   try {
-    // The icon rail exists only once the sidebar is collapsed to it.
-    await page.getByRole("button", { name: "Collapse to rail" }).click();
+    // The rail is always beside the panel (osionos sidebarRail.spec.mjs); there is no collapse step.
     await page.getByRole("tablist", { name: "Activity bar" }).getByRole("tab", { name: "Home", exact: true }).click();
     await page.getByRole("menuitem", { name: "Second Brain" }).click();
     const element = await expectNewGraph(page);
