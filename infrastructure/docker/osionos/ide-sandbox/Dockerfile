@@ -36,6 +36,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Language servers (P5) — matches bridge-ide-exec.mjs LSP_SERVERS:
 #   typescript → typescript-language-server --stdio
 #   python     → pyright-langserver --stdio
+#   java       → jdtls-launch (wrapper that starts Eclipse JDT LS on stdio)
 # Global, so a `docker exec` LSP relay finds them on PATH. Major-pinned (a dev
 # sandbox toolchain, not a project dependency under the release-age policy).
 RUN npm install -g --no-audit --no-fund \
@@ -43,11 +44,12 @@ RUN npm install -g --no-audit --no-fund \
     && npm cache clean --force
 
 # Compiled-language language servers (P5, extended) — matches bridge-ide-exec.mjs
-# LSP_SERVERS: go → gopls, rust → rust-analyzer, c/cpp → clangd (from apt above).
-# Go and gopls come from the gotools stage above (bookworm apt Go is too old);
-# rust-analyzer ships a self-contained release binary. Its download needs egress
-# and MUST stay ABOVE the HTTP_PROXY ENV block below (on the build daemon the
-# in-daemon egress proxy does not exist yet).
+# LSP_SERVERS: go → gopls, rust → rust-analyzer, c/cpp → clangd (from apt above),
+# java → jdtls-launch. Go and gopls come from the gotools stage above (bookworm
+# apt Go is too old); rust-analyzer ships a self-contained release binary; JDT LS
+# needs a Java 21 runtime (separate from the user's Java 17 JDK). All downloads
+# need egress and MUST stay ABOVE the HTTP_PROXY ENV block below (on the build
+# daemon the in-daemon egress proxy does not exist yet).
 COPY --from=gotools /usr/local/go /usr/local/go
 COPY --from=gotools /out/gopls /usr/local/bin/gopls
 ENV PATH="/usr/local/go/bin:${PATH}" GOTOOLCHAIN=local
@@ -56,9 +58,43 @@ ENV PATH="/usr/local/go/bin:${PATH}" GOTOOLCHAIN=local
 # /usr/local/bin. Without this, `go` is "command not found" in the terminal.
 RUN ln -s /usr/local/go/bin/go /usr/local/bin/go \
     && ln -s /usr/local/go/bin/gofmt /usr/local/bin/gofmt
-RUN curl -fsSL "https://github.com/rust-lang/rust-analyzer/releases/latest/download/rust-analyzer-x86_64-unknown-linux-gnu.gz" \
-      | gunzip -c > /usr/local/bin/rust-analyzer \
-    && chmod +x /usr/local/bin/rust-analyzer
+
+# Temurin JRE 21.0.12.1+1 (built 2026-08-19) — Eclipse JDT LS requires Java 21
+# runtime (eclipse.jdt.ls README line 45). User `java` stays 17 from default-jdk.
+# sha256: 2413149700df0f7d440500a84a8f764c535f21e5a5e87d38328b64eec2c5b500
+RUN curl -fsSL "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jre_x64_linux_hotspot_21.0.12.1_1.tar.gz" \
+      -o /tmp/jre21.tar.gz \
+    && echo "2413149700df0f7d440500a84a8f764c535f21e5a5e87d38328b64eec2c5b500  /tmp/jre21.tar.gz" | sha256sum -c - \
+    && mkdir -p /opt/jre21 \
+    && tar -xzf /tmp/jre21.tar.gz -C /opt/jre21 --strip-components=1 \
+    && rm /tmp/jre21.tar.gz
+
+# Eclipse JDT LS 1.61.0 (built 2026-09-03; 1.62.0 is too new under the 14-day
+# release-age rule). sha256: 338e7e73d61836651ba2453919a0d34fa763eb4e7c03342092309bffb8934c64
+RUN curl -fsSL "https://download.eclipse.org/jdtls/milestones/1.61.0/jdt-language-server-1.61.0-202609031315.tar.gz" \
+      -o /tmp/jdtls.tar.gz \
+    && echo "338e7e73d61836651ba2453919a0d34fa763eb4e7c03342092309bffb8934c64  /tmp/jdtls.tar.gz" | sha256sum -c - \
+    && mkdir -p /opt/jdtls \
+    && tar -xzf /tmp/jdtls.tar.gz -C /opt/jdtls \
+    && rm /tmp/jdtls.tar.gz
+# The launcher jar name carries a build qualifier; resolve it to a fixed path so
+# jdtls-launch never globs at runtime. Zero or several matches fail the build.
+RUN set -- /opt/jdtls/plugins/org.eclipse.equinox.launcher_*.jar; \
+    if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then \
+      echo "jdtls: expected exactly 1 equinox launcher jar, found: $*" >&2; exit 1; \
+    fi; \
+    ln -s "$1" /opt/jdtls/launcher.jar
+
+# rust-analyzer 2026-09-28 (built 2026-09-28), pinned by digest: `releases/latest`
+# with no checksum let any upstream re-publish land in the image unchecked.
+ARG RUST_ANALYZER_VERSION=2026-09-28
+ARG RUST_ANALYZER_SHA256=23f711d86b5f826e22886f01d7355dc01e0f4c1357dafa29710a95b903b48c85
+RUN curl -fsSL "https://github.com/rust-lang/rust-analyzer/releases/download/${RUST_ANALYZER_VERSION}/rust-analyzer-x86_64-unknown-linux-gnu.gz" \
+      -o /tmp/rust-analyzer.gz \
+    && echo "${RUST_ANALYZER_SHA256}  /tmp/rust-analyzer.gz" | sha256sum -c - \
+    && gunzip -c /tmp/rust-analyzer.gz > /usr/local/bin/rust-analyzer \
+    && chmod +x /usr/local/bin/rust-analyzer \
+    && rm /tmp/rust-analyzer.gz
 
 # PAT broker (devil condition 13): the credential helper only emits a secret
 # when GIT_PAT is present in the GIT PROCESS env — which happens ONLY when the
@@ -93,6 +129,11 @@ COPY osio-fs-agent.mjs /usr/local/lib/osio-fs-agent.mjs
 # The ignore set is what keeps build output, dependency trees and half-written saves out of
 # the page store: an image whose matcher is wrong must not build.
 RUN node /usr/local/lib/osio-fs-agent.mjs --selfcheck
+
+# jdtls-launch wrapper: speaks LSP on stdio, invoked by the bridge via
+# /api/ide/lsp?lang=java. Must be on PATH for the relay.
+COPY jdtls-launch.sh /usr/local/bin/jdtls-launch
+RUN chmod 755 /usr/local/bin/jdtls-launch
 
 WORKDIR /workspace
 USER coder
