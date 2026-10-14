@@ -3,8 +3,27 @@
 // WHY: every function takes plain objects so `node --test` can run it without Electron.
 const crypto = require("node:crypto");
 
-// WHY: Report-Only until the C15 smoke run shows zero violations; enforcement is a later unit.
-const CSP_HEADER_NAME = "content-security-policy-report-only";
+// WHY: only editions whose C15 Electron smoke ran clean enforce; add one when its smoke passes.
+const HARDENED_EDITIONS = new Set(["full"]);
+
+function editionOf(opts) {
+  // WHY: NATIVE bundles its backend so it wins over LOCAL; empty compose means FULL.
+  const o = opts || {};
+  if (o.isNative) return "native";
+  if (typeof o.localCompose === "string" && o.localCompose !== "") return "local";
+  return "full";
+}
+
+function cspHeaderName(edition) {
+  // WHY: hardened editions block violations; others stay Report-Only to gather signals.
+  if (HARDENED_EDITIONS.has(edition)) return "content-security-policy";
+  return "content-security-policy-report-only";
+}
+
+function webSecurityFor(edition) {
+  // WHY: hardened editions passed the C15 smoke with CORS allowing app://osionos; others stay off.
+  return HARDENED_EDITIONS.has(edition);
+}
 
 // WHY: the renderer frames mail/calendar/whiteboard loopback apps by default.
 const DEFAULT_FRAME_ORIGINS = [
@@ -121,7 +140,7 @@ function frameOriginsFrom(envValue) {
 }
 
 function rendererCsp(opts) {
-  // WHY: single policy string keeps file responses consistent; Report-Only header carries it until C15.
+  // WHY: single policy string keeps file responses consistent; per-edition header enforces it once that edition's C15 smoke passes.
   const o = opts || {};
   const hashes = Array.isArray(o.scriptHashes) ? o.scriptHashes : [];
   const frames = Array.isArray(o.frameOrigins) ? o.frameOrigins : [];
@@ -150,5 +169,8 @@ module.exports = {
   inlineScriptHashes,
   frameOriginsFrom,
   rendererCsp,
-  CSP_HEADER_NAME,
+  editionOf,
+  HARDENED_EDITIONS,
+  cspHeaderName,
+  webSecurityFor,
 };

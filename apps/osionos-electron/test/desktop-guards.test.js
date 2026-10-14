@@ -12,6 +12,9 @@ const {
   inlineScriptHashes,
   frameOriginsFrom,
   rendererCsp,
+  editionOf,
+  cspHeaderName,
+  webSecurityFor,
 } = require("../desktop-guards");
 
 function mainEvent(overrides) {
@@ -163,5 +166,32 @@ describe("rendererCsp", () => {
     assert.ok(!frameSrc.includes("'self'"));
     assert.ok(!frameSrc.includes("app:"));
     assert.ok(frameSrc.includes("http://localhost:3002"));
+  });
+});
+
+describe("edition hardening", () => {
+  it("editionOf: native wins over local", () => {
+    assert.equal(editionOf({ isNative: true, localCompose: "/x/docker-compose.local.yml" }), "native");
+  });
+  it("editionOf: set localCompose is local", () => {
+    assert.equal(editionOf({ isNative: false, localCompose: "/x/docker-compose.local.yml" }), "local");
+  });
+  it("editionOf: empty string and undefined are full", () => {
+    assert.equal(editionOf({ isNative: false, localCompose: "" }), "full");
+    assert.equal(editionOf({ isNative: false, localCompose: undefined }), "full");
+  });
+  it("cspHeaderName: full enforces, local and native stay report-only", () => {
+    assert.equal(cspHeaderName("full"), "content-security-policy");
+    assert.equal(cspHeaderName("local"), "content-security-policy-report-only");
+    assert.equal(cspHeaderName("native"), "content-security-policy-report-only");
+  });
+  it("webSecurityFor: full is true, local and native are false", () => {
+    assert.equal(webSecurityFor("full"), true);
+    assert.equal(webSecurityFor("local"), false);
+    assert.equal(webSecurityFor("native"), false);
+  });
+  it("unknown edition fails closed to report-only and false", () => {
+    assert.equal(cspHeaderName("beta"), "content-security-policy-report-only");
+    assert.equal(webSecurityFor("beta"), false);
   });
 });

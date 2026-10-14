@@ -68,6 +68,14 @@ async function cspHeader(page) {
   return `header=${names.join("+")}`;
 }
 
+// C16: the full edition must run with webSecurity on; read it from the live window, not from main.js.
+async function webSecurityOn(app) {
+  const on = await app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences().webSecurity);
+  if (on !== true) throw new Error(`webSecurity=${on} (C16: the full edition runs with it on)`);
+  return "webPreferences.webSecurity=true";
+}
+
 async function titlebarMaximize(app, page) {
   const isMax = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isMaximized());
   const before = await isMax();
@@ -145,6 +153,7 @@ const { app, page } = await launch();
 await check("csp-counter-selftest", () => cspCounterSelfTest(page));
 await check("window.open-null", () => windowOpenIsNull(page));
 await check("csp-header", () => cspHeader(page));
+await check("web-security", () => webSecurityOn(app));
 await check("titlebar-maximize", () => titlebarMaximize(app, page));
 await check("titlebar-minimize", () => titlebarMinimize(app, page));
 const loggedIn = await check("login", () => login(page));

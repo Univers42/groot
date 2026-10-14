@@ -16,6 +16,7 @@ playwright-core 1.49.1 into the `osionos-electron-smoke-cache` volume. Screensho
 - `csp-violations=<n>` + up to 10 distinct `violatedDirective blockedURI` lines: the C14 gate
   (enforce the CSP only when this is 0 across a full run). `csp-counter-selftest` proves the counter is live.
 - `console-errors=<n>`: renderer `console.error` count, informational.
+- `web-security`: `webPreferences.webSecurity` read from the live window (C16: on in the full edition).
 
 ## Does NOT check
 - Minimize/maximize are read from `BrowserWindow` under openbox, not on a real desktop WM.
