@@ -72,10 +72,11 @@ async function tidyTree(page: Page): Promise<void> {
   const input = page.getByLabel("Console command");
   await input.fill("layout layout.tree.tidy");
   await input.press("Enter");
-  // The run's own log line (`layout.tree.tidy <n> ms`) is the settle signal; the panel title
-  // naming it is the proof the console accepted the layout.
+  // The run's own log line (`layout.tree.tidy <n> ms`) is the settle signal and the proof the
+  // console accepted the layout. Not the dock's layout-panel title: from graph_render 48c865cf a
+  // shut dock section keeps its last drawing (Dock.tsx keepsShut), so that hidden title still
+  // names the layout that ran before this one.
   await expect(page.getByRole("log", { name: "What the studio did" })).toContainText(/layout\.tree\.tidy \d+ ms/, { timeout: WAIT_MS });
-  await expect(page.locator(".gs-action-title").filter({ hasText: /^layout\.tree\.tidy$/ })).toHaveCount(1);
   await page.getByRole("button", { name: "Close the console" }).click();
 }
 
