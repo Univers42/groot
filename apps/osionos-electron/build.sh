@@ -6,6 +6,7 @@
 #   bash apps/osionos-electron/build.sh            # FULL edition (HTTPS, BaaS-wired)
 #   bash apps/osionos-electron/build.sh --local    # LOCAL edition (HTTP :4000, lean
 #                                                  # backend, no mini-baas) -> dist-local/
+#   add --renderer-only -> stop after the renderer is extracted (smoke harness)
 #   add --win   -> also/only build a Windows .exe (NSIS) via the wine builder image
 #   add --all   -> build Linux (.deb/.AppImage) AND Windows (.exe) in one pass
 #   e.g.  bash apps/osionos-electron/build.sh --local --all
@@ -25,11 +26,12 @@ EL="apps/osionos-electron"
 # ---- platform: linux (default), --win (Windows .exe), --all (both) ---------
 # Windows cross-builds from Linux via electron-builder's wine image; the
 # Windows app still needs the Docker backend (Docker Desktop / WSL2) at runtime.
-EDITION="full"; PLATFORM="linux"
+EDITION="full"; PLATFORM="linux"; RENDERER_ONLY=0
 for a in "$@"; do case "$a" in
   --local|local)      EDITION="local";;
   --win|--windows)    PLATFORM="win";;
   --all|--all-os)     PLATFORM="all";;
+  --renderer-only)    RENDERER_ONLY=1;;
 esac; done
 case "$PLATFORM" in
   win) BUILDER_IMG="electronuserland/builder:wine"; DIST_SCRIPT="dist:win";;
@@ -88,6 +90,7 @@ docker build -f infrastructure/docker/osionos/app.Dockerfile \
   --build-arg VITE_CALENDAR_APP_URL=https://localhost:3003 \
   --build-arg VITE_APP_VERSION="desktop-$EDITION" \
   --build-arg VITE_BASE=./ \
+  --build-arg GRAPH_RENDER_SHA="$(git ls-tree HEAD apps/graph_render | awk '{print $3}')" \
   -t "$FE_TAG" apps/osionos/app
 
 echo "[2/4] Extracting dist -> $EL/renderer …"
@@ -105,6 +108,9 @@ docker run --rm -v "$REPO/$EL":/d -v "$REPO/apps/osionos-desktop/chrome":/c -w /
   if(!html.includes("osio-titlebar")){ html=html.replace("</body>", snip+"\n</body>"); fs.writeFileSync(idx,html); console.log("[chrome] titlebar injected"); }
   else console.log("[chrome] already present");
 '
+
+# The smoke harness needs only the renderer; packaging is the slow, heavy part.
+if [ "$RENDERER_ONLY" = 1 ]; then echo "Renderer ready in $EL/renderer (--renderer-only)."; exit 0; fi
 
 echo "[3/4] Preparing icon…"
 cp -f apps/osionos-desktop/src-tauri/icons/128x128@2x.png "$EL/icon.png" 2>/dev/null \
