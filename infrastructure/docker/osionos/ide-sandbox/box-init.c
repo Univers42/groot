@@ -16,27 +16,23 @@
 ** `kill -9 -1` from inside the box stopped the whole box, because tini exits
 ** when its child dies (devil s45t, condition 1). With `sleep infinity` as PID 1
 ** nothing reaped: hellish's `make -j8` left 469 zombies and every fork failed.
-** A namespace init only receives the signals it handles, plus SIGKILL from
-** outside, so with every signal blocked `docker stop` runs its timeout and then
-** SIGKILL, as it did with `sleep infinity`.
+** A namespace init with no handler loses every signal sent from inside, and
+** from outside only SIGKILL reaches it, so `docker stop` runs its timeout and
+** then SIGKILL, as it did with `sleep infinity`. Blocking signals instead keeps
+** them queued: a box user filled the uid's sigpending limit, 4096/4096, through
+** PID 1 (devil s45t advisory).
 ** Ponytail: with no child left it polls once a second, so an orphan can stay a
 ** zombie for up to 1 s; the Cmd is started once and never restarted.
 */
 
 #include <errno.h>
-#include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 int	main(int argc, char **argv)
 {
-	sigset_t	all;
-
-	sigfillset(&all);
-	sigprocmask(SIG_BLOCK, &all, NULL);
 	if (argc > 1 && fork() == 0)
 	{
-		sigprocmask(SIG_UNBLOCK, &all, NULL);
 		execvp(argv[1], argv + 1);
 		_exit(127);
 	}
