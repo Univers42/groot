@@ -110,6 +110,17 @@ RUN curl -fsSL "https://github.com/rust-lang/rust-analyzer/releases/download/${R
     && chmod +x /usr/local/bin/rust-analyzer \
     && rm /tmp/rust-analyzer.gz
 
+# Python debug adapter (S5-D): debugpy 1.8.22 (built 2026-09-15) has no dependencies, so
+# one hash pins the install; the bridge's DAP relay runs `debugpy-adapter` on stdio. A
+# breakpoint was hit through it on this image's Python 3.11 on 2026-10-14. Node debugging
+# is not here: js-debug needs Node >= 20 (the image has 18) and the startDebugging request.
+RUN echo "debugpy==1.8.22 --hash=sha256:192b73e8d53bbd60225220c0943627bf249ac93d0ea3090e23c45f3e0ceb6a35" > /tmp/debugpy.req \
+    && python3 -m pip install --no-cache-dir --require-hashes --only-binary :all: --no-deps \
+         --target /opt/debugpy -r /tmp/debugpy.req \
+    && rm /tmp/debugpy.req
+COPY debugpy-adapter.sh /usr/local/bin/debugpy-adapter
+RUN chmod 755 /usr/local/bin/debugpy-adapter
+
 # PAT broker (devil condition 13): the credential helper only emits a secret
 # when GIT_PAT is present in the GIT PROCESS env — which happens ONLY when the
 # provisioner runs `docker exec -e GIT_PAT=… git …` per operation. The long-lived
