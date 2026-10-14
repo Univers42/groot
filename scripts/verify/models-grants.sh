@@ -22,7 +22,8 @@
 #   Checks: c no anon/authenticated privilege on an osionos_% relation · d no policy
 #   for PUBLIC/anon/authenticated · e1/e2 service_role has full CRUD and round-trips a
 #   row · f six probes refused with 42501 · h no SECURITY DEFINER osionos_% function
-#   they may execute · g a second runner pass changes no ACL, policy or RLS flag
+#   they may execute · g a second runner pass changes no ACL, policy or RLS flag ·
+#   n the final notifications type CHECK admits every type the models files declare
 #
 # ISOLATION
 #   Throwaway containers only (--rm --network none, no port, no volume); the live
@@ -237,6 +238,7 @@ run_checks() {
 	probe "$1" V4 anon "UPDATE public.osionos_directory SET display_name='x'"
 	probe "$1" V5 anon "DELETE FROM public.osionos_directory"
 	check_count "$1" h secdef_exec
+	check_count "$1" n notify_types_missing
 	check_idempotent "$1"
 }
 
