@@ -51,9 +51,16 @@ SELECT 'notify_types_missing', count(*), coalesce(string_agg(t, ' ' ORDER BY t),
                     WHERE conname = 'osionos_notifications_type_check'
                       AND pg_get_constraintdef(oid) LIKE '%''' || t || '''%');
 
--- realtime_triggers: osionos_% tables whose row changes grobase's realtime_notify() broadcasts
+-- realtime_triggers: public tables whose row changes grobase's realtime_notify() broadcasts
 -- (SECURITY DEFINER, full row, no grant or RLS check at the gateway).
 SELECT 'realtime_triggers', count(*), coalesce(string_agg(c.relname, ' ' ORDER BY c.relname), '')
   FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
- WHERE c.relnamespace = 'public'::regnamespace AND c.relname LIKE 'osionos\_%'
+ WHERE c.relnamespace = 'public'::regnamespace
    AND NOT t.tgisinternal AND t.tgfoid = to_regproc('public.realtime_notify');
+
+-- realtime_event_trigger: 1 when grobase's CREATE TABLE hook would arm the next table, or when
+-- it is missing — both scenarios apply 012, so a missing hook means this check proves nothing.
+SELECT 'realtime_event_trigger',
+       CASE WHEN coalesce(min(evtenabled::text), 'missing') = 'D' THEN 0 ELSE 1 END,
+       coalesce(min(evtenabled::text), 'missing')
+  FROM pg_event_trigger WHERE evtname = 'realtime_auto_trigger_on_create';
