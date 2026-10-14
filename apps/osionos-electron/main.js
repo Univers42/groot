@@ -13,6 +13,7 @@ const { spawn } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
 const { existsSync, statSync, mkdirSync, readFileSync, writeFileSync } = require("node:fs");
 const crypto = require("node:crypto");
+const { isExternalHttpUrl, isAppPageUrl, isAllowedSubframeUrl, senderAllowed, baasResponseHeaders, inlineScriptHashes, frameOriginsFrom, rendererCsp, CSP_HEADER_NAME } = require("./desktop-guards");
 
 // The local mini-baas query-router speaks plain HTTP. The renderer runs from the
 // secure `app://` origin, where a direct http://localhost:8002 fetch is upgraded
@@ -30,8 +31,8 @@ const BAAS_TARGET = (process.env.OSIONOS_BAAS_URL || "http://127.0.0.1:8000")
   .replace(/\/\/localhost(?=[:/]|$)/, "//127.0.0.1");
 
 // Serve the bundled renderer from a stable app:// origin (so the bridge's CORS
-// can allow it) instead of file:// (origin "null", which CORS rejects). Keeps
-// webSecurity ON. Must be registered before the app is ready.
+// can allow it) instead of file:// (origin "null", which CORS rejects). Must be
+// registered before the app is ready. webSecurity is still off (see webPreferences).
 protocol.registerSchemesAsPrivileged([
   { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
 ]);
@@ -49,14 +50,17 @@ app.commandLine.appendSwitch("disable-smooth-scrolling");
 // AppImage (read-only temp mount) or a kernel that restricts unprivileged user
 // namespaces (Ubuntu 24.04). The installed .deb setuids /opt/osionos/chrome-sandbox,
 // so it KEEPS its sandbox. (process.env.APPIMAGE is not reliably set, so probe the
-// helper's mode directly.)
-try {
-  const sandbox = path.join(path.dirname(process.execPath), "chrome-sandbox");
-  const st = statSync(sandbox);
-  const setuidRoot = st.uid === 0 && (st.mode & 0o4000) !== 0;
-  if (!setuidRoot) app.commandLine.appendSwitch("no-sandbox");
-} catch {
-  app.commandLine.appendSwitch("no-sandbox"); // helper missing → can't sandbox anyway
+// helper's mode directly.) The setuid helper exists only on Linux, so other
+// platforms never drop the sandbox.
+if (process.platform === "linux") {
+  try {
+    const sandbox = path.join(path.dirname(process.execPath), "chrome-sandbox");
+    const st = statSync(sandbox);
+    const setuidRoot = st.uid === 0 && (st.mode & 0o4000) !== 0;
+    if (!setuidRoot) app.commandLine.appendSwitch("no-sandbox");
+  } catch {
+    app.commandLine.appendSwitch("no-sandbox"); // helper missing → can't sandbox anyway
+  }
 }
 
 function trackBinocleHome() {
@@ -110,6 +114,41 @@ async function startNative() {
   nativeHandle = await startSuite({ bin, dataDir, ports: DEFAULT_PORTS, superPass, migrationsDir: path.join(NATIVE_DIR, "models"), appUrl: "app://osionos" });
 }
 
+let mainWindow = null;
+
+// Every WebContents gets the same guards (per-window wiring missed child windows). The main
+// frame never leaves app://osionos: the Mail/Calendar buttons set location.href to an external
+// URL, which would strand the user on a page with no titlebar, so it opens in the system browser.
+app.on("web-contents-created", (_e, contents) => {
+  contents.setWindowOpenHandler(({ url }) => {
+    if (isExternalHttpUrl(url)) shell.openExternal(url);
+    return { action: "deny" };
+  });
+  contents.on("will-attach-webview", (e) => e.preventDefault());
+  contents.on("will-navigate", (e, url) => {
+    if (isAppPageUrl(url)) return;
+    e.preventDefault();
+    if (isExternalHttpUrl(url)) shell.openExternal(url);
+  });
+  contents.on("will-frame-navigate", (d) => {
+    if (d.isMainFrame ? !isAppPageUrl(d.url) : !isAllowedSubframeUrl(d.url)) d.preventDefault();
+  });
+});
+
+// WHY: win:* registered once here so a second window cannot double-register; the C12 sender check stops framed pages driving the window.
+ipcMain.on("win:minimize", (event) => {
+  if (!senderAllowed(event, mainWindow && mainWindow.webContents)) return;
+  if (mainWindow) mainWindow.minimize();
+});
+ipcMain.on("win:toggle-maximize", (event) => {
+  if (!senderAllowed(event, mainWindow && mainWindow.webContents)) return;
+  if (mainWindow) (mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize());
+});
+ipcMain.on("win:close", (event) => {
+  if (!senderAllowed(event, mainWindow && mainWindow.webContents)) return;
+  if (mainWindow) mainWindow.close();
+});
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
@@ -125,47 +164,28 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
       spellcheck: true,
-      // Local desktop app: it loads ONLY its own bundled content (app://osionos)
-      // and talks to several LOCAL backends (bridge:4000, kong:8000). Disabling
-      // the renderer's same-origin/CORS/mixed-content enforcement lets those
-      // direct calls work without configuring CORS on every service. Real
-      // security stays in the auth-gateway + Postgres RLS; external links open
-      // in the system browser (setWindowOpenHandler), so no untrusted content runs.
+      // Still off: the renderer calls the local bridge (:4000) cross-origin from
+      // app://osionos. It turns on only after the Electron smoke run (S4 C15) proves
+      // every edition works with it. Until then the navigation/window-open guards
+      // (web-contents-created) keep foreign pages out of this window, and authz
+      // stays in the auth-gateway + Postgres RLS.
       webSecurity: false,
     },
   });
+  mainWindow = win;
+  // A destroyed BrowserWindow throws on .webContents; the win:* handlers read it on every message.
+  win.on("closed", () => { if (mainWindow === win) mainWindow = null; });
 
   win.once("ready-to-show", () => win.show());
   win.loadURL("app://osionos/index.html");
-
-  // Open external links in the real browser, not inside the app.
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:/i.test(url)) { shell.openExternal(url); return { action: "deny" }; }
-    return { action: "allow" };
-  });
-
-  // Keep the main window ALWAYS on osionos. The Mail/Calendar buttons navigate via
-  // location.href to an external URL; in the desktop app that would replace osionos
-  // (losing the titlebar + stranding you on a blank page). Cancel any navigation that
-  // leaves app://osionos and open it in the system browser instead — so you can never
-  // get stuck and never lose the window controls.
-  win.webContents.on("will-navigate", (event, url) => {
-    if (!url.startsWith("app://osionos")) {
-      event.preventDefault();
-      if (/^https?:/i.test(url)) shell.openExternal(url);
-    }
-  });
 
   // Black-screen recovery: the titlebar + UI live in the renderer, so a crashed or
   // hung renderer leaves you with no window controls. Reload back to the app home
   // automatically; Ctrl/Cmd+Shift+R (global, below) is the manual escape hatch.
   win.webContents.on("render-process-gone", () => { try { win.loadURL("app://osionos/index.html"); } catch { /* */ } });
   win.webContents.on("unresponsive", () => { try { win.webContents.reload(); } catch { /* */ } });
-
-  ipcMain.on("win:minimize", () => win.minimize());
-  ipcMain.on("win:toggle-maximize", () => (win.isMaximized() ? win.unmaximize() : win.maximize()));
-  ipcMain.on("win:close", () => win.close());
 
   // Zoom — wired explicitly (Tauri's zoomHotkeysEnabled has no Electron equivalent).
   const wc = win.webContents;
@@ -195,6 +215,15 @@ app.whenReady().then(async () => {
   // global-menu integration otherwise spams LIBDBUSMENU-GLIB-WARNING on Linux.
   Menu.setApplicationMenu(null);
   const rendererDir = path.join(__dirname, "renderer");
+  // WHY: the file responses carry this Report-Only CSP; [] hashes on read failure keeps the header present.
+  const frameOrigins = frameOriginsFrom(process.env.OSIONOS_FRAME_ORIGINS);
+  let rendererPolicy = rendererCsp({ scriptHashes: [], frameOrigins });
+  try {
+    const html = readFileSync(path.join(rendererDir, "index.html"), "utf8");
+    rendererPolicy = rendererCsp({ scriptHashes: inlineScriptHashes(html), frameOrigins });
+  } catch (err) {
+    console.error("[desktop] renderer CSP fallback without hashes:", err && err.message ? err.message : err);
+  }
   protocol.handle("app", async (request) => {
     const url = new URL(request.url);
     // BaaS proxy: relay same-origin app://osionos/__baas/* to the plain-HTTP
@@ -216,14 +245,12 @@ app.whenReady().then(async () => {
       try {
         const upstream = await net.fetch(target, init);
         const body = await upstream.arrayBuffer();
-        const out = new Headers();
-        const contentType = upstream.headers.get("content-type");
-        if (contentType) out.set("content-type", contentType);
-        return new Response(body, { status: upstream.status, statusText: upstream.statusText, headers: out });
+        // WHY: upstream MIME/headers are never trusted; baasResponseHeaders forces octet-stream + sandbox.
+        return new Response(body, { status: upstream.status, statusText: upstream.statusText, headers: baasResponseHeaders(upstream.headers.get("content-type")) });
       } catch (error) {
         return new Response(JSON.stringify({ error: "baas proxy failed", detail: String(error) }), {
           status: 502,
-          headers: { "content-type": "application/json" },
+          headers: baasResponseHeaders("application/json"),
         });
       }
     }
@@ -231,7 +258,11 @@ app.whenReady().then(async () => {
     if (pathname === "/" || pathname === "") pathname = "/index.html";
     let filePath = path.join(rendererDir, pathname);
     if (!filePath.startsWith(rendererDir) || !existsSync(filePath)) filePath = path.join(rendererDir, "index.html");
-    return net.fetch(pathToFileURL(filePath).toString());
+    // WHY: every app:// file response (including the index fallback) carries the Report-Only CSP; enforcement is a later unit after the C15 smoke run.
+    const res = await net.fetch(pathToFileURL(filePath).toString());
+    const headers = new Headers(res.headers);
+    headers.set(CSP_HEADER_NAME, rendererPolicy);
+    return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
   });
   if (IS_NATIVE) {
     try { await startNative(); } catch (e) { console.error("[native] backend failed to start:", e); }
