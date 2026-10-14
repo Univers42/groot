@@ -26,7 +26,7 @@
 # same commit (new toolchain, new digest) lands at an unchanged URL that browsers cache as
 # immutable for a year, so they keep the old bytes. Never bump the digest alone: a same-commit
 # rebuild needs its own path first.
-ARG GRAPH_STUDIO_PACK=ghcr.io/univers42/graph-studio-pack@sha256:2c56d13da2d6d2308e638993d389c4af1d46c03818bc1343101412964d5a844a
+ARG GRAPH_STUDIO_PACK=ghcr.io/univers42/graph-studio-pack@sha256:13349d726600165b57abb2c128c66aac67bfa456634b1ee88ff25e04cdc6792a
 FROM ${GRAPH_STUDIO_PACK} AS graph-studio-pack
 
 FROM public.ecr.aws/docker/library/node:22-alpine AS builder
