@@ -131,12 +131,6 @@ RUN git config --system credential.helper \
       '!f() { test -n "$GIT_PAT" && printf "username=x-access-token\npassword=%s\n" "$GIT_PAT"; }; f' \
     && git config --system credential.useHttpPath true
 
-# tini (PID 1, see ENTRYPOINT) gets its own layer, the last one that can still reach apt (above
-# the proxy ENV): in the first apt layer it would re-resolve every unpinned package and rebuild
-# every layer after it.
-RUN apt-get update && apt-get install -y --no-install-recommends tini \
-    && rm -rf /var/lib/apt/lists/*
-
 # All egress flows through the in-daemon CONNECT proxy — the sandbox net is
 # `internal` so there is no other route. npm/pip/cargo/go honor these.
 ENV HTTP_PROXY=http://ide-egress:8080 \
@@ -167,6 +161,10 @@ RUN node /usr/local/lib/osio-fs-agent.mjs --selfcheck
 COPY jdtls-launch.sh /usr/local/bin/jdtls-launch
 RUN chmod 755 /usr/local/bin/jdtls-launch
 
+# box-init: PID 1 (see ENTRYPOINT and box-init.c), built with the image's own gcc.
+COPY box-init.c /tmp/box-init.c
+RUN gcc -Wall -Wextra -Werror -O2 -o /usr/local/sbin/box-init /tmp/box-init.c && rm /tmp/box-init.c
+
 # docker-ide runs userns-remap with a 65536-id range: one file owned outside it makes
 # `docker load` fail on the VM (jdtls's tarball once shipped uid 1001380000).
 RUN if find / -xdev \( -uid +65535 -o -gid +65535 \) -print -quit | grep -q .; then \
@@ -176,11 +174,10 @@ RUN if find / -xdev \( -uid +65535 -o -gid +65535 \) -print -quit | grep -q .; t
 
 WORKDIR /workspace
 USER coder
-# PID 1 is tini, which reaps every orphan reparented to it. With `sleep infinity`
-# as PID 1 none was reaped: hellish's `make -j8` (its spinner orphans a `sleep`
-# per tick) left 469 zombies that filled pids.max until every fork failed,
-# `/bin/sh: Cannot fork` (2026-10-14). The keep-alive stays `sleep infinity`, as
-# tini's child: the socket proxy requires that Cmd (create-shape.mjs). Shells and
-# tools attach via `docker exec`.
-ENTRYPOINT ["/usr/bin/tini", "--"]
+# PID 1 is box-init: it reaps every orphan (with `sleep infinity` as PID 1, hellish's `make -j8`
+# left 469 zombies and every fork failed, 2026-10-14) and, unlike tini, cannot be stopped from
+# inside the box (tini exits when its child dies: `pkill -x sleep` stopped the box). The Cmd
+# stays `sleep infinity`, as its child: the socket proxy requires that Cmd (create-shape.mjs).
+# Shells and tools attach via `docker exec`.
+ENTRYPOINT ["/usr/local/sbin/box-init"]
 CMD ["sleep", "infinity"]
