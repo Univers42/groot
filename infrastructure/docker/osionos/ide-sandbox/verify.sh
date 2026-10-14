@@ -34,7 +34,7 @@ RUNNER_PROBE=ide-runner-sigusr1-probe
 NAT_CHECK=/usr/local/sbin/osionos-ide-egress-nat
 PLANE_PROJECT=osionos-ide-plane
 pass=0; fail=0; skipped=0
-EXPECTED=42
+EXPECTED=43
 # The VM's default gateway (user-mode QEMU: 10.0.2.2 is the physical host's loopback, where 4242
 # is the VM's own forwarded ssh). Elsewhere set a port that listens on that gateway.
 GATEWAY_PORT="${OSIONOS_IDE_VERIFY_GATEWAY_PORT:-4242}"
@@ -246,6 +246,12 @@ fi
 
 echo "== Identity =="
 if [ "$(sx 'id -u')" = "10001" ]; then ok "box runs as uid 10001 (spec user)"; else bad "box runs as uid 10001 (spec user)"; fi
+
+echo "== Init =="
+# 50 orphans reparented to PID 1, then a second for it to reap them. With `sleep infinity` as
+# PID 1 they stayed zombies, and hellish's build filled pids.max with 469 (2026-10-14).
+sx 'i=0; while [ $i -lt 50 ]; do (sleep 0.1 &); i=$((i+1)); done; sleep 1' >/dev/null 2>&1
+if [ "$(sx "ps -eo stat= | grep -c '^Z'")" = "0" ]; then ok "PID 1 reaps orphaned processes"; else bad "PID 1 reaps orphaned processes"; fi
 
 echo "== Memory caps =="
 # Box cgroup: 1 GiB with swap equal; slice: 3 GiB; box scope inside slice.
