@@ -7,7 +7,9 @@
 #
 # Ponytail: MemoryMax/CPUQuota/IOWeight are estimates for a 14 GiB host that
 # also runs the 35-container production stack; a heavier workload needs the
-# numbers re-measured.
+# numbers re-measured. MemoryMax is 1 GiB per box times OSIONOS_IDE_MAX_BOXES: at 3G
+# the cap was 2 boxes, so two idle boxes (one per workspace) refused every other
+# workspace (2026-10-14, 7.6 GB available on the VM, an idle box using ~6 MB).
 
 [Unit]
 Description=osionos IDE sandboxes (docker-ide and every box it runs), capped as one group
@@ -15,7 +17,7 @@ Before=slices.target
 
 [Slice]
 MemoryAccounting=yes
-MemoryMax=3G
+MemoryMax=6G
 MemorySwapMax=0
 CPUAccounting=yes
 CPUQuota=200%
