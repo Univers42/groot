@@ -43,6 +43,17 @@ RUN npm install -g --no-audit --no-fund \
       typescript@5 typescript-language-server@4 pyright@1 \
     && npm cache clean --force
 
+# 42 school work: valgrind and gdb for leak and crash hunts, readline's headers for
+# minishell, norminette for the norm. A libft built in this sandbox on 2026-10-14
+# found none of them. norminette lives in its own venv: bookworm's pip refuses a
+# system-wide install (PEP 668).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      valgrind gdb libreadline-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/norminette \
+    && /opt/norminette/bin/pip install --no-cache-dir norminette==3.3.60 \
+    && ln -s /opt/norminette/bin/norminette /usr/local/bin/norminette
+
 # Compiled-language language servers (P5, extended) — matches bridge-ide-exec.mjs
 # LSP_SERVERS: go → gopls, rust → rust-analyzer, c/cpp → clangd (from apt above),
 # java → jdtls-launch. Go and gopls come from the gotools stage above (bookworm

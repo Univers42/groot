@@ -800,6 +800,9 @@ services:
       OSIONOS_IDE_ALLOWED_SUBJECTS: ${OSIONOS_IDE_ALLOWED_SUBJECTS:-}
       OSIONOS_IDE_SANDBOX_IMAGE: ${OSIONOS_IDE_SANDBOX_IMAGE:-osionos-ide-sandbox:latest}
       OSIONOS_IDE_STORAGE_QUOTA: ${OSIONOS_IDE_STORAGE_QUOTA:-}
+      # Boxes running at once (bridge-ide-sandbox.mjs maxRunningBoxes, default 2): size it with
+      # osionos-ide.slice MemoryMax at 1 GiB a box.
+      OSIONOS_IDE_MAX_BOXES: ${OSIONOS_IDE_MAX_BOXES:-}
     expose:
       - "4100"
     networks:
