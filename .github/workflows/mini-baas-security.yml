@@ -343,6 +343,8 @@ jobs:
           # audit-deps.sh and wiki/security-audit.md's accepted-with-remediation
           # posture) so a NEW advisory still fails the gate. Remediation: drop the
           # --ignore flags when a rustls-0.2x tiberius release lands.
+          # 0346/0349 (2026-10-14) hit the same rustls 0.21 via tiberius; the 0.23 line is fixed
+          # at 0.23.46 in grobase 8b9321a6, whose deny.toml accepts the same two with reasons.
           cd "${{ matrix.ws }}"
           cargo audit \
             --ignore RUSTSEC-2026-0098 \
@@ -350,7 +352,9 @@ jobs:
             --ignore RUSTSEC-2026-0104 \
             --ignore RUSTSEC-2025-0134 \
             --ignore RUSTSEC-2026-0002 \
-            --ignore RUSTSEC-2026-0097
+            --ignore RUSTSEC-2026-0097 \
+            --ignore RUSTSEC-2026-0346 \
+            --ignore RUSTSEC-2026-0349
 
   # ── 5d. SCA — govulncheck (Go control plane, blocking) ─────────────────────
   sca-govulncheck:
