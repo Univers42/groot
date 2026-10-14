@@ -48,6 +48,17 @@ RUN npm install -g --no-audit --no-fund \
 # rust-analyzer ships a self-contained release binary. Its download needs egress
 # and MUST stay ABOVE the HTTP_PROXY ENV block below (on the build daemon the
 # in-daemon egress proxy does not exist yet).
+# 42 school work: valgrind and gdb for leak and crash hunts, readline's headers for
+# minishell, norminette for the norm. A libft built in this sandbox on 2026-10-14
+# found none of them. norminette lives in its own venv: bookworm's pip refuses a
+# system-wide install (PEP 668).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      valgrind gdb libreadline-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/norminette \
+    && /opt/norminette/bin/pip install --no-cache-dir norminette==3.3.60 \
+    && ln -s /opt/norminette/bin/norminette /usr/local/bin/norminette
+
 COPY --from=gotools /usr/local/go /usr/local/go
 COPY --from=gotools /out/gopls /usr/local/bin/gopls
 ENV PATH="/usr/local/go/bin:${PATH}" GOTOOLCHAIN=local
