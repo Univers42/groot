@@ -370,6 +370,21 @@ re-run the `verify.sh` gate.
       them (gofmt ships with Go; `rustfmt`/`shfmt` are one apt package each) so the Format
       button works for Go/Rust/Shell/Java, not just Python/C/C++.
 
+### Epic 6 — Desktop over the real OS (S4) — `RULED 2026-10-14`
+The desktop edition (Electron) edits a real folder and later a local terminal through the same
+`FsProvider` / terminal seams as the sandbox. Ruled by the risk review on 2026-10-14: **BLOCK**
+overall, S4U1 and S4U2 may start. Details, conditions and falsifiers:
+[docs/ide/ADR-005-desktop-host-providers.md](docs/ide/ADR-005-desktop-host-providers.md).
+Nothing here is shipped; `scripts/host-fs-ops.mjs` is not merged.
+
+| Unit | What | Verdict | Conditions | Status |
+|---|---|---|---|---|
+| U1 | Host-fs transport (pure Node) + `host(node)` conformance target | PROCEED-WITH-CONDITIONS | C1–C10 | in progress |
+| U2 | Electron hardening (CSP, guards, sender check, sandbox) | PROCEED-WITH-CONDITIONS | C11–C18 | not started; C17, C18 fixed in the web app on an unmerged branch |
+| U3 | fs IPC into Electron main, root binding, watch | BLOCK | C19–C28 | not started |
+| U4 | Renderer wiring | seams PROCEED-WITH-CONDITIONS; third backend BLOCK with U3 | C29–C31 | not started |
+| U5 | Local PTY | BLOCK | own ruling | not started |
+
 ---
 
 ## Appendix — Plane B activation (ready-to-run)
@@ -413,6 +428,15 @@ After step 7: open a workspace in IDE mode → the terminal (`bash -l`), multi-l
 starts automatically (self-gated until now).
 
 ## Changelog
+
+- **2026-10-14** — **S4 (desktop over the real OS) ruled; docs only, no source touched.**
+  [ADR-005](docs/ide/ADR-005-desktop-host-providers.md) records the risk ruling: overall BLOCK;
+  S4U1 (host-fs transport, C1–C10) and S4U2 (Electron hardening, C11–C18) PROCEED-WITH-CONDITIONS;
+  S4U3 (fs IPC, C19–C28) and S4U5 (local PTY) BLOCKED; S4U4 split (seams C29–C31, third backend
+  waits for U3). Drivers: a `.` path could make a recursive delete wipe the bound folder, the
+  renderer can win a rename-swap race on its own, writes into `.git` run code, and host watch
+  events must never be ingested into pages. C17 (mermaid strict) and C18 (embed URLs http/https
+  only) were fixed in the web app on an unmerged osionos branch. Epic 6 added to §6.
 
 - **2026-10-14** — **The IDE line merged into develop.** osionos `develop` (22 commits:
   rail beside the panel, one Conversations space, the edge peek, wiki pages, pane zoom,
