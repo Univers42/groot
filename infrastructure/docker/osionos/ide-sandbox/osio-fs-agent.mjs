@@ -6,7 +6,7 @@
 //    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         //
 //                                                 +#+#+#+#+#+   +#+            //
 //    Created: 2026/07/19 00:00:00 by dlesieur          #+#    #+#              //
-//    Updated: 2026/10/13 00:00:00 by dlesieur         ###   ########.fr        //
+//    Updated: 2026/10/14 00:00:00 by dlesieur         ###   ########.fr        //
 //                                                                              //
 // **************************************************************************** //
 
@@ -232,4 +232,13 @@ if (isMain && process.argv.includes("--selfcheck")) {
   process.exit(0);
 }
 
-if (isMain) startWatch();
+// An agent never learned that its consumer left: under a TTY dockerd closes an exec's stdin
+// on hang-up only without one (moby container/stream/attach.go: CloseStdin && !TTY), so every
+// reload left one behind, 60-70 MB each. Seven held ~450 MB of the demo box's 1 GiB, and
+// `make -j8` of hellish hit memory.max 1430 times and failed (2026-10-14). The bridge now runs
+// it with stdin attached and no TTY: its stdin ends with the stream, and so does the agent.
+if (isMain) {
+  startWatch();
+  process.stdin.on("end", () => process.exit(0));
+  process.stdin.resume();
+}
