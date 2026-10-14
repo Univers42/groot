@@ -34,7 +34,7 @@ RUNNER_PROBE=ide-runner-sigusr1-probe
 NAT_CHECK=/usr/local/sbin/osionos-ide-egress-nat
 PLANE_PROJECT=osionos-ide-plane
 pass=0; fail=0; skipped=0
-EXPECTED=42
+EXPECTED=44
 # The VM's default gateway (user-mode QEMU: 10.0.2.2 is the physical host's loopback, where 4242
 # is the VM's own forwarded ssh). Elsewhere set a port that listens on that gateway.
 GATEWAY_PORT="${OSIONOS_IDE_VERIFY_GATEWAY_PORT:-4242}"
@@ -247,11 +247,22 @@ fi
 echo "== Identity =="
 if [ "$(sx 'id -u')" = "10001" ]; then ok "box runs as uid 10001 (spec user)"; else bad "box runs as uid 10001 (spec user)"; fi
 
+echo "== Init =="
+# 50 orphans reparented to PID 1, then a second for it to reap them. With `sleep infinity` as
+# PID 1 they stayed zombies, and hellish's build filled pids.max with 469 (2026-10-14).
+sx "i=0; while [ \$i -lt 50 ]; do (sleep 0.1 &); i=\$((i+1)); done; sleep 1" >/dev/null 2>&1
+if [ "$(sx "ps -eo stat= | grep -c '^Z'")" = "0" ]; then ok "PID 1 reaps orphaned processes"; else bad "PID 1 reaps orphaned processes"; fi
+# The box user signals everything they own, PID 1 included; with tini as PID 1 that stopped
+# the box. Box B is done with its probes by now (neighbour section above).
+$IDE exec "$BOX_B" sh -c 'pkill -x sleep; kill 1; kill -9 -1' >/dev/null 2>&1
+sleep 2
+if [ "$($IDE inspect -f '{{.State.Running}}' "$BOX_B" 2>/dev/null)" = "true" ]; then ok "box survives its user killing everything, PID 1 included"; else bad "box survives its user killing everything, PID 1 included"; fi
+
 echo "== Memory caps =="
-# Box cgroup: 1 GiB with swap equal; slice: 3 GiB; box scope inside slice.
+# Box cgroup: 1 GiB with swap equal; slice: 6 GiB (six boxes, osionos-ide.slice); box scope inside slice.
 if [ "$(sx 'cat /sys/fs/cgroup/memory.max')" = "1073741824" ]; then ok "box memory.max is 1 GiB"; else bad "box memory.max is 1 GiB"; fi
 SLICE_CG=$(systemctl show -p ControlGroup --value osionos-ide.slice)
-if [ -n "$SLICE_CG" ] && [ "$(cat /sys/fs/cgroup/"$SLICE_CG"/memory.max 2>/dev/null)" = "3221225472" ]; then ok "slice memory.max is 3 GiB"; else bad "slice memory.max is 3 GiB"; fi
+if [ -n "$SLICE_CG" ] && [ "$(cat /sys/fs/cgroup/"$SLICE_CG"/memory.max 2>/dev/null)" = "6442450944" ]; then ok "slice memory.max is 6 GiB"; else bad "slice memory.max is 6 GiB"; fi
 BOX_ID=$($IDE inspect -f '{{.Id}}' "$BOX_A" 2>/dev/null)
 if [ -n "$BOX_ID" ] && [ -n "$SLICE_CG" ] && [ -n "$(find /sys/fs/cgroup/"$SLICE_CG" -maxdepth 2 -name "docker-$BOX_ID.scope" 2>/dev/null | head -1)" ]; then ok "box scope inside slice"; else bad "box scope inside slice"; fi
 

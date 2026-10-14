@@ -161,6 +161,10 @@ RUN node /usr/local/lib/osio-fs-agent.mjs --selfcheck
 COPY jdtls-launch.sh /usr/local/bin/jdtls-launch
 RUN chmod 755 /usr/local/bin/jdtls-launch
 
+# box-init: PID 1 (see ENTRYPOINT and box-init.c), built with the image's own gcc.
+COPY box-init.c /tmp/box-init.c
+RUN gcc -Wall -Wextra -Werror -O2 -o /usr/local/sbin/box-init /tmp/box-init.c && rm /tmp/box-init.c
+
 # docker-ide runs userns-remap with a 65536-id range: one file owned outside it makes
 # `docker load` fail on the VM (jdtls's tarball once shipped uid 1001380000).
 RUN if find / -xdev \( -uid +65535 -o -gid +65535 \) -print -quit | grep -q .; then \
@@ -170,6 +174,10 @@ RUN if find / -xdev \( -uid +65535 -o -gid +65535 \) -print -quit | grep -q .; t
 
 WORKDIR /workspace
 USER coder
-# Keep-alive PID 1; shells + tools attach via `docker exec`. P4 replaces this
-# with the fs-agent (which also keeps the container alive).
+# PID 1 is box-init: it reaps every orphan (with `sleep infinity` as PID 1, hellish's `make -j8`
+# left 469 zombies and every fork failed, 2026-10-14) and, unlike tini, cannot be stopped from
+# inside the box (tini exits when its child dies: `pkill -x sleep` stopped the box). The Cmd
+# stays `sleep infinity`, as its child: the socket proxy requires that Cmd (create-shape.mjs).
+# Shells and tools attach via `docker exec`.
+ENTRYPOINT ["/usr/local/sbin/box-init"]
 CMD ["sleep", "infinity"]
