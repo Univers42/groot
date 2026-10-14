@@ -46,12 +46,15 @@ RUN npm install -g --no-audit --no-fund \
 # 42 school work: valgrind and gdb for leak and crash hunts, readline's headers for
 # minishell, norminette for the norm. A libft built in this sandbox on 2026-10-14
 # found none of them. norminette lives in its own venv: bookworm's pip refuses a
-# system-wide install (PEP 668).
+# system-wide install (PEP 668). norminette 3.3.60 (built 2026-08-29) has no
+# dependencies, so one hash pins the whole install.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       valgrind gdb libreadline-dev \
     && rm -rf /var/lib/apt/lists/* \
     && python3 -m venv /opt/norminette \
-    && /opt/norminette/bin/pip install --no-cache-dir norminette==3.3.60 \
+    && echo "norminette==3.3.60 --hash=sha256:c963ff9ff11180351f19b2f7e26a734bba8ee601a4a0c5e8f8f4a807770cf285" > /tmp/norminette.req \
+    && /opt/norminette/bin/pip install --no-cache-dir --require-hashes --only-binary :all: -r /tmp/norminette.req \
+    && rm /tmp/norminette.req \
     && ln -s /opt/norminette/bin/norminette /usr/local/bin/norminette
 
 # Compiled-language language servers (P5, extended) — matches bridge-ide-exec.mjs
