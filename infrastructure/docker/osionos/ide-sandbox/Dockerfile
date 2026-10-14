@@ -29,7 +29,7 @@ FROM debian:bookworm-slim
 #   clangd → the C/C++ language server (P5).  Go + its LSP land below (tarball).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       bash ca-certificates curl git python3 python3-pip python3-venv \
-      procps iproute2 ripgrep nodejs npm tini \
+      procps iproute2 ripgrep nodejs npm \
       gcc g++ clang clangd make rustc cargo default-jdk-headless \
     && rm -rf /var/lib/apt/lists/*
 
@@ -130,6 +130,12 @@ RUN chmod 755 /usr/local/bin/debugpy-adapter
 RUN git config --system credential.helper \
       '!f() { test -n "$GIT_PAT" && printf "username=x-access-token\npassword=%s\n" "$GIT_PAT"; }; f' \
     && git config --system credential.useHttpPath true
+
+# tini (PID 1, see ENTRYPOINT) gets its own layer, the last one that can still reach apt (above
+# the proxy ENV): in the first apt layer it would re-resolve every unpinned package and rebuild
+# every layer after it.
+RUN apt-get update && apt-get install -y --no-install-recommends tini \
+    && rm -rf /var/lib/apt/lists/*
 
 # All egress flows through the in-daemon CONNECT proxy — the sandbox net is
 # `internal` so there is no other route. npm/pip/cargo/go honor these.
