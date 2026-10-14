@@ -254,10 +254,10 @@ sx 'i=0; while [ $i -lt 50 ]; do (sleep 0.1 &); i=$((i+1)); done; sleep 1' >/dev
 if [ "$(sx "ps -eo stat= | grep -c '^Z'")" = "0" ]; then ok "PID 1 reaps orphaned processes"; else bad "PID 1 reaps orphaned processes"; fi
 
 echo "== Memory caps =="
-# Box cgroup: 1 GiB with swap equal; slice: 3 GiB; box scope inside slice.
+# Box cgroup: 1 GiB with swap equal; slice: 6 GiB (six boxes, osionos-ide.slice); box scope inside slice.
 if [ "$(sx 'cat /sys/fs/cgroup/memory.max')" = "1073741824" ]; then ok "box memory.max is 1 GiB"; else bad "box memory.max is 1 GiB"; fi
 SLICE_CG=$(systemctl show -p ControlGroup --value osionos-ide.slice)
-if [ -n "$SLICE_CG" ] && [ "$(cat /sys/fs/cgroup/"$SLICE_CG"/memory.max 2>/dev/null)" = "3221225472" ]; then ok "slice memory.max is 3 GiB"; else bad "slice memory.max is 3 GiB"; fi
+if [ -n "$SLICE_CG" ] && [ "$(cat /sys/fs/cgroup/"$SLICE_CG"/memory.max 2>/dev/null)" = "6442450944" ]; then ok "slice memory.max is 6 GiB"; else bad "slice memory.max is 6 GiB"; fi
 BOX_ID=$($IDE inspect -f '{{.Id}}' "$BOX_A" 2>/dev/null)
 if [ -n "$BOX_ID" ] && [ -n "$SLICE_CG" ] && [ -n "$(find /sys/fs/cgroup/"$SLICE_CG" -maxdepth 2 -name "docker-$BOX_ID.scope" 2>/dev/null | head -1)" ]; then ok "box scope inside slice"; else bad "box scope inside slice"; fi
 
