@@ -250,7 +250,7 @@ if [ "$(sx 'id -u')" = "10001" ]; then ok "box runs as uid 10001 (spec user)"; e
 echo "== Init =="
 # 50 orphans reparented to PID 1, then a second for it to reap them. With `sleep infinity` as
 # PID 1 they stayed zombies, and hellish's build filled pids.max with 469 (2026-10-14).
-sx 'i=0; while [ $i -lt 50 ]; do (sleep 0.1 &); i=$((i+1)); done; sleep 1' >/dev/null 2>&1
+sx "i=0; while [ \$i -lt 50 ]; do (sleep 0.1 &); i=\$((i+1)); done; sleep 1" >/dev/null 2>&1
 if [ "$(sx "ps -eo stat= | grep -c '^Z'")" = "0" ]; then ok "PID 1 reaps orphaned processes"; else bad "PID 1 reaps orphaned processes"; fi
 
 echo "== Memory caps =="
