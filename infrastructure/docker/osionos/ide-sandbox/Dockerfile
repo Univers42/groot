@@ -44,12 +44,13 @@ RUN npm install -g --no-audit --no-fund \
     && npm cache clean --force
 
 # 42 school work: valgrind and gdb for leak and crash hunts, readline's headers for
-# minishell, norminette for the norm. A libft built in this sandbox on 2026-10-14
-# found none of them. norminette lives in its own venv: bookworm's pip refuses a
+# minishell, norminette for the norm, strace for gnlTester's `make m` (exit 127 without
+# it; tracing its own child needs no capability under the default seccomp profile).
+# A libft built in this sandbox on 2026-10-14 found none of them. norminette lives in its own venv: bookworm's pip refuses a
 # system-wide install (PEP 668). norminette 3.3.60 (built 2026-08-29) has no
 # dependencies, so one hash pins the whole install.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      valgrind gdb libreadline-dev \
+      valgrind gdb libreadline-dev strace \
     && rm -rf /var/lib/apt/lists/* \
     && python3 -m venv /opt/norminette \
     && echo "norminette==3.3.60 --hash=sha256:c963ff9ff11180351f19b2f7e26a734bba8ee601a4a0c5e8f8f4a807770cf285" > /tmp/norminette.req \
@@ -80,7 +81,7 @@ RUN curl -fsSL "https://github.com/adoptium/temurin21-binaries/releases/download
       -o /tmp/jre21.tar.gz \
     && echo "2413149700df0f7d440500a84a8f764c535f21e5a5e87d38328b64eec2c5b500  /tmp/jre21.tar.gz" | sha256sum -c - \
     && mkdir -p /opt/jre21 \
-    && tar -xzf /tmp/jre21.tar.gz -C /opt/jre21 --strip-components=1 \
+    && tar --no-same-owner -xzf /tmp/jre21.tar.gz -C /opt/jre21 --strip-components=1 \
     && rm /tmp/jre21.tar.gz
 
 # Eclipse JDT LS 1.61.0 (built 2026-09-03; 1.62.0 is too new under the 14-day
@@ -89,7 +90,7 @@ RUN curl -fsSL "https://download.eclipse.org/jdtls/milestones/1.61.0/jdt-languag
       -o /tmp/jdtls.tar.gz \
     && echo "338e7e73d61836651ba2453919a0d34fa763eb4e7c03342092309bffb8934c64  /tmp/jdtls.tar.gz" | sha256sum -c - \
     && mkdir -p /opt/jdtls \
-    && tar -xzf /tmp/jdtls.tar.gz -C /opt/jdtls \
+    && tar --no-same-owner -xzf /tmp/jdtls.tar.gz -C /opt/jdtls \
     && rm /tmp/jdtls.tar.gz
 # The launcher jar name carries a build qualifier; resolve it to a fixed path so
 # jdtls-launch never globs at runtime. Zero or several matches fail the build.
@@ -159,6 +160,13 @@ RUN node /usr/local/lib/osio-fs-agent.mjs --selfcheck
 # /api/ide/lsp?lang=java. Must be on PATH for the relay.
 COPY jdtls-launch.sh /usr/local/bin/jdtls-launch
 RUN chmod 755 /usr/local/bin/jdtls-launch
+
+# docker-ide runs userns-remap with a 65536-id range: one file owned outside it makes
+# `docker load` fail on the VM (jdtls's tarball once shipped uid 1001380000).
+RUN if find / -xdev \( -uid +65535 -o -gid +65535 \) -print -quit | grep -q .; then \
+      echo "files owned outside the userns-remap range:" >&2; \
+      find / -xdev \( -uid +65535 -o -gid +65535 \) | head -5 >&2; exit 1; \
+    fi
 
 WORKDIR /workspace
 USER coder
