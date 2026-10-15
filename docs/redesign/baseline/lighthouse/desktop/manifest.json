@@ -1,0 +1,122 @@
+[
+  {
+    "url": "https://localhost:4322/",
+    "isRepresentativeRun": true,
+    "htmlPath": null,
+    "jsonPath": "localhost--2026_10_15_19_14_30.report.json.gz",
+    "summary": {
+      "performance": 1,
+      "accessibility": 1,
+      "best-practices": 1,
+      "seo": 1
+    }
+  },
+  {
+    "url": "https://localhost:4322/legal/privacy-policy",
+    "isRepresentativeRun": true,
+    "htmlPath": null,
+    "jsonPath": "localhost-legal_privacy_policy-2026_10_15_19_15_03.report.json.gz",
+    "summary": {
+      "performance": 1,
+      "accessibility": 0.93,
+      "best-practices": 1,
+      "seo": 1
+    }
+  },
+  {
+    "url": "https://localhost:4322/legal/terms",
+    "isRepresentativeRun": true,
+    "htmlPath": null,
+    "jsonPath": "localhost-legal_terms-2026_10_15_19_15_25.report.json.gz",
+    "summary": {
+      "performance": 1,
+      "accessibility": 1,
+      "best-practices": 1,
+      "seo": 1
+    }
+  },
+  {
+    "url": "https://localhost:4322/legal/cookies",
+    "isRepresentativeRun": true,
+    "htmlPath": null,
+    "jsonPath": "localhost-legal_cookies-2026_10_15_19_15_56.report.json.gz",
+    "summary": {
+      "performance": 1,
+      "accessibility": 1,
+      "best-practices": 1,
+      "seo": 1
+    }
+  },
+  {
+    "url": "https://localhost:4322/legal/data-rights",
+    "isRepresentativeRun": true,
+    "htmlPath": null,
+    "jsonPath": "localhost-legal_data_rights-2026_10_15_19_16_28.report.json.gz",
+    "summary": {
+      "performance": 1,
+      "accessibility": 0.95,
+      "best-practices": 1,
+      "seo": 1
+    }
+  },
+  {
+    "url": "https://localhost:4322/auth/confirm",
+    "isRepresentativeRun": true,
+    "htmlPath": null,
+    "jsonPath": "localhost-auth_confirm-2026_10_15_19_16_59.report.json.gz",
+    "summary": {
+      "performance": 1,
+      "accessibility": 1,
+      "best-practices": 1,
+      "seo": 0.66
+    }
+  },
+  {
+    "url": "https://localhost:4322/auth/reset-password",
+    "isRepresentativeRun": true,
+    "htmlPath": null,
+    "jsonPath": "localhost-auth_reset_password-2026_10_15_19_17_41.report.json.gz",
+    "summary": {
+      "performance": 1,
+      "accessibility": 1,
+      "best-practices": 1,
+      "seo": 0.66
+    }
+  },
+  {
+    "url": "https://localhost:4322/newsletter/confirm",
+    "isRepresentativeRun": true,
+    "htmlPath": null,
+    "jsonPath": "localhost-newsletter_confirm-2026_10_15_19_18_13.report.json.gz",
+    "summary": {
+      "performance": 1,
+      "accessibility": 1,
+      "best-practices": 1,
+      "seo": 0.66
+    }
+  },
+  {
+    "url": "https://localhost:4322/newsletter/unsubscribe",
+    "isRepresentativeRun": true,
+    "htmlPath": null,
+    "jsonPath": "localhost-newsletter_unsubscribe-2026_10_15_19_18_44.report.json.gz",
+    "summary": {
+      "performance": 1,
+      "accessibility": 1,
+      "best-practices": 1,
+      "seo": 0.66
+    }
+  },
+  {
+    "url": "https://localhost:4322/docs/",
+    "isRepresentativeRun": true,
+    "htmlPath": null,
+    "jsonPath": "localhost-docs_-2026_10_15_19_19_19.report.json.gz",
+    "summary": {
+      "performance": 0.8,
+      "accessibility": 0.95,
+      "best-practices": 1,
+      "seo": 0.92
+    }
+  }
+]
