@@ -1,0 +1,41 @@
+{
+  "route": "/legal/data-rights",
+  "widths": {
+    "390": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/phase6/screenshots/legal-data-rights-390.jpg",
+      "reducedScreenshot": "test-results/site-audit/phase6/screenshots/legal-data-rights-390-reduced.jpg",
+      "darkScreenshot": "test-results/site-audit/phase6/screenshots/legal-data-rights-390-dark.jpg",
+      "truncated": false,
+      "pageHeight": 2198,
+      "overflowPx": 0,
+      "consoleErrors": [],
+      "axe": [],
+      "axeDark": []
+    },
+    "768": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/phase6/screenshots/legal-data-rights-768.jpg",
+      "reducedScreenshot": "test-results/site-audit/phase6/screenshots/legal-data-rights-768-reduced.jpg",
+      "darkScreenshot": "test-results/site-audit/phase6/screenshots/legal-data-rights-768-dark.jpg",
+      "truncated": false,
+      "pageHeight": 1758,
+      "overflowPx": 0,
+      "consoleErrors": [],
+      "axe": [],
+      "axeDark": []
+    },
+    "1440": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/phase6/screenshots/legal-data-rights-1440.jpg",
+      "reducedScreenshot": "test-results/site-audit/phase6/screenshots/legal-data-rights-1440-reduced.jpg",
+      "darkScreenshot": "test-results/site-audit/phase6/screenshots/legal-data-rights-1440-dark.jpg",
+      "truncated": false,
+      "pageHeight": 1538,
+      "overflowPx": 0,
+      "consoleErrors": [],
+      "axe": [],
+      "axeDark": []
+    }
+  }
+}
