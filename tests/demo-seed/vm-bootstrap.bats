@@ -232,6 +232,19 @@ real_bundle() {
   rm -rf "scripts/demo/out/bats-$uid8" "$manifest"
 }
 
+@test "the deploy-mountlist guard sees the script, not its own code on a command line" {
+  . scripts/demo/vm/lib.sh
+  run bash -c "$(declare -f deploy_mountlist_running); deploy_mountlist_running && echo seen || echo clear"
+  [ "$output" = clear ]
+  local planted
+  bash -c 'sleep 30; :' deploy-mountlist-baas.sh &
+  planted=$!
+  sleep 1
+  run bash -c '. scripts/demo/vm/lib.sh; deploy_mountlist_running && echo seen || echo clear'
+  kill "$planted"
+  [ "$output" = seen ]
+}
+
 @test "the bootstrap deletes nothing and alters only a demo login's password" {
   run ! grep -nE '\b(DELETE|DROP|TRUNCATE)\b' scripts/demo/vm/vm-bootstrap.sh scripts/demo/vm/lib.sh scripts/demo/vm/mongo-user.js scripts/demo/vm/mongo-load.js
   run grep -nE '\b(UPDATE|ALTER|updateUser)\b' scripts/demo/vm/vm-bootstrap.sh scripts/demo/vm/mongo-user.js
