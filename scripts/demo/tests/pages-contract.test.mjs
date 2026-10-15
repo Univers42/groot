@@ -47,3 +47,13 @@ test('a link the loader cannot parse is caught', () => {
   page.content.push({ id: 'bbad', type: 'paragraph', content: 'see [[seed:Bad:Key]]', children: [] });
   assert.deepEqual(leftovers(page, allIds(pages)).left, ['[[seed:Bad:Key]]']);
 });
+
+test('no page shows the seed\'s bookkeeping: no seed_key property, no raw UUID in a property', () => {
+  const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
+  for (const p of fixture().dataset.pages) {
+    for (const prop of p.properties) {
+      assert.notEqual(prop.key, 'seed_key', p.seed_key);
+      if (prop.type !== 'relation') assert.doesNotMatch(JSON.stringify(prop.value), uuid, `${p.seed_key}.${prop.key}`);
+    }
+  }
+});

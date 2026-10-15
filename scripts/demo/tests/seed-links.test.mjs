@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { creationOrder, hasSeedReference, resolvePage, resolveText, seedKeyOf } from '../seed-links.mjs';
+import { creationOrder, hasSeedReference, pageKeyOf, reshapedProperties, resolvePage, resolveText, seedKeyOf } from '../seed-links.mjs';
 
 const ID = '0f1e2d3c-4b5a-4968-8776-655443322110';
 
@@ -37,4 +37,23 @@ test('parents are created before their children, whatever the input order', () =
 test('a missing parent or a cycle is refused', () => {
 	assert.throws(() => creationOrder([{ seed_key: 'a', parent_seed_key: 'ghost' }]), /ghost is not in the set/);
 	assert.throws(() => creationOrder([{ seed_key: 'a', parent_seed_key: 'b' }, { seed_key: 'b', parent_seed_key: 'a' }]), /cycle/);
+});
+
+test('a stored page is known by its manifest id, a legacy seed_key, or its title under its parent', () => {
+	const generated = [{ seed_key: 'log', title: 'Decision log' }, { seed_key: 'switch', title: 'Supplier switch', parent_seed_key: 'log' }];
+	assert.equal(pageKeyOf({ _id: ID }, { log: ID }, generated), 'log');
+	assert.equal(pageKeyOf({ _id: 'x', properties: [{ key: 'seed_key', value: 'switch' }] }, {}, generated), 'switch');
+	assert.equal(pageKeyOf({ _id: 'x', title: 'Supplier switch', parentPageId: ID }, { log: ID }, generated), 'switch');
+	assert.equal(pageKeyOf({ _id: 'x', title: 'Supplier switch', parentPageId: 'elsewhere' }, { log: ID }, generated), undefined);
+	assert.equal(pageKeyOf({ _id: 'x', title: 'Someone else\'s page' }, {}, generated), undefined);
+});
+
+test('the old on-screen bookkeeping is dropped only from a page still as the seed wrote it', () => {
+	const expected = [{ key: 'status', label: 'Status', type: 'select', value: 'Adopted', options: ['Adopted'] }];
+	const legacy = [{ key: 'seed_key', label: 'Seed key', type: 'text', value: 'switch' }, { type: 'select', key: 'status', label: 'Status', value: 'Adopted', options: ['Adopted'] }, { key: 'library_ids', label: 'Library refs', type: 'text', value: ID }];
+	assert.deepEqual(reshapedProperties({ properties: legacy }, expected), expected);
+	const edited = structuredClone(legacy);
+	edited[1].value = 'Trial';
+	assert.equal(reshapedProperties({ properties: edited }, expected), null);
+	assert.equal(reshapedProperties({ properties: expected }, expected), null);
 });
