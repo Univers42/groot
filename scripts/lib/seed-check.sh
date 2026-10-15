@@ -6,6 +6,7 @@
 #                              NAME.corrupt so nothing installs it), missing (LISTED, a file of
 #                              names relative to DIR, holds NAME but DIR does not) or private
 #                              (not in LISTED: sealed to its pusher, it never reaches a teammate).
+#   seed_names SUMS            every name a SHA256SUMS file lists.
 #   seeds_unverified DIR SUMS NAME…  "NAME: why" for each NAME that SUMS does not list, DIR does
 #                              not hold, or whose bytes differ. Reads only: renames and chmods nothing.
 #   seed_problems DIR LISTED   the seed_report table as a verdict (below).
@@ -48,6 +49,8 @@ seed_report() {
 		printf '%s %s %s %s\n' "$status" "$mode" "${size:--}" "$name"
 	done <"$dir/SHA256SUMS"
 }
+
+seed_names() { awk '{ n = $2; sub(/^\*/, "", n) } n != "" { print n }' "$1"; }
 
 seeds_unverified() {
 	local dir="$1" sums="$2" name want

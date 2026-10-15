@@ -98,7 +98,7 @@ syncro-submodule:
 
 .PHONY: submodules-pinned vault42-team-push vault42-team-pull
 vault42-team-push:
-## vault42 TEAM: publish this whole checkout to the shared environment $(VAULT42_ORG)/$(VAULT42_PROJECT)/$(VAULT42_ENV) — sealed to the ENV key, so every member granted the project can open it (the personal `vault42-push-all` seals to you alone and is readable by nobody else). Run it from a complete checkout with ./secrets holding fresh dumps. NOTE: agents are blocked from sending secrets off-box — run this yourself.
+## vault42 TEAM: publish this whole checkout to the shared environment $(VAULT42_ORG)/$(VAULT42_PROJECT)/$(VAULT42_ENV) — sealed to the ENV key, so every member granted the project can open it (the personal `vault42-push-all` seals to you alone and is readable by nobody else). Run it from a complete checkout with ./secrets holding fresh dumps; scripts/vault42-push-guard.sh refuses one that is not, before any prompt. NOTE: agents are blocked from sending secrets off-box — run this yourself.
 	@sh scripts/vault42-team.sh push
 
 vault42-team-pull:
@@ -109,10 +109,15 @@ vault42-team-pull:
 		$(if $(ONLY),--only '$(ONLY)',)
 
 vault42-push-all:
-## vault42: push the WHOLE monorepo *.env*/*.secrets tree (root + every submodule) to the SHARED environment ($(VAULT42_ORG)/$(VAULT42_PROJECT)/$(VAULT42_ENV)), sealed to the env key so every granted member can read it. Encrypted on this machine; passphrase read hidden. Blank VAULT42_ORG or VAULT42_ENV to fall back to the PERSONAL push (readable by nobody but you). NOTE: agents are blocked from sending secrets off-box — run this yourself.
-	@REPO_DIR="$(CURDIR)" CTL_IMAGE="$(CTL_IMAGE)" CTL_CFG_DIR="$(CTL_CFG_DIR)" VAULT_ENV_PROJECT="$(VAULT42_PROJECT)" \
-		VAULT_ENV_ORG="$(VAULT42_ORG)" VAULT_ENV_NAME="$(VAULT42_ENV)" \
-		sh apps/grobase/scripts/vault/ctl-env.sh push
+## vault42: push the WHOLE monorepo *.env*/*.secrets tree (root + every submodule) to the SHARED environment ($(VAULT42_ORG)/$(VAULT42_PROJECT)/$(VAULT42_ENV)), sealed to the env key so every granted member can read it. Encrypted on this machine; passphrase read hidden. Blank VAULT42_ORG or VAULT42_ENV to fall back to the PERSONAL push (readable by nobody but you). The SHARED push is the team push (scripts/vault42-team.sh), so it keeps *.bak and .env.grobase-remote sealed to you. scripts/vault42-push-guard.sh refuses first a checkout whose dumps fail ./secrets/SHA256SUMS or that holds a pulled copy under ./secrets or ./.vault42. NOTE: agents are blocked from sending secrets off-box — run this yourself.
+	@if [ -n '$(VAULT42_ORG)' ] && [ -n '$(VAULT42_ENV)' ]; then \
+		VAULT42_ORG='$(VAULT42_ORG)' VAULT42_PROJECT='$(VAULT42_PROJECT)' VAULT42_ENV='$(VAULT42_ENV)' \
+			CTL_IMAGE='$(CTL_IMAGE)' CTL_CFG_DIR='$(CTL_CFG_DIR)' sh scripts/vault42-team.sh push; \
+	else \
+		bash scripts/vault42-push-guard.sh && \
+		REPO_DIR="$(CURDIR)" CTL_IMAGE="$(CTL_IMAGE)" CTL_CFG_DIR="$(CTL_CFG_DIR)" VAULT_ENV_PROJECT="$(VAULT42_PROJECT)" \
+			VAULT_ENV_PERSONAL=1 sh apps/grobase/scripts/vault/ctl-env.sh push; \
+	fi
 
 vault42-pull-all:
 ## vault42: restore the WHOLE monorepo *.env* tree from the SHARED environment ($(VAULT42_ORG)/$(VAULT42_PROJECT)/$(VAULT42_ENV)) — DRY-RUN unless APPLY=1. Passphrase read hidden. FORCE=1 is accepted for muscle memory but has no meaning for a shared env (use BACKUP=1, which writes the displaced file aside). Blank VAULT42_ORG or VAULT42_ENV for the PERSONAL pull.
