@@ -4,13 +4,18 @@
 # socat are stubs on PATH: nothing here touches the host's units or network.
 #   bats tests/grobase-link-autostart
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   REPO=$(cd "$BATS_TEST_DIRNAME/../.." && pwd)
   STUBS=$BATS_TEST_TMPDIR/bin
   mkdir -p "$STUBS"
   for cmd in systemctl make loginctl; do
-    printf '#!/bin/sh\necho "%s $*" >>"%s/calls"\n[ "$1" != show-user ] || echo yes\n' \
-      "$cmd" "$BATS_TEST_TMPDIR" >"$STUBS/$cmd"
+    cat >"$STUBS/$cmd" <<STUB
+#!/bin/sh
+echo "$cmd \$*" >>"$BATS_TEST_TMPDIR/calls"
+[ "\$1" != show-user ] || echo yes
+STUB
   done
   printf '#!/bin/sh\necho "2: enp7s0    inet 192.168.1.132/24 brd 192.168.1.255 scope global"\n' >"$STUBS/ip"
   printf '#!/bin/sh\necho "socat $*"\n' >"$STUBS/socat"
@@ -24,7 +29,7 @@ setup() {
   [ "$status" -eq 0 ]
   for unit in grobase-link.service grobase-link-heal.service grobase-link-heal.timer grobase-lan-edge.service; do
     [ -f "$UNITS/$unit" ]
-    ! grep -q '@[A-Z_]*@' "$UNITS/$unit"
+    run ! grep -q '@[A-Z_]*@' "$UNITS/$unit"
   done
   grep -qx "WorkingDirectory=$REPO" "$UNITS/grobase-link.service"
   grep -qx "Environment=LAN_IF=enp7s0" "$UNITS/grobase-lan-edge.service"
@@ -36,7 +41,7 @@ setup() {
   [ "$status" -eq 0 ]
   [ -f "$UNITS/grobase-link.service" ]
   [ ! -e "$UNITS/grobase-lan-edge.service" ]
-  ! grep -q "lan-edge" "$BATS_TEST_TMPDIR/calls"
+  run ! grep -q "lan-edge" "$BATS_TEST_TMPDIR/calls"
 }
 
 @test "a differing installed unit is backed up before it is replaced" {
@@ -58,7 +63,7 @@ setup() {
   LAN_IF=enp7s0 LAN_SSH=1 VM_PORTS_FILE=/vm/ports.env run bash "$REPO/scripts/grobase-link-autostart.sh" install
   [ "$status" -eq 0 ]
   [ -f "$UNITS/grobase-lan-ssh.service" ]
-  ! grep -q '@[A-Z_]*@' "$UNITS/grobase-lan-ssh.service"
+  run ! grep -q '@[A-Z_]*@' "$UNITS/grobase-lan-ssh.service"
   grep -q 'grobase-lan-edge.sh ssh$' "$UNITS/grobase-lan-ssh.service"
   grep -q "systemctl --user enable grobase-lan-ssh.service" "$BATS_TEST_TMPDIR/calls"
   printf 'ssh=4243\nhttps=8445\n' >"$BATS_TEST_TMPDIR/ports.env"

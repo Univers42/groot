@@ -5,8 +5,10 @@
 # older small tree with an outdated mongo-rs-keyfile; epoch 2 cannot be opened with our key;
 # epoch 1 holds two backup generations of all 13 dumps.
 
-DUMPS="inception-wordpress.tar.gz minio.tar.gz mongo-rs-keyfile.tar.gz mongo.archive.gz mssql-all.tar.gz mysql-all.sql.gz postgres-all.sql.gz redis.rdb sqlite-data.tar.gz vite-gourmand-data.tar.gz"
-PRESENT="dynamodb-all.tar.gz grobase-certs.tar.gz inception-mariadb.tar.gz"
+DUMPS=(inception-wordpress.tar.gz minio.tar.gz mongo-rs-keyfile.tar.gz mongo.archive.gz mssql-all.tar.gz mysql-all.sql.gz postgres-all.sql.gz redis.rdb sqlite-data.tar.gz vite-gourmand-data.tar.gz)
+PRESENT=(dynamodb-all.tar.gz grobase-certs.tar.gz inception-mariadb.tar.gz)
+
+bats_require_minimum_version 1.5.0
 
 setup() {
 	T="$BATS_TEST_TMPDIR"
@@ -39,7 +41,7 @@ newest_is() { rm -rf "$STUB_DIR/e$1/rev-0" && cp -r "$STUB_DIR/e$1/rev-$2" "$STU
 
 sums_of() {
 	local name
-	for name in $DUMPS $PRESENT; do
+	for name in "${DUMPS[@]}" "${PRESENT[@]}"; do
 		printf '%s  %s\n' "$(printf 'gen-%s:%s' "$1" "$name" | sha256sum | cut -d' ' -f1)" "$name"
 	done
 }
@@ -47,16 +49,16 @@ sums_of() {
 today_is_gen() {
 	local name
 	sums_of "$1" >"$RECOVER_REPO/secrets/SHA256SUMS"
-	for name in $PRESENT; do printf 'gen-%s:%s' "$1" "$name" >"$RECOVER_REPO/secrets/$name"; done
+	for name in "${PRESENT[@]}"; do printf 'gen-%s:%s' "$1" "$name" >"$RECOVER_REPO/secrets/$name"; done
 }
 
 the_world() {
 	make_rev 3 1 0 mongo-rs-keyfile.tar.gz grobase-certs.tar.gz
-	make_rev 3 2 2 secrets/secrets $PRESENT
+	make_rev 3 2 2 secrets/secrets "${PRESENT[@]}"
 	newest_is 3 2
 	mkdir -p "$STUB_DIR/e2/rev-1" && : >"$STUB_DIR/e2/unreadable"
-	make_rev 1 1 1 $DUMPS $PRESENT
-	make_rev 1 2 2 $DUMPS $PRESENT
+	make_rev 1 1 1 "${DUMPS[@]}" "${PRESENT[@]}"
+	make_rev 1 2 2 "${DUMPS[@]}" "${PRESENT[@]}"
 	newest_is 1 2
 	today_is_gen 2
 }
@@ -95,8 +97,9 @@ probe_and_pull() {
 	the_world
 	probe_and_pull
 	[ "$status" -eq 0 ]
-	! grep -e stub-pass -e stub-value-of "$STUB_DIR/argv.log"
 	[[ "$output" != *stub-value-of* && "$output" != *stub-pass* ]]
+	[ -s "$STUB_DIR/argv.log" ]
+	run ! grep -e stub-pass -e stub-value-of "$STUB_DIR/argv.log"
 }
 
 @test "a dump no copy matches is quarantined, labelled, under an ignored secrets/ directory" {

@@ -6,8 +6,16 @@
 #                              NAME.corrupt so nothing installs it), missing (LISTED, a file of
 #                              names relative to DIR, holds NAME but DIR does not) or private
 #                              (not in LISTED: sealed to its pusher, it never reaches a teammate).
-#   seeds_uncovered DIR NAME…  print each NAME that SHA256SUMS does not list or DIR does not hold.
-#   seed_problems DIR LISTED [REQUIRED…]  both of the above as one verdict (below).
+#   seed_names SUMS            every name a SHA256SUMS file lists.
+#   seeds_unverified DIR SUMS NAME…  "NAME: why" for each NAME that SUMS does not list, DIR does
+#                              not hold, or whose bytes differ. Reads only: renames and chmods nothing.
+#   seed_problems DIR LISTED   the seed_report table as a verdict (below).
+#   engine_seeds REPO          the dumps restore-if-empty.sh needs; status 1 when it names none.
+
+# Caveat: ENGINE_SEEDS is read with the env-file parser (envfile.sh, which the caller sources);
+# should the line stop being a plain NAME="a b c" assignment it reads as absent, and every
+# caller then fails rather than require nothing.
+engine_seeds() { get_env "$1/scripts/restore-if-empty.sh" ENGINE_SEEDS; }
 
 seed_sha256() {
 	local out
@@ -42,30 +50,30 @@ seed_report() {
 	done <"$dir/SHA256SUMS"
 }
 
-seeds_uncovered() {
-	local dir="$1" name
-	shift
+seed_names() { awk '{ n = $2; sub(/^\*/, "", n) } n != "" { print n }' "$1"; }
+
+seeds_unverified() {
+	local dir="$1" sums="$2" name want
+	shift 2
 	for name in "$@"; do
-		if ! awk -v f="$name" '{ n = $2; sub(/^\*/, "", n) } n == f { hit = 1 } END { exit !hit }' "$dir/SHA256SUMS" ||
-			{ [ ! -f "$dir/$name" ] && [ ! -f "$dir/$name.corrupt" ]; }; then
-			printf '%s\n' "$name"
+		want="$(awk -v f="$name" '{ n = $2; sub(/^\*/, "", n) } n == f { print $1; exit }' "$sums")"
+		if [ -z "$want" ]; then
+			printf '%s: not in SHA256SUMS\n' "$name"
+		elif [ ! -f "$dir/$name" ]; then
+			printf '%s: absent\n' "$name"
+		elif [ "$(seed_sha256 "$dir/$name")" != "$want" ]; then
+			printf '%s: does not match SHA256SUMS\n' "$name"
 		fi
 	done
 }
 
-# seed_problems DIR LISTED [REQUIRED…]: the seed_report table on stderr, one line per problem on
-# stdout — a CORRUPT file, a REQUIRED name seeds_uncovered names, or no SHA256SUMS when any
-# file is required.
+# seed_problems DIR LISTED: the seed_report table on stderr, one line per CORRUPT file on stdout.
+# A DIR without SHA256SUMS has nothing to judge; whether one was owed is the caller's question.
 seed_problems() {
 	local dir="$1" listed="$2" status mode size name
-	shift 2
-	if [ ! -f "$dir/SHA256SUMS" ]; then
-		[ "$#" -eq 0 ] || printf "SHA256SUMS: absent, the required dumps cannot be verified\n"
-		return 0
-	fi
+	[ -f "$dir/SHA256SUMS" ] || return 0
 	while read -r status mode size name; do
 		printf "  %-8s %4s %6s  %s\n" "$status" "$mode" "$size" "$name" >&2
 		[ "$status" != CORRUPT ] || printf "%s: does not match SHA256SUMS, kept aside as .corrupt\n" "$name"
 	done < <(seed_report "$dir" "$listed")
-	seeds_uncovered "$dir" "$@" | sed "s/\$/: required, but not delivered or not in SHA256SUMS/"
 }
