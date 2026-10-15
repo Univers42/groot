@@ -6,6 +6,8 @@
 #
 # Run: docker run --rm -v "$PWD:/code" -w /code bats/bats:1.11.1 scripts/tests/demo-login.bats
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   ROOT="$BATS_TEST_TMPDIR/repo"
   mkdir -p "$ROOT/scripts/lib" "$BATS_TEST_TMPDIR/bin"
@@ -78,7 +80,7 @@ STUB
   [ "$status" -eq 0 ]
   [[ "$output" == *"password set from ./.env.local"* ]]
   [[ "$output" != *"pw-Sentinel"* ]]
-  ! grep -q 'pw-Sentinel' "$ARGV_LOG"
+  run ! grep -q 'pw-Sentinel' "$ARGV_LOG"
   grep -q -- '-e DEMO_LOGIN_PASSWORD -e DEMO_LOGIN_EMAIL' "$ARGV_LOG"
   grep -q '^\\getenv pw DEMO_LOGIN_PASSWORD$' "$STDIN_LOG"
   [ "$(grep -c 'pw-Sentinel' "$STDIN_LOG")" -eq 1 ]
@@ -125,7 +127,7 @@ STUB
   [ "$status" -eq 0 ]
   [[ "$output" == *"LOCAL mode"*"created with the password from ./.env.local"* ]]
   [[ "$output" != *"Sentinel"* ]]
-  ! grep -q 'Sentinel' "$ARGV_LOG"
+  run ! grep -q 'Sentinel' "$ARGV_LOG"
   grep -q 'http://127.0.0.1:8000/auth/v1/admin/users' "$ARGV_LOG"
   grep -q '^header = "apikey: anon-Sentinel"$' "$CURL_CFG_LOG"
   grep -q '^header = "Authorization: Bearer service-Sentinel"$' "$CURL_CFG_LOG"
