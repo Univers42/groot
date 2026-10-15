@@ -20,7 +20,10 @@ setup_file() {
   CONTAINER="groot-serve-site-$PORT"
   export PORT CONTAINER
   SITE="$(mktemp -d "$ROOT/tests/site-nginx/.tmp.XXXXXX")"
-  mkdir -p "$SITE/_astro" "$SITE/fonts" "$SITE/legal"
+  mkdir -p "$SITE/_astro" "$SITE/fonts" "$SITE/legal" "$SITE/auth/confirm" "$SITE/auth/reset-password"
+  echo '<p>confirm</p>' >"$SITE/auth/confirm/index.html"
+  echo '<p>reset</p>' >"$SITE/auth/reset-password/index.html"
+  mkdir -p "$SITE/auth/confirmed-elsewhere" && echo '<p>other</p>' >"$SITE/auth/confirmed-elsewhere/index.html"
   echo '<p>home</p>' >"$SITE/index.html"
   echo '<p>site-404-page</p>' >"$SITE/404.html"
   echo '<p>legal</p>' >"$SITE/legal/index.html"
@@ -89,6 +92,14 @@ has_security_headers() {
   out="$(fetch /)"
   grep -qi '^Permissions-Policy: ' <<<"$out"
   run ! grep -qi 'web-share' <<<"$out"
+}
+
+@test "the pages that receive a token in their fragment send no Referer; the others a strict one" {
+  for page in /auth/confirm/ /auth/reset-password/ /auth/confirm; do
+    grep -qi '^Referrer-Policy: no-referrer$' <<<"$(fetch "$page")" || { echo "no no-referrer on $page" >&2; return 1; }
+  done
+  grep -qi '^Referrer-Policy: strict-origin-when-cross-origin$' <<<"$(fetch /legal/)"
+  grep -qi '^Referrer-Policy: strict-origin-when-cross-origin$' <<<"$(fetch /auth/confirmed-elsewhere/)"
 }
 
 @test "the local TLS server passes the headers through and keeps gzip (HTTP/1.1 upstream)" {
