@@ -29,7 +29,7 @@ mapfile -t user_args < <(docker_run_user_args)
 # The sources, read-only over the image's /e2e (which keeps its own node_modules). A config here
 # is picked with `-c`, e.g. `run.sh -c site-audit.config.ts` (scripts/site-audit.sh).
 src_args=()
-for path in specs lib site-audit playwright.config.ts site-audit.config.ts tsconfig.json; do
+for path in specs lib site-audit playwright.config.ts site-audit.config.ts site.config.ts tsconfig.json; do
   src_args+=(-v "$here/$path:/e2e/$path:ro")
 done
 exec docker run --rm -e NPM_CONFIG_UPDATE_NOTIFIER=false --init --network host --ipc host \
