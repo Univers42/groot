@@ -93,6 +93,14 @@ tools() { bash "$ROOT/scripts/tools.sh" "$@"; }
   [[ "$output" == *DiG* ]]
 }
 
+@test "openssl writes a self-signed certificate for the local site server" {
+  run tools openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost \
+    -keyout "$WORK/key.pem" -out "$WORK/cert.pem"
+  [ "$status" -eq 0 ]
+  run tools openssl x509 -in "$WORK/cert.pem" -noout -subject
+  [[ "$output" == *CN*localhost* ]]
+}
+
 @test "Chromium renders a page headless" {
   run tools sh -c 'chromium-browser --headless=new --no-sandbox --disable-gpu --dump-dom "data:text/html,<p>ok-render</p>" 2>/dev/null'
   [ "$status" -eq 0 ]
