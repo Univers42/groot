@@ -23,9 +23,11 @@ FROM ${ALPINE_IMAGE}
 # ffmpeg, vips (+heif for AVIF), imagemagick: video and image conversion. Fonts so a headless
 # capture renders text instead of tofu. bind-tools: dig, for the SPF/DKIM/DMARC check of the
 # sending domain (docs/redesign/PLAN.md §7.4). fonttools + brotli: pyftsubset, for the site's web
-# font subsets (scripts/media/subset-fonts.sh).
+# font subsets (scripts/media/subset-fonts.sh). openssl: the throwaway TLS certificate of
+# scripts/serve-site.sh.
 RUN apk add --no-cache bash ca-certificates nss-tools chromium ffmpeg vips-tools vips-heif \
-      imagemagick nodejs npm font-noto font-noto-emoji ttf-dejavu bind-tools py3-fonttools py3-brotli
+      imagemagick nodejs npm font-noto font-noto-emoji ttf-dejavu bind-tools py3-fonttools py3-brotli \
+      openssl
 ARG SVGO_VERSION=4.1.0
 ARG LHCI_VERSION=0.15.1
 ARG CHROME_DEVTOOLS_MCP_VERSION=1.10.1
