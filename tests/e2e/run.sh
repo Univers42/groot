@@ -26,12 +26,16 @@ fi
 env_args=()
 while IFS= read -r name; do env_args+=(-e "$name"); done < <(compgen -e | grep '^E2E_' || true)
 mapfile -t user_args < <(docker_run_user_args)
+# The sources, read-only over the image's /e2e (which keeps its own node_modules). A config here
+# is picked with `-c`, e.g. `run.sh -c site-audit.config.ts` (scripts/site-audit.sh).
+src_args=()
+for path in specs lib site-audit playwright.config.ts site-audit.config.ts tsconfig.json; do
+  src_args+=(-v "$here/$path:/e2e/$path:ro")
+done
 exec docker run --rm -e NPM_CONFIG_UPDATE_NOTIFIER=false --init --network host --ipc host \
   "${user_args[@]}" -e HOME=/tmp/e2e-home \
   "${env_args[@]}" \
   -v "$ca:/certs/local-ca.pem:ro" \
-  -v "$here/specs:/e2e/specs:ro" -v "$here/lib:/e2e/lib:ro" \
-  -v "$here/playwright.config.ts:/e2e/playwright.config.ts:ro" \
-  -v "$here/tsconfig.json:/e2e/tsconfig.json:ro" \
+  "${src_args[@]}" \
   -v "$here/test-results:/e2e/test-results" \
   "$image" sh -c 'npx tsc -p tsconfig.json && npx playwright test "$@"' sh "$@"
