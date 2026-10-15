@@ -77,6 +77,22 @@ tools() { bash "$ROOT/scripts/tools.sh" "$@"; }
   [[ "$output" == *@playwright/mcp@0.0.83* ]]
 }
 
+@test "pnpm is the version the site's packageManager pins" {
+  want="$(sed -n 's/^ARG PNPM_VERSION=//p' "$ROOT/infrastructure/docker/tools/Dockerfile")"
+  [ -n "$want" ]
+  run grep -c "\"packageManager\": \"pnpm@$want\"" "$ROOT/apps/opposite-osiris/package.json"
+  [ "$output" = "1" ]
+  run tools pnpm --version
+  [ "$status" -eq 0 ]
+  [ "$output" = "$want" ]
+}
+
+@test "dig is on PATH for the mail DNS checks" {
+  run tools dig -v
+  [ "$status" -eq 0 ]
+  [[ "$output" == *DiG* ]]
+}
+
 @test "Chromium renders a page headless" {
   run tools sh -c 'chromium-browser --headless=new --no-sandbox --disable-gpu --dump-dom "data:text/html,<p>ok-render</p>" 2>/dev/null'
   [ "$status" -eq 0 ]
