@@ -9,6 +9,8 @@
 
 SECRET_VALUES='SECRETPASS|PASSWORDVALUE|FAKEKEYVALUE|FAKES3SECRETVALUE|TEAMSALTVALUE|ENVFILEVALUE|HANDBOOKSECRET'
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   ROOT="$BATS_TEST_TMPDIR/repo"
   BIN="$BATS_TEST_TMPDIR/bin"
@@ -110,8 +112,7 @@ nothing_written() {
 }
 
 no_secret_leaked() {
-  ! grep -qE "$SECRET_VALUES" <<<"$output"
-  ! grep -qE "$SECRET_VALUES" "$CALLS"
+  [ -s "$CALLS" ] && ! grep -qE "$SECRET_VALUES" <<<"$output" && ! grep -qE "$SECRET_VALUES" "$CALLS"
 }
 
 @test "without --yes, a 'n' at the prompt writes nothing and exits 0" {
@@ -122,7 +123,7 @@ no_secret_leaked() {
   [[ "$output" == *"+ secrets/postgres-all.sql.gz"* ]]
   [[ "$output" == *"nothing written"* ]]
   nothing_written
-  ! grep -q -- '--apply' "$CALLS"
+  run ! grep -q -- '--apply' "$CALLS"
 }
 
 @test "a full run installs prod, sandboxes dev, the notes and the handbook, all owner-only" {
