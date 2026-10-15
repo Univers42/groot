@@ -96,7 +96,10 @@ has_security_headers() {
 
 @test "the pages that receive a token in their fragment send no Referer; the others a strict one" {
   for page in /auth/confirm/ /auth/reset-password/ /auth/confirm; do
-    grep -qi '^Referrer-Policy: no-referrer$' <<<"$(fetch "$page")" || { echo "no no-referrer on $page" >&2; return 1; }
+    grep -qi '^Referrer-Policy: no-referrer$' <<<"$(fetch "$page")" || {
+      echo "no no-referrer on $page" >&2
+      return 1
+    }
   done
   grep -qi '^Referrer-Policy: strict-origin-when-cross-origin$' <<<"$(fetch /legal/)"
   grep -qi '^Referrer-Policy: strict-origin-when-cross-origin$' <<<"$(fetch /auth/confirmed-elsewhere/)"

@@ -11,5 +11,5 @@ site="apps/opposite-osiris"
 
 cp "$REPO/$site/src/assets/brand/favicon.svg" "$REPO/$site/public/favicon.svg"
 "$REPO/scripts/tools.sh" magick -background none -density 384 "$site/public/favicon.svg" \
-	-define icon:auto-resize=48,32,16 "$site/public/favicon.ico" </dev/null
+  -define icon:auto-resize=48,32,16 "$site/public/favicon.ico" </dev/null
 printf 'favicon.ico\t%s bytes\n' "$(wc -c <"$REPO/$site/public/favicon.ico")"

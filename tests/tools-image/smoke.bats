@@ -58,7 +58,7 @@ tools() { bash "$ROOT/scripts/tools.sh" "$@"; }
 }
 
 @test "svgo optimises an SVG" {
-  printf '<svg xmlns="http://www.w3.org/2000/svg"><!-- c --><rect width="1" height="1"/></svg>' > "$WORK/a.svg"
+  printf '<svg xmlns="http://www.w3.org/2000/svg"><!-- c --><rect width="1" height="1"/></svg>' >"$WORK/a.svg"
   run tools svgo "$WORK/a.svg" -o "$WORK/b.svg"
   [ "$status" -eq 0 ]
   run grep -c 'c -->' "$WORK/b.svg"
