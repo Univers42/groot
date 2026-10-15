@@ -1,4 +1,4 @@
--- One line per osionos_% relation, one per osionos_% public function, then the realtime
+-- One line per osionos_% relation and public.auth_session_cutoffs, one per osionos_% public function, then the realtime
 -- broadcast state. Diffed against itself around a second runner pass (check g): any GRANT,
 -- policy, RLS flag, function ACL or realtime trigger that a replay moves must show up here
 -- as a changed line.
@@ -10,7 +10,7 @@ SELECT c.relname, c.relkind, c.relacl::text, c.relrowsecurity, c.relforcerowsecu
        coalesce((SELECT string_agg(p.polname || ':' || p.polcmd::text || ':' || p.polroles::text, ' ' ORDER BY p.polname)
                    FROM pg_policy p WHERE p.polrelid = c.oid), '')
   FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
- WHERE ns.nspname = 'public' AND c.relname LIKE 'osionos\_%' AND c.relkind IN ('r','p','v','m','f')
+ WHERE ns.nspname = 'public' AND (c.relname LIKE 'osionos\_%' OR c.relname = 'auth_session_cutoffs') AND c.relkind IN ('r','p','v','m','f')
  ORDER BY c.relname;
 
 SELECT p.proname || '(' || pg_get_function_arguments(p.oid) || ')', p.proacl::text
