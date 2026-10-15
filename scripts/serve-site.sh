@@ -30,23 +30,26 @@ state="tests/e2e/test-results/.serve-site-$port"
 stop() { docker rm -f "$name" >/dev/null 2>&1 || true; }
 
 start() {
-	dist="${SERVE_SITE_DIST:-$site/dist}"
-	[[ -f "$dist/index.html" ]] || { echo "no build at $dist: run astro build first" >&2; exit 2; }
-	dist="$(cd "$dist" && pwd)"
-	image="$(awk '/^FROM .*nginx.* AS runtime/ {print $2}' "$site/docker/services/web/Dockerfile")"
-	stop
-	rm -rf "$state" && mkdir -p "$state"
-	local certs cert key
-	certs="$(dirname "$(local_ca_file "$REPO" 2>/dev/null || echo /nonexistent/ca)")"
-	cert="$certs/localhost.pem" key="$certs/localhost-key.pem"
-	if [[ ! -r "$cert" || ! -r "$key" ]]; then
-		echo "[serve-site] no local-CA certificate under $certs: self-signed, untrusted by browsers" >&2
-		cert="$REPO/$state/cert.pem" key="$REPO/$state/key.pem"
-		scripts/tools.sh openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost \
-			-addext subjectAltName=DNS:localhost,IP:127.0.0.1 \
-			-keyout "$state/key.pem" -out "$state/cert.pem" </dev/null 2>/dev/null
-	fi
-	cat >"$state/tls.conf" <<'CONF'
+  dist="${SERVE_SITE_DIST:-$site/dist}"
+  [[ -f "$dist/index.html" ]] || {
+    echo "no build at $dist: run astro build first" >&2
+    exit 2
+  }
+  dist="$(cd "$dist" && pwd)"
+  image="$(awk '/^FROM .*nginx.* AS runtime/ {print $2}' "$site/docker/services/web/Dockerfile")"
+  stop
+  rm -rf "$state" && mkdir -p "$state"
+  local certs cert key
+  certs="$(dirname "$(local_ca_file "$REPO" 2>/dev/null || echo /nonexistent/ca)")"
+  cert="$certs/localhost.pem" key="$certs/localhost-key.pem"
+  if [[ ! -r "$cert" || ! -r "$key" ]]; then
+    echo "[serve-site] no local-CA certificate under $certs: self-signed, untrusted by browsers" >&2
+    cert="$REPO/$state/cert.pem" key="$REPO/$state/key.pem"
+    scripts/tools.sh openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost \
+      -addext subjectAltName=DNS:localhost,IP:127.0.0.1 \
+      -keyout "$state/key.pem" -out "$state/cert.pem" </dev/null 2>/dev/null
+  fi
+  cat >"$state/tls.conf" <<'CONF'
 server {
     listen 8443 ssl;
     ssl_certificate /tls/cert.pem;
@@ -58,23 +61,29 @@ server {
     }
 }
 CONF
-	chmod -R a+rX "$state"
-	docker run -d --rm --name "$name" -p "127.0.0.1:$port:8443" \
-		-e OO_AUTH_UPSTREAM=http://127.0.0.1:9 -e OO_BAAS_UPSTREAM=http://127.0.0.1:9 -e OO_RESOLVER=127.0.0.11 \
-		-e NGINX_ENVSUBST_FILTER='^OO_' -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx/conf.d \
-		-v "$REPO/$site/docker/services/web/default.conf.template:/etc/nginx/templates/default.conf.template:ro" \
-		-v "$REPO/$state/tls.conf:/etc/nginx/conf.d/tls.conf:ro" -v "$cert:/tls/cert.pem:ro" -v "$key:/tls/key.pem:ro" \
-		-v "$dist:/usr/share/nginx/html:ro" "$image" >/dev/null
-	for _ in $(seq 50); do
-		docker exec "$name" curl -sfk -o /dev/null https://127.0.0.1:8443/ && { echo "https://127.0.0.1:$port"; return 0; }
-		sleep 0.2
-	done
-	docker logs "$name" >&2
-	exit 1
+  chmod -R a+rX "$state"
+  docker run -d --rm --name "$name" -p "127.0.0.1:$port:8443" \
+    -e OO_AUTH_UPSTREAM=http://127.0.0.1:9 -e OO_BAAS_UPSTREAM=http://127.0.0.1:9 -e OO_RESOLVER=127.0.0.11 \
+    -e NGINX_ENVSUBST_FILTER='^OO_' -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx/conf.d \
+    -v "$REPO/$site/docker/services/web/default.conf.template:/etc/nginx/templates/default.conf.template:ro" \
+    -v "$REPO/$state/tls.conf:/etc/nginx/conf.d/tls.conf:ro" -v "$cert:/tls/cert.pem:ro" -v "$key:/tls/key.pem:ro" \
+    -v "$dist:/usr/share/nginx/html:ro" "$image" >/dev/null
+  for _ in $(seq 50); do
+    docker exec "$name" curl -sfk -o /dev/null https://127.0.0.1:8443/ && {
+      echo "https://127.0.0.1:$port"
+      return 0
+    }
+    sleep 0.2
+  done
+  docker logs "$name" >&2
+  exit 1
 }
 
 case "$action" in
 start) start ;;
 stop) stop ;;
-*) echo "unknown action: $action (start|stop)" >&2; exit 2 ;;
+*)
+  echo "unknown action: $action (start|stop)" >&2
+  exit 2
+  ;;
 esac

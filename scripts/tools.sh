@@ -25,25 +25,25 @@ tools_tag() { cat "$DEF/Dockerfile" "$ENTRY_DIR/docker-entrypoint.sh" | sha256su
 image="${TOOLS_IMAGE:-groot-tools:$(tools_tag)}"
 
 ensure_image() {
-	docker image inspect "$image" >/dev/null 2>&1 && return 0
-	echo "[tools] building $image (first use of this definition)…" >&2
-	docker build --progress=plain -t "$image" --build-context e2e="$ENTRY_DIR" "$DEF" >&2
+  docker image inspect "$image" >/dev/null 2>&1 && return 0
+  echo "[tools] building $image (first use of this definition)…" >&2
+  docker build --progress=plain -t "$image" --build-context e2e="$ENTRY_DIR" "$DEF" >&2
 }
 
 case "${1:-}" in
 --tag)
-	printf '%s\n' "$image"
-	exit 0
-	;;
+  printf '%s\n' "$image"
+  exit 0
+  ;;
 --build)
-	ensure_image
-	printf '%s\n' "$image"
-	exit 0
-	;;
+  ensure_image
+  printf '%s\n' "$image"
+  exit 0
+  ;;
 '')
-	sed -n '9,12p' "$0" >&2
-	exit 2
-	;;
+  sed -n '9,12p' "$0" >&2
+  exit 2
+  ;;
 esac
 
 ensure_image
@@ -57,4 +57,4 @@ if [[ -t 0 && -t 1 ]]; then tty_args=(-it); fi
 workdir="$REPO"
 case "$PWD/" in "$REPO"/*) workdir="$PWD" ;; esac
 exec docker run --rm --init --network host --ipc host "${tty_args[@]}" "${user_args[@]}" \
-	-e HOME=/tmp/tools-home "${env_args[@]}" "${ca_args[@]}" -v "$REPO:$REPO" -w "$workdir" "$image" "$@"
+  -e HOME=/tmp/tools-home "${env_args[@]}" "${ca_args[@]}" -v "$REPO:$REPO" -w "$workdir" "$image" "$@"

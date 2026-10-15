@@ -18,6 +18,6 @@ UNICODES='U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304
 
 face=instrument-serif
 "$REPO/scripts/tools.sh" pyftsubset "$fonts/$face.woff2" \
-	--unicodes="$UNICODES" --layout-features='kern,liga,calt,locl' --no-hinting \
-	--flavor=woff2 --output-file="$fonts/$face-latin.woff2" </dev/null
+  --unicodes="$UNICODES" --layout-features='kern,liga,calt,locl' --no-hinting \
+  --flavor=woff2 --output-file="$fonts/$face-latin.woff2" </dev/null
 printf '%s\t%s bytes\n' "$face-latin.woff2" "$(wc -c <"$fonts/$face-latin.woff2")"
