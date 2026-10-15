@@ -137,19 +137,16 @@ up_ssh() {
 }
 
 up_direct() {
-  local cafile
   url_reachable "$1" || die "$1 does not answer from a container of this daemon"
   cmd_down_ssh # only once the URL answers: a dead target must not cost the link that works
   if [ -n "$CA_FILE" ]; then
     [ -r "$CA_FILE" ] || die "GROBASE_CA_FILE=$CA_FILE is not a readable file"
     install -m 644 "$CA_FILE" "$LINK_DIR/ca.pem" # that is /link/ca.pem in the relay
-    cafile=/link/ca.pem
   else
     rm -f "$LINK_DIR/ca.pem" # a copy from an earlier target would keep a CA we dropped
-    cafile=/etc/ssl/certs/ca-certificates.crt
   fi
-  direct_routes "$1" "$cafile" >"$ROUTES"
-  note "direct link to $1: Kong over the URL, bridge publishes through its service_role-only route;"
+  direct_routes "$1" "$(relay_cafile)" >"$ROUTES"
+  note "direct link to $1: Kong over the URL; the bridge's publish route is chosen by \`env\`;"
   note "Redis and Mailpit are local stand-ins (sessions and captured mail stay on this machine)."
 }
 
@@ -241,7 +238,7 @@ cmd_env() {
   esac
   [ ! -f "$REPO/.env.local" ] || sync=--sync
   GRO_ENV="$src" bash "$REPO/scripts/gen-local-env.sh" ${sync:+"$sync"}
-  publish_env "$mode" "$REPO/.env.local" && { [ "$mode" = local ] || rt_token_ensure "$REPO/.env.local" "$src"; }
+  publish_env "$mode" "$REPO/.env.local" "$(state_get target)" && { [ "$mode" = local ] || rt_token_ensure "$REPO/.env.local" "$src"; }
 }
 
 # The settings as `up` will use them, so make and the user read one resolution, not the file.
