@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Stub 42ctl for vault42-recover-dumps.bats. Push revision N of key epoch E is the directory
+# $STUB_DIR/eE/rev-N (rev-0 is the epoch's newest tree); the current epoch is $STUB_CURRENT.
+# `env files` lists a tree as "size rev path" (rev: the file's cksum, so equal bytes share it);
+# `env pull --only P --apply` copies P out of it into the current directory. An epoch holding a
+# file named `unreadable` cannot be opened. Every argv is appended to $STUB_DIR/argv.log.
+#   STUB_IGNORE_AT / STUB_IGNORE_EPOCH  behave like a server that ignores the flag
+#   STUB_FAIL_EPOCH=E                   every pull from epoch E fails
+#   STUB_TOUCH_SUMS=1                   every pull also rewrites $RECOVER_REPO/secrets/SHA256SUMS
+set -u
+printf '%s\n' "$*" >>"$STUB_DIR/argv.log"
+
+at=0 epoch=0 only=""
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+	case "${args[i]}" in
+	--at) at="${args[i + 1]}" ;;
+	--epoch) epoch="${args[i + 1]}" ;;
+	--only) only="${args[i + 1]}" ;;
+	esac
+done
+current="${STUB_CURRENT:-1}"
+# Client-side, in the patched 42ctl: a server ignoring --epoch still gets this refusal.
+if [ "$epoch" -gt "$current" ]; then
+	echo "Error: environment 'prod' is at key epoch $current; there is no epoch $epoch" >&2
+	exit 1
+fi
+[ -z "${STUB_IGNORE_AT:-}" ] || at=0
+[ -z "${STUB_IGNORE_EPOCH:-}" ] || epoch=0
+[ "$epoch" -ne 0 ] || epoch="$current"
+tree="$STUB_DIR/e$epoch/rev-$at"
+
+open_tree() {
+	if [ -e "$STUB_DIR/e$epoch/unreadable" ]; then
+		echo "Error: could not open the scope key — are you a wrapped member?" >&2
+		exit 1
+	fi
+	[ -d "$tree" ] || {
+		echo "Error: environment 'prod' holds no tree at revision $at of key epoch $epoch" >&2
+		exit 1
+	}
+}
+
+case "$1 ${2:-}" in
+"version ") echo "42ctl 0.1.16 (stub)" ;;
+"auth me" | "auth whoami") ;;
+"auth status") echo "logged in · contract c-stub" ;;
+"env secret") echo "stub-value-of-$4" ;;
+"env files")
+	open_tree
+	(cd "$tree" && find . -type f | sed 's|^\./||' | sort | while IFS= read -r f; do
+		printf '%s %s %s\n' "$(stat -c %s "$f")" "$(cksum <"$f" | cut -d' ' -f1)" "$f"
+	done)
+	;;
+"env pull")
+	open_tree
+	[ -n "${FT_PASSPHRASE:-}" ] && [ -n "${FT_S3_KEY:-}" ] || { echo "stub: credentials missing" >&2 && exit 3; }
+	[ -z "$(ls -A .)" ] || { echo "stub: not empty" >&2 && exit 4; }
+	[ "${STUB_FAIL_EPOCH:-}" != "$epoch" ] || { echo "Error: chunk fetch failed (stub)" >&2 && exit 5; }
+	[ -z "${STUB_TOUCH_SUMS:-}" ] || printf 'changed\n' >>"$RECOVER_REPO/secrets/SHA256SUMS"
+	mkdir -p "$(dirname "$only")" && cp "$tree/$only" "$only"
+	;;
+*)
+	echo "stub: unexpected: $*" >&2
+	exit 9
+	;;
+esac
