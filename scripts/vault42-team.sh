@@ -61,7 +61,10 @@ for _a in "$@"; do
 	[ "$_a" = "--apply" ] && apply=1
 done
 
-[ "$verb" = push ] && note "publishing this checkout to $ORG/$PROJECT/$ENVNAME — every teammate's next pull gets this tree"
+if [ "$verb" = push ]; then
+	bash "$REPO/scripts/vault42-push-guard.sh" || exit 1
+	note "publishing this checkout to $ORG/$PROJECT/$ENVNAME — every teammate's next pull gets this tree"
+fi
 # A pull backup (`--backup` writes the displaced file aside as .bak) of a private file is
 # not itself `*.local`, so a push would publish it to every member — measured on the first
 # team push: .env.local.bak went out SHARED. Every .bak stays private, whatever it backs up.
