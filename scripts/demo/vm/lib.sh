@@ -65,10 +65,12 @@ pg_super() {
 
 # pg_as_demo — psql logged in as the demo role itself (condition 4). DEMO_PG_PASSWORD rides in
 # as an inherited env var; `-1` makes the whole input one transaction.
+# PGOPTIONS drops the NOTICEs a re-run's IF NOT EXISTS emits (33 per run), which buried the lines
+# that matter; warnings and errors still print.
 pg_as_demo() {
   local role="$1"
   shift
-  PGPASSWORD="$DEMO_PG_PASSWORD" docker exec -i -e PGPASSWORD "$PG_CONTAINER" \
+  PGPASSWORD="$DEMO_PG_PASSWORD" PGOPTIONS='-c client_min_messages=warning' docker exec -i -e PGPASSWORD -e PGOPTIONS "$PG_CONTAINER" \
     psql -X -q -At -1 -v ON_ERROR_STOP=1 -h 127.0.0.1 -U "$role" -d "$role" "$@"
 }
 

@@ -119,6 +119,7 @@ psql_root() { docker exec -i "$PG" psql -X -q -At -U postgres -d postgres; }
   counts="$(echo "select count(*) from auth.users; select count(*) from tenant_databases; select count(*) from osionos_workspaces; select count(*) from osionos_workspace_members;" | psql_root | paste -sd' ')"
   run bash scripts/demo/vm/vm-bootstrap.sh "$dir"
   [ "$status" -eq 0 ]
+  [[ "$output" != *NOTICE* ]]
   [ "$(echo "select count(*) from auth.users; select count(*) from tenant_databases; select count(*) from osionos_workspaces; select count(*) from osionos_workspace_members;" | psql_root | paste -sd' ')" = "$counts" ]
   [ "$(docker exec "$PG" psql -At "${dsn/@postgres:5432/@127.0.0.1:5432}" -c 'select name from companies')" = "Hôtel Varenne (edited)" ]
 }
