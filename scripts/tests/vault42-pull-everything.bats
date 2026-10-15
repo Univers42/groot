@@ -19,7 +19,7 @@ setup() {
   export FAKE_STATE="$BATS_TEST_TMPDIR/state"
   mkdir -p "$ROOT/scripts/lib" "$BIN" "$CFG/secret" "$FAKE_STATE"
   cp "$BATS_TEST_DIRNAME/../vault42-pull-everything.sh" "$ROOT/scripts/"
-  for lib in envfile git-ignored seed-check vault42-session; do
+  for lib in envfile git-ignored seed-check vault42-pull-verify vault42-session; do
     cp "$BATS_TEST_DIRNAME/../lib/$lib.sh" "$ROOT/scripts/lib/"
   done
   grep '^ENGINE_SEEDS=' "$BATS_TEST_DIRNAME/../restore-if-empty.sh" >"$ROOT/scripts/restore-if-empty.sh"
@@ -56,22 +56,51 @@ write_fake_42ctl() {
 printf '%s\n' "$*" >>"$FAKE_CALLS"
 E=""; prev=""; for a in "$@"; do [ "$prev" = --env ] && E="$a"; prev="$a"; done
 DUMPS="postgres-all.sql.gz mysql-all.sql.gz mongo.archive.gz minio.tar.gz redis.rdb"
+# FAKE_SHIFTED: the tree prod had on 2026-10-15 — the checkout pushed again under secrets/, its
+# SHA256SUMS at secrets/secrets/ listing every dump while holding one.
+SEEDS=secrets HELD="$DUMPS" ENVS_AT=""
+[ -z "${FAKE_SHIFTED:-}" ] || { SEEDS=secrets/secrets; HELD=redis.rdb; ENVS_AT=secrets/; }
 manifest() {
   [ "${FAKE_EMPTY:-}" != "$1" ] || return 0
   if [ "$1" = prod ]; then
-    printf '%s\n' .env apps/grobase/.env secrets/SHA256SUMS
-    for d in $DUMPS; do printf 'secrets/%s\n' "$d"; done
+    printf "$ENVS_AT%s\n" .env apps/grobase/.env
+    [ -n "${FAKE_NO_SUMS:-}" ] || printf '%s/SHA256SUMS\n' "$SEEDS"
+    [ -z "${FAKE_TIE:-}" ] || printf 'secrets/other/SHA256SUMS\n'
+    for d in $HELD; do printf '%s/%s\n' "$SEEDS" "$d"; done
   else printf '.env\n'; fi
 }
 apply() {
-  manifest "$E" | grep -v '^secrets/' | grep -vxF "${FAKE_DROP:-none}" | while read -r f; do
+  manifest "$E" | grep -v "^$SEEDS/" | grep -vxF "${FAKE_DROP:-none}" | while read -r f; do
     mkdir -p "$(dirname "$f")"; echo "KEY_$E=ENVFILEVALUE" >"$f"; done
   [ "$E" = prod ] || return 0
-  mkdir -p secrets; : >secrets/SHA256SUMS
-  for d in $DUMPS; do echo "dump $d ${FAKE_DUMP_VERSION:-1}" >"secrets/$d"; (cd secrets && sha256sum "$d") >>secrets/SHA256SUMS; done
-  printf '%064d  private.local\n' 0 >>secrets/SHA256SUMS
-  [ -z "${FAKE_CORRUPT:-}" ] || echo garbage >>"secrets/$FAKE_CORRUPT"
+  mkdir -p "$SEEDS"; : >"$WORK_SUMS"
+  for d in $DUMPS; do
+    printf 'dump %s %s\n' "$d" "${FAKE_DUMP_VERSION:-1}" >"$WORK_SUMS.body"
+    [ "${FAKE_UNLISTED:-}" = "$d" ] ||
+      printf '%s  %s\n' "$(sha256sum <"$WORK_SUMS.body" | cut -d' ' -f1)" "$d" >>"$WORK_SUMS"
+    [[ " $HELD " != *" $d "* ]] || cp "$WORK_SUMS.body" "$SEEDS/$d"
+  done
+  printf '%064d  private.local\n' 0 >>"$WORK_SUMS"
+  [ -n "${FAKE_NO_SUMS:-}" ] || cp "$WORK_SUMS" "$SEEDS/SHA256SUMS"
+  [ -z "${FAKE_TIE:-}" ] || { mkdir -p secrets/other; cp "$WORK_SUMS" secrets/other/SHA256SUMS; }
+  [ -z "${FAKE_CORRUPT:-}" ] || echo garbage >>"$SEEDS/$FAKE_CORRUPT"
 }
+# Where 42ctl v0.1.16 writes a pull (src/core/project.rs root_of): the nearest .42ctl/project.json
+# no higher than the first ancestor holding a .git, else the directory it runs in.
+root_of() {
+  local dir="$PWD" repo=""
+  while [ -z "$repo" ]; do
+    if [ -e "$dir/.git" ]; then repo="$dir"; elif [ "$dir" = / ]; then pwd; return; fi
+    dir="$(dirname "$dir")"
+  done
+  dir="$PWD"
+  while [ ! -f "$dir/.42ctl/project.json" ]; do
+    [ "$dir" != "$repo" ] || { pwd; return; }
+    dir="$(dirname "$dir")"
+  done
+  printf '%s\n' "$dir"
+}
+WORK_SUMS="$FAKE_STATE/sums"
 case "$1 $2" in
 "auth me") [ -f "$FAKE_STATE/session" ] ;;
 "auth status") echo "logged in — session and contract" ;;
@@ -90,7 +119,9 @@ case "$1 $2" in
 "env pull")
   [[ " $* " == *" --apply "* ]] || { manifest "$E" | sed 's/^/  + /'; exit 0; }
   [ "${FAKE_FAIL_PULL:-}" != "$E" ] || { echo "transfer interrupted" >&2; exit 1; }
-  apply ;;
+  root="$(root_of)"
+  printf '%s\n' "$root" >>"$FAKE_STATE/apply-cwd"
+  cd "$root" && apply ;;
 "note ls") printf '%s\n' ${FAKE_NOTES:-runbooks/restart.md} ;;
 "note get") echo "body of $3" ;;
 "vault ls" | "vault get") [ "$2" = ls ] && echo personal-thing || exit 1 ;;
@@ -160,6 +191,109 @@ no_secret_leaked() {
   [[ "$output" == *"CORRUPT"*"redis.rdb"* ]]
 }
 
+# What the seeds in ./secrets look like: name, mode, size, hash.
+seeds_state() {
+  (cd "$ROOT/secrets" && for d in postgres-all.sql.gz mysql-all.sql.gz mongo.archive.gz minio.tar.gz redis.rdb SHA256SUMS; do
+    printf '%s %s\n' "$(stat -c '%n %a %s' "$d")" "$(sha256sum <"$d")"; done)
+}
+
+@test "a tree shifted under secrets/: the dumps this checkout holds are proven, untouched, and the run says to republish" {
+  pull
+  [ "$status" -eq 0 ]
+  before="$(seeds_state)"
+  pull FAKE_SHIFTED=1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"keeps its dumps in secrets/secrets/, not secrets/"* ]]
+  [[ "$output" == *"postgres-all.sql.gz"*"match the tree's SHA256SUMS"* ]]
+  [[ "$output" != *"SHA256SUMS: absent"* ]]
+  [[ "$output" != *"arrived and checks"* ]]
+  [[ "$(tail -n 1 <<<"$output")" == *"only this checkout holds postgres-all.sql.gz"*"a teammate's pull of it fails"*"vault42-push-guard.sh"*"make vault42-team-push"* ]]
+  [ "$(seeds_state)" = "$before" ]
+  [ -f "$ROOT/secrets/secrets/redis.rdb" ]
+}
+
+@test "a shifted tree with no ./secrets/SHA256SUMS fails: the restore checks that one" {
+  pull
+  mv "$ROOT/secrets/SHA256SUMS" "$ROOT/secrets/SUMS.old"
+  pull FAKE_SHIFTED=1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"./secrets/SHA256SUMS, which the restore checks, is absent (the tree's is ./secrets/secrets/SHA256SUMS)"* ]]
+}
+
+@test "a shifted tree with a stale ./secrets/SHA256SUMS fails, naming the dump it misses" {
+  pull
+  grep -v ' redis.rdb$' "$ROOT/secrets/SHA256SUMS" >"$ROOT/secrets/SUMS.new"
+  mv "$ROOT/secrets/SUMS.new" "$ROOT/secrets/SHA256SUMS"
+  pull FAKE_SHIFTED=1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"by ./secrets/SHA256SUMS, which the restore checks, secrets/redis.rdb: not in SHA256SUMS"* ]]
+}
+
+@test "no ENGINE_SEEDS line fails the run: which dumps the restore needs is unknown" {
+  : >"$ROOT/scripts/restore-if-empty.sh"
+  pull FAKE_SHIFTED=1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"names no ENGINE_SEEDS"* ]]
+}
+
+@test "a .git and a .42ctl marker planted above the stage cannot redirect the pull" {
+  mkdir -p "$BATS_TEST_TMPDIR/.git" "$BATS_TEST_TMPDIR/.42ctl"
+  echo '{}' >"$BATS_TEST_TMPDIR/.42ctl/project.json"
+  pull
+  [ "$status" -eq 0 ]
+  [ -s "$FAKE_STATE/apply-cwd" ]
+  run ! grep -qvx "$BATS_TEST_TMPDIR/.groot-vault42-pull\.[^/]*/staging/[a-z]*" "$FAKE_STATE/apply-cwd"
+  [ ! -e "$BATS_TEST_TMPDIR/.env" ] && [ ! -e "$BATS_TEST_TMPDIR/secrets" ]
+  [ -f "$ROOT/secrets/redis.rdb" ]
+}
+
+@test "a dump the tree delivers CORRUPT fails the run even when this checkout's copy matches" {
+  pull
+  pull FAKE_SHIFTED=1 FAKE_CORRUPT=redis.rdb
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"prod: secrets/secrets/redis.rdb: does not match SHA256SUMS, kept aside"* ]]
+}
+
+@test "an ENGINE_SEEDS dump the tree's SHA256SUMS does not list fails the run" {
+  pull FAKE_UNLISTED=mongo.archive.gz
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"prod: secrets/mongo.archive.gz: not in SHA256SUMS"* ]]
+}
+
+@test "two SHA256SUMS at the same depth is refused: which one lists the dumps is unknown" {
+  pull
+  pull FAKE_SHIFTED=1 FAKE_TIE=1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"two SHA256SUMS at one depth"* ]]
+}
+
+@test "the pull runs outside the repository, so a .42ctl marker in the checkout cannot redirect it" {
+  pull
+  [ "$status" -eq 0 ]
+  [ -s "$FAKE_STATE/apply-cwd" ]
+  run ! grep -q "^$ROOT" "$FAKE_STATE/apply-cwd"
+}
+
+@test "a tree shifted under secrets/ on a fresh checkout fails, naming each dump and the recovery" {
+  pull FAKE_SHIFTED=1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"prod: secrets/postgres-all.sql.gz: absent — bring them back: make vault42-recover-dumps"* ]]
+  [[ "$output" == *"prod: secrets/redis.rdb: absent"* ]]
+}
+
+@test "a checkout dump that differs from the tree's SHA256SUMS fails the run" {
+  pull
+  pull FAKE_SHIFTED=1 FAKE_DUMP_VERSION=2
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"prod: secrets/mysql-all.sql.gz: does not match SHA256SUMS"* ]]
+}
+
+@test "a tree with no SHA256SUMS anywhere fails, naming the recovery and the republish" {
+  pull FAKE_NO_SUMS=1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"the tree carries no SHA256SUMS"*"make vault42-recover-dumps"*"make vault42-team-push"* ]]
+}
+
 @test "a file listed but not delivered fails the run" {
   pull FAKE_DROP=apps/grobase/.env
   [ "$status" -eq 1 ]
@@ -185,6 +319,8 @@ no_secret_leaked() {
   [ "$status" -eq 1 ]
   [ -f "$ROOT/secrets/redis.rdb" ]
   [[ "$output" == *"dev: the pull stopped part-way"* ]]
+  [[ "$output" == *"problem(s); what it delivered is in ./.vault42/env/dev"* ]]
+  [ -d "$ROOT/.vault42/env/dev" ]
 }
 
 @test "a note path climbing out of .vault42/notes is refused" {

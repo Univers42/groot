@@ -8,15 +8,19 @@
 #   the project's notes                    → .vault42/notes/<path>
 #   team/handbook.html                     → groot-vault42-handbook.team.html
 #
-# Each environment lands in an empty .vault42/staging/<env> and is verified there, so a file
-# already in the checkout can never pass for one the pull delivered. Only then is the main
+# Each environment lands in an empty staging directory beside the checkout, in a directory pinned
+# as its own git repository root so 42ctl cannot write elsewhere, and is verified there, so a file already in the checkout can never pass for one the
+# pull delivered (one with a problem is kept in .vault42/staging/<env>). Only then is the main
 # environment moved in: a file that differs is swapped and the old one kept as
 # <file>.bak-<stamp>; a dump failing SHA256SUMS is never moved. Everything runs under umask 077.
+# Last, every ENGINE_SEEDS dump in ./secrets is proven against the SHA256SUMS the pull delivered
+# and against ./secrets/SHA256SUMS, which the restore checks.
 #
 # `42ctl pull` (personal tree) answers "no manifest": the tree is in the shared environment.
 # Sign-in: scripts/lib/vault42-session.sh. The object-store key is never written to disk.
 # Loading the dumps INTO databases is a separate, destructive step (make vault-restore).
-# Exit: 0 all listed arrived and checks; 1 something missing, corrupt or refused; 2 usage.
+# Exit: 0 this checkout holds everything listed and it checks (the last line says when the tree
+# itself is damaged); 1 something missing, corrupt or refused; 2 usage.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -43,6 +47,8 @@ assume_yes=0
 . "$REPO/scripts/lib/git-ignored.sh"
 # shellcheck source=scripts/lib/seed-check.sh
 . "$REPO/scripts/lib/seed-check.sh"
+# shellcheck source=scripts/lib/vault42-pull-verify.sh
+. "$REPO/scripts/lib/vault42-pull-verify.sh"
 # shellcheck source=scripts/lib/vault42-session.sh
 . "$REPO/scripts/lib/vault42-session.sh"
 
@@ -129,33 +135,6 @@ preview_all() {
 	fi
 }
 
-# The check that cannot pass vacuously: the staging directory started empty.
-verify_listed() {
-	local env="$1" stage="$2" path
-	while IFS= read -r path; do
-		[ -e "$stage/$path" ] || fail "$env: listed but not delivered: $path"
-	done <"$WORK/$env.files"
-}
-
-verify_dumps() {
-	local env="$1" dir="$2/secrets" problem
-	local -a required=()
-	[ -d "$dir" ] || [ "$env" = "$MAIN_ENV" ] || return 0
-	[ "$env" != "$MAIN_ENV" ] || read -ra required <<<"$(engine_seeds)"
-	sed -n 's|^secrets/||p' "$WORK/$env.files" >"$WORK/$env.seeds"
-	note "$env: secrets/ against SHA256SUMS"
-	while IFS= read -r problem; do
-		fail "$env: secrets/$problem"
-	done < <(seed_problems "$dir" "$WORK/$env.seeds" "${required[@]}")
-}
-
-# Caveat: the list is read from restore-if-empty.sh's ENGINE_SEEDS line with the env-file parser;
-# should that line stop being a plain NAME="a b c" assignment, only SHA256SUMS is enforced (said).
-engine_seeds() {
-	get_env "$REPO/scripts/restore-if-empty.sh" ENGINE_SEEDS ||
-		note "! no ENGINE_SEEDS line in scripts/restore-if-empty.sh: only SHA256SUMS is enforced"
-}
-
 # Moved, not copied, so each dump exists once on disk; a timestamped backup is never overwritten
 # by a later run.
 install_main() {
@@ -187,23 +166,28 @@ install_env() {
 	note "✓ $env → $(rel "$SANDBOX/env/$env")"
 }
 
-# One environment failing does not stop the next; a staging directory with a problem is kept.
+# One environment failing does not stop the next; a stage with a problem is kept in
+# .vault42/staging/<env> (another environment's stage has by then become .vault42/env/<env>).
 pull_all() {
-	local env stage before
+	local env stage before kept
 	for env in "${ENVS[@]}"; do
-		stage="$SANDBOX/staging/$env"
-		rm -rf "$stage"
+		stage="$WORK/staging/$env"
+		kept="$SANDBOX/staging/$env"
+		rm -rf "$kept"
 		mkdir -p "$stage"
 		before="$failures"
 		(cd "$stage" && in_env "$env" pull --apply) || fail "$env: the pull stopped part-way"
 		verify_listed "$env" "$stage"
 		verify_dumps "$env" "$stage"
 		install_env "$env" "$stage"
-		if [ "$failures" -eq "$before" ]; then
-			rm -rf "$stage"
+		[ "$failures" -ne "$before" ] || continue
+		if [ -d "$stage" ]; then
+			mkdir -p "$SANDBOX/staging"
+			mv "$stage" "$kept"
 		else
-			note "✗ $env: $((failures - before)) problem(s); what did not install is in $(rel "$stage")"
+			kept="$SANDBOX/env/$env"
 		fi
+		note "✗ $env: $((failures - before)) problem(s); what it delivered is in $(rel "$kept")"
 	done
 	rmdir "$SANDBOX/staging" 2>/dev/null || true
 }
@@ -272,6 +256,10 @@ finish() {
 		note "✗ $failures problem(s) above — the restore is NOT complete; fix them and re-run"
 		exit 1
 	fi
+	if [ "$tree_damaged" -eq 1 ]; then
+		note "✓ this checkout has everything it needs and it checks — but the tree is damaged${tree_kept:+ (only this checkout holds $tree_kept)}, and a teammate's pull of it fails. $REPUBLISH"
+		return 0
+	fi
 	note "✓ everything listed for $ORG/$PROJECT arrived and checks. Loading the dumps into databases: make vault-restore (destructive)"
 }
 
@@ -281,8 +269,7 @@ main() {
 	case "${1:-}" in --yes) assume_yes=1 ;; '') ;; *) usage ;; esac
 	umask 077
 	command -v "$CTL" >/dev/null || die "$CTL is not on PATH — https://github.com/Univers42/42ctl/releases"
-	WORK="$(mktemp -d)"
-	trap 'rm -rf "$WORK"' EXIT
+	make_work
 	load_credentials
 	ensure_session
 	ensure_unlocked
@@ -291,6 +278,7 @@ main() {
 	guard_sandbox
 	preview_all
 	pull_all
+	verify_required
 	pull_notes
 	save_handbook
 	restore_env_local
