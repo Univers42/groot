@@ -9,6 +9,7 @@
 #   scripts/tools.sh <command> [args...]   e.g. scripts/tools.sh ffmpeg -version
 #   scripts/tools.sh --build               build the image if this definition has none; print its tag
 #   scripts/tools.sh --tag                 print the tag, build nothing
+#   TOOLS_PASS_ENV="A B" scripts/tools.sh … forward host variables A and B by name (never on argv)
 #
 # The tag is a hash of the files that define the image, so an edit to either rebuilds on the next
 # run and two checkouts of the same tree run the same image. Build output goes to stderr only:
@@ -40,7 +41,7 @@ case "${1:-}" in
 	exit 0
 	;;
 '')
-	sed -n '9,11p' "$0" >&2
+	sed -n '9,12p' "$0" >&2
 	exit 2
 	;;
 esac
@@ -49,9 +50,11 @@ ensure_image
 mapfile -t user_args < <(docker_run_user_args)
 ca_args=()
 if ca="$(local_ca_file "$REPO")"; then ca_args=(-v "$ca:/certs/local-ca.pem:ro"); fi
+env_args=()
+for name in ${TOOLS_PASS_ENV:-}; do env_args+=(-e "$name"); done
 tty_args=(-i)
 if [[ -t 0 && -t 1 ]]; then tty_args=(-it); fi
 workdir="$REPO"
 case "$PWD/" in "$REPO"/*) workdir="$PWD" ;; esac
 exec docker run --rm --init --network host --ipc host "${tty_args[@]}" "${user_args[@]}" \
-	-e HOME=/tmp/tools-home "${ca_args[@]}" -v "$REPO:$REPO" -w "$workdir" "$image" "$@"
+	-e HOME=/tmp/tools-home "${env_args[@]}" "${ca_args[@]}" -v "$REPO:$REPO" -w "$workdir" "$image" "$@"

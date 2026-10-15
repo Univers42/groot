@@ -32,6 +32,18 @@ RUN npm install -g --no-audit --no-fund --no-update-notifier \
       "svgo@${SVGO_VERSION}" "@lhci/cli@${LHCI_VERSION}" \
       "chrome-devtools-mcp@${CHROME_DEVTOOLS_MCP_VERSION}" "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" \
  && npm cache clean --force
+# The osionos MCP server (apps/osionos/app/scripts/osionos-mcp-server.mjs) imports only these two,
+# at the versions osionos's pnpm-lock.yaml resolves (tests/tools-image/smoke.bats fails on drift).
+# Node's ESM resolver walks up from the script to /node_modules, and tools.sh mounts the repo at
+# its host path, so installing them at / serves the script with no node_modules in the submodule.
+ARG OSIONOS_MCP_SDK_VERSION=1.29.0
+ARG OSIONOS_ZOD_VERSION=4.4.3
+# Installed beside / then moved: npm run with / as its prefix fails ("Tracker idealTree already
+# exists", npm 11, reproduced in this build).
+RUN mkdir /tmp/mcp-deps && cd /tmp/mcp-deps \
+ && npm install --no-audit --no-fund --no-save --no-package-lock \
+      "@modelcontextprotocol/sdk@${OSIONOS_MCP_SDK_VERSION}" "zod@${OSIONOS_ZOD_VERSION}" \
+ && mv node_modules /node_modules && cd / && rm -rf /tmp/mcp-deps && npm cache clean --force
 COPY --from=grobase-cli /out/grobase /usr/local/bin/grobase
 COPY --from=e2e docker-entrypoint.sh /usr/local/bin/ca-trust-entrypoint
 # The browser every tool drives is this image's Chromium; nothing downloads another one.

@@ -5,7 +5,7 @@
 # files that define the image. `docker` is a stub on PATH; nothing here needs a daemon.
 #
 # Run: docker run --rm -v "$PWD:/code" -w /code --entrypoint sh bats/bats:1.11.1 \
-#        -c 'apk add -q --no-cache coreutils && bats scripts/tests/docker-run.bats'
+#        -c 'apk add -q --no-cache coreutils git && bats scripts/tests/docker-run.bats'
 
 bats_require_minimum_version 1.5.0
 
@@ -51,6 +51,50 @@ stub_docker_security() {
   LOCAL_CA_FILE="$BATS_TEST_TMPDIR/elsewhere.pem" run local_ca_file "$BATS_TEST_TMPDIR/nothing-here"
   [ "$status" -eq 0 ]
   [ "$output" = "$BATS_TEST_TMPDIR/elsewhere.pem" ]
+}
+
+git_quiet() { git -c user.email=t@example.test -c user.name=t -c init.defaultBranch=main "$@" >/dev/null 2>&1; }
+
+@test "a linked worktree finds the main checkout's CA (the CA is generated, never committed)" {
+  main="$BATS_TEST_TMPDIR/main"
+  git_quiet init "$main"
+  git_quiet -C "$main" commit --allow-empty -m root
+  git_quiet -C "$main" worktree add "$BATS_TEST_TMPDIR/wt"
+  mkdir -p "$main/apps/grobase/certs"
+  touch "$main/apps/grobase/certs/track-binocle-local-ca.pem"
+  run local_ca_file "$BATS_TEST_TMPDIR/wt"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$main/apps/grobase/certs/track-binocle-local-ca.pem" ]
+}
+
+@test "a main checkout without a CA fails rather than finding itself" {
+  git_quiet init "$BATS_TEST_TMPDIR/bare-main"
+  run local_ca_file "$BATS_TEST_TMPDIR/bare-main"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+}
+
+@test "an unreadable LOCAL_CA_FILE fails; it never falls back silently" {
+  mkdir -p "$BATS_TEST_TMPDIR/r/apps/grobase/certs"
+  touch "$BATS_TEST_TMPDIR/r/apps/grobase/certs/track-binocle-local-ca.pem"
+  LOCAL_CA_FILE="$BATS_TEST_TMPDIR/absent.pem" run local_ca_file "$BATS_TEST_TMPDIR/r"
+  [ "$status" -eq 1 ]
+}
+
+@test "tools.sh forwards TOOLS_PASS_ENV by name; the value never reaches argv" {
+  t="$(fake_tools_tree)"
+  cat > "$STUB/docker" <<'EOF'
+#!/bin/sh
+[ "$1" = image ] && exit 0
+[ "$1" = info ] && exit 0
+printf '%s\n' "$@"
+EOF
+  chmod +x "$STUB/docker"
+  SOME_URL=https://secret.example.test TOOLS_PASS_ENV="SOME_URL" run bash "$t/scripts/tools.sh" true
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'-e\nSOME_URL'* ]]
+  run grep -c 'secret.example.test' <<<"$output"
+  [ "$output" = "0" ]
 }
 
 @test "local_ca_file fails, printing nothing, when no CA is readable" {
