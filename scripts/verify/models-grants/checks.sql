@@ -3,25 +3,28 @@
 -- only): the label is then the first field of a line and nothing else lands on stdout.
 \set ON_ERROR_STOP on
 
--- privileged: every osionos_% relation anon/authenticated can touch (column grants included)
+-- The service_role-only set: every osionos_% relation, plus public.auth_session_cutoffs
+-- (models/auth-session-cutoffs.sql), which carries no osionos_ prefix.
+
+-- privileged: every such relation anon/authenticated can touch (column grants included)
 SELECT 'privileged', count(*), coalesce(string_agg(c.relname, ' ' ORDER BY c.relname), '')
   FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
- WHERE ns.nspname = 'public' AND c.relname LIKE 'osionos\_%' AND c.relkind IN ('r','p','v','m','f')
+ WHERE ns.nspname = 'public' AND (c.relname LIKE 'osionos\_%' OR c.relname = 'auth_session_cutoffs') AND c.relkind IN ('r','p','v','m','f')
    AND (has_any_column_privilege('anon', c.oid, 'SELECT') OR has_any_column_privilege('anon', c.oid, 'INSERT')
      OR has_any_column_privilege('anon', c.oid, 'UPDATE') OR has_table_privilege('anon', c.oid, 'DELETE')
      OR has_any_column_privilege('authenticated', c.oid, 'SELECT') OR has_any_column_privilege('authenticated', c.oid, 'INSERT')
      OR has_any_column_privilege('authenticated', c.oid, 'UPDATE') OR has_table_privilege('authenticated', c.oid, 'DELETE'));
 
--- member_policies: policies on osionos_% for PUBLIC (oid 0), anon or authenticated
+-- member_policies: policies on the set for PUBLIC (oid 0), anon or authenticated
 SELECT 'member_policies', count(*), coalesce(string_agg(c.relname || ':' || p.polname, ' ' ORDER BY 1), '')
   FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid JOIN pg_namespace ns ON ns.oid = c.relnamespace
- WHERE ns.nspname = 'public' AND c.relname LIKE 'osionos\_%'
+ WHERE ns.nspname = 'public' AND (c.relname LIKE 'osionos\_%' OR c.relname = 'auth_session_cutoffs')
    AND (0::oid = ANY (p.polroles) OR p.polroles && ARRAY(SELECT oid FROM pg_roles WHERE rolname IN ('anon','authenticated')));
 
--- service_role_gaps: osionos tables service_role cannot fully CRUD
+-- service_role_gaps: tables in the set service_role cannot fully CRUD
 SELECT 'service_role_gaps', count(*), coalesce(string_agg(c.relname, ' ' ORDER BY c.relname), '')
   FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
- WHERE ns.nspname = 'public' AND c.relname LIKE 'osionos\_%' AND c.relkind IN ('r','p')
+ WHERE ns.nspname = 'public' AND (c.relname LIKE 'osionos\_%' OR c.relname = 'auth_session_cutoffs') AND c.relkind IN ('r','p')
    AND NOT (has_table_privilege('service_role', c.oid, 'SELECT') AND has_table_privilege('service_role', c.oid, 'INSERT')
         AND has_table_privilege('service_role', c.oid, 'UPDATE') AND has_table_privilege('service_role', c.oid, 'DELETE'));
 
@@ -33,6 +36,19 @@ INSERT INTO public.osionos_pages (id, workspace_id, owner_id, title) VALUES ('99
 UPDATE public.osionos_pages SET title = 'svc2' WHERE id = '99999999-0000-0000-0000-0000000000aa';
 SELECT 'svc_rows', count(*) FROM public.osionos_pages WHERE id = '99999999-0000-0000-0000-0000000000aa' AND title = 'svc2';
 DELETE FROM public.osionos_pages WHERE id = '99999999-0000-0000-0000-0000000000aa';
+ROLLBACK;
+
+-- svc_cutoff: the auth-gateway's write, as PostgREST runs a merge-duplicates upsert, twice,
+-- so the second takes the ON CONFLICT path. The auth.users row is the shim's. Rolled back.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('dddddddd-dddd-dddd-dddd-dddddddddddd');
+SET LOCAL ROLE service_role;
+INSERT INTO public.auth_session_cutoffs (user_id, sessions_valid_after) VALUES ('dddddddd-dddd-dddd-dddd-dddddddddddd', '2026-10-15 12:00:00+00')
+  ON CONFLICT (user_id) DO UPDATE SET sessions_valid_after = EXCLUDED.sessions_valid_after;
+INSERT INTO public.auth_session_cutoffs (user_id, sessions_valid_after) VALUES ('dddddddd-dddd-dddd-dddd-dddddddddddd', '2026-10-15 12:00:01+00')
+  ON CONFLICT (user_id) DO UPDATE SET sessions_valid_after = EXCLUDED.sessions_valid_after;
+SELECT 'svc_cutoff', count(*) FROM public.auth_session_cutoffs
+ WHERE user_id = 'dddddddd-dddd-dddd-dddd-dddddddddddd' AND sessions_valid_after = '2026-10-15 12:00:01+00';
 ROLLBACK;
 
 -- secdef_exec: SECURITY DEFINER osionos_% functions anon/authenticated may execute

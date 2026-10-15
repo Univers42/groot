@@ -65,7 +65,7 @@ healthcheck: certs
 		echo "[healthcheck] expected website plain HTTP to redirect to HTTPS, got HTTP $$redirect_status" >&2; \
 		exit 1; \
 	fi
-	$(CURL_HEALTH) -o /dev/null -w 'auth-gateway-https-%{http_code}\n' $(AUTH_URL)/availability
+	$(CURL_HEALTH) -o /dev/null -w 'auth-gateway-https-%{http_code}\n' $(AUTH_URL)/health
 # drawnosaurus is part of the default stack now (T12-P1b), so it is probed like any other
 # frontend. Two assertions, because the interesting failure is not "port closed": if the
 # gateway is down, nginx answers 503 from its own fallback page and a plain reachability
