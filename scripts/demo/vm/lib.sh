@@ -31,24 +31,29 @@ deploy_mountlist_running() { pgrep -f '[d]eploy-mountlist' >/dev/null 2>&1; }
 # while deploy-mountlist runs. DEMO_IGNORE_WINDOW=1 is for the local fixture only.
 # Caveat: the windows are copied from groot-69's report of 2026-10-16; a timer moved on the
 # VM is not seen here. `systemctl list-timers` in the VM is the source of truth.
+# write_window_reason HOUR MINUTE — why writing is closed at that time, with when it reopens;
+# empty when it is open.
+write_window_reason() {
+  local hour=$((10#$1)) minute=$((10#$2))
+  if [ "$minute" -ge 58 ]; then
+    printf "b2b-backup's hourly pg_dump; writing resumes at %02d:08" $(((hour + 1) % 24))
+  elif [ "$minute" -le 7 ]; then
+    printf "b2b-backup's hourly pg_dump; writing resumes at %02d:08" "$hour"
+  elif [ "$hour" -eq 0 ] && [ "$minute" -ge 30 ] && [ "$minute" -le 50 ]; then
+    printf "b2b-var-gc; writing resumes at 00:51"
+  fi
+}
+
 write_window_wait() {
   [ "${DEMO_IGNORE_WINDOW:-0}" = 1 ] && return 0
-  local hour minute
+  local reason said=""
   while :; do
-    hour=$((10#$(date +%H)))
-    minute=$((10#$(date +%M)))
-    if [ "$minute" -ge 58 ] || [ "$minute" -le 7 ] ||
-      { [ "$hour" -eq 0 ] && [ "$minute" -ge 30 ] && [ "$minute" -le 50 ]; }; then
-      say "write window closed at $(date +%H:%M); waiting"
-      sleep 30
-      continue
-    fi
-    if deploy_mountlist_running; then
-      say "deploy-mountlist is running; waiting"
-      sleep 30
-      continue
-    fi
-    return 0
+    reason="$(write_window_reason "$(date +%H)" "$(date +%M)")"
+    [ -n "$reason" ] || ! deploy_mountlist_running || reason="deploy-mountlist is running; writing resumes when it exits"
+    [ -n "$reason" ] || return 0
+    [ "$reason" = "$said" ] || say "paused at $(date +%H:%M): $reason (not stuck; nothing to do)"
+    said="$reason"
+    sleep 30
   done
 }
 
