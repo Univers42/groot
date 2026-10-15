@@ -2,7 +2,7 @@
 // bridge, logged in as Inès (ADR 0005; devil phase2 conditions 7, 9, 10, 11). It runs after
 // vm-bootstrap.sh, whose state gave the manifest the user, workspace and mount ids.
 //
-//   node scripts/demo/load-pages.mjs --manifest <file> --pages <pages.json> --bridge <url>
+//   node scripts/demo/load-pages.mjs --manifest <file> --pages <pages.json> --bridge <url> --utc-offset +0200
 //   env: ARLET_INES_PASSWORD, ARLET_JULES_PASSWORD (scripts/tools.sh: TOOLS_PASS_ENV)
 //
 // Only adds: a page whose seed_key is already on the server is never posted again, and a page
@@ -12,8 +12,9 @@
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { creationOrder, hasSeedReference, resolvePage, seedKeyOf } from './seed-links.mjs';
+import { localClock, windowReason } from './write-window.mjs';
 
-const { values: args } = parseArgs({ options: { manifest: { type: 'string' }, pages: { type: 'string' }, bridge: { type: 'string' } } });
+const { values: args } = parseArgs({ options: { manifest: { type: 'string' }, pages: { type: 'string' }, bridge: { type: 'string' }, 'utc-offset': { type: 'string' } } });
 const manifest = JSON.parse(readFileSync(args.manifest, 'utf8'));
 const { pages } = JSON.parse(readFileSync(args.pages, 'utf8'));
 const PACE_MS = 1100;
@@ -25,15 +26,16 @@ function saveManifest() {
 	renameSync(`${args.manifest}.tmp`, args.manifest);
 }
 
-// The same closed windows as vm-bootstrap.sh: :58-:07 (hourly pg_dump) and 00:30-00:50 (gc).
+// The same closed windows as vm-bootstrap.sh (write-window.mjs), at the host's UTC offset.
 // Caveat: this host's clock stands in for the VM's; the two are NTP-synced on this seat, but
 // a drifted VM clock would let a write land on the window's edge.
 async function writeWindowWait() {
+	let said = '';
 	for (;;) {
-		const now = new Date();
-		const [hour, minute] = [now.getHours(), now.getMinutes()];
-		if (!(minute >= 58 || minute <= 7 || (hour === 0 && minute >= 30 && minute <= 50))) return;
-		say(`write window closed at ${hour}:${String(minute).padStart(2, '0')}; waiting`);
+		const reason = windowReason(...localClock(new Date(), args['utc-offset']));
+		if (!reason) return;
+		if (reason !== said) say(`paused: ${reason} (not stuck; nothing to do)`);
+		said = reason;
 		await sleep(30_000);
 	}
 }
@@ -125,6 +127,7 @@ async function verify(inesToken, julesToken) {
 }
 
 async function main() {
+	localClock(new Date(), args['utc-offset']);
 	manifest.pages ??= {};
 	const inesToken = await login(manifest.users.ines.email, process.env.ARLET_INES_PASSWORD);
 	const julesToken = await login(manifest.users.jules.email, process.env.ARLET_JULES_PASSWORD);

@@ -90,7 +90,7 @@ load_pages() {
   ARLET_JULES_PASSWORD="$(get_env "$SECRETS" ARLET_JULES_PASSWORD)" \
   TOOLS_PASS_ENV="NODE_EXTRA_CA_CERTS ARLET_INES_PASSWORD ARLET_JULES_PASSWORD" \
     scripts/tools.sh node scripts/demo/load-pages.mjs --manifest "$MANIFEST" --pages "$OUT/pages.json" \
-    --bridge "$BRIDGE_URL" </dev/null
+    --bridge "$BRIDGE_URL" --utc-offset "$(date +%z)" </dev/null
 }
 
 main() {

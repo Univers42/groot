@@ -245,6 +245,43 @@ real_bundle() {
   [ "$output" = seen ]
 }
 
+@test "the VM and the page loader close the same windows, minute for minute" {
+  local hour minute
+  node_run scripts/demo/write-window.mjs >"$BATS_TEST_TMPDIR/js"
+  . scripts/demo/vm/lib.sh
+  for hour in $(seq 0 23); do
+    for minute in $(seq 0 59); do
+      printf '%s %s %s\n' "$hour" "$minute" "$(write_window_reason "$hour" "$minute")"
+    done
+  done >"$BATS_TEST_TMPDIR/sh"
+  [ "$(wc -l <"$BATS_TEST_TMPDIR/js")" -eq 1440 ]
+  diff "$BATS_TEST_TMPDIR/js" "$BATS_TEST_TMPDIR/sh"
+}
+
+@test "a closed window says why and until when, once, then writes when it opens" {
+  local shims="$BATS_TEST_TMPDIR/shims" clock="$BATS_TEST_TMPDIR/clock"
+  mkdir -p "$shims"
+  echo "01 04" >"$clock"
+  # date reads the fake clock; the third sleep moves it to 01:08, when writing reopens.
+  cat >"$shims/date" <<EOF
+#!/bin/sh
+case "\$1" in +%H) cut -d" " -f1 "$clock" ;; +%M) cut -d" " -f2 "$clock" ;; *) echo 01:04 ;; esac
+EOF
+  cat >"$shims/sleep" <<EOF
+#!/bin/sh
+n=\$(cat "$clock.n" 2>/dev/null || echo 0)
+echo \$((n + 1)) >"$clock.n"
+[ "\$n" -ge 2 ] && echo "01 08" >"$clock"
+exit 0
+EOF
+  chmod +x "$shims/date" "$shims/sleep"
+  run env PATH="$shims:$PATH" DEMO_IGNORE_WINDOW=0 bash -c '. scripts/demo/vm/lib.sh; write_window_wait; echo open'
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'paused at' <<<"$output")" -eq 1 ]
+  [[ "$output" == *"writing resumes at 01:08 (not stuck"* ]]
+  [ "${lines[-1]}" = open ]
+}
+
 @test "the bootstrap deletes nothing and alters only a demo login's password" {
   run ! grep -nE '\b(DELETE|DROP|TRUNCATE)\b' scripts/demo/vm/vm-bootstrap.sh scripts/demo/vm/lib.sh scripts/demo/vm/mongo-user.js scripts/demo/vm/mongo-load.js
   run grep -nE '\b(UPDATE|ALTER|updateUser)\b' scripts/demo/vm/vm-bootstrap.sh scripts/demo/vm/mongo-user.js
