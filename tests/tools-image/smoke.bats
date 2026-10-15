@@ -7,7 +7,7 @@
 # tools.sh bind-mounts it by host path):
 #   docker run --rm -v "$PWD:$PWD" -w "$PWD" -e DOCKER_HOST=unix:///docker.sock \
 #     -v "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/docker.sock:/docker.sock" --entrypoint sh \
-#     bats/bats:1.11.1 -c 'apk add -q --no-cache bash coreutils docker-cli openssl && bats tests/tools-image'
+#     bats/bats:1.11.1 -c 'apk add -q --no-cache bash coreutils docker-cli docker-cli-buildx openssl jq && bats tests/tools-image'
 # On a rootful daemon, mount /var/run/docker.sock instead.
 
 setup_file() {
@@ -100,4 +100,47 @@ tools() { bash "$ROOT/scripts/tools.sh" "$@"; }
   LOCAL_CA_FILE="$WORK/absent.pem" run tools sh -c 'echo no-ca-ok'
   [ "$status" -eq 0 ]
   [[ "$output" == *no-ca-ok* ]]
+}
+
+# One JSON-RPC initialize on stdin, the first stdout line back. The command line is read from
+# .mcp.json itself, so this proves the config Claude Code loads, not a copy of it.
+mcp_initialize() {
+  local name="$1" argv env_json
+  mapfile -t argv < <(jq -r --arg n "$name" '.mcpServers[$n].args[]' "$ROOT/.mcp.json")
+  env_json="$(jq -c --arg n "$name" '.mcpServers[$n].env // {}' "$ROOT/.mcp.json")"
+  local -a envs=()
+  mapfile -t envs < <(jq -r 'to_entries[] | "\(.key)=\(.value)"' <<<"$env_json")
+  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}' |
+    (cd "$ROOT" && env "${envs[@]}" timeout 120 bash "${argv[@]}") | head -1
+}
+
+@test "MCP playwright answers initialize from its .mcp.json command line" {
+  run mcp_initialize playwright
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"id":1'* && "$output" == *'"serverInfo"'* ]]
+}
+
+@test "MCP chrome-devtools answers initialize from its .mcp.json command line" {
+  run mcp_initialize chrome-devtools
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"id":1'* && "$output" == *'"serverInfo"'* ]]
+}
+
+@test "MCP osionos answers initialize from its .mcp.json command line" {
+  [ -f "$ROOT/apps/osionos/app/scripts/osionos-mcp-server.mjs" ] ||
+    skip "apps/osionos/app is not checked out here (git submodule update --init apps/osionos/app)"
+  run mcp_initialize osionos
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"id":1'* && "$output" == *'"serverInfo"'* ]]
+}
+
+@test "the osionos MCP deps in the image are the versions osionos's lockfile resolves" {
+  lock="$ROOT/apps/osionos/app/pnpm-lock.yaml"
+  [ -f "$lock" ] || skip "apps/osionos/app is not checked out here"
+  df="$ROOT/infrastructure/docker/tools/Dockerfile"
+  sdk="$(sed -n 's/^ARG OSIONOS_MCP_SDK_VERSION=//p' "$df")"
+  zod="$(sed -n 's/^ARG OSIONOS_ZOD_VERSION=//p' "$df")"
+  [ -n "$sdk" ] && [ -n "$zod" ]
+  grep -q "^  '@modelcontextprotocol/sdk@$sdk':" "$lock"
+  grep -q "^  zod@$zod:" "$lock"
 }
