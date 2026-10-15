@@ -5,13 +5,14 @@
 //   node scripts/demo/load-pages.mjs --manifest <file> --pages <pages.json> --bridge <url> --utc-offset +0200
 //   env: ARLET_INES_PASSWORD, ARLET_JULES_PASSWORD (scripts/tools.sh: TOOLS_PASS_ENV)
 //
-// Only adds: a page whose seed_key is already on the server is never posted again, and a page
-// is patched only while it still holds an unresolved [[seed:]] reference, so an edit made in
-// the app survives a re-run. The manifest is rewritten after every page, so a run cut short
+// Only adds: a page the manifest (or, for pages loaded before 2026-10-16, a seed_key property)
+// already maps is never posted again, and a page is patched only while it still holds an
+// unresolved [[seed:]] reference or the old on-screen bookkeeping, so an edit made in the app
+// survives a re-run. The manifest is rewritten after every page, so a run cut short
 // resumes where it stopped.
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
-import { creationOrder, hasSeedReference, resolvePage, seedKeyOf } from './seed-links.mjs';
+import { creationOrder, hasSeedReference, pageKeyOf, reshapedProperties, resolvePage } from './seed-links.mjs';
 import { localClock, windowReason } from './write-window.mjs';
 
 const { values: args } = parseArgs({ options: { manifest: { type: 'string' }, pages: { type: 'string' }, bridge: { type: 'string' }, 'utc-offset': { type: 'string' } } });
@@ -110,10 +111,33 @@ async function resolveLinks(token, existing) {
 		const body = resolvePage(stored, manifest.pages);
 		const { status } = await call('PATCH', `/api/pages/${manifest.pages[page.seed_key]}`, { token, body });
 		if (status !== 200) throw new Error(`linking ${page.seed_key} answered HTTP ${status}`);
+		existing.set(page.seed_key, { ...stored, ...body });
 		patched += 1;
 		await sleep(PACE_MS);
 	}
 	return patched;
+}
+
+// Pages loaded before 2026-10-16 carry a seed_key property and *_ids UUID lists on screen; each
+// one still exactly as the seed wrote it gets the current properties. An edited page keeps its own.
+async function reshape(token, existing) {
+	const counts = { reshaped: 0, keptEdited: 0 };
+	for (const page of pages) {
+		const stored = existing.get(page.seed_key);
+		if (!stored) continue;
+		const expected = resolvePage(page, manifest.pages).properties;
+		const properties = reshapedProperties(stored, expected);
+		if (!properties) {
+			if ((stored.properties ?? []).some((prop) => prop.key === 'seed_key')) counts.keptEdited += 1;
+			continue;
+		}
+		await writeWindowWait();
+		const { status } = await call('PATCH', `/api/pages/${manifest.pages[page.seed_key]}`, { token, body: { properties } });
+		if (status !== 200) throw new Error(`reshaping ${page.seed_key} answered HTTP ${status}`);
+		counts.reshaped += 1;
+		await sleep(PACE_MS);
+	}
+	return counts;
 }
 
 async function verify(inesToken, julesToken) {
@@ -121,7 +145,7 @@ async function verify(inesToken, julesToken) {
 	const listed = JSON.stringify(people.data ?? '');
 	const directoryClean = people.status === 200 && !listed.includes(manifest.users.ines.id) && !listed.includes(manifest.users.jules.id);
 	const finance = await serverPages(julesToken, manifest.workspaces.finance.id);
-	const sharedOpens = finance.some((entry) => seedKeyOf(entry) === 'q4-supplier-review');
+	const sharedOpens = finance.some((entry) => entry._id === manifest.pages['q4-supplier-review']);
 	const operations = await call('GET', `/api/pages?workspaceId=${manifest.workspaces.operations.id}`, { token: julesToken });
 	return { directoryClean, sharedOpens, julesKeptOutOfOperations: operations.status === 403 };
 }
@@ -137,7 +161,7 @@ async function main() {
 	const existing = new Map();
 	for (const workspace of Object.values(manifest.workspaces)) {
 		for (const entry of await serverPages(inesToken, workspace.id)) {
-			const key = seedKeyOf(entry);
+			const key = pageKeyOf(entry, manifest.pages, pages);
 			if (!key) continue;
 			existing.set(key, entry);
 			manifest.pages[key] ??= entry._id;
@@ -147,8 +171,9 @@ async function main() {
 	const before = Object.keys(manifest.pages).length;
 	await createMissing(inesToken, existing);
 	const patched = await resolveLinks(inesToken, existing);
+	const shaped = await reshape(inesToken, existing);
 	const checks = await verify(inesToken, julesToken);
-	process.stdout.write(`${JSON.stringify({ created: Object.keys(manifest.pages).length - before, patched, ...checks })}\n`);
+	process.stdout.write(`${JSON.stringify({ created: Object.keys(manifest.pages).length - before, patched, ...shaped, ...checks })}\n`);
 	if (!Object.values(checks).every(Boolean)) process.exitCode = 1;
 }
 

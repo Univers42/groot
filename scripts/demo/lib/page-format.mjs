@@ -28,10 +28,12 @@ export function relation(key, label, seedKeys) {
   return { key, label, type: 'relation', relationTarget: 'page', value: seedKeys.map((k) => RELATION_PREFIX + k) };
 }
 
-// uuid mentions of mount records (library items, contacts, companies) ride in text properties:
-// a relation property may only target pages, and these records are not pages.
-export function uuidList(key, label, ids) {
-  return text(key, label, ids.join(', '));
+// uuid mentions of mount records (library items, contacts, companies). page() moves them to the
+// page's `refs`, which the generator's graph and integrity checks read and the loader never posts:
+// as properties they put raw UUIDs on screen next to the names the page already shows (Sources,
+// People, Companies), and osionos has no hidden property.
+export function uuidList(key, _label, ids) {
+  return { ref: key, ids };
 }
 
 export function blockId(seedKey, n) {
@@ -52,7 +54,8 @@ export function page({ seedKey, workspace, title, icon, parent, extra, propertie
   const out = { seed_key: seedKey, workspace, title, icon };
   if (parent) out.parent_seed_key = parent;
   Object.assign(out, extra);
-  out.properties = [text('seed_key', 'Seed key', seedKey), ...properties];
+  out.properties = properties.filter((prop) => !prop.ref);
+  out.refs = Object.fromEntries(properties.filter((prop) => prop.ref && prop.ids.length > 0).map((prop) => [prop.ref, prop.ids]));
   out.content = content;
   return out;
 }
@@ -72,8 +75,7 @@ export function inlineLinks(pageEntry) {
 }
 
 export function uuidMentions(pageEntry) {
-  return pageEntry.properties.filter((p) => p.key.endsWith('_ids') && p.value)
-    .flatMap((p) => p.value.split(', '));
+  return Object.values(pageEntry.refs ?? {}).flat();
 }
 
 // Adds `from` to the reverse relation property on `target`, creating it when absent.

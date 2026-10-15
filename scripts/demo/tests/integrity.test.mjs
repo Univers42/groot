@@ -23,8 +23,8 @@ const MUTATIONS = {
     }
   },
   'page property uuid': (d) => {
-    const prop = d.pages.flatMap((p) => p.properties).find((x) => x.key === 'library_ids' && x.value);
-    prop.value = '00000000-0000-5000-8000-000000000002';
+    const refs = d.pages.map((p) => p.refs).find((r) => r.library_ids);
+    refs.library_ids = ['00000000-0000-5000-8000-000000000002'];
   },
 };
 
