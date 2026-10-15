@@ -21,16 +21,20 @@ RUN short="$(printf %.7s "$GROBASE_CLI_REF")" \
 FROM ${ALPINE_IMAGE}
 # chromium + nss-tools: Lighthouse, both browser MCPs, and the CA import the entrypoint does.
 # ffmpeg, vips (+heif for AVIF), imagemagick: video and image conversion. Fonts so a headless
-# capture renders text instead of tofu.
+# capture renders text instead of tofu. bind-tools: dig, for the SPF/DKIM/DMARC check of the
+# sending domain (docs/redesign/PLAN.md §7.4). fonttools + brotli: pyftsubset, for the site's web
+# font subsets (scripts/media/subset-fonts.sh).
 RUN apk add --no-cache bash ca-certificates nss-tools chromium ffmpeg vips-tools vips-heif \
-      imagemagick nodejs npm font-noto font-noto-emoji ttf-dejavu
+      imagemagick nodejs npm font-noto font-noto-emoji ttf-dejavu bind-tools py3-fonttools py3-brotli
 ARG SVGO_VERSION=4.1.0
 ARG LHCI_VERSION=0.15.1
 ARG CHROME_DEVTOOLS_MCP_VERSION=1.10.1
 ARG PLAYWRIGHT_MCP_VERSION=0.0.83
+# pnpm at the version apps/opposite-osiris/package.json pins in packageManager (smoke.bats fails on drift).
+ARG PNPM_VERSION=11.5.1
 RUN npm install -g --no-audit --no-fund --no-update-notifier \
       "svgo@${SVGO_VERSION}" "@lhci/cli@${LHCI_VERSION}" \
-      "chrome-devtools-mcp@${CHROME_DEVTOOLS_MCP_VERSION}" "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" \
+      "chrome-devtools-mcp@${CHROME_DEVTOOLS_MCP_VERSION}" "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" "pnpm@${PNPM_VERSION}" \
  && npm cache clean --force
 # The osionos MCP server (apps/osionos/app/scripts/osionos-mcp-server.mjs) imports only these two,
 # at the versions osionos's pnpm-lock.yaml resolves (tests/tools-image/smoke.bats fails on drift).
