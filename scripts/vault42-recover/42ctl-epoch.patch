@@ -1,0 +1,488 @@
+diff --git a/src/cli/env.rs b/src/cli/env.rs
+index 278b5b1..f4a2231 100644
+--- a/src/cli/env.rs
++++ b/src/cli/env.rs
+@@ -91,10 +91,22 @@ pub enum Env {
+         /// Keep a `.bak` copy of every file that is overwritten
+         #[arg(long)]
+         backup: bool,
++        /// Restore the tree as push revision VERSION left it; 0, the default, is the newest
++        ///
++        /// Without your private files. With --apply an older revision is written only into an
++        /// empty directory that is its own project root, so it can never replace today's files.
++        #[arg(long, value_name = "VERSION", default_value_t = 0)]
++        at: u64,
++        /// Read key epoch EPOCH instead of the current one; 0, the default, is the current
++        ///
++        /// An older epoch holds the trees pushed before a rotation. Its key cannot be checked
++        /// against the one the environment publishes today: verify what it restores.
++        #[arg(long, value_name = "EPOCH", default_value_t = 0)]
++        epoch: u32,
+     },
+     /// List an environment's files from its manifests — no file is fetched
+     ///
+-    /// Columns: Path Size Mode Kind Private Labels. Your private files show Private=true; a
++    /// Columns: Path Size Rev Mode Kind Private Labels. Your private files show Private=true; a
+     /// teammate's private files are not listed at all, for anyone. Shapes like the other
+     /// lists: `--format '{{.Path}} {{.Labels.app}}'`, `--format json`, `--filter Private=true`.
+     Files {
+@@ -103,6 +115,12 @@ pub enum Env {
+         /// Output shaping: --format / --filter
+         #[command(flatten)]
+         out: super::Output,
++        /// List the tree as push revision VERSION left it; 0, the default, is the newest
++        #[arg(long, value_name = "VERSION", default_value_t = 0)]
++        at: u64,
++        /// List key epoch EPOCH instead of the current one; 0, the default, is the current
++        #[arg(long, value_name = "EPOCH", default_value_t = 0)]
++        epoch: u32,
+     },
+     /// One secret sealed to the environment's key: set, get
+     #[command(subcommand)]
+diff --git a/src/cmd/mod.rs b/src/cmd/mod.rs
+index d3f53d9..1f53a70 100644
+--- a/src/cmd/mod.rs
++++ b/src/cmd/mod.rs
+@@ -36,6 +36,7 @@ mod notes;
+ mod org;
+ mod project;
+ mod scope;
++mod scope_at;
+ mod scope_chunks;
+ mod scope_init;
+ mod scope_ls;
+diff --git a/src/cmd/scope.rs b/src/cmd/scope.rs
+index 593d7b0..974180c 100644
+--- a/src/cmd/scope.rs
++++ b/src/cmd/scope.rs
+@@ -20,7 +20,7 @@ use crate::adapters::api::Session;
+ use crate::adapters::rbac::{grant, org, project as rbac_project, pubkey, GrantScope};
+ use crate::adapters::session;
+ use crate::cli::{Env, EnvKeys, EnvSecret, Scope};
+-use crate::cmd::{scope_init, scope_ls, scope_private, scope_rotate, scope_secret};
++use crate::cmd::{scope_at, scope_init, scope_ls, scope_private, scope_rotate, scope_secret};
+ use crate::cmd::{scope_status, scope_sync, scope_tree};
+ 
+ /// The resolved orchestration context: the base URL + session token and the project/env
+@@ -72,8 +72,15 @@ pub async fn run(session: &mut Session, cmd: &Env, profile: &str) -> anyhow::Res
+         Env::Init(scope) => scope_init::env_init(session, &resolve(profile, scope).await?).await,
+         Env::Keys(keys) => keyset(session, keys, profile).await,
+         Env::Secret(secret) => one_secret(session, secret, profile).await,
+-        Env::Files { scope, out } => {
+-            scope_ls::ls_env(session, &resolve(profile, scope).await?, out).await
++        Env::Files {
++            scope,
++            out,
++            at,
++            epoch,
++        } => {
++            let mut ctx = resolve(profile, scope).await?;
++            let wanted = scope_at::rewind(&mut ctx, (*epoch, *at))?;
++            scope_ls::ls_env(session, &ctx, out, wanted).await
+         }
+         Env::Push { .. } | Env::Pull { .. } => transfer(session, cmd, profile).await,
+         Env::Create { .. } | Env::Ls { .. } => {
+@@ -132,13 +139,17 @@ async fn transfer(session: &mut Session, cmd: &Env, profile: &str) -> anyhow::Re
+             only,
+             apply,
+             backup,
++            at,
++            epoch,
+         } => {
+             let opts = crate::core::materialize::Opts {
+                 apply: *apply,
+                 force: false,
+                 backup: *backup,
+             };
+-            scope_tree::pull_env(session, &resolve(profile, scope).await?, &opts, only).await
++            let mut ctx = resolve(profile, scope).await?;
++            let wanted = scope_at::rewind(&mut ctx, (*epoch, *at))?;
++            scope_tree::pull_env(session, &ctx, &opts, (only, wanted)).await
+         }
+         _ => unreachable!("transfer only handles push and pull"),
+     }
+diff --git a/src/cmd/scope_at.rs b/src/cmd/scope_at.rs
+new file mode 100644
+index 0000000..dc3902f
+--- /dev/null
++++ b/src/cmd/scope_at.rs
+@@ -0,0 +1,233 @@
++//! `env pull --at --epoch` / `env files --at --epoch` — an environment's tree as an older push
++//! left it, in the current key epoch or an earlier one.
++//!
++//! Every `env push` stores its manifest as the next revision and the server keeps them all,
++//! but a push publishes only what was on the pusher's disk: a teammate without the dumps
++//! drops them from the newest tree while their bytes stay stored under the older revision.
++//! A rotation carries only each path's newest version into the next epoch, so a tree pushed
++//! before it is reachable only in the epoch it was pushed in.
++//!
++//! `env pull --apply` overwrites without asking, which is right for today's tree and wrong
++//! for an old one: run in a working copy, it replaces today's files with an earlier push's. So
++//! an old tree is written only into an empty directory that is its own project root.
++
++use crate::cmd::scope::Ctx;
++use std::path::Path;
++
++/// The tree a read asks for, once `rewind` has pointed the context at its epoch.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub struct Wanted {
++    /// Push revision of the tree manifest; 0 ⇒ the newest of the epoch.
++    pub rev: u64,
++    /// The current epoch's newest tree: the only one a private manifest joins, and the only
++    /// one `--apply` may write over existing files.
++    pub today: bool,
++}
++
++/// Point `ctx` at key epoch `epoch` (0 ⇒ the current one) and say which tree of it is wanted.
++///
++/// The environment publishes only its current scope key, so an older epoch's secret cannot be
++/// compared with it and the comparison is dropped. A substituted wrap then surfaces as a
++/// manifest that does not open — or, if the substitute also sealed a manifest, as content
++/// only the caller can judge, which is why an older epoch is never written over files.
++pub fn rewind(ctx: &mut Ctx, point: (u32, u64)) -> anyhow::Result<Wanted> {
++    let (epoch, rev) = point;
++    let current = ctx.epoch();
++    if epoch > current {
++        anyhow::bail!(
++            "environment '{}' is at key epoch {current}; there is no epoch {epoch}",
++            ctx.env_name
++        );
++    }
++    let older = epoch != 0 && epoch < current;
++    if older {
++        ctx.scope_epoch = epoch;
++        ctx.scope_pubkey = None;
++    }
++    Ok(Wanted {
++        rev,
++        today: rev == 0 && !older,
++    })
++}
++
++/// Refuse to write an old tree anywhere it could replace a file.
++///
++/// `dirs` is (project root, current directory). Today's tree and a preview are never refused:
++/// neither changes what they did before `--at` and `--epoch` existed.
++pub fn refuse_over_files(wanted: Wanted, apply: bool, dirs: (&Path, &Path)) -> anyhow::Result<()> {
++    let (root, cwd) = dirs;
++    if wanted.today || !apply {
++        return Ok(());
++    }
++    if root != cwd {
++        anyhow::bail!(
++            "an older tree is written only into its own project root, and {} is inside {} — \
++             run it from a new empty directory",
++            cwd.display(),
++            root.display()
++        );
++    }
++    if std::fs::read_dir(cwd)?.next().is_some() {
++        anyhow::bail!(
++            "an older tree is written only into an empty directory, and {} is not empty — it \
++             would replace what is there",
++            cwd.display()
++        );
++    }
++    Ok(())
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::cli::{Cli, Command, Env};
++    use std::path::PathBuf;
++
++    const TODAY: Wanted = Wanted { rev: 0, today: true };
++    const OLD: Wanted = Wanted { rev: 5, today: false };
++
++    /// A fresh directory under the system temp dir, removed by the caller.
++    fn fresh_dir(name: &str) -> PathBuf {
++        let dir = std::env::temp_dir().join(format!("42ctl-at-{}-{name}", std::process::id()));
++        let _ = std::fs::remove_dir_all(&dir);
++        std::fs::create_dir_all(&dir).expect("temp dir");
++        dir
++    }
++
++    /// (epoch, at) as the command line parses them.
++    fn parsed(line: &str) -> (u32, u64) {
++        use clap::Parser;
++        let cli = Cli::try_parse_from(line.split_whitespace())
++            .unwrap_or_else(|error| panic!("{line}\n{error}"));
++        match cli.command {
++            Some(Command::Env(
++                Env::Pull { epoch, at, .. } | Env::Files { epoch, at, .. },
++            )) => (epoch, at),
++            _ => panic!("{line} is neither env pull nor env files"),
++        }
++    }
++
++    fn ctx_at(epoch: u32) -> Ctx {
++        Ctx {
++            grobase: String::new(),
++            token: String::new(),
++            org: "acme".to_string(),
++            org_id: String::new(),
++            project: "api".to_string(),
++            env_id: "env".to_string(),
++            env_name: "prod".to_string(),
++            scope_epoch: epoch,
++            scope_pubkey: Some("published".to_string()),
++        }
++    }
++
++    /// Without the flags both verbs read today's tree, exactly as before they existed.
++    #[test]
++    fn without_flags_both_verbs_read_todays_tree() {
++        let scope = "--org acme --project api --env prod";
++        assert_eq!(parsed(&format!("42ctl env pull {scope} --apply")), (0, 0));
++        assert_eq!(parsed(&format!("42ctl env files {scope}")), (0, 0));
++        assert_eq!(parsed(&format!("42ctl env files {scope} --at 7")), (0, 7));
++        assert_eq!(parsed(&format!("42ctl env pull {scope} --epoch 2 --at 3")), (2, 3));
++    }
++
++    /// `--epoch` reads; no verb that writes or manages keys accepts it. Each line parses
++    /// without the flag, so a refusal can only be the flag's.
++    #[test]
++    fn only_the_reading_verbs_take_epoch() {
++        use clap::Parser;
++        let parses = |line: &str| Cli::try_parse_from(line.split_whitespace()).is_ok();
++        let scope = "--org acme --project api --env prod";
++        for verb in [
++            "env push",
++            "env secret get db/url",
++            "env secret set db/url",
++            "env keys ls",
++            "env keys sync",
++            "env keys rotate",
++        ] {
++            let line = format!("42ctl {verb} {scope}");
++            assert!(parses(&line), "{line} must parse without --epoch");
++            assert!(!parses(&format!("{line} --epoch 2")), "{line} must refuse --epoch");
++        }
++    }
++
++    /// An older epoch's newest tree is revision 0 of it, and still never today's.
++    #[test]
++    fn an_older_epochs_newest_tree_is_never_written_over_files() {
++        let wanted = rewind(&mut ctx_at(4), (2, 0)).expect("older");
++        let inside = refuse_over_files(wanted, true, (Path::new("/repo"), Path::new("/repo/s")));
++        assert!(inside.is_err(), "a subdirectory of a project must be refused");
++        let dir = fresh_dir("older");
++        std::fs::write(dir.join(".env"), b"today").expect("seed file");
++        let over = refuse_over_files(wanted, true, (&dir, &dir));
++        let _ = std::fs::remove_dir_all(&dir);
++        assert!(over.is_err(), "a non-empty root must be refused");
++    }
++
++    #[test]
++    fn the_current_epoch_is_left_as_resolved() {
++        let mut ctx = ctx_at(4);
++        assert_eq!(rewind(&mut ctx, (0, 0)).expect("default"), TODAY);
++        assert_eq!(rewind(&mut ctx, (4, 0)).expect("explicit current"), TODAY);
++        assert_eq!(
++            rewind(&mut ctx, (0, 2)).expect("older revision"),
++            Wanted { rev: 2, today: false }
++        );
++        assert_eq!((ctx.epoch(), ctx.scope_pubkey.as_deref()), (4, Some("published")));
++    }
++
++    /// An older epoch is read with its own key, which today's published key cannot vouch for.
++    #[test]
++    fn an_older_epoch_is_read_with_its_own_key_and_never_as_today() {
++        let mut ctx = ctx_at(4);
++        assert_eq!(rewind(&mut ctx, (2, 0)).expect("older"), Wanted { rev: 0, today: false });
++        assert_eq!((ctx.epoch(), ctx.scope_pubkey.as_deref()), (2, None));
++    }
++
++    #[test]
++    fn an_epoch_past_the_current_one_is_refused_naming_the_current() {
++        let said = rewind(&mut ctx_at(4), (5, 0)).expect_err("no epoch 5").to_string();
++        assert!(said.contains("is at key epoch 4"), "{said}");
++    }
++
++    /// An env whose keyset predates epoch bookkeeping reports 0 and means epoch 1.
++    #[test]
++    fn epoch_one_is_today_for_an_env_without_bookkeeping() {
++        assert_eq!(rewind(&mut ctx_at(0), (1, 0)).expect("epoch 1"), TODAY);
++    }
++
++    /// Today's tree and every preview keep today's behaviour, wherever they run.
++    #[test]
++    fn todays_tree_and_a_preview_are_never_refused() {
++        let (root, inside) = (Path::new("/repo"), Path::new("/repo/srcs"));
++        refuse_over_files(TODAY, true, (root, inside)).expect("today's tree is the old behaviour");
++        refuse_over_files(OLD, false, (root, inside)).expect("a preview writes nothing");
++    }
++
++    #[test]
++    fn an_old_tree_is_not_written_inside_another_project() {
++        let said = refuse_over_files(OLD, true, (Path::new("/repo"), Path::new("/repo/srcs")))
++            .expect_err("a subdirectory of a project must be refused")
++            .to_string();
++        assert!(said.contains("project root"), "{said}");
++    }
++
++    #[test]
++    fn an_old_tree_is_not_written_over_files() {
++        let dir = fresh_dir("full");
++        std::fs::write(dir.join(".env"), b"today").expect("seed file");
++        let refused = refuse_over_files(OLD, true, (&dir, &dir));
++        let _ = std::fs::remove_dir_all(&dir);
++        let said = refused.expect_err("a non-empty root must be refused").to_string();
++        assert!(said.contains("not empty"), "{said}");
++    }
++
++    #[test]
++    fn an_old_tree_is_written_into_an_empty_root() {
++        let dir = fresh_dir("empty");
++        let allowed = refuse_over_files(OLD, true, (&dir, &dir));
++        let _ = std::fs::remove_dir_all(&dir);
++        allowed.expect("an empty directory that is its own root is the one safe target");
++    }
++}
+diff --git a/src/cmd/scope_ls.rs b/src/cmd/scope_ls.rs
+index 2b4aefc..7bcc246 100644
+--- a/src/cmd/scope_ls.rs
++++ b/src/cmd/scope_ls.rs
+@@ -22,23 +22,32 @@ use crate::adapters::api::Session;
+ use crate::adapters::scope as crypto;
+ use crate::cli::Output;
+ use crate::cmd::scope::Ctx;
++use crate::cmd::scope_at::Wanted;
+ use crate::cmd::scope_private::{self, Pick};
+ use crate::cmd::scope_recover::recover_scope_secret;
+ use crate::ui;
+ use vault42_core::Kind;
+ 
+-/// Render `Path Size Mode Kind Private Labels` for every file the caller can restore.
+-pub async fn ls_env(session: &mut Session, ctx: &Ctx, out: &Output) -> anyhow::Result<()> {
++/// Render `Path Size Rev Mode Kind Private Labels` for every file the caller can restore
++/// from the tree `wanted` names in `ctx`'s epoch. `Rev` is the stored version a file is read
++/// at, so two trees showing the same path and `Rev` in one epoch hold the same bytes.
++pub async fn ls_env(
++    session: &mut Session,
++    ctx: &Ctx,
++    out: &Output,
++    wanted: Wanted,
++) -> anyhow::Result<()> {
+     let scope_id = crypto::scope_id(&ctx.project, &ctx.env_name)?;
+     let owner = hex::encode(scope_id);
+     let secret =
+         recover_scope_secret(session, scope_id, ctx.epoch(), ctx.scope_pubkey.as_deref()).await?;
+-    let (shared, mine) = scope_private::both_manifests(session, ctx, (&owner, &secret)).await?;
++    let (shared, mine) =
++        scope_private::both_manifests(session, ctx, (&owner, &secret), wanted).await?;
+     let merged = scope_private::merge(&shared, mine.as_ref().map(|m| &m.manifest));
+     scope_private::report_shadows(&merged.shadowed);
+     let rows = merged.picks.iter().map(row).collect();
+     ui::render(
+-        &["Path", "Size", "Mode", "Kind", "Private", "Labels"],
++        &["Path", "Size", "Rev", "Mode", "Kind", "Private", "Labels"],
+         rows,
+         out.shape(),
+     )
+@@ -50,6 +59,7 @@ fn row(pick: &Pick) -> serde_json::Value {
+     serde_json::json!({
+         "Path": entry.relative_path,
+         "Size": entry.size,
++        "Rev": entry.rev,
+         "Mode": format!("{:04o}", entry.mode),
+         "Kind": if entry.kind == Kind::Note as u8 { "note" } else { "file" },
+         "Private": pick.private,
+diff --git a/src/cmd/scope_private.rs b/src/cmd/scope_private.rs
+index 2d7241c..ea0d349 100644
+--- a/src/cmd/scope_private.rs
++++ b/src/cmd/scope_private.rs
+@@ -27,6 +27,7 @@
+ use crate::adapters::api::Session;
+ use crate::adapters::derive;
+ use crate::cmd::scope::Ctx;
++use crate::cmd::scope_at::Wanted;
+ use crate::cmd::scope_store::{self, Dest, Heads, Key, Slot};
+ use crate::cmd::scope_tree;
+ use crate::core::manifest::{Entry, Manifest};
+@@ -191,26 +192,46 @@ pub struct Mine {
+     pub epoch: u32,
+ }
+ 
+-/// The shared manifest and, if the caller ever pushed one here, their private manifest.
++/// The shared manifest `wanted` names in `ctx`'s epoch and, for today's tree only, the
++/// caller's private manifest if they ever pushed one here.
++///
++/// An older tree comes without the private manifest: only its newest is ever read, and
++/// merging today's private files into an old tree restores a tree nobody pushed.
+ pub async fn both_manifests(
+     session: &mut Session,
+     ctx: &Ctx,
+     key: (&str, &Zeroizing<[u8; 32]>),
++    wanted: Wanted,
+ ) -> anyhow::Result<(Manifest, Option<Mine>)> {
+     let (owner, secret) = key;
+     let shared = Slot {
+         owner,
+         epoch: ctx.epoch(),
+         path: scope_tree::TREE_MANIFEST,
+-        rev: 0,
++        rev: wanted.rev,
+     };
+     let raw = scope_store::fetch_one(session, shared, &Key::Scope(secret))
+         .await?
+-        .ok_or_else(|| anyhow::anyhow!("environment '{}' holds no tree", ctx.env_name))?;
+-    let mine = newest_mine(session, owner, ctx.epoch()).await?;
++        .ok_or_else(|| no_tree(ctx, wanted))?;
++    let mine = if wanted.today {
++        newest_mine(session, owner, ctx.epoch()).await?
++    } else {
++        None
++    };
+     Ok((Manifest::parse(&raw)?, mine))
+ }
+ 
++fn no_tree(ctx: &Ctx, wanted: Wanted) -> anyhow::Error {
++    let (env, epoch) = (&ctx.env_name, ctx.epoch());
++    match (wanted.today, wanted.rev) {
++        (true, _) => anyhow::anyhow!("environment '{env}' holds no tree"),
++        (false, 0) => anyhow::anyhow!("environment '{env}' holds no tree in key epoch {epoch}"),
++        (false, rev) => anyhow::anyhow!(
++            "environment '{env}' holds no tree at revision {rev} of key epoch {epoch}"
++        ),
++    }
++}
++
+ /// The caller's private manifest from the newest epoch holding one, back from `current`.
+ ///
+ /// A rotation cannot carry private files forward. They are sealed to their owner, and the
+diff --git a/src/cmd/scope_tree.rs b/src/cmd/scope_tree.rs
+index 4ac31ed..98dca1e 100644
+--- a/src/cmd/scope_tree.rs
++++ b/src/cmd/scope_tree.rs
+@@ -30,6 +30,7 @@ use crate::adapters::derive;
+ use crate::adapters::rbac::pubkey;
+ use crate::adapters::scope as crypto;
+ use crate::cmd::scope::Ctx;
++use crate::cmd::scope_at;
+ use crate::cmd::scope_chunks;
+ use crate::cmd::scope_private::{self, Pick, Scanned};
+ use crate::cmd::scope_recover::recover_scope_secret;
+@@ -208,14 +209,18 @@ pub async fn pull_env(
+     session: &mut Session,
+     ctx: &Ctx,
+     opts: &Opts,
+-    only: &[String],
++    selection: (&[String], scope_at::Wanted),
+ ) -> anyhow::Result<()> {
+-    let root = project::root_of(&std::env::current_dir()?);
++    let (only, wanted) = selection;
++    let cwd = std::env::current_dir()?;
++    let root = project::root_of(&cwd);
++    scope_at::refuse_over_files(wanted, opts.apply, (&root, &cwd))?;
+     let scope_id = crypto::scope_id(&ctx.project, &ctx.env_name)?;
+     let owner = hex::encode(scope_id);
+     let secret =
+         recover_scope_secret(session, scope_id, ctx.epoch(), ctx.scope_pubkey.as_deref()).await?;
+-    let (shared, mine) = scope_private::both_manifests(session, ctx, (&owner, &secret)).await?;
++    let (shared, mine) =
++        scope_private::both_manifests(session, ctx, (&owner, &secret), wanted).await?;
+     let merged = scope_private::merge(&shared, mine.as_ref().map(|m| &m.manifest));
+     scope_private::report_shadows(&merged.shadowed);
+     let selected: Vec<&Pick> = merged

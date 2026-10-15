@@ -70,6 +70,8 @@ screenshots/
 
 # vault42 tool state (contains secret-file patterns)
 .42ctl/
+# scripts/vault42-pull-everything.sh: the other environments' trees and the notes, in the clear
+.vault42/
 # the team handbook carries every filled secret slot — hand it over out-of-band, never via git
 *.team.html
 

@@ -36,6 +36,7 @@ include $(MAKE_DIR)/vault-session-aliases.mk
 include $(MAKE_DIR)/fly.mk
 include $(MAKE_DIR)/vault-auth.mk
 include $(MAKE_DIR)/vault-recovery.mk
+include $(MAKE_DIR)/vault42-recover.mk
 include $(MAKE_DIR)/env.mk
 include $(MAKE_DIR)/database.mk
 include $(MAKE_DIR)/app.mk
