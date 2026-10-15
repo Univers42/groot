@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
 # The site image's nginx template (apps/opposite-osiris/docker/services/web/default.conf.template)
-# on the real nginx base image, against a fixture site: every response keeps the security
-# headers, fingerprinted assets are immutable, and a missing page gets the site's own 404.
+# on the real nginx base image, against a fixture site served by scripts/serve-site.sh: every
+# response keeps the security headers, fingerprinted assets are immutable, a missing page gets the
+# site's own 404, and the local TLS proxy in front keeps all of it.
 # Needs a Docker daemon, so it lives outside scripts/tests (whose CI job has none).
 #
 # Run (bats in a container, talking to this machine's daemon; the repo at its own path because
@@ -15,9 +16,9 @@ bats_require_minimum_version 1.5.0
 
 setup_file() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  dockerfile="$ROOT/apps/opposite-osiris/docker/services/web/Dockerfile"
-  IMAGE="$(awk '/^FROM .*nginx.* AS runtime/ {print $2}' "$dockerfile")"
-  [[ -n "$IMAGE" ]] || { echo "no nginx runtime stage in $dockerfile" >&2; return 1; }
+  PORT=4391
+  CONTAINER="groot-serve-site-$PORT"
+  export PORT CONTAINER
   SITE="$(mktemp -d "$ROOT/tests/site-nginx/.tmp.XXXXXX")"
   mkdir -p "$SITE/_astro" "$SITE/fonts" "$SITE/legal"
   echo '<p>home</p>' >"$SITE/index.html"
@@ -25,30 +26,26 @@ setup_file() {
   echo '<p>legal</p>' >"$SITE/legal/index.html"
   echo 'console.log(1)' >"$SITE/_astro/app.js"
   echo 'font' >"$SITE/fonts/face.woff2"
+  head -c 4096 /dev/zero | tr '\0' 'a' | sed 's/^/<p>/' >"$SITE/legal/long.html"
   chmod -R a+rX "$SITE"
-  CONTAINER="$(docker run -d --rm \
-    -e OO_AUTH_UPSTREAM=http://127.0.0.1:9 -e OO_BAAS_UPSTREAM=http://127.0.0.1:9 -e OO_RESOLVER=127.0.0.11 \
-    -e NGINX_ENVSUBST_FILTER='^OO_' -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx/conf.d \
-    -v "$ROOT/apps/opposite-osiris/docker/services/web/default.conf.template:/etc/nginx/templates/default.conf.template:ro" \
-    -v "$SITE:/usr/share/nginx/html:ro" "$IMAGE")"
-  export ROOT SITE CONTAINER
-  for _ in $(seq 50); do
-    docker exec "$CONTAINER" curl -sf -o /dev/null http://127.0.0.1:8080/ && return 0
-    sleep 0.2
-  done
-  docker logs "$CONTAINER" >&2
-  return 1
+  SERVE_SITE_DIST="$SITE" bash "$ROOT/scripts/serve-site.sh" start "$PORT" >/dev/null
+  export ROOT SITE
 }
 
 teardown_file() {
-  docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+  bash "$ROOT/scripts/serve-site.sh" stop "$PORT"
   rm -rf "$SITE"
 }
 
 # Prints the status line, the headers and the body of one request from inside the container
-# (curl -i: busybox wget prints no body for an error status).
+# (curl -i: busybox wget prints no body for an error status), from nginx's own listener.
+# tls_fetch prints the headers only, through the TLS proxy the site audits measure.
 fetch() {
   docker exec "$CONTAINER" curl -s -i "http://127.0.0.1:8080$1" | tr -d '\r'
+}
+
+tls_fetch() {
+  docker exec "$CONTAINER" curl -sk -D - -o /dev/null -H 'Accept-Encoding: gzip' "https://127.0.0.1:8443$1" | tr -d '\r'
 }
 
 has_security_headers() {
@@ -92,4 +89,11 @@ has_security_headers() {
   out="$(fetch /)"
   grep -qi '^Permissions-Policy: ' <<<"$out"
   run ! grep -qi 'web-share' <<<"$out"
+}
+
+@test "the local TLS server passes the headers through and keeps gzip (HTTP/1.1 upstream)" {
+  out="$(tls_fetch /legal/long.html)"
+  grep -q '^HTTP/1.1 200' <<<"$out"
+  has_security_headers "$out"
+  grep -qi '^Content-Encoding: gzip' <<<"$out"
 }
