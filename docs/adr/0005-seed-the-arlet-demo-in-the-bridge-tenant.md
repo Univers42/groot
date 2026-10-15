@@ -1,6 +1,7 @@
 # 0005. Seed the Arlet demo into the bridge's tenant, with a reset that only deletes what it made
 
-- Status: proposed (blocked on one input: the user's exclusive local-backend window, L1)
+- Status: accepted for baas as amended below (2026-10-16). The reset and the L1 window are
+  superseded there; they still describe a local run
 - Date: 2026-10-15
 - Deciders: devil (rulings of 2026-10-15, `docs/redesign/verdicts/phase1-devil.md`); the user
   records the backend window and runs the baas seed
@@ -66,3 +67,26 @@
 - Until L1 is recorded, Phase 2 does not run, and the captures and tour that depend on it
   (Phase 4) show placeholders. The site states this ("The recording is made from the demo
   account and lands with it").
+
+## Amendment (2026-10-16): baas directly, additive only
+
+- **Why:** the user answered L1 without a local grobase (D-039): seed straight into the baas VM,
+  never destroy what is there. The devil re-ruled PROCEED-WITH-CONDITIONS
+  (`docs/redesign/verdicts/phase2-baas-submission.md`, conditions 1–12).
+- **There is no reset on baas.** The teardown in Decision applies to a local target only. Leftover
+  spike objects stay unless the user records otherwise.
+- **Privileged writes run in the VM**, from `scripts/demo/vm/vm-bootstrap.sh`, which
+  `scripts/demo/seed-baas.sh` ships over `ssh b2b`. They are: the demo databases and their logins,
+  the mounts (`POST /admin/v1/databases` against Kong inside the VM), the two GoTrue users, and
+  the workspace, member and link rows. Pages still go through the bridge as Inès. Registering
+  over ssh does not pass the Funnel, so WAF rule 10130, which denies `/admin/v1/*` there, is not
+  in the path. The user runs the seed knowing that.
+- **The schema and data load as the demo login** (`psql -1 ON_ERROR_STOP`), with a `demo_schema`
+  fingerprint that refuses a changed file. Mongo loads as the demo user, with `$setOnInsert`
+  upserts.
+- **G2 runs on the target itself.** Before its DSN is registered, the demo login must fail to read
+  `auth.users` from the platform database.
+- **Invariance replaces G1.** Every row that existed before the run still exists afterwards, and
+  the demo rows are exactly 2 users, 2 mounts, 2 workspaces, 3 members and 2 links.
+- **Proof:** `tests/demo-seed/vm-bootstrap.bats`, run against a throwaway postgres 16, mongo 7 and a
+  fake Kong. The run is human-run: `--only spike` first, then the full dataset.
