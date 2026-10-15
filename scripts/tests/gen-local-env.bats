@@ -27,6 +27,7 @@ VITE_BAAS_REALTIME_TOKEN=rt-tenant-token
 OSIONOS_BRIDGE_EMAIL_HASH_SALT=salt-keep
 DEMO_LOGIN_PASSWORD=demo-keep
 OSIONOS_IDE_TOKEN_SECRET=ide-secret-keep
+AUTH_LINK_SIGNING_KEY=link-key-keep
 VITE_BAAS_URL=https://localhost:3001
 LOCAL
   chmod 600 "$OUT"
@@ -247,4 +248,37 @@ stale_kong() { sed -i 's/^SB_KONG_KEY=.*/SB_KONG_KEY=anon-OLD/' "$OUT"; }
   run bash "$SCRIPT" --sync
   [ "$status" -eq 0 ]
   [ "$(val "$OUT" VITE_BAAS_KONG_KEY)" = "anon-A" ]
+}
+
+@test "--sync: an .env.local without AUTH_LINK_SIGNING_KEY gets one minted, named, never printed" {
+  sed -i '/^AUTH_LINK_SIGNING_KEY=/d' "$OUT"
+  run bash "$SCRIPT" --sync
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"minted AUTH_LINK_SIGNING_KEY"* ]]
+  [[ "$output" == *"restart auth-gateway"* ]]
+  minted="$(val "$OUT" AUTH_LINK_SIGNING_KEY)"
+  [[ "$minted" =~ ^[A-Za-z0-9]{48}$ ]]
+  [[ "$output" != *"$minted"* ]]
+  [ "$(val "$OUT" OSIONOS_IDE_TOKEN_SECRET)" = "ide-secret-keep" ]
+}
+
+@test "--sync: an existing AUTH_LINK_SIGNING_KEY is never re-minted" {
+  run bash "$SCRIPT" --sync
+  [ "$status" -eq 0 ]
+  [ "$(val "$OUT" AUTH_LINK_SIGNING_KEY)" = "link-key-keep" ]
+}
+
+@test "--check: a missing AUTH_LINK_SIGNING_KEY exits 1 and names it" {
+  sed -i '/^AUTH_LINK_SIGNING_KEY=/d' "$OUT"
+  run bash "$SCRIPT" --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"missing AUTH_LINK_SIGNING_KEY"* ]]
+}
+
+@test "generate: a fresh .env.local carries a 48-char AUTH_LINK_SIGNING_KEY" {
+  rm -f "$OUT"
+  printf 'JWT_SECRET=jwt-A\nANON_KEY=anon-A\nSERVICE_ROLE_KEY=svc-A\n' > "$GRO_ENV"
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$(val "$OUT" AUTH_LINK_SIGNING_KEY)" =~ ^[A-Za-z0-9]{48}$ ]]
 }
