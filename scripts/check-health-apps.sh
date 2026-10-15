@@ -62,7 +62,7 @@ done <<EOF
 opposite-osiris|https://localhost:4322|https://localhost:4322|$PROD_WEBSITE|$PROD_WEBSITE
 osionos|https://localhost:3001|https://localhost:3001|$PROD_OSIONOS|$PROD_OSIONOS
 osionos-bridge|https://localhost:4000|https://localhost:4000/api/auth/bridge/health|$PROD_GROBASE|$PROD_GROBASE/api/auth/bridge/health
-auth-gateway|https://localhost:8787|https://localhost:8787/api/auth/availability|$PROD_AUTH|$PROD_AUTH/api/auth/availability
+auth-gateway|https://localhost:8787|https://localhost:8787/api/auth/health|$PROD_AUTH|$PROD_AUTH/api/auth/health
 grobase (Kong)|http://127.0.0.1:8000|http://127.0.0.1:8000/auth/v1/health|$PROD_GROBASE|$PROD_GROBASE/auth/v1/health
 grobase (TLS)|https://localhost:8444|https://localhost:8444/auth/v1/health||
 mail|https://localhost:3002|https://localhost:3002||

@@ -512,6 +512,8 @@ services:
       PUBLIC_BAAS_URL: http://mini-baas-kong:8000
       OSIONOS_BRIDGE_URL: http://osionos-bridge:4000/api/auth/bridge/session
       PUBLIC_SITE_URL: https://localhost:${OPPOSITE_OSIRIS_HOST_PORT:-4322}
+      # Stays false locally until the confirm page ships (verdict B C13): turning it on
+      # before /auth/confirm exists would mail links to a page that cannot spend them.
       AUTH_REQUIRE_EMAIL_VERIFICATION: ${AUTH_REQUIRE_EMAIL_VERIFICATION:-false}
       PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION: ${PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION:-false}
       # Turnstile config used to live in opposite-osiris/.env.local (now removed).
@@ -520,13 +522,21 @@ services:
       # `env_file:`, so an empty default would clobber the Vault-fetched value.
       # TURNSTILE_SECRET_KEY is injected at up-time from ./.env.local.
       TURNSTILE_BYPASS_LOCAL: ${TURNSTILE_BYPASS_LOCAL:-true}
+      # grobase's SMTP names (auth-api.yml), so one vocabulary configures GoTrue and the
+      # gateway. SMTP_SECURE empty = derived from the port (465 TLS, 587 STARTTLS, else
+      # plain). EMAIL_FROM may carry a display name: "Prismatica <noreply@…>".
+      # tests/e2e/run.sh refuses the pr*/dm* specs unless SMTP_HOST is Mailpit (C11).
       SMTP_HOST: ${SMTP_HOST:-mailpit}
       SMTP_PORT: ${SMTP_PORT:-1025}
-      SMTP_ENCRYPTION: ${SMTP_ENCRYPTION:-none}
-      SMTP_USERNAME: ${SMTP_USERNAME:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-noreply@mini-baas.local}
-      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Prismatica}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      EMAIL_FROM: ${EMAIL_FROM:-Prismatica <noreply@mini-baas.local>}
+      # Signed confirm/reset links (C1). AUTH_LINK_SIGNING_KEY is NOT set here: like
+      # TURNSTILE_SECRET_KEY, an empty default would clobber the value scripts/gen-local-env.sh
+      # mints into ./.env.local (env_file above). Without it the link routes answer 503.
+      AUTH_VERIFY_TOKEN_TTL_SEC: ${AUTH_VERIFY_TOKEN_TTL_SEC:-86400}
+      AUTH_RESET_TOKEN_TTL_SEC: ${AUTH_RESET_TOKEN_TTL_SEC:-3600}
       MAILPIT_API_URL: http://mailpit:8025
       MAILPIT_VERIFY_DELIVERY: ${MAILPIT_VERIFY_DELIVERY:-true}
       # --- security hardening (prismatica auth-gateway) ---
@@ -552,7 +562,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          'node -e "fetch(''http://127.0.0.1:8787/api/auth/availability'').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"',
+          'node -e "fetch(''http://127.0.0.1:8787/api/auth/health'').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"',
         ]
       interval: 30s
       start_interval: 2s
