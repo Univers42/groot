@@ -42,7 +42,7 @@ die() {
 }
 
 preflight() {
-  pgrep -f deploy-mountlist >/dev/null 2>&1 && die "deploy-mountlist is running on this host; wait for it"
+  pgrep -f '[d]eploy-mountlist' >/dev/null 2>&1 && die "deploy-mountlist is running on this host; wait for it"
   TENANT="$(docker exec "$BRIDGE_CONTAINER" printenv OSIONOS_BAAS_TENANT_ID)" ||
     die "cannot read the bridge's tenant from $BRIDGE_CONTAINER (is the link stack up?)"
   ssh -o BatchMode=yes -o ClearAllForwardings=yes "$SSH_HOST" true || die "ssh $SSH_HOST failed"

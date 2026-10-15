@@ -19,6 +19,13 @@ die() {
   exit 1
 }
 
+# deploy_mountlist_running — the [d] keeps pgrep -f from matching a shell that carries this
+# check's own code on its command line (measured 2026-10-16: an inline `ssh b2b 'pgrep -f …'`
+# saw itself and would have waited forever).
+# Caveat: any process whose command line names the script (an editor, `less`) still counts as
+# running, so the seed waits; over-reporting, never under. Close it to proceed.
+deploy_mountlist_running() { pgrep -f '[d]eploy-mountlist' >/dev/null 2>&1; }
+
 # write_window_wait — blocks until writing is allowed: never at :58-:07 (b2b-backup's hourly
 # pg_dump starts on the hour plus up to 5 min) nor 00:30-00:50 (b2b-var-gc at 00:39:55), nor
 # while deploy-mountlist runs. DEMO_IGNORE_WINDOW=1 is for the local fixture only.
@@ -36,7 +43,7 @@ write_window_wait() {
       sleep 30
       continue
     fi
-    if pgrep -f deploy-mountlist >/dev/null 2>&1; then
+    if deploy_mountlist_running; then
       say "deploy-mountlist is running; waiting"
       sleep 30
       continue
