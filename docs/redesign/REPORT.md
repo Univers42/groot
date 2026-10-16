@@ -1,6 +1,6 @@
 # Prismatica redesign: report
 
-Status on 2026-10-16.
+Status on 2026-10-16, 03:30 CEST.
 
 | Phase | State |
 |---|---|
@@ -11,7 +11,7 @@ Status on 2026-10-16.
 | 4 Media | Partial. S1, S8, S9, S11 and S12 are captured; V1, V2 and V4 are drawn. S2–S7, S10, V3 and the tour wait on the Funnel 403 (D-044) |
 | 5 Verification and reset | Code done, with devil conditions C1–C14. pr1–pr4 have not run against a stack with Mailpit |
 | 6 Quality gate | Done (results below) |
-| 7 Ship | Stopped before the production migration and the real Titan send. Nothing is pushed |
+| 7 Ship | Branches pushed for review. The migration and the Titan send were run by you; the gateway deploy is not decided |
 
 ## Before and after
 
@@ -179,12 +179,12 @@ Run on 2026-10-16 against the pinned site, 97ec501.
 
 | Item | Blocked on | Next step |
 |---|---|---|
-| S2–S7, S10, V3, the 75 s tour, st4 snapshots (D-033, D-044); the devil's P1 check | The Funnel answers 403 on the bridge's adapter-registry call: ADR 0004's deploy, owned by groot-69 | Once it is deployed, run `bash scripts/media/capture.sh` with the S2–S10 specs added, then flip `ready` in `shots.ts` |
+| S2–S7, S10, V3, the 75 s tour, st4 snapshots (D-033, D-044); the devil's P1 check | The Funnel answers 403 on the bridge's adapter-registry call (re-probed as Inès 2026-10-16 03:25: `GET /api/databases` → 403 from nginx): ADR 0004's deploy, owned by groot-69 | Once it is deployed, run `bash scripts/media/capture.sh` with the S2–S10 specs added, then flip `ready` in `shots.ts` |
 | pr1–pr4 against a real stack | A local stack with Mailpit | Run the specs above when a local window is free |
-| Push | Your approval | Submodules first: osionos `redesign/bridge-auth`, then opposite-osiris `redesign/site`. Then groot `redesign/auth` and `redesign/brief`, as PRs into `develop` |
-| `auth-session-cutoffs.sql` on baas, then the C14 check | You run it (a production migration; the classifier refused it from this session) | Outside HH:58–HH:07 and 00:30–00:50: `ssh b2b -o ClearAllForwardings=yes 'docker exec -i mini-baas-postgres psql -X -q -U postgres -d postgres -v ON_ERROR_STOP=1' < /goinfre/dlesieur/groot-auth/models/auth-session-cutoffs.sql` |
-| Fly secret `AUTH_LINK_SIGNING_KEY` for the gateway | You set it (vault42 value) | `fly secrets set`, then deploy after the push |
-| The one real Titan send | Your approval, and a `TEST_INBOX` (D-010) | Run after the push, to your inbox |
+| PRs into `develop` | Opening them (no `gh` on this seat) | Pushed 2026-10-16, after a devil PROCEED (history scan clean, every pinned gitlink reachable). Open [osionos](https://github.com/Univers42/osionos/compare/develop...redesign/bridge-auth), [prismatica](https://github.com/Univers42/prismatica/compare/develop...redesign/site), then groot [auth](https://github.com/Univers42/groot/compare/develop...redesign/auth) and [brief](https://github.com/Univers42/groot/compare/develop...redesign/brief); brief contains auth |
+| `auth-session-cutoffs.sql` on baas, then C14 | You report it applied (2026-10-16); this session cannot read baas to confirm | Confirm: `ssh b2b -o ClearAllForwardings=yes 'docker exec mini-baas-postgres psql -X -U postgres -d postgres -c "\\d public.auth_session_cutoffs"'`. C14: `GOTRUE_MAILER_OTP_EXP` on baas's GoTrue must be ≥ 86400 |
+| The gateway on Fly | App `prismatica-auth-gateway` created, `AUTH_LINK_SIGNING_KEY` staged (2026-10-16); never deployed | `deploy/fly/fly.toml` has 3 PLACEHOLDER URLs and points at `grobase-stack.fly.dev`, which the account does not have; it also needs `SERVICE_ROLE_KEY`, `OSIONOS_BRIDGE_SHARED_SECRET`, `TURNSTILE_SECRET_KEY`, `SMTP_PASS`. Where the gateway runs in production is your decision |
+| The real Titan send | You report it sent (2026-10-16), to `devfast@archicode.codes` (MX `mx1/mx2.titan.email`) | It ran through the site image at :4322, so it proves grobase → Titan delivery, not the Phase 5 templates; repeat after the gateway deploy |
 | The "Not done yet" Share line (D-037) | The bridge deploy at pin 750346b2 | Remove the line in the same change as the deploy |
 | Handed over | Their owners | osionos markdown engine `renderTaskListItems` labels (D-036). C12 teardown. C13 flip, together with `ac1` and `session.ts freshLogin` (register now answers 202) |
 | `docs/redesign/*.md` fail prettier | `make pretty-check` only selects root markdown | A separate decision about widening `SEL_MD` |
