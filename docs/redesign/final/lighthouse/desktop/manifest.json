@@ -1,0 +1,146 @@
+[
+  {
+    "url": "https://127.0.0.1:4390/",
+    "isRepresentativeRun": true,
+    "htmlPath": null,
+    "jsonPath": "127_0_0_1--2026_10_16_00_13_20.report.json.gz",
+    "summary": {
+      "performance": 1,
+      "accessibility": 1,
+      "best-practices": 1,
+      "seo": 1
+    }
+  },
+  {
+    "url": "https://127.0.0.1:4390/tour",
+    "isRepresentativeRun": true,
+    "htmlPath": null,
+    "jsonPath": "127_0_0_1-tour-2026_10_16_00_13_52.report.json.gz",
+    "summary": {
+      "performance": 1,
+      "accessibility": 1,
+      "best-practices": 1,
+      "seo": 1
+    }
+  },
+  {
+    "url": "https://127.0.0.1:4390/legal/privacy-policy",
+    "isRepresentativeRun": true,
+    "htmlPath": null,
+    "jsonPath": "127_0_0_1-legal_privacy_policy-2026_10_16_00_14_24.report.json.gz",
+    "summary": {
+      "performance": 1,
+      "accessibility": 1,
+      "best-practices": 1,
+      "seo": 1
+    }
+  },
+  {
+    "url": "https://127.0.0.1:4390/legal/terms",
+    "isRepresentativeRun": true,
+    "htmlPath": null,
+    "jsonPath": "127_0_0_1-legal_terms-2026_10_16_00_14_45.report.json.gz",
+    "summary": {
+      "performance": 1,
+      "accessibility": 1,
+      "best-practices": 1,
+      "seo": 1
+    }
+  },
+  {
+    "url": "https://127.0.0.1:4390/legal/cookies",
+    "isRepresentativeRun": true,
+    "htmlPath": null,
+    "jsonPath": "127_0_0_1-legal_cookies-2026_10_16_00_15_16.report.json.gz",
+    "summary": {
+      "performance": 1,
+      "accessibility": 1,
+      "best-practices": 1,
+      "seo": 1
+    }
+  },
+  {
+    "url": "https://127.0.0.1:4390/legal/data-rights",
+    "isRepresentativeRun": true,
+    "htmlPath": null,
+    "jsonPath": "127_0_0_1-legal_data_rights-2026_10_16_00_15_48.report.json.gz",
+    "summary": {
+      "performance": 1,
+      "accessibility": 1,
+      "best-practices": 1,
+      "seo": 1
+    }
+  },
+  {
+    "url": "https://127.0.0.1:4390/auth/confirm",
+    "isRepresentativeRun": true,
+    "htmlPath": null,
+    "jsonPath": "127_0_0_1-auth_confirm-2026_10_16_00_16_20.report.json.gz",
+    "summary": {
+      "performance": 1,
+      "accessibility": 1,
+      "best-practices": 1,
+      "seo": 0.66
+    }
+  },
+  {
+    "url": "https://127.0.0.1:4390/auth/reset-password",
+    "isRepresentativeRun": true,
+    "htmlPath": null,
+    "jsonPath": "127_0_0_1-auth_reset_password-2026_10_16_00_16_51.report.json.gz",
+    "summary": {
+      "performance": 1,
+      "accessibility": 1,
+      "best-practices": 1,
+      "seo": 0.66
+    }
+  },
+  {
+    "url": "https://127.0.0.1:4390/newsletter/confirm",
+    "isRepresentativeRun": true,
+    "htmlPath": null,
+    "jsonPath": "127_0_0_1-newsletter_confirm-2026_10_16_00_17_34.report.json.gz",
+    "summary": {
+      "performance": 1,
+      "accessibility": 1,
+      "best-practices": 1,
+      "seo": 0.66
+    }
+  },
+  {
+    "url": "https://127.0.0.1:4390/newsletter/unsubscribe",
+    "isRepresentativeRun": true,
+    "htmlPath": null,
+    "jsonPath": "127_0_0_1-newsletter_unsubscribe-2026_10_16_00_17_55.report.json.gz",
+    "summary": {
+      "performance": 1,
+      "accessibility": 1,
+      "best-practices": 1,
+      "seo": 0.66
+    }
+  },
+  {
+    "url": "https://127.0.0.1:4390/docs/",
+    "isRepresentativeRun": true,
+    "htmlPath": null,
+    "jsonPath": "127_0_0_1-docs_-2026_10_16_00_18_27.report.json.gz",
+    "summary": {
+      "performance": 1,
+      "accessibility": 1,
+      "best-practices": 1,
+      "seo": 1
+    }
+  },
+  {
+    "url": "https://127.0.0.1:4390/docs/graph/performance-tuning/",
+    "isRepresentativeRun": true,
+    "htmlPath": null,
+    "jsonPath": "127_0_0_1-docs_graph_performance_tuning_-2026_10_16_00_19_11.report.json.gz",
+    "summary": {
+      "performance": 1,
+      "accessibility": 1,
+      "best-practices": 1,
+      "seo": 1
+    }
+  }
+]
