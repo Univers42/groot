@@ -103,11 +103,25 @@ export function unsafeCreateBody(body) {
 export function unsafeVolumeBody(body) {
   const driver = String(body?.Driver ?? "local");
   if (driver !== "local") return "Driver";
-  const opts = body?.DriverOpts;
-  if (opts && typeof opts === "object" && Object.keys(opts).length) return "DriverOpts";
+  if (!isAllowedDriverOpts(String(body?.Name ?? ""), body?.DriverOpts)) return "DriverOpts";
   if (!VOLUME_NAME_RE.test(String(body?.Name ?? ""))) return "Name";
   if (!isManagedLabels(body?.Labels)) return "Labels";
   return null;
+}
+
+/** Size quotas (OSIONOS_IDE_VOLUME_QUOTA, ADR 0011 follow-up): DriverOpts are admitted only when absent
+ *  or exactly the one literal for the volume's prefix. Any other key (type, o, device) or size is the
+ *  host-bind escape this filter exists to stop, so it compares the key array and the literal, never a
+ *  pattern. Caveat: the local driver ignores `size` unless the volume directory sits on xfs+pquota; the
+ *  filter proves what the bridge may ask for, not that the daemon enforces it. */
+const VOLUME_SIZE_BY_PREFIX = [["osio-ide-home-", "2G"], ["osio-ide-vol-", "5G"]];
+function isAllowedDriverOpts(name, opts) {
+  if (opts === undefined || opts === null) return true;
+  if (typeof opts !== "object" || Array.isArray(opts)) return false;
+  const keys = Object.keys(opts);
+  if (keys.length === 0) return true;
+  const expected = VOLUME_SIZE_BY_PREFIX.find(([prefix]) => name.startsWith(prefix))?.[1];
+  return keys.length === 1 && keys[0] === "size" && expected !== undefined && opts.size === expected;
 }
 
 /** Labels must be exactly the one managed key — compared as a key array, never by
@@ -272,6 +286,17 @@ if (isMain && process.argv.includes("--selfcheck")) {
   chk("foreign volume driver rejected", unsafeVolumeBody({ Name: "x", Driver: "vieux/sshfs" }), "Driver");
   chk("provisioner home volume ok", unsafeVolumeBody({ Name: `osio-ide-home-${DIGEST}`, Driver: "local", Labels: { [MANAGED_LABEL]: "1" } }), null);
   chk("home volume DriverOpts refused", unsafeVolumeBody({ Name: `osio-ide-home-${DIGEST}`, Driver: "local", Labels: { [MANAGED_LABEL]: "1" }, DriverOpts: { type: "none", o: "bind", device: "/" } }), "DriverOpts");
+  const quotaVol = (suffix, DriverOpts) => unsafeVolumeBody({ Name: `${suffix}${DIGEST}`, Driver: "local", Labels: { [MANAGED_LABEL]: "1" }, DriverOpts });
+  chk("home volume 2G ok", quotaVol("osio-ide-home-", { size: "2G" }), null);
+  chk("workspace volume 5G ok", quotaVol("osio-ide-vol-", { size: "5G" }), null);
+  chk("empty DriverOpts ok", quotaVol("osio-ide-vol-", {}), null);
+  chk("size 3G refused", quotaVol("osio-ide-vol-", { size: "3G" }), "DriverOpts");
+  chk("home literal on a workspace name refused", quotaVol("osio-ide-vol-", { size: "2G" }), "DriverOpts");
+  chk("workspace literal on a home name refused", quotaVol("osio-ide-home-", { size: "5G" }), "DriverOpts");
+  chk("type/o/device refused", quotaVol("osio-ide-vol-", { type: "none", o: "bind", device: "/" }), "DriverOpts");
+  chk("size plus o refused", quotaVol("osio-ide-vol-", { size: "5G", o: "bind" }), "DriverOpts");
+  chk("size plus type refused", quotaVol("osio-ide-home-", { size: "2G", type: "none" }), "DriverOpts");
+  chk("array DriverOpts refused", quotaVol("osio-ide-vol-", ["size"]), "DriverOpts");
   chk("other volume prefix refused", unsafeVolumeBody({ Name: `osio-ide-data-${DIGEST}`, Driver: "local", Labels: { [MANAGED_LABEL]: "1" } }), "Name");
   chk("provisioner volume ok", unsafeVolumeBody({ Name: `osio-ide-vol-${DIGEST}`, Driver: "local", Labels: { [MANAGED_LABEL]: "1" } }), null);
   chk("unmanaged volume name rejected", unsafeVolumeBody({ Name: "other", Driver: "local" }), "Name");
