@@ -36,7 +36,7 @@ LINK_COMPOSE_ENV = GROBASE_LINK_DIR='$(GROBASE_LINK_DIR)' GROBASE_LINK_HOST_PORT
 LINK_COMPOSE = $(LINK_COMPOSE_ENV) docker compose --env-file ./.env.local
 
 link:
-## Reach grobase wherever it runs: open the path, derive ./.env.local from that grobase's secrets, start the relay (in direct mode with the local Redis/Mailpit stand-ins and the loopback Kong port; or stop it in local mode), then verify it from inside every frontend already running. The target and its kind come from GROBASE_TARGET=auto|local|ssh://…|<alias>|http(s)://… on this line, else from ./.env.grobase-link.
+## Reach grobase wherever it runs: open the path, derive ./.env.local from that grobase's secrets, start the relay (in direct mode with the local Redis/Mailpit stand-ins and the loopback Kong port, plus the IDE relay when GROBASE_IDE_SSH linked it; or stop it in local mode), then verify it from inside every frontend already running. The target and its kind come from GROBASE_TARGET=auto|local|ssh://…|<alias>|http(s)://… on this line, else from ./.env.grobase-link.
 	@$(LINK_COMPOSE) rm -sf grobase-link-hostport >/dev/null 2>&1 || true # an ssh link forwards that port itself
 	@$(LINK_SCRIPT) up
 	@if [ "$$($(LINK_SCRIPT) mode)" = local ]; then \
@@ -48,12 +48,11 @@ link:
 		docker network inspect mini-baas_mini-baas >/dev/null 2>&1 || docker network create mini-baas_mini-baas >/dev/null; \
 		if [ "$$($(LINK_SCRIPT) mode)" = direct ]; then \
 			$(LINK_COMPOSE) up -d --wait grobase-link-redis grobase-link-mailpit; \
-			$(LINK_COMPOSE) rm -sf grobase-link-ide >/dev/null 2>&1 || true; \
 		else \
 			$(LINK_COMPOSE) rm -sf grobase-link-redis grobase-link-mailpit >/dev/null 2>&1; \
 		fi; \
 		$(LINK_COMPOSE) up -d --force-recreate --wait grobase-link; \
-		if [ "$$($(LINK_SCRIPT) mode)" = ssh ]; then \
+		if [ "$$($(LINK_SCRIPT) mode)" = ssh ] || [ "$$($(LINK_SCRIPT) mode)" = direct ]; then \
 			if $(LINK_SCRIPT) ide-linked; then \
 				COMPOSE_PROFILES=link-ide $(LINK_COMPOSE) up -d --force-recreate grobase-link-ide; \
 			else \
