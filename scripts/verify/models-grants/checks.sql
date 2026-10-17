@@ -10,7 +10,7 @@
 -- privileged: every such relation anon/authenticated can touch (column grants included)
 SELECT 'privileged', count(*), coalesce(string_agg(c.relname, ' ' ORDER BY c.relname), '')
   FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
- WHERE ns.nspname = 'public' AND (c.relname LIKE 'osionos\_%' OR c.relname IN ('auth_session_cutoffs','auth_audit_events')) AND c.relkind IN ('r','p','v','m','f')
+ WHERE ns.nspname = 'public' AND (c.relname LIKE 'osionos\_%' OR c.relname IN ('auth_session_cutoffs','auth_audit_events','auth_audit_events_legacy_int')) AND c.relkind IN ('r','p','v','m','f')
    AND (has_any_column_privilege('anon', c.oid, 'SELECT') OR has_any_column_privilege('anon', c.oid, 'INSERT')
      OR has_any_column_privilege('anon', c.oid, 'UPDATE') OR has_table_privilege('anon', c.oid, 'DELETE')
      OR has_any_column_privilege('authenticated', c.oid, 'SELECT') OR has_any_column_privilege('authenticated', c.oid, 'INSERT')
@@ -19,13 +19,13 @@ SELECT 'privileged', count(*), coalesce(string_agg(c.relname, ' ' ORDER BY c.rel
 -- member_policies: policies on the set for PUBLIC (oid 0), anon or authenticated
 SELECT 'member_policies', count(*), coalesce(string_agg(c.relname || ':' || p.polname, ' ' ORDER BY 1), '')
   FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid JOIN pg_namespace ns ON ns.oid = c.relnamespace
- WHERE ns.nspname = 'public' AND (c.relname LIKE 'osionos\_%' OR c.relname IN ('auth_session_cutoffs','auth_audit_events'))
+ WHERE ns.nspname = 'public' AND (c.relname LIKE 'osionos\_%' OR c.relname IN ('auth_session_cutoffs','auth_audit_events','auth_audit_events_legacy_int'))
    AND (0::oid = ANY (p.polroles) OR p.polroles && ARRAY(SELECT oid FROM pg_roles WHERE rolname IN ('anon','authenticated')));
 
 -- service_role_gaps: tables in the set service_role cannot fully CRUD
 SELECT 'service_role_gaps', count(*), coalesce(string_agg(c.relname, ' ' ORDER BY c.relname), '')
   FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
- WHERE ns.nspname = 'public' AND (c.relname LIKE 'osionos\_%' OR c.relname IN ('auth_session_cutoffs','auth_audit_events')) AND c.relkind IN ('r','p')
+ WHERE ns.nspname = 'public' AND (c.relname LIKE 'osionos\_%' OR c.relname IN ('auth_session_cutoffs','auth_audit_events','auth_audit_events_legacy_int')) AND c.relkind IN ('r','p')
    AND NOT (has_table_privilege('service_role', c.oid, 'SELECT') AND has_table_privilege('service_role', c.oid, 'INSERT')
         AND has_table_privilege('service_role', c.oid, 'UPDATE') AND has_table_privilege('service_role', c.oid, 'DELETE'));
 

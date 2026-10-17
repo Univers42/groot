@@ -10,7 +10,7 @@ SELECT c.relname, c.relkind, c.relacl::text, c.relrowsecurity, c.relforcerowsecu
        coalesce((SELECT string_agg(p.polname || ':' || p.polcmd::text || ':' || p.polroles::text, ' ' ORDER BY p.polname)
                    FROM pg_policy p WHERE p.polrelid = c.oid), '')
   FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
- WHERE ns.nspname = 'public' AND (c.relname LIKE 'osionos\_%' OR c.relname IN ('auth_session_cutoffs','auth_audit_events')) AND c.relkind IN ('r','p','v','m','f')
+ WHERE ns.nspname = 'public' AND (c.relname LIKE 'osionos\_%' OR c.relname IN ('auth_session_cutoffs','auth_audit_events','auth_audit_events_legacy_int')) AND c.relkind IN ('r','p','v','m','f')
  ORDER BY c.relname;
 
 SELECT p.proname || '(' || pg_get_function_arguments(p.oid) || ')', p.proacl::text

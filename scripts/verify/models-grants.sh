@@ -17,13 +17,13 @@
 #
 # WHAT IT RUNS  (both scenarios drive the REAL runner, never a re-typed file list)
 #   fresh   roles -> grobase 001_initial_schema + 012 realtime hook -> shim -> runner -> checks
-#   legacy  roles -> the pre-1e407614 default privileges -> 001 -> shim -> runner
+#   legacy  roles -> the pre-1e407614 default privileges -> 001 -> shim -> an old integer-keyed audit table with rows and a blanket grant -> runner
 #           -> an old-bootstrap boot (blanket GRANT, DEFAULT revoked) -> runner -> checks
 #   Checks: c no anon/authenticated privilege on an osionos_% relation or on
 #   auth_session_cutoffs · d no policy for PUBLIC/anon/authenticated · e1/e2 service_role
 #   has full CRUD and round-trips a row · e3 it upserts a session cut-off as the
 #   auth-gateway does · e4 service_role calls auth_record_audit_event with a new-list event ·
-#   f six probes, S1-S3 on auth_session_cutoffs and A1-A3 on auth_audit_events and its RPC, refused with 42501 ·
+#   f six probes (eight in legacy), S1-S3 on auth_session_cutoffs and A1-A3 on auth_audit_events and its RPC (A4-A5, legacy only: the renamed auth_audit_events_legacy_int), refused with 42501 ·
 #   h no SECURITY DEFINER osionos_% function or auth_record_audit_event
 #   they may execute · g a second runner pass changes no ACL, policy or RLS flag ·
 #   n the final notifications type CHECK admits every type the models files declare ·
@@ -253,6 +253,11 @@ run_checks() {
 	probe "$1" A1 authenticated "SELECT event_type FROM public.auth_audit_events"
 	probe "$1" A2 anon "SELECT public.auth_record_audit_event('logout')"
 	probe "$1" A3 authenticated "INSERT INTO public.auth_audit_events (event_type) VALUES ('logout')"
+	# Only the legacy scenario plants the old-shape table the migration renames.
+	if [ "$1" = "legacy" ]; then
+		probe "$1" A4 authenticated "SELECT event_type FROM public.auth_audit_events_legacy_int"
+		probe "$1" A5 anon "SELECT event_type FROM public.auth_audit_events_legacy_int"
+	fi
 	check_count "$1" h secdef_exec
 	check_count "$1" n notify_types_missing
 	check_count "$1" r realtime_triggers
@@ -278,6 +283,9 @@ run_scenario() {
 		die "scenario" "setup/$1" "could not read ${GROBASE_REALTIME}"
 	apply "${WORK}/012.sql" || die "scenario" "setup/$1" "012_realtime_triggers_all_tables.sql"
 	apply "${FIX}/shim.sql" || die "scenario" "setup/$1" "shim.sql"
+	if [ "$1" = "legacy" ]; then
+		apply "${FIX}/legacy-audit.sql" || die "scenario" "setup/$1" "legacy-audit.sql"
+	fi
 	run_runner "$1" first
 	if [ "$1" = "legacy" ]; then
 		apply "${FIX}/legacy-reboot.sql" || die "scenario" "setup/$1" "legacy-reboot.sql"
