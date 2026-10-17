@@ -102,9 +102,9 @@ static void	write_default_passwd(void)
 	int	out;
 	int	done;
 
-	if (mkdir(PASSWD_DIR, 0755) < 0 && errno != EEXIST)
+	if (mkdir(PASSWD_DIR, 0700) < 0 && errno != EEXIST)
 		return ;
-	out = open(PASSWD_TMP, O_WRONLY | O_CREAT | O_EXCL, 0644);
+	out = open(PASSWD_TMP, O_WRONLY | O_CREAT | O_EXCL, 0600);
 	if (out < 0)
 		return ;
 	done = copy_base(out) == 0;
