@@ -38,9 +38,9 @@ osio_username_refusal() {
 # file it had, and the shell still starts.
 osio_write_identity() {
   [ -r "$PASSWD_BASE" ] || return 1
-  mkdir -p "$PASSWD_DIR" || return 1
+  mkdir -p -m 0700 "$PASSWD_DIR" || return 1
   tmp=$(mktemp "$PASSWD_DIR/passwd.XXXXXX") || return 1
-  if sed "s/^coder:/$1:/" "$PASSWD_BASE" > "$tmp" && chmod 0644 "$tmp" && mv -fT "$tmp" "$PASSWD_DIR/passwd"; then
+  if sed "s/^coder:/$1:/" "$PASSWD_BASE" > "$tmp" && chmod 0600 "$tmp" && mv -fT "$tmp" "$PASSWD_DIR/passwd"; then
     return 0
   fi
   rm -f "$tmp"
