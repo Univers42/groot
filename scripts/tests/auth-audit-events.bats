@@ -8,7 +8,7 @@
 # Caveat: the extraction is a regex, not a parser. It reads (audit|flowAudit)( first arguments
 # that are quoted literals, ternaries of them, or a template whose only substitution is
 # ${action} (expanded over the protectedAction(...) names), plus the last quoted argument of
-# sendMessage( / signedLink( calls. An event name built any other way is reported as
+# sendMessage( / signedLink( / revoke( calls. An event name built any other way is reported as
 # "<dynamic ...>" and fails the test (over-reporting, the safe direction); a call spread over
 # two lines before its first comma is not seen (under-reporting).
 #
@@ -39,7 +39,7 @@ gateway_events() {
   actions="$(mjs_grep "$dir" -oE "protectedAction\(request, response, '[a-z_]+'" | grep -oE "'[a-z_]+'$" | tr -d "'")"
   {
     mjs_grep "$dir" -oE "(audit|flowAudit)\([^,)]*" | grep -oE "'[a-z_]+'|\`[^\`]*\`"
-    mjs_grep "$dir" -E "(sendMessage|signedLink)\(" | sed -nE "s/.*'([a-z_]+)'\)+.*/'\1'/p"
+    mjs_grep "$dir" -E "(sendMessage|signedLink|revoke)\(" | sed -nE "s/.*'([a-z_]+)'\)+.*/'\1'/p"
   } | sort -u | while IFS= read -r tok; do
     case "$tok" in
     \`*\${action}*)
@@ -111,13 +111,13 @@ JS
   [ "$output" = planted_unknown_event ]
 }
 
-@test "a planted unknown ternary branch, template action, sendMessage and signedLink name are reported" {
+@test "a planted unknown ternary branch, template action, sendMessage, signedLink and revoke name are reported" {
   fixture_gateway
   printf "audit(ok ? 'login_success' : 'planted_ternary', {});\n" >>"$FIX/auth/mail.mjs"
   printf "await protectedAction(request, response, 'planted_action', async () => {});\n" >>"$FIX/gateway.mjs"
-  printf "sendMessage(e, 'x', {}, 'planted_message');\nsignedLink('t', e, r, 'planted_link');\n" >>"$FIX/auth/mail.mjs"
+  printf "sendMessage(e, 'x', {}, 'planted_message');\nsignedLink('t', e, r, 'planted_link');\nrevoke(record, 'planted_revoke');\n" >>"$FIX/auth/mail.mjs"
   run missing_events "$FIX" "$MIGRATION"
-  [ "$output" = "$(printf '%s\n' planted_action_turnstile_failed planted_link planted_message planted_ternary)" ]
+  [ "$output" = "$(printf '%s\n' planted_action_turnstile_failed planted_link planted_message planted_revoke planted_ternary)" ]
 }
 
 @test "a template with another substitution is reported as dynamic, not skipped" {
