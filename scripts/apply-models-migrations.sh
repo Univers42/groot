@@ -83,7 +83,7 @@
 #   everything: it revokes what earlier files and older boots granted.
 #   users-pii-grants-migration.sql runs after it, last of all: it fixes the
 #   public.users column grants (no anon email, no password_hash for anyone).
-#   apply-models.sh gets the same order from the file name sorting last.
+#   apply-models.sh runs it last too, by name (GRANTS_LAST), not by glob collation.
 #
 # Usage:  sh scripts/apply-models-migrations.sh [--check]
 #           --check  report unapplied DDL and exit non-zero; change nothing.
