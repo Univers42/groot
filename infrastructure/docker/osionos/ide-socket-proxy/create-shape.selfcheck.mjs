@@ -142,12 +142,20 @@ export function shapeFailures() {
     ["Cmd string", { ...SHELL, Cmd: "sh" }],
     ["Env without a name", { ...SHELL, Env: ["=x"] }],
     ["exec HOME elsewhere", { ...SHELL, Env: ["HOME=/tmp/evil"] }],
+    ["exec TZ empty", { ...SHELL, Env: ["TZ="] }],
+    ["exec TZ with a space", { ...SHELL, Env: ["TZ=Europe/Par is"] }],
+    ["exec TZ with a newline", { ...SHELL, Env: ["TZ=UTC\nLD_PRELOAD=/x"] }],
+    ["exec TZ over 64", { ...SHELL, Env: [`TZ=${"A".repeat(65)}`] }],
+    ["exec TZ twice", { ...SHELL, Env: ["TZ=UTC", "TZ=Europe/Paris"] }],
+    ["exec TZ with a dollar", { ...SHELL, Env: ["TZ=$(id)"] }],
     ["exec HOME empty", { ...SHELL, Env: ["HOME="] }],
     ["Detach", { ...SHELL, Detach: false }],
   ];
   chk("exec shell ok", execShapeViolation(SHELL), null);
   chk("exec HOME as pinned ok", execShapeViolation({ ...SHELL, Env: ["TERM=xterm", "HOME=/home/coder"] }), null);
   const { Env: _omitted, ...noEnv } = SHELL;
+  chk("exec one TZ ok", execShapeViolation({ ...SHELL, Env: ["TERM=xterm", "TZ=America/Argentina/Buenos_Aires"] }), null);
+  chk("exec TZ with + and digits ok", execShapeViolation({ ...SHELL, Env: ["TZ=Etc/GMT+5"] }), null);
   chk("exec without Env ok", execShapeViolation(noEnv), null);
   for (const [label, body] of EXEC_REFUSALS) refuse(`exec ${label}`, execShapeViolation(body));
 

@@ -30,8 +30,10 @@ import {
   buildShellExecSpec,
   buildFsAgentExecSpec,
 } from "../../apps/osionos/app/scripts/ide-sandbox-spec.mjs";
+import { volumeDriverOpts } from "../../apps/osionos/app/scripts/ide-docker.mjs";
 import { buildInitSpec } from "../../apps/osionos/app/scripts/ide-volume-init.mjs";
 import { createShapeViolation, execShapeViolation, shapeLimits } from "../../infrastructure/docker/osionos/ide-socket-proxy/create-shape.mjs";
+import { unsafeVolumeBody } from "../../infrastructure/docker/osionos/ide-socket-proxy/proxy.mjs";
 import { initShapeViolation } from "../../infrastructure/docker/osionos/ide-socket-proxy/init-shape.mjs";
 
 const LIMITS = shapeLimits({});
@@ -92,6 +94,9 @@ assertExec("tunnel", buildPortTunnelExecSpec(3000));
 assertExec("shell", buildShellExecSpec());
 assertExec("shell with a username", buildShellExecSpec({ username: "dylan" }));
 assertExec("safe shell", buildShellExecSpec({ safe: true, username: "dylan" }));
+assertExec("shell with a time zone", buildShellExecSpec({ username: "dylan", tz: "Europe/Paris" }));
+assertExec("safe shell with a time zone", buildShellExecSpec({ safe: true, tz: "America/Argentina/Buenos_Aires" }));
+assertExec("shell with an invalid time zone (UTC)", buildShellExecSpec({ tz: "not a zone;" }));
 assertExec("fs-agent", buildFsAgentExecSpec());
 // COPIED, not imported: lspExecSpec is a private function of bridge-ide-exec.mjs.
 // Its literal shape is lspExecSpec in that file; keep the copy in step with it. No User: ADR 0011.
@@ -102,6 +107,15 @@ assertExec("lsp", {
   AttachStderr: true,
   Cmd: ["typescript-language-server", "--stdio"],
 });
+
+// The quota literals the bridge sends must be exactly what the proxy admits, flag on or off.
+for (const [flag, prefix] of [["on", "osio-ide-home-"], ["on", "osio-ide-vol-"], ["off", "osio-ide-home-"], ["off", "osio-ide-vol-"]]) {
+  const name = `${prefix}${"a".repeat(32)}`;
+  const DriverOpts = volumeDriverOpts(name, { OSIONOS_IDE_VOLUME_QUOTA: flag });
+  count += 1;
+  const got = unsafeVolumeBody({ Name: name, Driver: "local", Labels: { "osio.ide.managed": "1" }, ...(DriverOpts ? { DriverOpts } : {}) });
+  if (got !== null) fail.push(`volume ${prefix} quota ${flag}: ${got}`);
+}
 
 // An exec that names a User is refused by the proxy; the bridge must never send one.
 count += 1;
