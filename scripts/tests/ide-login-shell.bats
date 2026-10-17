@@ -224,7 +224,7 @@ launch_plain() { printf '%s\n' "$IDENTITY_PROBE" | /usr/local/bin/osio-login; }
   run grep -q '^coder:' "$PASSWD"
   [ "$status" -ne 0 ]
   [ "$(grep -v '^dylan:' "$PASSWD")" = "$(grep -v '^coder:' /etc/passwd.base)" ]
-  [ "$(stat -c %a "$PASSWD")" = 644 ]
+  [ "$(stat -c %a "$PASSWD")" = 600 ]
 }
 
 @test "the shell gets USER and LOGNAME, keeps HOME untouched, and never sees OSIO_USER" {
