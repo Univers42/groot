@@ -37,6 +37,11 @@ endif
 # shared `export A B C ...` list re-triggers the same GNU Make 4.4.1 recursion
 # guard on the whole batch, not just this variable (reproduced empirically).
 export TRACK_BINOCLE_BIND_ADDR
+# "1" when the Docker daemon runs rootless, else empty. Its root is the invoking user, and
+# that user's own uid/gid has no mapping inside a container, so `--user $(id -u)` or a compose
+# `user:` with it fails "cannot setuid to unmapped uid" (42 workstations, 2026-10-08 and
+# 2026-10-17). Recursive, so `docker info` runs only when a recipe reads it.
+DOCKER_ROOTLESS = $(shell docker info -f '{{.SecurityOptions}}' 2>/dev/null | grep -q rootless && echo 1)
 COMPOSE_PROFILES ?= dev
 export COMPOSE_PROFILES COMPOSE_PROGRESS BUILDKIT_PROGRESS BUILDX_BUILDER DOCKER_BUILDKIT COMPOSE_DOCKER_CLI_BUILD COMPOSE_BAKE REGISTRY_CACHE_PREFIX
 DOCKER_PULL_ATTEMPTS ?= 1
