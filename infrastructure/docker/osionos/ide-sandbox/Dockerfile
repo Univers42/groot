@@ -148,6 +148,18 @@ RUN printf 'ulimit -c 0\n' > /etc/profile.d/00-nocore.sh \
 RUN useradd --uid 10001 --create-home --shell /bin/bash coder \
     && mkdir -p /workspace && chown coder:coder /workspace
 
+# Login shell choice without /etc: `chsh -s` saves a path under ~/.config/osio and osio-login (the
+# PTY Cmd) starts it, else bash. The setuid /usr/bin/chsh cannot work here (read-only /etc,
+# no-new-privileges), so it is removed and the shim shadows nothing. The persistent home volume
+# at /home/coder is what makes the choice outlive a box.
+COPY osio-shell.sh /usr/local/lib/osio-shell.sh
+COPY osio-login.sh /usr/local/bin/osio-login
+COPY osio-chsh.sh /usr/local/bin/chsh
+RUN rm -f /usr/bin/chsh \
+    && chmod 0644 /usr/local/lib/osio-shell.sh \
+    && chmod 0755 /usr/local/bin/osio-login /usr/local/bin/chsh \
+    && ! find / -xdev -name chsh -perm /6000 -print | grep -q .
+
 # The in-sandbox filesystem agent (P4): watches /workspace and streams
 # create/modify/delete events for the gateway, applying the ignore set so a
 # `pip install` never floods the page store. Launched per-session by the gateway.

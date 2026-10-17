@@ -15,7 +15,7 @@
 # conditions as runnable probes. Run AFTER `bootstrap.sh` with the `ide`
 # profile up. Probes run inside TWO throwaway boxes (ide-probe-a/b)
 # in the PRODUCTION shape (uid 10001, /workspace on named volume,
-# CapDrop ALL, no-new-privileges, tmpfs /tmp 64m + /home/coder 64m,
+# CapDrop ALL, no-new-privileges, tmpfs /tmp 64m, per-user home volume at /home/coder,
 # pids 512, memory 1 GiB swap equal, 1 CPU). Positive controls run first
 # so a broken probe tool never reads as a pass; every probe prints exactly
 # one PASS/FAIL/SKIP line, and the RESULT line checks the total against EXPECTED.
@@ -34,7 +34,9 @@ RUNNER_PROBE=ide-runner-sigusr1-probe
 NAT_CHECK=/usr/local/sbin/osionos-ide-egress-nat
 PLANE_PROJECT=osionos-ide-plane
 pass=0; fail=0; skipped=0
-EXPECTED=44
+# 44 + 4 persistent-home probes (a)-(d); the green line is `RESULT: 47 passed, 0 failed, 1 skipped (expected 48)`
+# where the one skip is the runner image, absent on a VM without the code runner.
+EXPECTED=48
 # The VM's default gateway (user-mode QEMU: 10.0.2.2 is the physical host's loopback, where 4242
 # is the VM's own forwarded ssh). Elsewhere set a port that listens on that gateway.
 GATEWAY_PORT="${OSIONOS_IDE_VERIFY_GATEWAY_PORT:-4242}"
@@ -94,7 +96,7 @@ plane_no_reach() {
 # their volumes, and the runner probe container.
 cleanup() {
   $IDE rm -f "$BOX_A" "$BOX_B" >/dev/null 2>&1
-  $IDE volume rm "osio-ide-vol-$BOX_A" "osio-ide-vol-$BOX_B" >/dev/null 2>&1
+  $IDE volume rm "osio-ide-vol-$BOX_A" "osio-ide-vol-$BOX_B" "osio-ide-home-$BOX_A" "osio-ide-home-$BOX_B" >/dev/null 2>&1
   docker rm -f "$RUNNER_PROBE" >/dev/null 2>&1
 }
 trap cleanup EXIT
@@ -106,14 +108,19 @@ trap cleanup EXIT
 # catches drift in the bridge, this copy can still lag it.
 start_box() {
   $IDE rm -f "$1" >/dev/null 2>&1
-  $IDE volume rm "osio-ide-vol-$1" >/dev/null 2>&1
+  $IDE volume rm "osio-ide-vol-$1" "osio-ide-home-$1" >/dev/null 2>&1
+  run_box "$1"
+}
+
+# The box alone, volumes kept: the home must outlive the container.
+run_box() {
   $IDE run -d --name "$1" \
     --network "$SANDBOX_NET" \
     --user 10001:10001 --workdir /workspace \
     --cap-drop ALL --security-opt no-new-privileges:true --read-only \
     -v "osio-ide-vol-$1":/workspace \
+    -v "osio-ide-home-$1":/home/coder \
     --tmpfs /tmp:size=64m,mode=1777 \
-    --tmpfs /home/coder:size=64m,mode=0700,uid=10001,gid=10001 \
     --pids-limit 512 --memory 1g --memory-swap 1g --cpus 1 \
     --ulimit core=0:0 --ulimit nproc=512:512 --ulimit nofile=4096:4096 \
     --restart no \
@@ -281,6 +288,18 @@ deny "test -S /var/run/docker.sock" "no docker socket in sandbox"
 deny "command -v docker"            "no docker binary in sandbox"
 deny "unshare -Ur id"               "unprivileged userns blocked (seccomp)"
 deny "cat /proc/1/root/etc/shadow"  "no host fs escape"
+
+echo "== Persistent home (devil verdict ide-user-shell, H8) =="
+# The home is a named volume per user at the constant /home/coder; /etc stays read-only.
+# (a) copy-up gave it to uid 10001. (b) the volumes are per box here as per user in production.
+# (c) the file outlives the container. (d) the one writable-looking tree outside it is not.
+if sx 'test "$(stat -c %u /home/coder)" = 10001 && echo a >/home/coder/probe-a && rm /home/coder/probe-a'; then ok "home is owned by 10001 and writable"; else bad "home is owned by 10001 and writable"; fi
+sx 'echo marker >/home/coder/probe-marker' >/dev/null
+if $IDE exec "$BOX_B" sh -c 'echo b >/home/coder/probe-b && test ! -e /home/coder/probe-marker' >/dev/null 2>&1; then ok "box B cannot read box A's home (distinct volumes)"; else bad "box B cannot read box A's home (distinct volumes)"; fi
+$IDE rm -f "$BOX_A" >/dev/null 2>&1
+run_box "$BOX_A" || printf 'warning: %s failed to restart — probes fail closed\n' "$BOX_A" >&2
+if [ "$(sx 'cat /home/coder/probe-marker')" = "marker" ]; then ok "a file in the home survives box remove and recreate"; else bad "a file in the home survives box remove and recreate"; fi
+deny "touch /etc/probe-x" "/etc is read-only (touch /etc/x denied)"
 
 echo "== Resource caps (conditions 14,15,16) =="
 if [ "$(sx 'ulimit -c')" = "0" ]; then ok "core dumps disabled (RLIMIT_CORE=0)"; else bad "core dumps disabled (RLIMIT_CORE=0)"; fi

@@ -16,7 +16,7 @@
 // proxy.mjs --selfcheck imports the fixtures below; the image does not ship this file.
 
 import { fileURLToPath } from "node:url";
-import { createShapeViolation, execShapeViolation, shapeLimits } from "./create-shape.mjs";
+import { createShapeViolation, execShapeViolation, homeVolumeFor, shapeLimits } from "./create-shape.mjs";
 
 const LIMITS = shapeLimits(process.env);
 const MANAGED_LABEL = "osio.ide.managed";
@@ -27,6 +27,8 @@ export const DIGEST = "a".repeat(32);
 const OWNER = "11111111-1111-4111-8111-111111111111";
 const WORKSPACE = "22222222-2222-4222-8222-222222222222";
 // The bridge's own, unversioned path (ide-docker.mjs); the versioned form is checked below.
+const WORKSPACE_MOUNT = { Type: "volume", Source: `osio-ide-vol-${DIGEST}`, Target: "/workspace" };
+const OTHER_OWNER = "33333333-3333-4333-8333-333333333333";
 export const CANON_PATH = `/containers/create?name=ide-${DIGEST}`;
 export const mk = () => ({
   Image: LIMITS.image,
@@ -42,8 +44,8 @@ export const mk = () => ({
   HostConfig: {
     NetworkMode: LIMITS.sandboxNet, CapDrop: ["ALL"], SecurityOpt: ["no-new-privileges:true"],
     ReadonlyRootfs: true,
-    Mounts: [{ Type: "volume", Source: `osio-ide-vol-${DIGEST}`, Target: "/workspace" }],
-    Tmpfs: { "/tmp": "size=64m,mode=1777", "/home/coder": "size=64m,mode=0700,uid=10001,gid=10001" },
+    Mounts: [WORKSPACE_MOUNT, { Type: "volume", Source: homeVolumeFor(OWNER), Target: "/home/coder" }],
+    Tmpfs: { "/tmp": "size=64m,mode=1777" },
     PidsLimit: 512, Memory: 1073741824, MemorySwap: 1073741824, NanoCpus: 1000000000,
     Ulimits: [{ Name: "core", Soft: 0, Hard: 0 }, { Name: "nproc", Soft: 512, Hard: 512 }, { Name: "nofile", Soft: 4096, Hard: 4096 }],
     RestartPolicy: { Name: "no" },
@@ -65,7 +67,14 @@ function shapeFailures() {
   // failure names the single field that stopped being the bridge's shape.
   const CREATE_REFUSALS = [
     ["volume DriverConfig", host({ Mounts: [{ Type: "volume", Source: `osio-ide-vol-${DIGEST}`, Target: "/workspace", VolumeOptions: { DriverConfig: { Name: "local", Options: { o: "bind", device: "/" } } } }] })],
-    ["other volume digest", host({ Mounts: [{ Type: "volume", Source: `osio-ide-vol-${"b".repeat(32)}`, Target: "/workspace" }] })],
+    ["other volume digest", host({ Mounts: [{ ...WORKSPACE_MOUNT, Source: `osio-ide-vol-${"b".repeat(32)}` }, mk().HostConfig.Mounts[1]] })],
+    ["workspace mount alone", host({ Mounts: [WORKSPACE_MOUNT] })],
+    ["another owner's home hash", host({ Mounts: [WORKSPACE_MOUNT, { ...mk().HostConfig.Mounts[1], Source: homeVolumeFor(OTHER_OWNER) }] })],
+    ["a third mount", host({ Mounts: [...mk().HostConfig.Mounts, { Type: "volume", Source: `osio-ide-vol-${"c".repeat(32)}`, Target: "/data" }] })],
+    ["home Target not /home/coder", host({ Mounts: [WORKSPACE_MOUNT, { ...mk().HostConfig.Mounts[1], Target: "/home/other" }] })],
+    ["home Type bind", host({ Mounts: [WORKSPACE_MOUNT, { ...mk().HostConfig.Mounts[1], Type: "bind" }] })],
+    ["mounts in the wrong order", host({ Mounts: [...mk().HostConfig.Mounts].reverse() })],
+    ["home tmpfs next to the home mount", host({ Tmpfs: { ...mk().HostConfig.Tmpfs, "/home/coder": "size=64m,mode=0700,uid=10001,gid=10001" } })],
     ["egress net", host({ NetworkMode: "osio-ide-egress-net" })],
     ["VolumesFrom", host({ VolumesFrom: ["x"] })],
     ["PortBindings", host({ PortBindings: {} })],
