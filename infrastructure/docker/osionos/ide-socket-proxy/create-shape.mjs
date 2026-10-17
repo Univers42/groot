@@ -49,6 +49,7 @@ const REQUIRED_TMPFS_KEYS = ["/tmp"];
 const HOME_TARGET = "/home/coder";
 const REQUIRED_ULIMIT_NAMES = ["core", "nproc", "nofile"];
 // No "User": an exec inherits the create User, and an explicit one would override it (verdict E4).
+const EXEC_TZ_RE = /^TZ=[A-Za-z0-9_+/-]{1,64}$/;
 const ALLOWED_EXEC_KEYS = ["Cmd", "WorkingDir", "AttachStdin", "AttachStdout", "AttachStderr", "Tty", "Env"];
 
 // Ponytail: the 8 Env strings and their order are the bridge's literal output;
@@ -209,12 +210,16 @@ export function execShapeViolation(body) {
 
   if ("Env" in body) {
     if (!Array.isArray(body.Env)) return "Env";
+    if (body.Env.filter((e) => typeof e === "string" && e.startsWith("TZ=")).length > 1) return "Env";
     for (const e of body.Env) {
       if (typeof e !== "string") return "Env";
       if (!/^[A-Za-z_][A-Za-z0-9_]*=/.test(e)) return "Env";
       // HOME is pinned once, in the create Env (ADR 0009): runc takes it from there for every
       // exec, whatever /etc/passwd says, so no exec may carry a different one.
       if (e.startsWith("HOME=") && e !== "HOME=/home/coder") return "Env";
+      // The browser zone rides the shell exec only (never the create Env), once, and with the same
+      // character set the bridge validates (ide-sandbox-spec.mjs normalizeTimeZone).
+      if (e.startsWith("TZ=") && !EXEC_TZ_RE.test(e)) return "Env";
     }
   }
 
