@@ -88,8 +88,9 @@ probe() {
   return 0
 }
 # C1 - each plane container runs the image shipped from here, by config + layers, not .Id
-# (containerd ids it by manifest). Ponytail: history/timestamps uncompared, see deploy-plane.sh.
-FINGERPRINT='{{json .Config}} {{json .RootFS.Layers}}'
+# (containerd ids it by manifest); image-fingerprint.sh says what is compared.
+# shellcheck source=infrastructure/docker/osionos/ide-sandbox/image-fingerprint.sh
+. "$(dirname "$0")/image-fingerprint.sh"
 c1() {
   case "$proxy_cid:$server_cid" in :* | *:)
     bad "C1 image-equality:cannot-decide(proxy ${proxy_reason:-ok} server ${server_reason:-ok})"; return ;;
