@@ -122,6 +122,19 @@ RUN echo "debugpy==1.8.22 --hash=sha256:192b73e8d53bbd60225220c0943627bf249ac93d
 COPY debugpy-adapter.sh /usr/local/bin/debugpy-adapter
 RUN chmod 755 /usr/local/bin/debugpy-adapter
 
+# A terminal that feels like a computer: tmux to survive a dropped tab, less as the pager, man
+# for the manual. Debian's slim dpkg config drops /usr/share/man, so man-db alone would find no
+# page; the drop-in re-admits man pages for this layer, and the base tools' pages (excluded when
+# they were first installed) are reinstalled. The drop-in is removed so later installs keep the
+# slim behaviour. Needs egress: it must stay above the HTTP_PROXY ENV block.
+RUN echo 'path-include=/usr/share/man/*' > /etc/dpkg/dpkg.cfg.d/zz-man \
+    && apt-get update && apt-get install -y --no-install-recommends \
+      tmux less man-db manpages manpages-dev \
+    && apt-get install -y --no-install-recommends --reinstall \
+      bash coreutils findutils grep sed tar gzip diffutils \
+    && rm -f /etc/dpkg/dpkg.cfg.d/zz-man \
+    && rm -rf /var/lib/apt/lists/*
+
 # PAT broker (devil condition 13): the credential helper only emits a secret
 # when GIT_PAT is present in the GIT PROCESS env — which happens ONLY when the
 # provisioner runs `docker exec -e GIT_PAT=… git …` per operation. The long-lived
@@ -144,6 +157,12 @@ ENV HTTP_PROXY=http://ide-egress:8080 \
 # Belt-and-suspenders no-core (the provisioner also sets RLIMIT_CORE=0 at create).
 RUN printf 'ulimit -c 0\n' > /etc/profile.d/00-nocore.sh \
     && chmod 0644 /etc/profile.d/00-nocore.sh
+
+# User-space toolchain defaults for login shells (comments in the file). Root-owned and 0644: /etc
+# stays unwritable for the box user. conda-forge is micromamba's only default channel.
+COPY user-space.profile.sh /etc/profile.d/10-user-space.sh
+COPY conda.condarc /etc/conda/.condarc
+RUN chmod 0644 /etc/profile.d/10-user-space.sh /etc/conda/.condarc
 
 RUN useradd --uid 10001 --create-home --shell /bin/bash coder \
     && mkdir -p /workspace && chown coder:coder /workspace
