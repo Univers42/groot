@@ -211,7 +211,8 @@ if (isMain && process.argv.includes("--selfcheck")) {
   const refuse = (label, got) => { if (got === null) fail.push(`${label}: accepted, want a refusal reason`); };
 
   // The canonical bridge body and its one-field variants live with the shape cases.
-  const { DIGEST, CANON_PATH, mk, host } = await import("./create-shape.selfcheck.mjs");
+  const { DIGEST, CANON_PATH, mk, host, shapeFailures } = await import("./create-shape.selfcheck.mjs");
+  fail.push(...shapeFailures());
 
   chk("allow create", isAllowed("POST", "/containers/create?name=ide-" + "a".repeat(32)), true);
   chk("allow start", isAllowed("POST", "/containers/ide-" + "a".repeat(32) + "/start"), true);
