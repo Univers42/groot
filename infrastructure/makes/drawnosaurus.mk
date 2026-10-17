@@ -43,10 +43,8 @@ drawnosaurus-assert-engine:
 # root-owned on the host and the next build cannot overwrite it. On a ROOTLESS daemon the
 # container's root already IS the invoking user (the daemon runs as them), and the host
 # uid/gid pair is unmapped inside its user namespace: --user there fails the run with
-# "cannot setuid to unmapped uid" (seen 2026-10-08 on a 42 workstation). Recursive, so the
-# `docker info` call only runs when drawnosaurus-wasm does.
-DRAWNOSAURUS_RUN_USER = $(shell if docker info -f '{{.SecurityOptions}}' 2>/dev/null | grep -q rootless; \
-	then echo ""; else echo "--user $$(id -u):$$(id -g)"; fi)
+# "cannot setuid to unmapped uid" (DOCKER_ROOTLESS, common.mk).
+DRAWNOSAURUS_RUN_USER = $(if $(DOCKER_ROOTLESS),,--user $(shell id -u):$(shell id -g))
 
 drawnosaurus-wasm: drawnosaurus-assert-engine
 ## Build engine/pkg (the Rust->wasm artifact web.Dockerfile requires). Depends on the assert.

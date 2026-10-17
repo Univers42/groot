@@ -16,7 +16,7 @@ GROBASE_LINK_DIR ?= $(or $(XDG_RUNTIME_DIR),/tmp)/track-binocle-link
 PATHS ?=
 GROBASE_LINK_HOST_PORT ?= $(shell bash scripts/grobase-link.sh conf GROBASE_LINK_HOST_PORT)
 # 443 needs a privileged bind, which rootless Docker cannot do (ip_unprivileged_port_start).
-LINK_VHOST_HTTPS_PORT ?= $(shell if docker info -f '{{.SecurityOptions}}' 2>/dev/null | grep -q rootless \
+LINK_VHOST_HTTPS_PORT ?= $(shell if [ -n '$(DOCKER_ROOTLESS)' ] \
 	&& [ "$$(sysctl -n net.ipv4.ip_unprivileged_port_start 2>/dev/null || echo 1024)" -gt 443 ]; then echo 9443; else echo 443; fi)
 LINK_SCRIPT = GROBASE_TARGET='$(GROBASE_TARGET)' GROBASE_LINK_DIR='$(GROBASE_LINK_DIR)' \
 	GROBASE_LINK_HOST_PORT='$(GROBASE_LINK_HOST_PORT)' LOCAL_CA_CERT='$(LOCAL_CA_CERT)' bash scripts/grobase-link.sh
@@ -32,7 +32,7 @@ LINK_VERIFY = $(LINK_SCRIPT) verify
 # runs where grobase runs, not here; the local key stays 0600 for local-https-proxy alone.
 LINK_COMPOSE_ENV = GROBASE_LINK_DIR='$(GROBASE_LINK_DIR)' GROBASE_LINK_HOST_PORT='$(GROBASE_LINK_HOST_PORT)' COMPOSE_FILE='docker-compose.yml:docker-compose.grobase-link.yml' \
 	TRACK_BINOCLE_VHOST_HTTPS_PORT='$(LINK_VHOST_HTTPS_PORT)' MINI_BAAS_WAF_TLS_GID=none \
-	GROBASE_LINK_UID="$$(id -u)" GROBASE_LINK_GID="$$(id -g)"
+	GROBASE_LINK_UID="$(if $(DOCKER_ROOTLESS),0,$$(id -u))" GROBASE_LINK_GID="$(if $(DOCKER_ROOTLESS),0,$$(id -g))"
 LINK_COMPOSE = $(LINK_COMPOSE_ENV) docker compose --env-file ./.env.local
 
 link:
