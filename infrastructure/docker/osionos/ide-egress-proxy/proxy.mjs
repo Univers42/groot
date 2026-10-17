@@ -42,6 +42,10 @@ const BASE_ALLOW = [
   "github.com", "codeload.github.com", "objects.githubusercontent.com",
   "raw.githubusercontent.com", "release-assets.githubusercontent.com", "crates.io", "static.crates.io",
   "index.crates.io", "proxy.golang.org", "sum.golang.org",
+  // User-space toolchain installers (no sudo): rustup, node tarballs, uv, micromamba, yarn.
+  // Exact names, each reviewed. anaconda.org and api.anaconda.org (package uploads) stay out.
+  "static.rust-lang.org", "nodejs.org", "astral.sh", "conda.anaconda.org", "micro.mamba.pm",
+  "registry.yarnpkg.com",
 ];
 const GIT_HOSTS = (process.env.IDE_EGRESS_GIT_HOSTS || "")
   .split(",").map((h) => h.trim().toLowerCase()).filter(Boolean);
@@ -186,6 +190,21 @@ if (isMain && process.argv.includes("--selfcheck")) {
   expect("bare githubusercontent denied", hostAllowed("githubusercontent.com"), false);
   expect("release-assets suffix-spoof denied", hostAllowed("release-assets.githubusercontent.com.evil.com"), false);
   expect("gist githubusercontent denied", hostAllowed("gist.githubusercontent.com"), false);
+  // Toolchain hosts: each allowed (and a dotted child, by the suffix rule) with look-alikes denied.
+  for (const host of ["static.rust-lang.org", "nodejs.org", "astral.sh", "conda.anaconda.org", "micro.mamba.pm", "registry.yarnpkg.com"]) {
+    expect(`${host} allowed`, hostAllowed(host), true);
+    expect(`child of ${host} allowed`, hostAllowed(`x.${host}`), true);
+    expect(`${host} suffix-spoof denied`, hostAllowed(`x.${host}.evil.com`), false);
+    expect(`evil${host} denied`, hostAllowed(`evil${host}`), false);
+  }
+  expect("rust-lang.org parent denied", hostAllowed("rust-lang.org"), false);
+  expect("www.rust-lang.org sibling denied", hostAllowed("www.rust-lang.org"), false);
+  expect("anaconda.org denied", hostAllowed("anaconda.org"), false);
+  expect("api.anaconda.org denied", hostAllowed("api.anaconda.org"), false);
+  expect("repo.anaconda.com denied", hostAllowed("repo.anaconda.com"), false);
+  expect("mamba.pm parent denied", hostAllowed("mamba.pm"), false);
+  expect("yarnpkg.com parent denied", hostAllowed("yarnpkg.com"), false);
+  expect("base allowlist size", BASE_ALLOW.length, 19);
   expect("metadata v4 denied", denied4("169.254.169.254"), true);
   expect("rfc1918 10 denied", denied4("10.1.2.3"), true);
   expect("rfc1918 172.16 denied", denied4("172.16.5.5"), true);
