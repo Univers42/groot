@@ -25,15 +25,17 @@ test("AC1 a new account signs up on the landing, lands in its own osionos worksp
   await signUp.getByRole("textbox", { name: "Username" }).fill(username);
   await signUp.getByRole("textbox", { name: "Email" }).fill(email);
   await signUp.locator('input[name="password"]').fill(PASSWORD);
-  await signUp.locator('input[name="password_confirm"]').fill(PASSWORD);
-  await signUp.getByRole("checkbox", { name: /Terms of Service/ }).check();
-  await signUp.getByRole("button", { name: /Create protected account/ }).click();
-  await expect(page.getByText("Account created", { exact: true }), "the portal confirms the account").toBeVisible();
+  await signUp.locator('input[name="confirmPassword"]').fill(PASSWORD);
+  await signUp.getByRole("checkbox", { name: /I agree to the Terms/ }).check();
+  await signUp.locator("form").getByRole("button", { name: "Create workspace account", exact: true }).click();
+  await expect(page.getByText("Welcome to Prismatica!", { exact: true }), "the portal confirms the account").toBeVisible();
+  // The portal closes itself after a sign-up (opposite-osiris b2ed21d); sign in from a fresh one.
+  await expect(signUp, "the portal closes after the sign-up").toBeHidden();
 
-  await signUp.getByRole("group", { name: "Authentication mode" }).getByRole("button", { name: "Sign in", exact: true }).click();
-  await signUp.getByRole("textbox", { name: "Email" }).fill(email);
-  await signUp.locator('input[name="password"]').fill(PASSWORD);
-  await signUp.getByRole("button", { name: /Sign in securely/ }).click();
+  const signIn = await openPortal(page, "Sign in");
+  await signIn.getByRole("textbox", { name: "Email" }).fill(email);
+  await signIn.locator('input[name="password"]').fill(PASSWORD);
+  await signIn.locator("form").getByRole("button", { name: "Sign in", exact: true }).click();
   await page.waitForURL((url) => url.origin === new URL(OSIONOS_URL).origin, { timeout: 30_000 });
   const s = await osionosSession(page);
 

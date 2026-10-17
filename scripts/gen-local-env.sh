@@ -30,12 +30,24 @@
 # older .env.local predates. `--sync` mints one that is absent or empty and says so by
 # name; `--check` reports it as missing. scripts/demo-login-ensure.sh then applies the
 # password to the account.
+#
+# MEDIA keys (UNSPLASH_ACCESS_KEY, PIXABAY_API) are read by the osionos bridge only from
+# ./.env.local, yet a fresh clone holds them only in apps/osionos/app/.env (MEDIA_ENV=<path>
+# overrides). Generate and `--sync` copy one when the source value is non-empty AND the
+# ./.env.local value is absent or empty; a non-empty ./.env.local value is never overwritten.
+# `--check` names a media key whose two non-empty values differ, informationally. Media keys
+# never affect the exit status of --check/--sync: only the eight derived keys decide it
+# (callers: grobase-link.sh, repo.mk, vault42-team.sh). A missing source file is not an error.
+# Caveat: a key is compared as a whole value, so a source rotated to the same text is
+# invisible, and a source that was emptied on purpose never clears ./.env.local.
 set -eu
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 GRO_ENV="${GRO_ENV:-$REPO/apps/grobase/.env}"
 SRC="${GRO_ENV#"$REPO/"}" # names the real source in notes (a linked VM: .env.grobase-remote)
 OUT="${OUT:-$REPO/.env.local}"
+MEDIA_ENV="${MEDIA_ENV:-$REPO/apps/osionos/app/.env}"
+MSRC="${MEDIA_ENV#"$REPO/"}"
 FORCE="${FORCE:-0}"
 MODE="${1:-generate}"
 
@@ -54,6 +66,8 @@ SB_KONG_KEY=KONG_PUBLIC_API_KEY|ANON_KEY VITE_BAAS_KONG_KEY=KONG_PUBLIC_API_KEY|
 ADAPTER_REGISTRY_SERVICE_TOKEN=ADAPTER_REGISTRY_SERVICE_TOKEN"
 # Minted once per machine, never derived; an absent or empty one is minted by --sync.
 MINTED="DEMO_LOGIN_PASSWORD OSIONOS_IDE_TOKEN_SECRET AUTH_LINK_SIGNING_KEY"
+# Copied from $MEDIA_ENV, never derived: they decide nothing about the exit status.
+MEDIA="UNSPLASH_ACCESS_KEY PIXABAY_API"
 # NOT derived: VITE_BAAS_REALTIME_TOKEN — the generator seeds it with the anon key, but
 # `make seed-live-demo` (live-data-ensure) later replaces it with a tenant realtime token
 # minted from RT_JWT_SECRET; it travels as a team value (vault42-team.sh), never a derived one.
@@ -106,6 +120,31 @@ mint_missing() {
   done
 }
 
+# media_fill: copy each MEDIA key from $MEDIA_ENV into $OUT when the source is non-empty and
+# the destination is absent or empty. A differing non-empty destination is kept, by name.
+media_fill() {
+  for key in $MEDIA; do
+    want="$(get_env "$MEDIA_ENV" "$key" || true)"
+    [ -n "$want" ] || continue
+    have="$(get_env "$OUT" "$key" || true)"
+    if [ -z "$have" ]; then
+      put_env "$OUT" "$key" "$want"
+      note "copied $key from $MSRC"
+    elif [ "$have" != "$want" ]; then
+      note "kept $key (differs from $MSRC)"
+    fi
+  done
+}
+
+# media_differing: names of MEDIA keys whose non-empty values differ between source and $OUT.
+media_differing() {
+  for key in $MEDIA; do
+    want="$(get_env "$MEDIA_ENV" "$key" || true)"
+    have="$(get_env "$OUT" "$key" || true)"
+    if [ -n "$want" ] && [ -n "$have" ] && [ "$want" != "$have" ]; then printf '%s\n' "$key"; fi
+  done
+}
+
 # drift_report: one line per derived key — "sync KEY" | "drift KEY" | "missing KEY" |
 # "unknown KEY" (source empty). Key names only. Returns 1 when anything is not in sync.
 drift_report() {
@@ -135,6 +174,7 @@ check_mode() {
   for key in $(minted_missing); do report="$report
 missing $key"; rc=1; done
   printf '%s\n' "$report" | sed 's/^/[gen-local-env]   /' >&2
+  for key in $(media_differing); do note "  media $key differs from $MSRC (informational, exit status unchanged)"; done
   if [ "$rc" -eq 0 ]; then note "in sync with $SRC (8 derived keys)."; else
     note "DRIFT — $(basename "$OUT") disagrees with $SRC. Fix: bash scripts/gen-local-env.sh --sync"
   fi
@@ -147,6 +187,7 @@ sync_mode() {
   require_inputs
   [ -f "$OUT" ] || { note "$(basename "$OUT") absent — generating it."; generate; return; }
   mint_missing
+  media_fill
   rc=0
   report="$(drift_report)" || rc=$?
   [ "$rc" -ne 0 ] || { note "in sync with $SRC — nothing to write."; exit 0; }
@@ -258,6 +299,9 @@ PERMS_SERVICE_TOKEN=
 
 # ── Optional cloud integrations (empty = feature dormant; LiveKit uses compose dev defaults) ──
 GIPHY_API=
+# Copied from apps/osionos/app/.env by this script when set there (media search in the bridge).
+UNSPLASH_ACCESS_KEY=
+PIXABAY_API=
 DOCKER_USER=
 DOCKER_PAT=
 DOCKER_USERNAME=
@@ -267,6 +311,7 @@ SONAR_TOK=
 GITHUB_PAT=
 EMAIL_RECUP_ADMIN_VAULT=
 EOF
+media_fill
 
 note "wrote $(basename "$OUT") (BaaS keys derived from grobase, osionos secrets minted, cloud keys empty)."
 }
