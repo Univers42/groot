@@ -49,3 +49,19 @@ grants_anon_email() { grep -inE 'grant .*\bemail\b.* on (table )?(public\.)?user
   run grep -E '^ORDERED_LAST=".* users-pii-grants-migration\.sql"$' "$REPO/scripts/apply-models-migrations.sh"
   [ "$status" -eq 0 ]
 }
+
+# apply-models.sh's own order, under the collation that broke it and under C.
+order_last() { LC_ALL=$1 MODELS_DIR=$2 sh "$REPO/scripts/apply-models.sh" order | tail -1; }
+
+@test "apply-models.sh runs the users grants migration last, whatever the locale" {
+  mkdir "$BATS_TEST_TMPDIR/m"
+  : >"$BATS_TEST_TMPDIR/m/user.sql"
+  : >"$BATS_TEST_TMPDIR/m/zzz.sql"
+  : >"$BATS_TEST_TMPDIR/m/users-pii-grants-migration.sql"
+  for loc in C en_US.UTF-8; do
+    run order_last "$loc" "$BATS_TEST_TMPDIR/m"
+    [ "$output" = "$BATS_TEST_TMPDIR/m/users-pii-grants-migration.sql" ]
+  done
+  run order_last C "$REPO/models"
+  [ "$output" = "$REPO/models/users-pii-grants-migration.sql" ]
+}

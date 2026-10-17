@@ -10,7 +10,7 @@
 --   authenticated  SELECT on every column except password_hash (INSERT/UPDATE/DELETE untouched)
 --   password_hash  readable by neither; movieverse_profiles unreachable by both
 -- Columns come from information_schema, so a users table without avatar_url (b2b) works.
--- Both runners run this file last (apply-models.sh by name order, the other via ORDERED_LAST).
+-- Both runners run this file last: apply-models.sh names it in GRANTS_LAST, the other lists it in ORDERED_LAST.
 -- Caveat: a column added to public.users after this runs is NOT granted to authenticated
 -- until the next run; the runners re-run it only when its checksum changes or on every
 -- apply-models-migrations.sh pass.
