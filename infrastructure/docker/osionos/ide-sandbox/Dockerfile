@@ -184,8 +184,24 @@ RUN if find / -xdev \( -uid +65535 -o -gid +65535 \) -print -quit | grep -q .; t
       find / -xdev \( -uid +65535 -o -gid +65535 \) | head -5 >&2; exit 1; \
     fi
 
+# The box's account file lives on the box's /tmp tmpfs so the terminal can show the user's own
+# name (ADR 0009). The link is the LAST step: from here on, root lookups in a build RUN fail.
+# It is safe only because the box runs with no-new-privileges, CapDrop ALL, a read-only rootfs
+# and a numeric User; with any of them gone, a user-written passwd plus a setuid binary gives
+# root in the box. The build asserts what it can: the link, one 10001 account, no new setuid.
+# SETUID_BASELINE is the count measured on 2026-10-17 (7) plus one of headroom.
+ARG SETUID_BASELINE=8
+RUN cp /etc/passwd /etc/passwd.base \
+    && test "$(grep -c ':10001:' /etc/passwd.base)" = 1 \
+    && grep -q '^coder:x:10001:10001:' /etc/passwd.base \
+    && ln -sf /tmp/.osio/passwd /etc/passwd \
+    && test "$(readlink /etc/passwd)" = /tmp/.osio/passwd \
+    && test "$(find / -xdev -perm -4000 -type f | wc -l)" -le "${SETUID_BASELINE}"
+
 WORKDIR /workspace
-USER coder
+# Numeric: dockerd resolves a user name against the image's own passwd, which now points at a
+# file that does not exist before the box starts. The socket proxy also requires the number.
+USER 10001:10001
 # PID 1 is box-init: it reaps every orphan (with `sleep infinity` as PID 1, hellish's `make -j8`
 # left 469 zombies and every fork failed, 2026-10-14) and, unlike tini, cannot be stopped from
 # inside the box (tini exits when its child dies: `pkill -x sleep` stopped the box). The Cmd

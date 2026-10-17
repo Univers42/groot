@@ -27,6 +27,7 @@ const REQUIRED_ENV = [
   "NO_PROXY=localhost,127.0.0.1",
   "no_proxy=localhost,127.0.0.1",
   "GIT_TERMINAL_PROMPT=0",
+  "HOME=/home/coder",
 ];
 const REQUIRED_LABELS = ["osio.ide.managed", "osio.ide.owner", "osio.ide.workspace"];
 const REQUIRED_HOST_CONFIG = [
@@ -40,7 +41,7 @@ const HOME_TARGET = "/home/coder";
 const REQUIRED_ULIMIT_NAMES = ["core", "nproc", "nofile"];
 const REQUIRED_EXEC_KEYS = ["Cmd", "User", "WorkingDir", "AttachStdin", "AttachStdout", "AttachStderr", "Tty", "Env"];
 
-// Ponytail: the 7 Env strings and their order are the bridge's literal output;
+// Ponytail: the 8 Env strings and their order are the bridge's literal output;
 // a bridge configured with extra proxies or a different GIT_TERMINAL_PROMPT
 // value is refused until these constants move with it.
 // Ponytail: maxMemory (1 GiB), maxNanoCpus (1B), maxPids (512) are the spec's
@@ -96,7 +97,7 @@ export function createShapeViolation(body, path, limits) {
   if (body.WorkingDir !== "/workspace") return "WorkingDir";
   if (!deepEqualJson(body.Cmd, ["sleep", "infinity"])) return "Cmd";
 
-  if (!Array.isArray(body.Env) || body.Env.length !== 7) return "Env";
+  if (!Array.isArray(body.Env) || body.Env.length !== 8) return "Env";
   for (const e of REQUIRED_ENV) if (!body.Env.includes(e)) return "Env";
 
   if (!sameKeys(body.Labels, REQUIRED_LABELS)) return "Labels";
@@ -182,6 +183,9 @@ export function execShapeViolation(body) {
     for (const e of body.Env) {
       if (typeof e !== "string") return "Env";
       if (!/^[A-Za-z_][A-Za-z0-9_]*=/.test(e)) return "Env";
+      // HOME is pinned once, in the create Env (ADR 0009): runc takes it from there for every
+      // exec, whatever /etc/passwd says, so no exec may carry a different one.
+      if (e.startsWith("HOME=") && e !== "HOME=/home/coder") return "Env";
     }
   }
 
