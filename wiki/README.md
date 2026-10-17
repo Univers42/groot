@@ -70,6 +70,7 @@ zero per-project server code.
 | [grobase-link](runbooks/grobase-link.md) | Frontends here, grobase elsewhere (VM, LAN, cloud): `make link`, no sudo |
 | [another-device](runbooks/another-device.md) | The prompt for an agent on another device: vault42, the grobase CLI and `make link` over localhost, LAN, wifi, ssh, Tailscale and the internet, with the test plan |
 | [real-mail-titan](runbooks/real-mail-titan.md) | Send real mail from Titan through grobase, and why the e2e mail specs refuse that machine |
+| [public-site-b2b](runbooks/public-site-b2b.md) | Serve the Prismatica site and auth gateway to colleagues from b2b on Funnel :10000, with the phone check and the rollback |
 
 ### [quality/](quality/)
 
