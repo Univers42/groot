@@ -34,9 +34,10 @@ RUNNER_PROBE=ide-runner-sigusr1-probe
 NAT_CHECK=/usr/local/sbin/osionos-ide-egress-nat
 PLANE_PROJECT=osionos-ide-plane
 pass=0; fail=0; skipped=0
-# 44 + 4 persistent-home probes (a)-(d); the green line is `RESULT: 47 passed, 0 failed, 1 skipped (expected 48)`
-# where the one skip is the runner image, absent on a VM without the code runner.
-EXPECTED=48
+# 44 + 4 persistent-home probes (a)-(d) + 3 identity probes (e)-(g); the green line is
+# `RESULT: 50 passed, 0 failed, 1 skipped (expected 51)` where the one skip is the runner image,
+# absent on a VM without the code runner.
+EXPECTED=51
 # The VM's default gateway (user-mode QEMU: 10.0.2.2 is the physical host's loopback, where 4242
 # is the VM's own forwarded ssh). Elsewhere set a port that listens on that gateway.
 GATEWAY_PORT="${OSIONOS_IDE_VERIFY_GATEWAY_PORT:-4242}"
@@ -131,6 +132,7 @@ run_box() {
     -e NO_PROXY=localhost,127.0.0.1 \
     -e no_proxy=localhost,127.0.0.1 \
     -e GIT_TERMINAL_PROMPT=0 \
+    -e HOME=/home/coder \
     "$SANDBOX_IMAGE" sleep infinity >/dev/null 2>&1
 }
 
@@ -300,6 +302,27 @@ $IDE rm -f "$BOX_A" >/dev/null 2>&1
 run_box "$BOX_A" || printf 'warning: %s failed to restart — probes fail closed\n' "$BOX_A" >&2
 if [ "$(sx 'cat /home/coder/probe-marker')" = "marker" ]; then ok "a file in the home survives box remove and recreate"; else bad "a file in the home survives box remove and recreate"; fi
 deny "touch /etc/probe-x" "/etc is read-only (touch /etc/x denied)"
+
+echo "== Box identity (ADR 0009, P6) =="
+# /etc/passwd links to /tmp/.osio/passwd, which box-init writes before the Cmd starts. A `docker
+# exec` that lands in the first milliseconds can precede that write, so (e) and (g) ask again for
+# up to 5 s. (e) the numeric user resolves to coder and HOME is the create Env's. (f) a hostile
+# account file changes neither uid nor HOME: runc takes both from the numeric User and the create
+# Env. (g) a file that breaks every exec (a 100 KB line) is cured by a restart, which gives /tmp
+# a fresh tmpfs.
+sx_retry() {
+  for _ in 1 2 3 4 5; do
+    if out=$(sx "$1") && [ -n "$out" ]; then printf '%s' "$out"; return 0; fi
+    sleep 1
+  done
+  return 1
+}
+if [ "$(sx_retry 'whoami; echo $HOME' | tr '\n' ' ')" = "coder /home/coder " ]; then ok "whoami is coder and HOME is /home/coder right after start"; else bad "whoami is coder and HOME is /home/coder right after start"; fi
+sx 'printf "root:x:10001:10001::/root:/bin/sh\n" >/tmp/.osio/passwd' >/dev/null
+if [ "$(sx 'id -u; echo $HOME' | tr '\n' ' ')" = "10001 /home/coder " ]; then ok "a hostile passwd file changes neither uid nor HOME"; else bad "a hostile passwd file changes neither uid nor HOME"; fi
+sx 'head -c 100000 /dev/zero | tr "\0" a >/tmp/.osio/passwd' >/dev/null
+$IDE restart -t 2 "$BOX_A" >/dev/null 2>&1
+if [ "$(sx_retry 'whoami' | tr -d '\n')" = "coder" ]; then ok "a passwd file that breaks every exec is cured by a box restart"; else bad "a passwd file that breaks every exec is cured by a box restart"; fi
 
 echo "== Resource caps (conditions 14,15,16) =="
 if [ "$(sx 'ulimit -c')" = "0" ]; then ok "core dumps disabled (RLIMIT_CORE=0)"; else bad "core dumps disabled (RLIMIT_CORE=0)"; fi

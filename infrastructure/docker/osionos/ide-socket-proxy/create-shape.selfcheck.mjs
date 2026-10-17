@@ -39,6 +39,7 @@ export const mk = () => ({
     "HTTP_PROXY=http://ide-egress:8080", "HTTPS_PROXY=http://ide-egress:8080",
     "http_proxy=http://ide-egress:8080", "https_proxy=http://ide-egress:8080",
     "NO_PROXY=localhost,127.0.0.1", "no_proxy=localhost,127.0.0.1", "GIT_TERMINAL_PROMPT=0",
+    "HOME=/home/coder",
   ],
   Labels: { [MANAGED_LABEL]: "1", "osio.ide.owner": OWNER, "osio.ide.workspace": WORKSPACE },
   HostConfig: {
@@ -88,7 +89,9 @@ function shapeFailures() {
     ["MemorySwap differs", host({ MemorySwap: 1 })],
     ["User root", { ...mk(), User: "0" }],
     ["foreign image", { ...mk(), Image: "alpine" }],
-    ["eighth Env entry", { ...mk(), Env: [...mk().Env, "EXTRA=1"] }],
+    ["ninth Env entry", { ...mk(), Env: [...mk().Env, "EXTRA=1"] }],
+    ["Env without HOME", { ...mk(), Env: mk().Env.filter((e) => !e.startsWith("HOME=")) }],
+    ["create HOME elsewhere", { ...mk(), Env: mk().Env.map((e) => (e.startsWith("HOME=") ? "HOME=/tmp" : e)) }],
     ["Env entry swapped", { ...mk(), Env: mk().Env.map((e) => (e.startsWith("HTTP_PROXY") ? "HTTP_PROXY=http://elsewhere:1" : e)) }],
     ["extra top-level key", { ...mk(), Entrypoint: ["sh"] }],
     ["extra label", { ...mk(), Labels: { ...mk().Labels, extra: "1" } }],
@@ -110,9 +113,14 @@ function shapeFailures() {
     ["Cmd empty", { ...SHELL, Cmd: [] }],
     ["Cmd string", { ...SHELL, Cmd: "sh" }],
     ["Env without a name", { ...SHELL, Env: ["=x"] }],
+    ["exec HOME elsewhere", { ...SHELL, Env: ["HOME=/tmp/evil"] }],
+    ["exec HOME empty", { ...SHELL, Env: ["HOME="] }],
     ["Detach", { ...SHELL, Detach: false }],
   ];
   chk("exec shell ok", execShapeViolation(SHELL), null);
+  chk("exec HOME as pinned ok", execShapeViolation({ ...SHELL, Env: ["TERM=xterm", "HOME=/home/coder"] }), null);
+  const { Env: _omitted, ...noEnv } = SHELL;
+  chk("exec without Env ok", execShapeViolation(noEnv), null);
   for (const [label, body] of EXEC_REFUSALS) refuse(`exec ${label}`, execShapeViolation(body));
 
   return fail;

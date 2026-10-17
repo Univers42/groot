@@ -225,15 +225,18 @@ COMPOSE_PROFILES=ide docker compose up -d osionos-ide-socket-proxy
 #    ~2.8 GB copy is removed) — to keep it: `OSIONOS_IDE_KEEP_MAIN_COPY=1`
 sudo sh infrastructure/docker/osionos/ide-sandbox/bootstrap.sh
 
-# 4. Run the hostile corpus (must be green before enabling). verify.sh pins EXPECTED=48 and every
+# 4. Run the hostile corpus (must be green before enabling). verify.sh pins EXPECTED=51 and every
 #    probe prints exactly one PASS/FAIL/SKIP line. The "Control plane reachability" section adds two
 #    probes: a box must not open TCP to osionos-ide-server:4100 nor osionos-ide-socket-proxy:2375, on
 #    EVERY address each container has, every target first shown to accept connections from the host;
 #    both SKIP where the plane is not deployed. The code-runner probe SKIPs where no runner image is
 #    present. The "Persistent home" section adds four probes (home owned by 10001 and writable, box B
-#    cannot read box A's home, a file survives box remove and recreate, `touch /etc/x` denied). Expected
-#    green line once the home and shell change is deployed: `RESULT: 47 passed, 0 failed, 1 skipped
-#    (expected 48)`, the skip being the runner probe (not yet run: it needs the VM, 2026-10-17). The
+#    cannot read box A's home, a file survives box remove and recreate, `touch /etc/x` denied). The
+#    "Box identity" section adds three more (`whoami` is coder and HOME is /home/coder right after start,
+#    a hostile passwd file changes neither uid nor HOME, a 100 KB passwd line breaks every exec and a
+#    box restart cures it). Expected green line once the identity change is deployed: `RESULT: 50
+#    passed, 0 failed, 1 skipped (expected 51)`, the skip being the runner probe (not yet run: it needs
+#    the VM, 2026-10-17). The
 #    last measured line on the VM (2026-10-14) was `41 passed, 0 failed, 1 skipped (expected 42)`. The checks do not map 1:1 onto the 16 conditions.
 sudo sh infrastructure/docker/osionos/ide-sandbox/verify.sh
 
@@ -286,6 +289,53 @@ name from the `osio.ide.owner` label (`create-shape.mjs`, pinned to the bridge b
   a fixed argv that skips the launcher, `~/.bashrc` and `~/.profile`. A saved shell that passes the checks
   but crashes at once, or an rc with `exit 1`, ends every normal terminal; the safe terminal is the way
   back in. `chsh -s /bin/bash` undoes the choice.
+
+### Account name and HOME (ADR 0009)
+
+`/etc/passwd` in the image is a symlink to `/tmp/.osio/passwd`; the real file is
+`/etc/passwd.base`. `box-init` copies the base to the tmpfs before the Cmd starts, so the account is
+`coder`. `osio-login` re-validates `OSIO_USER` (the PTY exec Env entry the bridge sets from the token's
+`un` claim) and rewrites the file with only the `coder` line renamed, so `whoami` and the prompt show
+the user's osionos username. Names in `/etc/passwd.base` are refused, and so is anything outside
+`^[a-z_][a-z0-9_-]{0,31}$`; a refusal keeps `coder`. uid, gid, groups and HOME never come from the
+file: runc takes the first three from the numeric `User` and HOME from the create Env, where
+`HOME=/home/coder` is the 8th entry. The socket proxy requires that entry and refuses any other
+`HOME=` in an exec Env.
+
+**Invariant (P8).** This is safe only while no-new-privileges, `CapDrop: ["ALL"]`, the read-only
+rootfs and the numeric `User` pins hold. Without any one of them, a user-written passwd plus a setuid
+binary gives root in the box. A change to `create-shape.mjs` on those fields, or a setuid binary added
+to the image (the build fails above `SETUID_BASELINE`, 8), re-opens ADR 0009.
+
+**Symptom and recovery (P7).** The box user can break their own box: a FIFO, a directory or a line of
+more than 64 KB at `/tmp/.osio/passwd` makes every `docker exec` hang or fail, the safe terminal
+included (`unable to setup user`, or a terminal that never opens). The workbench's "Restart box" button
+calls `DELETE /api/ide/session`, which disposes the sessions and stops the box; the next terminal
+recreates it with a fresh `/tmp`. Nothing else in the box is reachable first, so no VM root is needed.
+
+**Acceptance on docker-ide (P11, user-run on the VM, before the host bridge goes live).** Any line that
+differs from its comment is a stop: report it and do not run R8.
+
+```sh
+D='sudo docker -H unix:///run/docker-ide.sock'; IMG=<sandbox image id pinned by ship-images.sh>
+runc --version; $D version --format '{{.Server.Version}}'
+$D run -d --name osio-p3-probe --network none --user 10001:10001 -e HOME=/home/coder \
+  --read-only --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 512 \
+  --tmpfs /tmp:size=64m,mode=1777 --tmpfs /home/coder:uid=10001 "$IMG" sleep infinity
+$D exec osio-p3-probe sh -c 'whoami; echo HOME=$HOME'                 # coder, HOME=/home/coder
+$D exec -it -e OSIO_USER=dylan -e TERM=xterm-256color osio-p3-probe /usr/local/bin/osio-login
+#   in that shell: whoami; id; echo $HOME; exit                        # dylan, uid=10001(dylan) groups=10001(coder), /home/coder
+$D exec osio-p3-probe sh -c 'printf "root:x:10001:0::/root:/bin/sh\n" > /tmp/.osio/passwd'
+$D exec osio-p3-probe sh -c 'echo HOME=$HOME; id'                     # HOME=/home/coder, uid=10001(root) groups=10001(coder)
+$D exec osio-p3-probe sh -c 'head -c 70000 /dev/zero | tr "\0" a > /tmp/.osio/passwd'
+$D exec osio-p3-probe true; echo "exit=$?"                            # exit=126 or 128, "unable to setup user"
+$D restart -t 1 osio-p3-probe && $D exec osio-p3-probe whoami          # coder
+$D exec osio-p3-probe sh -c 'find / -xdev -perm -4000 2>/dev/null | wc -l; touch /etc/x'  # P1 count; Read-only file system
+$D rm -f osio-p3-probe
+```
+
+Browser acceptance (P7, user-run): in a terminal, `mkfifo /tmp/x && mv -f /tmp/x /tmp/.osio/passwd`,
+open another terminal (it hangs), press "Restart box", open a terminal (it works).
 
 ### Recovery when no terminal opens (user-run on the VM)
 

@@ -21,6 +21,8 @@ setup_file() {
   install -D -m 0644 "$SRC/osio-shell.sh" /usr/local/lib/osio-shell.sh
   install -D -m 0755 "$SRC/osio-login.sh" /usr/local/bin/osio-login
   install -D -m 0755 "$SRC/osio-chsh.sh" /usr/local/bin/chsh
+  # The image ships this file (ADR 0009); osio-login reads it and never writes it.
+  printf 'root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\ncoder:x:10001:10001::/home/coder:/bin/bash\n' > /etc/passwd.base
   touch /etc/shells
   grep -qxF /bin/sh /etc/shells || echo /bin/sh >> /etc/shells
   grep -qxF /bin/bash /etc/shells || echo /bin/bash >> /etc/shells
@@ -30,6 +32,9 @@ setup() {
   export HOME="$BATS_TEST_TMPDIR/home"
   mkdir -p "$HOME"
   CONF="$HOME/.config/osio/login-shell"
+  rm -rf /tmp/.osio /tmp/pwned-by-osio-user
+  mkdir -p /tmp/.osio
+  cp /etc/passwd.base /tmp/.osio/passwd
   # Prints what the launcher started, then leaves.
   PROBE='if shopt -q login_shell 2>/dev/null; then echo BASH-LOGIN; fi; exit'
 }
@@ -200,4 +205,102 @@ refused() {
   [ "$status" -eq 0 ]
   run grep -E 'COPY osio-chsh.sh /usr/local/bin/chsh' "$SRC/Dockerfile"
   [ "$status" -eq 0 ]
+}
+
+# --- Identity (ADR 0009): OSIO_USER names the account in /tmp/.osio/passwd -----------------------
+
+PASSWD=/tmp/.osio/passwd
+IDENTITY_PROBE='echo "USER=$USER LOGNAME=$LOGNAME HOME=$HOME OSIO_USER=${OSIO_USER-unset}"; exit'
+
+launch_as() { printf '%s\n' "$IDENTITY_PROBE" | OSIO_USER="$1" /usr/local/bin/osio-login; }
+launch_plain() { printf '%s\n' "$IDENTITY_PROBE" | /usr/local/bin/osio-login; }
+
+@test "a valid OSIO_USER renames only the coder line, keeping uid, gid, home and shell" {
+  run --separate-stderr launch_as dylan
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+  [ "$(grep -c . "$PASSWD")" -eq "$(grep -c . /etc/passwd.base)" ]
+  grep -qxF 'dylan:x:10001:10001::/home/coder:/bin/bash' "$PASSWD"
+  run grep -q '^coder:' "$PASSWD"
+  [ "$status" -ne 0 ]
+  [ "$(grep -v '^dylan:' "$PASSWD")" = "$(grep -v '^coder:' /etc/passwd.base)" ]
+  [ "$(stat -c %a "$PASSWD")" = 644 ]
+}
+
+@test "the shell gets USER and LOGNAME, keeps HOME untouched, and never sees OSIO_USER" {
+  run launch_as dylan
+  [ "$output" = "USER=dylan LOGNAME=dylan HOME=$HOME OSIO_USER=unset" ]
+}
+
+@test "an invalid or reserved OSIO_USER keeps the default file and names the reason" {
+  local value reason
+  while IFS='|' read -r value reason; do
+    run --separate-stderr launch_as "$value"
+    [ "$status" -eq 0 ] || { echo "shell did not start for [$value]"; return 1; }
+    cmp -s "$PASSWD" /etc/passwd.base || { echo "file changed for [$value]"; return 1; }
+    [[ "$stderr" == *"($reason)"* ]] || { echo "[$value]: stderr was [$stderr], wanted ($reason)"; return 1; }
+  done <<'CASES'
+x:0:0::/:|bad-character
+../x|bad-character
+Dylan|bad-character
+a b|bad-character
+$(touch /tmp/pwned-by-osio-user)|bad-character
+9lives|bad-first-character
+-rf|bad-first-character
+root|reserved
+daemon|reserved
+coder|reserved
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|too-long
+CASES
+  [ ! -e /tmp/pwned-by-osio-user ]
+}
+
+@test "an embedded newline is rejected" {
+  run --separate-stderr launch_as $'dylan\nroot'
+  cmp -s "$PASSWD" /etc/passwd.base
+  [[ "$stderr" == *"(bad-character)"* ]]
+}
+
+@test "an unset or empty OSIO_USER leaves the file alone, silently" {
+  run --separate-stderr launch_plain
+  [ -z "$stderr" ]
+  cmp -s "$PASSWD" /etc/passwd.base
+  run --separate-stderr launch_as ""
+  [ -z "$stderr" ]
+  cmp -s "$PASSWD" /etc/passwd.base
+}
+
+@test "a file that cannot be written does not stop the terminal" {
+  rm -rf /tmp/.osio
+  : > /tmp/.osio
+  run --separate-stderr launch_as dylan
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"OSIO_USER=unset"* ]]
+  [[ "$output" != *"USER=dylan"* ]]
+  [[ "$stderr" == *"account name not written"* ]]
+  rm -f /tmp/.osio
+}
+
+@test "no temp file is left behind" {
+  launch_as dylan >/dev/null
+  [ "$(ls -A /tmp/.osio)" = "passwd" ]
+}
+
+@test "terminals opened at once never tear the file" {
+  local n
+  for n in 1 2 3 4 5 6 7 8 9 10 11 12; do launch_as "user$n" >/dev/null & done
+  wait
+  [ "$(grep -c . "$PASSWD")" -eq "$(grep -c . /etc/passwd.base)" ]
+  grep -Eq '^user[0-9]+:x:10001:10001::/home/coder:/bin/bash$' "$PASSWD"
+  [ "$(ls -A /tmp/.osio)" = "passwd" ]
+}
+
+@test "a failed rename removes its temp file and the terminal still starts" {
+  rm -f "$PASSWD"
+  mkdir -p "$PASSWD/occupied"
+  run --separate-stderr launch_as dylan
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"account name not written"* ]]
+  [ "$(ls -A /tmp/.osio)" = "passwd" ]
+  rm -rf "$PASSWD"
 }
