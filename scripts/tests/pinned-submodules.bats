@@ -237,6 +237,23 @@ clone_super() {
   [[ "$output" == *"no origin/nosuch"* ]]
 }
 
+@test "repair-detached makes no commit and moves no ref on a clean develop-only pin" {
+  side_upstream lib
+  git init -q "$T/super"
+  git -C "$T/super" submodule add -q "file://$T/lib.git" apps/lib
+  git -C "$T/super/apps/lib" checkout -q "$lib_dev"
+  clone_super
+  git -C "$W" submodule update -q --init --recursive
+  local before after
+  before=$(git -C "$W/apps/lib" for-each-ref; git -C "$T/lib.git" for-each-ref)
+  run_recipe repair-detached
+  [ "$status" -eq 0 ]
+  after=$(git -C "$W/apps/lib" for-each-ref; git -C "$T/lib.git" for-each-ref)
+  [ "$before" = "$after" ]
+  [ "$(head_of apps/lib)" = "$lib_dev" ]
+  [[ "$output" == *"nothing to repair"* ]]
+}
+
 @test "repair-detached neither commits nor pushes under an update=none submodule" {
   fixture none
   populate_pinned

@@ -263,6 +263,10 @@ repair-detached:
 			echo "[repair] $$displaypath already on $$branch — skipping"; \
 			exit 0; \
 		fi; \
+		if [ -z "$$(git status --porcelain)" ] && on=$$(git branch -r --contains HEAD | head -n1 | tr -d " ") && [ -n "$$on" ]; then \
+			echo "[repair] $$displaypath at its gitlink $$(git rev-parse --short HEAD) (on $$on) — nothing to repair"; \
+			exit 0; \
+		fi; \
 		echo "[repair] $$displaypath is detached — fixing"; \
 		git add -A; \
 		if ! git diff --cached --quiet; then \
@@ -296,7 +300,14 @@ pushes:
 		[ -n "$$repo" ] || continue; \
 		if ! git -C "$$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1; then continue; fi; \
 		branch="$$(git -C "$$repo" symbolic-ref --short -q HEAD || true)"; \
-		if [ -z "$$branch" ]; then echo "[pushes] $$repo is detached — run 'make repair-detached' first"; continue; fi; \
+		if [ -z "$$branch" ]; then \
+			if [ -z "$$(git -C "$$repo" status --porcelain)" ] && [ -n "$$(git -C "$$repo" branch -r --contains HEAD)" ]; then \
+				echo "[pushes] $$repo at its gitlink (detached, on an origin branch) — nothing to push"; \
+			else \
+				echo "[pushes] $$repo is detached — run 'make repair-detached' first"; \
+			fi; \
+			continue; \
+		fi; \
 		echo "[pushes] $$repo ($$branch)"; \
 		git -C "$$repo" add -A; \
 		if ! git -C "$$repo" diff --cached --quiet; then \
