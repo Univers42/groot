@@ -41,6 +41,26 @@ the machine that runs grobase. Exposing the frontends themselves to other machin
 knob, `TRACK_BINOCLE_BIND_ADDR` (`infrastructure/makes/grobase.mk:127`,
 `infrastructure/scripts/detect-bind-addr.sh`).
 
+
+### `GROBASE_IDE_SSH` — the IDE terminal over a direct link
+
+A direct link uses no ssh, so the IDE plane on the VM (compose project `osionos-ide-plane`,
+`osionos-ide-server` on 4100) is out of reach. Set `GROBASE_IDE_SSH=<ssh alias>` (environment or
+`./.env.grobase-link`) and `make link` also opens an ssh master to that alias, used only to run
+`link_ide_plane`: one unix-socket forward, `$LINK_DIR/ide/ide-server-4100.sock` to the plane's edge
+address on port 4100. `make link` then starts the `grobase-link-ide` relay, as it does in ssh mode.
+
+- It routes no BaaS traffic. Kong, realtime, Redis and Mailpit stay on the direct path, and the
+  `routes` file is the same with or without the key.
+- Unset (the default): no ssh process is started in direct mode.
+- Ignored in ssh and local modes.
+- A value that is not a plain alias (`^[A-Za-z0-9][A-Za-z0-9._@:-]*$`; a leading `-` would be read
+  as an ssh option) is refused with a note and no ssh call.
+- A master that will not open, or a plane that is absent or unhealthy, is a note: the link still
+  succeeds and only the IDE stays unavailable. `make link-down` closes the master.
+- Tested by `scripts/tests/grobase-link-ide.bats` (`up direct:` tests) with an ssh stub. Not run
+  against a real VM.
+
 ## From another device — every path
 
 The data center is the born2root QEMU VM `b2b` running grobase at `/opt/grobase` on a host whose

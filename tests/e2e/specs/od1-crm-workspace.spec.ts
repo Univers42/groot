@@ -62,7 +62,9 @@ test("OD1 a new account builds a CRM workspace in the UI: created, renamed, a cu
   expect(pages.map((p) => p.title).sort(), "the work kit's starter pages").toEqual([...STARTER_PAGES].sort());
 
   const known = new Set((await objectDatabases(page, s)).map((db) => db.dbKey));
-  await page.getByRole("textbox", { name: "Type '/' for commands…" }).last().click();
+  // The append zone focuses a trailing empty paragraph (or makes one): the slash menu opens
+  // only when the whole block ends in "/", so a click into existing text never opens it.
+  await page.getByRole("main").getByRole("button", { name: "Add a block", exact: true }).click();
   await page.keyboard.type("/database");
   await page.getByRole("option", { name: "Database - Inline" }).click();
   const grid = page.getByRole("grid", { name: /table — arrow keys to move/ });

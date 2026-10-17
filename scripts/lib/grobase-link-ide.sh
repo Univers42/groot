@@ -11,7 +11,8 @@
 #                                                                            #
 # ************************************************************************** #
 
-# grobase-link-ide.sh — the IDE plane relay behind `make link` in ssh mode.
+# grobase-link-ide.sh — the IDE plane relay behind `make link` in ssh mode, and in direct mode
+# when GROBASE_IDE_SSH names an ssh alias (link_ide_direct).
 # The VM runs the IDE plane as compose project osionos-ide-plane (another unit
 # deploys it); this machine reaches its osionos-ide-server through one ssh
 # forward to a unix socket, and the grobase-link-ide relay answers to that
@@ -79,6 +80,28 @@ link_ide_plane() {
     note "no IDE plane on the target; the IDE stays unavailable"
     ;;
   esac
+  return 0
+}
+
+# Direct mode only: GROBASE_IDE_SSH=<alias> opens an ssh master used for the IDE plane
+# socket and nothing else (no BaaS route goes over it). Fail-soft in every branch: an
+# alias that could be read as an ssh option, a master that will not open, or a refused
+# forward is a note, and the link already written stays. Each step runs in a subshell
+# because open_master and forward die.
+# Caveat: the alias check is syntactic; a well-formed alias that ssh cannot resolve is
+# found only when the master fails to open.
+link_ide_direct() {
+  local alias=${1:-}
+  [ -n "$alias" ] || return 0
+  if ! [[ $alias =~ ^[A-Za-z0-9][A-Za-z0-9._@:-]*$ ]]; then
+    note "GROBASE_IDE_SSH is not a plain ssh alias or user@host; the IDE plane stays unlinked"
+    return 0
+  fi
+  if ! (open_master "$alias"); then
+    note "no ssh master to $alias; the IDE plane stays unlinked (the BaaS link is unaffected)"
+    return 0
+  fi
+  (link_ide_plane) || note "the IDE plane forward through $alias failed; the IDE stays unavailable"
   return 0
 }
 
