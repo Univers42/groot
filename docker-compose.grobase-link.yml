@@ -36,17 +36,18 @@ services:
           - mailpit
           - mini-baas-realtime
     # A real request through the relay to Kong: a dead tunnel or a moved container shows
-    # here, a listening socat alone would not. -t5 and shut-none: by default socat half-closes
-    # when the request ends and waits 0.5 s for the answer, and over Tailscale Funnel the
-    # answer takes ~0.6 s and a half-closed request gets a 502 (measured 2026-10-15: 2/6
-    # checks passed before, 6/6 after).
+    # here, a listening socat alone would not. -t 6 and shut-none: by default socat half-closes
+    # when the request ends and waits 0.5 s for the answer; over Tailscale Funnel a half-closed
+    # request gets a 502 (measured 2026-10-15: 2/6 checks passed before, 6/6 after), and a slow
+    # link (a phone handover) needs longer than 0.5 s.
+    # Ponytail: an answer slower than 6 s still reads as unhealthy (compose timeout is 8 s).
     healthcheck:
       test:
         - CMD
         - sh
         - -c
         - >-
-          printf 'GET / HTTP/1.0\r\nHost: localhost\r\n\r\n' | timeout 7 socat -t5 - TCP:127.0.0.1:8000,shut-none | grep -q '^HTTP/'
+          printf 'GET / HTTP/1.0\r\nHost: localhost\r\n\r\n' | timeout 7 socat -t 6 - TCP:127.0.0.1:8000,shut-none | grep -q '^HTTP/'
       interval: 30s
       timeout: 8s
       retries: 3
@@ -131,7 +132,7 @@ services:
         - sh
         - -c
         - >-
-          printf 'GET /healthz HTTP/1.0\r\nHost: localhost\r\n\r\n' | timeout 5 socat - TCP:127.0.0.1:4100 | grep -q '^HTTP/1\.[01] 200'
+          printf 'GET /healthz HTTP/1.0\r\nHost: localhost\r\n\r\n' | timeout 7 socat -t 6 - TCP:127.0.0.1:4100 | grep -q '^HTTP/1\.[01] 200'
       interval: 30s
       timeout: 8s
       retries: 3
