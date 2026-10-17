@@ -200,7 +200,7 @@ else
     fi
   }
   # sp_check DESC VOLUME-FILTER — FILTER must hold on the one volume entry.
-  sp_vol() { sp_check "$1" "(.volumes | type) == \"array\" and (.volumes | length) == 1 and any(.volumes[]; $2)"; }
+  sp_vol() { sp_check "$1" "(.volumes | type) == \"array\" and (.volumes | length) == 2 and any(.volumes[]; $2)"; }
   sp_check "no ports" '.ports == null or .ports == []'
   sp_check "networks exact" '.networks | (keys | sort) == ["osionos-ide-control-net"]'
   sp_check "read_only true" '.read_only == true'
@@ -209,7 +209,8 @@ else
   sp_check "mem_limit set" '.mem_limit != null and .mem_limit != ""'
   sp_check "pids_limit set" '.pids_limit != null'
   sp_check "group_add is one numeric gid" '(.group_add | length) == 1 and (.group_add[0] | tostring | test("^[0-9]+$"))'
-  sp_check "exactly one volume" '(.volumes | type) == "array" and (.volumes | length) == 1'
+  sp_check "exactly two volumes" '(.volumes | type) == "array" and (.volumes | length) == 2'
+  sp_vol "ledger is a named volume at /ledger" '.type == "volume" and .target == "/ledger" and (.source | endswith("osionos-ide-ledger"))'
   sp_vol "bind of /dind-run/docker.sock" '.type == "bind" and .target == "/dind-run/docker.sock"'
   sp_vol "create_host_path false" '(.bind | type) == "object" and (.bind.create_host_path // false) == false'
   # The proxy refuses a create whose image differs from its own setting, so it must render the

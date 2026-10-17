@@ -19,6 +19,11 @@ import { createHash } from "node:crypto";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // The bridge sends the unversioned path (ide-docker.mjs `call("POST", "/containers/create?name=…")`).
 const CREATE_PATH_RE = /^\/(?:v[\d.]+\/)?containers\/create\?name=ide-([0-9a-f]{32})$/;
+// The numeric uid a box runs as: allocated once per owner and bound in the ledger (ADR 0011). The gid is
+// fixed so /etc/group stays static and never user-writable (ADR 0009).
+export const UID_MIN = 20000;
+export const UID_MAX = 59999;
+export const BOX_GID = 10001;
 const REQUIRED_ENV = [
   "HTTP_PROXY=http://ide-egress:8080",
   "HTTPS_PROXY=http://ide-egress:8080",
@@ -29,17 +34,22 @@ const REQUIRED_ENV = [
   "GIT_TERMINAL_PROMPT=0",
   "HOME=/home/coder",
 ];
-const REQUIRED_LABELS = ["osio.ide.managed", "osio.ide.owner", "osio.ide.workspace"];
+export const LABEL_UID = "osio.ide.uid";
+const REQUIRED_LABELS = ["osio.ide.managed", "osio.ide.owner", "osio.ide.workspace", LABEL_UID];
 const REQUIRED_HOST_CONFIG = [
   "NetworkMode", "CapDrop", "SecurityOpt", "ReadonlyRootfs", "Mounts",
   "Tmpfs", "PidsLimit", "Memory", "MemorySwap", "NanoCpus", "Ulimits", "RestartPolicy",
 ];
 const OPTIONAL_HOST_CONFIG = ["StorageOpt", "OomScoreAdj"];
-const REQUIRED_MOUNT_KEYS = ["Type", "Source", "Target"];
+// NoCopy: without it an emptied volume is re-filled from the image and its root reset to 10001:10001 755,
+// which locks the user out of their own home (verdict G2).
+const REQUIRED_MOUNT_KEYS = ["Type", "Source", "Target", "VolumeOptions"];
+const NO_COPY = { NoCopy: true };
 const REQUIRED_TMPFS_KEYS = ["/tmp"];
 const HOME_TARGET = "/home/coder";
 const REQUIRED_ULIMIT_NAMES = ["core", "nproc", "nofile"];
-const REQUIRED_EXEC_KEYS = ["Cmd", "User", "WorkingDir", "AttachStdin", "AttachStdout", "AttachStderr", "Tty", "Env"];
+// No "User": an exec inherits the create User, and an explicit one would override it (verdict E4).
+const ALLOWED_EXEC_KEYS = ["Cmd", "WorkingDir", "AttachStdin", "AttachStdout", "AttachStderr", "Tty", "Env"];
 
 // Ponytail: the 8 Env strings and their order are the bridge's literal output;
 // a bridge configured with extra proxies or a different GIT_TERMINAL_PROMPT
@@ -60,7 +70,7 @@ export function shapeLimits(env) {
   };
 }
 
-function sameKeys(obj, names) {
+export function sameKeys(obj, names) {
   if (obj === null || typeof obj !== "object" || Array.isArray(obj)) return false;
   const keys = Object.keys(obj);
   if (keys.length !== names.length) return false;
@@ -68,7 +78,7 @@ function sameKeys(obj, names) {
   return true;
 }
 
-function deepEqualJson(a, b) {
+export function deepEqualJson(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
@@ -76,13 +86,27 @@ function isSafePositiveInt(n, max) {
   return Number.isInteger(n) && n > 0 && n <= max;
 }
 
-function isUuidLike(s) {
+export function isUuidLike(s) {
   return typeof s === "string" && UUID_RE.test(s);
 }
 
 // Same derivation as the bridge's deriveHomeVolume (ide-sandbox-spec.mjs); scripts/tests/ide-proxy-parity.mjs pins the two together.
 export function homeVolumeFor(ownerId) {
   return `osio-ide-home-${createHash("sha256").update(String(ownerId)).digest("hex").slice(0, 32)}`;
+}
+
+/** The uid of a box User string "<uid>:10001", or null for anything else (non-numeric, a gid other
+ *  than 10001, or a uid outside 20000..59999, which excludes 10001 and 65534). */
+export function parseBoxUid(user) {
+  const match = typeof user === "string" ? /^([0-9]{5}):([0-9]{5})$/.exec(user) : null;
+  if (!match || Number(match[2]) !== BOX_GID) return null;
+  const uid = Number(match[1]);
+  return uid >= UID_MIN && uid <= UID_MAX ? uid : null;
+}
+
+// Same derivation as the bridge's deriveNames; the parity test pins the two together.
+export function digestFor(ownerId, workspaceId) {
+  return createHash("sha256").update(`${ownerId}:${workspaceId}`).digest("hex").slice(0, 32);
 }
 
 export function createShapeViolation(body, path, limits) {
@@ -93,7 +117,8 @@ export function createShapeViolation(body, path, limits) {
   if (!sameKeys(body, ["Image", "User", "WorkingDir", "Cmd", "Env", "Labels", "HostConfig"])) return "top-level keys";
 
   if (body.Image !== limits.image) return "Image";
-  if (body.User !== "10001:10001") return "User";
+  const uid = parseBoxUid(body.User);
+  if (uid === null) return "User";
   if (body.WorkingDir !== "/workspace") return "WorkingDir";
   if (!deepEqualJson(body.Cmd, ["sleep", "infinity"])) return "Cmd";
 
@@ -104,6 +129,10 @@ export function createShapeViolation(body, path, limits) {
   if (body.Labels["osio.ide.managed"] !== "1") return "Labels";
   if (!isUuidLike(body.Labels["osio.ide.owner"])) return "Labels";
   if (!isUuidLike(body.Labels["osio.ide.workspace"])) return "Labels";
+  if (body.Labels[LABEL_UID] !== String(uid)) return "Labels";
+  // The workspace volume is named after the digest, so a digest that is not this owner's and this
+  // workspace's would mount someone else's workspace under the right labels (N12).
+  if (digestFor(body.Labels["osio.ide.owner"], body.Labels["osio.ide.workspace"]) !== digest) return "name";
 
   const hc = body.HostConfig;
   const allowedHostConfig = [...REQUIRED_HOST_CONFIG, ...OPTIONAL_HOST_CONFIG];
@@ -122,10 +151,10 @@ export function createShapeViolation(body, path, limits) {
   // body naming another user's home (or any other volume) at /home/coder is refused.
   if (!Array.isArray(hc.Mounts) || hc.Mounts.length !== 2) return "Mounts";
   const [workspace, home] = hc.Mounts;
-  if (!sameKeys(workspace, REQUIRED_MOUNT_KEYS)) return "Mounts";
+  if (!sameKeys(workspace, REQUIRED_MOUNT_KEYS) || !deepEqualJson(workspace.VolumeOptions, NO_COPY)) return "Mounts";
   if (workspace.Type !== "volume" || workspace.Target !== "/workspace") return "Mounts";
   if (workspace.Source !== `osio-ide-vol-${digest}`) return "Mounts";
-  if (!sameKeys(home, REQUIRED_MOUNT_KEYS)) return "Mounts";
+  if (!sameKeys(home, REQUIRED_MOUNT_KEYS) || !deepEqualJson(home.VolumeOptions, NO_COPY)) return "Mounts";
   if (home.Type !== "volume" || home.Target !== HOME_TARGET) return "Mounts";
   if (home.Source !== homeVolumeFor(body.Labels["osio.ide.owner"])) return "Mounts";
 
@@ -166,9 +195,9 @@ export function execShapeViolation(body) {
   if (body === null || typeof body !== "object" || Array.isArray(body)) return "not an object";
 
   const keys = Object.keys(body);
-  for (const k of keys) if (!REQUIRED_EXEC_KEYS.includes(k)) return "extra key";
+  if (keys.includes("User")) return "User";
+  for (const k of keys) if (!ALLOWED_EXEC_KEYS.includes(k)) return "extra key";
 
-  if (body.User !== "10001:10001") return "User";
   if (body.WorkingDir !== "/workspace") return "WorkingDir";
 
   if (!Array.isArray(body.Cmd) || body.Cmd.length === 0) return "Cmd";
