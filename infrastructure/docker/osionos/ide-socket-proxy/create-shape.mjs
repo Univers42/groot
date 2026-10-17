@@ -130,7 +130,7 @@ export function createShapeViolation(body, path, limits) {
   if (home.Source !== homeVolumeFor(body.Labels["osio.ide.owner"])) return "Mounts";
 
   if (!sameKeys(hc.Tmpfs, REQUIRED_TMPFS_KEYS)) return "Tmpfs";
-  if (hc.Tmpfs["/tmp"] !== "size=64m,mode=1777") return "Tmpfs";
+  if (hc.Tmpfs["/tmp"] !== "size=64m,mode=1777,exec") return "Tmpfs";
 
   if (!isSafePositiveInt(hc.PidsLimit, limits.maxPids)) return "PidsLimit";
   if (!isSafePositiveInt(hc.Memory, limits.maxMemory)) return "Memory";
