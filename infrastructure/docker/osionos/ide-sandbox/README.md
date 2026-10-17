@@ -290,6 +290,19 @@ name from the `osio.ide.owner` label (`create-shape.mjs`, pinned to the bridge b
   but crashes at once, or an rc with `exit 1`, ends every normal terminal; the safe terminal is the way
   back in. `chsh -s /bin/bash` undoes the choice.
 
+### User-space defaults (login shells only)
+
+`/etc/profile.d/10-user-space.sh` (source: `user-space.profile.sh`) points every toolchain at `$HOME`,
+so installers work with a read-only rootfs and no sudo: `~/.local/bin`, `~/.cargo/bin` and `~/go/bin`
+lead `PATH`; `NPM_CONFIG_PREFIX` and `PYTHONUSERBASE` are `~/.local` (with `PIP_BREAK_SYSTEM_PACKAGES=1`
+so `pip install` lands in the user site despite PEP 668); `GOPATH=~/go`, `CARGO_HOME=~/.cargo`,
+`RUSTUP_HOME=~/.rustup`, `MAMBA_ROOT_PREFIX=~/micromamba`; `LANG` and `LC_ALL` are `C.UTF-8`.
+`/etc/conda/.condarc` makes conda-forge micromamba's only default channel, never Anaconda `defaults`.
+`tmux`, `less` and `man` (with man pages) are in the image. The safe terminal skips all of it by
+design. A value the user already exports wins. Not done here: `TZ` from the browser, which belongs to
+the bridge's exec builders. Tests: `scripts/tests/ide-user-space.bats` (its header says how to run the
+image checks).
+
 ### Account name and HOME (ADR 0009)
 
 `/etc/passwd` in the image is a symlink to `/tmp/.osio/passwd`; the real file is
