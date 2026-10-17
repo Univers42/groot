@@ -225,13 +225,16 @@ COMPOSE_PROFILES=ide docker compose up -d osionos-ide-socket-proxy
 #    ~2.8 GB copy is removed) — to keep it: `OSIONOS_IDE_KEEP_MAIN_COPY=1`
 sudo sh infrastructure/docker/osionos/ide-sandbox/bootstrap.sh
 
-# 4. Run the hostile corpus (must be green before enabling). verify.sh pins EXPECTED=42 and every
+# 4. Run the hostile corpus (must be green before enabling). verify.sh pins EXPECTED=48 and every
 #    probe prints exactly one PASS/FAIL/SKIP line. The "Control plane reachability" section adds two
 #    probes: a box must not open TCP to osionos-ide-server:4100 nor osionos-ide-socket-proxy:2375, on
 #    EVERY address each container has, every target first shown to accept connections from the host;
 #    both SKIP where the plane is not deployed. The code-runner probe SKIPs where no runner image is
-#    present. On the VM (2026-10-14): `RESULT: 41 passed, 0 failed, 1 skipped (expected 42)` — the skip
-#    is the runner probe. The checks do not map 1:1 onto the 16 conditions.
+#    present. The "Persistent home" section adds four probes (home owned by 10001 and writable, box B
+#    cannot read box A's home, a file survives box remove and recreate, `touch /etc/x` denied). Expected
+#    green line once the home and shell change is deployed: `RESULT: 47 passed, 0 failed, 1 skipped
+#    (expected 48)`, the skip being the runner probe (not yet run: it needs the VM, 2026-10-17). The
+#    last measured line on the VM (2026-10-14) was `41 passed, 0 failed, 1 skipped (expected 42)`. The checks do not map 1:1 onto the 16 conditions.
 sudo sh infrastructure/docker/osionos/ide-sandbox/verify.sh
 
 # 5. Seed docker-ide, then deploy the plane to the VM (the VM never builds) and prove it read-only:
@@ -256,6 +259,54 @@ sudo sh infrastructure/docker/osionos/ide-sandbox/verify.sh
 #    change (its IDE gates are pinned empty in compose — see Placement).
 # 6. On the client machine: `make link` (ssh mode), then `make link-verify` — see Placement.
 ```
+
+## Persistent home and login shell
+
+A user's dotfiles, `~/.local` installs and shell choice live in one named volume,
+`osio-ide-home-<sha256(userId)[0:32]>`, mounted at the constant `/home/coder` in every box of that
+user. `/workspace` stays per user and workspace. The username never enters a path or a volume name.
+The socket proxy admits exactly two mounts, `[workspace, home]` in that order, and recomputes the home
+name from the `osio.ide.owner` label (`create-shape.mjs`, pinned to the bridge by
+`scripts/tests/ide-proxy-parity.mjs`). The old 64 MB `/home/coder` tmpfs is gone; `/tmp` stays one.
+
+- **No quota.** The home is unbounded like `/workspace`: it is limited by the docker-ide data-root, not
+  by `diskSize` (a local volume honours no size option, and the proxy refuses `DriverOpts`). Before a
+  second subject joins `OSIONOS_IDE_ALLOWED_SUBJECTS`, the volume growth bound has to be ruled again.
+- **Shared by design (N4).** One home serves all of a user's workspaces and up to two concurrent boxes.
+  An rc file written in one box runs in the others.
+- **Login shell.** The PTY starts `/usr/local/bin/osio-login`. It reads the first line (at most 4096
+  bytes) of `~/.config/osio/login-shell` as a path, never evaluates it, and starts it with `-l` only if
+  it is absolute, free of `..` and control characters, a regular executable file, not the launcher
+  itself, and either under `$HOME` or listed in `/etc/shells`. Anything else prints one stderr line with
+  a fixed reason and starts `/bin/bash -l`. `chsh -s <path>` (a POSIX sh shim at `/usr/local/bin/chsh`;
+  the setuid `/usr/bin/chsh` is removed from the image) applies the same checks and writes the file
+  atomically; `chsh` alone prints the current shell. It never touches `/etc`. Tests:
+  `scripts/tests/ide-login-shell.bats`.
+- **Safe terminal.** The IDE's "Safe terminal" button attaches with `safe=1`: `bash --noprofile --norc`,
+  a fixed argv that skips the launcher, `~/.bashrc` and `~/.profile`. A saved shell that passes the checks
+  but crashes at once, or an rc with `exit 1`, ends every normal terminal; the safe terminal is the way
+  back in. `chsh -s /bin/bash` undoes the choice.
+
+### Recovery when no terminal opens (user-run on the VM)
+
+Moves the rc files aside and clears the saved shell, volume kept. `<h>` is the 32 hex characters of the
+home volume (`docker -H unix:///run/docker-ide.sock volume ls | grep osio-ide-home`); stop the user's box
+first so no shell holds the files.
+
+```sh
+docker -H unix:///run/docker-ide.sock run --rm --user 10001:10001 -v osio-ide-home-<h>:/h \
+  osionos-ide-sandbox:latest sh -c \
+  'cd /h && for f in .bashrc .profile .bash_profile .config/osio/login-shell; do [ -e "$f" ] && mv "$f" "$f.aside"; done; ls -A'
+```
+
+### Removing a user's data (user-run, GDPR)
+
+Stop and remove the user's `ide-*` containers (without `-v`; the containers carry the
+`osio.ide.owner` label), then remove their volumes. Volumes carry only `osio.ide.managed=1`, so they are
+found by name: `osio-ide-home-<h>` is `sha256(userId)[0:32]`, and each `osio-ide-vol-<h>` is the digest
+`deriveNames` gives for that user and workspace (the `Source` of the container's mounts, visible with
+`docker inspect` before the container is removed). Nothing automates this yet; it is a tracked
+follow-up, not done here.
 
 ## P3–P7 routes (server halves — built + verified offline)
 
