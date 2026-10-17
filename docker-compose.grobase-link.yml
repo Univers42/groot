@@ -113,7 +113,9 @@ services:
         aliases:
           - osionos-ide-server
     # The link owner's uid (make link sets it): ssh makes the forwarded socket 0600 in a 0700 dir,
-    # and root without CAP_DAC_OVERRIDE gets EACCES on it (measured 2026-10-13).
+    # and root without CAP_DAC_OVERRIDE gets EACCES on it (measured 2026-10-13). On rootless
+    # Docker make link sets 0: container root is the owner there, and the owner's own uid is
+    # unmapped inside the container (DOCKER_ROOTLESS, common.mk).
     user: "${GROBASE_LINK_UID:-1000}:${GROBASE_LINK_GID:-1000}"
     read_only: true
     cap_drop: [ALL]
