@@ -46,6 +46,16 @@ jobs:
         run: |
           git config --global url."https://github.com/".insteadOf "git@github.com:"
           git submodule update --init --recursive apps/osionos/app
+      - name: base images from mirror.gcr.io under their public.ecr.aws names
+        # The ECR cap outlasts minutes of retry on one runner IP (job 3d19b714: 3 attempts, all 429).
+        # mirror.gcr.io serves the same Docker Official Images; tagged locally under the ECR name,
+        # the docker-driver build uses them and never asks ECR. Caveat: the two registries move a
+        # tag independently, so right after an upstream release the mirror can lag a digest behind.
+        run: |
+          for img in node:22-alpine nginx:1.27-alpine; do
+            docker pull -q "mirror.gcr.io/library/$img"
+            docker tag "mirror.gcr.io/library/$img" "public.ecr.aws/docker/library/$img"
+          done
       - name: build osionos-app as make does
         # Retries only a registry refusal: public.ecr.aws caps anonymous data per runner IP
         # ("429 Data limit exceeded", job 117478667141). Caveat: "registry-shaped" is a grep
