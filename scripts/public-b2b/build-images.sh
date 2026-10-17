@@ -38,6 +38,11 @@ sha=$(git -C "$oo" rev-parse --short=12 HEAD)
 
 anon_key=$(get_env "$build_env" PUBLIC_BAAS_ANON_KEY) || fail "PUBLIC_BAAS_ANON_KEY missing in $build_env"
 site_key=$(get_env "$build_env" PUBLIC_TURNSTILE_SITE_KEY) || fail "PUBLIC_TURNSTILE_SITE_KEY missing in $build_env"
+# Cloudflare's published dummy site keys render a widget that any visitor passes; the gateway
+# never sees the site key, so only the build can refuse it.
+case $site_key in
+[123]x00000000000000000000*) fail "PUBLIC_TURNSTILE_SITE_KEY is a Cloudflare dummy key: create a widget for baas.tail10f2ea.ts.net at dash.cloudflare.com -> Turnstile" ;;
+esac
 
 site_image=prismatica-public/site:$sha
 gateway_image=prismatica-public/auth-gateway:$sha

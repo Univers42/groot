@@ -234,6 +234,20 @@ check_no_mini_baas_writes() { # file: every `-p mini-baas` use must be a read-on
   [[ "$output" == *"PUBLIC_TURNSTILE_SITE_KEY missing"* ]]
 }
 
+@test "build-images.sh refuses Cloudflare's dummy Turnstile site keys before building" {
+  mkdir -p "$W/oo/docker/services/web"
+  : > "$W/oo/docker/services/web/Dockerfile"
+  git -C "$W/oo" init -q
+  git -C "$W/oo" -c user.name=t -c user.email=t@t add -A
+  git -C "$W/oo" -c user.name=t -c user.email=t@t commit -q -m init
+  for key in 1x00000000000000000000AA 2x00000000000000000000AB 3x00000000000000000000FF; do
+    printf 'PUBLIC_BAAS_ANON_KEY=a\nPUBLIC_TURNSTILE_SITE_KEY=%s\n' "$key" > "$W/build.env"
+    PUBLIC_BUILD_ENV_FILE="$W/build.env" run bash "$SCRIPTS/build-images.sh" "$W/oo"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"Cloudflare dummy key"* ]]
+  done
+}
+
 # Serve-config diff (PUB-9, PUB-13) against synthetic JSON, with bash standing in for ssh.
 serve_fixtures() {
   cat > "$W/before.json" << 'JSON'
