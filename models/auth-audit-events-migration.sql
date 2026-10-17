@@ -7,7 +7,7 @@
 -- RPC never existed here and every audit() call was swallowed with a warning. This file is the
 -- applied one. It is safe on a database that lacks the objects and on one carrying the old
 -- shape (integer user_id, a narrower CHECK, a function with its own copy of the event list):
--- the table is kept (user_id retyped to uuid when it is integer), the CHECK and the function are replaced.
+-- the old table is renamed to auth_audit_events_legacy_int with its rows, the CHECK and the function are replaced.
 --
 -- The CHECK is the ONE event list. The function no longer repeats it: an unknown event is
 -- refused by the CHECK (23514). scripts/tests/auth-audit-events.bats fails when the gateway
@@ -19,9 +19,56 @@
 -- grobase's CREATE TABLE hook gives this table.
 --
 -- DOWN (manual): DROP FUNCTION public.auth_record_audit_event(TEXT, TEXT, JSONB);
---                DROP TABLE public.auth_audit_events;
+--                DROP TABLE public.auth_audit_events;  (auth_audit_events_legacy_int, if present, holds old rows)
 
 BEGIN;
+
+-- An old-shape table has user_id INTEGER (and an FK to an integer users table). Against
+-- grobase's uuid public.users those ids point at nothing, so the table is moved aside whole, never
+-- retyped: every legacy row survives in public.auth_audit_events_legacy_int, readable by
+-- service_role only. Its constraints, indexes and sequence get a _legacy_int suffix so the new
+-- table's names are free. Caveat: the legacy rows are not copied into the new table (their integer
+-- ids cannot be mapped to uuids); merging them is a manual step. A later run does not rename
+-- again; it only re-applies the revoke below.
+DO $$
+DECLARE
+  item record;
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_attribute
+              WHERE attrelid = to_regclass('public.auth_audit_events') AND attname = 'user_id'
+                AND atttypid <> 'uuid'::regtype) THEN
+    IF to_regclass('public.auth_audit_events_legacy_int') IS NOT NULL THEN
+      RAISE EXCEPTION 'public.auth_audit_events_legacy_int already exists; resolve it by hand before migrating';
+    END IF;
+    ALTER TABLE public.auth_audit_events RENAME TO auth_audit_events_legacy_int;
+    FOR item IN
+      SELECT conname FROM pg_constraint WHERE conrelid = 'public.auth_audit_events_legacy_int'::regclass
+    LOOP
+      EXECUTE format('ALTER TABLE public.auth_audit_events_legacy_int RENAME CONSTRAINT %I TO %I',
+                     item.conname, item.conname || '_legacy_int');
+    END LOOP;
+    FOR item IN
+      SELECT indexname FROM pg_indexes
+       WHERE schemaname = 'public' AND tablename = 'auth_audit_events_legacy_int'
+         AND indexname NOT LIKE '%\_legacy\_int'
+    LOOP
+      EXECUTE format('ALTER INDEX public.%I RENAME TO %I', item.indexname, item.indexname || '_legacy_int');
+    END LOOP;
+    IF to_regclass('public.auth_audit_events_id_seq') IS NOT NULL THEN
+      ALTER SEQUENCE public.auth_audit_events_id_seq RENAME TO auth_audit_events_legacy_int_id_seq;
+    END IF;
+  END IF;
+  -- Every run, not only the renaming one: a later blanket GRANT (an old bootstrap's) must not reopen it.
+  IF to_regclass('public.auth_audit_events_legacy_int') IS NOT NULL THEN
+    REVOKE ALL ON public.auth_audit_events_legacy_int FROM PUBLIC, anon, authenticated;
+    GRANT ALL ON public.auth_audit_events_legacy_int TO service_role;
+    IF to_regclass('public.auth_audit_events_legacy_int_id_seq') IS NOT NULL THEN
+      REVOKE ALL ON SEQUENCE public.auth_audit_events_legacy_int_id_seq FROM PUBLIC, anon, authenticated;
+      GRANT ALL ON SEQUENCE public.auth_audit_events_legacy_int_id_seq TO service_role;
+    END IF;
+  END IF;
+END
+$$;
 
 CREATE TABLE IF NOT EXISTS public.auth_audit_events (
   id BIGSERIAL PRIMARY KEY,
@@ -33,28 +80,6 @@ CREATE TABLE IF NOT EXISTS public.auth_audit_events (
   details JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-
--- An old-shape table has user_id INTEGER (and an FK to an integer users table). Against
--- grobase's uuid public.users those ids point at nothing, and the function's lookup would fail
--- on the first known email. Caveat: the integer values are discarded (set to NULL), not mapped.
-DO $$
-DECLARE
-  fk record;
-BEGIN
-  IF (SELECT atttypid FROM pg_attribute
-       WHERE attrelid = 'public.auth_audit_events'::regclass AND attname = 'user_id') = 'integer'::regtype THEN
-    FOR fk IN
-      SELECT conname FROM pg_constraint
-       WHERE conrelid = 'public.auth_audit_events'::regclass AND contype = 'f'
-         AND conkey = ARRAY[(SELECT attnum FROM pg_attribute
-                              WHERE attrelid = 'public.auth_audit_events'::regclass AND attname = 'user_id')]
-    LOOP
-      EXECUTE format('ALTER TABLE public.auth_audit_events DROP CONSTRAINT %I', fk.conname);
-    END LOOP;
-    ALTER TABLE public.auth_audit_events ALTER COLUMN user_id TYPE uuid USING NULL;
-  END IF;
-END
-$$;
 
 CREATE INDEX IF NOT EXISTS auth_audit_events_event_created_idx ON public.auth_audit_events (event_type, created_at DESC);
 CREATE INDEX IF NOT EXISTS auth_audit_events_email_created_idx ON public.auth_audit_events (lower(email), created_at DESC);
