@@ -3,7 +3,7 @@
 #                                                                              #
 #    models-grants.sh                                                          #
 #                                                                              #
-#    Prove every public.osionos_* relation and auth_session_cutoffs is        #
+#    Prove public.osionos_*, auth_session_cutoffs and auth_audit_events are    #
 #    reachable by service_role and by nothing else, on two throwaway DBs.      #
 #                                                                              #
 # **************************************************************************** #
@@ -22,7 +22,9 @@
 #   Checks: c no anon/authenticated privilege on an osionos_% relation or on
 #   auth_session_cutoffs · d no policy for PUBLIC/anon/authenticated · e1/e2 service_role
 #   has full CRUD and round-trips a row · e3 it upserts a session cut-off as the
-#   auth-gateway does · f six probes, and S1-S3 on auth_session_cutoffs, refused with 42501 · h no SECURITY DEFINER osionos_% function
+#   auth-gateway does · e4 service_role calls auth_record_audit_event with a new-list event ·
+#   f six probes, S1-S3 on auth_session_cutoffs and A1-A3 on auth_audit_events and its RPC, refused with 42501 ·
+#   h no SECURITY DEFINER osionos_% function or auth_record_audit_event
 #   they may execute · g a second runner pass changes no ACL, policy or RLS flag ·
 #   n the final notifications type CHECK admits every type the models files declare ·
 #   r no public table keeps a realtime_notify() trigger (it broadcasts rows past every grant) ·
@@ -238,6 +240,7 @@ run_checks() {
 	check_count "$1" e1 service_role_gaps
 	check_svc "$1" e2 svc_rows
 	check_svc "$1" e3 svc_cutoff
+	check_svc "$1" e4 svc_audit
 	probe "$1" T1 authenticated "SELECT count(*) FROM public.osionos_pages"
 	probe "$1" T2 authenticated "DELETE FROM public.osionos_pages"
 	probe "$1" T3 authenticated "UPDATE public.osionos_pages SET owner_id='cccccccc-cccc-cccc-cccc-cccccccccccc', visibility='public'"
@@ -247,6 +250,9 @@ run_checks() {
 	probe "$1" S1 authenticated "SELECT user_id, sessions_valid_after FROM public.auth_session_cutoffs"
 	probe "$1" S2 anon "INSERT INTO public.auth_session_cutoffs (user_id) VALUES ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb')"
 	probe "$1" S3 authenticated "UPDATE public.auth_session_cutoffs SET sessions_valid_after = 'epoch'"
+	probe "$1" A1 authenticated "SELECT event_type FROM public.auth_audit_events"
+	probe "$1" A2 anon "SELECT public.auth_record_audit_event('logout')"
+	probe "$1" A3 authenticated "INSERT INTO public.auth_audit_events (event_type) VALUES ('logout')"
 	check_count "$1" h secdef_exec
 	check_count "$1" n notify_types_missing
 	check_count "$1" r realtime_triggers

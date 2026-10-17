@@ -29,6 +29,8 @@
 #      target the auth gateway's own database, and applying them here fails on
 #      a uuid/integer foreign-key clash (measured, not assumed):
 #        gdpr-migration.sql  user.sql  auth-security-migration.sql
+#      The audit surface that last one declared lives, uuid-native and applied, in
+#      auth-audit-events-migration.sql (plain alphabetical order, no dependency).
 #      auth-gateway-users-reconcile-migration.sql was on this list and does NOT
 #      belong to it: it is additive uuid-native DDL (five ADD COLUMN IF NOT
 #      EXISTS on public.users, two unique indexes, one trigger) and applies with
