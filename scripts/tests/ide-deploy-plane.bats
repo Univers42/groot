@@ -55,6 +55,17 @@ if [ "$1" = image ] && [ "$2" = inspect ]; then
   fi
   case "$fmt" in
     *RootFS.Layers*)
+      # The config the way each daemon prints it: the whole object differs between the
+      # build machine (Docker 28.1 prints zero-value fields) and the VM (29.9 omits them),
+      # field by field it is identical unless CONFIG_MISMATCH names the image.
+      case "$fmt" in
+        *'{{json .Config}}'*)
+          if [ "$daemon" = main ]; then printf '{"Cmd":["node"],"Tty":false,"Labels":null} '; else printf '{"Cmd":["node"]} '; fi ;;
+        *'.Config.Cmd'*)
+          cmd='["node"]'
+          if [ "$daemon" = vm ]; then case " ${CONFIG_MISMATCH:-} " in *" $img "*) cmd='["sh"]' ;; esac; fi
+          printf '%s ' "$cmd" ;;
+      esac
       if [ "$daemon" = vm ]; then case " ${LAYERS_MISMATCH:-} " in *" $img "*) echo '["sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"]'; exit 0 ;; esac; fi
       echo '["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]'
       ;;
@@ -211,6 +222,24 @@ BOTH='osionos-ide-socket-proxy:latest track-binocle/osionos-bridge:local'
   [[ "$output" != *"$SECRET"* ]]
   run grep -F "$SECRET" "$CALLS"
   [ "$status" -eq 1 ]
+}
+
+@test "a config field that differs on the VM stops the deploy, naming the image, no compose" {
+  valid_env
+  IDE_SHIP_HOST=vm OSIONOS_IDE_ENV_FILE="$ENV_FILE" VM_ABSENT="$BOTH" CONFIG_MISMATCH=track-binocle/osionos-bridge:local deploy
+  [ "$status" -ne 0 ]
+  [[ "$output" == *track-binocle/osionos-bridge:local* ]]
+  run grep -E 'compose' "$CALLS"
+  [ "$status" -eq 1 ]
+}
+
+@test "the same image printed by Docker 28 and 29 compares equal: shipped, deployed, C1 ok" {
+  valid_env
+  IDE_SHIP_HOST=vm OSIONOS_IDE_ENV_FILE="$ENV_FILE" VM_ABSENT="$BOTH" deploy
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"deployed: socket-proxy"* ]]
+  IDE_SHIP_HOST=vm OSIONOS_IDE_ENV_FILE="$ENV_FILE" check
+  [[ "$output" == *"ok C1 "* ]]
 }
 
 @test "an image the VM already holds under the same id is not shipped again" {
