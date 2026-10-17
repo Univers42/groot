@@ -225,7 +225,7 @@ COMPOSE_PROFILES=ide docker compose up -d osionos-ide-socket-proxy
 #    ~2.8 GB copy is removed) — to keep it: `OSIONOS_IDE_KEEP_MAIN_COPY=1`
 sudo sh infrastructure/docker/osionos/ide-sandbox/bootstrap.sh
 
-# 4. Run the hostile corpus (must be green before enabling). verify.sh pins EXPECTED=51 and every
+# 4. Run the hostile corpus (must be green before enabling). verify.sh pins EXPECTED=52 and every
 #    probe prints exactly one PASS/FAIL/SKIP line. The "Control plane reachability" section adds two
 #    probes: a box must not open TCP to osionos-ide-server:4100 nor osionos-ide-socket-proxy:2375, on
 #    EVERY address each container has, every target first shown to accept connections from the host;
@@ -234,8 +234,8 @@ sudo sh infrastructure/docker/osionos/ide-sandbox/bootstrap.sh
 #    cannot read box A's home, a file survives box remove and recreate, `touch /etc/x` denied). The
 #    "Box identity" section adds three more (`whoami` is coder and HOME is /home/coder right after start,
 #    a hostile passwd file changes neither uid nor HOME, a 100 KB passwd line breaks every exec and a
-#    box restart cures it). Expected green line once the identity change is deployed: `RESULT: 50
-#    passed, 0 failed, 1 skipped (expected 51)`, the skip being the runner probe (not yet run: it needs
+#    box restart cures it). Expected green line once the identity change is deployed: `RESULT: 51
+#    passed, 0 failed, 1 skipped (expected 52)`, the skip being the runner probe (not yet run: it needs
 #    the VM, 2026-10-17). The
 #    last measured line on the VM (2026-10-14) was `41 passed, 0 failed, 1 skipped (expected 42)`. The checks do not map 1:1 onto the 16 conditions.
 sudo sh infrastructure/docker/osionos/ide-sandbox/verify.sh
@@ -307,6 +307,18 @@ rootfs and the numeric `User` pins hold. Without any one of them, a user-written
 binary gives root in the box. A change to `create-shape.mjs` on those fields, or a setuid binary added
 to the image (the build fails above `SETUID_BASELINE`, 8), re-opens ADR 0009.
 
+**/tmp is exec, nosuid and nodev (ADR 0010).** The create spec's `size=64m,mode=1777,exec` mounts as
+`rw,nosuid,nodev`: docker prepends `noexec,nosuid,nodev` and the last flag wins. Under noexec, `go run`,
+dlopen of a library in /tmp and installers failed (measured 2026-10-17). The boundary does not rest on
+noexec: every process is uid 10001, and anyone who can write /tmp can already run code from /workspace
+and the home. The socket proxy admits only this exact string, since `,suid` or `,dev` would drop
+nosuid or nodev. Boxes created before the rollout keep noexec until stopped (Restart box).
+
+Caveat: /tmp is still 64 MB, so a build whose temp tree passes that fails with ENOSPC (a large
+`go run`, a pip build with heavy build dependencies); use `TMPDIR=/workspace/.local/tmp` for those.
+A full /tmp also keeps the terminal name `coder`, because `osio-login` cannot write the account file;
+execs keep working.
+
 **Symptom and recovery (P7).** The box user can break their own box: a FIFO, a directory or a line of
 more than 64 KB at `/tmp/.osio/passwd` makes every `docker exec` hang or fail, the safe terminal
 included (`unable to setup user`, or a terminal that never opens). The workbench's "Restart box" button
@@ -321,7 +333,8 @@ D='sudo docker -H unix:///run/docker-ide.sock'; IMG=<sandbox image id pinned by 
 runc --version; $D version --format '{{.Server.Version}}'
 $D run -d --name osio-p3-probe --network none --user 10001:10001 -e HOME=/home/coder \
   --read-only --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 512 \
-  --tmpfs /tmp:size=64m,mode=1777 --tmpfs /home/coder:uid=10001 "$IMG" sleep infinity
+  --tmpfs /tmp:size=64m,mode=1777,exec --tmpfs /home/coder:uid=10001 "$IMG" sleep infinity
+$D exec osio-p3-probe sh -c 'grep " /tmp " /proc/mounts'               # rw,nosuid,nodev,... and no noexec (X6)
 $D exec osio-p3-probe sh -c 'whoami; echo HOME=$HOME'                 # coder, HOME=/home/coder
 $D exec -it -e OSIO_USER=dylan -e TERM=xterm-256color osio-p3-probe /usr/local/bin/osio-login
 #   in that shell: whoami; id; echo $HOME; exit                        # dylan, uid=10001(dylan) groups=10001(coder), /home/coder

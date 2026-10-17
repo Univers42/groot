@@ -15,7 +15,7 @@
 # conditions as runnable probes. Run AFTER `bootstrap.sh` with the `ide`
 # profile up. Probes run inside TWO throwaway boxes (ide-probe-a/b)
 # in the PRODUCTION shape (uid 10001, /workspace on named volume,
-# CapDrop ALL, no-new-privileges, tmpfs /tmp 64m, per-user home volume at /home/coder,
+# CapDrop ALL, no-new-privileges, tmpfs /tmp 64m exec, per-user home volume at /home/coder,
 # pids 512, memory 1 GiB swap equal, 1 CPU). Positive controls run first
 # so a broken probe tool never reads as a pass; every probe prints exactly
 # one PASS/FAIL/SKIP line, and the RESULT line checks the total against EXPECTED.
@@ -34,10 +34,10 @@ RUNNER_PROBE=ide-runner-sigusr1-probe
 NAT_CHECK=/usr/local/sbin/osionos-ide-egress-nat
 PLANE_PROJECT=osionos-ide-plane
 pass=0; fail=0; skipped=0
-# 44 + 4 persistent-home probes (a)-(d) + 3 identity probes (e)-(g); the green line is
-# `RESULT: 50 passed, 0 failed, 1 skipped (expected 51)` where the one skip is the runner image,
+# 44 + 4 persistent-home probes (a)-(d) + 3 identity probes (e)-(g) + 1 /tmp probe; the green line is
+# `RESULT: 51 passed, 0 failed, 1 skipped (expected 52)` where the one skip is the runner image,
 # absent on a VM without the code runner.
-EXPECTED=51
+EXPECTED=52
 # The VM's default gateway (user-mode QEMU: 10.0.2.2 is the physical host's loopback, where 4242
 # is the VM's own forwarded ssh). Elsewhere set a port that listens on that gateway.
 GATEWAY_PORT="${OSIONOS_IDE_VERIFY_GATEWAY_PORT:-4242}"
@@ -121,7 +121,7 @@ run_box() {
     --cap-drop ALL --security-opt no-new-privileges:true --read-only \
     -v "osio-ide-vol-$1":/workspace \
     -v "osio-ide-home-$1":/home/coder \
-    --tmpfs /tmp:size=64m,mode=1777 \
+    --tmpfs /tmp:size=64m,mode=1777,exec \
     --pids-limit 512 --memory 1g --memory-swap 1g --cpus 1 \
     --ulimit core=0:0 --ulimit nproc=512:512 --ulimit nofile=4096:4096 \
     --restart no \
@@ -302,6 +302,20 @@ $IDE rm -f "$BOX_A" >/dev/null 2>&1
 run_box "$BOX_A" || printf 'warning: %s failed to restart — probes fail closed\n' "$BOX_A" >&2
 if [ "$(sx 'cat /home/coder/probe-marker')" = "marker" ]; then ok "a file in the home survives box remove and recreate"; else bad "a file in the home survives box remove and recreate"; fi
 deny "touch /etc/probe-x" "/etc is read-only (touch /etc/x denied)"
+
+# /tmp is exec, nosuid and nodev (ADR 0010): the mount flags AND a copied binary that runs, because
+# a flag read alone would pass on a daemon that merges the options differently.
+tmp_flags=$(sx 'grep " /tmp " /proc/self/mounts' | awk '{print $4}')
+case ",$tmp_flags," in
+  *,nosuid,*) has_nosuid=1 ;; *) has_nosuid=0 ;;
+esac
+case ",$tmp_flags," in
+  *,nodev,*) has_nodev=1 ;; *) has_nodev=0 ;;
+esac
+case ",$tmp_flags," in
+  *,noexec,*) has_noexec=1 ;; *) has_noexec=0 ;;
+esac
+if [ "$has_nosuid" = 1 ] && [ "$has_nodev" = 1 ] && [ "$has_noexec" = 0 ] && sx 'cp /bin/true /tmp/probe-true && /tmp/probe-true && rm /tmp/probe-true'; then ok "/tmp is exec, nosuid and nodev, and a copied binary runs"; else bad "/tmp is exec, nosuid and nodev, and a copied binary runs"; fi
 
 echo "== Box identity (ADR 0009, P6) =="
 # /etc/passwd links to /tmp/.osio/passwd, which box-init writes before the Cmd starts. A `docker
