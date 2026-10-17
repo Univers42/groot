@@ -25,7 +25,8 @@
 ** zombie for up to 1 s; the Cmd is started once and never restarted.
 **
 ** It also writes the box's default /tmp/.osio/passwd (a copy of /etc/passwd.base, which names
-** the user coder) before the Cmd starts: /etc/passwd is a symlink to that file, and without it
+** the user coder, with the coder line's uid replaced by getuid(): each user's box runs as its own
+** uid, ADR 0011) before the Cmd starts: /etc/passwd is a symlink to that file, and without it
 ** the first `docker exec` could not resolve the numeric user's home. The write is never fatal.
 ** Caveat: the Cmd is forked right after, so a `docker exec` that lands in the first
 ** milliseconds can still see no file (runc then resolves no home, HOME comes from the create
@@ -36,6 +37,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -45,21 +47,54 @@
 #define PASSWD_TMP "/tmp/.osio/passwd.init"
 #define PASSWD_FILE "/tmp/.osio/passwd"
 #define PASSWD_MAX 16384
+#define CODER_BASE "coder:x:10001:10001:"
 
-static int	copy_base(int out)
+static ssize_t	read_base(char *buf, size_t size)
 {
-	static char	buf[PASSWD_MAX];
-	ssize_t		len;
-	int			in;
+	ssize_t	len;
+	int		in;
 
 	in = open(PASSWD_BASE, O_RDONLY);
 	if (in < 0)
 		return (-1);
-	len = read(in, buf, sizeof(buf));
+	len = read(in, buf, size);
 	close(in);
-	if (len <= 0 || len == (ssize_t)sizeof(buf))
+	if (len <= 0 || len == (ssize_t)size)
 		return (-1);
-	return (write(out, buf, (size_t)len) == len ? 0 : -1);
+	return (len);
+}
+
+/* The coder line, at the start of the file or of a line, or NULL. */
+static char	*find_coder(char *buf, ssize_t len)
+{
+	char	*at;
+
+	buf[len] = '\0';
+	at = strstr(buf, CODER_BASE);
+	while (at != NULL && at != buf && at[-1] != '\n')
+		at = strstr(at + 1, CODER_BASE);
+	return (at);
+}
+
+static int	copy_base(int out)
+{
+	static char	buf[PASSWD_MAX + 1];
+	char		line[64];
+	ssize_t		len;
+	char		*at;
+	int			head;
+
+	len = read_base(buf, PASSWD_MAX);
+	at = len < 0 ? NULL : find_coder(buf, len);
+	if (at == NULL)
+		return (-1);
+	head = snprintf(line, sizeof(line), "coder:x:%u:10001:", (unsigned)getuid());
+	if (head <= 0 || write(out, buf, (size_t)(at - buf)) != at - buf)
+		return (-1);
+	if (write(out, line, (size_t)head) != head)
+		return (-1);
+	at += strlen(CODER_BASE);
+	return (write(out, at, (size_t)(buf + len - at)) == buf + len - at ? 0 : -1);
 }
 
 static void	write_default_passwd(void)
