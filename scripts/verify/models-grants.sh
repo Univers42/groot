@@ -107,10 +107,13 @@ apply() {
 	return 1
 }
 
+# Ready = answering on TCP. The image's entrypoint first runs a socket-only temporary
+# server for its init scripts and then restarts; a socket probe can succeed in that window
+# and the next psql finds no socket (CI job 117478667259, "FAIL scenario setup/fresh").
 wait_ready() {
 	i=0
 	while [ "${i}" -lt "${READY_TIMEOUT}" ]; do
-		if docker exec "${CTN}" pg_isready -U "${PG_USER}" -d "${PG_DB}" >/dev/null 2>&1; then
+		if docker exec "${CTN}" pg_isready -h 127.0.0.1 -U "${PG_USER}" -d "${PG_DB}" >/dev/null 2>&1; then
 			return 0
 		fi
 		i=$((i + 1))
