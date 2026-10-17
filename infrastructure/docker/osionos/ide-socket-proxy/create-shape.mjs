@@ -14,6 +14,8 @@
 // exec specs are the ONLY accepted shapes — every deviation is refused with a
 // short reason. No I/O, no deps, Node 22 builtins only.
 
+import { createHash } from "node:crypto";
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // The bridge sends the unversioned path (ide-docker.mjs `call("POST", "/containers/create?name=…")`).
 const CREATE_PATH_RE = /^\/(?:v[\d.]+\/)?containers\/create\?name=ide-([0-9a-f]{32})$/;
@@ -25,6 +27,7 @@ const REQUIRED_ENV = [
   "NO_PROXY=localhost,127.0.0.1",
   "no_proxy=localhost,127.0.0.1",
   "GIT_TERMINAL_PROMPT=0",
+  "HOME=/home/coder",
 ];
 const REQUIRED_LABELS = ["osio.ide.managed", "osio.ide.owner", "osio.ide.workspace"];
 const REQUIRED_HOST_CONFIG = [
@@ -33,11 +36,12 @@ const REQUIRED_HOST_CONFIG = [
 ];
 const OPTIONAL_HOST_CONFIG = ["StorageOpt", "OomScoreAdj"];
 const REQUIRED_MOUNT_KEYS = ["Type", "Source", "Target"];
-const REQUIRED_TMPFS_KEYS = ["/tmp", "/home/coder"];
+const REQUIRED_TMPFS_KEYS = ["/tmp"];
+const HOME_TARGET = "/home/coder";
 const REQUIRED_ULIMIT_NAMES = ["core", "nproc", "nofile"];
 const REQUIRED_EXEC_KEYS = ["Cmd", "User", "WorkingDir", "AttachStdin", "AttachStdout", "AttachStderr", "Tty", "Env"];
 
-// Ponytail: the 7 Env strings and their order are the bridge's literal output;
+// Ponytail: the 8 Env strings and their order are the bridge's literal output;
 // a bridge configured with extra proxies or a different GIT_TERMINAL_PROMPT
 // value is refused until these constants move with it.
 // Ponytail: maxMemory (1 GiB), maxNanoCpus (1B), maxPids (512) are the spec's
@@ -76,6 +80,11 @@ function isUuidLike(s) {
   return typeof s === "string" && UUID_RE.test(s);
 }
 
+// Same derivation as the bridge's deriveHomeVolume (ide-sandbox-spec.mjs); scripts/tests/ide-proxy-parity.mjs pins the two together.
+export function homeVolumeFor(ownerId) {
+  return `osio-ide-home-${createHash("sha256").update(String(ownerId)).digest("hex").slice(0, 32)}`;
+}
+
 export function createShapeViolation(body, path, limits) {
   const match = path.match(CREATE_PATH_RE);
   if (!match) return "name";
@@ -88,7 +97,7 @@ export function createShapeViolation(body, path, limits) {
   if (body.WorkingDir !== "/workspace") return "WorkingDir";
   if (!deepEqualJson(body.Cmd, ["sleep", "infinity"])) return "Cmd";
 
-  if (!Array.isArray(body.Env) || body.Env.length !== 7) return "Env";
+  if (!Array.isArray(body.Env) || body.Env.length !== 8) return "Env";
   for (const e of REQUIRED_ENV) if (!body.Env.includes(e)) return "Env";
 
   if (!sameKeys(body.Labels, REQUIRED_LABELS)) return "Labels";
@@ -109,16 +118,19 @@ export function createShapeViolation(body, path, limits) {
   if (hc.ReadonlyRootfs !== true) return "ReadonlyRootfs";
   if (!deepEqualJson(hc.RestartPolicy, { Name: "no" })) return "RestartPolicy";
 
-  if (!Array.isArray(hc.Mounts) || hc.Mounts.length !== 1) return "Mounts";
-  const m = hc.Mounts[0];
-  if (!sameKeys(m, REQUIRED_MOUNT_KEYS)) return "Mounts";
-  if (m.Type !== "volume") return "Mounts";
-  if (m.Target !== "/workspace") return "Mounts";
-  if (m.Source !== `osio-ide-vol-${digest}`) return "Mounts";
+  // Positional: [workspace, home]. The home Source is recomputed from the owner label, so a
+  // body naming another user's home (or any other volume) at /home/coder is refused.
+  if (!Array.isArray(hc.Mounts) || hc.Mounts.length !== 2) return "Mounts";
+  const [workspace, home] = hc.Mounts;
+  if (!sameKeys(workspace, REQUIRED_MOUNT_KEYS)) return "Mounts";
+  if (workspace.Type !== "volume" || workspace.Target !== "/workspace") return "Mounts";
+  if (workspace.Source !== `osio-ide-vol-${digest}`) return "Mounts";
+  if (!sameKeys(home, REQUIRED_MOUNT_KEYS)) return "Mounts";
+  if (home.Type !== "volume" || home.Target !== HOME_TARGET) return "Mounts";
+  if (home.Source !== homeVolumeFor(body.Labels["osio.ide.owner"])) return "Mounts";
 
   if (!sameKeys(hc.Tmpfs, REQUIRED_TMPFS_KEYS)) return "Tmpfs";
-  if (hc.Tmpfs["/tmp"] !== "size=64m,mode=1777") return "Tmpfs";
-  if (hc.Tmpfs["/home/coder"] !== "size=64m,mode=0700,uid=10001,gid=10001") return "Tmpfs";
+  if (hc.Tmpfs["/tmp"] !== "size=64m,mode=1777,exec") return "Tmpfs";
 
   if (!isSafePositiveInt(hc.PidsLimit, limits.maxPids)) return "PidsLimit";
   if (!isSafePositiveInt(hc.Memory, limits.maxMemory)) return "Memory";
@@ -171,6 +183,9 @@ export function execShapeViolation(body) {
     for (const e of body.Env) {
       if (typeof e !== "string") return "Env";
       if (!/^[A-Za-z_][A-Za-z0-9_]*=/.test(e)) return "Env";
+      // HOME is pinned once, in the create Env (ADR 0009): runc takes it from there for every
+      // exec, whatever /etc/passwd says, so no exec may carry a different one.
+      if (e.startsWith("HOME=") && e !== "HOME=/home/coder") return "Env";
     }
   }
 
