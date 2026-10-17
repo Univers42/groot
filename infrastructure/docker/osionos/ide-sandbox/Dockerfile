@@ -160,6 +160,11 @@ RUN rm -f /usr/bin/chsh \
     && chmod 0755 /usr/local/bin/osio-login /usr/local/bin/chsh \
     && ! find / -xdev -name chsh -perm /6000 -print | grep -q .
 
+# The ownership init (ADR 0011): the ide-server runs this image with this entrypoint before every
+# box create, to give a user's two volumes to that user's uid. Never the box's own entrypoint.
+COPY osio-volume-init.sh /usr/local/sbin/osio-volume-init
+RUN chmod 0755 /usr/local/sbin/osio-volume-init
+
 # The in-sandbox filesystem agent (P4): watches /workspace and streams
 # create/modify/delete events for the gateway, applying the ignore set so a
 # `pip install` never floods the page store. Launched per-session by the gateway.
@@ -189,6 +194,8 @@ RUN if find / -xdev \( -uid +65535 -o -gid +65535 \) -print -quit | grep -q .; t
 # It is safe only because the box runs with no-new-privileges, CapDrop ALL, a read-only rootfs
 # and a numeric User; with any of them gone, a user-written passwd plus a setuid binary gives
 # root in the box. The build asserts what it can: the link, one 10001 account, no new setuid.
+# box-init and osio-login copy passwd.base at run time, swapping the coder line's 10001 uid for the
+# box's own, so that line is the template they match: keep it exactly as asserted here.
 # SETUID_BASELINE is the count measured on 2026-10-17 (7) plus one of headroom.
 ARG SETUID_BASELINE=8
 RUN cp /etc/passwd /etc/passwd.base \
@@ -200,7 +207,9 @@ RUN cp /etc/passwd /etc/passwd.base \
 
 WORKDIR /workspace
 # Numeric: dockerd resolves a user name against the image's own passwd, which now points at a
-# file that does not exist before the box starts. The socket proxy also requires the number.
+# file that does not exist before the box starts. This is only the image's default: every box is
+# created with its owner's "<uid>:10001" (20000-59999, ADR 0011) and the socket proxy refuses any
+# other User, 10001:10001 included, so no box runs as the account baked in above.
 USER 10001:10001
 # PID 1 is box-init: it reaps every orphan (with `sleep infinity` as PID 1, hellish's `make -j8`
 # left 469 zombies and every fork failed, 2026-10-14) and, unlike tini, cannot be stopped from

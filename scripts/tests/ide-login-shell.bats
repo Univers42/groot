@@ -23,6 +23,10 @@ setup_file() {
   install -D -m 0755 "$SRC/osio-chsh.sh" /usr/local/bin/chsh
   # The image ships this file (ADR 0009); osio-login reads it and never writes it.
   printf 'root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\ncoder:x:10001:10001::/home/coder:/bin/bash\n' > /etc/passwd.base
+  # A box runs as its owner's own uid (ADR 0011); osio-login reads it with `id -u`. This container is
+  # root, so a shim stands in for the uid runc would have set.
+  printf '#!/bin/sh\n[ "$1" = -u ] && { echo 20042; exit 0; }\nexec /usr/bin/id "$@"\n' > /usr/local/bin/id
+  chmod 0755 /usr/local/bin/id
   touch /etc/shells
   grep -qxF /bin/sh /etc/shells || echo /bin/sh >> /etc/shells
   grep -qxF /bin/bash /etc/shells || echo /bin/bash >> /etc/shells
@@ -215,12 +219,12 @@ IDENTITY_PROBE='echo "USER=$USER LOGNAME=$LOGNAME HOME=$HOME OSIO_USER=${OSIO_US
 launch_as() { printf '%s\n' "$IDENTITY_PROBE" | OSIO_USER="$1" /usr/local/bin/osio-login; }
 launch_plain() { printf '%s\n' "$IDENTITY_PROBE" | /usr/local/bin/osio-login; }
 
-@test "a valid OSIO_USER renames only the coder line, keeping uid, gid, home and shell" {
+@test "a valid OSIO_USER renames only the coder line, giving it the box's uid, keeping gid, home and shell" {
   run --separate-stderr launch_as dylan
   [ "$status" -eq 0 ]
   [ -z "$stderr" ]
   [ "$(grep -c . "$PASSWD")" -eq "$(grep -c . /etc/passwd.base)" ]
-  grep -qxF 'dylan:x:10001:10001::/home/coder:/bin/bash' "$PASSWD"
+  grep -qxF 'dylan:x:20042:10001::/home/coder:/bin/bash' "$PASSWD"
   run grep -q '^coder:' "$PASSWD"
   [ "$status" -ne 0 ]
   [ "$(grep -v '^dylan:' "$PASSWD")" = "$(grep -v '^coder:' /etc/passwd.base)" ]
@@ -291,7 +295,7 @@ CASES
   for n in 1 2 3 4 5 6 7 8 9 10 11 12; do launch_as "user$n" >/dev/null & done
   wait
   [ "$(grep -c . "$PASSWD")" -eq "$(grep -c . /etc/passwd.base)" ]
-  grep -Eq '^user[0-9]+:x:10001:10001::/home/coder:/bin/bash$' "$PASSWD"
+  grep -Eq '^user[0-9]+:x:20042:10001::/home/coder:/bin/bash$' "$PASSWD"
   [ "$(ls -A /tmp/.osio)" = "passwd" ]
 }
 
