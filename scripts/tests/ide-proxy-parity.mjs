@@ -71,6 +71,8 @@ assertExec("write", buildWriteExecSpec("a.txt", "aGk="));
 assertExec("ports", buildPortsExecSpec());
 assertExec("tunnel", buildPortTunnelExecSpec(3000));
 assertExec("shell", buildShellExecSpec());
+assertExec("shell with a username", buildShellExecSpec({ username: "dylan" }));
+assertExec("safe shell", buildShellExecSpec({ safe: true, username: "dylan" }));
 assertExec("fs-agent", buildFsAgentExecSpec());
 // COPIED, not imported: lspExecSpec is a private function of bridge-ide-exec.mjs.
 // Its literal shape is line 113 of that file; keep the copy in step with it.
