@@ -35,13 +35,8 @@ BRIDGE_IMAGE="${OSIONOS_BRIDGE_IMAGE:-track-binocle/osionos-bridge:local}"
 
 log() { printf '[ide-deploy] %s\n' "$1" >&2; }
 
-# An image's .Id is not portable: the classic store reports the config digest, the
-# containerd store (the VM, Docker 29.9) the manifest digest, so the same image has two
-# ids. Its config plus its layer list is the same on both and is what is compared.
-# Ponytail: build history and timestamps are left out, so two builds with identical
-# config and layers count as one image; a docker that renders .Config differently
-# reads as a mismatch, which only costs a re-ship.
-FINGERPRINT='{{json .Config}} {{json .RootFS.Layers}}'
+# shellcheck source=infrastructure/docker/osionos/ide-sandbox/image-fingerprint.sh
+. "$(dirname "$0")/image-fingerprint.sh"
 
 # vm CMD — run CMD on the VM's MAIN daemon over ssh. The remote shell reads it
 # from stdin and re-splits it, so CMD carries its own quoting; ship_one vets the
