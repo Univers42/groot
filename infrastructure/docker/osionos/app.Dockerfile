@@ -29,9 +29,7 @@
 ARG GRAPH_STUDIO_PACK=ghcr.io/univers42/graph-studio-pack@sha256:2c56d13da2d6d2308e638993d389c4af1d46c03818bc1343101412964d5a844a
 FROM ${GRAPH_STUDIO_PACK} AS graph-studio-pack
 
-# mirror.gcr.io serves the same node:22-alpine and nginx:1.27-alpine digests as public.ecr.aws
-# without its anonymous data cap (graph-studio CI job 117478667141: "429 Data limit exceeded").
-FROM mirror.gcr.io/library/node:22-alpine AS builder
+FROM public.ecr.aws/docker/library/node:22-alpine AS builder
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
@@ -145,7 +143,7 @@ RUN NODE_OPTIONS=--max-old-space-size=4096 pnpm exec vite build --base "$VITE_BA
       -o -name '*.json' -o -name '*.wasm' \) -size +1k -print0 \
     | xargs -0 -P "$(nproc)" -n 16 gzip -9k
 
-FROM mirror.gcr.io/library/nginx:1.27-alpine AS runtime
+FROM public.ecr.aws/docker/library/nginx:1.27-alpine AS runtime
 LABEL org.opencontainers.image.title="osionos-app"
 LABEL org.opencontainers.image.source="https://github.com/univers42/osionos"
 # Reuse the submodule's static+SPA nginx config (listens on :80).
