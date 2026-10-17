@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+bats_require_minimum_version 1.5.0
 # gen-local-env.sh derives eight BaaS keys in ./.env.local from apps/grobase/.env. When
 # that source changes under an existing .env.local (vault pull, JWT rotation, LOCAL-mode
 # regeneration) the frontends and `make healthcheck` present a key Kong no longer knows.
@@ -12,6 +13,7 @@ setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../gen-local-env.sh"
   export GRO_ENV="$BATS_TEST_TMPDIR/grobase.env"
   export OUT="$BATS_TEST_TMPDIR/local.env"
+  export MEDIA_ENV="$BATS_TEST_TMPDIR/osionos-app.env"
   printf 'JWT_SECRET=jwt-A\nANON_KEY=anon-A\nSERVICE_ROLE_KEY=svc-A\nADAPTER_REGISTRY_SERVICE_TOKEN=adapter-A\n' > "$GRO_ENV"
   cat > "$OUT" <<'LOCAL'
 # header comment stays
@@ -247,4 +249,120 @@ stale_kong() { sed -i 's/^SB_KONG_KEY=.*/SB_KONG_KEY=anon-OLD/' "$OUT"; }
   run bash "$SCRIPT" --sync
   [ "$status" -eq 0 ]
   [ "$(val "$OUT" VITE_BAAS_KONG_KEY)" = "anon-A" ]
+}
+
+# --- media keys (UNSPLASH_ACCESS_KEY, PIXABAY_API) copied from apps/osionos/app/.env ---
+
+media_source() { printf 'UNSPLASH_ACCESS_KEY=unsplash-SRC-9f3\nPIXABAY_API=pixabay-SRC-7c1\n' > "$MEDIA_ENV"; }
+
+@test "media --sync: keys absent from .env.local are copied" {
+  media_source
+  run bash "$SCRIPT" --sync
+  [ "$status" -eq 0 ]
+  [ "$(val "$OUT" UNSPLASH_ACCESS_KEY)" = "unsplash-SRC-9f3" ]
+  [ "$(val "$OUT" PIXABAY_API)" = "pixabay-SRC-7c1" ]
+  [[ "$output" == *"copied UNSPLASH_ACCESS_KEY"* ]]
+}
+
+@test "media --sync: keys present but empty are filled, once" {
+  media_source
+  printf 'UNSPLASH_ACCESS_KEY=\nPIXABAY_API=\n' >> "$OUT"
+  run bash "$SCRIPT" --sync
+  [ "$status" -eq 0 ]
+  [ "$(val "$OUT" UNSPLASH_ACCESS_KEY)" = "unsplash-SRC-9f3" ]
+  [ "$(grep -c '^PIXABAY_API=' "$OUT")" -eq 1 ]
+}
+
+@test "media --sync: a non-empty .env.local value is kept byte-identical, named in the output" {
+  media_source
+  printf 'UNSPLASH_ACCESS_KEY=unsplash-LOCAL=x==\n' >> "$OUT"
+  run bash "$SCRIPT" --sync
+  [ "$status" -eq 0 ]
+  [ "$(val "$OUT" UNSPLASH_ACCESS_KEY)" = "unsplash-LOCAL=x==" ]
+  [ "$(val "$OUT" PIXABAY_API)" = "pixabay-SRC-7c1" ]
+  [[ "$output" == *"kept UNSPLASH_ACCESS_KEY"* ]]
+}
+
+@test "media --sync: an empty source value adds nothing" {
+  printf 'UNSPLASH_ACCESS_KEY=\n' > "$MEDIA_ENV"
+  before=$(cat "$OUT")
+  run bash "$SCRIPT" --sync
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OUT")" = "$before" ]
+}
+
+@test "media --sync: a missing source file adds nothing and exits as before" {
+  before=$(cat "$OUT")
+  run bash "$SCRIPT" --sync
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OUT")" = "$before" ]
+  stale_kong
+  run bash "$SCRIPT" --sync
+  [ "$status" -eq 0 ]
+}
+
+@test "media generate: a fresh .env.local gets the keys from the source" {
+  media_source
+  rm -f "$OUT"
+  printf 'JWT_SECRET=jwt-A\nANON_KEY=anon-A\nSERVICE_ROLE_KEY=svc-A\n' > "$GRO_ENV"
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$(val "$OUT" UNSPLASH_ACCESS_KEY)" = "unsplash-SRC-9f3" ]
+  [ "$(val "$OUT" PIXABAY_API)" = "pixabay-SRC-7c1" ]
+}
+
+@test "media generate: without a source file the keys exist, empty" {
+  rm -f "$OUT"
+  printf 'JWT_SECRET=jwt-A\nANON_KEY=anon-A\nSERVICE_ROLE_KEY=svc-A\n' > "$GRO_ENV"
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  grep -qx 'UNSPLASH_ACCESS_KEY=' "$OUT"
+  grep -qx 'PIXABAY_API=' "$OUT"
+}
+
+@test "media: no mode ever prints a media value" {
+  media_source
+  printf 'UNSPLASH_ACCESS_KEY=unsplash-LOCAL-4d8\n' >> "$OUT"
+  run bash "$SCRIPT" --check
+  run ! grep -e SRC-9f3 -e SRC-7c1 -e LOCAL-4d8 <<< "$output"
+  run bash "$SCRIPT" --sync
+  run ! grep -e SRC-9f3 -e SRC-7c1 -e LOCAL-4d8 <<< "$output"
+  rm -f "$OUT"
+  printf 'JWT_SECRET=jwt-A\nANON_KEY=anon-A\nSERVICE_ROLE_KEY=svc-A\n' > "$GRO_ENV"
+  run bash "$SCRIPT"
+  run ! grep -e SRC-9f3 -e SRC-7c1 <<< "$output"
+}
+
+@test "media --check: exit status is identical with and without media drift" {
+  run bash "$SCRIPT" --check
+  clean=$status
+  media_source
+  printf 'UNSPLASH_ACCESS_KEY=unsplash-LOCAL-4d8\nPIXABAY_API=\n' >> "$OUT"
+  run bash "$SCRIPT" --check
+  [ "$status" -eq "$clean" ]
+  stale_kong
+  run bash "$SCRIPT" --check
+  [ "$status" -eq 1 ]
+}
+
+@test "media --sync: exit status is identical with and without media drift" {
+  stale_kong
+  sed -i '/^ADAPTER_REGISTRY_SERVICE_TOKEN=/d' "$GRO_ENV"
+  run bash "$SCRIPT" --sync
+  without=$status
+  stale_kong
+  media_source
+  printf 'UNSPLASH_ACCESS_KEY=unsplash-LOCAL-4d8\n' >> "$OUT"
+  run bash "$SCRIPT" --sync
+  [ "$status" -eq "$without" ]
+  [ "$without" -eq 1 ]
+}
+
+@test "media --check: names a key whose non-empty values differ, exit unchanged" {
+  media_source
+  printf 'UNSPLASH_ACCESS_KEY=unsplash-LOCAL-4d8\n' >> "$OUT"
+  run bash "$SCRIPT" --check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"media UNSPLASH_ACCESS_KEY differs from"*"osionos-app.env"* ]]
+  [[ "$output" != *"media PIXABAY_API"* ]]
 }
