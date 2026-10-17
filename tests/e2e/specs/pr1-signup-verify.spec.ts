@@ -32,7 +32,8 @@ test("PR1 sign-up mails a link; a resend kills the first; the second confirms; t
   expect(signUp.body.message).toBe(REGISTER_ACCEPTED);
   const [first] = await waitForMails(email, SUBJECTS.confirm, 1);
 
-  expect((await login(email, SPEC_PASSWORD)).status, "an unconfirmed account cannot sign in").not.toBe(200);
+  const unconfirmed = await login(email, SPEC_PASSWORD);
+  expect({ status: unconfirmed.status, error: unconfirmed.body.error }, "an unconfirmed account cannot sign in, and is told why").toEqual({ status: 403, error: "email_not_confirmed" });
 
   const again = await resend(email);
   expect(again.status).toBe(202);
