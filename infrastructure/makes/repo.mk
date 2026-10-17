@@ -82,6 +82,20 @@ syncro-submodule:
 			def=$$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed "s@^origin/@@" || true); \
 			branch=$${decl:-$${def:-main}}; \
 			git fetch --quiet --prune origin || true; \
+			if [ "$$(git rev-parse --is-shallow-repository)" = true ]; then \
+				git fetch --quiet --unshallow origin || true; \
+			fi; \
+			: never rewind to a tip that lacks the gitlink, osionos-ui 23016cfa was reset to 0cf241b0 and broke the vite build; \
+			pin=$$(git rev-parse --short HEAD); \
+			if [ "$$(git rev-parse --is-shallow-repository)" = true ]; then \
+				echo "  ! $$displaypath: shallow — cannot prove origin/$$branch contains $$pin; left at the gitlink"; exit 0; \
+			fi; \
+			if ! git rev-parse --verify -q "origin/$$branch^{commit}" >/dev/null; then \
+				echo "  ! $$displaypath: no origin/$$branch — left at the gitlink $$pin"; exit 0; \
+			fi; \
+			if ! git merge-base --is-ancestor HEAD "origin/$$branch"; then \
+				echo "  ! $$displaypath: origin/$$branch does not contain the gitlink $$pin — left at the gitlink"; exit 0; \
+			fi; \
 			git checkout -B "$$branch" "origin/$$branch"; \
 		fi; \
 		git fetch --quiet --prune origin || true; \
@@ -93,7 +107,7 @@ syncro-submodule:
 	'; \
 	echo '[syncro] verify nothing is left detached…'; \
 	bad=$$(git submodule foreach --quiet --recursive '$(SKIP_IF_PINNED) git symbolic-ref -q HEAD >/dev/null 2>&1 || printf "%s " "$$displaypath"' || true); \
-	if [ -n "$$bad" ]; then echo "[syncro] STILL DETACHED (likely dirty/diverged): $$bad" >&2; fi; \
+	if [ -n "$$bad" ]; then echo "[syncro] STILL DETACHED (dirty, diverged, shallow, or the branch lacks the gitlink): $$bad" >&2; fi; \
 	echo '[syncro] done. Now: make all   (rebuilds frontends from the synced source)'
 
 .PHONY: submodules-pinned vault42-team-push vault42-team-pull
