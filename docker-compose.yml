@@ -121,6 +121,9 @@ services:
       # osionos 0cfa815, which would read a blank value as an empty URL.
       OSIONOS_QUERY_ROUTER_URL: ${OSIONOS_QUERY_ROUTER_URL:-http://mini-baas-query-router:4001}
       OSIONOS_ADAPTER_REGISTRY_URL: ${OSIONOS_ADAPTER_REGISTRY_URL:-http://mini-baas-adapter-registry-go:3021}
+      # A direct link lists the tenant's mounts on tenant-control's self-serve route with the
+      # tenant key (over Funnel the WAF refuses /admin/v1); blank = the registry above.
+      OSIONOS_TENANT_MOUNTS_URL: ${OSIONOS_TENANT_MOUNTS_URL:-}
       # Agency org workspace: scopes /api/people + default feed topic.
       OSIONOS_ORG_WORKSPACE_ID: ${OSIONOS_ORG_WORKSPACE_ID:-b1a0c1e5-0000-4000-a000-000000000001}
       # IDE code runner (P3) — DOUBLE-GATED, default DISABLED. The /api/ide/run
