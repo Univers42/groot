@@ -265,6 +265,43 @@ sudo sh infrastructure/docker/osionos/ide-sandbox/verify.sh
 # 6. On the client machine: `make link` (ssh mode), then `make link-verify` — see Placement.
 ```
 
+## Access and capacity
+
+**Access mode** `OSIONOS_IDE_ACCESS` (host bridge and plane read the same value):
+
+| Value | Who gets a token and a PTY |
+|---|---|
+| `allowlist` (default, also for an empty or unset value) | ids in `OSIONOS_IDE_ALLOWED_SUBJECTS`; no database read |
+| `approved` | a row in `public.osionos_ide_access` with `approved_at` set and `disabled_at` null |
+| `verified` | **BLOCKED**: a confirmed e-mail (`email_confirmed_at`) and `disabled_at` null. Do not turn on in public until B1.L1 to B1.L7 of the devil verdict hold (sign-up posture, B2-B4 live, disk accounting, isolation boundary decision, plane-side token gate, go-public checks, bounded lookup) |
+| `off` | nobody: the kill switch |
+
+An unknown value behaves as `allowlist` with an empty list and logs one line. The host decides at token
+mint (`reason: not-allowed`); the plane re-checks per connection with no database: `off` and the
+denylist `OSIONOS_IDE_DENIED_SUBJECTS` apply there at once, and the host's approval (and
+`disabled_at`) takes effect within one token lifetime (15 minutes). Both reads are bounded
+(1.5 s) and fail closed. The table is created by `models/osionos-ide-access-migration.sql` (RLS on,
+no policies, `service_role` only).
+
+**One running box per user.** Opening a workspace stops (never removes) the user's other running
+boxes, inside the serialized start section; the terminal prints that processes in the other workspace
+were stopped. A language-server or fs-sync socket never does this: it is refused with 409.
+**A full plane** answers HTTP 429, `Retry-After: 60`, code `SANDBOX_BUSY` ("All sandboxes are busy,
+retry in a minute"). Caveat: 60 s is not a forecast; a slot frees when a user stops a box or the idle
+reaper does (up to about 25 minutes). Box creates are limited to 6 per hour per user and 30 per hour
+for the plane (`OSIONOS_IDE_CREATES_PER_USER_HOUR`, `OSIONOS_IDE_CREATES_GLOBAL_HOUR`; in memory, a
+bridge restart refills them); over the limit is 429 `CREATE_RATE` with `Retry-After`.
+
+**Idle stop.** A box with no terminal, language-server or fs-sync socket for 20 minutes is stopped,
+next to the 4 h / 12 h age caps. The activity window went from 30 to 20 minutes and the sweep from
+15 to 5 minutes (worst case about 25 minutes from the last close to the stop); shell output no longer
+counts as activity. Background processes run until 20 minutes after the last terminal closes. After a
+bridge restart every box gets one 20-minute grace, because the activity registry is in memory.
+
+The egress proxy logs one line per allowed connection, `[ide-egress] ALLOW <host> -> <address>` (a denial writes no
+line): no user, workspace or
+token, and nothing in phase B adds one.
+
 ## Persistent home and login shell
 
 A user's dotfiles, `~/.local` installs and shell choice live in one named volume,
@@ -274,10 +311,22 @@ The socket proxy admits exactly two mounts, `[workspace, home]` in that order, a
 name from the `osio.ide.owner` label (`create-shape.mjs`, pinned to the bridge by
 `scripts/tests/ide-proxy-parity.mjs`). The old 64 MB `/home/coder` tmpfs is gone; `/tmp` stays one.
 
-- **No quota.** The home is unbounded like `/workspace`: it is limited by the docker-ide data-root, not
-  by `diskSize` (a local volume honours no size option, and the proxy refuses `DriverOpts`). Before a
-  second subject joins `OSIONOS_IDE_ALLOWED_SUBJECTS`, the volume growth bound has to be ruled again.
-- **Shared by design (N4).** One home serves all of a user's workspaces and up to two concurrent boxes.
+- **Size bounds, off by default.** With `OSIONOS_IDE_VOLUME_QUOTA=on` the bridge creates new volumes
+  with `DriverOpts {"size":"2G"}` (`osio-ide-home-*`) and `{"size":"5G"}` (`osio-ide-vol-*`), and the
+  socket proxy admits `DriverOpts` only when absent or exactly that literal for the prefix (any other
+  key or value, such as `size:"3G"`, `type`/`o`/`device`, `size` plus `o`, or the home literal on a
+  workspace name, is refused: `proxy.mjs --selfcheck`). **The flag stays off until the user has run B3.2
+  on docker-ide** (a 64 MB probe volume refuses a 100 MB write with `Disk quota exceeded`, plus the
+  inode probe), because the local driver ignores `size` on a filesystem without xfs+pquota.
+  Residuals, named so the bound is not read as more than it is:
+  - volumes that already exist stay unbounded until they are recreated;
+  - the inode bound is whatever B3.2 records, not a number from this repo;
+  - total disk across users is a separate limit (the docker-ide data-root and the 80 % `ide_crypt`
+    alarm), not something per-volume sizes add up to;
+  - the verify.sh write-past-quota probe (B3.6) is not written: it needs a live quota, so it comes with
+    the B3.2 result.
+  A second subject joining `OSIONOS_IDE_ALLOWED_SUBJECTS` is unblocked only by B3.2 + B3.3 + B3.6.
+- **Shared by design (N4).** One home serves all of a user's workspaces and at most one running box (see Access and capacity).
   An rc file written in one box runs in the others.
 - **Login shell.** The PTY starts `/usr/local/bin/osio-login`. It reads the first line (at most 4096
   bytes) of `~/.config/osio/login-shell` as a path, never evaluates it, and starts it with `-l` only if
