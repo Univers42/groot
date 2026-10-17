@@ -25,7 +25,8 @@
 #   they may execute · g a second runner pass changes no ACL, policy or RLS flag ·
 #   n the final notifications type CHECK admits every type the models files declare ·
 #   r no public table keeps a realtime_notify() trigger (it broadcasts rows past every grant) ·
-#   rt grobase's CREATE TABLE hook that re-arms new tables exists and is disabled
+#   rt grobase's CREATE TABLE hook that re-arms new tables exists and is disabled ·
+#   u anon cannot SELECT public.users.email or password_hash, authenticated cannot SELECT password_hash
 #
 # ISOLATION
 #   Throwaway containers only (--rm --network none, no port, no volume); the live
@@ -245,6 +246,7 @@ run_checks() {
 	check_count "$1" n notify_types_missing
 	check_count "$1" r realtime_triggers
 	check_count "$1" rt realtime_event_trigger
+	check_count "$1" u users_pii
 	check_idempotent "$1"
 }
 

@@ -25,3 +25,7 @@ SELECT 'realtime_trigger', c.relname FROM pg_trigger t JOIN pg_class c ON c.oid 
  ORDER BY 2;
 SELECT 'realtime_event_trigger', evtenabled::text FROM pg_event_trigger
  WHERE evtname = 'realtime_auto_trigger_on_create';
+-- users ACL per column: a replay that moves a public.users grant shows as a changed line.
+SELECT 'users_acl', attname, attacl::text FROM pg_attribute
+ WHERE attrelid = 'public.users'::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum;
+SELECT 'users_acl', relname, relacl::text FROM pg_class WHERE oid = 'public.users'::regclass;
