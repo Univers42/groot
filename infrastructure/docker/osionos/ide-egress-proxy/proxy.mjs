@@ -40,7 +40,7 @@ const DIAL_TIMEOUT_MS = 15_000;
 const BASE_ALLOW = [
   "registry.npmjs.org", "pypi.org", "files.pythonhosted.org",
   "github.com", "codeload.github.com", "objects.githubusercontent.com",
-  "raw.githubusercontent.com", "crates.io", "static.crates.io",
+  "raw.githubusercontent.com", "release-assets.githubusercontent.com", "crates.io", "static.crates.io",
   "index.crates.io", "proxy.golang.org", "sum.golang.org",
 ];
 const GIT_HOSTS = (process.env.IDE_EGRESS_GIT_HOSTS || "")
@@ -104,30 +104,36 @@ const server = net.createServer((client) => {
   client.once("data", (chunk) => {
     const line = chunk.toString("latin1").split("\r\n")[0];
     const match = /^CONNECT\s+([^\s:]+):(\d+)\s+HTTP\/1\.[01]$/i.exec(line);
-    if (!match) return refuse(client, 400, "Bad Request");
+    if (!match) return deny(client, 400, "Bad Request", null, null, "bad-request");
     const host = match[1];
     const port = Number(match[2]);
-    if (port !== ALLOW_PORT) return refuse(client, 403, "Port not allowed");
-    if (!hostAllowed(host)) return refuse(client, 403, "Host not allowed");
+    if (port !== ALLOW_PORT) return deny(client, 403, "Port not allowed", host, port, "port");
+    if (!hostAllowed(host)) return deny(client, 403, "Host not allowed", host, port, "host");
 
     resolveSafe(host)
       .then((record) => dialUpstream(client, host, record))
-      .catch(() => refuse(client, 403, "Address denied"));
+      .catch(() => deny(client, 403, "Address denied", host, port, "address"));
   });
   client.on("error", () => client.destroy());
 });
 
 function dialUpstream(client, host, record) {
   const upstream = net.connect({ host: record.address, port: ALLOW_PORT, family: record.family });
-  const timer = setTimeout(() => upstream.destroy(), DIAL_TIMEOUT_MS);
+  let established = false;
+  const timer = setTimeout(() => upstream.destroy(new Error("dial timeout")), DIAL_TIMEOUT_MS);
   upstream.on("connect", () => {
+    established = true;
     clearTimeout(timer);
     client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
     upstream.pipe(client);
     client.pipe(upstream);
     log("ALLOW", host, record.address);
   });
-  upstream.on("error", () => { clearTimeout(timer); refuse(client, 502, "Upstream failed"); });
+  upstream.on("error", () => {
+    clearTimeout(timer);
+    if (established) return client.destroy(); // a 502 inside a live tunnel is garbage to the TLS peer
+    deny(client, 502, "Upstream failed", host, ALLOW_PORT, "upstream");
+  });
   client.on("error", () => upstream.destroy());
   client.on("close", () => upstream.destroy());
 }
@@ -137,11 +143,30 @@ function refuse(client, code, message) {
   client.destroy();
 }
 
+// Hosts come off the wire and the CONNECT regex admits control bytes (ESC),
+// so only a plain DNS-label charset is ever echoed into the log.
+const LOGGABLE_HOST = /^[A-Za-z0-9.-]{1,253}$/;
+
+let writeLine = (line) => process.stdout.write(line);
 function log(decision, host, address) {
-  process.stdout.write(`[ide-egress] ${decision} ${host} -> ${address ?? "-"}\n`);
+  writeLine(`[ide-egress] ${decision} ${host} -> ${address ?? "-"}\n`);
 }
 
-export { hostAllowed, denied4, denied6, ALLOWLIST };
+/** Refuse and log exactly one DENY line: never a path, header, request byte or resolved IP. */
+function deny(client, code, message, host, port, reason) {
+  const shown = host !== null && LOGGABLE_HOST.test(host) ? host : "<invalid>";
+  writeLine(`[ide-egress] DENY ${shown}:${port ?? "-"} ${reason}\n`);
+  refuse(client, code, message);
+}
+
+/** Test seam: redirect log lines; returns the previous writer. */
+function setLogWriter(writer) {
+  const previous = writeLine;
+  writeLine = writer;
+  return previous;
+}
+
+export { hostAllowed, denied4, denied6, ALLOWLIST, server, setLogWriter };
 
 const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 
@@ -155,6 +180,12 @@ if (isMain && process.argv.includes("--selfcheck")) {
   expect("pypi allowed", hostAllowed("files.pythonhosted.org"), true);
   expect("evil denied", hostAllowed("evil.example.com"), false);
   expect("evilgithub.com denied", hostAllowed("evilgithub.com"), false);
+  expect("release-assets allowed", hostAllowed("release-assets.githubusercontent.com"), true);
+  expect("release-assets subdomain allowed", hostAllowed("x.release-assets.githubusercontent.com"), true);
+  expect("evil-githubusercontent denied", hostAllowed("evil-githubusercontent.com"), false);
+  expect("bare githubusercontent denied", hostAllowed("githubusercontent.com"), false);
+  expect("release-assets suffix-spoof denied", hostAllowed("release-assets.githubusercontent.com.evil.com"), false);
+  expect("gist githubusercontent denied", hostAllowed("gist.githubusercontent.com"), false);
   expect("metadata v4 denied", denied4("169.254.169.254"), true);
   expect("rfc1918 10 denied", denied4("10.1.2.3"), true);
   expect("rfc1918 172.16 denied", denied4("172.16.5.5"), true);
