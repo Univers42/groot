@@ -202,10 +202,18 @@ function vetBody(req, res, vet, cap) {
     const raw = Buffer.concat(chunks);
     let body;
     try { body = JSON.parse(raw.toString("utf8") || "{}"); } catch { return deny(res, 400, "invalid create body"); }
-    // A vetter may be async (the ledger); a throw is a refusal, never a pass.
-    Promise.resolve().then(() => vet(body)).catch(() => "vetter failed").then((bad) => {
+    // A vetter may be async (the ledger); a throw is a refusal, never a pass. The trailing
+    // catch matters: an unhandled rejection (deny on a response already answered) would
+    // kill the proxy, and with it every user's IDE.
+    void (async () => {
+      let bad;
+      try { bad = await vet(body); } catch { bad = "vetter failed"; }
       if (bad) return deny(res, 403, `create rejected: ${bad}`);
       forward(req, res, raw);
+    })().catch((error) => {
+      process.stderr.write(`[ide-socket-proxy] vet/forward failed: ${error?.code ?? error?.message ?? "error"}\n`);
+      if (!res.headersSent) deny(res, 502, "proxy error");
+      else res.destroy();
     });
   });
 }
