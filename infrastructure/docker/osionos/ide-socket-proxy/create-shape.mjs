@@ -85,6 +85,11 @@ export function homeVolumeFor(ownerId) {
   return `osio-ide-home-${createHash("sha256").update(String(ownerId)).digest("hex").slice(0, 32)}`;
 }
 
+// Same derivation as the bridge's deriveNames; the parity test pins the two together.
+export function digestFor(ownerId, workspaceId) {
+  return createHash("sha256").update(`${ownerId}:${workspaceId}`).digest("hex").slice(0, 32);
+}
+
 export function createShapeViolation(body, path, limits) {
   const match = path.match(CREATE_PATH_RE);
   if (!match) return "name";
@@ -104,6 +109,9 @@ export function createShapeViolation(body, path, limits) {
   if (body.Labels["osio.ide.managed"] !== "1") return "Labels";
   if (!isUuidLike(body.Labels["osio.ide.owner"])) return "Labels";
   if (!isUuidLike(body.Labels["osio.ide.workspace"])) return "Labels";
+  // The workspace volume is named after the digest, so a digest that is not this owner's and this
+  // workspace's would mount someone else's workspace under the right labels (N12).
+  if (digestFor(body.Labels["osio.ide.owner"], body.Labels["osio.ide.workspace"]) !== digest) return "name";
 
   const hc = body.HostConfig;
   const allowedHostConfig = [...REQUIRED_HOST_CONFIG, ...OPTIONAL_HOST_CONFIG];

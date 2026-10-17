@@ -15,6 +15,7 @@
 //   node infrastructure/docker/osionos/ide-socket-proxy/create-shape.selfcheck.mjs
 // proxy.mjs --selfcheck imports the fixtures below; the image does not ship this file.
 
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { createShapeViolation, execShapeViolation, homeVolumeFor, shapeLimits } from "./create-shape.mjs";
 
@@ -23,9 +24,10 @@ const MANAGED_LABEL = "osio.ide.managed";
 
 // The bridge's own create body (ide-sandbox-spec.mjs buildContainerSpec) for a
 // fixed digest and two fixed UUIDs — the one shape that must be accepted.
-export const DIGEST = "a".repeat(32);
 const OWNER = "11111111-1111-4111-8111-111111111111";
 const WORKSPACE = "22222222-2222-4222-8222-222222222222";
+const digestOf = (owner, workspace) => createHash("sha256").update(`${owner}:${workspace}`).digest("hex").slice(0, 32);
+export const DIGEST = digestOf(OWNER, WORKSPACE);
 // The bridge's own, unversioned path (ide-docker.mjs); the versioned form is checked below.
 const WORKSPACE_MOUNT = { Type: "volume", Source: `osio-ide-vol-${DIGEST}`, Target: "/workspace" };
 const OTHER_OWNER = "33333333-3333-4333-8333-333333333333";
@@ -55,7 +57,7 @@ export const mk = () => ({
 export const host = (patch) => { const b = mk(); b.HostConfig = { ...b.HostConfig, ...patch }; return b; };
 const dropHost = (key) => { const b = mk(); delete b.HostConfig[key]; return b; };
 
-function shapeFailures() {
+export function shapeFailures() {
   const fail = [];
   const chk = (label, got, want) => { if (got !== want) fail.push(`${label}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`); };
   const refuse = (label, got) => { if (got === null) fail.push(`${label}: accepted, want a refusal reason`); };
@@ -104,6 +106,11 @@ function shapeFailures() {
   for (const [label, body] of CREATE_REFUSALS) refuse(`create ${label}`, createShapeViolation(body, CANON_PATH, LIMITS));
   refuse("create path without name", createShapeViolation(mk(), "/v1.47/containers/create", LIMITS));
   refuse("create path with extra query", createShapeViolation(mk(), `${CANON_PATH}&x=1`, LIMITS));
+  // N12: the name digest, and so the workspace volume, must be this owner's and this workspace's.
+  const foreign = digestOf(OTHER_OWNER, WORKSPACE);
+  chk("create owner A with B's digest refused", createShapeViolation(
+    { ...mk(), HostConfig: { ...mk().HostConfig, Mounts: [{ ...WORKSPACE_MOUNT, Source: `osio-ide-vol-${foreign}` }, mk().HostConfig.Mounts[1]] } },
+    `/containers/create?name=ide-${foreign}`, LIMITS), "name");
   refuse("create path digest mismatch", createShapeViolation(mk(), `/v1.47/containers/create?name=ide-${"b".repeat(32)}`, LIMITS));
 
   const SHELL = { User: "10001:10001", WorkingDir: "/workspace", AttachStdin: true, AttachStdout: true, AttachStderr: true, Tty: true, Env: ["TERM=xterm-256color"], Cmd: ["bash", "-l"] };
