@@ -11,8 +11,9 @@
 # **************************************************************************** #
 
 # Certificate diagnostics target.
-certs-doctor: certs
-## Check whether the local trust stores and running HTTPS proxy use the current local HTTPS CA.
+##@ Certificates
+certs-doctor: certs ## Check the local CA is consistent and the HTTPS proxy serves it
+## Checks whether the local trust stores and the running HTTPS proxy use the current local HTTPS CA.
 	@if [[ -f '$(LOCAL_CA_CERT)' ]] && command -v openssl >/dev/null 2>&1; then \
 		if openssl verify -CAfile '$(LOCAL_CA_CERT)' '$(LOCAL_CA_CERT)' >/dev/null 2>&1; then \
 			echo '[certs] grobase CA at $(LOCAL_CA_CERT) is present and self-consistent'; \
@@ -29,7 +30,7 @@ certs-doctor: certs
 			&& openssl verify -CAfile '$(LOCAL_CA_CERT)' "$$tmp_cert" >/dev/null 2>&1; then \
 			echo "[certs] local HTTPS proxy serves the current Track Binocle CA on https://localhost:$$port"; \
 		else \
-			echo "[certs] local HTTPS proxy certificate on https://localhost:$$port does not verify against $(LOCAL_CA_CERT); recreate local-https-proxy with make up." >&2; \
+			echo "[certs] local HTTPS proxy certificate on https://localhost:$$port does not verify against $(LOCAL_CA_CERT); recreate local-https-proxy with make frontends-up." >&2; \
 			exit 1; \
 		fi; \
 		redirect_status="$$(curl -sS -o /dev/null -w '%{http_code}' "http://localhost:$$port/" || true)"; \

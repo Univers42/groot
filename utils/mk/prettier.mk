@@ -11,8 +11,8 @@
 #    toolchains — grobase via `pretty-grobase`). File lists come from          #
 #    `git ls-files` at recipe-time (tracked files only, no glob-miss errors).  #
 #    `pretty` / `pretty-check` aggregate shell·yaml·md. `pretty-all` adds      #
-#    grobase. Help text uses the root convention: `## ` on the line AFTER the  #
-#    target (see common.mk help awk).                                          #
+#    grobase. Help text: an inline `## summary` on the target line, extended   #
+#    `## ` lines below it (see utils/scripts/make-help.awk).                   #
 # **************************************************************************** #
 
 PRETTIER_IMG  ?= node:20-alpine
@@ -28,57 +28,46 @@ SEL_MD   := git ls-files '*.md' | grep -vE '/'   # root-level docs only (not the
 _PRETTIER_RUN = docker run --rm -e NPM_CONFIG_UPDATE_NOTIFIER=false -v "$(CURDIR)":/d -w /d -v $(NPM_CACHE_VOL):/root/.npm $(PRETTIER_IMG) npx --yes prettier@$(PRETTIER_VER)
 _SHFMT_RUN    = docker run --rm -v "$(CURDIR)":/d -w /d $(SHFMT_IMG)
 
-pretty: pretty-shell pretty-yaml pretty-md
-## Format the monorepo's root-owned files in place (shell·yaml·md)
+##@ Formatting
+pretty: pretty-shell pretty-yaml pretty-md ## Format the monorepo's root-owned files in place (shell·yaml·md)
 	@printf '\033[0;32m✓ pretty: root shell·yaml·md formatted\033[0m\n'
 
-pretty-check: pretty-shell-check pretty-yaml-check pretty-md-check
-## Verify root formatting without writing (CI gate)
+pretty-check: pretty-shell-check pretty-yaml-check pretty-md-check ## Verify root formatting without writing (CI gate)
 	@printf '\033[0;32m✓ pretty-check: every root file is formatted\033[0m\n'
 
-pretty-all: pretty pretty-grobase
-## Format EVERYTHING — root-owned files + grobase's own formatters
+pretty-all: pretty pretty-grobase ## Format EVERYTHING — root-owned files + grobase's own formatters
 
-pretty-shell:
-## Format root shell scripts in place — shfmt -i 2 (Docker)
+pretty-shell: ## Format root shell scripts in place — shfmt -i 2 (Docker)
 	@f=$$($(SEL_SH)); [ -z "$$f" ] && { echo "no root shell"; exit 0; }; \
 		$(_SHFMT_RUN) -w -i 2 $$f && printf '\033[0;32m✓ shell (shfmt -w)\033[0m\n'
 
-pretty-shell-check:
-## Check root shell formatting — shfmt -l (Docker)
+pretty-shell-check: ## Check root shell formatting — shfmt -l (Docker)
 	@f=$$($(SEL_SH)); [ -z "$$f" ] && { echo "no root shell"; exit 0; }; \
 		out=$$($(_SHFMT_RUN) -l -i 2 $$f 2>&1 || true); \
 		[ -z "$$out" ] && printf '\033[0;32m✓ shell formatted\033[0m\n' \
 		|| { printf '\033[0;31m✗ shell needs formatting:\033[0m\n%s\n' "$$out"; exit 1; }
 
-pretty-yaml:
-## Format root YAML in place — prettier (Docker)
+pretty-yaml: ## Format root YAML in place — prettier (Docker)
 	@f=$$($(SEL_YAML)); [ -z "$$f" ] && { echo "no root yaml"; exit 0; }; \
 		$(_PRETTIER_RUN) --write $$f && printf '\033[0;32m✓ yaml (prettier)\033[0m\n'
 
-pretty-yaml-check:
-## Check root YAML formatting — prettier --check (Docker)
+pretty-yaml-check: ## Check root YAML formatting — prettier --check (Docker)
 	@f=$$($(SEL_YAML)); [ -z "$$f" ] && { echo "no root yaml"; exit 0; }; \
 		$(_PRETTIER_RUN) --check $$f && printf '\033[0;32m✓ yaml formatted\033[0m\n'
 
-pretty-md:
-## Format root-level Markdown docs in place — prettier (Docker; excludes the wiki tree)
+pretty-md: ## Format root-level Markdown in place — prettier (Docker)
+## Excludes the wiki tree.
 	@f=$$($(SEL_MD)); [ -z "$$f" ] && { echo "no root markdown"; exit 0; }; \
 		$(_PRETTIER_RUN) --write $$f && printf '\033[0;32m✓ md (prettier)\033[0m\n'
 
-pretty-md-check:
-## Check root-level Markdown formatting — prettier --check (Docker; excludes the wiki tree)
+pretty-md-check: ## Check root-level Markdown formatting — prettier --check (Docker)
+## Excludes the wiki tree.
 	@f=$$($(SEL_MD)); [ -z "$$f" ] && { echo "no root markdown"; exit 0; }; \
 		$(_PRETTIER_RUN) --check $$f && printf '\033[0;32m✓ md formatted\033[0m\n'
 
-pretty-grobase:
-## Delegate: run grobase's own formatters (gofumpt·rustfmt·prettier·shfmt)
+pretty-grobase: ## Run grobase's own formatters (gofumpt·rustfmt·prettier·shfmt)
 	@$(MAKE) -C apps/grobase prettiers
 
-pretty-grobase-check:
-## Delegate: verify grobase formatting (CI gate)
+pretty-grobase-check: ## Verify grobase formatting (CI gate)
 	@$(MAKE) -C apps/grobase prettiers-check
 
-.PHONY: pretty pretty-check pretty-all pretty-shell pretty-shell-check \
-	pretty-yaml pretty-yaml-check pretty-md pretty-md-check \
-	pretty-grobase pretty-grobase-check
