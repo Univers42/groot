@@ -55,10 +55,12 @@ push | pull) ;;
 	;;
 esac
 
-# --apply anywhere in the argv decides whether the overlay runs afterwards.
+# --apply anywhere in the argv decides whether the overlay runs afterwards; --only vetoes it.
 apply=0
+only=0
 for _a in "$@"; do
 	[ "$_a" = "--apply" ] && apply=1
+	[ "$_a" = "--only" ] && only=1
 done
 
 if [ "$verb" = push ]; then
@@ -83,6 +85,13 @@ VAULT_ENV_ORG="$ORG" VAULT_ENV_PROJECT="$PROJECT" VAULT_ENV_NAME="$ENVNAME" \
 
 # Only an applied PULL needs a local .env.local rebuilt and overlaid.
 if [ "$verb" != pull ] || [ "$apply" -ne 1 ]; then
+	exit 0
+fi
+
+# The rebuild and the overlay assume the whole tree was restored. An ONLY pull restores a few
+# files, and running them re-pointed a live .env.local at the wrong backend (2026-10-18).
+if [ "$only" -eq 1 ]; then
+	note "--only restored just the files you named — .env.local left as found; to rebuild it run: make vault42-team-pull APPLY=1"
 	exit 0
 fi
 
