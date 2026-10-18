@@ -6,6 +6,24 @@
 # Everything the browser downloads is public, so the bundles are built with no tenant key and
 # no realtime token (forced empty, overriding .env.local) and the images carry the :public
 # tag, never overwriting the :local ones. wiki/runbooks/public-funnel.md.
+x-static-preview: &static-preview
+  read_only: true
+  tmpfs:
+    - /var/cache/nginx
+    - /run
+    - /tmp
+  mem_limit: 64m
+  restart: unless-stopped
+  networks:
+    - apps-static-net
+  healthcheck:
+    test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/"]
+    interval: 30s
+    start_period: 5s
+    start_interval: 2s
+    timeout: 3s
+    retries: 3
+
 services:
   osionos-app:
     image: track-binocle/osionos-web:public
@@ -19,10 +37,11 @@ services:
         VITE_BAAS_REALTIME_TOKEN: ""
         # The IDE is a shell on a shared host and is never exposed (rules in the base file).
         VITE_OSIONOS_IDE_URL: ""
-        # Mail, Calendar and Whiteboard stay hidden until each has its own public origin: the
-        # base file's https://localhost:PORT would frame the visitor's own machine.
-        VITE_MAIL_APP_URL: ""
-        VITE_CALENDAR_APP_URL: ""
+        # Mail and Calendar are framed from the apps node's origins (empty hides the tab: the base
+        # file's https://localhost:PORT would frame the visitor's own machine). The whiteboard has
+        # no per-user auth and stays hidden.
+        VITE_MAIL_APP_URL: ${PUBLIC_MAIL_ORIGIN:-}
+        VITE_CALENDAR_APP_URL: ${PUBLIC_CALENDAR_ORIGIN:-}
         VITE_WHITEBOARD_APP_URL: ""
 
   opposite-osiris-web:
@@ -66,6 +85,50 @@ services:
       OSIONOS_IDE_TOKEN_SECRET: ""
       OSIONOS_IDE_ACCESS: ""
 
+  # Static previews for the apps node (second Funnel node). Prod target = nginx serving dist/, built
+  # with every bridge/BaaS URL empty so the apps make no request outside their own origin. They
+  # sit on a network shared with local-https-proxy alone: no mini-baas, no grobase-link, no
+  # env_file, no volume, a read-only root. The :public tag never overwrites a :local image.
+  mail-web:
+    image: track-binocle/osionos-mail-web:public
+    build:
+      context: ./apps/mail
+      target: prod
+      args:
+        VITE_MAIL_BRIDGE_URL: ""
+    <<: *static-preview
+
+  calendar-web:
+    image: track-binocle/osionos-calendar-web:public
+    build:
+      context: ./apps/calendar
+      target: prod
+      args:
+        VITE_CALENDAR_BRIDGE_URL: ""
+        VITE_CALENDAR_BAAS_URL: ""
+    <<: *static-preview
+
+  # The track-binocle.d files are mounted one by one, not as a directory: the nginx image's
+  # envsubst step renders the apps vhosts into that directory at start, which a read-only
+  # directory mount would refuse. The vhosts listen on LITERAL 127.0.0.1 (not
+  # TRACK_BINOCLE_BIND_ADDR, which resolves to 0.0.0.0 on this host): only the Funnel reaches them.
   local-https-proxy:
+    environment:
+      NGINX_ENVSUBST_FILTER: PUBLIC_
+      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx/track-binocle.d
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN}
+      PUBLIC_MAIL_ORIGIN: ${PUBLIC_MAIL_ORIGIN:-}
+      PUBLIC_CALENDAR_ORIGIN: ${PUBLIC_CALENDAR_ORIGIN:-}
+    ports:
+      - "127.0.0.1:3102:3102"
+      - "127.0.0.1:3103:3103"
+    networks:
+      - apps-static-net
     volumes:
-      - ./infrastructure/tls/public.d:/etc/nginx/track-binocle.d:ro
+      - ./infrastructure/tls/public.d/bridge-public.conf:/etc/nginx/track-binocle.d/bridge-public.conf:ro
+      - ./infrastructure/tls/public.d/http-limits.conf:/etc/nginx/track-binocle.d/http-limits.conf:ro
+      - ./infrastructure/tls/public.d/apps.conf.template:/etc/nginx/templates/http-apps.conf.template:ro
+
+networks:
+  apps-static-net:
+    internal: true
