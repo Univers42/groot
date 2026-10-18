@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# `make healthcheck` probes grobase's Kong at BAAS_URL (infrastructure/makes/common.mk). A local
+# `make healthcheck` probes grobase's Kong at BAAS_URL (utils/mk/common.mk). A local
 # Kong wins; a linked machine (make link) has none and must probe the link's loopback port, not
 # 8000. Drives the real Makefile against a fake `docker` and a fake link state.
 #

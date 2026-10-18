@@ -15,7 +15,7 @@ SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 .DEFAULT_GOAL := help
 
-MAKE_DIR := infrastructure/makes
+MAKE_DIR := utils/mk
 
 include $(MAKE_DIR)/common.mk
 include $(MAKE_DIR)/pipeline.mk
