@@ -11,15 +11,13 @@
 # **************************************************************************** #
 
 # Calendar service targets.
-calendar-up: docker-prefetch-images
-## Start osionos Calendar and the Google Calendar bridge with Docker Compose.
+##@ Apps
+calendar-up: docker-prefetch-images ## Start osionos Calendar and the Google Calendar bridge
 	$(MAKE) compose-build BAKE_GROUP=calendar BAKE_TARGETS='calendar'
 	docker compose up -d --no-build --pull never calendar calendar-bridge
 
-calendar-logs:
-## Follow osionos Calendar and Google Calendar bridge logs.
+calendar-logs: ## Follow osionos Calendar and Google Calendar bridge logs
 	docker compose logs -f calendar calendar-bridge
 
-calendar-down:
-## Stop osionos Calendar and the Google Calendar bridge containers.
+calendar-down: ## Stop osionos Calendar and the Google Calendar bridge containers
 	docker compose stop calendar calendar-bridge

@@ -24,8 +24,8 @@ DRAWNOSAURUS_CARGO_JOBS ?= 4
 # so bumping the submodule pointer updates this automatically rather than drifting.
 DRAWNOSAURUS_ENGINE_SHA = $(shell git -C $(DRAWNOSAURUS_DIR) ls-tree HEAD engine | awk '{print $$3}')
 
-drawnosaurus-assert-engine:
-## Fail loudly if the nested engine submodule is not at the commit drawnosaurus pins.
+##@ Apps
+drawnosaurus-assert-engine: ## Fail if the nested engine submodule is not at the commit drawnosaurus pins
 	@expected='$(DRAWNOSAURUS_ENGINE_SHA)'; \
 	actual="$$(git -C $(DRAWNOSAURUS_DIR)/engine rev-parse HEAD 2>/dev/null)"; \
 	if [ -z "$$expected" ]; then \
@@ -46,25 +46,23 @@ drawnosaurus-assert-engine:
 # "cannot setuid to unmapped uid" (DOCKER_ROOTLESS, common.mk).
 DRAWNOSAURUS_RUN_USER = $(if $(DOCKER_ROOTLESS),,--user $(shell id -u):$(shell id -g))
 
-drawnosaurus-wasm: drawnosaurus-assert-engine
-## Build engine/pkg (the Rust->wasm artifact web.Dockerfile requires). Depends on the assert.
-## CARGO_BUILD_JOBS is passed with -e: nice/ionice on the compose CLI do NOT reach cargo,
-## which runs under dockerd, so the job cap is the only control that actually lands.
+drawnosaurus-wasm: drawnosaurus-assert-engine ## Build engine/pkg, the Rust->wasm artifact web.Dockerfile requires
+## Depends on the assert. CARGO_BUILD_JOBS is passed with -e: nice/ionice on the compose CLI do NOT
+## reach cargo, which runs under dockerd, so the job cap is the only control that actually lands.
 	docker compose --profile drawnosaurus build drawnosaurus-wasm
 	docker compose --profile drawnosaurus run --rm --no-deps \
 		-e CARGO_BUILD_JOBS=$(DRAWNOSAURUS_CARGO_JOBS) \
 		$(DRAWNOSAURUS_RUN_USER) drawnosaurus-wasm
 
-drawnosaurus-up: drawnosaurus-wasm
-## Start drawnosaurus (wasm first, then images). Services are named explicitly: this compose
-## project is shared with the live stack, so a service-less up would reconcile everything.
+drawnosaurus-up: drawnosaurus-wasm ## Start drawnosaurus (wasm first, then images)
+## Services are named explicitly: this compose project is shared with the live stack, so a
+## service-less up would reconcile everything.
 	docker compose --profile drawnosaurus build $(DRAWNOSAURUS_SERVICES)
 	docker compose --profile drawnosaurus up -d --no-build $(DRAWNOSAURUS_SERVICES)
 
-drawnosaurus-logs:
-## Follow drawnosaurus logs.
+drawnosaurus-logs: ## Follow drawnosaurus logs
 	docker compose --profile drawnosaurus logs -f $(DRAWNOSAURUS_SERVICES)
 
-drawnosaurus-down:
-## Stop drawnosaurus. Never -v: the board data volume outlives a restart.
+drawnosaurus-down: ## Stop drawnosaurus (never -v)
+## The board data volume outlives a restart.
 	docker compose --profile drawnosaurus stop $(DRAWNOSAURUS_SERVICES)
