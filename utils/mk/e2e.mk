@@ -5,8 +5,8 @@
 # minute of silence before saying the stack is down.
 E2E_CURL_HEALTH := curl --cacert $(LOCAL_CA_CERT) -m 5 -fsS
 
-e2e-preflight:
-## Fail fast with a clear message if the live stack is not up (reuses `make healthcheck`).
+##@ Tests
+e2e-preflight: ## Fail fast if the live stack is not up (reuses make healthcheck)
 	@log="$$(mktemp)"; \
 	if ! $(MAKE) --no-print-directory healthcheck CURL_HEALTH='$(E2E_CURL_HEALTH)' >"$$log" 2>&1; then \
 		tail -n 5 "$$log" >&2; rm -f "$$log"; \
@@ -15,18 +15,21 @@ e2e-preflight:
 	fi; \
 	rm -f "$$log"; echo '[e2e] stack healthy'
 
-e2e: e2e-preflight
-## Run the Docker-first e2e smoke (DW3/DW8/DW9/DW10) against the live stack. Leaves e2e- boards: follow with make e2e-clean.
+e2e: e2e-preflight ## Run the Docker-first e2e smoke against the live stack
+## Usage: make e2e [E2E_SPECS=specs/<file>.spec.ts]
+## Run the Docker-first e2e smoke (DW3/DW8/DW9/DW10) against the live stack. Leaves e2e- boards:
+## follow with make e2e-clean.
 	bash tests/e2e/run.sh $(E2E_SPECS)
 
-e2e-clean:
-## Soft-delete every drawnosaurus board titled e2e-* via the API container; refuses if any title only nearly matches.
+e2e-clean: ## Soft-delete the e2e-* drawnosaurus boards via the API container
+## Usage: make e2e-clean [DRY_RUN=1]
+## Soft-delete every drawnosaurus board titled e2e-* via the API container; refuses if any title
+## only nearly matches.
 	@api="$$(docker compose ps -q drawnosaurus-api)"; \
 	if [ -z "$$api" ]; then echo '[e2e-clean] drawnosaurus-api is not running' >&2; exit 1; fi; \
 	docker exec -i "$$api" node --input-type=module - $(if $(DRY_RUN),--dry-run) < tests/e2e/clean-boards.mjs
 
-roundtrip:
-## Prove persistence end to end through the TLS edge: register, sign in, bridge into osionos, write a page, read the rows back from grobase's postgres (adapts to the link mode); exit 1 on any FAIL.
+roundtrip: ## Prove persistence through the TLS edge: register, write, read back
+## Prove persistence end to end through the TLS edge: register, sign in, bridge into osionos, write
+## a page, read the rows back from grobase's postgres (adapts to the link mode); exit 1 on any FAIL.
 	@GROBASE_LINK_DIR='$(GROBASE_LINK_DIR)' LOCAL_CA_CERT='$(LOCAL_CA_CERT)' bash scripts/verify/account-roundtrip.sh
-
-.PHONY: e2e e2e-preflight e2e-clean roundtrip

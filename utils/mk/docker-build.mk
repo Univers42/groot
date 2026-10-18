@@ -1,6 +1,6 @@
 # Docker build and image prefetch targets.
-buildx-setup:
-## Ensure a BuildKit docker-container builder is available for parallel bake builds.
+##@ Docker
+buildx-setup: ## Ensure a BuildKit docker-container builder exists for parallel bake builds
 	@set -eu; \
 	if docker buildx inspect '$(BUILDX_BUILDER)' >/dev/null 2>&1; then \
 		docker buildx use '$(BUILDX_BUILDER)' >/dev/null; \
@@ -14,8 +14,9 @@ buildx-setup:
 		timeout --kill-after='$(BUILDX_BOOTSTRAP_KILL_AFTER)s' '$(BUILDX_BOOTSTRAP_TIMEOUT)s' docker buildx inspect --bootstrap '$(BUILDX_BUILDER)' >/dev/null; \
 	fi
 
-compose-build: buildx-setup
-## Build local Compose images in parallel with BuildKit bake and optional registry cache.
+compose-build: buildx-setup ## Build the local Compose images in parallel with BuildKit bake
+## Usage: make compose-build [BAKE_GROUP=<group>] [BAKE_TARGETS='<targets>'] [REGISTRY_CACHE_PREFIX=<ref>]
+## Optional registry build cache when REGISTRY_CACHE_PREFIX is set.
 	@set -eu; \
 	cache_flags=''; \
 	if [[ -n '$(REGISTRY_CACHE_PREFIX)' ]]; then \
@@ -28,9 +29,10 @@ compose-build: buildx-setup
 	fi; \
 	docker buildx bake --builder '$(BUILDX_BUILDER)' --file '$(BAKE_FILE)' --load $$cache_flags '$(BAKE_GROUP)'
 
-docker-prefetch-images:
-## Pull required public images from resilient mirrors before Compose builds. Scope `frontends`
-## is only the bases of the images frontends-up builds (make all); `all` adds docker/dockerfile:1.
+docker-prefetch-images: ## Pre-pull public base images from resilient mirrors before builds
+## Usage: make docker-prefetch-images [DOCKER_PREFETCH_SCOPE=all|frontends] [DOCKER_PREFETCH_JOBS=<n>]
+## Pull required public images from resilient mirrors before Compose builds. Scope `frontends` is
+## only the bases of the images frontends-up builds (make all); `all` adds docker/dockerfile:1.
 	@set -eu; \
 	jobs='$(DOCKER_PREFETCH_JOBS)'; \
 	scope='$(DOCKER_PREFETCH_SCOPE)'; \

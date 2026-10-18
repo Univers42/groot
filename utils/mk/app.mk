@@ -1,8 +1,11 @@
-app-images:
-## Build the local Docker images for the website, osionos, Mail, Calendar, bridges, and BaaS gateway.
+##@ Docker
+app-images: ## Build the local images for the apps, bridges and playground
+## Build the local Docker images for the website, osionos, Mail, Calendar, bridges, and BaaS
+## gateway.
 	$(MAKE) compose-build BAKE_GROUP=testing BAKE_TARGETS='$(BAKE_TARGETS) playground-simulation'
 
-healthcheck: certs
+##@ Pipeline
+healthcheck: certs ## Probe the backend, website, osionos app, bridge and auth gateway
 ## Verify the grobase backend, website, osionos app, bridge, and auth gateway.
 	docker compose ps
 	@echo '$(CURL_HEALTH) -H "apikey: <SB_KONG_KEY>" $(BAAS_URL)/auth/v1/health'
@@ -32,10 +35,12 @@ healthcheck: certs
 		exit 1; \
 	fi
 
-showcase:
-## Recap every local URL the RUNNING stack exposes — click to open. Last step of `make all`. (Only services that are actually up are listed.) Logic in scripts/showcase.sh.
+showcase: ## Print every local URL the running stack exposes (last step of make all)
+## Recap every local URL the RUNNING stack exposes — click to open. Last step of `make all`. (Only
+## services that are actually up are listed.) Logic in scripts/showcase.sh.
 	@sh scripts/showcase.sh
 
-check_health_apps:
-## App health matrix — each app probed on localhost AND in production (Vercel sites + fly backend): UP/DOWN per environment with clickable URLs. Logic in scripts/check-health-apps.sh.
+check_health_apps: ## Probe each app on localhost and in production: UP/DOWN per environment
+## App health matrix — each app probed on localhost AND in production (Vercel sites + fly backend):
+## UP/DOWN per environment with clickable URLs. Logic in scripts/check-health-apps.sh.
 	@sh scripts/check-health-apps.sh

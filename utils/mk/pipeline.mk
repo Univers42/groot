@@ -2,11 +2,21 @@
 # The BaaS backend now runs as the standalone apps/grobase stack (docker project
 # mini-baas). The root pipeline regenerates certs (via grobase), guards that the
 # grobase backend is up, brings up the root FRONTENDS only, then healthchecks.
-all: sync-submodules-soft secrets-ensure certs certs-trust-local backend-up env-local-ensure restore-if-empty demo-login-ensure models-migrate live-data-ensure mounts-reencrypt frontends-up healthcheck showcase
-## FROM-ZERO self-provisioning: sync submodules to latest → pull secrets from vault42 (or, with NO vault key, grobase self-generates them) → certs → START the grobase backend if down → derive root ./.env.local locally when absent (no-vault mode) → restore all-engine data IF fresh (fail-safe no-op otherwise) → set the demo account's password from ./.env.local → build+start frontends → verify → clickable recap. A clean clone + `make all` reconstitutes the whole machine — with the vault key it restores the SHARED secrets+data, without it everything is generated locally.
+##@ Pipeline
+all: sync-submodules-soft secrets-ensure certs certs-trust-local backend-up env-local-ensure restore-if-empty demo-login-ensure models-migrate live-data-ensure mounts-reencrypt frontends-up healthcheck showcase ## Provision a fresh machine end to end: secrets, certs, backend, frontends, checks
+## Usage: make all [SKIP_SYNC=1] [GROBASE_EDITION=devlean|migrate|full] [PULL_PREBUILT=1]
+## FROM-ZERO self-provisioning: sync submodules to latest → pull secrets from vault42 (or, with NO
+## vault key, grobase self-generates them) → certs → START the grobase backend if down → derive root
+## ./.env.local locally when absent (no-vault mode) → restore all-engine data IF fresh (fail-safe
+## no-op otherwise) → set the demo account's password from ./.env.local → build+start frontends →
+## verify → clickable recap. A clean clone + `make all` reconstitutes the whole machine — with the
+## vault key it restores the SHARED secrets+data, without it everything is generated locally.
 
-sync-submodules-soft:
-## Best-effort recursive submodule sync to latest (ff-only, skips dirty) so `make all` always builds the newest code. NEVER blocks the pipeline — network/sync hiccups just print a note and continue. Skipped entirely with SKIP_SYNC=1.
+sync-submodules-soft: ## Sync submodules to latest, best effort; never blocks the pipeline
+## Usage: make sync-submodules-soft [SKIP_SYNC=1]
+## Best-effort recursive submodule sync to latest (ff-only, skips dirty) so `make all` always builds
+## the newest code. NEVER blocks the pipeline — network/sync hiccups just print a note and continue.
+## Skipped entirely with SKIP_SYNC=1.
 	@if [ "$(SKIP_SYNC)" = "1" ]; then \
 		printf '[make all] SKIP_SYNC=1 — not syncing submodules\n'; \
 	else \
@@ -14,6 +24,7 @@ sync-submodules-soft:
 			|| printf '[make all] submodule sync skipped/partial (offline or diverged) — continuing with the current checkout\n'; \
 	fi
 
-rebuild-server:
-## Run the host rebuild daemon (127.0.0.1:7799) so the osionos Update button can rebuild the stack (make all) on click. Leave it running in a terminal.
+rebuild-server: ## Run the host rebuild daemon on 127.0.0.1:7799 for the osionos Update button
+## Run the host rebuild daemon (127.0.0.1:7799) so the osionos Update button can rebuild the stack
+## (make all) on click. Leave it running in a terminal.
 	@python3 scripts/dev-rebuild-server.py
