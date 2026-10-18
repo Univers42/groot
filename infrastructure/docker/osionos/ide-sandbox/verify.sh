@@ -123,10 +123,11 @@ box_uid() { if [ "$1" = "$BOX_B" ]; then echo "$UID_B"; else echo "$UID_A"; fi; 
 
 # The ownership init exactly as buildInitSpec shapes it: the sandbox image at the real targets, the
 # entrypoint overridden, three capabilities, no network. Copy-up happens here, not under the box.
+# OSIONOS_IDE_INIT_PIDS: under gVisor sentry threads count as pids, 16 cannot start the init (40 measured); mirrors the proxy floor.
 init_volumes() {
   $IDE run --rm --network none --user 0:0 --entrypoint /usr/local/sbin/osio-volume-init \
     --cap-drop ALL --cap-add CHOWN --cap-add DAC_READ_SEARCH --cap-add FOWNER \
-    --security-opt no-new-privileges:true --read-only --pids-limit 16 --memory 128m --memory-swap 128m \
+    --security-opt no-new-privileges:true --read-only --pids-limit "${OSIONOS_IDE_INIT_PIDS:-16}" --memory 128m --memory-swap 128m \
     -e OSIO_UID="$3" -v "$1":/workspace -v "$2":/home/coder "$SANDBOX_IMAGE" >/dev/null 2>&1
 }
 

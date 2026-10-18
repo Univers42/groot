@@ -13,8 +13,14 @@ setup() {
 
 @test "sandbox image: the setuid strip is opt-in and precedes the passwd link" {
   [ "$(grep -c '^ARG STRIP_SETUID=0$' "$SRC/Dockerfile")" -eq 1 ]
-  grep -q 'if \[ "\$STRIP_SETUID" = 1 \]' "$SRC/Dockerfile"
+  grep -q 'if \[ "[$]STRIP_SETUID" = 1 \]' "$SRC/Dockerfile"
   strip=$(grep -n '^ARG STRIP_SETUID' "$SRC/Dockerfile" | cut -d: -f1)
   link=$(grep -n 'ln -sf /tmp/.osio/passwd /etc/passwd' "$SRC/Dockerfile" | cut -d: -f1)
   [ "$strip" -lt "$link" ]
+}
+
+# Under gVisor the sentry threads count as pids: the ownership init needs 40 (measured 2026-10-18),
+# so verify.sh must be able to mirror the socket proxy's pinned-runtime floor.
+@test "verify.sh: the init pids limit can be raised, 16 stays the default" {
+  grep -qE -- '--pids-limit "[$][{]OSIONOS_IDE_INIT_PIDS:-16[}]"' "$SRC/verify.sh"
 }
