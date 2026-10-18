@@ -16,8 +16,8 @@
 # (one sudo, inline below, for curl/Electron/system-trust clients) and this user's
 # browser stores (scripts/certs-trust-user.sh: Chrome's NSS db and every Firefox
 # profile, no sudo). Both no-op with a message when sudo/certutil are missing.
-certs:
-## Generate the local HTTPS CA and localhost certificate (delegated to apps/grobase).
+##@ Certificates
+certs: ## Generate the local HTTPS CA and localhost cert (delegated to apps/grobase)
 	$(MAKE) -C apps/grobase certs
 
 # Inline trust of the grobase CA: system store + NSS (certutil) when present.
@@ -45,31 +45,28 @@ define TRUST_LOCAL_CA
 		|| echo '[certs] a browser store import FAILED (above); re-run: make certs-trust-user'
 endef
 
-certs-trust: certs
-## Trust the grobase CA in the system + NSS stores.
+certs-trust: certs ## Trust the grobase CA in the system and NSS stores
 	@$(TRUST_LOCAL_CA)
-
-certs-trust-system: certs
-## Trust the grobase CA in the Linux system store for VS Code/Electron and system-trust browsers.
-	@$(TRUST_LOCAL_CA)
-
-certs-trust-browser-host: certs
-## No-op at root: forwarded-browser-host trust moved with the backend to apps/grobase.
-	@echo '[skip] certs-trust-browser-host now lives in apps/grobase'
 
 # `certs` only when the CA is missing: with one present nothing in apps/grobase is touched,
 # so this works where that target does not (an NFS tree refuses the WAF gid, runbook).
-certs-trust-user:
-## Trust the local CA in THIS user's browser stores, no sudo: Chrome/Chromium's NSS db and every Firefox profile (deb, snap, flatpak), replacing any copy from an older tree. A running browser sees it after a relaunch. Mints the CA first when there is none.
+certs-trust-user: ## Trust the local CA in this user's browser stores, no sudo
+## Trust the local CA in THIS user's browser stores, no sudo: Chrome/Chromium's NSS db and every
+## Firefox profile (deb, snap, flatpak), replacing any copy from an older tree. A running browser
+## sees it after a relaunch. Mints the CA first when there is none.
 	@[ -f '$(LOCAL_CA_CERT)' ] || $(MAKE) --no-print-directory certs
 	@bash scripts/certs-trust-user.sh '$(LOCAL_CA_CERT)'
 
-certs-trust-check:
-## One line per browser store: does it hold the CURRENT local CA (ok|FAIL kind path state); exit 1 when one is stale or missing.
+certs-trust-check: ## Check each browser store holds the current local CA; exit 1 if stale
+## One line per browser store: does it hold the CURRENT local CA (ok|FAIL kind path state); exit 1
+## when one is stale or missing.
 	@bash scripts/certs-trust-user.sh --check '$(LOCAL_CA_CERT)'
 
-certs-trust-local: certs
-## Trust the grobase CA for developer browsers and system-trust clients; skipped in CI. CERT_TRUST_MODE / TRACK_BINOCLE_CERT_TRUST = system (default, one sudo + browsers) | user (browsers only, no sudo) | skip.
+certs-trust-local: certs ## Trust the grobase CA for dev browsers and system clients; skipped in CI
+## Usage: make certs-trust-local [CERT_TRUST_MODE=system|user|skip]
+## Trust the grobase CA for developer browsers and system-trust clients; skipped in CI.
+## CERT_TRUST_MODE / TRACK_BINOCLE_CERT_TRUST = system (default, one sudo + browsers) | user
+## (browsers only, no sudo) | skip.
 	@if [[ "$${CI:-}" == 'true' || "$${GITHUB_ACTIONS:-}" == 'true' || "$${TRACK_BINOCLE_SKIP_CERT_TRUST:-}" == '1' ]]; then \
 		echo '[certs] skipping browser trust import in CI/noninteractive mode'; \
 	elif [[ "$${TRACK_BINOCLE_CERT_TRUST:-$(CERT_TRUST_MODE)}" == 'skip' ]]; then \
@@ -80,6 +77,8 @@ certs-trust-local: certs
 		$(TRUST_LOCAL_CA); \
 	fi
 
-certs-export:
-## Copy the local CA to DEST (default ./track-binocle-local-ca.pem) for a browser on another machine; prints its SHA-256 fingerprint and the host import commands. No sudo.
+certs-export: ## Copy the local CA to DEST for a browser on another machine; no sudo
+## Usage: make certs-export [DEST=<file>]
+## Copy the local CA to DEST (default ./track-binocle-local-ca.pem) for a browser on another
+## machine; prints its SHA-256 fingerprint and the host import commands. No sudo.
 	@bash scripts/certs-export.sh '$(LOCAL_CA_CERT)' '$(or $(DEST),track-binocle-local-ca.pem)'
