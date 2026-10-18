@@ -13,9 +13,18 @@ import http from "node:http";
 export const START_PATH_RE = /^\/(?:v[\d.]+\/)?containers\/(ide(?:init)?-[0-9a-f]{32})\/start$/;
 const INSPECT_TIMEOUT_MS = 3000;
 
-/** The body with HostConfig.Runtime set to the required runtime. Call after the shape check. */
+// gVisor's sentry threads count against the container's pids cgroup: `true` needs a limit of 32 and
+// osio-volume-init 40 (measured 2026-10-18, runsc 20261012.0, systrap; 24 and 28 fail with "cannot read
+// client sync file"). The app's init asks for 16, so every first box would fail under runsc.
+// Caveat: 64 is the measured need plus headroom for the init, not a bound derived from runsc; a heavier
+// init needs a higher floor. The box's own 512 is untouched.
+export const MIN_PIDS_UNDER_RUNTIME = 64;
+
+/** The body with HostConfig.Runtime set to the required runtime and a pids limit the sentry can live in. Call after the shape check. */
 export function pinRuntime(body, runtime) {
-  return { ...body, HostConfig: { ...body.HostConfig, Runtime: runtime } };
+  const pids = body.HostConfig?.PidsLimit;
+  const floor = Number.isInteger(pids) && pids < MIN_PIDS_UNDER_RUNTIME ? { PidsLimit: MIN_PIDS_UNDER_RUNTIME } : {};
+  return { ...body, HostConfig: { ...body.HostConfig, ...floor, Runtime: runtime } };
 }
 
 /** HostConfig.Runtime of the named container as the daemon reports it, or null when unknown. */
