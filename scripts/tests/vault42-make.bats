@@ -258,6 +258,36 @@ new_private() {
   grep -qxF 'apps/*/vendor/*' "$BATS_TEST_TMPDIR/new.sorted"
 }
 
+# vault42-team.sh rebuilds .env.local after an applied pull on the premise that the whole tree was
+# restored; an ONLY pull restores a few files and used to re-point a live .env.local (2026-10-18).
+@test "vault42-team.sh: an applied pull with --only leaves .env.local byte-identical and says so" {
+  fixture
+  export CTL_CFG_DIR="$BATS_TEST_TMPDIR/cfg" CTL_IMAGE=fake/42ctl:test
+  mkdir -p "$CTL_CFG_DIR"
+  : >"$CTL_CFG_DIR/keystore.v42"
+  printf 'LIVE=1\nANON_KEY=stale\n' >"$FX/.env.local"
+  cp "$FX/.env.local" "$BATS_TEST_TMPDIR/before"
+  run sh "$FX/scripts/vault42-team.sh" pull --apply --only 'secrets/*'
+  [ "$status" -eq 0 ]
+  run cmp "$FX/.env.local" "$BATS_TEST_TMPDIR/before"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"derived keys"* ]]
+  run sh "$FX/scripts/vault42-team.sh" pull --apply --only 'secrets/*'
+  [[ "$output" == *".env.local left as found"*"make vault42-team-pull APPLY=1"* ]]
+}
+
+@test "vault42-team.sh: a full applied pull still refreshes .env.local" {
+  fixture
+  export CTL_CFG_DIR="$BATS_TEST_TMPDIR/cfg" CTL_IMAGE=fake/42ctl:test
+  mkdir -p "$CTL_CFG_DIR"
+  : >"$CTL_CFG_DIR/keystore.v42"
+  printf 'LIVE=1\nANON_KEY=stale\n' >"$FX/.env.local"
+  run sh "$FX/scripts/vault42-team.sh" pull --apply
+  [ "$status" -eq 0 ]
+  grep -qx 'ANON_KEY=anon-A' "$FX/.env.local"
+  grep -qx 'LIVE=1' "$FX/.env.local"
+}
+
 # ---- G3: a vendored app's env example goes out private ----
 
 @test "G3: apps/x/vendor/y/.env.example is scanned and marked private by the new path" {

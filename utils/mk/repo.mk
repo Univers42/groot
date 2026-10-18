@@ -242,7 +242,7 @@ vault42-team-pull: ## Restore the shared vault42 tree here (dry-run unless APPLY
 ## ONLY='secrets/*' limits the set; BACKUP=1 writes each displaced file aside as .bak. After an
 ## applied pull it rebuilds ./.env.local (gen-local-env.sh) and lays the owner-published team keys
 ## over it, without which a fresh OSIONOS_BRIDGE_EMAIL_HASH_SALT makes every restored identity
-## unfindable.
+## unfindable. An ONLY pull restores part of the tree, so it leaves ./.env.local alone.
 	@sh scripts/vault42-team.sh pull \
 		$(if $(filter 1,$(APPLY)),--apply,) \
 		$(if $(filter 1,$(BACKUP)),--backup,) \
