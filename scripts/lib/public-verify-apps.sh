@@ -291,4 +291,5 @@ check_apps() {
   check_bundle2
   check_appurls
   check_appenv
+  check_appshape
 }
