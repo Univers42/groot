@@ -309,3 +309,24 @@ esac"
   helper "publish_env ssh '$env_local'"
   grep -qx 'OSIONOS_TENANT_MOUNTS_URL=' "$env_local"
 }
+
+@test "publish_env direct writes OSIONOS_BAAS_KEEPALIVE=1" {
+  probe_stub
+  helper "publish_env direct '$env_local' https://baas.example.ts.net"
+  [ "$status" -eq 0 ]
+  grep -qx 'OSIONOS_BAAS_KEEPALIVE=1' "$env_local"
+}
+
+@test "publish_env ssh and local never add OSIONOS_BAAS_KEEPALIVE" {
+  probe_stub
+  helper "publish_env ssh '$env_local'"
+  helper "publish_env local '$env_local'"
+  [ "$(grep -c '^OSIONOS_BAAS_KEEPALIVE=' "$env_local")" -eq 0 ]
+}
+
+@test "publish_env ssh blanks an OSIONOS_BAAS_KEEPALIVE a direct link left" {
+  probe_stub
+  printf 'OSIONOS_BAAS_KEEPALIVE=1\n' >>"$env_local"
+  helper "publish_env ssh '$env_local'"
+  grep -qx 'OSIONOS_BAAS_KEEPALIVE=' "$env_local"
+}
