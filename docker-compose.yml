@@ -551,11 +551,14 @@ services:
     depends_on:
       osionos-bridge:
         condition: service_healthy
+    # prismatica 6984374 (main, what `make all` syncs to) serves /api/auth/health and 404s the old
+    # /api/auth/availability; the pin 8559d6d and older published images serve only the old one.
+    # Fresh-Machine runs 39091236637..39140018952 died here on main's 404.
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          'node -e "fetch(''http://127.0.0.1:8787/api/auth/availability'').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"',
+          'node -e "fetch(''http://127.0.0.1:8787/api/auth/health'').then((r) => (r.status === 404 ? fetch(''http://127.0.0.1:8787/api/auth/availability'') : r)).then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"',
         ]
       interval: 30s
       start_interval: 2s

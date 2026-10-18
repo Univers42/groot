@@ -20,7 +20,13 @@ healthcheck: certs ## Probe the backend, website, osionos app, bridge and auth g
 		echo "[healthcheck] expected website plain HTTP to redirect to HTTPS, got HTTP $$redirect_status" >&2; \
 		exit 1; \
 	fi
-	$(CURL_HEALTH) -o /dev/null -w 'auth-gateway-https-%{http_code}\n' $(AUTH_URL)/availability
+# The gateway's probe moved from /availability to /health (docker-compose.yml, auth-gateway).
+# No --retry-all-errors on the route pick: a 404 there is the answer, not a failure to retry.
+# Caveat: a gateway still refusing connections after ~60 s is probed on /health; an old one then
+# fails on the 404 instead of falling back.
+	@route=health; \
+	[ "$$(curl --cacert $(LOCAL_CA_CERT) --retry 30 --retry-delay 2 --retry-connrefused -m 5 -s -o /dev/null -w '%{http_code}' $(AUTH_URL)/health || true)" != 404 ] || route=availability; \
+	$(CURL_HEALTH) -o /dev/null -w 'auth-gateway-https-%{http_code}\n' $(AUTH_URL)/$$route
 # drawnosaurus is part of the default stack now (T12-P1b), so it is probed like any other
 # frontend. Two assertions, because the interesting failure is not "port closed": if the
 # gateway is down, nginx answers 503 from its own fallback page and a plain reachability
