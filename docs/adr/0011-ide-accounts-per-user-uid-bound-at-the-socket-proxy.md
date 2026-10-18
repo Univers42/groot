@@ -1,7 +1,8 @@
 # 0011. Each IDE user runs as their own uid, bound at the socket proxy; public `verified` access waits
 
 - Status: accepted with conditions (A1–A3, B1–B4, C, D in the verdict). `verified` in public is
-  blocked (B1.L1–L7). Nothing built yet.
+  blocked (B1.L1–L7). Phase A built on `feat/ide-per-user-uid` (A1–A3 minus the user-run A3.8 and
+  A3.9); nothing deployed.
 - Date: 2026-10-17
 - Deciders: devil, `/goinfre/dlesieur/.groot-vault42-recover/devil-verdict-ide-every-user-2026-10-17.md`.
   The user runs the docker-ide probes (A3.8, B3.2, D1–D4), the load test (B2.2) and the rollout, and
@@ -36,6 +37,9 @@
 - A box runs as `<uid>:10001`, with the uid in 20000..59999.
 - The socket proxy holds a persistent owner↔uid ledger and refuses any create that disagrees with
   it. It also recomputes the workspace digest from the owner and workspace labels.
+- The proxy allocates the uid (option b of A1.3): `POST /osio/v1/uid` returns the owner's bound uid or
+  the next one above every bound uid. There is no database table, no migration and no uid in the
+  token, so verdict A1.4 (the DB-side sequence work) is moot.
 - Execs carry no User. Both box mounts are NoCopy.
 - Volume ownership is set by `ideinit-<digest>`, the only create shape with capabilities: CHOWN,
   DAC_READ_SEARCH and FOWNER; no network; read-only; the sandbox image at the real targets; a fixed
@@ -66,8 +70,13 @@
 
 ## Consequences
 
-- The proxy gains state (the ledger volume). Losing it re-learns bindings by trust on first use. The
-  file carries a `Caveat:`.
+- The proxy gains state (the ledger volume `osionos-ide-ledger`, jsonl, rename + fsync writes). Losing
+  it re-learns bindings by trust on first use. The file carries a `Caveat:`. Allocation is highest + 1,
+  so a hand-deleted line frees its uid only when it was the top one.
+- `POST /osio/v1/uid` is gated by the control network alone: any caller there can bind an owner.
+- The init is a no-op when the roots already match, so it can change ownership under a still-running
+  box of the same owner in another workspace (B2.4 is not enforced).
+- A running box without the `osio.ide.uid` label is replaced on its next use.
 - A rollback to a 10001 image cannot read volumes already chowned to a per-user uid without a user-run
   `chown -R` on docker-ide.
 - GDPR removal of a user is user-run: the volumes plus the ledger line. Automating it is a

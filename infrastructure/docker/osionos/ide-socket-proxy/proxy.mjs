@@ -30,20 +30,32 @@ import http from "node:http";
 import net from "node:net";
 import { fileURLToPath } from "node:url";
 import { createShapeViolation, execShapeViolation, shapeLimits } from "./create-shape.mjs";
+import { INIT_PATH_RE, initShapeViolation } from "./init-shape.mjs";
+import { createLedger } from "./uid-ledger.mjs";
+import { UID_PATH, handleUidRequest } from "./uid-endpoint.mjs";
 
 const LISTEN_PORT = Number(process.env.IDE_SOCKET_PROXY_PORT || 2375);
 const DOCKER_SOCK = process.env.IDE_DOCKER_SOCK || "/dind-run/docker.sock";
 const ID = "ide-[0-9a-f]{32}";
+// Volume-ownership init containers get create, start, wait, json and DELETE, and nothing else:
+// no exec, attach or upgrade route names them (ADR 0011).
+const INIT_ID = "ideinit-[0-9a-f]{32}";
 const EXEC_PATH = new RegExp(`^/(v[\\d.]+/)?containers/${ID}/exec$`);
 const VOLUME_NAME_RE = /^osio-ide-(vol|home)-[0-9a-f]{32}$/;
 const MANAGED_LABEL = "osio.ide.managed";
 const LIMITS = shapeLimits(process.env);
+const ledger = createLedger({ file: process.env.IDE_UID_LEDGER || "/ledger/uid-ledger.jsonl" });
 
 // Allowed (METHOD, path-regex). Anything not listed is denied.
 const ALLOW = [
   ["GET", /^\/_ping$/],
   ["GET", /^\/(v[\d.]+\/)?containers\/json(\?.*)?$/],
-  ["POST", /^\/(v[\d.]+\/)?containers\/create\?name=ide-[0-9a-f]{32}$/],
+  ["POST", /^\/(v[\d.]+\/)?containers\/create\?name=ide(init)?-[0-9a-f]{32}$/],
+  ["POST", new RegExp(`^/(v[\\d.]+/)?containers/${INIT_ID}/start$`)],
+  ["POST", new RegExp(`^/(v[\\d.]+/)?containers/${INIT_ID}/wait(\\?.*)?$`)],
+  ["GET", new RegExp(`^/(v[\\d.]+/)?containers/${INIT_ID}/json$`)],
+  ["DELETE", new RegExp(`^/(v[\\d.]+/)?containers/${INIT_ID}(\\?.*)?$`)],
+  ["POST", new RegExp(`^${UID_PATH}$`)],
   ["GET", new RegExp(`^/(v[\\d.]+/)?containers/${ID}/json$`)],
   ["POST", new RegExp(`^/(v[\\d.]+/)?containers/${ID}/start$`)],
   ["POST", new RegExp(`^/(v[\\d.]+/)?containers/${ID}/stop(\\?.*)?$`)],
@@ -91,11 +103,25 @@ export function unsafeCreateBody(body) {
 export function unsafeVolumeBody(body) {
   const driver = String(body?.Driver ?? "local");
   if (driver !== "local") return "Driver";
-  const opts = body?.DriverOpts;
-  if (opts && typeof opts === "object" && Object.keys(opts).length) return "DriverOpts";
+  if (!isAllowedDriverOpts(String(body?.Name ?? ""), body?.DriverOpts)) return "DriverOpts";
   if (!VOLUME_NAME_RE.test(String(body?.Name ?? ""))) return "Name";
   if (!isManagedLabels(body?.Labels)) return "Labels";
   return null;
+}
+
+/** Size quotas (OSIONOS_IDE_VOLUME_QUOTA, ADR 0011 follow-up): DriverOpts are admitted only when absent
+ *  or exactly the one literal for the volume's prefix. Any other key (type, o, device) or size is the
+ *  host-bind escape this filter exists to stop, so it compares the key array and the literal, never a
+ *  pattern. Caveat: the local driver ignores `size` unless the volume directory sits on xfs+pquota; the
+ *  filter proves what the bridge may ask for, not that the daemon enforces it. */
+const VOLUME_SIZE_BY_PREFIX = [["osio-ide-home-", "2G"], ["osio-ide-vol-", "5G"]];
+function isAllowedDriverOpts(name, opts) {
+  if (opts === undefined || opts === null) return true;
+  if (typeof opts !== "object" || Array.isArray(opts)) return false;
+  const keys = Object.keys(opts);
+  if (keys.length === 0) return true;
+  const expected = VOLUME_SIZE_BY_PREFIX.find(([prefix]) => name.startsWith(prefix))?.[1];
+  return keys.length === 1 && keys[0] === "size" && expected !== undefined && opts.size === expected;
 }
 
 /** Labels must be exactly the one managed key — compared as a key array, never by
@@ -114,12 +140,22 @@ export function unsafeNetworkBody(body) {
   return null;
 }
 
+/** A container create, box or init by its name: the shape first (the box shape is also run
+ *  through the escalation denylist, the init shape is the one that may carry capabilities), then
+ *  the ledger. Resolves to a refusal reason or null. */
+export async function vetCreateBody(body, path, boundLedger = ledger) {
+  const isInit = INIT_PATH_RE.test(path);
+  const bad = isInit ? initShapeViolation(body, path, LIMITS) : createShapeViolation(body, path, LIMITS) ?? unsafeCreateBody(body);
+  if (bad) return bad;
+  return boundLedger.admit(body.Labels["osio.ide.owner"], Number(body.Labels["osio.ide.uid"]));
+}
+
 /** The body vetter for a POST endpoint, or null when the endpoint carries no body risk.
  *  A create body must match the bridge's shape FIRST, then survive the escalation
  *  denylist — the two cover different directions, so both run. */
 function bodyVetter(path) {
   if (/\/containers\/create/.test(path)) {
-    return (body) => createShapeViolation(body, path, LIMITS) ?? unsafeCreateBody(body);
+    return (body) => vetCreateBody(body, path);
   }
   if (EXEC_PATH.test(path)) return execShapeViolation;
   if (/\/volumes\/create$/.test(path)) return unsafeVolumeBody;
@@ -166,9 +202,19 @@ function vetBody(req, res, vet, cap) {
     const raw = Buffer.concat(chunks);
     let body;
     try { body = JSON.parse(raw.toString("utf8") || "{}"); } catch { return deny(res, 400, "invalid create body"); }
-    const bad = vet(body);
-    if (bad) return deny(res, 403, `create rejected: ${bad}`);
-    forward(req, res, raw);
+    // A vetter may be async (the ledger); a throw is a refusal, never a pass. The trailing
+    // catch matters: an unhandled rejection (deny on a response already answered) would
+    // kill the proxy, and with it every user's IDE.
+    void (async () => {
+      let bad;
+      try { bad = await vet(body); } catch { bad = "vetter failed"; }
+      if (bad) return deny(res, 403, `create rejected: ${bad}`);
+      forward(req, res, raw);
+    })().catch((error) => {
+      process.stderr.write(`[ide-socket-proxy] vet/forward failed: ${error?.code ?? error?.message ?? "error"}\n`);
+      if (!res.headersSent) deny(res, 502, "proxy error");
+      else res.destroy();
+    });
   });
 }
 
@@ -176,6 +222,8 @@ const server = http.createServer((req, res) => {
   const method = (req.method || "GET").toUpperCase();
   const path = req.url || "/";
   if (!isAllowed(method, path)) return deny(res, 403, `endpoint not allowed: ${method} ${path}`);
+
+  if (path === UID_PATH) return handleUidRequest(req, res, ledger);
 
   // Every create (container, volume, network) and every exec create has its body
   // vetted before it reaches the daemon.
@@ -211,7 +259,20 @@ if (isMain && process.argv.includes("--selfcheck")) {
   const refuse = (label, got) => { if (got === null) fail.push(`${label}: accepted, want a refusal reason`); };
 
   // The canonical bridge body and its one-field variants live with the shape cases.
-  const { DIGEST, CANON_PATH, mk, host } = await import("./create-shape.selfcheck.mjs");
+  const { DIGEST, CANON_PATH, host, shapeFailures } = await import("./create-shape.selfcheck.mjs");
+  fail.push(...shapeFailures());
+  fail.push(...await (await import("./uid-ledger.selfcheck.mjs")).ledgerFailures(vetCreateBody));
+  const INIT = `ideinit-${DIGEST}`;
+  for (const [method, route, want] of [
+    ["POST", `/containers/create?name=${INIT}`, true], ["POST", `/containers/${INIT}/start`, true],
+    ["POST", `/containers/${INIT}/wait?condition=not-running`, true], ["GET", `/containers/${INIT}/json`, true],
+    ["DELETE", `/containers/${INIT}?force=true&v=false`, true], ["POST", UID_PATH, true],
+    ["POST", `/containers/${INIT}/exec`, false], ["POST", `/containers/${INIT}/attach`, false],
+    ["POST", `/containers/${INIT}/stop`, false], ["POST", `/containers/${INIT}/archive`, false],
+    ["GET", UID_PATH, false], ["POST", `/v1.47/osio/v1/uid`, false], ["POST", "/containers/ideinit-short/start", false],
+    ["POST", `/containers/ideinit-${"G".repeat(32)}/start`, false],
+  ]) chk(`${method} ${route.replace(DIGEST, "<digest>")} allowed`, isAllowed(method, route), want);
+  chk("the upgrade path stays exec-only", /^\/(v[\d.]+\/)?exec\/[a-f0-9]+\/start$/.test(`/containers/${INIT}/attach`), false);
 
   chk("allow create", isAllowed("POST", "/containers/create?name=ide-" + "a".repeat(32)), true);
   chk("allow start", isAllowed("POST", "/containers/ide-" + "a".repeat(32) + "/start"), true);
@@ -233,6 +294,17 @@ if (isMain && process.argv.includes("--selfcheck")) {
   chk("foreign volume driver rejected", unsafeVolumeBody({ Name: "x", Driver: "vieux/sshfs" }), "Driver");
   chk("provisioner home volume ok", unsafeVolumeBody({ Name: `osio-ide-home-${DIGEST}`, Driver: "local", Labels: { [MANAGED_LABEL]: "1" } }), null);
   chk("home volume DriverOpts refused", unsafeVolumeBody({ Name: `osio-ide-home-${DIGEST}`, Driver: "local", Labels: { [MANAGED_LABEL]: "1" }, DriverOpts: { type: "none", o: "bind", device: "/" } }), "DriverOpts");
+  const quotaVol = (suffix, DriverOpts) => unsafeVolumeBody({ Name: `${suffix}${DIGEST}`, Driver: "local", Labels: { [MANAGED_LABEL]: "1" }, DriverOpts });
+  chk("home volume 2G ok", quotaVol("osio-ide-home-", { size: "2G" }), null);
+  chk("workspace volume 5G ok", quotaVol("osio-ide-vol-", { size: "5G" }), null);
+  chk("empty DriverOpts ok", quotaVol("osio-ide-vol-", {}), null);
+  chk("size 3G refused", quotaVol("osio-ide-vol-", { size: "3G" }), "DriverOpts");
+  chk("home literal on a workspace name refused", quotaVol("osio-ide-vol-", { size: "2G" }), "DriverOpts");
+  chk("workspace literal on a home name refused", quotaVol("osio-ide-home-", { size: "5G" }), "DriverOpts");
+  chk("type/o/device refused", quotaVol("osio-ide-vol-", { type: "none", o: "bind", device: "/" }), "DriverOpts");
+  chk("size plus o refused", quotaVol("osio-ide-vol-", { size: "5G", o: "bind" }), "DriverOpts");
+  chk("size plus type refused", quotaVol("osio-ide-home-", { size: "2G", type: "none" }), "DriverOpts");
+  chk("array DriverOpts refused", quotaVol("osio-ide-vol-", ["size"]), "DriverOpts");
   chk("other volume prefix refused", unsafeVolumeBody({ Name: `osio-ide-data-${DIGEST}`, Driver: "local", Labels: { [MANAGED_LABEL]: "1" } }), "Name");
   chk("provisioner volume ok", unsafeVolumeBody({ Name: `osio-ide-vol-${DIGEST}`, Driver: "local", Labels: { [MANAGED_LABEL]: "1" } }), null);
   chk("unmanaged volume name rejected", unsafeVolumeBody({ Name: "other", Driver: "local" }), "Name");
@@ -241,9 +313,9 @@ if (isMain && process.argv.includes("--selfcheck")) {
   chk("provisioner network ok", unsafeNetworkBody({ Name: "ide-net", Driver: "bridge", Internal: true }), null);
   chk("volume create is vetted", bodyVetter("/v1.47/volumes/create") === unsafeVolumeBody, true);
   chk("network create is vetted", bodyVetter("/networks/create") === unsafeNetworkBody, true);
-  chk("create vetter runs the shape check", bodyVetter(CANON_PATH)(mk()), null);
-  refuse("create vetter refuses Privileged", bodyVetter(CANON_PATH)(host({ Privileged: true })));
-  chk("exec create is vetted", bodyVetter(`/containers/ide-${DIGEST}/exec`)({ User: "10001:10001" }), "WorkingDir");
+  refuse("create vetter refuses Privileged", await bodyVetter(CANON_PATH)(host({ Privileged: true })));
+  chk("create vetter wraps vetCreateBody", await bodyVetter(CANON_PATH)(host({ Privileged: true })), await vetCreateBody(host({ Privileged: true }), CANON_PATH));
+  chk("exec create is vetted", bodyVetter(`/containers/ide-${DIGEST}/exec`)({ User: "20000:10001" }), "User");
 
   if (fail.length) { process.stderr.write(`selfcheck FAIL:\n${fail.join("\n")}\n`); process.exit(1); }
   process.stdout.write("selfcheck OK: socket-proxy allow/deny + body filter correct\n");
@@ -251,5 +323,6 @@ if (isMain && process.argv.includes("--selfcheck")) {
 }
 
 if (isMain) {
+  await ledger.ready();
   server.listen(LISTEN_PORT, () => process.stdout.write(`[ide-socket-proxy] :${LISTEN_PORT} -> ${DOCKER_SOCK}\n`));
 }
