@@ -99,3 +99,6 @@ prints first), then every other `utils/mk/*.mk` in name order. A new module load
 - `tools/seeds/seed_wiki_content.py` lines 508, 525, 729 carry seed text naming deleted targets.
 - `tools/seeds/*gourmand*` are orphaned by the removal of `gourmand.mk`.
 - `secrets-ensure` pushes and pulls asymmetrically; a separate change.
+- Retire the old vault42 path (`vault42-team-push|pull`, `vault42-push-all|pull-all`,
+  `scripts/vault42-team.sh`) once the checklist R1-R6 of
+  [ADR 0017](0017-vault42-cli-beside-the-old-path.md) is done by the operator.

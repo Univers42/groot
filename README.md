@@ -288,6 +288,10 @@ tree automatically during `make all` (or with `make vault42-pull-all APPLY=1`). 
 created with `42ctl keys init` and enrolled with an invitation from the vault's operator.
 Details: [`DATA-MIGRATION.md`](DATA-MIGRATION.md).
 
+The vault42 CLI is wired in beside that path: the `Secrets (vault42)` section of `make help`, and
+[`vendor/scripts/vault42/README.md`](vendor/scripts/vault42/README.md). Status and retirement
+checklist: [ADR 0017](docs/adr/0017-vault42-cli-beside-the-old-path.md).
+
 ### Everyday commands
 
 | Command | What it does |
