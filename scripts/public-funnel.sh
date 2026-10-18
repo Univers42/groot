@@ -3,9 +3,11 @@
 # and prove the stack behind it is the public build before anything is exposed.
 #   up [443|all]       verify --pre, then open 443 (website) alone, or 443 + 8443 (osionos app)
 #                      + 10000 (bridge). Nothing else is ever exposed.
-#   down               tailscale funnel reset; the containers keep running on localhost
-#   status             node name and open Funnel ports
-#   verify [--pre] [443|all]   PASS/FAIL/SKIP per check, exit 1 on any FAIL (lib/public-verify.sh)
+#   up apps            verify --pre, then open 443 -> 3102 (Mail) and 8443 -> 3103 (Calendar) on the
+#                      second node (scripts/public-node.sh start first)
+#   down               funnel reset on BOTH nodes; the containers keep running on localhost
+#   status             both nodes: name and open Funnel ports
+#   verify [--pre] [443|all|apps]   PASS/FAIL/SKIP per check, exit 1 on any FAIL (lib/public-verify.sh)
 #   env                create ./.env.public from the example, mint AUTH_LINK_SIGNING_KEY (mode 600)
 # Settings (environment): TAILSCALE_BIN, TAILSCALE_SOCKET, PUBLIC_ENV_FILE, PUBLIC_PROJECT,
 # PUBLIC_EDGE_BASE, PUBLIC_APP_IMAGE, PUBLIC_WEB_IMAGE, PUBLIC_TS_PROXY. wiki/runbooks/public-funnel.md.
@@ -14,6 +16,8 @@
 # born2root seat starts it --state=mem:, which serves a TLS alert to every visitor (verify's tls
 # check FAILs on it). A daemon whose state is in memory also loses the node name and the Funnel
 # config on restart; `verify` then fails on the name and `up` has to be run again.
+# With PUBLIC_MAIL_ORIGIN and PUBLIC_CALENDAR_ORIGIN set, the apps checks need the apps node
+# serving: `up 443` or `up all` then FAILs its post-open verify (and resets) until `up apps` ran.
 set -euo pipefail
 
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,7 +38,8 @@ export GIT_REPO ENV_FILE LOCAL_ENV REMOTE_ENV APP_IMAGE WEB_IMAGE
 PROJECT="${PUBLIC_PROJECT:-track-binocle}"
 TAILSCALE_BIN="${TAILSCALE_BIN:-$HOME/.local/bin/tailscale}"
 TAILSCALE_SOCKET="${TAILSCALE_SOCKET:-$HOME/.local/state/tailscale/tailscaled.sock}"
-# public port:local loopback port (the local-https-proxy listeners)
+# public port:local loopback port (the local-https-proxy listeners); the apps node's map is
+# APPS_FUNNEL_MAP in lib/public-tailnet.sh
 FUNNEL_MAP="443:4322 8443:3001 10000:4000"
 # The userspace tailscaled's outbound proxy, through which verify reaches the node's own cert.
 TS_PROXY="${PUBLIC_TS_PROXY:-socks5h://localhost:1055}"
@@ -58,13 +63,27 @@ scope_pairs() {
   done
 }
 
+# Opens the apps node's Funnel; the checks already passed in pre mode.
+open_apps() {
+  local pair
+  for pair in $APPS_FUNNEL_MAP; do
+    tsa funnel --bg "--https=${pair%%:*}" "https+insecure://127.0.0.1:${pair##*:}" || { tsa funnel reset || true; die "apps funnel on ${pair%%:*} failed: reset"; }
+  done
+  run_verify full apps || { tsa funnel reset || true; die "post-open verify failed: apps Funnel reset"; }
+  note "apps public on $(penv PUBLIC_MAIL_ORIGIN || true) and $(penv PUBLIC_CALENDAR_ORIGIN || true)"
+}
+
 cmd_up() {
   local scope=${1:-443} pair
-  case "$scope" in 443 | all) ;; *) die "usage: up [443|all]" ;; esac
+  case "$scope" in 443 | all | apps) ;; *) die "usage: up [443|all|apps]" ;; esac
   if [ "$scope" = all ] && [ -z "$(penv AUTH_TRUSTED_PROXY_HOPS || true)" ]; then
     die "refusing 'up all': AUTH_TRUSTED_PROXY_HOPS is unset in $ENV_FILE (measure it on 443 first)"
   fi
   run_verify pre || die "verify --pre failed: the Funnel stays closed"
+  if [ "$scope" = apps ]; then
+    open_apps
+    return
+  fi
   for pair in $(scope_pairs "$scope"); do
     ts funnel --bg "--https=${pair%%:*}" "https+insecure://127.0.0.1:${pair##*:}" || { ts funnel reset || true; die "funnel on ${pair%%:*} failed: reset"; }
   done
@@ -72,20 +91,26 @@ cmd_up() {
   note "public on $(penv PUBLIC_ORIGIN) (scope $scope)"
 }
 
+# Both resets are attempted: a failure on one node must not leave the other open.
 cmd_down() {
-  ts funnel reset
-  note "Funnel closed; the containers keep running on localhost"
+  local rc=0
+  ts funnel reset || rc=1
+  if tsa status --json >/dev/null 2>&1; then tsa funnel reset || rc=1; fi
+  [ "$rc" = 0 ] || die "a funnel reset failed: check both nodes with 'status'"
+  note "Funnel closed on both nodes; the containers keep running on localhost"
 }
 
 cmd_status() {
   printf 'node:  %s\n' "$(ts status --json 2>/dev/null | jq -r '.Self.DNSName // "unreadable"' || echo unreadable)"
-  printf 'ports: %s\n' "$(funnel_ports || echo unreadable)"
+  printf 'ports: %s\n' "$(funnel_ports ts || echo unreadable)"
+  printf 'apps node:  %s\n' "$(tsa status --json 2>/dev/null | jq -r '.Self.DNSName // "unreadable"' || echo "not running")"
+  printf 'apps ports: %s\n' "$(funnel_ports tsa || echo unreadable)"
 }
 
 cmd_verify() {
   local mode=full scope=""
   for a in "$@"; do
-    case "$a" in --pre) mode=pre ;; 443 | all) scope=$a ;; *) die "usage: verify [--pre] [443|all]" ;; esac
+    case "$a" in --pre) mode=pre ;; 443 | all | apps) scope=$a ;; *) die "usage: verify [--pre] [443|all|apps]" ;; esac
   done
   run_verify "$mode" "$scope"
 }
@@ -118,7 +143,7 @@ main() {
     status) cmd_status ;;
     verify) cmd_verify "$@" ;;
     env) cmd_env ;;
-    *) die "usage: public-funnel.sh up [443|all] | down | status | verify [--pre] [443|all] | env" ;;
+    *) die "usage: public-funnel.sh up [443|all|apps] | down | status | verify [--pre] [443|all|apps] | env" ;;
   esac
 }
 main "$@"

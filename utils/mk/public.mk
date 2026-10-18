@@ -8,7 +8,7 @@
 PUBLIC_COMPOSE_EXTRA ?=
 PUBLIC_PORTS ?= 443
 PUBLIC_SCRIPT = bash scripts/public-funnel.sh
-PUBLIC_SERVICES = osionos-app opposite-osiris-web auth-gateway osionos-bridge local-https-proxy
+PUBLIC_SERVICES = osionos-app opposite-osiris-web auth-gateway osionos-bridge local-https-proxy mail-web calendar-web
 public-empty :=
 public-space := $(public-empty) $(public-empty)
 PUBLIC_COMPOSE_FILES = docker-compose.yml:docker-compose.grobase-link.yml$(subst $(public-space),,$(patsubst %,:%,$(PUBLIC_COMPOSE_EXTRA))):docker-compose.public.yml
@@ -26,11 +26,12 @@ public-env: ## Create ./.env.public (git-ignored, mode 600) and mint its signing
 	@$(PUBLIC_SCRIPT) env
 
 public-up: ## Rebuild as :public, recreate the frontends, then open the Funnel
-## Usage: make public-up [PUBLIC_PORTS=443|all] [PUBLIC_COMPOSE_EXTRA="file.yml …"]
-## RECREATES osionos-app, opposite-osiris-web, auth-gateway, osionos-bridge and local-https-proxy
+## Usage: make public-up [PUBLIC_PORTS=443|all|apps] [PUBLIC_COMPOSE_EXTRA="file.yml …"]
+## RECREATES osionos-app, opposite-osiris-web, auth-gateway, osionos-bridge, local-https-proxy,
+## mail-web and calendar-web
 ## with the public configuration (the :local images are kept), then runs `public-funnel.sh up`,
 ## which refuses to open the Funnel unless `verify --pre` passes. PUBLIC_PORTS=all adds 8443 and
-## 10000 and needs a measured AUTH_TRUSTED_PROXY_HOPS.
+## 10000 and needs a measured AUTH_TRUSTED_PROXY_HOPS; PUBLIC_PORTS=apps opens only the apps node.
 	$(PUBLIC_COMPOSE) up -d --build --wait $(PUBLIC_SERVICES)
 	$(PUBLIC_SCRIPT) up $(PUBLIC_PORTS)
 
@@ -45,6 +46,6 @@ public-status: ## Show the node name and which Funnel ports are open
 	@$(PUBLIC_SCRIPT) status
 
 public-verify: ## Check the public stack: PASS/FAIL/SKIP per fact, exit 1 on any FAIL
-## Usage: make public-verify [PUBLIC_VERIFY_ARGS="--pre|443|all"]
+## Usage: make public-verify [PUBLIC_VERIFY_ARGS="--pre|443|all|apps"]
 ## --pre runs the checks that need no open Funnel; 443 or all also requires exactly that exposure.
 	@$(PUBLIC_SCRIPT) verify $(PUBLIC_VERIFY_ARGS)
