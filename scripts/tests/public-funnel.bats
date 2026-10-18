@@ -41,6 +41,7 @@ logs) cat "$T/gw.log" ;;
 run) echo "${RUN_HITS:-0}" ;;
 esac'
   stub curl 'case "$*" in
+*"-x socks5h://"*) echo "$*" >>"$T/tls.log"; exit "${TLS_RC:-0}" ;;
 *"-X POST"*) echo "${EDGE_STREAM:-404}" ;;
 *) n=${GEO_503:-14}; i=0; while [ $i -lt 20 ]; do [ $i -lt $((20 - n)) ] && echo 502 || echo 503; i=$((i + 1)); done ;;
 esac'
@@ -170,6 +171,40 @@ set_env() { sed -i "s|^$1=.*|$1=$2|" "$T/repo/.env.public"; }
   run_pf verify
   [ "$status" -eq 1 ]
   has "expected 443 alone or 443,8443,10000"
+}
+
+@test "verify checks the served certificate of every open port through the tailnet proxy" {
+  printf '443\n8443\n10000\n' >"$T/funnel"
+  run_pf verify all
+  [ "$status" -eq 0 ]
+  has "PASS  tls            https://osionos.tail10f2ea.ts.net:443 serves a valid certificate"
+  has "PASS  tls            https://osionos.tail10f2ea.ts.net:10000 serves a valid certificate"
+  [ "$(grep -c 'socks5h://localhost:1055' "$T/tls.log")" -eq 3 ]
+}
+
+@test "verify FAILs a port whose TLS fails (no state dir) and up then resets the Funnel" {
+  echo 443 >"$T/funnel"
+  TLS_RC=35 run_pf verify 443
+  [ "$status" -eq 1 ]
+  has "FAIL  tls            https://osionos.tail10f2ea.ts.net:443: no valid TLS"
+  has "needs --statedir"
+  : >"$T/funnel"
+  TLS_RC=35 run_pf up 443
+  [ "$status" -ne 0 ]
+  [ ! -s "$T/funnel" ]
+}
+
+@test "an unreachable tailnet proxy SKIPs the certificate check instead of passing it" {
+  echo 443 >"$T/funnel"
+  TLS_RC=7 PUBLIC_TS_PROXY=socks5h://localhost:1 run_pf verify 443
+  [ "$status" -eq 0 ]
+  has "SKIP  tls            cannot reach the proxy socks5h://localhost:1"
+  lacks "PASS  tls"
+}
+
+@test "verify --pre never probes the certificate: nothing is open yet" {
+  run_pf verify --pre
+  [ ! -e "$T/tls.log" ]
 }
 
 @test "verify with no scope SKIPs a closed Funnel instead of passing it; with a scope it FAILs" {

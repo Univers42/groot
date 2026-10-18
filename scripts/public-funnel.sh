@@ -8,10 +8,12 @@
 #   verify [--pre] [443|all]   PASS/FAIL/SKIP per check, exit 1 on any FAIL (lib/public-verify.sh)
 #   env                create ./.env.public from the example, mint AUTH_LINK_SIGNING_KEY (mode 600)
 # Settings (environment): TAILSCALE_BIN, TAILSCALE_SOCKET, PUBLIC_ENV_FILE, PUBLIC_PROJECT,
-# PUBLIC_EDGE_BASE, PUBLIC_APP_IMAGE, PUBLIC_WEB_IMAGE. wiki/runbooks/public-funnel.md.
+# PUBLIC_EDGE_BASE, PUBLIC_APP_IMAGE, PUBLIC_WEB_IMAGE, PUBLIC_TS_PROXY. wiki/runbooks/public-funnel.md.
 #
-# Caveat: tailscaled here runs --state=mem:, so a restart drops the node name and the Funnel
-# config; `verify` then fails on the name and `up` has to be run again.
+# Caveat: Funnel needs tailscaled to have a state dir for its certificate (--statedir); the
+# born2root seat starts it --state=mem:, which serves a TLS alert to every visitor (verify's tls
+# check FAILs on it). A daemon whose state is in memory also loses the node name and the Funnel
+# config on restart; `verify` then fails on the name and `up` has to be run again.
 set -euo pipefail
 
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,6 +36,8 @@ TAILSCALE_BIN="${TAILSCALE_BIN:-$HOME/.local/bin/tailscale}"
 TAILSCALE_SOCKET="${TAILSCALE_SOCKET:-$HOME/.local/state/tailscale/tailscaled.sock}"
 # public port:local loopback port (the local-https-proxy listeners)
 FUNNEL_MAP="443:4322 8443:3001 10000:4000"
+# The userspace tailscaled's outbound proxy, through which verify reaches the node's own cert.
+TS_PROXY="${PUBLIC_TS_PROXY:-socks5h://localhost:1055}"
 
 note() { printf '[public-funnel] %s\n' "$*" >&2; }
 die() {

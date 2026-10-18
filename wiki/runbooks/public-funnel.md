@@ -53,8 +53,15 @@ recreates them from the local build (not exercised in this change).
 
 ## Limits
 
-- tailscaled here runs `--state=mem:`: a restart drops the node name and the Funnel config. The
-  name check then fails and `public-up` has to be run again.
+- Funnel needs tailscaled to have a state dir, where it keeps the certificate. The born2root seat
+  starts it with `--state=mem:` alone; every visitor then gets `SSL_ERROR_INTERNAL_ERROR_ALERT`
+  and tailscaled logs `no TailscaleVarRoot`. Restart it with `--state=<dir>/tailscaled.state
+  --statedir=<dir>/var` and run `public-up` again; verify's `tls` check fails until then. A
+  daemon whose state is in memory also drops the node name and the Funnel config on restart.
+- A re-registered node (same name, new node) can be unreachable through some Funnel relays for
+  several minutes: each `*.ts.net` relay address answers on its own, and a stale one closes the
+  connection right after the ClientHello. `public-down` then `public-up` refreshed one relay of
+  three within a minute (2026-10-18).
 - The bundle check greps for literal secret values; a split or encoded value is missed. The
   geocode check is rate-based and needs a fast host. Both are stated in
   `scripts/lib/public-verify.sh`.
