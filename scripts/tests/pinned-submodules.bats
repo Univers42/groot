@@ -396,6 +396,13 @@ parent_pin_fixture() {
   [[ "$output" == *"left at their gitlink with everything under them: "*"apps/parent/lib"* ]]
 }
 
+@test "PARENT_PINNED holds every nested submodule a parent records: engine and grobase's scripts" {
+  run make -C "$REPO" -pq __no_such_target__
+  line=$(printf '%s\n' "$output" | grep -m1 '^PARENT_PINNED ')
+  [[ " ${line#*= } " == *" apps/drawnosaurus/engine "* ]]
+  [[ " ${line#*= } " == *" apps/grobase/vendor/scripts "* ]]
+}
+
 @test "negative control: with PARENT_PINNED empty syncro moves the nested submodule to its tip" {
   parent_pin_fixture
   run_recipe syncro-submodule PARENT_PINNED=
