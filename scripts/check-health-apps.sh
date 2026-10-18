@@ -17,7 +17,13 @@ PROD_AUTH="${PROD_AUTH_URL:-https://prismatica-auth-gateway.fly.dev}"
 # probe URL -> HTTP status code (000 = unreachable). -k accepts the local self-signed cert.
 probe() {
 	[ -n "$1" ] || { printf '%s' '---'; return; }
-	curl -k -sS -o /dev/null -w '%{http_code}' --max-time "$TIMEOUT" "$1" 2>/dev/null || printf '%s' '000'
+	code=$(curl -k -sS -o /dev/null -w '%{http_code}' --max-time "$TIMEOUT" "$1" 2>/dev/null) || code=000
+	# Same rule as docker-compose.yml's auth-gateway healthcheck: older gateways only serve /availability.
+	if [ "$code" = 404 ] && [ "${1%/api/auth/health}" != "$1" ]; then
+		probe "${1%/health}/availability"
+		return
+	fi
+	printf '%s' "$code"
 }
 
 # up_code CODE -> 0 if the server is responding (any HTTP reply, incl. auth-gated 401/403).
@@ -62,7 +68,7 @@ done <<EOF
 opposite-osiris|https://localhost:4322|https://localhost:4322|$PROD_WEBSITE|$PROD_WEBSITE
 osionos|https://localhost:3001|https://localhost:3001|$PROD_OSIONOS|$PROD_OSIONOS
 osionos-bridge|https://localhost:4000|https://localhost:4000/api/auth/bridge/health|$PROD_GROBASE|$PROD_GROBASE/api/auth/bridge/health
-auth-gateway|https://localhost:8787|https://localhost:8787/api/auth/availability|$PROD_AUTH|$PROD_AUTH/api/auth/availability
+auth-gateway|https://localhost:8787|https://localhost:8787/api/auth/health|$PROD_AUTH|$PROD_AUTH/api/auth/health
 grobase (Kong)|http://127.0.0.1:8000|http://127.0.0.1:8000/auth/v1/health|$PROD_GROBASE|$PROD_GROBASE/auth/v1/health
 grobase (TLS)|https://localhost:8444|https://localhost:8444/auth/v1/health||
 mail|https://localhost:3002|https://localhost:3002||
