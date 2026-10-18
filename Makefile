@@ -25,3 +25,8 @@ include $(sort $(filter-out $(MAKE_DIR)/common.mk $(MAKE_DIR)/pipeline.mk,$(wild
 
 # Documented targets are commands, not files (./playground is a directory).
 .PHONY: $(MAKE_HELP_PHONY)
+
+# `all` is an ordered prerequisite list (secrets, backend, env, frontends,
+# healthcheck); under -j make would start them together. Nothing here is
+# written for parallel runs.
+.NOTPARALLEL:
