@@ -65,7 +65,7 @@ docker_reclaim_dangling:
 ## SAFE: only removes volumes with no container reference — never touches live DB or service data.
 	@echo "=== dangling volumes before ==="
 	@docker volume ls -f dangling=true --format '{{.Name}}' | wc -l | xargs -I{} echo "{} dangling volumes"
-	@docker volume ls -f dangling=true --format '{{.Name}}' | xargs -r docker volume rm 2>&1 | grep -c removed | xargs -I{} echo "{} volumes removed" || true
+	@docker volume ls -f dangling=true --format '{{.Name}}' | xargs -r docker volume rm 2>/dev/null | wc -l | xargs -I{} echo "{} volumes removed" || true
 	@env -u BUILDX_BUILDER docker buildx use default >/dev/null 2>&1 || true
 	@env -u BUILDX_BUILDER docker builder prune -a -f 2>/dev/null | tail -1 || true
 	@echo "=== /home after ==="; df -h /home | tail -1
