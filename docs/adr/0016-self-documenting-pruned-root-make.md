@@ -71,10 +71,10 @@ prints first), then every other `utils/mk/*.mk` in name order. A new module load
   - C7: `vault42-seed` help no longer cites the deleted `vault.mk`.
   - C11: the `agency-content` container fix is its own commit.
   - C12: this ADR and `.out-of-scope/root-grobase-wrappers.md`.
-  - The other conditions of the ruling (C1-C3, C5, C6, C8-C10) are held by the help-convention
-    bats test and by the `make -pq` database diff run before every commit: only deleted rules and
-    variables differ after the deletions, only the fixed recipes after the fixes, nothing after
-    the marker conversion.
+  - The other conditions (C1-C3, C5, C6, C8-C10) are in the devil's ruling, not restated here.
+  - Before every commit the `make -pq` database was diffed against the pre-change base: after
+    the deletions only deleted rules and variables differ, after the fixes only the fixed recipes,
+    after the marker conversion nothing.
 - Fixes in kept targets: `e2e` passes `E2E_SPECS`; `docker_reclaim_dangling` counts the volumes
   it removed (it always printed 0); `docker-prefetch-images` scope is `all|frontends`;
   `agency-content` writes to `mini-baas-postgres`.
@@ -83,8 +83,9 @@ prints first), then every other `utils/mk/*.mk` in name order. A new module load
 - `common.mk` lost every variable with no remaining reader; `COMPOSE_*_INFRA` were folded into
   the three `COMPOSE_*_SERVICES` lists with identical final values.
 - Residual, known and not fixed here:
-  - `make` on a deleted name now fails with "No rule to make target"; nothing in the tree calls
-    one from a script or workflow (grep of the tree at this commit).
+  - `make` on a deleted name now fails with "No rule to make target"; no script or workflow
+    calls one (grep of the tree at this commit); docs naming `make baas-security-scan`
+    (`QUALITY-SECURITY-TOOLING.md:97`, `.semgrepignore:3`) are stale.
   - Anything outside this repo that ran a deleted target (shell history, other checkouts) is
     unchecked.
 
