@@ -47,6 +47,11 @@ CTL_CFG_DIR     ?= $(HOME)/.config/42ctl
 # their gitlink. The branch-following foreach loops below skip each one AND everything under it,
 # because `foreach --recursive` still descends into a submodule whose command exited 0.
 PIN_SUBMODULES := $(CURDIR)/scripts/pin-submodules.sh
+# Nested submodules whose PARENT asserts the commit it records, so syncro must not follow their
+# branch: drawnosaurus-assert-engine refuses any other engine commit, and CI run 39082685726
+# failed on it after syncro moved engine from the pinned 2b8adaa to origin/main dd453b5 (which
+# contains it, so the never-rewind rule allowed the move). Space separated, one entry per path.
+PARENT_PINNED ?= apps/drawnosaurus/engine
 SKIP_IF_PINNED = for p in $$PINNED; do case "$$displaypath/" in "$$p"/*) exit 0 ;; esac; done;
 # Prefix for every recipe that builds osionos-app: app.Dockerfile serves the graph_render pack only
 # when GRAPH_RENDER_SHA is the gitlink. Read when the recipe runs, not by an exported $(shell),
@@ -66,7 +71,7 @@ syncro-submodule:
 	echo '[syncro] init + checkout all submodules at their recorded SHAs'; \
 	git submodule update --init --recursive; \
 	echo '[syncro] put each submodule on a real branch at latest stable'; \
-	PINNED=$$(sh $(PIN_SUBMODULES) --list | tr '\n' ' '); export PINNED; \
+	PINNED="$$(sh $(PIN_SUBMODULES) --list | tr '\n' ' ') $(PARENT_PINNED)"; export PINNED; \
 	[ -z "$$PINNED" ] || echo "[syncro] pinned, left at their gitlink with everything under them: $$PINNED"; \
 	git submodule foreach --recursive ' \
 		set -eu; \
@@ -255,7 +260,7 @@ pulls:
 repair-detached:
 ## Re-attach every detached submodule HEAD: commit dirty state, merge onto main, push main + develop.
 	@set -eu; \
-	PINNED=$$(sh $(PIN_SUBMODULES) --list | tr '\n' ' '); export PINNED; \
+	PINNED="$$(sh $(PIN_SUBMODULES) --list | tr '\n' ' ') $(PARENT_PINNED)"; export PINNED; \
 	git submodule foreach --recursive 'set -eu; \
 		$(SKIP_IF_PINNED) \
 		branch=$$(git symbolic-ref --short -q HEAD 2>/dev/null || true); \
