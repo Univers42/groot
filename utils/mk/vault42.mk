@@ -30,8 +30,9 @@ vault42_need = if [ -z $(call vault42_q,$(call vault42_arg,$(1))) ]; then echo "
 
 ##@ Secrets (vault42)
 vault42-status: ## Check 42ctl, the environment, the session and your key (read-only)
-## Reads FT_PASSPHRASE from the environment. Exit 5 when it is missing.
-	@$(vault42_guard) $(VAULT42_BIN) doctor
+## Usage: make vault42-status [TARGET=secrets]
+## TARGET=volumes checks the volumes target's key instead. Reads FT_PASSPHRASE from the environment. Exit 5 when it is missing.
+	@$(vault42_guard) $(VAULT42_BIN) $(vault42_target) doctor
 
 vault42-login: ## Log in to the vault42 authority with FT_EMAIL, FT_PASSWORD, FT_TENANT
 ## Credentials come from the environment only; nothing is written to a file.

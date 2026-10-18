@@ -80,9 +80,15 @@ new_private() {
 @test "status and login are one CLI call each" {
   run dry vault42-status
   [ "$status" -eq 0 ]
-  [[ "$output" == *"bash vendor/scripts/vault42/vault42.sh --config utils/vault42.conf doctor" ]]
+  [[ "$output" == *"bash vendor/scripts/vault42/vault42.sh --config utils/vault42.conf --target 'secrets' doctor" ]]
   run dry vault42-login
   [[ "$output" == *"--config utils/vault42.conf login" ]]
+}
+
+@test "status checks the secrets target by default and TARGET=volumes switches it" {
+  run dry vault42-status TARGET=volumes
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--config utils/vault42.conf --target 'volumes' doctor" ]]
 }
 
 @test "list and diff default to the secrets target; KIND becomes repeated --kind, TARGET --target" {
