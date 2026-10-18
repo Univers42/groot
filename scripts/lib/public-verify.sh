@@ -23,7 +23,10 @@ expect() {
 
 # The secrets that must never be inside a served bundle, and where their values may live.
 BUNDLE_SECRET_KEYS="JWT_SECRET SERVICE_ROLE_KEY OSIONOS_BAAS_API_KEY VITE_BAAS_REALTIME_TOKEN OSIONOS_APP_SESSION_SECRET OSIONOS_BRIDGE_SHARED_SECRET AUTH_LINK_SIGNING_KEY"
-BRIDGE_MUST_BE_EMPTY="OSIONOS_AGENT_CLAUDE OSIONOS_IDE_ALLOWED_SUBJECTS OSIONOS_RUNNER_URL OSIONOS_SQL_RO"
+BRIDGE_MUST_BE_EMPTY="OSIONOS_AGENT_CLAUDE OSIONOS_IDE_ALLOWED_SUBJECTS OSIONOS_RUNNER_URL OSIONOS_SQL_RO OSIONOS_IDE_TOKEN_SECRET"
+
+# shellcheck source=scripts/lib/public-verify-surfaces.sh
+. "$(dirname "${BASH_SOURCE[0]}")/public-verify-surfaces.sh"
 
 # host part of PUBLIC_ORIGIN (https://host, no port, no path).
 origin_host() {
@@ -224,7 +227,9 @@ run_verify() {
     check_tls
   }
   check_bundle_secrets
+  check_bundle_links
   check_bridge_env
+  check_ide_access
   check_gateway_env
   check_edge
   printf 'verify (%s): %d pass, %d fail, %d skip\n' "$1" "$V_PASS" "$V_FAIL" "$V_SKIP"

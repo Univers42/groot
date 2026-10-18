@@ -19,6 +19,11 @@ services:
         VITE_BAAS_REALTIME_TOKEN: ""
         # The IDE is a shell on a shared host and is never exposed (rules in the base file).
         VITE_OSIONOS_IDE_URL: ""
+        # Mail, Calendar and Whiteboard stay hidden until each has its own public origin: the
+        # base file's https://localhost:PORT would frame the visitor's own machine.
+        VITE_MAIL_APP_URL: ""
+        VITE_CALENDAR_APP_URL: ""
+        VITE_WHITEBOARD_APP_URL: ""
 
   opposite-osiris-web:
     image: track-binocle/opposite-osiris-web:public
@@ -57,6 +62,9 @@ services:
       OSIONOS_IDE_ALLOWED_SUBJECTS: ""
       OSIONOS_RUNNER_URL: ""
       OSIONOS_SQL_RO: ""
+      # No IDE route ships in public: an empty secret makes the mint answer 404, an empty mode is off.
+      OSIONOS_IDE_TOKEN_SECRET: ""
+      OSIONOS_IDE_ACCESS: ""
 
   local-https-proxy:
     volumes:
