@@ -291,6 +291,9 @@ new_private() {
 }
 
 @test "G4: the pre-push hook and the post-pull hook are tracked and executable" {
+  # CI's checkout belongs to the runner user while the container runs as root, so git refuses
+  # the repo as dubious ownership without this (graph-studio-build.bats does the same).
+  export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0='*'
   for f in scripts/vault42-push-guard.sh utils/scripts/vault42-post-pull.sh; do
     [ -x "$REPO/$f" ]
     run git -C "$REPO" ls-files --stage -- "$f"
