@@ -2,7 +2,7 @@
 # public-verify-apps.sh — the checks for the Mail and Calendar static previews on the second
 # Funnel node (the apps node): what it exposes, that no bridge or dev server stands behind it,
 # the headers every response carries, and that nothing secret is in, or reaches, the two static
-# images. Sourced by lib/public-verify.sh, which provides pass/fail/skip/expect, bundle_hits,
+# images. The checks of the running static containers are in public-verify-appcontainers.sh. Sourced by lib/public-verify.sh, which provides pass/fail/skip/expect, bundle_hits,
 # bundle_links, container_env, svc_container, tls_probe and the PUBLIC_* settings; lib/
 # public-tailnet.sh provides tsa, node_dns, funnel_ports, funnel_targets and APPS_FUNNEL_MAP.
 # No check prints a secret value: only variable names, pattern names and counts.
@@ -19,8 +19,6 @@ APPS_MAIL_IMAGE="${PUBLIC_MAIL_IMAGE:-track-binocle/osionos-mail-web:public}"
 APPS_CALENDAR_IMAGE="${PUBLIC_CALENDAR_IMAGE:-track-binocle/osionos-calendar-web:public}"
 # MC2: files a Vite dev server or the bridges' token stores would serve; the prod image has none.
 APPS_DEV_PATHS="/@vite/client /src/main.tsx /package.json /.mail-bridge-tokens.json /.calendar-bridge-tokens.json"
-# MC13: variable names that must not exist in a static container.
-APPS_FORBIDDEN_ENV='^(SMTP_|GOOGLE_|VAULT_|KONG_)|^(SERVICE_ROLE_KEY|JWT_SECRET)$'
 # MC5: name|mode|pattern (F fixed string, E extended regex).
 APPS_BUNDLE_PATTERNS=$'GOCSPX-|F|GOCSPX-\nclient_secret|F|client_secret\nservice_role|F|service_role\nlocalhost:|F|localhost:\nJWT-shaped|E|eyJ[A-Za-z0-9_-]{10,}\\.eyJ[A-Za-z0-9_-]{10,}'
 
@@ -52,14 +50,6 @@ apps_host() {
   h=${h%.}
   printf '%s' "${h%%[:/]*}"
 }
-# Variable names of a container, from its config: needs neither exec nor an env binary in the
-# image. Fails when docker cannot read it.
-container_env_names() {
-  local env
-  env=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$1" 2>/dev/null) || return 1
-  cut -d= -f1 <<<"$env"
-}
-
 # The apps node must answer when the apps are configured or it has ever been started here.
 apps_node_expected() { apps_configured || [ -e "$(apps_node_dir)" ]; }
 
@@ -275,30 +265,6 @@ check_appurls() {
   elif [ "$links" != 0 ]; then
     fail appurls "$APP_IMAGE has ${links:-an unreadable count of} file(s) linking to localhost"
   else pass appurls "$APP_IMAGE contains $(app_origin mail) and $(app_origin calendar), no localhost"; fi
-}
-
-# MC13: names only, from the config of each static container. An env that cannot be read, or has
-# no name at all, is a FAIL: a real container always has PATH, so empty means the read failed.
-check_appenv() {
-  local svc c names bad="" unread="" n=0
-  for svc in mail-web calendar-web; do
-    c=$(svc_container "$svc")
-    [ -n "$c" ] || {
-      apps_absent appenv "$svc is not running" || true
-      return
-    }
-    if ! names=$(container_env_names "$c") || [ -z "$names" ]; then
-      unread+=" $svc"
-      continue
-    fi
-    n=$((n + $(grep -c . <<<"$names" || true)))
-    bad+=$(grep -E "$APPS_FORBIDDEN_ENV" <<<"$names" | sed "s/^/ $svc:/" | paste -sd' ' - || true)
-  done
-  if [ -n "$unread" ]; then
-    fail appenv "environment unreadable or empty for:$unread (docker inspect)"
-    return
-  fi
-  expect appenv "mail-web and calendar-web hold $n variables, none of SMTP_ GOOGLE_ VAULT_ KONG_ SERVICE_ROLE_KEY JWT_SECRET" "forbidden variable(s) present (values withheld):$bad" [ -z "$bad" ]
 }
 
 # The apps node's certificate probes, one tls2 line per open port; with no open port, one line

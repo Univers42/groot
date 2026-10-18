@@ -31,6 +31,8 @@ BRIDGE_MUST_BE_EMPTY="OSIONOS_AGENT_CLAUDE OSIONOS_IDE_ALLOWED_SUBJECTS OSIONOS_
 . "$(dirname "${BASH_SOURCE[0]}")/public-verify-surfaces.sh"
 # shellcheck source=scripts/lib/public-verify-apps.sh
 . "$(dirname "${BASH_SOURCE[0]}")/public-verify-apps.sh"
+# shellcheck source=scripts/lib/public-verify-appcontainers.sh
+. "$(dirname "${BASH_SOURCE[0]}")/public-verify-appcontainers.sh"
 
 # host part of PUBLIC_ORIGIN (https://host, no port, no path).
 origin_host() {
