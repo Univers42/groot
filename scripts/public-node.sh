@@ -83,7 +83,7 @@ cmd_start() {
       die "could not join the tailnet: key missing on stdin, or refused; the daemon was stopped"
     }
   fi
-  note "node $(apps_node_name) is up: $(tsa status --json | jq -r '.Self.DNSName // "unnamed"')"
+  note "node $(apps_node_name) is up: $(node_dns tsa || true)"
 }
 
 cmd_stop() {
@@ -103,7 +103,9 @@ cmd_status() {
     printf 'node:  %s (not running)\n' "$(apps_node_name)"
     return 0
   fi
-  printf 'node:  %s\n' "$(tsa status --json | jq -r '.Self.DNSName // "unreadable"')"
+  local dns
+  dns=$(node_dns tsa || true)
+  printf 'node:  %s\n' "${dns:-unreadable}"
   printf 'ports: %s\n' "$(funnel_ports tsa || echo unreadable)"
 }
 

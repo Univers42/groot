@@ -4,7 +4,7 @@
 # the headers every response carries, and that nothing secret is in, or reaches, the two static
 # images. Sourced by lib/public-verify.sh, which provides pass/fail/skip/expect, bundle_hits,
 # bundle_links, container_env, svc_container, tls_probe and the PUBLIC_* settings; lib/
-# public-tailnet.sh provides tsa, funnel_ports, funnel_targets and APPS_FUNNEL_MAP.
+# public-tailnet.sh provides tsa, node_dns, funnel_ports, funnel_targets and APPS_FUNNEL_MAP.
 # No check prints a secret value: only variable names, pattern names and counts.
 #
 # With PUBLIC_MAIL_ORIGIN and PUBLIC_CALENDAR_ORIGIN both empty the apps are not deployed: the
@@ -48,7 +48,7 @@ apps_host() {
   o=$(app_origin mail)
   [ -n "$o" ] || o=$(app_origin calendar)
   h=${o#https://}
-  if [ -z "$h" ]; then h=$(tsa status --json 2>/dev/null | jq -r '.Self.DNSName // empty' || true); fi
+  if [ -z "$h" ]; then h=$(node_dns tsa || true); fi
   h=${h%.}
   printf '%s' "${h%%[:/]*}"
 }
@@ -63,7 +63,7 @@ apps_absent() {
 # $1: the verify scope (apps = the Funnel must be open on the apps node).
 check_exposure2() {
   local have targets want_targets dns host
-  if ! dns=$(tsa status --json 2>/dev/null | jq -r '.Self.DNSName // empty'); then
+  if ! dns=$(node_dns tsa); then
     apps_absent exposure2 "the apps node is not running (scripts/public-node.sh start)" || true
     return
   fi
