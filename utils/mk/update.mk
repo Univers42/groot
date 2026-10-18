@@ -11,7 +11,6 @@
 #                     already in apps/osionos-electron/dist/ — so we always rebuild
 #                     the package before installing. The install step needs root.
 
-OSIONOS_APP_ENV ?= apps/osionos/app/.env
 OSIONOS_ELECTRON_DIR ?= apps/osionos-electron
 
 ##@ Apps
