@@ -100,6 +100,9 @@ cmd_up() {
   if [ "$scope" = all ] && [ -z "$(penv AUTH_TRUSTED_PROXY_HOPS || true)" ]; then
     die "refusing 'up all': AUTH_TRUSTED_PROXY_HOPS is unset in $ENV_FILE (measure it on 443 first)"
   fi
+  if [ "$scope" = apps ] && ! apps_configured; then
+    die "refusing 'up apps': set PUBLIC_MAIL_ORIGIN and PUBLIC_CALENDAR_ORIGIN in $ENV_FILE (the apps checks need the origins)"
+  fi
   run_verify pre || die "verify --pre failed: the Funnel stays closed"
   if [ "$scope" = apps ]; then
     open_apps

@@ -28,6 +28,18 @@ load public-funnel-helpers
   lacks "FAIL"
 }
 
+@test "up apps dies before opening anything when the apps origins are not set" {
+  : >"$T/funnel-apps"
+  set_env PUBLIC_MAIL_ORIGIN ""
+  set_env PUBLIC_CALENDAR_ORIGIN ""
+  run_pf up apps
+  [ "$status" -ne 0 ]
+  has "PUBLIC_MAIL_ORIGIN"
+  has "PUBLIC_CALENDAR_ORIGIN"
+  [ "$(apps_funnel_calls)" -eq 0 ]
+  [ ! -s "$T/funnel-apps" ]
+}
+
 @test "up apps opens nothing when verify --pre fails" {
   : >"$T/funnel-apps"
   chmod 644 "$T/repo/.env.public"
