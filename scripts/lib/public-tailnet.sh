@@ -9,7 +9,8 @@
 
 # public port:local loopback port of the apps node's edge listeners (local-https-proxy,
 # infrastructure/tls/public.d/apps.conf.template): Mail on 443, Calendar on 8443.
-export APPS_FUNNEL_MAP="443:3102 8443:3103"
+# shellcheck disable=SC2034 # read by scripts/public-funnel.sh and lib/public-verify-apps.sh, which source this file
+APPS_FUNNEL_MAP="443:3102 8443:3103"
 
 apps_node_name() { printf '%s' "${PUBLIC_APPS_NODE:-osionos-apps}"; }
 apps_node_dir() { printf '%s/tailscale-%s' "${XDG_STATE_HOME:-$HOME/.local/state}" "$(apps_node_name)"; }
@@ -17,6 +18,14 @@ apps_node_socket() { printf '%s' "${TAILSCALE_APPS_SOCKET:-$(apps_node_dir)/tail
 
 # The tailscale CLI aimed at the apps node.
 tsa() { "${TAILSCALE_BIN:-$HOME/.local/bin/tailscale}" --socket "$(apps_node_socket)" "$@"; }
+
+# DNS name of a node ($1: the CLI function, ts or tsa): empty when it has none, status 1 when the
+# daemon does not answer.
+node_dns() {
+  local json
+  json=$("${1:-ts}" status --json 2>/dev/null) || return 1
+  jq -r '.Self.DNSName // empty' <<<"$json"
+}
 
 # Open Funnel ports of a node, comma-joined ascending; $1 is the CLI function (ts or tsa).
 # Fails when tailscale cannot answer.

@@ -46,7 +46,7 @@ check_node_name() {
   local host have
   host=$(origin_host)
   [ -n "$host" ] || { fail node-name "PUBLIC_ORIGIN is not an https://host origin in .env.public"; return; }
-  have=$(ts status --json 2>/dev/null | jq -r '.Self.DNSName // empty' || true)
+  have=$(node_dns ts || true)
   if [ "$have" = "$host." ]; then pass node-name "this node is $have"
   else fail node-name "node DNS name is '${have:-unreadable}', PUBLIC_ORIGIN wants '$host.'"; fi
 }

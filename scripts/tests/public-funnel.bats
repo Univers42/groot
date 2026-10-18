@@ -305,3 +305,14 @@ load public-funnel-helpers
   [ "$status" -eq 1 ]
   has "FAIL  gateway-env    AUTH_VERIFICATION_EXEMPT=other@example.test, Admin@Example.test lists an OSIONOS_ADMIN_EMAILS admin: admin@example.test"
 }
+
+@test "node_dns prints a node's DNS name, nothing when it has none, and fails when the daemon is silent" {
+  ts() { "$TAILSCALE_BIN" --socket "$TAILSCALE_SOCKET" "$@"; }
+  tsa() { "$TAILSCALE_BIN" --socket "$T/state/tailscale-osionos-apps/sock" "$@"; }
+  . "$BATS_TEST_DIRNAME/../lib/public-tailnet.sh"
+  [ "$(node_dns ts)" = "osionos.tail10f2ea.ts.net." ]
+  [ "$(node_dns tsa)" = "osionos-apps.tail10f2ea.ts.net." ]
+  rm "$T/apps-node"
+  run node_dns tsa
+  [ "$status" -eq 1 ]
+}

@@ -100,10 +100,16 @@ cmd_down() {
   note "Funnel closed on both nodes; the containers keep running on localhost"
 }
 
+# $1 line label, $2 CLI function, $3 what to print when the daemon does not answer
+node_line() {
+  local dns
+  if dns=$(node_dns "$2"); then printf '%s  %s\n' "$1" "${dns:-unreadable}"; else printf '%s  %s\n' "$1" "$3"; fi
+}
+
 cmd_status() {
-  printf 'node:  %s\n' "$(ts status --json 2>/dev/null | jq -r '.Self.DNSName // "unreadable"' || echo unreadable)"
+  node_line "node:" ts unreadable
   printf 'ports: %s\n' "$(funnel_ports ts || echo unreadable)"
-  printf 'apps node:  %s\n' "$(tsa status --json 2>/dev/null | jq -r '.Self.DNSName // "unreadable"' || echo "not running")"
+  node_line "apps node:" tsa "not running"
   printf 'apps ports: %s\n' "$(funnel_ports tsa || echo unreadable)"
 }
 

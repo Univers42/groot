@@ -12,7 +12,7 @@ load public-funnel-helpers
 
 @test "the main FUNNEL_MAP is unchanged and the apps map is the second node's alone" {
   grep -qx 'FUNNEL_MAP="443:4322 8443:3001 10000:4000"' "$SCRIPT"
-  grep -qx 'export APPS_FUNNEL_MAP="443:3102 8443:3103"' "$BATS_TEST_DIRNAME/../lib/public-tailnet.sh"
+  grep -qx 'APPS_FUNNEL_MAP="443:3102 8443:3103"' "$BATS_TEST_DIRNAME/../lib/public-tailnet.sh"
 }
 
 @test "up apps opens 443 and 8443 on the apps node only, after verify --pre, then verifies" {
