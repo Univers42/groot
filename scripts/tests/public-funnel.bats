@@ -330,6 +330,16 @@ set_env() { sed -i "s|^$1=.*|$1=$2|" "$T/repo/.env.public"; }
   [ "$(sed -n 's/^AUTH_LINK_SIGNING_KEY=//p' "$T/repo/.env.public")" = "$key" ]
 }
 
+@test "env refuses a short minted key: exit 1 and AUTH_LINK_SIGNING_KEY stays empty" {
+  rm "$T/repo/.env.public"
+  printf '#!/bin/sh\necho ab\n' >"$BIN/od"
+  chmod +x "$BIN/od"
+  run_pf env
+  [ "$status" -eq 1 ]
+  [ -z "$(sed -n 's/^AUTH_LINK_SIGNING_KEY=//p' "$T/repo/.env.public")" ]
+  has "could not mint AUTH_LINK_SIGNING_KEY"
+}
+
 @test "status prints the node and ports, and an unknown command is a usage error" {
   echo 443 >"$T/funnel"
   run_pf status

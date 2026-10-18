@@ -91,11 +91,16 @@ cmd_verify() {
 }
 
 # Creates the file from the example and mints the signing key; never prints a value.
+# The key comes from od, not openssl: without openssl a failed $(…) is not caught by set -e and
+# the file got an empty key (CI's bats image, run 39148082034); od is in busybox and coreutils.
 cmd_env() {
+  local key
   [ -f "$ENV_FILE" ] || (umask 077 && cp "$REPO/.env.public.example" "$ENV_FILE")
   chmod 600 "$ENV_FILE"
   if [ -z "$(penv AUTH_LINK_SIGNING_KEY || true)" ]; then
-    put_env "$ENV_FILE" AUTH_LINK_SIGNING_KEY "$(openssl rand -hex 32)"
+    key="$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')"
+    [ "${#key}" -eq 64 ] || die "could not mint AUTH_LINK_SIGNING_KEY from /dev/urandom; $ENV_FILE left without it"
+    put_env "$ENV_FILE" AUTH_LINK_SIGNING_KEY "$key"
     note "minted AUTH_LINK_SIGNING_KEY in $ENV_FILE"
   fi
   for k in OSIONOS_ADMIN_EMAILS AUTH_TRUSTED_PROXY_HOPS; do
