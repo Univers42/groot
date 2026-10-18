@@ -14,19 +14,12 @@ FROM public.ecr.aws/docker/library/node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 
-# The bridge server + its standalone route modules (only runtime files it
-# needs): graph projection, in-chat AI agent (agent), LiveKit tokens (rtc),
-# permission UX proxy (perms), and the social plane (chat/profile/feed/social/
-# collab + their shared core).
-COPY scripts/bridge-api.mjs scripts/bridge-graph.mjs scripts/bridge-graph-data.mjs scripts/bridge-records.mjs scripts/bridge-agent.mjs scripts/bridge-runner.mjs \
-	scripts/bridge-connector.mjs scripts/bridge-oauth.mjs \
-	scripts/bridge-rtc.mjs scripts/bridge-perms.mjs scripts/bridge-perms-rules.mjs scripts/bridge-chat.mjs \
-	scripts/bridge-chat-media.mjs scripts/bridge-storage-core.mjs scripts/bridge-ratelimit.mjs scripts/bridge-chat-search.mjs scripts/bridge-chat-threads.mjs \
-	scripts/bridge-communities.mjs \
-	scripts/bridge-profile.mjs scripts/bridge-feed.mjs scripts/bridge-social.mjs scripts/bridge-notify.mjs scripts/bridge-push.mjs scripts/bridge-media.mjs scripts/bridge-tasks.mjs scripts/bridge-comments.mjs scripts/bridge-public.mjs \
-	scripts/bridge-collab.mjs scripts/bridge-social-core.mjs scripts/bridge-page-read.mjs scripts/bridge-baas-body.mjs \
-	scripts/bridge-ide-sandbox.mjs scripts/ide-term-sessions.mjs scripts/ide-docker.mjs scripts/ide-sandbox-spec.mjs scripts/bridge-ide-ops.mjs scripts/bridge-ide-exec.mjs scripts/ide-ws.mjs \
-	scripts/ide-server.mjs scripts/ide-token.mjs scripts/ide-username.mjs scripts/bridge-ide-token.mjs scripts/ide-preview.mjs ./scripts/
+# The bridge server and every module it loads. All of them are named bridge-*.mjs or ide-*.mjs,
+# so globs replace the hand-kept list: app 08418d7f added bridge-realtime-socket.mjs and
+# ide-volume-init.mjs, the list lacked both, and the bridge crash-looped on ERR_MODULE_NOT_FOUND
+# (groot main, CI run 39089475219). scripts/tests/bridge-image-closure.bats walks the import
+# closure of bridge-api.mjs and fails on any module these globs (minus the .dockerignore) miss.
+COPY scripts/bridge-*.mjs scripts/ide-*.mjs ./scripts/
 
 USER node
 EXPOSE 4000
