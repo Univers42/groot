@@ -21,7 +21,7 @@
   the executable bit on `scripts/vault42-push-guard.sh`, which the CLI executes as `pre_push`.
 - The `secrets` target does not name `stage_unscanned_as`: the old path stages nothing, so a first
   push from the new path must produce the same tree.
-- The `shared` list holds the 12 engine dump names ruled shared on 2026-10-18; `secrets/my_vault`
+- The `shared` list holds the 13 engine dump names ruled shared on 2026-10-18; `secrets/my_vault`
   is left out because its owner has not decided, so a push stops and asks.
 - The `volumes` target has no `private`: the archives exceed 42ctl's 4 MiB private-file ceiling.
 
