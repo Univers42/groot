@@ -225,7 +225,7 @@ COMPOSE_PROFILES=ide docker compose up -d osionos-ide-socket-proxy
 #    ~2.8 GB copy is removed) — to keep it: `OSIONOS_IDE_KEEP_MAIN_COPY=1`
 sudo sh infrastructure/docker/osionos/ide-sandbox/bootstrap.sh
 
-# 4. Run the hostile corpus (must be green before enabling). verify.sh pins EXPECTED=56 and every
+# 4. Run the hostile corpus (must be green before enabling). verify.sh pins EXPECTED=57 and every
 #    probe prints exactly one PASS/FAIL/SKIP line. The "Control plane reachability" section adds two
 #    probes: a box must not open TCP to osionos-ide-server:4100 nor osionos-ide-socket-proxy:2375, on
 #    EVERY address each container has, every target first shown to accept connections from the host;
@@ -237,8 +237,8 @@ sudo sh infrastructure/docker/osionos/ide-sandbox/bootstrap.sh
 #    box restart cures it). The "Per-user uid" section adds four (another uid cannot list box A's home
 #    while its owner can, the two boxes run as different host uids, `volume-nocopy` leaves a fresh volume
 #    root alone, the init with its three capabilities gives a 0700 tree another uid left to the new uid).
-#    Expected green line once ADR 0011 is deployed: `RESULT: 55 passed, 0 failed, 1 skipped (expected
-#    56)`, the skip being the runner probe (not yet run: it needs the VM, A3.8 and A3.9, 2026-10-17). The
+#    Expected green line once ADR 0011 is deployed: `RESULT: 55 passed, 0 failed, 2 skipped (expected
+#    57)`, the skips being the runner probe and the runtime assertion (unset by default; not yet run: it needs the VM, A3.8 and A3.9, 2026-10-17). The
 #    last measured line on the VM (2026-10-14) was `41 passed, 0 failed, 1 skipped (expected 42)`. The checks do not map 1:1 onto the 16 conditions.
 sudo sh infrastructure/docker/osionos/ide-sandbox/verify.sh
 

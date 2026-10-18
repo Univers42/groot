@@ -34,6 +34,7 @@ import { INIT_PATH_RE, initShapeViolation } from "./init-shape.mjs";
 import { createLedger } from "./uid-ledger.mjs";
 import { UID_PATH, handleUidRequest } from "./uid-endpoint.mjs";
 import { findDuplicateKey } from "./json-guard.mjs";
+import { START_PATH_RE, inspectRuntime, pinRuntime } from "./runtime-pin.mjs";
 import { unsafeNetworkBody, unsafeVolumeBody } from "./volume-shape.mjs";
 
 const LISTEN_PORT = Number(process.env.IDE_SOCKET_PROXY_PORT || 2375);
@@ -138,7 +139,10 @@ function forward(clientReq, clientRes, payload) {
   }
   const upstream = http.request(
     { socketPath: DOCKER_SOCK, method: clientReq.method, path: clientReq.url, headers },
-    (upRes) => { clientRes.writeHead(upRes.statusCode ?? 502, upRes.headers); upRes.pipe(clientRes); },
+    (upRes) => {
+      clientRes.writeHead(upRes.statusCode ?? 502, upRes.headers);
+      upRes.pipe(clientRes);
+    },
   );
   upstream.on("error", () => deny(clientRes, 502, "daemon unreachable"));
   if (payload) upstream.end(payload);
@@ -171,13 +175,22 @@ function vetBody(req, res, vet, cap) {
       try { bad = await vet(body); } catch { bad = "vetter failed"; }
       if (bad) return deny(res, 403, `create rejected: ${bad}`);
       // What was vetted is what is sent: the re-serialized object, never the client's bytes (K12).
-      forward(req, res, Buffer.from(JSON.stringify(body)));
+      const sent = LIMITS.requiredRuntime && /\/containers\/create/.test(req.url) ? pinRuntime(body, LIMITS.requiredRuntime) : body;
+      forward(req, res, Buffer.from(JSON.stringify(sent)));
     })().catch((error) => {
       process.stderr.write(`[ide-socket-proxy] vet/forward failed: ${error?.code ?? error?.message ?? "error"}\n`);
       if (!res.headersSent) deny(res, 502, "proxy error");
       else res.destroy();
     });
   });
+}
+
+/** Start only a container the daemon reports under the required runtime (K11): a mismatch, or an
+ *  inspect that gives no answer, is a refusal. */
+async function startIfRuntimeMatches(req, res) {
+  const name = START_PATH_RE.exec(req.url)[1];
+  if (await inspectRuntime(DOCKER_SOCK, name) === LIMITS.requiredRuntime) return forward(req, res, null);
+  deny(res, 403, `start rejected: runtime is not ${LIMITS.requiredRuntime}`);
 }
 
 const server = http.createServer((req, res) => {
@@ -191,6 +204,7 @@ const server = http.createServer((req, res) => {
   // vetted before it reaches the daemon.
   const vet = method === "POST" ? bodyVetter(path) : null;
   if (vet) return vetBody(req, res, vet, bodyCap(path));
+  if (LIMITS.requiredRuntime && method === "POST" && START_PATH_RE.test(path)) return startIfRuntimeMatches(req, res);
   forward(req, res, null);
 });
 

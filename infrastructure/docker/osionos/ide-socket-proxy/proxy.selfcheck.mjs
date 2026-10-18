@@ -15,7 +15,7 @@ import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CANON_PATH, DIGEST, mk } from "./create-shape.selfcheck.mjs";
+import { CANON_PATH, DIGEST, host, mk } from "./create-shape.selfcheck.mjs";
 
 const PROXY = fileURLToPath(new URL("./proxy.mjs", import.meta.url));
 
@@ -35,8 +35,9 @@ async function startFakeDaemon(sock, state) {
     req.on("data", (chunk) => chunks.push(chunk));
     req.on("end", () => {
       seen.push({ method: req.method, url: req.url, headers: req.headers, body: Buffer.concat(chunks).toString("utf8") });
-      res.writeHead(/\/json$/.test(req.url) ? 200 : /\/create/.test(req.url) ? 201 : 204, { "content-type": "application/json" });
-      res.end(/\/json$/.test(req.url) ? JSON.stringify({ HostConfig: { Runtime: state.runtime } }) : "{}");
+      const inspect = /\/json$/.test(req.url);
+      res.writeHead(inspect ? state.inspectStatus : /\/create/.test(req.url) ? 201 : 204, { "content-type": "application/json" });
+      res.end(inspect ? JSON.stringify({ HostConfig: { Runtime: state.runtime } }) : "{}");
     });
   });
   await new Promise((resolve) => server.listen(sock, resolve));
@@ -107,18 +108,56 @@ async function repeatedKeysAreRefused(proxy, daemon, chk) {
   chk("nothing repeated reached the daemon", daemon.seen.length, before);
 }
 
+const BOX = `/containers/ide-${DIGEST}`;
+const startsSeen = (daemon) => daemon.seen.filter((r) => r.method === "POST" && r.url.endsWith("/start")).length;
+const inspectsSeen = (daemon) => daemon.seen.filter((r) => r.method === "GET").length;
+
+async function unsetPlaneKeepsToday(proxy, daemon, chk) {
+  const refused = await send(proxy.port, "POST", CANON_PATH, JSON.stringify(host({ Runtime: "runsc" })));
+  chk("unset: Runtime in the create is refused", refused.status, 403);
+  await send(proxy.port, "POST", CANON_PATH, JSON.stringify(mk()));
+  await settle();
+  chk("unset: no Runtime is added to the create", daemon.seen.at(-1).body.includes("Runtime"), false);
+  const started = await send(proxy.port, "POST", `${BOX}/start`);
+  chk("unset: start answered by the daemon", started.status, 204);
+  chk("unset: start is not inspected", inspectsSeen(daemon), 0);
+}
+
+async function pinnedPlaneAssertsRuntime(proxy, daemon, state, chk) {
+  await send(proxy.port, "POST", CANON_PATH, JSON.stringify(mk()));
+  await settle();
+  chk("pinned: Runtime written into the forwarded create", daemon.seen.at(-1).body, JSON.stringify({ ...mk(), HostConfig: { ...mk().HostConfig, Runtime: "runsc" } }));
+  chk("pinned: Runtime runsc from the client ok", (await send(proxy.port, "POST", CANON_PATH, JSON.stringify(host({ Runtime: "runsc" })))).status, 201);
+  chk("pinned: Runtime runc from the client refused", (await send(proxy.port, "POST", CANON_PATH, JSON.stringify(host({ Runtime: "runc" })))).status, 403);
+  chk("pinned: empty Runtime from the client refused", (await send(proxy.port, "POST", CANON_PATH, JSON.stringify(host({ Runtime: "" })))).status, 403);
+
+  const starts = startsSeen(daemon);
+  for (const [label, runtime, inspectStatus, want] of [["runsc", "runsc", 200, 204], ["runc", "runc", 200, 403], ["empty", "", 200, 403], ["inspect failing", "runsc", 500, 403]]) {
+    Object.assign(state, { runtime, inspectStatus });
+    chk(`pinned: start of a ${label} box`, (await send(proxy.port, "POST", `${BOX}/start`)).status, want);
+  }
+  chk("pinned: only the matching start reached the daemon", startsSeen(daemon) - starts, 1);
+  Object.assign(state, { runtime: "runc", inspectStatus: 200 });
+  chk("pinned: an init container is gated the same way", (await send(proxy.port, "POST", `/containers/ideinit-${DIGEST}/start`)).status, 403);
+}
+
 export async function proxyFailures() {
   const fail = [];
-  const chk = (label, got, want) => { if (got !== want) fail.push(`${label}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`); };
+  const chk = (label, got, want) => { if (got !== want) fail.push(`${label}: got ${JSON.stringify(got).slice(0, 160)}, want ${JSON.stringify(want).slice(0, 160)}`); };
   const dir = await mkdtemp(path.join(tmpdir(), "ide-proxy-selfcheck-"));
-  const state = { runtime: "" };
-  const daemon = await startFakeDaemon(path.join(dir, "docker.sock"), state);
-  const proxy = await startProxy(dir, path.join(dir, "docker.sock"), {});
+  const sock = path.join(dir, "docker.sock");
+  const state = { runtime: "", inspectStatus: 200 };
+  const daemon = await startFakeDaemon(sock, state);
+  const plain = await startProxy(dir, sock, {});
+  const pinned = await startProxy(dir, sock, { OSIONOS_IDE_REQUIRE_RUNTIME: "runsc" });
   try {
-    await bytesForwardedAreVetted(proxy, daemon, chk);
-    await repeatedKeysAreRefused(proxy, daemon, chk);
+    await bytesForwardedAreVetted(plain, daemon, chk);
+    await repeatedKeysAreRefused(plain, daemon, chk);
+    await unsetPlaneKeepsToday(plain, daemon, chk);
+    await pinnedPlaneAssertsRuntime(pinned, daemon, state, chk);
   } finally {
-    proxy.stop();
+    plain.stop();
+    pinned.stop();
     await daemon.close();
     await rm(dir, { recursive: true, force: true });
   }
@@ -128,5 +167,5 @@ export async function proxyFailures() {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const fail = await proxyFailures();
   if (fail.length) { process.stderr.write(`proxy selfcheck FAIL:\n${fail.join("\n")}\n`); process.exit(1); }
-  process.stdout.write("proxy selfcheck OK: the daemon receives exactly the vetted body, repeated keys refused\n");
+  process.stdout.write("proxy selfcheck OK: vetted bytes only, repeated keys refused, runtime pinned\n");
 }

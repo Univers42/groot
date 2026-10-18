@@ -66,6 +66,14 @@ export function shapeFailures() {
   chk("create canonical ok", createShapeViolation(mk(), CANON_PATH, LIMITS), null);
   chk("create versioned path ok", createShapeViolation(mk(), `/v1.47/containers/create?name=ide-${DIGEST}`, LIMITS), null);
   chk("create OomScoreAdj 500 ok", createShapeViolation(host({ OomScoreAdj: 500 }), CANON_PATH, LIMITS), null);
+  // K11: Runtime is the one optional key whose only accepted value is the runtime the plane requires.
+  const GVISOR = { ...LIMITS, requiredRuntime: "runsc" };
+  chk("unset plane: Runtime runsc refused", createShapeViolation(host({ Runtime: "runsc" }), CANON_PATH, { ...LIMITS, requiredRuntime: "" }), "Runtime");
+  chk("runsc plane: Runtime runsc ok", createShapeViolation(host({ Runtime: "runsc" }), CANON_PATH, GVISOR), null);
+  chk("runsc plane: no Runtime ok (the proxy pins it)", createShapeViolation(mk(), CANON_PATH, GVISOR), null);
+  for (const other of ["runc", "", null, "RUNSC", "runsc ", ["runsc"]]) {
+    chk(`runsc plane: Runtime ${JSON.stringify(other)} refused`, createShapeViolation(host({ Runtime: other }), CANON_PATH, GVISOR), "Runtime");
+  }
   chk("create OomScoreAdj other refused", createShapeViolation(host({ OomScoreAdj: -1000 }), CANON_PATH, LIMITS), "OomScoreAdj");
 
   // Every case below changes the canonical body in exactly ONE place, so a
