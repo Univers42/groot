@@ -1,6 +1,6 @@
 # Docker build and image prefetch targets.
-buildx-setup:
-## Ensure a BuildKit docker-container builder is available for parallel bake builds.
+##@ Docker
+buildx-setup: ## Ensure a BuildKit docker-container builder exists for parallel bake builds
 	@set -eu; \
 	if docker buildx inspect '$(BUILDX_BUILDER)' >/dev/null 2>&1; then \
 		docker buildx use '$(BUILDX_BUILDER)' >/dev/null; \
@@ -14,8 +14,9 @@ buildx-setup:
 		timeout --kill-after='$(BUILDX_BOOTSTRAP_KILL_AFTER)s' '$(BUILDX_BOOTSTRAP_TIMEOUT)s' docker buildx inspect --bootstrap '$(BUILDX_BUILDER)' >/dev/null; \
 	fi
 
-compose-build: buildx-setup
-## Build local Compose images in parallel with BuildKit bake and optional registry cache.
+compose-build: buildx-setup ## Build the local Compose images in parallel with BuildKit bake
+## Usage: make compose-build [BAKE_GROUP=<group>] [BAKE_TARGETS='<targets>'] [REGISTRY_CACHE_PREFIX=<ref>]
+## Optional registry build cache when REGISTRY_CACHE_PREFIX is set.
 	@set -eu; \
 	cache_flags=''; \
 	if [[ -n '$(REGISTRY_CACHE_PREFIX)' ]]; then \
@@ -28,15 +29,15 @@ compose-build: buildx-setup
 	fi; \
 	docker buildx bake --builder '$(BUILDX_BUILDER)' --file '$(BAKE_FILE)' --load $$cache_flags '$(BAKE_GROUP)'
 
-docker-prefetch-images:
-## Pull required public images from resilient mirrors before Compose builds. Scope `frontends`
-## is only the bases of the images frontends-up builds (make all), `vault` the Vault stack's,
-## `all` the whole root compose graph (up, up-infra).
+docker-prefetch-images: ## Pre-pull public base images from resilient mirrors before builds
+## Usage: make docker-prefetch-images [DOCKER_PREFETCH_SCOPE=all|frontends] [DOCKER_PREFETCH_JOBS=<n>]
+## Pull required public images from resilient mirrors before Compose builds. Scope `frontends` is
+## only the bases of the images frontends-up builds (make all); `all` adds docker/dockerfile:1.
 	@set -eu; \
 	jobs='$(DOCKER_PREFETCH_JOBS)'; \
 	scope='$(DOCKER_PREFETCH_SCOPE)'; \
 	case "$$jobs" in ''|*[!0-9]*) echo '[docker] DOCKER_PREFETCH_JOBS must be a positive integer'; exit 1;; esac; \
-	case "$$scope" in all|vault|frontends) ;; *) echo '[docker] DOCKER_PREFETCH_SCOPE must be all, vault or frontends'; exit 1;; esac; \
+	case "$$scope" in all|frontends) ;; *) echo '[docker] DOCKER_PREFETCH_SCOPE must be all or frontends'; exit 1;; esac; \
 	if [ "$$jobs" -lt 1 ]; then jobs=1; fi; \
 	echo "[docker] prefetching $$scope images with up to $$jobs concurrent pulls"; \
 	pull_image() { \
@@ -71,20 +72,8 @@ docker-prefetch-images:
 	start_pull docker/dockerfile:1.7; \
 	if [[ "$$scope" != 'frontends' ]]; then \
 		start_pull docker/dockerfile:1; \
-		start_pull public.ecr.aws/hashicorp/vault:1.16 hashicorp/vault:1.16; \
 	fi; \
-	if [[ "$$scope" != 'vault' ]]; then \
-		start_pull public.ecr.aws/docker/library/node:22-bookworm-slim node:22-bookworm-slim; \
-		start_pull "$$(sed -n 's/^ARG GRAPH_STUDIO_PACK=//p' infrastructure/docker/osionos/app.Dockerfile)"; \
-	fi; \
-	if [[ "$$scope" == 'all' ]]; then \
-		start_pull public.ecr.aws/docker/library/postgres:16-alpine postgres:16-alpine; \
-		start_pull public.ecr.aws/docker/library/redis:7-alpine redis:7-alpine; \
-		start_pull '$(MAILPIT_IMAGE)'; \
-		start_pull public.ecr.aws/docker/library/kong:3.8 kong:3.8; \
-		start_pull mirror.gcr.io/postgrest/postgrest:v12.2.3; \
-		start_pull public.ecr.aws/supabase/gotrue:v2.188.1; \
-		start_pull public.ecr.aws/supabase/postgres-meta:v0.91.0; \
-	fi; \
+	start_pull public.ecr.aws/docker/library/node:22-bookworm-slim node:22-bookworm-slim; \
+	start_pull "$$(sed -n 's/^ARG GRAPH_STUDIO_PACK=//p' infrastructure/docker/osionos/app.Dockerfile)"; \
 	while [ "$$(jobs -p | wc -l)" -gt 0 ]; do wait_for_pull; done; \
 	if [ "$$failed" -ne 0 ]; then echo '[docker] some prefetch pulls failed (transient registry rate-limit?) — continuing; the build/up pulls these on demand' >&2; fi
