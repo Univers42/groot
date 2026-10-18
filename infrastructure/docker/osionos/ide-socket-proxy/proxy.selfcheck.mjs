@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CANON_PATH, DIGEST, OWNER, host, mk } from "./create-shape.selfcheck.mjs";
+import { pinRuntime } from "./runtime-pin.mjs";
 
 const PROXY = fileURLToPath(new URL("./proxy.mjs", import.meta.url));
 
@@ -127,6 +128,9 @@ async function pinnedPlaneAssertsRuntime(proxy, daemon, state, chk) {
   await send(proxy.port, "POST", CANON_PATH, JSON.stringify(mk()));
   await settle();
   chk("pinned: Runtime written into the forwarded create", daemon.seen.at(-1).body, JSON.stringify({ ...mk(), HostConfig: { ...mk().HostConfig, Runtime: "runsc" } }));
+  chk("pinned: a pids limit below the gVisor floor is raised to it", pinRuntime({ HostConfig: { PidsLimit: 16 } }, "runsc").HostConfig.PidsLimit, 64);
+  chk("pinned: a pids limit at or above the floor is left alone", pinRuntime({ HostConfig: { PidsLimit: 512 } }, "runsc").HostConfig.PidsLimit, 512);
+  chk("pinned: a body with no pids limit gets none", "PidsLimit" in pinRuntime({ HostConfig: {} }, "runsc").HostConfig, false);
   chk("pinned: Runtime runsc from the client ok", (await send(proxy.port, "POST", CANON_PATH, JSON.stringify(host({ Runtime: "runsc" })))).status, 201);
   chk("pinned: Runtime runc from the client refused", (await send(proxy.port, "POST", CANON_PATH, JSON.stringify(host({ Runtime: "runc" })))).status, 403);
   chk("pinned: empty Runtime from the client refused", (await send(proxy.port, "POST", CANON_PATH, JSON.stringify(host({ Runtime: "" })))).status, 403);
