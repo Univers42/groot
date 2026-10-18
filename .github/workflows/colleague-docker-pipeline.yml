@@ -104,9 +104,6 @@ jobs:
           REGISTRY_CACHE_PREFIX: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'ghcr.io/univers42/track-binocle/build-cache' || '' }}
         run: make all
 
-      - name: Verify secret drift checks
-        run: make vault-status db-password-check
-
       - name: Dump service logs on failure
         if: failure()
         run: |

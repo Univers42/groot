@@ -27,7 +27,7 @@ BAKE_TARGETS ?= osionos-app mail calendar opposite-osiris-node
 # Best-effort Make-level default for consumers that just read this variable.
 # GNU Make 4.4.1's $(shell)+export machinery has proven flaky here even with
 # one-time (:=) expansion and its own export line (reproduced: identical
-# expression, 1-in-3 runs wrong) — the `up`/`all` recipes that actually launch
+# expression, 1-in-3 runs wrong) — the `all`/`frontends-up` recipes that actually launch
 # Docker do NOT rely on this value; they call detect-bind-addr.sh directly at
 # shell-execution time instead, which sidesteps the flake entirely.
 ifeq ($(origin TRACK_BINOCLE_BIND_ADDR),undefined)
@@ -54,25 +54,11 @@ COMPOSE_WAIT_INTERVAL ?= 2
 # Backend (postgres/gotrue/kong/postgrest/...) now lives in the standalone
 # apps/grobase stack (docker project mini-baas). The root pipeline only owns the
 # frontends, so the compose-wait lists carry frontend services only.
-COMPOSE_HEALTHY_SERVICES_INFRA ?= local-https-proxy osionos-bridge
-COMPOSE_HEALTHY_SERVICES ?= $(COMPOSE_HEALTHY_SERVICES_INFRA) auth-gateway osionos-app opposite-osiris-web
-COMPOSE_RUNNING_SERVICES_INFRA ?=
-COMPOSE_RUNNING_SERVICES ?= $(COMPOSE_RUNNING_SERVICES_INFRA)
-COMPOSE_COMPLETED_SERVICES_INFRA ?=
-COMPOSE_COMPLETED_SERVICES ?= $(COMPOSE_COMPLETED_SERVICES_INFRA)
-VERSION ?=
-BAAS_VERSION ?= $(if $(VERSION),$(if $(filter v%,$(VERSION)),$(VERSION),v$(VERSION)),v$(shell date +%F))
-APP_VERSION ?= $(if $(VERSION),$(if $(filter v%,$(VERSION)),$(VERSION),v$(VERSION)),v$(shell date +%F))
-BAAS_DOCKERHUB_IMAGE ?= dlesieur/mini-baas-infra
-BAAS_GHCR_IMAGE ?= ghcr.io/univers42/mini-baas-infra
-BAAS_SMTP_IMAGE ?= dlesieur/mini-baas-infra
-BAAS_SMTP_VERSION ?= smtp-v1
-MAILPIT_IMAGE ?= axllent/mailpit:v1.22.3
-BAAS_SERVICES ?= kong gotrue postgrest postgres redis realtime
-# BaaS image build moved to the standalone apps/grobase repo; these are unused at root.
-BAAS_DOCKERFILE := apps/grobase/Dockerfile
-BAAS_CONTEXT := apps/grobase
+COMPOSE_HEALTHY_SERVICES ?= local-https-proxy osionos-bridge auth-gateway osionos-app opposite-osiris-web
+COMPOSE_RUNNING_SERVICES ?=
+COMPOSE_COMPLETED_SERVICES ?=
 FRONTEND_DIR := apps/opposite-osiris
+MAILPIT_IMAGE ?= axllent/mailpit:v1.22.3
 BOOL ?= false
 WEBSITE_URL := https://localhost:4322
 OSIONOS_URL := https://localhost:3001
@@ -97,12 +83,6 @@ BAAS_URL = http://127.0.0.1:$(or $(BAAS_PORT),8000)
 # Deferred (=) not immediate (:=): on a fresh machine .env.local does not exist at parse
 # time — `make all` pulls it mid-run (secrets-ensure) — so this must re-read at recipe time.
 BAAS_HEALTH_KEY = $(shell grep -m1 -oE '^SB_KONG_KEY=.*' .env.local 2>/dev/null | cut -d= -f2-)
-MAIL_URL := https://localhost:3002
-MAIL_BRIDGE_URL := https://localhost:4100
-CALENDAR_URL := https://localhost:3003
-CALENDAR_BRIDGE_URL := https://localhost:4200
-VAULT_URL := https://localhost:18200
-MAILPIT_URL := http://localhost:8025
 PLAYGROUND_VIEWER_URL := $(OSIONOS_URL)/playground-simulation/index.html
 VSCODE_CLI ?= /usr/bin/code
 GIT_COMMIT_MESSAGE ?= update
@@ -111,66 +91,6 @@ LOCAL_CERT_DIR ?= apps/grobase/certs
 LOCAL_CA_CERT := $(LOCAL_CERT_DIR)/track-binocle-local-ca.pem
 CERT_TRUST_MODE ?= system
 CURL_HEALTH := curl --cacert $(LOCAL_CA_CERT) --retry 30 --retry-delay 2 --retry-all-errors --retry-connrefused -fsS
-VAULT_COMPOSE := docker compose --profile secrets
-# Vault tooling moved to apps/grobase; this var is referenced only by neutralized targets.
-VAULT_ENV_CMD := true
-VAULT_SHARED_CMD := $(VAULT_COMPOSE) run --rm --no-deps
-VAULT_TEAM_ROLE ?= reader
-VAULT_TOKEN_TTL ?= 24h
-VAULT_READER_TOKEN_TTL ?= 24h
-VAULT_WRITER_TOKEN_TTL ?= 8h
-VAULT_TEAM_TOKEN_FILE ?= .vault/track-binocle-$(VAULT_TEAM_ROLE).env
-VAULT_READER_TOKEN_FILE ?= .vault/track-binocle-reader.env
-VAULT_WRITER_TOKEN_FILE ?= .vault/track-binocle-writer.env
-VAULT_ADMIN_TOKEN_FILE ?= .vault/track-binocle-admin.env
-VAULT_SESSION_FILE ?= .vault/track-binocle-session.env
-VAULT_CLI_TOKEN_FILE ?= $(HOME)/.vault-token
-VAULT_SESSION_ADDR ?= $(if $(VAULT_ADDR),$(VAULT_ADDR),$(FLY_VAULT_URL))
-VAULT_NAMESPACE ?=
-VAULT_USER_AUTH_METHOD ?= github
-VAULT_APPROLE_AUTH_PATH ?= approle
-VAULT_ROLE_ID_FILE ?= .vault/track-binocle-role-id
-VAULT_SECRET_ID_FILE ?= .vault/track-binocle-secret-id
-VAULT_JWT_AUTH_PATH ?= $(VAULT_GITHUB_OIDC_AUTH_PATH)
-VAULT_JWT_ROLE ?= $(VAULT_GITHUB_OIDC_ROLE)
-VAULT_ADMIN_TOKEN_TTL ?= 2h
-VAULT_SECRET_PATH ?=
-VAULT_SECRET_OUTPUT ?= .vault/track-binocle-secret.json
-VAULT_TOKEN_FILE ?= $(VAULT_READER_TOKEN_FILE)
-VAULT_PUBLISH_TOKEN_FILE ?= $(VAULT_WRITER_TOKEN_FILE)
-ADMIN_CRED_LOST_RECEIPT_FILE ?= .vault/admin-cred-lost-receipt.env
-VAULT_PUBLIC_ADDR ?= $(VAULT_URL)
-VAULT_ENV_PREFIX ?= secret/data/track-binocle/env
-VAULT_SHARED_REQUIRED ?= false
-VAULT_SHARED_ADDR ?= $(FLY_VAULT_URL)
-VAULT_ALLOW_LOCAL_SHARED ?= false
-VAULT_UP_STAMP := .vault/.up-stamp
-VAULT_GITHUB_OIDC_AUTH_PATH ?= jwt
-VAULT_GITHUB_OIDC_ROLE ?= track-binocle-github-actions
-VAULT_GITHUB_OIDC_REPOSITORY ?= Univers42/track-binocle
-VAULT_GITHUB_OIDC_AUDIENCE ?= vault://track-binocle
-VAULT_GITHUB_AUTH_PATH ?= github
-VAULT_GITHUB_ORG ?= Univers42
-VAULT_GITHUB_TEAM ?= transcendance
-FLY_VAULT_APP ?= track-binocle-vault
-FLY_VAULT_REGION ?= cdg
-FLY_VAULT_VOLUME ?= vault_data
-FLY_VAULT_URL ?= https://$(FLY_VAULT_APP).fly.dev
-FLY_BIN := $(shell command -v flyctl 2>/dev/null || command -v fly 2>/dev/null)
-VAULT_FLY_IMAGE ?= flyio/flyctl:latest
-FLY_DOCKER := docker compose --profile secrets run --rm --no-deps -e FLY_API_TOKEN vault-fly
-FLY ?= $(if $(FLY_BIN),$(FLY_BIN),$(FLY_DOCKER))
-VAULT_FLY_RESET_PHRASE := destroy-$(FLY_VAULT_APP)
-VAULT_FLY_RESET_CONFIRM ?=
-HOST_UID := $(shell id -u)
-HOST_GID := $(shell id -g)
-export HOST_UID HOST_GID
-NODE_BIN ?= $(shell command -v node 2>/dev/null || true)
-DOCKER_NODE := docker run --rm --user "$(HOST_UID):$(HOST_GID)" -e HOST_UID="$(HOST_UID)" -e HOST_GID="$(HOST_GID)" -v "$$PWD":/workspace -w /workspace node:22-alpine
-DOCKER_NODE_SHARED := docker run --rm --network host --user "$(HOST_UID):$(HOST_GID)" -e HOST_UID="$(HOST_UID)" -e HOST_GID="$(HOST_GID)" -e VAULT_ADDR -e VAULT_NAMESPACE -e VAULT_TOKEN -e VAULT_ENV_PREFIX -e NODE_EXTRA_CA_CERTS=/workspace/apps/grobase/certs/track-binocle-local-ca.pem -v "$$PWD":/workspace -w /workspace node:22-alpine
-DOCKER_NODE_VAULT := docker run --rm --user "$(HOST_UID):$(HOST_GID)" -e HOST_UID="$(HOST_UID)" -e HOST_GID="$(HOST_GID)" -e VAULT_ADDR -e VAULT_NAMESPACE -e VAULT_TOKEN -e VAULT_ENV_PREFIX -e VAULT_TEAM_ROLE -e VAULT_TOKEN_TTL -e VAULT_TEAM_TOKEN_FILE -e VAULT_PUBLIC_ADDR -e VAULT_GITHUB_OIDC_AUTH_PATH -e VAULT_GITHUB_OIDC_ROLE -e VAULT_GITHUB_OIDC_REPOSITORY -e VAULT_GITHUB_OIDC_AUDIENCE -e VAULT_GITHUB_AUTH_PATH -e VAULT_GITHUB_ORG -e VAULT_GITHUB_TEAM -v "$$PWD":/workspace -w /workspace node:22-alpine
-NODE_RUN := $(if $(NODE_BIN),$(NODE_BIN),$(DOCKER_NODE) node)
-NODE_RUN_SHARED := $(if $(NODE_BIN),$(NODE_BIN),$(DOCKER_NODE_SHARED) node)
 
 help:
 	@echo -e "\033[1;38;5;39m───────────────────────────────────────────────────────────────\033[0m"
@@ -181,4 +101,3 @@ help:
 	@echo -e "\033[1;38;5;39m───────────────────────────────────────────────────────────────\033[0m"
 	@echo -e "\033[1;38;5;245mFor docs: make docs or see README.md\033[0m"
 
-.PHONY: help all all-local local up-local pulls pushes repair-detached bootstrap certs certs-trust certs-trust-system certs-trust-browser-host certs-doctor certs-trust-local certs-trust-user certs-trust-check env-format buildx-setup compose-build docker-prefetch-images vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fly-invite-token vault-reader-token vault-writer-token vault-fetch-shared vault-shared-doctor vault-session-node-check vault-session-check vault-login-user vault-login-approle vault-login-jwt vault-login-fly-admin vault-session-status vault-get-secrets vault-kv-export vault-session-reader-token vault-session-writer-token vault-logout check-env login-user login-approle login-jwt get-secrets logout env-fetch-shared vault-publish-shared vault-status-shared vault-repair-shared vault-github-oidc vault-fly-create vault-fly-deploy vault-fly-publish vault-fly-github vault-fly admin-cred-lost vault-fly-reset vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply compose-wait up up-infra app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache

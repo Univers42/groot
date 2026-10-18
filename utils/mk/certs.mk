@@ -49,14 +49,6 @@ certs-trust: certs
 ## Trust the grobase CA in the system + NSS stores.
 	@$(TRUST_LOCAL_CA)
 
-certs-trust-system: certs
-## Trust the grobase CA in the Linux system store for VS Code/Electron and system-trust browsers.
-	@$(TRUST_LOCAL_CA)
-
-certs-trust-browser-host: certs
-## No-op at root: forwarded-browser-host trust moved with the backend to apps/grobase.
-	@echo '[skip] certs-trust-browser-host now lives in apps/grobase'
-
 # `certs` only when the CA is missing: with one present nothing in apps/grobase is touched,
 # so this works where that target does not (an NFS tree refuses the WAF gid, runbook).
 certs-trust-user:
