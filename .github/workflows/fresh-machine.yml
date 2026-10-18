@@ -49,6 +49,8 @@ on:
       - "apps/opposite-osiris"
       - ".gitmodules"
       - "apps/graph_render"
+      # a pin bump can add a module the bridge image does not copy (bridge-image-closure.bats)
+      - "apps/osionos/app"
   workflow_dispatch:
     inputs:
       grobase_edition:
@@ -79,10 +81,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - name: grobase + opposite-osiris checkout (vault-restore.sh and the web/gateway Dockerfiles are under test)
+      - name: grobase + opposite-osiris + osionos app checkout (vault-restore.sh, the web/gateway Dockerfiles and the bridge image closure are under test)
         run: |
           git config --global --add url."https://github.com/".insteadOf "git@github.com:"
-          git submodule update --init --depth 1 apps/grobase apps/opposite-osiris
+          git submodule update --init --depth 1 apps/grobase apps/opposite-osiris apps/osionos/app
       - name: bats scripts/tests
         run: |
           docker run --rm -v "$PWD:/code" -w /code --entrypoint sh \
