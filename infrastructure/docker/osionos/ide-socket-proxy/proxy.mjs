@@ -35,7 +35,7 @@ const LISTEN_PORT = Number(process.env.IDE_SOCKET_PROXY_PORT || 2375);
 const DOCKER_SOCK = process.env.IDE_DOCKER_SOCK || "/dind-run/docker.sock";
 const ID = "ide-[0-9a-f]{32}";
 const EXEC_PATH = new RegExp(`^/(v[\\d.]+/)?containers/${ID}/exec$`);
-const VOLUME_NAME_RE = /^osio-ide-vol-[0-9a-f]{32}$/;
+const VOLUME_NAME_RE = /^osio-ide-(vol|home)-[0-9a-f]{32}$/;
 const MANAGED_LABEL = "osio.ide.managed";
 const LIMITS = shapeLimits(process.env);
 
@@ -86,7 +86,7 @@ export function unsafeCreateBody(body) {
  *  the daemon host's filesystem into a sandbox. The provisioner only ever sends
  *  `{Name, Driver:"local", Labels}`, so any driver option or other driver is refused.
  *  Name and Labels are pinned to the bridge's own shape too: `osio-ide-vol-<32hex>`
- *  derived from the same digest as the container, and exactly the managed label —
+ *  (workspace, digest shared with the container) or `osio-ide-home-<32hex>` (per user), and exactly the managed label —
  *  otherwise a second volume carrying someone else's identity could be mounted. */
 export function unsafeVolumeBody(body) {
   const driver = String(body?.Driver ?? "local");
@@ -231,6 +231,9 @@ if (isMain && process.argv.includes("--selfcheck")) {
   chk("clean body ok", unsafeCreateBody({ HostConfig: { CapDrop: ["ALL"], Mounts: [{ Type: "volume" }] } }), null);
   chk("host-bind volume rejected", unsafeVolumeBody({ Name: "x", Driver: "local", DriverOpts: { type: "none", o: "bind", device: "/" } }), "DriverOpts");
   chk("foreign volume driver rejected", unsafeVolumeBody({ Name: "x", Driver: "vieux/sshfs" }), "Driver");
+  chk("provisioner home volume ok", unsafeVolumeBody({ Name: `osio-ide-home-${DIGEST}`, Driver: "local", Labels: { [MANAGED_LABEL]: "1" } }), null);
+  chk("home volume DriverOpts refused", unsafeVolumeBody({ Name: `osio-ide-home-${DIGEST}`, Driver: "local", Labels: { [MANAGED_LABEL]: "1" }, DriverOpts: { type: "none", o: "bind", device: "/" } }), "DriverOpts");
+  chk("other volume prefix refused", unsafeVolumeBody({ Name: `osio-ide-data-${DIGEST}`, Driver: "local", Labels: { [MANAGED_LABEL]: "1" } }), "Name");
   chk("provisioner volume ok", unsafeVolumeBody({ Name: `osio-ide-vol-${DIGEST}`, Driver: "local", Labels: { [MANAGED_LABEL]: "1" } }), null);
   chk("unmanaged volume name rejected", unsafeVolumeBody({ Name: "other", Driver: "local" }), "Name");
   chk("empty volume labels rejected", unsafeVolumeBody({ Name: `osio-ide-vol-${DIGEST}`, Driver: "local", Labels: {} }), "Labels");

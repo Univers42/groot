@@ -16,7 +16,7 @@
 // proxy.mjs --selfcheck imports the fixtures below; the image does not ship this file.
 
 import { fileURLToPath } from "node:url";
-import { createShapeViolation, execShapeViolation, shapeLimits } from "./create-shape.mjs";
+import { createShapeViolation, execShapeViolation, homeVolumeFor, shapeLimits } from "./create-shape.mjs";
 
 const LIMITS = shapeLimits(process.env);
 const MANAGED_LABEL = "osio.ide.managed";
@@ -27,6 +27,8 @@ export const DIGEST = "a".repeat(32);
 const OWNER = "11111111-1111-4111-8111-111111111111";
 const WORKSPACE = "22222222-2222-4222-8222-222222222222";
 // The bridge's own, unversioned path (ide-docker.mjs); the versioned form is checked below.
+const WORKSPACE_MOUNT = { Type: "volume", Source: `osio-ide-vol-${DIGEST}`, Target: "/workspace" };
+const OTHER_OWNER = "33333333-3333-4333-8333-333333333333";
 export const CANON_PATH = `/containers/create?name=ide-${DIGEST}`;
 export const mk = () => ({
   Image: LIMITS.image,
@@ -37,13 +39,14 @@ export const mk = () => ({
     "HTTP_PROXY=http://ide-egress:8080", "HTTPS_PROXY=http://ide-egress:8080",
     "http_proxy=http://ide-egress:8080", "https_proxy=http://ide-egress:8080",
     "NO_PROXY=localhost,127.0.0.1", "no_proxy=localhost,127.0.0.1", "GIT_TERMINAL_PROMPT=0",
+    "HOME=/home/coder",
   ],
   Labels: { [MANAGED_LABEL]: "1", "osio.ide.owner": OWNER, "osio.ide.workspace": WORKSPACE },
   HostConfig: {
     NetworkMode: LIMITS.sandboxNet, CapDrop: ["ALL"], SecurityOpt: ["no-new-privileges:true"],
     ReadonlyRootfs: true,
-    Mounts: [{ Type: "volume", Source: `osio-ide-vol-${DIGEST}`, Target: "/workspace" }],
-    Tmpfs: { "/tmp": "size=64m,mode=1777", "/home/coder": "size=64m,mode=0700,uid=10001,gid=10001" },
+    Mounts: [WORKSPACE_MOUNT, { Type: "volume", Source: homeVolumeFor(OWNER), Target: "/home/coder" }],
+    Tmpfs: { "/tmp": "size=64m,mode=1777,exec" },
     PidsLimit: 512, Memory: 1073741824, MemorySwap: 1073741824, NanoCpus: 1000000000,
     Ulimits: [{ Name: "core", Soft: 0, Hard: 0 }, { Name: "nproc", Soft: 512, Hard: 512 }, { Name: "nofile", Soft: 4096, Hard: 4096 }],
     RestartPolicy: { Name: "no" },
@@ -65,7 +68,19 @@ function shapeFailures() {
   // failure names the single field that stopped being the bridge's shape.
   const CREATE_REFUSALS = [
     ["volume DriverConfig", host({ Mounts: [{ Type: "volume", Source: `osio-ide-vol-${DIGEST}`, Target: "/workspace", VolumeOptions: { DriverConfig: { Name: "local", Options: { o: "bind", device: "/" } } } }] })],
-    ["other volume digest", host({ Mounts: [{ Type: "volume", Source: `osio-ide-vol-${"b".repeat(32)}`, Target: "/workspace" }] })],
+    ["other volume digest", host({ Mounts: [{ ...WORKSPACE_MOUNT, Source: `osio-ide-vol-${"b".repeat(32)}` }, mk().HostConfig.Mounts[1]] })],
+    ["workspace mount alone", host({ Mounts: [WORKSPACE_MOUNT] })],
+    ["another owner's home hash", host({ Mounts: [WORKSPACE_MOUNT, { ...mk().HostConfig.Mounts[1], Source: homeVolumeFor(OTHER_OWNER) }] })],
+    ["a third mount", host({ Mounts: [...mk().HostConfig.Mounts, { Type: "volume", Source: `osio-ide-vol-${"c".repeat(32)}`, Target: "/data" }] })],
+    ["home Target not /home/coder", host({ Mounts: [WORKSPACE_MOUNT, { ...mk().HostConfig.Mounts[1], Target: "/home/other" }] })],
+    ["home Type bind", host({ Mounts: [WORKSPACE_MOUNT, { ...mk().HostConfig.Mounts[1], Type: "bind" }] })],
+    ["mounts in the wrong order", host({ Mounts: [...mk().HostConfig.Mounts].reverse() })],
+    ["/tmp back to noexec", host({ Tmpfs: { "/tmp": "size=64m,mode=1777" } })],
+    ["/tmp exec,suid", host({ Tmpfs: { "/tmp": "size=64m,mode=1777,exec,suid" } })],
+    ["/tmp exec,dev", host({ Tmpfs: { "/tmp": "size=64m,mode=1777,exec,dev" } })],
+    ["/tmp exec,noexec", host({ Tmpfs: { "/tmp": "size=64m,mode=1777,exec,noexec" } })],
+    ["/tmp 128m", host({ Tmpfs: { "/tmp": "size=128m,mode=1777,exec" } })],
+    ["home tmpfs next to the home mount", host({ Tmpfs: { ...mk().HostConfig.Tmpfs, "/home/coder": "size=64m,mode=0700,uid=10001,gid=10001" } })],
     ["egress net", host({ NetworkMode: "osio-ide-egress-net" })],
     ["VolumesFrom", host({ VolumesFrom: ["x"] })],
     ["PortBindings", host({ PortBindings: {} })],
@@ -79,7 +94,9 @@ function shapeFailures() {
     ["MemorySwap differs", host({ MemorySwap: 1 })],
     ["User root", { ...mk(), User: "0" }],
     ["foreign image", { ...mk(), Image: "alpine" }],
-    ["eighth Env entry", { ...mk(), Env: [...mk().Env, "EXTRA=1"] }],
+    ["ninth Env entry", { ...mk(), Env: [...mk().Env, "EXTRA=1"] }],
+    ["Env without HOME", { ...mk(), Env: mk().Env.filter((e) => !e.startsWith("HOME=")) }],
+    ["create HOME elsewhere", { ...mk(), Env: mk().Env.map((e) => (e.startsWith("HOME=") ? "HOME=/tmp" : e)) }],
     ["Env entry swapped", { ...mk(), Env: mk().Env.map((e) => (e.startsWith("HTTP_PROXY") ? "HTTP_PROXY=http://elsewhere:1" : e)) }],
     ["extra top-level key", { ...mk(), Entrypoint: ["sh"] }],
     ["extra label", { ...mk(), Labels: { ...mk().Labels, extra: "1" } }],
@@ -101,9 +118,14 @@ function shapeFailures() {
     ["Cmd empty", { ...SHELL, Cmd: [] }],
     ["Cmd string", { ...SHELL, Cmd: "sh" }],
     ["Env without a name", { ...SHELL, Env: ["=x"] }],
+    ["exec HOME elsewhere", { ...SHELL, Env: ["HOME=/tmp/evil"] }],
+    ["exec HOME empty", { ...SHELL, Env: ["HOME="] }],
     ["Detach", { ...SHELL, Detach: false }],
   ];
   chk("exec shell ok", execShapeViolation(SHELL), null);
+  chk("exec HOME as pinned ok", execShapeViolation({ ...SHELL, Env: ["TERM=xterm", "HOME=/home/coder"] }), null);
+  const { Env: _omitted, ...noEnv } = SHELL;
+  chk("exec without Env ok", execShapeViolation(noEnv), null);
   for (const [label, body] of EXEC_REFUSALS) refuse(`exec ${label}`, execShapeViolation(body));
 
   return fail;
