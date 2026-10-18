@@ -49,11 +49,13 @@ vault42-diff: ## Show what a push or a pull would change, by size (read-only)
 ## +local only, -vault only, ~size differs. Size only: a same-size edit is not shown.
 	@$(vault42_guard) $(VAULT42_BIN) $(vault42_target) $(vault42_kinds) diff
 
-vault42-pull: ## Preview the vault's tree; APPLY=1 writes it here and runs post_pull
+vault42-pull: ## Preview the vault's tree; APPLY=1 writes it here (post_pull on full pulls)
 ## Usage: make vault42-pull [KIND="env secrets"] [TARGET=secrets] [ONLY="a b"] [APPLY=1]
 ## A preview unless APPLY=1 is typed on the command line (an exported APPLY is ignored). ONLY
 ## limits the restore to those paths. After an applied pull utils/scripts/vault42-post-pull.sh
-## rebuilds .env.local and lays the team/env-local secret over it.
+## rebuilds .env.local and lays the team/env-local secret over it; with ONLY, or a KIND without
+## env, the hook does not run (a partial restore is not the environment it rebuilds from) and the
+## CLI prints the command.
 	@$(vault42_guard) $(VAULT42_BIN) $(vault42_target) $(vault42_kinds) pull $(call vault42_flag,APPLY,--apply) $(call vault42_each,--only,ONLY)
 
 vault42-push: ## Replace the vault's tree with this checkout (asks first; YES=1 skips)
