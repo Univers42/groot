@@ -3,6 +3,8 @@
 - Decided: 2026-10-17 · by devil (ruling on the public-site design, ADR 0013)
 - Holds while: account and newsletter mail is sent by the gateway from the Titan box that also sends grobase
   prod's own mail, under one Kong bucket of 200/h
+- Reopened: 2026-10-18 by [ADR 0018](../docs/adr/0018-serve-the-groot-frontends-on-the-host-funnel-with-verified-open-signup.md):
+  the gateway now carries a tested daily mail cap of 50 or less (the second reopen condition below)
 
 ## The concept
 
