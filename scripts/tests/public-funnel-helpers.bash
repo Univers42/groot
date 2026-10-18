@@ -15,6 +15,7 @@ case "$sock" in
 */tailscale-*) who=apps; f="$T/funnel-apps"; dns="${TSA_DNS:-osionos-apps.tail10f2ea.ts.net.}"; pre="[apps] "; [ -f "$T/apps-node" ] || exit 1 ;;
 *) who=main; f="$T/funnel"; dns="${TS_DNS:-osionos.tail10f2ea.ts.net.}"; pre="" ;;
 esac
+if [ "$who" = main ] && [ -n "${TS_DOWN:-}" ]; then exit 1; fi
 echo "$pre$*" >>"$T/ts.log"
 case "$1 $2" in
 "status --json") printf "{\"BackendState\":\"Running\",\"Self\":{\"DNSName\":\"%s\"}}\n" "$dns" ;;
@@ -41,6 +42,7 @@ ps) case "$*" in
   *service=osionos-ide-server*) [ -f "$T/env-ide" ] && echo cid-ide ;;
   esac ;;
 image) exit "${IMG_RC:-0}" ;;
+inspect) f="$T/env-${4#cid-}"; case "$3" in *Config.Env*) [ -z "${ENV_FAIL:-}" ] && cat "$f" ;; esac ;;
 exec) f="$T/env-${2#cid-}"; if [ "$3" = env ]; then cat "$f"; else grep "^$4=" "$f" 2>/dev/null | cut -d= -f2- | grep .; fi ;;
 logs) cat "$T/gw.log" ;;
 run) case "$*" in

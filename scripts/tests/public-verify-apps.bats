@@ -53,7 +53,7 @@ load public-funnel-helpers
   : >"$T/funnel-apps"
   TLS_RC=35 run_pf up apps
   [ "$status" -ne 0 ]
-  has "FAIL  tls"
+  has "FAIL  tls2"
   grep -qx '\[apps\] funnel reset' "$T/ts.log"
   [ ! -s "$T/funnel-apps" ]
 }
@@ -103,6 +103,28 @@ load public-funnel-helpers
   printf '443 3102\n8443 4200\n' >"$T/funnel-apps"
   run_pf verify apps
   has "FAIL  nobridge       a Funnel node proxies to a bridge port: 8443 / 127.0.0.1:4200"
+}
+
+@test "nobridge FAILs when a node that must be read does not answer, and names it" {
+  rm "$T/apps-node"
+  run_pf verify --pre
+  [ "$status" -eq 1 ]
+  has "FAIL  nobridge       cannot read the Funnel targets of: apps"
+  setup_apps
+  TS_DOWN=1 run_pf verify --pre
+  has "FAIL  nobridge       cannot read the Funnel targets of: main"
+}
+
+@test "nobridge does not require the apps node when no origin is set and it has no state, and says so" {
+  rm "$T/apps-node"
+  set_env PUBLIC_MAIL_ORIGIN ""
+  set_env PUBLIC_CALENDAR_ORIGIN ""
+  run_pf verify --pre
+  has "PASS  nobridge"
+  has "apps node not deployed: not checked"
+  mkdir -p "$T/state/tailscale-osionos-apps"
+  run_pf verify --pre
+  has "FAIL  nobridge       cannot read the Funnel targets of: apps"
 }
 
 @test "nodev passes on 10 probes of 404 and FAILs naming the leaking app and path" {
@@ -206,6 +228,38 @@ load public-funnel-helpers
   [ "$status" -eq 1 ]
   has "FAIL  appenv         forbidden variable(s) present (values withheld): mail-web:SMTP_PASS calendar-web:JWT_SECRET"
   lacks "hunter"
+}
+
+@test "appenv FAILs when the environment cannot be read or comes back empty, instead of passing 0 variables" {
+  ENV_FAIL=1 run_pf verify --pre
+  [ "$status" -eq 1 ]
+  has "FAIL  appenv         environment unreadable or empty for: mail-web calendar-web"
+  lacks "PASS  appenv"
+  : >"$T/env-mail"
+  run_pf verify --pre
+  has "FAIL  appenv         environment unreadable or empty for: mail-web"
+  lacks "for: mail-web calendar-web"
+}
+
+@test "tls2 prints exactly one line when the apps node has no open port: FAIL when apps are expected, SKIP when not" {
+  : >"$T/funnel-apps"
+  run_pf verify apps
+  [ "$status" -eq 1 ]
+  [ "$(printf '%s\n' "$out" | grep -c '^[A-Z]*  tls2')" -eq 1 ]
+  has "FAIL  tls2"
+  set_env PUBLIC_MAIL_ORIGIN ""
+  set_env PUBLIC_CALENDAR_ORIGIN ""
+  run_pf verify
+  [ "$(printf '%s\n' "$out" | grep -c '^[A-Z]*  tls2')" -eq 1 ]
+  has "SKIP  tls2"
+}
+
+@test "tls2 labels the apps node's certificate probes apart from the main node's tls" {
+  run_pf verify apps
+  has "PASS  tls2           https://osionos-apps.tail10f2ea.ts.net:443 serves a valid certificate"
+  TLS_RC=35 run_pf verify apps
+  has "FAIL  tls2"
+  lacks "FAIL  tls  "
 }
 
 @test "appenv FAILs a missing container when apps are deployed and SKIPs it when they are not" {
