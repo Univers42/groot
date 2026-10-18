@@ -146,7 +146,7 @@ load public-funnel-helpers
   has "PASS  tls            https://osionos.tail10f2ea.ts.net:443 serves a valid certificate"
   has "PASS  tls            https://osionos.tail10f2ea.ts.net:10000 serves a valid certificate"
   [ "$(grep -c 'socks5h://localhost:1055' "$T/tls.log")" -eq 5 ]
-  has "PASS  tls            https://osionos-apps.tail10f2ea.ts.net:8443 serves a valid certificate"
+  has "PASS  tls2           https://osionos-apps.tail10f2ea.ts.net:8443 serves a valid certificate"
 }
 
 @test "verify FAILs a port whose TLS fails (no state dir) and up then resets the Funnel" {

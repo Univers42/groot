@@ -178,16 +178,16 @@ check_edge() {
 # none), which is a SKIP; it proves the node's cert, not that every Funnel relay routes to it.
 check_tls() { tls_probe "$(origin_host)" "$(funnel_ports || true)"; }
 
-# $1 host, $2 comma-joined ports
+# $1 host, $2 comma-joined ports, $3 the check name on the output lines (default tls)
 tls_probe() {
-  local host=$1 port rc
+  local host=$1 port rc label=${3:-tls}
   for port in $(tr ',' ' ' <<<"$2"); do
     rc=0
     curl -sS --max-time 30 -x "$TS_PROXY" -o /dev/null "https://$host:$port/" 2>/dev/null || rc=$?
     case $rc in
-    0) pass tls "https://$host:$port serves a valid certificate" ;;
-    5 | 7) skip tls "cannot reach the proxy $TS_PROXY (curl $rc): the certificate is unchecked" ;;
-    *) fail tls "https://$host:$port: no valid TLS through $TS_PROXY (curl $rc); tailscaled needs --statedir to keep a cert" ;;
+    0) pass "$label" "https://$host:$port serves a valid certificate" ;;
+    5 | 7) skip "$label" "cannot reach the proxy $TS_PROXY (curl $rc): the certificate is unchecked" ;;
+    *) fail "$label" "https://$host:$port: no valid TLS through $TS_PROXY (curl $rc); tailscaled needs --statedir to keep a cert" ;;
     esac
   done
 }

@@ -52,7 +52,16 @@ apps_host() {
   h=${h%.}
   printf '%s' "${h%%[:/]*}"
 }
-container_env_names() { docker exec "$1" env 2>/dev/null | cut -d= -f1 || true; }
+# Variable names of a container, from its config: needs neither exec nor an env binary in the
+# image. Fails when docker cannot read it.
+container_env_names() {
+  local env
+  env=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$1" 2>/dev/null) || return 1
+  cut -d= -f1 <<<"$env"
+}
+
+# The apps node must answer when the apps are configured or it has ever been started here.
+apps_node_expected() { apps_configured || [ -e "$(apps_node_dir)" ]; }
 
 # SKIP when the apps are not deployed, FAIL when they are and $2 is missing; returns 1 either way.
 apps_absent() {
@@ -84,24 +93,39 @@ check_exposure2() {
   else pass exposure2 "apps node ${dns}: funnel $have -> $targets"; fi
 }
 
-# MC1: no bridge container, and neither node proxies to a bridge port.
+# Bridge-port targets of the nodes that must answer; "unreadable:NAME" for one that does not.
+bridge_targets_problems() {
+  local node label targets
+  for node in ts tsa; do
+    label=main
+    if [ "$node" = tsa ]; then
+      label=apps
+      apps_node_expected || continue
+    fi
+    if targets=$(funnel_targets "$node"); then grep -E ':(4100|4200)$' <<<"$targets" || true; else printf 'unreadable:%s\n' "$label"; fi
+  done
+}
+
+# MC1: no bridge container, and no node that must be read proxies to a bridge port.
 check_nobridge() {
-  local running mapped
+  local running problems unreadable mapped scope="no node maps 4100 or 4200"
   running=$(docker ps --filter "label=com.docker.compose.project=$PROJECT" --format '{{.Label "com.docker.compose.service"}}' 2>/dev/null || echo unreadable)
   if [ "$running" = unreadable ]; then
     fail nobridge "cannot list the containers of project $PROJECT"
     return
   fi
   running=$(grep -E '^(mail|calendar)-bridge$' <<<"$running" | paste -sd, - || true)
-  mapped=$({
-    funnel_targets ts || true
-    funnel_targets tsa || true
-  } | grep -E ':(4100|4200)$' | paste -sd, - || true)
+  problems=$(bridge_targets_problems)
+  unreadable=$(grep '^unreadable:' <<<"$problems" | cut -d: -f2 | paste -sd, - || true)
+  mapped=$(grep -v '^unreadable:' <<<"$problems" | paste -sd, - || true)
+  apps_node_expected || scope="main node maps neither 4100 nor 4200 (apps node not deployed: not checked)"
   if [ -n "$running" ]; then
     fail nobridge "bridge container(s) running in $PROJECT: $running"
+  elif [ -n "$unreadable" ]; then
+    fail nobridge "cannot read the Funnel targets of: $unreadable (daemon not answering)"
   elif [ -n "$mapped" ]; then
     fail nobridge "a Funnel node proxies to a bridge port: $mapped"
-  else pass nobridge "no mail-bridge or calendar-bridge container; no node maps 4100 or 4200"; fi
+  else pass nobridge "no mail-bridge or calendar-bridge container; $scope"; fi
 }
 
 # One curl of an app's loopback listener with the Funnel's Host: headers (-D) or the code.
@@ -253,27 +277,47 @@ check_appurls() {
   else pass appurls "$APP_IMAGE contains $(app_origin mail) and $(app_origin calendar), no localhost"; fi
 }
 
-# MC13: names only, from `env` in each static container.
+# MC13: names only, from the config of each static container. An env that cannot be read, or has
+# no name at all, is a FAIL: a real container always has PATH, so empty means the read failed.
 check_appenv() {
-  local svc c names bad="" n=0
+  local svc c names bad="" unread="" n=0
   for svc in mail-web calendar-web; do
     c=$(svc_container "$svc")
     [ -n "$c" ] || {
       apps_absent appenv "$svc is not running" || true
       return
     }
-    names=$(container_env_names "$c")
+    if ! names=$(container_env_names "$c") || [ -z "$names" ]; then
+      unread+=" $svc"
+      continue
+    fi
     n=$((n + $(grep -c . <<<"$names" || true)))
     bad+=$(grep -E "$APPS_FORBIDDEN_ENV" <<<"$names" | sed "s/^/ $svc:/" | paste -sd' ' - || true)
   done
+  if [ -n "$unread" ]; then
+    fail appenv "environment unreadable or empty for:$unread (docker inspect)"
+    return
+  fi
   expect appenv "mail-web and calendar-web hold $n variables, none of SMTP_ GOOGLE_ VAULT_ KONG_ SERVICE_ROLE_KEY JWT_SECRET" "forbidden variable(s) present (values withheld):$bad" [ -z "$bad" ]
+}
+
+# The apps node's certificate probes, one tls2 line per open port; with no open port, one line
+# decided like exposure2: FAIL when the apps are expected open, SKIP when they are not deployed.
+check_tls2() {
+  local ports
+  ports=$(funnel_ports tsa || true)
+  if [ -n "$ports" ]; then
+    tls_probe "$(apps_host)" "$ports" tls2
+  elif [ "$1" = apps ] || apps_configured; then
+    fail tls2 "apps node has no open port: no certificate to check"
+  else skip tls2 "apps node has no open port and no origin is set"; fi
 }
 
 # $1: pre | full   $2: the verify scope
 check_apps() {
   if [ "$1" != pre ]; then
     check_exposure2 "$2"
-    tls_probe "$(apps_host)" "$(funnel_ports tsa || true)"
+    check_tls2 "$2"
   fi
   check_nobridge
   check_nodev
