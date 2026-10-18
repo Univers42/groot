@@ -1,0 +1,68 @@
+# Public mode overlay: the frontends as the internet sees them, through the host's Tailscale
+# Funnel (443 website, 8443 osionos app, 10000 bridge). Layered LAST, after the link overlay
+# and any PUBLIC_COMPOSE_EXTRA file:
+#   docker compose -f docker-compose.yml -f docker-compose.grobase-link.yml \
+#     -f docker-compose.public.yml --env-file .env.local --env-file .env.public config
+# Everything the browser downloads is public, so the bundles are built with no tenant key and
+# no realtime token (forced empty, overriding .env.local) and the images carry the :public
+# tag, never overwriting the :local ones. wiki/runbooks/public-funnel.md.
+services:
+  osionos-app:
+    image: track-binocle/osionos-web:public
+    build:
+      args:
+        VITE_API_URL: ${PUBLIC_ORIGIN:?set PUBLIC_ORIGIN in .env.public}:10000
+        VITE_PRISMATICA_URL: ${PUBLIC_ORIGIN}
+        VITE_BAAS_URL: ${PUBLIC_ORIGIN}:8443
+        VITE_BAAS_API_KEY: ""
+        VITE_BAAS_KONG_KEY: ""
+        VITE_BAAS_REALTIME_TOKEN: ""
+        # The IDE is a shell on a shared host and is never exposed (rules in the base file).
+        VITE_OSIONOS_IDE_URL: ""
+
+  opposite-osiris-web:
+    image: track-binocle/opposite-osiris-web:public
+    build:
+      args:
+        PUBLIC_SITE_URL: ${PUBLIC_ORIGIN}
+        PUBLIC_OSIONOS_APP_URL: ${PUBLIC_ORIGIN}:8443
+        PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION: "true"
+
+  auth-gateway:
+    environment:
+      PUBLIC_SITE_URL: ${PUBLIC_ORIGIN}
+      PUBLIC_OSIONOS_APP_URL: ${PUBLIC_ORIGIN}:8443
+      AUTH_REQUIRE_EMAIL_VERIFICATION: "true"
+      PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION: "true"
+      AUTH_DEMO_INSECURE: "false"
+      TURNSTILE_BYPASS_LOCAL: "false"
+      AUTH_TURNSTILE_OPTIONAL: "true"
+      AUTH_SIGNUP_OPEN: ${AUTH_SIGNUP_OPEN:-true}
+      AUTH_REGISTER_RATE_LIMIT_PER_HOUR: ${AUTH_REGISTER_RATE_LIMIT_PER_HOUR:-10}
+      AUTH_MAIL_DAILY_CAP: ${AUTH_MAIL_DAILY_CAP:-50}
+      AUTH_LINK_SIGNING_KEY: ${AUTH_LINK_SIGNING_KEY:?set AUTH_LINK_SIGNING_KEY in .env.public (make public-env)}
+      AUTH_TRUSTED_PROXY_HOPS: ${AUTH_TRUSTED_PROXY_HOPS:?set AUTH_TRUSTED_PROXY_HOPS in .env.public (measure it)}
+    # /api/auth/availability is gone from opposite-osiris main; the pinned gateway has no
+    # /health. Either answering is a live gateway.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "const p=(u)=>fetch('http://127.0.0.1:8787/api/auth/'+u).then((r)=>r.ok);
+          p('health').then((ok)=>ok||p('availability')).then((ok)=>process.exit(ok?0:1)).catch(()=>process.exit(1))"
+
+  osionos-bridge:
+    environment:
+      OSIONOS_APP_URL: ${PUBLIC_ORIGIN}:8443
+      OSIONOS_ALLOWED_ORIGIN: ${PUBLIC_ORIGIN}:8443
+      PUBLIC_OSIONOS_APP_URL: ${PUBLIC_ORIGIN}:8443
+      OSIONOS_ADMIN_EMAILS: ${OSIONOS_ADMIN_EMAILS:?set OSIONOS_ADMIN_EMAILS in .env.public (emails, or none)}
+      # environment: beats the bridge's env_file (.env.local), so empty here means off.
+      OSIONOS_AGENT_CLAUDE: ""
+      OSIONOS_IDE_ALLOWED_SUBJECTS: ""
+      OSIONOS_RUNNER_URL: ""
+      OSIONOS_SQL_RO: ""
+
+  local-https-proxy:
+    volumes:
+      - ./infrastructure/tls/public.d:/etc/nginx/track-binocle.d:ro
