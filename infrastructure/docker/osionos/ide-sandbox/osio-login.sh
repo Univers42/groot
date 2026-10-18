@@ -11,7 +11,7 @@
 #
 # It also names the user. OSIO_USER (set by the host bridge on the PTY exec Env) is re-validated
 # here, because the box user controls this process's environment, and becomes the account name in
-# /tmp/.osio/passwd, the file /etc/passwd links to. uid, gid and home never come from it: runc
+# /tmp/.osio/passwd, the file /etc/passwd links to. uid, gid and home never come from it (the uid is `id -u`): runc
 # takes them from the numeric User and the create Env. A name that fails validation, or is one of
 # the names in /etc/passwd.base, leaves the default coder file in place. The chosen shell gets `-l`; one that rejects the flag exits
 # at once, and chsh -s /bin/bash undoes the choice.
@@ -33,14 +33,15 @@ osio_username_refusal() {
   return 0
 }
 
-# Writes passwd.base with only the coder line renamed. A unique temp file and an atomic rename keep
+# Writes passwd.base with only the coder line renamed and given the box's uid. A unique temp file and an atomic rename keep
 # two terminals opening at once from tearing each other's file. Never fatal: the box keeps whatever
 # file it had, and the shell still starts.
 osio_write_identity() {
   [ -r "$PASSWD_BASE" ] || return 1
   mkdir -p -m 0700 "$PASSWD_DIR" || return 1
   tmp=$(mktemp "$PASSWD_DIR/passwd.XXXXXX") || return 1
-  if sed "s/^coder:/$1:/" "$PASSWD_BASE" > "$tmp" && chmod 0600 "$tmp" && mv -fT "$tmp" "$PASSWD_DIR/passwd"; then
+  # The uid is the box's own (ADR 0011), the one runc was started with, never a value from the environment.
+  if sed "s/^coder:x:10001:/$1:x:$(id -u):/" "$PASSWD_BASE" > "$tmp" && chmod 0600 "$tmp" && mv -fT "$tmp" "$PASSWD_DIR/passwd"; then
     return 0
   fi
   rm -f "$tmp"

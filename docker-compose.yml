@@ -142,6 +142,9 @@ services:
       # Comma-separated account ids allowed a sandbox (a sandbox is a shell on a shared
       # host, so access is opt-in). Empty = nobody. The mint route checks this.
       OSIONOS_IDE_ALLOWED_SUBJECTS: ${OSIONOS_IDE_ALLOWED_SUBJECTS:-}
+      # allowlist (default) | approved | verified (BLOCKED, ide-sandbox/README.md) | off.
+      OSIONOS_IDE_ACCESS: ${OSIONOS_IDE_ACCESS:-}
+      OSIONOS_IDE_DENIED_SUBJECTS: ${OSIONOS_IDE_DENIED_SUBJECTS:-}
       # Signs the 15-minute IDE token the mint route issues. At least 32 bytes and
       # never OSIONOS_APP_SESSION_SECRET (ide-token.mjs refuses otherwise); the IDE
       # server verifies with the same value.
@@ -767,6 +770,9 @@ services:
         target: /dind-run/docker.sock
         bind:
           create_host_path: false
+      # The owner<->uid ledger (ADR 0011). A named volume so it survives a container recreate; `compose down`
+      # without -v keeps it, and losing it re-learns bindings by trust on first use.
+      - osionos-ide-ledger:/ledger
     expose:
       - "2375"
     networks:
@@ -804,11 +810,18 @@ services:
       OSIONOS_IDE_SANDBOX: ${OSIONOS_IDE_SANDBOX:-}
       OSIONOS_IDE_DOCKER_HOST: ${OSIONOS_IDE_DOCKER_HOST:-}
       OSIONOS_IDE_ALLOWED_SUBJECTS: ${OSIONOS_IDE_ALLOWED_SUBJECTS:-}
+      OSIONOS_IDE_ACCESS: ${OSIONOS_IDE_ACCESS:-}
+      OSIONOS_IDE_DENIED_SUBJECTS: ${OSIONOS_IDE_DENIED_SUBJECTS:-}
       OSIONOS_IDE_SANDBOX_IMAGE: ${OSIONOS_IDE_SANDBOX_IMAGE:-osionos-ide-sandbox:latest}
       OSIONOS_IDE_STORAGE_QUOTA: ${OSIONOS_IDE_STORAGE_QUOTA:-}
       # Boxes running at once (bridge-ide-sandbox.mjs maxRunningBoxes, default 2): size it with
       # osionos-ide.slice MemoryMax at 1 GiB a box.
       OSIONOS_IDE_MAX_BOXES: ${OSIONOS_IDE_MAX_BOXES:-}
+      # Box-create limits per hour (defaults 6 per user, 30 global) and the volume size quota
+      # (off until the user has run B3.2 on docker-ide).
+      OSIONOS_IDE_CREATES_PER_USER_HOUR: ${OSIONOS_IDE_CREATES_PER_USER_HOUR:-}
+      OSIONOS_IDE_CREATES_GLOBAL_HOUR: ${OSIONOS_IDE_CREATES_GLOBAL_HOUR:-}
+      OSIONOS_IDE_VOLUME_QUOTA: ${OSIONOS_IDE_VOLUME_QUOTA:-}
     expose:
       - "4100"
     networks:
@@ -1022,6 +1035,7 @@ services:
       - drawnosaurus-cargo-home:/cargo-home
 
 volumes:
+  osionos-ide-ledger:
   drawnosaurus-mongo-data:
   drawnosaurus-cargo-home:
   osionos-app-node-modules:
