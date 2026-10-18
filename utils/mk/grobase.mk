@@ -53,7 +53,7 @@ restore-if-empty:
 	@GROBASE_EDITION="$(GROBASE_EDITION)" sh scripts/restore-if-empty.sh
 
 vault42-seed:
-## Capture every RUNNING engine's data into ./secrets — the exact file set `make vault-restore` replays, and what `make vault42-push-all` then sends to the vault. (Named vault42-seed: `vault-seed` is the HashiCorp Vault env loader in vault.mk.) Records coverage in secrets/MANIFEST.json; never deletes. Bring the engines-extra profile up first if you want mssql + dynamodb covered.
+## Capture every RUNNING engine's data into ./secrets — the exact file set `make vault-restore` replays, and what `make vault42-push-all` then sends to the vault. Records coverage in secrets/MANIFEST.json; never deletes. Bring the engines-extra profile up first if you want mssql + dynamodb covered.
 	@mkdir -p "$(CURDIR)/secrets"
 	$(MAKE) -C apps/grobase vault-seed SEED_DIR="$(CURDIR)/secrets"
 
