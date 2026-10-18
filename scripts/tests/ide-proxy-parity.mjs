@@ -33,7 +33,7 @@ import {
 import { volumeDriverOpts } from "../../apps/osionos/app/scripts/ide-docker.mjs";
 import { buildInitSpec } from "../../apps/osionos/app/scripts/ide-volume-init.mjs";
 import { createShapeViolation, execShapeViolation, shapeLimits } from "../../infrastructure/docker/osionos/ide-socket-proxy/create-shape.mjs";
-import { unsafeVolumeBody } from "../../infrastructure/docker/osionos/ide-socket-proxy/proxy.mjs";
+import { unsafeVolumeBody } from "../../infrastructure/docker/osionos/ide-socket-proxy/volume-shape.mjs";
 import { initShapeViolation } from "../../infrastructure/docker/osionos/ide-socket-proxy/init-shape.mjs";
 
 const LIMITS = shapeLimits({});
