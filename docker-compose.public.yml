@@ -37,7 +37,9 @@ services:
       AUTH_DEMO_INSECURE: "false"
       TURNSTILE_BYPASS_LOCAL: "false"
       AUTH_TURNSTILE_OPTIONAL: "true"
+      # Open signup is AUTH_SIGNUP_OPEN; an allowlist inherited from .env.local would re-close it.
       AUTH_SIGNUP_OPEN: ${AUTH_SIGNUP_OPEN:-true}
+      AUTH_SIGNUP_ALLOWLIST: ""
       AUTH_REGISTER_RATE_LIMIT_PER_HOUR: ${AUTH_REGISTER_RATE_LIMIT_PER_HOUR:-10}
       AUTH_MAIL_DAILY_CAP: ${AUTH_MAIL_DAILY_CAP:-50}
       AUTH_VERIFICATION_EXEMPT: ${AUTH_VERIFICATION_EXEMPT:-}
