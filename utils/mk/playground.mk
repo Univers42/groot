@@ -1,12 +1,11 @@
 # Playground simulation targets.
-playground: healthcheck playground-preview
-## Run the Docker Playwright user flow and app-service integration simulation.
+##@ Tests
+playground: healthcheck playground-preview ## Run the Docker Playwright user flow and integration simulation
 	$(MAKE) compose-build BAKE_GROUP=playground BAKE_TARGETS='playground-simulation'
 	docker compose --profile testing run --rm playground-simulation
 	$(MAKE) showcase
 
-playground-preview:
-## Open the VS Code simulation viewer for Docker Playwright results.
+playground-preview: ## Open the VS Code simulation viewer for Docker Playwright results
 	@printf '\nSimulation preview: Docker Playwright will create a throwaway account and bridge it into osionos.\n'
 	@printf 'Opening the VS Code simulation viewer: %s\n' '$(PLAYGROUND_VIEWER_URL)'
 	@if [ -x '$(VSCODE_CLI)' ]; then \

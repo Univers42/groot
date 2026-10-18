@@ -58,12 +58,16 @@ SKIP_IF_PINNED = for p in $$PINNED; do case "$$displaypath/" in "$$p"/*) exit 0 
 # which common.mk documents as flaky under GNU Make 4.4.1.
 WITH_GRAPH_RENDER_SHA = export GRAPH_RENDER_SHA="$$(git ls-tree HEAD apps/graph_render | awk '$$2 == "commit" { print $$3 }')";
 
-submodules-pinned:
-## Check out absent pinned submodules (`update = none`) at the commit groot records, then fail if any is elsewhere or edited. Never moves a checked-out one.
+##@ Git & submodules
+submodules-pinned: ## Check out absent pinned submodules at their gitlink, fail if edited
+## Absent pinned submodules (`update = none`) are checked out at the commit groot records, then it
+## fails if any is elsewhere or edited. Never moves a checked-out one.
 	@sh $(PIN_SUBMODULES)
 
-syncro-submodule:
-## Force EVERY submodule onto its stable branch at latest (fix detached HEADs, ff-pull) so a fresh start never builds the wrong image. Dirty submodules are skipped (never clobbered). Run `make all` after to rebuild.
+syncro-submodule: ## Put every submodule on its stable branch at latest (skips dirty ones)
+## Forces EVERY submodule onto its stable branch at latest (fixes detached HEADs, ff-pulls) so a
+## fresh start never builds the wrong image. Dirty submodules are skipped (never clobbered). Run
+## `make all` after to rebuild.
 	@set -eu; \
 	command -v git >/dev/null || { echo '[syncro] git not found' >&2; exit 1; }; \
 	echo '[syncro] sync submodule URLs from .gitmodules'; \
@@ -115,20 +119,140 @@ syncro-submodule:
 	if [ -n "$$bad" ]; then echo "[syncro] STILL DETACHED (dirty, diverged, shallow, or the branch lacks the gitlink): $$bad" >&2; fi; \
 	echo '[syncro] done. Now: make all   (rebuilds frontends from the synced source)'
 
-.PHONY: submodules-pinned vault42-team-push vault42-team-pull
-vault42-team-push:
-## vault42 TEAM: publish this whole checkout to the shared environment $(VAULT42_ORG)/$(VAULT42_PROJECT)/$(VAULT42_ENV) — sealed to the ENV key, so every member granted the project can open it (the personal `vault42-push-all` seals to you alone and is readable by nobody else). Run it from a complete checkout with ./secrets holding fresh dumps; scripts/vault42-push-guard.sh refuses one that is not, before any prompt. NOTE: agents are blocked from sending secrets off-box — run this yourself.
+pulls: ## Fetch and pull the root repo and every submodule
+## Uses the configured upstreams, for the root repo plus every recursive submodule.
+	@set -eu; \
+	echo '[pulls] root'; \
+	git fetch --all --prune; \
+	if git symbolic-ref --short -q HEAD >/dev/null && git rev-parse --verify --quiet '@{u}' >/dev/null; then \
+		git pull --rebase --autostash; \
+	else \
+		echo '[pulls] root has no upstream branch; fetched only'; \
+	fi; \
+	git submodule sync --recursive; \
+	git submodule update --init --recursive; \
+	git submodule foreach --recursive ' \
+		set -eu; \
+		branch=$$(git symbolic-ref --short -q HEAD || true); \
+		echo "[pulls] $${displaypath} ($${branch:-detached})"; \
+		git fetch --all --prune; \
+		if [ -n "$$branch" ] && git rev-parse --verify --quiet "@{u}" >/dev/null; then \
+			git pull --rebase --autostash; \
+		else \
+			echo "[pulls] $${displaypath} has no upstream branch; fetched only"; \
+		fi \
+	'; \
+	git submodule update --init --recursive --checkout
+
+repair-detached: ## Re-attach detached submodule HEADs, merge onto main, push main + develop
+## Usage: make repair-detached GIT_COMMIT_MESSAGE="..."
+## Re-attaches every detached submodule HEAD: commits dirty state (with GIT_COMMIT_MESSAGE), merges
+## onto main, pushes main + develop.
+	@set -eu; \
+	PINNED="$$(sh $(PIN_SUBMODULES) --list | tr '\n' ' ') $(PARENT_PINNED)"; export PINNED; \
+	git submodule foreach --recursive 'set -eu; \
+		$(SKIP_IF_PINNED) \
+		branch=$$(git symbolic-ref --short -q HEAD 2>/dev/null || true); \
+		if [ -n "$$branch" ]; then \
+			echo "[repair] $$displaypath already on $$branch — skipping"; \
+			exit 0; \
+		fi; \
+		if [ -z "$$(git status --porcelain)" ] && on=$$(git branch -r --contains HEAD | head -n1 | tr -d " ") && [ -n "$$on" ]; then \
+			echo "[repair] $$displaypath at its gitlink $$(git rev-parse --short HEAD) (on $$on) — nothing to repair"; \
+			exit 0; \
+		fi; \
+		echo "[repair] $$displaypath is detached — fixing"; \
+		git add -A; \
+		if ! git diff --cached --quiet; then \
+			git commit -m "$(GIT_COMMIT_MESSAGE)"; \
+		fi; \
+		tmp="tmp/detached-$$(git rev-parse --short HEAD)"; \
+		git checkout -b "$$tmp"; \
+		if git rev-parse --verify main >/dev/null 2>&1; then \
+			git checkout main; \
+			git merge --no-ff "$$tmp" -m "merge: bring detached work onto main" || true; \
+		else \
+			git checkout -b main; \
+		fi; \
+		git push -u origin main; \
+		if git ls-remote --exit-code --heads origin develop >/dev/null 2>&1; then \
+			git checkout develop 2>/dev/null || git checkout -b develop origin/develop; \
+			git merge --no-ff main -m "merge: sync develop from main" || true; \
+		else \
+			git checkout -b develop; \
+		fi; \
+		git push -u origin develop; \
+		git checkout main; \
+		git branch -d "$$tmp" 2>/dev/null || true \
+	'
+
+pushes: ## Commit and push the root repo and every submodule
+## Usage: make pushes GIT_COMMIT_MESSAGE="..."
+## Adds, commits, and pushes the root repo plus every recursive submodule.
+	@set -eu; \
+	repos="$$(git submodule foreach --quiet --recursive 'printf "%s\n" "$$displaypath"' | awk '{ print length, $$0 }' | sort -rn | cut -d' ' -f2-)"; \
+	printf '%s\n.\n' "$$repos" | while IFS= read -r repo; do \
+		[ -n "$$repo" ] || continue; \
+		if ! git -C "$$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1; then continue; fi; \
+		branch="$$(git -C "$$repo" symbolic-ref --short -q HEAD || true)"; \
+		if [ -z "$$branch" ]; then \
+			if [ -z "$$(git -C "$$repo" status --porcelain)" ] && [ -n "$$(git -C "$$repo" branch -r --contains HEAD)" ]; then \
+				echo "[pushes] $$repo at its gitlink (detached, on an origin branch) — nothing to push"; \
+			else \
+				echo "[pushes] $$repo is detached — run 'make repair-detached' first"; \
+			fi; \
+			continue; \
+		fi; \
+		echo "[pushes] $$repo ($$branch)"; \
+		git -C "$$repo" add -A; \
+		if ! git -C "$$repo" diff --cached --quiet; then \
+			git -C "$$repo" commit -m '$(GIT_COMMIT_MESSAGE)'; \
+		else \
+			echo "[pushes] $$repo has no staged changes"; \
+		fi; \
+		if git -C "$$repo" ls-remote --exit-code --heads origin "$$branch" >/dev/null 2>&1; then \
+			git -C "$$repo" fetch origin "$$branch"; \
+			git -C "$$repo" merge --ff-only "origin/$$branch" 2>/dev/null || true; \
+		fi; \
+		if git -C "$$repo" rev-parse --verify --quiet '@{u}' >/dev/null; then \
+			git -C "$$repo" push; \
+		else \
+			git -C "$$repo" push -u '$(GIT_PUSH_REMOTE)' "$$branch"; \
+		fi; \
+	done
+
+##@ Secrets (vault42)
+vault42-team-push: ## Publish this checkout to the shared vault42 environment
+## vault42 TEAM: publishes this whole checkout to the shared environment
+## $(VAULT42_ORG)/$(VAULT42_PROJECT)/$(VAULT42_ENV) — sealed to the ENV key, so every member granted
+## the project can open it (the personal `vault42-push-all` seals to you alone and is readable by
+## nobody else). Run it from a complete checkout with ./secrets holding fresh dumps;
+## scripts/vault42-push-guard.sh refuses one that is not, before any prompt. NOTE: agents are
+## blocked from sending secrets off-box — run this yourself.
 	@sh scripts/vault42-team.sh push
 
-vault42-team-pull:
-## vault42 TEAM: restore the shared environment's tree here — DRY-RUN unless APPLY=1. ONLY='secrets/*' limits the set; BACKUP=1 writes each displaced file aside as .bak. After an applied pull it rebuilds ./.env.local (gen-local-env.sh) and lays the owner-published team keys over it, without which a fresh OSIONOS_BRIDGE_EMAIL_HASH_SALT makes every restored identity unfindable.
+vault42-team-pull: ## Restore the shared vault42 tree here (dry-run unless APPLY=1)
+## Usage: make vault42-team-pull [APPLY=1] [BACKUP=1] [ONLY='secrets/*']
+## vault42 TEAM: restores the shared environment's tree here — DRY-RUN unless APPLY=1.
+## ONLY='secrets/*' limits the set; BACKUP=1 writes each displaced file aside as .bak. After an
+## applied pull it rebuilds ./.env.local (gen-local-env.sh) and lays the owner-published team keys
+## over it, without which a fresh OSIONOS_BRIDGE_EMAIL_HASH_SALT makes every restored identity
+## unfindable.
 	@sh scripts/vault42-team.sh pull \
 		$(if $(filter 1,$(APPLY)),--apply,) \
 		$(if $(filter 1,$(BACKUP)),--backup,) \
 		$(if $(ONLY),--only '$(ONLY)',)
 
-vault42-push-all:
-## vault42: push the WHOLE monorepo *.env*/*.secrets tree (root + every submodule) to the SHARED environment ($(VAULT42_ORG)/$(VAULT42_PROJECT)/$(VAULT42_ENV)), sealed to the env key so every granted member can read it. Encrypted on this machine; passphrase read hidden. Blank VAULT42_ORG or VAULT42_ENV to fall back to the PERSONAL push (readable by nobody but you). The SHARED push is the team push (scripts/vault42-team.sh), so it keeps *.bak and .env.grobase-remote sealed to you. scripts/vault42-push-guard.sh refuses first a checkout whose dumps fail ./secrets/SHA256SUMS or that holds a pulled copy under ./secrets or ./.vault42. NOTE: agents are blocked from sending secrets off-box — run this yourself.
+vault42-push-all: ## Push every *.env*/*.secrets file to the shared vault42 environment
+## Usage: make vault42-push-all [VAULT42_ORG=] [VAULT42_ENV=]
+## vault42: pushes the WHOLE monorepo *.env*/*.secrets tree (root + every submodule) to the SHARED
+## environment ($(VAULT42_ORG)/$(VAULT42_PROJECT)/$(VAULT42_ENV)), sealed to the env key so every
+## granted member can read it. Encrypted on this machine; passphrase read hidden. Blank VAULT42_ORG
+## or VAULT42_ENV to fall back to the PERSONAL push (readable by nobody but you). The SHARED push is
+## the team push (scripts/vault42-team.sh), so it keeps *.bak and .env.grobase-remote sealed to you.
+## scripts/vault42-push-guard.sh refuses first a checkout whose dumps fail ./secrets/SHA256SUMS or
+## that holds a pulled copy under ./secrets or ./.vault42. NOTE: agents are blocked from sending
+## secrets off-box — run this yourself.
 	@if [ -n '$(VAULT42_ORG)' ] && [ -n '$(VAULT42_ENV)' ]; then \
 		VAULT42_ORG='$(VAULT42_ORG)' VAULT42_PROJECT='$(VAULT42_PROJECT)' VAULT42_ENV='$(VAULT42_ENV)' \
 			CTL_IMAGE='$(CTL_IMAGE)' CTL_CFG_DIR='$(CTL_CFG_DIR)' sh scripts/vault42-team.sh push; \
@@ -138,14 +262,31 @@ vault42-push-all:
 			VAULT_ENV_PERSONAL=1 sh apps/grobase/scripts/vault/ctl-env.sh push; \
 	fi
 
-vault42-pull-all:
-## vault42: restore the WHOLE monorepo *.env* tree from the SHARED environment ($(VAULT42_ORG)/$(VAULT42_PROJECT)/$(VAULT42_ENV)) — DRY-RUN unless APPLY=1. Passphrase read hidden. FORCE=1 is accepted for muscle memory but has no meaning for a shared env (use BACKUP=1, which writes the displaced file aside). Blank VAULT42_ORG or VAULT42_ENV for the PERSONAL pull.
+vault42-pull-all: ## Restore every *.env* file from the shared vault42 env (dry-run by default)
+## Usage: make vault42-pull-all [APPLY=1] [BACKUP=1] [FORCE=1] [VAULT42_ORG=] [VAULT42_ENV=]
+## vault42: restores the WHOLE monorepo *.env* tree from the SHARED environment
+## ($(VAULT42_ORG)/$(VAULT42_PROJECT)/$(VAULT42_ENV)) — DRY-RUN unless APPLY=1. Passphrase read
+## hidden. FORCE=1 is accepted for muscle memory but has no meaning for a shared env (use BACKUP=1,
+## which writes the displaced file aside). Blank VAULT42_ORG or VAULT42_ENV for the PERSONAL pull.
 	@REPO_DIR="$(CURDIR)" CTL_IMAGE="$(CTL_IMAGE)" CTL_CFG_DIR="$(CTL_CFG_DIR)" VAULT_ENV_PROJECT="$(VAULT42_PROJECT)" \
 		VAULT_ENV_ORG="$(VAULT42_ORG)" VAULT_ENV_NAME="$(VAULT42_ENV)" \
 		sh apps/grobase/scripts/vault/ctl-env.sh pull $(if $(filter 1,$(APPLY)),--apply,) $(if $(filter 1,$(BACKUP)),--backup,) $(if $(filter 1,$(FORCE)),--force,)
 
-secrets-ensure:
-## Fresh-machine secret provisioning, wired into `make all`. If grobase secrets are ABSENT but a vault42 keystore is present, pull the whole *.env tree from vault42 — non-interactive when FT_PASSPHRASE/VAULT42_PASSPHRASE is set (CI), else one hidden prompt. Secrets already present → no-op. No keystore → LOCAL mode directly. A vault-PULL FAILURE (shared vault unreachable/empty) is NOT fatal — it falls back LOUDLY to the same LOCAL mode (grobase self-generates its own secrets; ./.env.local is derived after backend-up via env-local-ensure) instead of aborting `make all`. This is what lets a bare `make all` provision a clean machine end-to-end even when the shared vault is down. LOCAL mode drops the marker .vault42-local-mode, and while it exists EVERY later run prints a loud banner saying the machine is on self-generated secrets — without it, the first branch below silently skips the pull forever and `make all` reports success while sharing nothing. Recovery is NOT automatic: the data volumes were initialised with the local secrets and POSTGRES_PASSWORD only applies to an empty PGDATA, so the banner names the (destructive) steps instead.
+secrets-ensure: ## Provision secrets on a fresh machine: vault42 pull, else LOCAL mode
+## Usage: make secrets-ensure [VAULT42_SOURCE=team]
+## Fresh-machine secret provisioning, wired into `make all`. If grobase secrets are ABSENT but a
+## vault42 keystore is present, pulls the whole *.env tree from vault42 — non-interactive when
+## FT_PASSPHRASE/VAULT42_PASSPHRASE is set (CI), else one hidden prompt. Secrets already present →
+## no-op. No keystore → LOCAL mode directly. A vault-PULL FAILURE (shared vault unreachable/empty)
+## is NOT fatal — it falls back LOUDLY to the same LOCAL mode (grobase self-generates its own
+## secrets; ./.env.local is derived after backend-up via env-local-ensure) instead of aborting `make
+## all`. This is what lets a bare `make all` provision a clean machine end-to-end even when the
+## shared vault is down. LOCAL mode drops the marker .vault42-local-mode, and while it exists EVERY
+## later run prints a loud banner saying the machine is on self-generated secrets — without it, the
+## first branch below silently skips the pull forever and `make all` reports success while sharing
+## nothing. Recovery is NOT automatic: the data volumes were initialised with the local secrets and
+## POSTGRES_PASSWORD only applies to an empty PGDATA, so the banner names the (destructive) steps
+## instead. VAULT42_SOURCE=team pulls the SHARED environment and forbids the LOCAL fallback.
 	@if [ "$(VAULT42_SOURCE)" = 'team' ] && [ ! -f apps/grobase/.env ]; then \
 		printf '[secrets] VAULT42_SOURCE=team — pulling the SHARED environment %s/%s/%s\n' \
 			'$(VAULT42_ORG)' '$(VAULT42_PROJECT)' '$(VAULT42_ENV)'; \
@@ -207,23 +348,40 @@ secrets-ensure:
 		printf '[secrets] no grobase/.env and no vault42 keystore at %s — LOCAL mode: grobase self-generates its secrets; ./.env.local is derived after backend-up (env-local-ensure).\n' "$(CTL_CFG_DIR)/keystore.v42"; \
 	fi
 
-.PHONY: env-local-ensure
-env-local-ensure:
-## Wired into `make all` AFTER backend-up. When there is no root ./.env.local (no-vault fresh machine), derive it from the now-generated apps/grobase/.env so the frontends authenticate against the freshly self-generated backend. No-op when ./.env.local already exists (vault-pulled or hand-edited). Then `--sync` refreshes ONLY the seven derived BaaS keys (JWT_SECRET, ANON_KEY, SERVICE_ROLE_KEY, KONG_*, SB_KONG_KEY, ADAPTER_REGISTRY_SERVICE_TOKEN) from apps/grobase/.env, in place — an existing file can no longer keep a stale Kong key, the recurring healthcheck 401. `bash scripts/gen-local-env.sh --check` reports drift by key name.
+env-local-ensure: ## Derive and refresh ./.env.local from apps/grobase/.env
+## Wired into `make all` AFTER backend-up. When there is no root ./.env.local (no-vault fresh
+## machine), derives it from the now-generated apps/grobase/.env so the frontends authenticate
+## against the freshly self-generated backend. No-op when ./.env.local already exists (vault-pulled
+## or hand-edited). Then `--sync` refreshes ONLY the seven derived BaaS keys (JWT_SECRET, ANON_KEY,
+## SERVICE_ROLE_KEY, KONG_*, SB_KONG_KEY, ADAPTER_REGISTRY_SERVICE_TOKEN) from apps/grobase/.env, in
+## place — an existing file can no longer keep a stale Kong key, the recurring healthcheck 401.
+## `bash scripts/gen-local-env.sh --check` reports drift by key name.
 	@bash scripts/gen-local-env.sh
 	@bash scripts/gen-local-env.sh --sync || printf '[env-local-ensure] derived keys not all refreshed — inspect: bash scripts/gen-local-env.sh --check\n' >&2
 
-.PHONY: demo-login-ensure demo-login
-demo-login-ensure:
-## Wired into `make all` AFTER restore-if-empty. Sets the local demo account's password (dev.pro.photo@gmail.com) to DEMO_LOGIN_PASSWORD from ./.env.local — the snapshot's copy is an old, published one. No-op when it already matches; a missing var or account is a hard error.
+secrets-scan: ## Scan every tracked file for secrets with gitleaks (Docker, pinned)
+## Covers every tracked file incl. submodules; fails on any finding not in the reviewed
+## .gitleaksignore baseline. `bash scripts/gitleaks-gate.sh --list` shows all current fingerprints.
+	@bash scripts/gitleaks-gate.sh
+
+##@ Backend (grobase)
+demo-login-ensure: ## Set the local demo account's password from ./.env.local
+## Wired into `make all` AFTER restore-if-empty. Sets the local demo account's password
+## (dev.pro.photo@gmail.com) to DEMO_LOGIN_PASSWORD from ./.env.local — the snapshot's copy is an
+## old, published one. No-op when it already matches; a missing var or account is a hard error.
 	@sh scripts/demo-login-ensure.sh
 
-demo-login:
-## Print the LOCAL demo login (email + password from ./.env.local). Local only: production accounts are not managed here.
+demo-login: ## Print the LOCAL demo login (email + password from ./.env.local)
+## Local only: production accounts are not managed here.
 	@. scripts/lib/demo-login.sh && pw="$$(demo_login_password .env.local)" && printf '%s / %s\n' "$$DEMO_LOGIN_EMAIL" "$$pw"
 
-bootstrap:
-## Thin alias kept for muscle memory — `make all` is now self-provisioning (it runs secrets-ensure + brings the backend up), so `make bootstrap` simply runs it. FROM-ZERO on a clean machine: copy ~/.config/42ctl/keystore.v42 over first (the only file in neither git nor the vault), then `make all`. The data restore is DESTRUCTIVE on an EMPTY stack only (restore-if-empty never wipes populated data).
+##@ Pipeline
+bootstrap: ## Alias for `make all`, which provisions a clean machine itself
+## Thin alias kept for muscle memory — `make all` is now self-provisioning (it runs secrets-ensure +
+## brings the backend up), so `make bootstrap` simply runs it. FROM-ZERO on a clean machine: copy
+## ~/.config/42ctl/keystore.v42 over first (the only file in neither git nor the vault), then `make
+## all`. The data restore is DESTRUCTIVE on an EMPTY stack only (restore-if-empty never wipes
+## populated data).
 	@if [ ! -f "$(CTL_CFG_DIR)/keystore.v42" ] && [ -z "$${FT_PASSPHRASE:-}$${VAULT42_PASSPHRASE:-}" ]; then \
 		echo '[bootstrap] no vault key at $(CTL_CFG_DIR)/keystore.v42 — running in LOCAL no-vault mode:' >&2; \
 		echo '            grobase self-generates its secrets and ./.env.local is derived locally.' >&2; \
@@ -231,107 +389,3 @@ bootstrap:
 	fi
 	@$(MAKE) --no-print-directory all
 	@echo '✓ bootstrap complete — everything is back. Login: dev.pro.photo@gmail.com (password: make demo-login)'
-
-pulls:
-## Fetch and pull the root repo plus every recursive submodule using configured upstreams.
-	@set -eu; \
-	echo '[pulls] root'; \
-	git fetch --all --prune; \
-	if git symbolic-ref --short -q HEAD >/dev/null && git rev-parse --verify --quiet '@{u}' >/dev/null; then \
-		git pull --rebase --autostash; \
-	else \
-		echo '[pulls] root has no upstream branch; fetched only'; \
-	fi; \
-	git submodule sync --recursive; \
-	git submodule update --init --recursive; \
-	git submodule foreach --recursive ' \
-		set -eu; \
-		branch=$$(git symbolic-ref --short -q HEAD || true); \
-		echo "[pulls] $${displaypath} ($${branch:-detached})"; \
-		git fetch --all --prune; \
-		if [ -n "$$branch" ] && git rev-parse --verify --quiet "@{u}" >/dev/null; then \
-			git pull --rebase --autostash; \
-		else \
-			echo "[pulls] $${displaypath} has no upstream branch; fetched only"; \
-		fi \
-	'; \
-	git submodule update --init --recursive --checkout
-
-repair-detached:
-## Re-attach every detached submodule HEAD: commit dirty state, merge onto main, push main + develop.
-	@set -eu; \
-	PINNED="$$(sh $(PIN_SUBMODULES) --list | tr '\n' ' ') $(PARENT_PINNED)"; export PINNED; \
-	git submodule foreach --recursive 'set -eu; \
-		$(SKIP_IF_PINNED) \
-		branch=$$(git symbolic-ref --short -q HEAD 2>/dev/null || true); \
-		if [ -n "$$branch" ]; then \
-			echo "[repair] $$displaypath already on $$branch — skipping"; \
-			exit 0; \
-		fi; \
-		if [ -z "$$(git status --porcelain)" ] && on=$$(git branch -r --contains HEAD | head -n1 | tr -d " ") && [ -n "$$on" ]; then \
-			echo "[repair] $$displaypath at its gitlink $$(git rev-parse --short HEAD) (on $$on) — nothing to repair"; \
-			exit 0; \
-		fi; \
-		echo "[repair] $$displaypath is detached — fixing"; \
-		git add -A; \
-		if ! git diff --cached --quiet; then \
-			git commit -m "$(GIT_COMMIT_MESSAGE)"; \
-		fi; \
-		tmp="tmp/detached-$$(git rev-parse --short HEAD)"; \
-		git checkout -b "$$tmp"; \
-		if git rev-parse --verify main >/dev/null 2>&1; then \
-			git checkout main; \
-			git merge --no-ff "$$tmp" -m "merge: bring detached work onto main" || true; \
-		else \
-			git checkout -b main; \
-		fi; \
-		git push -u origin main; \
-		if git ls-remote --exit-code --heads origin develop >/dev/null 2>&1; then \
-			git checkout develop 2>/dev/null || git checkout -b develop origin/develop; \
-			git merge --no-ff main -m "merge: sync develop from main" || true; \
-		else \
-			git checkout -b develop; \
-		fi; \
-		git push -u origin develop; \
-		git checkout main; \
-		git branch -d "$$tmp" 2>/dev/null || true \
-	'
-
-pushes:
-## Add, commit, and push the root repo plus every recursive submodule. Use GIT_COMMIT_MESSAGE="...".
-	@set -eu; \
-	repos="$$(git submodule foreach --quiet --recursive 'printf "%s\n" "$$displaypath"' | awk '{ print length, $$0 }' | sort -rn | cut -d' ' -f2-)"; \
-	printf '%s\n.\n' "$$repos" | while IFS= read -r repo; do \
-		[ -n "$$repo" ] || continue; \
-		if ! git -C "$$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1; then continue; fi; \
-		branch="$$(git -C "$$repo" symbolic-ref --short -q HEAD || true)"; \
-		if [ -z "$$branch" ]; then \
-			if [ -z "$$(git -C "$$repo" status --porcelain)" ] && [ -n "$$(git -C "$$repo" branch -r --contains HEAD)" ]; then \
-				echo "[pushes] $$repo at its gitlink (detached, on an origin branch) — nothing to push"; \
-			else \
-				echo "[pushes] $$repo is detached — run 'make repair-detached' first"; \
-			fi; \
-			continue; \
-		fi; \
-		echo "[pushes] $$repo ($$branch)"; \
-		git -C "$$repo" add -A; \
-		if ! git -C "$$repo" diff --cached --quiet; then \
-			git -C "$$repo" commit -m '$(GIT_COMMIT_MESSAGE)'; \
-		else \
-			echo "[pushes] $$repo has no staged changes"; \
-		fi; \
-		if git -C "$$repo" ls-remote --exit-code --heads origin "$$branch" >/dev/null 2>&1; then \
-			git -C "$$repo" fetch origin "$$branch"; \
-			git -C "$$repo" merge --ff-only "origin/$$branch" 2>/dev/null || true; \
-		fi; \
-		if git -C "$$repo" rev-parse --verify --quiet '@{u}' >/dev/null; then \
-			git -C "$$repo" push; \
-		else \
-			git -C "$$repo" push -u '$(GIT_PUSH_REMOTE)' "$$branch"; \
-		fi; \
-	done
-
-.PHONY: secrets-scan
-secrets-scan:
-## gitleaks (Docker, pinned) over every tracked file incl. submodules; fails on any finding not in the reviewed .gitleaksignore baseline. `bash scripts/gitleaks-gate.sh --list` shows all current fingerprints.
-	@bash scripts/gitleaks-gate.sh
