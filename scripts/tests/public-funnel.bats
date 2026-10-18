@@ -18,7 +18,7 @@ load public-funnel-helpers
 @test "verify --pre passes on a fully public stack and has no FAIL or SKIP line" {
   run_pf verify --pre
   [ "$status" -eq 0 ]
-  has "verify (pre): 29 pass, 0 fail, 0 skip"
+  has "verify (pre): 35 pass, 0 fail, 0 skip"
   lacks "SKIP"
 }
 
@@ -71,17 +71,27 @@ load public-funnel-helpers
   [ ! -s "$T/funnel" ]
 }
 
-@test "up rejects a scope other than 443 or all" {
+@test "up rejects a scope other than 443, all or apps" {
   run_pf up 8443
   [ "$status" -ne 0 ]
   [ "$(funnel_calls)" -eq 0 ]
 }
 
-@test "down resets the Funnel and says the containers keep running" {
+@test "down resets the Funnel of BOTH nodes and says the containers keep running" {
   printf '443\n8443\n' >"$T/funnel"
   run_pf down
   [ "$status" -eq 0 ]
   has "containers keep running on localhost"
+  [ ! -s "$T/funnel" ]
+  [ ! -s "$T/funnel-apps" ]
+  grep -qx '\[apps\] funnel reset' "$T/ts.log"
+}
+
+@test "down still resets the main node when the apps node is not running" {
+  printf '443\n' >"$T/funnel"
+  rm "$T/apps-node"
+  run_pf down
+  [ "$status" -eq 0 ]
   [ ! -s "$T/funnel" ]
 }
 
@@ -102,7 +112,8 @@ load public-funnel-helpers
   [ "$status" -eq 0 ]
   has "PASS  tls            https://osionos.tail10f2ea.ts.net:443 serves a valid certificate"
   has "PASS  tls            https://osionos.tail10f2ea.ts.net:10000 serves a valid certificate"
-  [ "$(grep -c 'socks5h://localhost:1055' "$T/tls.log")" -eq 3 ]
+  [ "$(grep -c 'socks5h://localhost:1055' "$T/tls.log")" -eq 5 ]
+  has "PASS  tls            https://osionos-apps.tail10f2ea.ts.net:8443 serves a valid certificate"
 }
 
 @test "verify FAILs a port whose TLS fails (no state dir) and up then resets the Funnel" {
@@ -133,7 +144,7 @@ load public-funnel-helpers
 @test "verify with no scope SKIPs a closed Funnel instead of passing it; with a scope it FAILs" {
   run_pf verify
   has "SKIP  exposure"
-  lacks "PASS  exposure"
+  lacks "PASS  exposure  "
   run_pf verify 443
   [ "$status" -eq 1 ]
   has "FAIL  exposure"
@@ -269,6 +280,8 @@ load public-funnel-helpers
   [ "$status" -eq 0 ]
   has "node:  osionos.tail10f2ea.ts.net."
   has "ports: 443"
+  has "apps node:  osionos-apps.tail10f2ea.ts.net."
+  has "apps ports: 443,8443"
   run_pf frobnicate
   [ "$status" -ne 0 ]
   has "usage:"

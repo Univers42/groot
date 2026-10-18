@@ -13,12 +13,12 @@ setup() {
 
 dry() { run make -n -C "$REPO" "$@"; }
 
-@test "public-up recreates the public services, then opens 443 by default" {
+@test "public-up recreates the public services and the two static apps, then opens 443 by default" {
   dry public-up
   [ "$status" -eq 0 ]
   [[ "$output" == *"COMPOSE_FILE='docker-compose.yml:docker-compose.grobase-link.yml:docker-compose.public.yml'"* ]]
   [[ "$output" == *"--env-file ./.env.local --env-file ./.env.public"* ]]
-  [[ "$output" == *"up -d --build --wait osionos-app opposite-osiris-web auth-gateway osionos-bridge local-https-proxy"* ]]
+  [[ "$output" == *"up -d --build --wait osionos-app opposite-osiris-web auth-gateway osionos-bridge local-https-proxy mail-web calendar-web"* ]]
   [[ "$output" == *"bash scripts/public-funnel.sh up 443"* ]]
 }
 

@@ -78,9 +78,11 @@ load public-funnel-helpers
   has "FAIL  bundle-links   could not be scanned in track-binocle/osionos-web:public"
 }
 
-@test "the public overlay empties the mail, calendar, whiteboard and IDE surfaces" {
+@test "the public overlay points the mail and calendar tabs at the apps origins (empty when unset) and empties whiteboard and IDE" {
   overlay="$BATS_TEST_DIRNAME/../../docker-compose.public.yml"
-  for key in VITE_MAIL_APP_URL VITE_CALENDAR_APP_URL VITE_WHITEBOARD_APP_URL VITE_OSIONOS_IDE_URL OSIONOS_IDE_TOKEN_SECRET OSIONOS_IDE_ACCESS; do
+  grep -qE '^ +VITE_MAIL_APP_URL: \$\{PUBLIC_MAIL_ORIGIN:-\}$' "$overlay"
+  grep -qE '^ +VITE_CALENDAR_APP_URL: \$\{PUBLIC_CALENDAR_ORIGIN:-\}$' "$overlay"
+  for key in VITE_WHITEBOARD_APP_URL VITE_OSIONOS_IDE_URL OSIONOS_IDE_TOKEN_SECRET OSIONOS_IDE_ACCESS; do
     grep -qE "^ +$key: \"\"$" "$overlay" || { echo "overlay does not empty $key" >&2; return 1; }
   done
 }
