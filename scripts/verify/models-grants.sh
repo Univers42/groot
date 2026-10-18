@@ -3,8 +3,8 @@
 #                                                                              #
 #    models-grants.sh                                                          #
 #                                                                              #
-#    Prove every public.osionos_* relation is reachable by service_role        #
-#    (the bridge) and by nothing else, on two throwaway databases.             #
+#    Prove every public.osionos_* relation and auth_session_cutoffs is        #
+#    reachable by service_role and by nothing else, on two throwaway DBs.      #
 #                                                                              #
 # **************************************************************************** #
 #
@@ -19,12 +19,14 @@
 #   fresh   roles -> grobase 001_initial_schema + 012 realtime hook -> shim -> runner -> checks
 #   legacy  roles -> the pre-1e407614 default privileges -> 001 -> shim -> runner
 #           -> an old-bootstrap boot (blanket GRANT, DEFAULT revoked) -> runner -> checks
-#   Checks: c no anon/authenticated privilege on an osionos_% relation · d no policy
-#   for PUBLIC/anon/authenticated · e1/e2 service_role has full CRUD and round-trips a
-#   row · f six probes refused with 42501 · h no SECURITY DEFINER osionos_% function
+#   Checks: c no anon/authenticated privilege on an osionos_% relation or on
+#   auth_session_cutoffs · d no policy for PUBLIC/anon/authenticated · e1/e2 service_role
+#   has full CRUD and round-trips a row · e3 it upserts a session cut-off as the
+#   auth-gateway does · e4 a late, older upsert leaves the newer cut-off in place · f six probes, and S1-S3 on auth_session_cutoffs, refused with 42501 · h no SECURITY DEFINER osionos_% function
 #   they may execute · g a second runner pass changes no ACL, policy or RLS flag ·
 #   n the final notifications type CHECK admits every type the models files declare ·
-#   r no public table keeps a realtime_notify() trigger (it broadcasts rows past every grant) ·
+#   r no public table keeps a realtime_notify() trigger (it broadcasts rows past every grant),
+#   and r-cutoffs asserts it for auth_session_cutoffs by name ·
 #   rt grobase's CREATE TABLE hook that re-arms new tables exists and is disabled
 #
 # ISOLATION
@@ -165,12 +167,13 @@ check_count() {
 	fi
 }
 
+# check_svc <scenario> <id> <label> — a `<label>|<count>` row from checks.sql that must be 1.
 check_svc() {
-	n="$(grep '^svc_rows|' "${WORK}/checks-$1.out" | cut -d'|' -f2 || true)"
+	n="$(grep "^$3|" "${WORK}/checks-$1.out" | cut -d'|' -f2 || true)"
 	if [ "${n}" = "1" ]; then
-		pass "$1" "e2" "1"
+		pass "$1" "$2" "1"
 	else
-		fail "$1" "e2" "bridge round trip saw ${n:-no} row(s)"
+		fail "$1" "$2" "service_role round trip ($3) saw ${n:-no} row(s)"
 	fi
 }
 
@@ -237,16 +240,22 @@ run_checks() {
 	check_count "$1" c privileged
 	check_count "$1" d member_policies
 	check_count "$1" e1 service_role_gaps
-	check_svc "$1"
+	check_svc "$1" e2 svc_rows
+	check_svc "$1" e3 svc_cutoff
+	check_svc "$1" e4 svc_cutoff_monotonic
 	probe "$1" T1 authenticated "SELECT count(*) FROM public.osionos_pages"
 	probe "$1" T2 authenticated "DELETE FROM public.osionos_pages"
 	probe "$1" T3 authenticated "UPDATE public.osionos_pages SET owner_id='cccccccc-cccc-cccc-cccc-cccccccccccc', visibility='public'"
 	probe "$1" V1 anon "SELECT user_id, display_name FROM public.osionos_directory"
 	probe "$1" V4 anon "UPDATE public.osionos_directory SET display_name='x'"
 	probe "$1" V5 anon "DELETE FROM public.osionos_directory"
+	probe "$1" S1 authenticated "SELECT user_id, sessions_valid_after FROM public.auth_session_cutoffs"
+	probe "$1" S2 anon "INSERT INTO public.auth_session_cutoffs (user_id) VALUES ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb')"
+	probe "$1" S3 authenticated "UPDATE public.auth_session_cutoffs SET sessions_valid_after = 'epoch'"
 	check_count "$1" h secdef_exec
 	check_count "$1" n notify_types_missing
 	check_count "$1" r realtime_triggers
+	check_count "$1" r-cutoffs cutoff_realtime_triggers
 	check_count "$1" rt realtime_event_trigger
 	check_idempotent "$1"
 }
