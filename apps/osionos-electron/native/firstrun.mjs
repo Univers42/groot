@@ -30,6 +30,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // earlier files and older boots granted, closing /rest/v1 and /graphql/v1 for
 // osionos_* to anon and authenticated.
 const SERVICE_ROLE_ONLY = "osionos-service-role-only-migration.sql";
+const AUTH_SESSION_CUTOFFS = "auth-session-cutoffs.sql";
 const MIGRATIONS = [
   "user.sql",
   "gdpr-migration.sql",
@@ -100,6 +101,19 @@ export async function firstRun(cfg) {
     }
     await client.query(`ALTER ROLE authenticator LOGIN PASSWORD '${secrets.authenticatorPassword}'`);
     return { secrets, bootstrapped };
+  } finally {
+    await client.end();
+  }
+}
+
+// Applied on every boot, AFTER gotrue: auth_session_cutoffs references auth.users, which
+// only gotrue's own migrations create, so it cannot sit in MIGRATIONS. The bridge enforces
+// cutoffs whenever it has a service key and BaaS URL and answers 503 until it can read this
+// table, so a desktop install without it would serve nothing. The file is idempotent.
+export async function applyAuthSessionCutoffs(cfg) {
+  const client = await connectWithRetry(cfg);
+  try {
+    await client.query(readFileSync(join(cfg.migrationsDir, AUTH_SESSION_CUTOFFS), "utf8"));
   } finally {
     await client.end();
   }
