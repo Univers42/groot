@@ -33,6 +33,7 @@ import { createShapeViolation, execShapeViolation, shapeLimits } from "./create-
 import { INIT_PATH_RE, initShapeViolation } from "./init-shape.mjs";
 import { createLedger } from "./uid-ledger.mjs";
 import { UID_PATH, handleUidRequest } from "./uid-endpoint.mjs";
+import { createAudit } from "./audit.mjs";
 import { findDuplicateKey } from "./json-guard.mjs";
 import { START_PATH_RE, inspectRuntime, pinRuntime } from "./runtime-pin.mjs";
 import { unsafeNetworkBody, unsafeVolumeBody } from "./volume-shape.mjs";
@@ -46,6 +47,7 @@ const INIT_ID = "ideinit-[0-9a-f]{32}";
 const EXEC_PATH = new RegExp(`^/(v[\\d.]+/)?containers/${ID}/exec$`);
 const MANAGED_LABEL = "osio.ide.managed";
 const LIMITS = shapeLimits(process.env);
+const audit = createAudit();
 const ledger = createLedger({ file: process.env.IDE_UID_LEDGER || "/ledger/uid-ledger.jsonl" });
 
 // Allowed (METHOD, path-regex). Anything not listed is denied.
@@ -130,7 +132,7 @@ function deny(res, code, message) {
 
 // A vetted body goes out as `payload` with its own framing: the client's Content-Length,
 // Transfer-Encoding and Content-Encoding described bytes the daemon will no longer receive.
-function forward(clientReq, clientRes, payload) {
+function forward(clientReq, clientRes, payload, body) {
   const headers = { ...clientReq.headers, host: "docker" };
   if (payload) {
     delete headers["transfer-encoding"];
@@ -140,6 +142,7 @@ function forward(clientReq, clientRes, payload) {
   const upstream = http.request(
     { socketPath: DOCKER_SOCK, method: clientReq.method, path: clientReq.url, headers },
     (upRes) => {
+      audit.record(clientReq.method, clientReq.url, { status: upRes.statusCode, headers: clientReq.headers, body });
       clientRes.writeHead(upRes.statusCode ?? 502, upRes.headers);
       upRes.pipe(clientRes);
     },
@@ -176,7 +179,7 @@ function vetBody(req, res, vet, cap) {
       if (bad) return deny(res, 403, `create rejected: ${bad}`);
       // What was vetted is what is sent: the re-serialized object, never the client's bytes (K12).
       const sent = LIMITS.requiredRuntime && /\/containers\/create/.test(req.url) ? pinRuntime(body, LIMITS.requiredRuntime) : body;
-      forward(req, res, Buffer.from(JSON.stringify(sent)));
+      forward(req, res, Buffer.from(JSON.stringify(sent)), sent);
     })().catch((error) => {
       process.stderr.write(`[ide-socket-proxy] vet/forward failed: ${error?.code ?? error?.message ?? "error"}\n`);
       if (!res.headersSent) deny(res, 502, "proxy error");
@@ -186,10 +189,11 @@ function vetBody(req, res, vet, cap) {
 }
 
 /** Start only a container the daemon reports under the required runtime (K11): a mismatch, or an
- *  inspect that gives no answer, is a refusal. */
+ *  inspect that gives no answer, is a refusal and an audit line. */
 async function startIfRuntimeMatches(req, res) {
   const name = START_PATH_RE.exec(req.url)[1];
   if (await inspectRuntime(DOCKER_SOCK, name) === LIMITS.requiredRuntime) return forward(req, res, null);
+  audit.record(req.method, req.url, { status: 403, headers: req.headers, reason: "runtime-mismatch" });
   deny(res, 403, `start rejected: runtime is not ${LIMITS.requiredRuntime}`);
 }
 
