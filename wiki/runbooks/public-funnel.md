@@ -58,6 +58,24 @@ Surface checks (`scripts/lib/public-verify-surfaces.sh`):
   machine in the Mail, Calendar and Whiteboard tabs. An image that cannot be scanned is a FAIL.
   It misses a URL built at run time or written as `127.0.0.1`.
 
+## Mail and Calendar previews (second node)
+
+Static previews of Mail and Calendar, no bridge and no account, served by a second Funnel node
+(`osionos-apps`) on its own hostname: Mail on 443, Calendar on 8443
+([ADR 0020](../../docs/adr/0020-mail-and-calendar-ship-public-as-static-previews-on-a-second-funnel-node.md)).
+
+1. Mint a Tailscale auth key: single-use, tagged (the tag's ACL needs the `funnel` nodeAttr),
+   pre-approved, NOT ephemeral. Then `pbpaste | bash scripts/public-node.sh start` (the key is read
+   from stdin only). `bash scripts/public-node.sh status` prints the DNS name and the Funnel ports.
+2. In `.env.public` set `PUBLIC_MAIL_ORIGIN=https://<node dns name>` and
+   `PUBLIC_CALENDAR_ORIGIN=https://<node dns name>:8443` (both or neither; the host must not be
+   `PUBLIC_ORIGIN`'s). Rebuild the images (`make public-up` builds the osionos app with both URLs).
+3. `bash scripts/public-funnel.sh up apps` runs `verify --pre`, opens 443 -> 127.0.0.1:3102 and
+   8443 -> 127.0.0.1:3103 on the apps node, then verifies again. `down` resets both nodes.
+
+With either origin set, `up 443` and `up all` FAIL their post-open verify until the apps node
+serves. The marketplace rows are changed by a user-run SQL script (dry run unless `-v apply=1`).
+
 ## Rollback
 
 `make public-down` runs `tailscale funnel reset`: nothing is reachable from the internet. The

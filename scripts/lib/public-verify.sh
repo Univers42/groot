@@ -25,8 +25,12 @@ expect() {
 BUNDLE_SECRET_KEYS="JWT_SECRET SERVICE_ROLE_KEY OSIONOS_BAAS_API_KEY VITE_BAAS_REALTIME_TOKEN OSIONOS_APP_SESSION_SECRET OSIONOS_BRIDGE_SHARED_SECRET AUTH_LINK_SIGNING_KEY"
 BRIDGE_MUST_BE_EMPTY="OSIONOS_AGENT_CLAUDE OSIONOS_IDE_ALLOWED_SUBJECTS OSIONOS_RUNNER_URL OSIONOS_SQL_RO OSIONOS_IDE_TOKEN_SECRET"
 
+# shellcheck source=scripts/lib/public-tailnet.sh
+. "$(dirname "${BASH_SOURCE[0]}")/public-tailnet.sh"
 # shellcheck source=scripts/lib/public-verify-surfaces.sh
 . "$(dirname "${BASH_SOURCE[0]}")/public-verify-surfaces.sh"
+# shellcheck source=scripts/lib/public-verify-apps.sh
+. "$(dirname "${BASH_SOURCE[0]}")/public-verify-apps.sh"
 
 # host part of PUBLIC_ORIGIN (https://host, no port, no path).
 origin_host() {
@@ -38,16 +42,6 @@ origin_host() {
 
 is_int_between() { [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -ge "$2" ] && [ "$1" -le "$3" ]; }
 
-# Open Funnel ports, comma-joined ascending; fails when tailscale cannot answer.
-# Caveat: reads .AllowFunnel from `funnel status --json` (tailscale 1.104); another schema
-# reads as "nothing open", which the explicit-scope form of verify turns into a FAIL.
-funnel_ports() {
-  local json
-  json=$(ts funnel status --json 2>/dev/null) || return 1
-  printf '%s' "$json" | jq -r '(.AllowFunnel // {}) | to_entries[] | select(.value == true) | .key | split(":") | last' |
-    sort -n | paste -sd, -
-}
-
 check_node_name() {
   local host have
   host=$(origin_host)
@@ -57,7 +51,8 @@ check_node_name() {
   else fail node-name "node DNS name is '${have:-unreadable}', PUBLIC_ORIGIN wants '$host.'"; fi
 }
 
-# $1: 443 | all | empty (either known set is accepted; an empty set is then a SKIP).
+# $1: 443 | all | empty (either known set is accepted; an empty set is then a SKIP). The scope
+# `apps` concerns the other node and is read like empty here.
 check_exposure() {
   local have want
   have=$(funnel_ports) || { fail exposure "cannot read the funnel status"; return; }
@@ -73,10 +68,10 @@ check_exposure() {
   else fail exposure "funnel ports '$have', expected 443 alone or 443,8443,10000"; fi
 }
 
-# Count of files in IMAGE holding the value of the exported V; docker reads V from our env,
-# so the value is on no command line.
+# Count of files in IMAGE holding the exported V, as a fixed string (default) or, with $2=E, as an
+# extended regex; docker reads V from our env, so the value is on no command line.
 bundle_hits() {
-  docker run --rm -e V --entrypoint sh "$1" -c 'grep -rlF -- "$V" /usr/share/nginx/html /app /srv 2>/dev/null | wc -l' 2>/dev/null | tr -d '[:space:]'
+  docker run --rm -e V --entrypoint sh "$1" -c "grep -rl${2:-F} -- \"\$V\" /usr/share/nginx/html /app /srv 2>/dev/null | wc -l" 2>/dev/null | tr -d '[:space:]'
 }
 
 # A secret value from one env file, scanned in both public images.
@@ -181,10 +176,12 @@ check_edge() {
 # internal-error alert while every other check passes (measured 2026-10-18).
 # Caveat: curl exit 5 or 7 means the proxy itself is unreachable (a kernel-mode tailscaled has
 # none), which is a SKIP; it proves the node's cert, not that every Funnel relay routes to it.
-check_tls() {
-  local host port rc
-  host=$(origin_host)
-  for port in $(funnel_ports | tr ',' ' '); do
+check_tls() { tls_probe "$(origin_host)" "$(funnel_ports || true)"; }
+
+# $1 host, $2 comma-joined ports
+tls_probe() {
+  local host=$1 port rc
+  for port in $(tr ',' ' ' <<<"$2"); do
     rc=0
     curl -sS --max-time 30 -x "$TS_PROXY" -o /dev/null "https://$host:$port/" 2>/dev/null || rc=$?
     case $rc in
@@ -232,6 +229,7 @@ run_verify() {
   check_ide_access
   check_gateway_env
   check_edge
+  check_apps "$1" "${2:-}"
   printf 'verify (%s): %d pass, %d fail, %d skip\n' "$1" "$V_PASS" "$V_FAIL" "$V_SKIP"
   [ "$V_FAIL" -eq 0 ]
 }
