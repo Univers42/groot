@@ -8,30 +8,7 @@ SET LOCAL search_path = public;
 
 CREATE TABLE IF NOT EXISTS auth_audit_events (
   id BIGSERIAL PRIMARY KEY,
-  event_type VARCHAR(64) NOT NULL CHECK (event_type IN (
-    'register_requested',
-    'register_failed',
-    'register_dev_confirmed',
-    'register_dev_failed',
-    'login_success',
-    'login_failed',
-    'login_alert_sent',
-    'login_alert_failed',
-    'login_alert_skipped',
-    'login_turnstile_failed',
-    'register_turnstile_failed',
-    'recover_turnstile_failed',
-    'password_recovery_requested',
-    'newsletter_optin_requested',
-    'password_changed',
-    'refresh_success',
-    'refresh_failed',
-    'logout',
-    'mfa_totp_enroll_started',
-    'mfa_totp_verified',
-    'webauthn_challenge_started',
-    'ip_shift_detected'
-  )),
+  event_type VARCHAR(64) NOT NULL,
   user_id INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
   email VARCHAR(255),
   ip_address VARCHAR(255),
@@ -44,43 +21,82 @@ CREATE INDEX IF NOT EXISTS auth_audit_events_event_created_idx ON auth_audit_eve
 CREATE INDEX IF NOT EXISTS auth_audit_events_email_created_idx ON auth_audit_events (lower(email), created_at DESC);
 
 ALTER TABLE auth_audit_events DROP CONSTRAINT IF EXISTS auth_audit_events_event_type_check;
+-- The auth gateway (apps/opposite-osiris) is the only writer of these events and this list is the
+-- only copy of what it may write: auth_record_audit_event keeps none. The test guarding it against
+-- the gateway source is scripts/tests/auth-audit-event-types.bats. Keep one name and one comma per
+-- line: a missing comma concatenates two names into one string constant, with no syntax error.
 ALTER TABLE auth_audit_events ADD CONSTRAINT auth_audit_events_event_type_check CHECK (event_type IN (
-    'register_requested',
-    'register_failed',
-    'register_dev_confirmed',
-    'register_dev_failed',
-    'account_created_email_sent',
     'account_created_email_failed',
+    'account_created_email_sent',
+    'account_exists_email_sent',
+    'account_mail_throttled',
+    'auth_link_refused',
     'email_verification_sent',
-    'login_success',
-    'login_failed',
-    'login_alert_sent',
+    'email_verified',
+    'ip_shift_detected',
     'login_alert_failed',
+    'login_alert_sent',
     'login_alert_skipped',
     'login_alert_suppressed',
+    'login_approve_approved',
+    'login_approve_capped',
+    'login_approve_denied',
+    'login_approve_mismatch',
+    'login_approve_released',
+    'login_approve_requested',
+    'login_approve_send_failed',
+    'login_email_unconfirmed',
+    'login_failed',
+    'login_locked',
+    'login_lockout_triggered',
+    'login_otp_expired',
+    'login_otp_failed',
+    'login_otp_locked',
+    'login_otp_request_failed',
+    'login_otp_requested',
+    'login_otp_verified',
+    'login_success',
     'login_turnstile_failed',
-    'register_turnstile_failed',
-    'recover_turnstile_failed',
-    'password_recovery_requested',
-    'password_recovery_email_sent',
-    'password_recovery_link_failed',
-    'newsletter_optin_requested',
-    'newsletter_confirmation_email_sent',
-    'newsletter_confirmation_email_failed',
-    'newsletter_welcome_email_sent',
-    'newsletter_welcome_email_failed',
-    'newsletter_unsubscribe_email_sent',
-    'newsletter_unsubscribe_email_failed',
-    'osionos_bridge_success',
-    'osionos_bridge_failed',
-    'password_changed',
-    'refresh_success',
-    'refresh_failed',
     'logout',
+    'mail_job_failed',
+    'mail_queue_overflow',
+    'mail_suppressed_exempt',
     'mfa_totp_enroll_started',
     'mfa_totp_verified',
-    'webauthn_challenge_started',
-    'ip_shift_detected'
+    'newsletter_confirmation_email_failed',
+    'newsletter_confirmation_email_sent',
+    'newsletter_optin_requested',
+    'newsletter_target_throttled',
+    'newsletter_turnstile_failed',
+    'newsletter_unsubscribe_email_failed',
+    'newsletter_unsubscribe_email_sent',
+    'newsletter_welcome_email_failed',
+    'newsletter_welcome_email_sent',
+    'osionos_bridge_failed',
+    'osionos_bridge_redirect_rejected',
+    'osionos_bridge_success',
+    'password_changed',
+    'password_changed_email_sent',
+    'password_recovery_email_sent',
+    'password_recovery_link_failed',
+    'password_recovery_requested',
+    'password_reset_completed',
+    'password_reset_cutoff_failed',
+    'password_reset_logout_failed',
+    'recover_turnstile_failed',
+    'refresh_failed',
+    'refresh_success',
+    'register_dev_confirmed',
+    'register_dev_failed',
+    'register_failed',
+    'register_profile_failed',
+    'register_requested',
+    'register_turnstile_failed',
+    'resend_turnstile_failed',
+    'signup_refused_allowlist',
+    'signup_refused_exempt',
+    'verification_resend_link_failed',
+    'webauthn_challenge_started'
   ));
 
 COMMENT ON TABLE auth_audit_events IS 'security_monitoring: sensitive authentication events, failed logins, password recovery, token refreshes, MFA hooks and IP shifts; retain for 13 months unless a documented legal hold applies.';
@@ -95,62 +111,30 @@ DECLARE
   normalized_email TEXT;
   matched_user_id INTEGER;
   event_id BIGINT;
+  violated_constraint TEXT;
 BEGIN
   normalized_email := lower(NULLIF(trim(email), ''));
 
-  IF event_type NOT IN (
-    'register_requested',
-    'register_failed',
-    'register_dev_confirmed',
-    'register_dev_failed',
-    'account_created_email_sent',
-    'account_created_email_failed',
-    'email_verification_sent',
-    'login_success',
-    'login_failed',
-    'login_alert_sent',
-    'login_alert_failed',
-    'login_alert_skipped',
-    'login_alert_suppressed',
-    'login_turnstile_failed',
-    'register_turnstile_failed',
-    'recover_turnstile_failed',
-    'password_recovery_requested',
-    'password_recovery_email_sent',
-    'password_recovery_link_failed',
-    'newsletter_optin_requested',
-    'newsletter_confirmation_email_sent',
-    'newsletter_confirmation_email_failed',
-    'newsletter_welcome_email_sent',
-    'newsletter_welcome_email_failed',
-    'newsletter_unsubscribe_email_sent',
-    'newsletter_unsubscribe_email_failed',
-    'osionos_bridge_success',
-    'osionos_bridge_failed',
-    'password_changed',
-    'refresh_success',
-    'refresh_failed',
-    'logout',
-    'mfa_totp_enroll_started',
-    'mfa_totp_verified',
-    'webauthn_challenge_started',
-    'ip_shift_detected'
-  ) THEN
-    RAISE EXCEPTION 'Unsupported audit event type' USING ERRCODE = '22023';
-  END IF;
-
   SELECT id INTO matched_user_id FROM users WHERE lower(users.email) = normalized_email LIMIT 1;
 
-  INSERT INTO auth_audit_events (event_type, user_id, email, ip_address, user_agent, details)
-  VALUES (
-    event_type,
-    matched_user_id,
-    normalized_email,
-    COALESCE(current_setting('request.header.x-forwarded-for', true), current_setting('request.header.x-real-ip', true)),
-    current_setting('request.header.user-agent', true),
-    COALESCE(details, '{}'::jsonb)
-  )
-  RETURNING id INTO event_id;
+  BEGIN
+    INSERT INTO auth_audit_events (event_type, user_id, email, ip_address, user_agent, details)
+    VALUES (
+      event_type,
+      matched_user_id,
+      normalized_email,
+      COALESCE(current_setting('request.header.x-forwarded-for', true), current_setting('request.header.x-real-ip', true)),
+      current_setting('request.header.user-agent', true),
+      COALESCE(details, '{}'::jsonb)
+    )
+    RETURNING id INTO event_id;
+  EXCEPTION WHEN check_violation THEN
+    GET STACKED DIAGNOSTICS violated_constraint = CONSTRAINT_NAME;
+    IF violated_constraint = 'auth_audit_events_event_type_check' THEN
+      RAISE EXCEPTION 'Unsupported audit event type' USING ERRCODE = '22023';
+    END IF;
+    RAISE;
+  END;
 
   RETURN jsonb_build_object('status', 'recorded', 'event_id', event_id);
 END;
