@@ -11,9 +11,18 @@
 
 V_PASS=0 V_FAIL=0 V_SKIP=0
 
-pass() { V_PASS=$((V_PASS + 1)); printf 'PASS  %-14s %s\n' "$1" "$2"; }
-fail() { V_FAIL=$((V_FAIL + 1)); printf 'FAIL  %-14s %s\n' "$1" "$2"; }
-skip() { V_SKIP=$((V_SKIP + 1)); printf 'SKIP  %-14s %s\n' "$1" "$2"; }
+pass() {
+  V_PASS=$((V_PASS + 1))
+  printf 'PASS  %-14s %s\n' "$1" "$2"
+}
+fail() {
+  V_FAIL=$((V_FAIL + 1))
+  printf 'FAIL  %-14s %s\n' "$1" "$2"
+}
+skip() {
+  V_SKIP=$((V_SKIP + 1))
+  printf 'SKIP  %-14s %s\n' "$1" "$2"
+}
 # expect NAME PASS-MESSAGE FAIL-MESSAGE COMMAND...: one line, PASS when COMMAND succeeds.
 expect() {
   local name=$1 ok=$2 ko=$3
@@ -47,9 +56,13 @@ is_int_between() { [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -ge "$2" ] && [ "$1" -le "$3
 check_node_name() {
   local host have
   host=$(origin_host)
-  [ -n "$host" ] || { fail node-name "PUBLIC_ORIGIN is not an https://host origin in .env.public"; return; }
+  [ -n "$host" ] || {
+    fail node-name "PUBLIC_ORIGIN is not an https://host origin in .env.public"
+    return
+  }
   have=$(node_dns ts || true)
-  if [ "$have" = "$host." ]; then pass node-name "this node is $have"
+  if [ "$have" = "$host." ]; then
+    pass node-name "this node is $have"
   else fail node-name "node DNS name is '${have:-unreadable}', PUBLIC_ORIGIN wants '$host.'"; fi
 }
 
@@ -57,7 +70,10 @@ check_node_name() {
 # `apps` concerns the other node and is read like empty here.
 check_exposure() {
   local have want
-  have=$(funnel_ports) || { fail exposure "cannot read the funnel status"; return; }
+  have=$(funnel_ports) || {
+    fail exposure "cannot read the funnel status"
+    return
+  }
   case "$1" in
     443) want=443 ;;
     all) want=443,8443,10000 ;;
@@ -65,8 +81,10 @@ check_exposure() {
   esac
   if [ -n "$want" ]; then
     expect exposure "funnel ports: $have" "funnel ports '${have:-none}', expected exactly $want" [ "$have" = "$want" ]
-  elif [ -z "$have" ]; then skip exposure "funnel closed: nothing is exposed"
-  elif [ "$have" = 443 ] || [ "$have" = 443,8443,10000 ]; then pass exposure "funnel ports: $have"
+  elif [ -z "$have" ]; then
+    skip exposure "funnel closed: nothing is exposed"
+  elif [ "$have" = 443 ] || [ "$have" = 443,8443,10000 ]; then
+    pass exposure "funnel ports: $have"
   else fail exposure "funnel ports '$have', expected 443 alone or 443,8443,10000"; fi
 }
 
@@ -83,7 +101,8 @@ scan_secret() {
     hits=$(V="$value" bundle_hits "$image" || true)
     if [ "$hits" = 0 ]; then continue; fi
     bad=1
-    if [ -n "$hits" ]; then fail bundle-secret "$key (from ${file##*/}) found in $hits file(s) of $image"
+    if [ -n "$hits" ]; then
+      fail bundle-secret "$key (from ${file##*/}) found in $hits file(s) of $image"
     else fail bundle-secret "$key (from ${file##*/}) could not be scanned in $image"; fi
   done
   [ "$bad" = 1 ] || pass bundle-secret "$key (from ${file##*/}): 0 files in $APP_IMAGE and $WEB_IMAGE"
@@ -110,13 +129,17 @@ container_env() { docker exec "$1" printenv "$2" 2>/dev/null || true; }
 check_bridge_env() {
   local c key have want
   c=$(svc_container osionos-bridge)
-  [ -n "$c" ] || { fail bridge-env "osionos-bridge is not running"; return; }
+  [ -n "$c" ] || {
+    fail bridge-env "osionos-bridge is not running"
+    return
+  }
   for key in $BRIDGE_MUST_BE_EMPTY; do
     expect bridge-env "$key is empty" "$key is set (value withheld)" [ -z "$(container_env "$c" "$key")" ]
   done
   want=$(penv OSIONOS_ADMIN_EMAILS || true)
   have=$(container_env "$c" OSIONOS_ADMIN_EMAILS)
-  if [ -n "$want" ] && [ "$have" = "$want" ]; then pass bridge-env "OSIONOS_ADMIN_EMAILS equals .env.public"
+  if [ -n "$want" ] && [ "$have" = "$want" ]; then
+    pass bridge-env "OSIONOS_ADMIN_EMAILS equals .env.public"
   else fail bridge-env "OSIONOS_ADMIN_EMAILS differs from .env.public (or is empty there)"; fi
   want="$(penv PUBLIC_ORIGIN || true):8443"
   expect bridge-env "OSIONOS_ALLOWED_ORIGIN is the app origin" "OSIONOS_ALLOWED_ORIGIN is not $want" [ "$(container_env "$c" OSIONOS_ALLOWED_ORIGIN)" = "$want" ]
@@ -145,15 +168,20 @@ check_verification_exempt() {
 check_gateway_env() {
   local c hops logs
   c=$(svc_container auth-gateway)
-  [ -n "$c" ] || { fail gateway-env "auth-gateway is not running"; return; }
+  [ -n "$c" ] || {
+    fail gateway-env "auth-gateway is not running"
+    return
+  }
   expect gateway-env "AUTH_DEMO_INSECURE is not true" "AUTH_DEMO_INSECURE is true" [ "$(container_env "$c" AUTH_DEMO_INSECURE)" != true ]
   expect gateway-env "TURNSTILE_BYPASS_LOCAL=false" "TURNSTILE_BYPASS_LOCAL is not false" [ "$(container_env "$c" TURNSTILE_BYPASS_LOCAL)" = false ]
   expect gateway-env "AUTH_REQUIRE_EMAIL_VERIFICATION=true" "AUTH_REQUIRE_EMAIL_VERIFICATION is not true" [ "$(container_env "$c" AUTH_REQUIRE_EMAIL_VERIFICATION)" = true ]
   check_verification_exempt "$c"
   hops=$(penv AUTH_TRUSTED_PROXY_HOPS || true)
   logs=$(docker logs "$c" 2>&1 || true)
-  if [ -z "$hops" ]; then fail gateway-env "AUTH_TRUSTED_PROXY_HOPS is unset in .env.public"
-  elif grep -qF "trusted proxy hops: $hops)" <<<"$logs"; then pass gateway-env "boot log: trusted proxy hops: $hops"
+  if [ -z "$hops" ]; then
+    fail gateway-env "AUTH_TRUSTED_PROXY_HOPS is unset in .env.public"
+  elif grep -qF "trusted proxy hops: $hops)" <<<"$logs"; then
+    pass gateway-env "boot log: trusted proxy hops: $hops"
   else fail gateway-env "boot log has no 'trusted proxy hops: $hops'"; fi
   # The listen line prints the store before its async Redis connect finishes, so a healthy
   # gateway says "store: memory" there and "connected to Redis" a moment later (measured 2026-10-18).
@@ -187,16 +215,19 @@ tls_probe() {
     rc=0
     curl -sS --max-time 30 -x "$TS_PROXY" -o /dev/null "https://$host:$port/" 2>/dev/null || rc=$?
     case $rc in
-    0) pass "$label" "https://$host:$port serves a valid certificate" ;;
-    5 | 7) skip "$label" "cannot reach the proxy $TS_PROXY (curl $rc): the certificate is unchecked" ;;
-    *) fail "$label" "https://$host:$port: no valid TLS through $TS_PROXY (curl $rc); tailscaled needs --statedir to keep a cert" ;;
+      0) pass "$label" "https://$host:$port serves a valid certificate" ;;
+      5 | 7) skip "$label" "cannot reach the proxy $TS_PROXY (curl $rc): the certificate is unchecked" ;;
+      *) fail "$label" "https://$host:$port: no valid TLS through $TS_PROXY (curl $rc); tailscaled needs --statedir to keep a cert" ;;
     esac
   done
 }
 
 check_env_file() {
   local mode
-  if [ ! -f "$ENV_FILE" ]; then fail env-file ".env.public is missing (make public-env)"; return; fi
+  if [ ! -f "$ENV_FILE" ]; then
+    fail env-file ".env.public is missing (make public-env)"
+    return
+  fi
   expect env-file ".env.public is git-ignored" ".env.public is not git-ignored" git -C "$GIT_REPO" check-ignore -q -- "$ENV_FILE"
   mode=$(stat -c %a "$ENV_FILE")
   expect env-file ".env.public mode is 600" ".env.public mode is $mode, expected 600" [ "$mode" = 600 ]
