@@ -17,7 +17,7 @@ e2e-preflight:
 
 e2e: e2e-preflight
 ## Run the Docker-first e2e smoke (DW3/DW8/DW9/DW10) against the live stack. Leaves e2e- boards: follow with make e2e-clean.
-	bash tests/e2e/run.sh
+	bash tests/e2e/run.sh $(E2E_SPECS)
 
 e2e-clean:
 ## Soft-delete every drawnosaurus board titled e2e-* via the API container; refuses if any title only nearly matches.
