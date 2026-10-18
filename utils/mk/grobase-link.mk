@@ -35,8 +35,14 @@ LINK_COMPOSE_ENV = GROBASE_LINK_DIR='$(GROBASE_LINK_DIR)' GROBASE_LINK_HOST_PORT
 	GROBASE_LINK_UID="$(if $(DOCKER_ROOTLESS),0,$$(id -u))" GROBASE_LINK_GID="$(if $(DOCKER_ROOTLESS),0,$$(id -g))"
 LINK_COMPOSE = $(LINK_COMPOSE_ENV) docker compose --env-file ./.env.local
 
-link:
-## Reach grobase wherever it runs: open the path, derive ./.env.local from that grobase's secrets, start the relay (in direct mode with the local Redis/Mailpit stand-ins and the loopback Kong port, plus the IDE relay when GROBASE_IDE_SSH linked it; or stop it in local mode), then verify it from inside every frontend already running. The target and its kind come from GROBASE_TARGET=auto|local|ssh://…|<alias>|http(s)://… on this line, else from ./.env.grobase-link.
+##@ Link (grobase anywhere)
+link: ## Open the path to grobase, derive ./.env.local, start the relay, verify
+## Usage: make link [GROBASE_TARGET=auto|local|ssh://…|<alias>|http(s)://…]
+## Reaches grobase wherever it runs: opens the path, derives ./.env.local from that grobase's
+## secrets, starts the relay (in direct mode with the local Redis/Mailpit stand-ins and the loopback
+## Kong port, plus the IDE relay when GROBASE_IDE_SSH linked it; or stops it in local mode), then
+## verifies it from inside every frontend already running. The target and its kind come from
+## GROBASE_TARGET on this line, else from ./.env.grobase-link.
 	@$(LINK_COMPOSE) rm -sf grobase-link-hostport >/dev/null 2>&1 || true # an ssh link forwards that port itself
 	@$(LINK_SCRIPT) up
 	@if [ "$$($(LINK_SCRIPT) mode)" = local ]; then \
@@ -68,25 +74,29 @@ link:
 	fi
 	@LINK_VERIFY_TRUST=note $(LINK_VERIFY)
 
-link-status:
-## Is the link open, and does Kong answer through it.
+link-status: ## Show whether the link is open and Kong answers through it
 	@$(LINK_SCRIPT) status
 
-link-verify:
-## Prove the link from where it matters: one request per grobase name (Kong, Redis, Mailpit smtp+http, realtime) from inside every frontend on grobase's network, then the browser's path through the TLS edge; exit 1 on any FAIL.
+link-verify: ## Prove the link from inside every frontend; exit 1 on any FAIL
+## Sends one request per grobase name (Kong, Redis, Mailpit smtp+http, realtime) from inside every
+## frontend on grobase's network, then checks the browser's path through the TLS edge.
 	@$(LINK_VERIFY)
 
-link-down:
-## Close the link: stop the relay, the ssh master and its forwards. The frontends lose the backend until `make link` or `make backend-up`.
+link-down: ## Close the link: stop the relay, the ssh master and its forwards
+## The frontends lose the backend until `make link` or `make backend-up`.
 	@$(LINK_COMPOSE) rm -sf grobase-link grobase-link-redis grobase-link-mailpit grobase-link-hostport >/dev/null 2>&1 || true
 	@$(LINK_SCRIPT) down
 
-link-autostart:
-## Bring the link back on its own after a reboot, a data center restart or a network drop: systemd user units open it once the VM is up and a 2-minute timer re-opens it when link-status fails. LAN_IF=<iface> also keeps the WAF on the LAN (https://<LAN IP>:8443); with LAN_SSH=1, the VM's password ssh too (<LAN IP>:4242). Undo: make link-autostart-off.
+link-autostart: ## Reopen the link by itself after a reboot or network drop (systemd)
+## Usage: make link-autostart [LAN_IF=<iface>] [LAN_SSH=1]
+## Brings the link back after a reboot, a data center restart or a network drop: systemd user units
+## open it once the VM is up and a 2-minute timer re-opens it when link-status fails. LAN_IF=<iface>
+## also keeps the WAF on the LAN (https://<LAN IP>:8443); with LAN_SSH=1, the VM's password ssh too
+## (<LAN IP>:4242). Undo: make link-autostart-off.
 	@LAN_IF='$(LAN_IF)' LAN_SSH='$(LAN_SSH)' bash scripts/grobase-link-autostart.sh install
 
-link-autostart-off:
-## Remove the link-autostart units (the link itself stays open until make link-down).
+link-autostart-off: ## Remove the link-autostart units (the link stays open)
+## The link itself stays open until make link-down.
 	@bash scripts/grobase-link-autostart.sh remove
 
 # What `make all` does with models-migrate, driven over the link: groot's models/*.sql land
@@ -95,8 +105,9 @@ link-autostart-off:
 # ssh (one docker exec per file through docker's ssh transport, ~2 min).
 LINK_ON_TARGET = host="$$($(LINK_SCRIPT) docker-host)"; [ -z "$$host" ] || export DOCKER_HOST="$$host";
 
-link-models-migrate:
-## Apply groot's models/*.sql to the LINKED grobase's postgres (local = this daemon, ssh = the target's daemon through docker's ssh transport; direct mode has no database and refuses). Idempotent, part of link-frontends-up.
+link-models-migrate: ## Apply models/*.sql to the LINKED grobase's postgres
+## Local = this daemon, ssh = the target's daemon through docker's ssh transport; direct mode has no
+## database and refuses. Idempotent, part of link-frontends-up.
 	@$(LINK_ON_TARGET) $(MAKE) --no-print-directory models-migrate
 
 # What `make all` does with demo-login-ensure, driven over the link: the demo account in the
@@ -105,27 +116,33 @@ link-models-migrate:
 # is reached through the link's loopback port, the one this machine can open in every mode.
 # A grobase on another daemon is shared, so the first machine to set the password holds it
 # (DEMO_LOGIN_SHARED, scripts/demo-login-ensure.sh); DEMO_LOGIN_FORCE=1 takes it over.
-link-demo-login-ensure:
-## Set the demo account's password in the LINKED grobase to ./.env.local's DEMO_LOGIN_PASSWORD (make demo-login prints it), unless another linked machine holds it (DEMO_LOGIN_FORCE=1 takes it over). Idempotent, part of link-frontends-up.
+link-demo-login-ensure: ## Set the demo account's password in the LINKED grobase
+## Usage: make link-demo-login-ensure [DEMO_LOGIN_FORCE=1]
+## Sets it to ./.env.local's DEMO_LOGIN_PASSWORD (make demo-login prints it), unless another linked
+## machine holds it (DEMO_LOGIN_FORCE=1 takes it over). Idempotent, part of link-frontends-up.
 	@$(LINK_ON_TARGET) DEMO_LOGIN_SHARED="$${DOCKER_HOST:+1}" BAAS_URL='http://127.0.0.1:$(GROBASE_LINK_HOST_PORT)' sh scripts/demo-login-ensure.sh
 
 # What `make all` does with live-data-ensure, driven over the link: the app's API key is
 # verified (or issued) by the LINKED tenant-control, through the link's host-only socket, and
 # the demo rows are re-stamped onto it (2026-10-11: the VM's 1635 finance rows in mssql were
 # owned by another agency key, so the finance mount listed nothing).
-link-live-data-ensure:
-## Converge the app's live-database key and the demo rows' owner on the LINKED grobase (scripts/ensure-live-data-access.sh; ssh mode reaches tenant-control through the link). Idempotent, part of link-frontends-up.
+link-live-data-ensure: ## Fix the app's live-database key and demo rows' owner on the LINKED grobase
+## Converges both through scripts/ensure-live-data-access.sh (ssh mode reaches tenant-control
+## through the link). Idempotent, part of link-frontends-up.
 	@$(LINK_ON_TARGET) sock='$(GROBASE_LINK_DIR)/tenant-control-3022.sock'; \
 		[ ! -S "$$sock" ] || export TENANT_CONTROL_SOCKET="$$sock"; bash scripts/ensure-live-data-access.sh
 
-link-frontends-up: link link-models-migrate link-demo-login-ensure link-live-data-ensure link-frontends-start
-## Converge the LINKED grobase (link-models-migrate, link-demo-login-ensure, link-live-data-ensure), then link-frontends-start.
+link-frontends-up: link link-models-migrate link-demo-login-ensure link-live-data-ensure link-frontends-start ## Converge the LINKED grobase, then start the frontends against it
+## Runs link-models-migrate, link-demo-login-ensure and link-live-data-ensure, then
+## link-frontends-start.
 
 # The half that writes nothing to the data center: what an agent on another device may run
 # (wiki/runbooks/another-device.md §0). Before 2026-10-12 it existed only inside
 # link-frontends-up, so the device test rebuilt it by hand from this recipe.
-link-frontends-start: link
-## Build and start the root frontends here against the linked grobase without writing to it (frontends-up, in a non-local mode with the relay overlay and the vhost on LINK_VHOST_HTTPS_PORT), trust the local CA in this user's browser stores (no sudo; certs-trust-user), then verify the link and that trust from inside every frontend.
+link-frontends-start: link ## Start the frontends here against the linked grobase, writing nothing to it
+## Builds and starts the root frontends (frontends-up, in a non-local mode with the relay overlay
+## and the vhost on LINK_VHOST_HTTPS_PORT), trusts the local CA in this user's browser stores (no
+## sudo; certs-trust-user), then verifies the link and that trust from inside every frontend.
 	@if [ "$$($(LINK_SCRIPT) mode)" = local ]; then \
 		$(MAKE) --no-print-directory frontends-up certs-trust-user; \
 	else \
@@ -133,8 +150,8 @@ link-frontends-start: link
 	fi
 	@$(LINK_VERIFY)
 
-link-healthcheck:
-## link-verify, then the stack healthcheck with the backend probed through the link's loopback Kong port.
+link-healthcheck: ## Verify the link, then run the stack healthcheck through it
+## The backend is probed through the link's loopback Kong port.
 	@$(LINK_VERIFY)
 	@if [ "$$($(LINK_SCRIPT) mode)" = local ]; then \
 		$(MAKE) --no-print-directory healthcheck; \
@@ -144,10 +161,14 @@ link-healthcheck:
 
 # E2E_SPECS narrows the run (E2E_SPECS=specs/t43-landing-sign-in.spec.ts); empty = the suite.
 E2E_SPECS ?=
-link-e2e: link-healthcheck
-## link-healthcheck, then the Playwright smoke (tests/e2e) in its pinned container against the frontends served here through the linked grobase; the stack must already be up (link-frontends-up).
+link-e2e: link-healthcheck ## Run the Playwright smoke against the frontends served through the link
+## Usage: make link-e2e [E2E_SPECS=specs/t43-landing-sign-in.spec.ts]
+## Runs link-healthcheck first, then the Playwright smoke (tests/e2e) in its pinned container; the
+## stack must already be up (link-frontends-up). Empty E2E_SPECS runs the suite.
 	@bash tests/e2e/run.sh $(E2E_SPECS)
 
-link-paths:
-## Which ways this device reaches the grobase data center: each WAF URL (TLS verified against GROBASE_CA_FILE) and each ssh target (grobase's Kong running there). PATHS="url|ssh-target ..." overrides the configured ones.
+link-paths: ## List the ways this device reaches the grobase data center
+## Usage: make link-paths [PATHS="url|ssh-target ..."]
+## Checks each WAF URL (TLS verified against GROBASE_CA_FILE) and each ssh target (grobase's Kong
+## running there). PATHS overrides the configured ones.
 	@bash scripts/grobase-paths.sh $(PATHS)
