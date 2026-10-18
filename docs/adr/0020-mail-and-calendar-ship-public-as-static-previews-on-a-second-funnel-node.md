@@ -56,8 +56,9 @@
 ## Consequences
 
 - Mail and Calendar are previews: no account is connected and nothing is stored server-side.
-- With either origin set, `up 443` and `up all` fail their post-open verify (and reset) until the apps node
-  serves, because `exposure2` and `appenv` then need it.
+- With either origin set, `up 443` and `up all` fail their post-open verify, and every post-open failure
+  resets both nodes, until the apps node serves, because `exposure2` and `appenv` then need it. So the apps
+  node is opened first.
 - Mail's CSP carries `style-src 'unsafe-inline'`; Calendar's does not (measured with Playwright against
   the built bundles). Mail was exercised only lightly (two clicks), so a style it applies later may be
   blocked; the CSP is a header, so the fix is one line in the vhost.
@@ -71,5 +72,6 @@
 
 - Mint a single-use, tagged, pre-approved, non-ephemeral key; `scripts/public-node.sh start`.
 - Set `PUBLIC_MAIL_ORIGIN` and `PUBLIC_CALENDAR_ORIGIN` in `.env.public`; rebuild the three images.
-- `scripts/public-funnel.sh up apps`, then the main node's `up`.
+- `scripts/public-funnel.sh up apps` FIRST, then the main node's `up`: with the origins set the main
+  node's post-open verify fails while the apps node is not serving, and that resets both nodes.
 - Run the marketplace SQL script as a dry run, read it, then apply.
