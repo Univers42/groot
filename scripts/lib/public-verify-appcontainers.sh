@@ -47,6 +47,7 @@ check_appenv() {
 
 # MC10: mem_limit 64m, the largest a static container may be given.
 APPS_STATIC_MEMORY_MAX=67108864
+# shellcheck disable=SC2016 # a Go template for docker, not a shell expansion
 APPS_SHAPE_FORMAT='ro={{.HostConfig.ReadonlyRootfs}} mem={{.HostConfig.Memory}} nets={{range $name, $_ := .NetworkSettings.Networks}}{{$name}},{{end}} mounts={{range .Mounts}}{{.Type}},{{end}}'
 
 # Properties of container $1 that are not the static shape, space-joined; empty when it is.
