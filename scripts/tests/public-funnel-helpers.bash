@@ -56,6 +56,9 @@ run) case "$*" in
 esac'
   stub curl 'case "$*" in
 *"-x socks5h://"*) echo "$*" >>"$T/tls.log"; exit "${TLS_RC:-0}" ;;
+*127.0.0.1:3001/*)
+  for last; do :; done
+  case "$last" in *:3001/storage/*) cat "$T/hdr-3001-storage" ;; *) cat "$T/hdr-3001" ;; esac ;;
 *127.0.0.1:310[23]*)
   for last; do :; done
   case "$*" in
@@ -116,6 +119,8 @@ setup_apps() {
   cp "$T/shape-mail" "$T/shape-cal"
   printf 'HTTP/2 200\r\ncontent-security-policy: default-src %s; script-src %s; connect-src %s; style-src %s; base-uri %s; frame-ancestors https://osionos.tail10f2ea.ts.net:8443\r\nx-content-type-options: nosniff\r\nreferrer-policy: no-referrer\r\nstrict-transport-security: max-age=31536000\r\n\r\n' "'self'" "'self'" "'self'" "'self'" "'none'" >"$T/hdr-3102"
   cp "$T/hdr-3102" "$T/hdr-3103"
+  printf 'HTTP/2 200\r\nx-frame-options: DENY\r\ncontent-security-policy: frame-ancestors %s\r\n\r\n' "'none'" >"$T/hdr-3001"
+  cp "$T/hdr-3001" "$T/hdr-3001-storage"
 }
 
 run_pf() { run "$SCRIPT" "$@"; out="$output"; }
