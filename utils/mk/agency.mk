@@ -28,9 +28,9 @@ agency-policies: ## Agency: seed ABAC roles + policies (permission-engine + osio
 
 agency-content: ## Agency: seed wikis, galleries, teamspaces, channels + feed backfill
 	python3 $(AGENCY_SEEDS_DIR)/seed_agency_wiki.py
-	docker exec -i track-binocle-postgres-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 -q < $(AGENCY_SEEDS_DIR)/seed_agency_wiki.sql
+	docker exec -i mini-baas-postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 -q < $(AGENCY_SEEDS_DIR)/seed_agency_wiki.sql
 	@if [ -f $(AGENCY_SEEDS_DIR)/seed_agency_chat.sql ]; then \
-		docker exec -i track-binocle-postgres-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 -q < $(AGENCY_SEEDS_DIR)/seed_agency_chat.sql; \
+		docker exec -i mini-baas-postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 -q < $(AGENCY_SEEDS_DIR)/seed_agency_chat.sql; \
 	fi
 
 agency-verify: ## Agency: run the m23 foundation gate (tables, accounts, policy decisions)
