@@ -140,8 +140,11 @@ uid) + `--iptables=false`. Host-prep:
 3. **Egress NAT** (scoped to docker-ide's 10.202.0.0/16 pool only):
    ```
    sudo sh infrastructure/docker/osionos/ide-sandbox/install-egress-nat.sh
-   # (a root-owned copy + a drop-in, so the rules survive reboots; a one-off
-   #  `sudo sh …/ide-egress-nat.sh up` is lost at the next boot)
+   # (a root-owned copy + a drop-in: `up` runs as ExecStartPre, so docker-ide does not
+   #  start if the rules fail to load; a one-off `sudo sh …/ide-egress-nat.sh up` is lost
+   #  at the next boot. `down` is manual now (uninstall only): nothing runs it on stop, so
+   #  the rules stay loaded while the daemon is stopped. `sh …/install-egress-nat.sh print`
+   #  shows the drop-in without root)
    ```
 
 ## Rootful, not rootless — what that does and does not protect
