@@ -1,29 +1,3 @@
-grobase-up: docker-prefetch-images
-## Start the Grobase marketing site dev server (http://127.0.0.1:4324).
-	$(MAKE) compose-build BAKE_GROUP=grobase BAKE_TARGETS='grobase-site'
-	docker compose --profile grobase up -d --no-build --pull never grobase-site
-
-grobase-logs:
-## Follow Grobase marketing site logs.
-	docker compose --profile grobase logs -f grobase-site
-
-grobase-down:
-## Stop the Grobase marketing site containers.
-	docker compose --profile grobase stop grobase-site
-
-grobase-audit:
-## Run the full Grobase quality gate: prod build + preview + Lighthouse (>=90 x4
-## on /, /pricing, /security) + pa11y + CSP check + html-validate. Fails on any gate.
-	docker compose --profile grobase build grobase-site-audit
-	docker compose --profile grobase run --rm grobase-site-audit
-
-grobase-e2e:
-## Run the Playwright end-to-end suite (story spine, scroll morph, one-shot Big
-## Bang, latch, reduced-motion + no-JS dignity, CSP/console cleanliness, keyboard
-## explorer) against a prod preview, using the audit image's system Chromium.
-	docker compose --profile grobase build grobase-site-audit
-	docker compose --profile grobase run --rm grobase-site-audit npm run test:e2e
-
 # --- Grobase backend integration (standalone apps/grobase stack = docker project mini-baas) ---
 .PHONY: backend-up frontends-up
 
@@ -165,3 +139,38 @@ frontends-up: submodules-pinned certs drawnosaurus-wasm
 		COMPOSE_PROFILES=ide $$compose up -d osionos-ide-socket-proxy || true; \
 	fi
 	$(MAKE) compose-wait
+
+compose-wait:
+## Wait for long-running services to become healthy/running and init jobs to exit cleanly.
+	@set -eu; \
+	deadline=$$((SECONDS + $(COMPOSE_WAIT_TIMEOUT))); \
+	while true; do \
+		pending=''; failed=''; \
+		for service in $(COMPOSE_HEALTHY_SERVICES); do \
+			cid="$$(docker compose ps -q "$$service" 2>/dev/null || true)"; \
+			if [[ -z "$$cid" ]]; then pending="$$pending $$service(no-container)"; continue; fi; \
+			state="$$(docker inspect -f '{{.State.Status}}' "$$cid")"; \
+			health="$$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$$cid")"; \
+			if [[ "$$state" == 'exited' || "$$state" == 'dead' ]]; then failed="$$failed $$service($$state)"; continue; fi; \
+			if [[ "$$health" != 'healthy' ]]; then pending="$$pending $$service($$health)"; fi; \
+		done; \
+		for service in $(COMPOSE_RUNNING_SERVICES); do \
+			cid="$$(docker compose ps -q "$$service" 2>/dev/null || true)"; \
+			if [[ -z "$$cid" ]]; then pending="$$pending $$service(no-container)"; continue; fi; \
+			state="$$(docker inspect -f '{{.State.Status}}' "$$cid")"; \
+			if [[ "$$state" != 'running' ]]; then pending="$$pending $$service($$state)"; fi; \
+		done; \
+		for service in $(COMPOSE_COMPLETED_SERVICES); do \
+			cid="$$(docker compose ps -a -q "$$service" 2>/dev/null || true)"; \
+			if [[ -z "$$cid" ]]; then pending="$$pending $$service(no-container)"; continue; fi; \
+			state="$$(docker inspect -f '{{.State.Status}}' "$$cid")"; \
+			exit_code="$$(docker inspect -f '{{.State.ExitCode}}' "$$cid")"; \
+			if [[ "$$state" == 'exited' && "$$exit_code" == '0' ]]; then continue; fi; \
+			if [[ "$$state" == 'exited' ]]; then failed="$$failed $$service(exit=$$exit_code)"; else pending="$$pending $$service($$state)"; fi; \
+		done; \
+		if [[ -n "$$failed" ]]; then echo "[compose] failed:$$failed"; docker compose ps; exit 1; fi; \
+		if [[ -z "$$pending" ]]; then echo '[compose] services ready'; exit 0; fi; \
+		if [[ "$$SECONDS" -ge "$$deadline" ]]; then echo "[compose] timed out waiting for:$$pending"; docker compose ps; exit 1; fi; \
+		echo "[compose] waiting for:$$pending"; \
+		sleep '$(COMPOSE_WAIT_INTERVAL)'; \
+	done
