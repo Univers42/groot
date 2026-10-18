@@ -42,14 +42,6 @@ services:
       AUTH_MAIL_DAILY_CAP: ${AUTH_MAIL_DAILY_CAP:-50}
       AUTH_LINK_SIGNING_KEY: ${AUTH_LINK_SIGNING_KEY:?set AUTH_LINK_SIGNING_KEY in .env.public (make public-env)}
       AUTH_TRUSTED_PROXY_HOPS: ${AUTH_TRUSTED_PROXY_HOPS:?set AUTH_TRUSTED_PROXY_HOPS in .env.public (measure it)}
-    # /api/auth/availability is gone from opposite-osiris main; the pinned gateway has no
-    # /health. Either answering is a live gateway.
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - >-
-          node -e "const p=(u)=>fetch('http://127.0.0.1:8787/api/auth/'+u).then((r)=>r.ok);
-          p('health').then((ok)=>ok||p('availability')).then((ok)=>process.exit(ok?0:1)).catch(()=>process.exit(1))"
 
   osionos-bridge:
     environment:
