@@ -24,6 +24,7 @@ on:
     paths:
       - ".github/workflows/fresh-machine.yml"
       - "infrastructure/**"
+      - "utils/**"
       - "scripts/**"
       - "Makefile"
       - "docker-compose.yml"
@@ -40,6 +41,7 @@ on:
     paths:
       - ".github/workflows/fresh-machine.yml"
       - "infrastructure/**"
+      - "utils/**"
       - "scripts/**"
       - "Makefile"
       - "docker-compose.yml"
