@@ -241,6 +241,57 @@ load public-funnel-helpers
   lacks "for: mail-web calendar-web"
 }
 
+@test "appshape passes on the locked-down shape: read-only rootfs, memory capped, one internal network, no bind or volume" {
+  run_pf verify --pre
+  has "PASS  appshape       mail-web and calendar-web: read-only rootfs, memory <= 64 MiB, only track-binocle_apps-static-net, tmpfs mounts only"
+  printf 'ro=true mem=67108864 nets=track-binocle_apps-static-net, mounts=tmpfs,tmpfs,\n' >"$T/shape-mail"
+  run_pf verify --pre
+  has "PASS  appshape"
+}
+
+@test "appshape FAILs naming the container and the property that is wrong" {
+  printf 'ro=false mem=67108864 nets=track-binocle_apps-static-net, mounts=\n' >"$T/shape-mail"
+  run_pf verify --pre
+  [ "$status" -eq 1 ]
+  has "FAIL  appshape       not the locked-down shape: mail-web:rootfs-writable;"
+  setup_apps
+  printf 'ro=true mem=0 nets=track-binocle_apps-static-net, mounts=\n' >"$T/shape-cal"
+  run_pf verify --pre
+  has "calendar-web:memory-not-in-1..67108864;"
+  printf 'ro=true mem=134217728 nets=track-binocle_apps-static-net, mounts=\n' >"$T/shape-cal"
+  run_pf verify --pre
+  has "calendar-web:memory-not-in-1..67108864;"
+  setup_apps
+  printf 'ro=true mem=67108864 nets=track-binocle_apps-static-net,track-binocle_default, mounts=\n' >"$T/shape-mail"
+  run_pf verify --pre
+  has "mail-web:network-not-only-track-binocle_apps-static-net;"
+  printf 'ro=true mem=67108864 nets=track-binocle_default, mounts=\n' >"$T/shape-mail"
+  run_pf verify --pre
+  has "mail-web:network-not-only-track-binocle_apps-static-net;"
+  setup_apps
+  printf 'ro=true mem=67108864 nets=track-binocle_apps-static-net, mounts=tmpfs,bind,\n' >"$T/shape-cal"
+  run_pf verify --pre
+  has "calendar-web:mounts-not-tmpfs-only;"
+  printf 'ro=true mem=67108864 nets=track-binocle_apps-static-net, mounts=volume,\n' >"$T/shape-cal"
+  run_pf verify --pre
+  has "calendar-web:mounts-not-tmpfs-only;"
+}
+
+@test "appshape FAILs a container docker cannot inspect and a missing one when apps are deployed, SKIPs it when not" {
+  rm "$T/shape-mail"
+  run_pf verify --pre
+  [ "$status" -eq 1 ]
+  has "mail-web:unreadable;"
+  setup_apps
+  rm "$T/env-cal"
+  run_pf verify --pre
+  has "FAIL  appshape       calendar-web is not running"
+  set_env PUBLIC_MAIL_ORIGIN ""
+  set_env PUBLIC_CALENDAR_ORIGIN ""
+  run_pf verify --pre
+  has "SKIP  appshape"
+}
+
 @test "tls2 prints exactly one line when the apps node has no open port: FAIL when apps are expected, SKIP when not" {
   : >"$T/funnel-apps"
   run_pf verify apps

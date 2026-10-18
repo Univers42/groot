@@ -18,7 +18,7 @@ load public-funnel-helpers
 @test "verify --pre passes on a fully public stack and has no FAIL or SKIP line" {
   run_pf verify --pre
   [ "$status" -eq 0 ]
-  has "verify (pre): 35 pass, 0 fail, 0 skip"
+  has "verify (pre): 36 pass, 0 fail, 0 skip"
   lacks "SKIP"
 }
 

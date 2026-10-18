@@ -42,7 +42,7 @@ ps) case "$*" in
   *service=osionos-ide-server*) [ -f "$T/env-ide" ] && echo cid-ide ;;
   esac ;;
 image) exit "${IMG_RC:-0}" ;;
-inspect) f="$T/env-${4#cid-}"; case "$3" in *Config.Env*) [ -z "${ENV_FAIL:-}" ] && cat "$f" ;; esac ;;
+inspect) f="$T/env-${4#cid-}"; case "$3" in *Config.Env*) [ -z "${ENV_FAIL:-}" ] && cat "$f" ;; *ReadonlyRootfs*) cat "$T/shape-${4#cid-}" ;; esac ;;
 exec) f="$T/env-${2#cid-}"; if [ "$3" = env ]; then cat "$f"; else grep "^$4=" "$f" 2>/dev/null | cut -d= -f2- | grep .; fi ;;
 logs) cat "$T/gw.log" ;;
 run) case "$*" in
@@ -112,6 +112,8 @@ setup_apps() {
   printf 'osionos-bridge\nauth-gateway\nmail-web\ncalendar-web\n' >"$T/ps-services"
   printf 'PATH=/usr/bin\nNGINX_VERSION=1.27\nHOSTNAME=abc\n' >"$T/env-mail"
   cp "$T/env-mail" "$T/env-cal"
+  printf 'ro=true mem=67108864 nets=track-binocle_apps-static-net, mounts=\n' >"$T/shape-mail"
+  cp "$T/shape-mail" "$T/shape-cal"
   printf 'HTTP/2 200\r\ncontent-security-policy: default-src %s; script-src %s; connect-src %s; style-src %s; base-uri %s; frame-ancestors https://osionos.tail10f2ea.ts.net:8443\r\nx-content-type-options: nosniff\r\nreferrer-policy: no-referrer\r\nstrict-transport-security: max-age=31536000\r\n\r\n' "'self'" "'self'" "'self'" "'self'" "'none'" >"$T/hdr-3102"
   cp "$T/hdr-3102" "$T/hdr-3103"
 }
