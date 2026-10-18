@@ -173,6 +173,25 @@ check_edge() {
   expect edge "20 rapid /api/geocode -> $limited x 503 (>= 14)" "20 rapid /api/geocode -> ${limited:-0} x 503, expected >= 14" [ "${limited:-0}" -ge 14 ]
 }
 
+# Through tailscaled's own proxy, each open port serves a certificate curl accepts. A tailscaled
+# with no state dir (--state=mem: alone) cannot store the Funnel cert: every visitor gets a TLS
+# internal-error alert while every other check passes (measured 2026-10-18).
+# Caveat: curl exit 5 or 7 means the proxy itself is unreachable (a kernel-mode tailscaled has
+# none), which is a SKIP; it proves the node's cert, not that every Funnel relay routes to it.
+check_tls() {
+  local host port rc
+  host=$(origin_host)
+  for port in $(funnel_ports | tr ',' ' '); do
+    rc=0
+    curl -sS --max-time 30 -x "$TS_PROXY" -o /dev/null "https://$host:$port/" 2>/dev/null || rc=$?
+    case $rc in
+    0) pass tls "https://$host:$port serves a valid certificate" ;;
+    5 | 7) skip tls "cannot reach the proxy $TS_PROXY (curl $rc): the certificate is unchecked" ;;
+    *) fail tls "https://$host:$port: no valid TLS through $TS_PROXY (curl $rc); tailscaled needs --statedir to keep a cert" ;;
+    esac
+  done
+}
+
 check_env_file() {
   local mode
   if [ ! -f "$ENV_FILE" ]; then fail env-file ".env.public is missing (make public-env)"; return; fi
@@ -200,7 +219,10 @@ run_verify() {
   check_env_file
   check_env_values
   check_node_name
-  [ "$1" = pre ] || check_exposure "${2:-}"
+  [ "$1" = pre ] || {
+    check_exposure "${2:-}"
+    check_tls
+  }
   check_bundle_secrets
   check_bridge_env
   check_gateway_env
