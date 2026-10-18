@@ -122,6 +122,26 @@ check_bridge_env() {
   expect bridge-env "OSIONOS_ALLOWED_ORIGIN is the app origin" "OSIONOS_ALLOWED_ORIGIN is not $want" [ "$(container_env "$c" OSIONOS_ALLOWED_ORIGIN)" = "$want" ]
 }
 
+# Lower-cased, trimmed entries of a comma list, one per line.
+list_entries() { printf '%s' "$1" | tr 'A-Z,' 'a-z\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep . || true; }
+
+# Entries of $1 that also appear in $2 (comma lists), one per line.
+list_overlap() {
+  local a b
+  a=$(list_entries "$1")
+  b=$(list_entries "$2")
+  if [ -n "$a" ] && [ -n "$b" ]; then grep -Fxf <(printf '%s\n' "$b") <<<"$a" || true; fi
+}
+
+# An address list, not a secret: printed as a value. An exempt account is never mailed, so an
+# admin among them would be an unverified admin.
+check_verification_exempt() {
+  local exempt overlap
+  exempt=$(container_env "$1" AUTH_VERIFICATION_EXEMPT)
+  overlap=$(list_overlap "$exempt" "$(penv OSIONOS_ADMIN_EMAILS || true)" | paste -sd, -)
+  expect gateway-env "AUTH_VERIFICATION_EXEMPT=${exempt:-<empty>}" "AUTH_VERIFICATION_EXEMPT=${exempt:-<empty>} lists an OSIONOS_ADMIN_EMAILS admin: $overlap" [ -z "$overlap" ]
+}
+
 check_gateway_env() {
   local c hops logs
   c=$(svc_container auth-gateway)
@@ -129,6 +149,7 @@ check_gateway_env() {
   expect gateway-env "AUTH_DEMO_INSECURE is not true" "AUTH_DEMO_INSECURE is true" [ "$(container_env "$c" AUTH_DEMO_INSECURE)" != true ]
   expect gateway-env "TURNSTILE_BYPASS_LOCAL=false" "TURNSTILE_BYPASS_LOCAL is not false" [ "$(container_env "$c" TURNSTILE_BYPASS_LOCAL)" = false ]
   expect gateway-env "AUTH_REQUIRE_EMAIL_VERIFICATION=true" "AUTH_REQUIRE_EMAIL_VERIFICATION is not true" [ "$(container_env "$c" AUTH_REQUIRE_EMAIL_VERIFICATION)" = true ]
+  check_verification_exempt "$c"
   hops=$(penv AUTH_TRUSTED_PROXY_HOPS || true)
   logs=$(docker logs "$c" 2>&1 || true)
   if [ -z "$hops" ]; then fail gateway-env "AUTH_TRUSTED_PROXY_HOPS is unset in .env.public"

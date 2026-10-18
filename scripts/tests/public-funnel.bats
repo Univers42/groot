@@ -94,7 +94,7 @@ set_env() { sed -i "s|^$1=.*|$1=$2|" "$T/repo/.env.public"; }
 @test "verify --pre passes on a fully public stack and has no FAIL or SKIP line" {
   run_pf verify --pre
   [ "$status" -eq 0 ]
-  has "verify (pre): 24 pass, 0 fail, 0 skip"
+  has "verify (pre): 25 pass, 0 fail, 0 skip"
   lacks "SKIP"
 }
 
@@ -304,4 +304,23 @@ set_env() { sed -i "s|^$1=.*|$1=$2|" "$T/repo/.env.public"; }
   run_pf frobnicate
   [ "$status" -ne 0 ]
   has "usage:"
+}
+
+@test "verify prints the gateway's AUTH_VERIFICATION_EXEMPT as a value and passes when no admin is listed" {
+  echo "AUTH_VERIFICATION_EXEMPT=dylan@gmail.com" >>"$T/env-gw"
+  run_pf verify --pre
+  [ "$status" -eq 0 ]
+  has "PASS  gateway-env    AUTH_VERIFICATION_EXEMPT=dylan@gmail.com"
+}
+
+@test "verify prints <empty> for an unset exemption list" {
+  run_pf verify --pre
+  has "AUTH_VERIFICATION_EXEMPT=<empty>"
+}
+
+@test "verify FAILs when an exempt address is also an admin, ignoring case and spacing" {
+  echo "AUTH_VERIFICATION_EXEMPT=other@example.test, Admin@Example.test" >>"$T/env-gw"
+  run_pf verify --pre
+  [ "$status" -eq 1 ]
+  has "FAIL  gateway-env    AUTH_VERIFICATION_EXEMPT=other@example.test, Admin@Example.test lists an OSIONOS_ADMIN_EMAILS admin: admin@example.test"
 }
