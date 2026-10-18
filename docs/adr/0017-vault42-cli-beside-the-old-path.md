@@ -16,7 +16,7 @@
 
 - `utils/vault42.conf` (targets `secrets` and `volumes`), `utils/mk/vault42.mk` (section
   `Secrets (vault42)`) and `utils/scripts/vault42-post-pull.sh` wire the CLI in. `vendor/scripts`
-  is pinned at aece862c (scripts main: the CLI plus the strict-review fixes).
+  is pinned at c619e5d1 (scripts main: the CLI plus the strict-review fixes).
 - The old path is unchanged except one `--private 'apps/*/vendor/*'` in `vault42-team.sh` (G3) and
   the executable bit on `scripts/vault42-push-guard.sh`, which the CLI executes as `pre_push`.
 - The `secrets` target does not name `stage_unscanned_as`: the old path stages nothing, so a first
@@ -29,7 +29,7 @@
 
 | | Condition | Proven by `scripts/tests/vault42-make.bats` |
 |---|---|---|
-| G1 | `vendor/scripts` is pinned at a commit that is an ancestor of `origin/main` | `git -C vendor/scripts merge-base --is-ancestor aece862c origin/main` |
+| G1 | `vendor/scripts` is pinned at a commit that is an ancestor of `origin/main` | `git -C vendor/scripts merge-base --is-ancestor c619e5d1 origin/main` |
 | G2 | the old and the new path pass the same `--private` set | "G2: old vault42-team.sh push and new make vault42-push" |
 | G3 | `apps/*/vendor/*` is private on both paths | "G3: apps/x/vendor/y/.env.example ..." and G2 |
 | G4 | an applied pull runs the real post-pull hook, with only FT_PASSPHRASE, and no lock error | "G4: make vault42-pull APPLY=1 ..." |

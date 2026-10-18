@@ -307,6 +307,18 @@ new_private() {
   done
 }
 
+@test "G4: a pull with ONLY restores the named file and does not rebuild .env.local" {
+  fixture
+  mkdir -p "$FAKE42/tree.prod"
+  echo A=1 >"$FAKE42/tree.prod/x.env"
+  echo LIVE=1 >"$FX/.env.local"
+  run make -C "$FX" vault42-pull APPLY=1 ONLY=x.env
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"post_pull not run"* ]]
+  [ "$(cat "$FX/x.env")" = A=1 ]
+  [ "$(cat "$FX/.env.local")" = LIVE=1 ]
+}
+
 @test "G4: a pull without APPLY previews and leaves .env.local alone" {
   fixture
   mkdir -p "$FAKE42/tree.prod"
