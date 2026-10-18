@@ -16,7 +16,28 @@ setup() {
   T="$BATS_TEST_TMPDIR"
   mkdir -p "$T/bin"
   printf '#!/bin/sh\necho "$*" >>"$T/tsd.log"\ntouch "$T/node-running"\ntrap '"'"'kill $s; rm -f "$T/node-running"; exit 0'"'"' TERM\nsleep 31 &\ns=$!\nwait\n' >"$T/bin/tailscaled"
-  printf '#!/bin/sh\nshift 2\necho "$*" >>"$T/ts.log"\ncase "$1" in\nstatus) [ -f "$T/node-running" ] || exit 1\n  st=NeedsLogin; [ -f "$T/loggedin" ] && st=Running\n  printf "{\\"BackendState\\":\\"%%s\\",\\"Self\\":{\\"DNSName\\":\\"osionos-apps.tail10f2ea.ts.net.\\"}}\\n" "$st" ;;\nup) cat >"$T/stdin-seen"; [ "${UP_RC:-0}" = 0 ] && touch "$T/loggedin"; exit "${UP_RC:-0}" ;;\nfunnel) printf "{\\"AllowFunnel\\":{\\"osionos-apps.tail10f2ea.ts.net:443\\":true,\\"osionos-apps.tail10f2ea.ts.net:8443\\":true}}\\n" ;;\nesac\n' >"$T/bin/tailscale"
+  cat >"$T/bin/tailscale" <<'STUB'
+#!/bin/sh
+shift 2
+echo "$*" >>"$T/ts.log"
+case "$1" in
+status) [ -f "$T/node-running" ] || exit 1
+  st=NeedsLogin; [ -f "$T/loggedin" ] && st=Running
+  if [ -n "${STARTING_N:-}" ]; then
+    c=$(cat "$T/status-calls" 2>/dev/null || echo 0); c=$((c + 1)); echo "$c" >"$T/status-calls"
+    [ "$c" -gt "$STARTING_N" ] || st=Starting
+  fi
+  [ -z "${FORCE_STATE:-}" ] || st=$FORCE_STATE
+  printf '{"BackendState":"%s","Self":{"DNSName":"osionos-apps.tail10f2ea.ts.net."}}\n' "$st" ;;
+up) cat >"$T/stdin-seen"; [ "${UP_RC:-0}" = 0 ] && touch "$T/loggedin"; exit "${UP_RC:-0}" ;;
+funnel)
+  if [ "$2" = reset ]; then
+    echo "reset daemon-running=$([ -f "$T/node-running" ] && echo yes || echo no)" >>"$T/reset.log"
+    exit "${RESET_RC:-0}"
+  fi
+  printf '{"AllowFunnel":{"osionos-apps.tail10f2ea.ts.net:443":true,"osionos-apps.tail10f2ea.ts.net:8443":true}}\n' ;;
+esac
+STUB
   chmod +x "$T/bin/tailscaled" "$T/bin/tailscale"
   export T XDG_STATE_HOME="$T/state" TAILSCALED_BIN="$T/bin/tailscaled" TAILSCALE_BIN="$T/bin/tailscale"
   DIR="$T/state/tailscale-osionos-apps"
@@ -65,6 +86,38 @@ lacks() {
   [ "$(grep -c '^up ' "$T/ts.log" || true)" -eq 0 ]
 }
 
+@test "start on a logged-in node that reports Starting first waits for Running and reads no key" {
+  mkdir -p "$DIR"
+  touch "$T/loggedin"
+  STARTING_N=4 run_node start
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^up ' "$T/ts.log" || true)" -eq 0 ]
+  [ "$(cat "$T/status-calls")" -ge 5 ]
+}
+
+@test "start on a node that reports Starting and then NeedsLogin reads the key and joins" {
+  STARTING_N=3 STDIN_KEY="$KEY" run_node start
+  [ "$status" -eq 0 ]
+  [ "$(cat "$T/stdin-seen")" = "$KEY" ]
+}
+
+@test "start stops the daemon and names the state when the node is neither Running nor NeedsLogin" {
+  FORCE_STATE=Stopped STDIN_KEY="$KEY" run_node start
+  [ "$status" -ne 0 ]
+  has "state 'Stopped'"
+  [ "$(grep -c '^up ' "$T/ts.log" || true)" -eq 0 ]
+  sleep 0.5
+  [ ! -f "$T/node-running" ]
+}
+
+@test "start gives up after 10 s on a node stuck in Starting, names the state and stops the daemon" {
+  STARTING_N=100000 run_node start
+  [ "$status" -ne 0 ]
+  has "still 'Starting' after 10 s"
+  sleep 0.5
+  [ ! -f "$T/node-running" ]
+}
+
 @test "start refuses when a tailscaled already answers on the socket" {
   touch "$T/node-running"
   STDIN_KEY="$KEY" run_node start
@@ -99,6 +152,56 @@ lacks() {
   run_node stop
   [ "$status" -ne 0 ]
   has "nothing of ours to stop"
+}
+
+@test "stop resets the Funnel while the daemon still answers, then stops it" {
+  STDIN_KEY="$KEY" run_node start
+  run_node stop
+  [ "$status" -eq 0 ]
+  [ "$(cat "$T/reset.log")" = "reset daemon-running=yes" ]
+}
+
+@test "stop still stops the daemon when the Funnel reset fails, and says the config persists" {
+  STDIN_KEY="$KEY" run_node start
+  RESET_RC=1 run_node stop
+  [ "$status" -eq 1 ]
+  has "funnel reset failed"
+  has "re-serves it"
+  sleep 0.5
+  [ ! -f "$T/node-running" ]
+}
+
+@test "stop never kills a tailscaled that was not started with the apps socket (stale pidfile, reused PID)" {
+  mkdir -p "$DIR"
+  "$T/bin/tailscaled" --socket="$T/main.sock" >/dev/null 2>&1 &
+  other=$!
+  sleep 0.3
+  echo "$other" >"$DIR/tailscaled.pid"
+  run_node stop
+  alive=0
+  kill -0 "$other" 2>/dev/null && alive=1
+  kill "$other" 2>/dev/null || true
+  [ "$alive" -eq 1 ]
+  has "not a running tailscaled of ours"
+  [ ! -s "$T/reset.log" ]
+}
+
+@test "the daemon's output goes to /dev/null by default and to tailscaled.log with PUBLIC_APPS_LOG=1" {
+  STDIN_KEY="$KEY" run_node start
+  [ "$status" -eq 0 ]
+  [ ! -e "$DIR/tailscaled.log" ]
+  run_node stop
+  PUBLIC_APPS_LOG=1 STDIN_KEY="$KEY" run_node start
+  [ -e "$DIR/tailscaled.log" ]
+}
+
+@test "a daemon that never opens its socket is reported with the way to get its log" {
+  printf '#!/bin/sh\nexit 1\n' >"$T/bin/dead"
+  chmod +x "$T/bin/dead"
+  TAILSCALED_BIN="$T/bin/dead" run_node start
+  [ "$status" -ne 0 ]
+  has "did not open $DIR/tailscaled.sock"
+  has "PUBLIC_APPS_LOG=1"
 }
 
 @test "status prints the DNS name and the Funnel ports, or says the node is not running" {
