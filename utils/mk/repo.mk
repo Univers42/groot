@@ -50,8 +50,10 @@ PIN_SUBMODULES := $(CURDIR)/scripts/pin-submodules.sh
 # Nested submodules whose PARENT asserts the commit it records, so syncro must not follow their
 # branch: drawnosaurus-assert-engine refuses any other engine commit, and CI run 39082685726
 # failed on it after syncro moved engine from the pinned 2b8adaa to origin/main dd453b5 (which
-# contains it, so the never-rewind rule allowed the move). Space separated, one entry per path.
-PARENT_PINNED ?= apps/drawnosaurus/engine
+# contains it, so the never-rewind rule allowed the move). grobase records the scripts commit its
+# vault42 targets were verified against; following scripts main would show apps/grobase as
+# modified, and syncro skips a modified submodule from then on. Space separated, one per path.
+PARENT_PINNED ?= apps/drawnosaurus/engine apps/grobase/vendor/scripts
 SKIP_IF_PINNED = for p in $$PINNED; do case "$$displaypath/" in "$$p"/*) exit 0 ;; esac; done;
 # Prefix for every recipe that builds osionos-app: app.Dockerfile serves the graph_render pack only
 # when GRAPH_RENDER_SHA is the gitlink. Read when the recipe runs, not by an exported $(shell),
