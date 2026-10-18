@@ -32,7 +32,7 @@
 | G1 | `vendor/scripts` is pinned at a commit that is an ancestor of `origin/main` | `git -C vendor/scripts merge-base --is-ancestor c619e5d1 origin/main` |
 | G2 | the old and the new path pass the same `--private` set | "G2: old vault42-team.sh push and new make vault42-push" |
 | G3 | `apps/*/vendor/*` is private on both paths | "G3: apps/x/vendor/y/.env.example ..." and G2 |
-| G4 | an applied pull runs the real post-pull hook, with only FT_PASSPHRASE, and no lock error | "G4: make vault42-pull APPLY=1 ..." |
+| G4 | a full applied pull runs the real post-pull hook, with only FT_PASSPHRASE, and no lock error; a partial one (ONLY, or KIND without env) skips it by design, after the 2026-10-18 incident where an ONLY pull re-pointed the live `.env.local` at the wrong backend | "G4: make vault42-pull APPLY=1 lays the team overlay on .env.local, no lock error" (full) and "G4: a pull with ONLY restores the named file and does not rebuild .env.local" (partial) |
 | G5 | `APPLY`, `YES`, `ALL` count only from the make command line | "G5: ..." (two tests) |
 | G6 | `VAULT42_ENV`, `VAULT42_ORG`, `VAULT42_PROJECT` are refused, from either source | "G6: ..." and its control |
 | G7 | no absolute path in the config; a missing volumes root fails before docker runs | "G7: ..." (three tests) |
