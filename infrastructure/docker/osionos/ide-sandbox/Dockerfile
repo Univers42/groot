@@ -208,6 +208,16 @@ RUN if find / -xdev \( -uid +65535 -o -gid +65535 \) -print -quit | grep -q .; t
       find / -xdev \( -uid +65535 -o -gid +65535 \) | head -5 >&2; exit 1; \
     fi
 
+# Opt-in (--build-arg STRIP_SETUID=1): a box for anyone but the operator needs zero setuid/setgid
+# entries (devil R8, ADR 0022 stage 1); the operator image keeps its measured baseline of 7. Setgid
+# directories (/usr/local/*, /var/mail) count too, so the strip covers every type. Default 0 changes
+# no file in the image.
+ARG STRIP_SETUID=0
+RUN if [ "$STRIP_SETUID" = 1 ]; then \
+      find / -xdev -perm /6000 -exec chmod a-s {} + \
+      && test -z "$(find / -xdev -perm /6000)"; \
+    fi
+
 # The box's account file lives on the box's /tmp tmpfs so the terminal can show the user's own
 # name (ADR 0009). The link is the LAST step: from here on, root lookups in a build RUN fail.
 # It is safe only because the box runs with no-new-privileges, CapDrop ALL, a read-only rootfs
