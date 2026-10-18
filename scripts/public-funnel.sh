@@ -63,13 +63,34 @@ scope_pairs() {
   done
 }
 
+# Both resets are attempted, and a node whose state is on disk but whose socket is silent counts
+# as a failed reset: its persisted serve config may still be exposing. CLOSED lists what was reset.
+reset_both() {
+  local rc=0
+  CLOSED=""
+  if ts funnel reset; then CLOSED="main"; else rc=1; fi
+  if tsa status --json >/dev/null 2>&1; then
+    if tsa funnel reset; then CLOSED+="${CLOSED:+, }apps"; else rc=1; fi
+  elif [ -e "$(apps_node_dir)" ]; then
+    note "apps node has state in $(apps_node_dir) but nothing answers on $(apps_node_socket): its Funnel could not be reset"
+    rc=1
+  fi
+  return $rc
+}
+
+# Any failure after something was opened closes both nodes: the verify judges the whole exposure.
+fail_closed() {
+  reset_both || note "reset incomplete (closed: ${CLOSED:-none}): check both nodes with 'status'"
+  die "$1"
+}
+
 # Opens the apps node's Funnel; the checks already passed in pre mode.
 open_apps() {
   local pair
   for pair in $APPS_FUNNEL_MAP; do
-    tsa funnel --bg "--https=${pair%%:*}" "https+insecure://127.0.0.1:${pair##*:}" || { tsa funnel reset || true; die "apps funnel on ${pair%%:*} failed: reset"; }
+    tsa funnel --bg "--https=${pair%%:*}" "https+insecure://127.0.0.1:${pair##*:}" || fail_closed "apps funnel on ${pair%%:*} failed: both nodes reset"
   done
-  run_verify full apps || { tsa funnel reset || true; die "post-open verify failed: apps Funnel reset"; }
+  run_verify full apps || fail_closed "post-open verify failed: both nodes reset"
   note "apps public on $(penv PUBLIC_MAIL_ORIGIN || true) and $(penv PUBLIC_CALENDAR_ORIGIN || true)"
 }
 
@@ -85,19 +106,15 @@ cmd_up() {
     return
   fi
   for pair in $(scope_pairs "$scope"); do
-    ts funnel --bg "--https=${pair%%:*}" "https+insecure://127.0.0.1:${pair##*:}" || { ts funnel reset || true; die "funnel on ${pair%%:*} failed: reset"; }
+    ts funnel --bg "--https=${pair%%:*}" "https+insecure://127.0.0.1:${pair##*:}" || fail_closed "funnel on ${pair%%:*} failed: both nodes reset"
   done
-  run_verify full "$scope" || { ts funnel reset || true; die "post-open verify failed: Funnel reset"; }
+  run_verify full "$scope" || fail_closed "post-open verify failed: both nodes reset"
   note "public on $(penv PUBLIC_ORIGIN) (scope $scope)"
 }
 
-# Both resets are attempted: a failure on one node must not leave the other open.
 cmd_down() {
-  local rc=0
-  ts funnel reset || rc=1
-  if tsa status --json >/dev/null 2>&1; then tsa funnel reset || rc=1; fi
-  [ "$rc" = 0 ] || die "a funnel reset failed: check both nodes with 'status'"
-  note "Funnel closed on both nodes; the containers keep running on localhost"
+  reset_both || die "a funnel reset failed (closed: ${CLOSED:-none}): check both nodes with 'status'"
+  note "Funnel closed on: $CLOSED; the containers keep running on localhost"
 }
 
 # $1 line label, $2 CLI function, $3 what to print when the daemon does not answer
