@@ -58,7 +58,6 @@ COMPOSE_HEALTHY_SERVICES ?= local-https-proxy osionos-bridge auth-gateway osiono
 COMPOSE_RUNNING_SERVICES ?=
 COMPOSE_COMPLETED_SERVICES ?=
 FRONTEND_DIR := apps/opposite-osiris
-MAILPIT_IMAGE ?= axllent/mailpit:v1.22.3
 BOOL ?= false
 WEBSITE_URL := https://localhost:4322
 OSIONOS_URL := https://localhost:3001
