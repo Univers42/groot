@@ -58,3 +58,28 @@ check_bundle_links() {
     fail bundle-links "$count file(s) in $APP_IMAGE link to $ports"
   fi
 }
+
+# osionos refuses to be framed on the local TLS front, which is also what the Funnel's 8443
+# proxies to. Probes the SPA, a deep link and a Kong-routed path: Kong routes are what the app
+# image's own headers cannot cover. 'self' is rejected: a redirected frame is same-origin.
+# Caveat: probes three paths, not every route; a location that later gains its own add_header
+# and loses these is caught only if it is one of the three.
+FRAME_PROBE_PATHS="/ /p/x /storage/v1/object/public/x"
+
+# $1 path: the response headers of the local osionos vhost lack either anti-framing header.
+frame_headers_missing() {
+  local hdrs
+  hdrs=$(curl -sk -D - -o /dev/null --max-time 10 "https://127.0.0.1:3001$1" | tr -d '\r') || return 0
+  grep -qi '^x-frame-options: *DENY *$' <<<"$hdrs" &&
+    grep -qi "^content-security-policy:.*frame-ancestors 'none'" <<<"$hdrs" && return 1
+  return 0
+}
+
+check_frame_headers() {
+  local path bad=""
+  for path in $FRAME_PROBE_PATHS; do
+    ! frame_headers_missing "$path" || bad+=" $path"
+  done
+  expect frame-headers "osionos :3001 sends X-Frame-Options DENY and frame-ancestors 'none'" \
+    "osionos :3001 lacks X-Frame-Options DENY or frame-ancestors 'none' on:$bad" [ -z "$bad" ]
+}
