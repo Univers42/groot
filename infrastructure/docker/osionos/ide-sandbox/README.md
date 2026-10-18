@@ -109,6 +109,10 @@ compose; the ide-server runs from the bridge image with a different entrypoint.
 | 15 | Block quota, separate fs | separate loopback data-root caps host blast; per-sandbox `StorageOpt.size` is xfs+pquota-only, opt-in via `OSIONOS_IDE_STORAGE_QUOTA` | ✅ host-bounded; per-sandbox = xfs upgrade |
 | 16 | Idle/lifetime reap + CPU budget | `reapExpiredSandboxes`: past 4 h an idle box is stopped, past 12 h any box; `NanoCpus` cap. A stopped box is re-provisioned by the terminal, the session POST, or the LSP/fs-sync sockets — but a box stopped at the 12 h cap comes back only on an explicit action (terminal / session POST), so an open tab cannot keep one alive | `ide-ensure-sandbox.test.mjs` (hard-cap refusal, single-flight, 409 adoption) |
 
+| 17 | Socket proxy forwards what it vetted (K12) | `proxy.selfcheck.mjs` runs the real proxy against a fake daemon: a repeated key (`HostConfig`, `Privileged`, `Image`; escaped or re-cased spellings too) is 400 and never reaches the daemon; every vetted body goes out as `JSON.stringify(vetted)` with a recomputed `Content-Length` and no `Transfer-Encoding`. Reverting either half fails the selfcheck | ✅ offline-verified |
+| 18 | The plane asserts its runtime (K11) | `OSIONOS_IDE_REQUIRE_RUNTIME` (unset = as before; e.g. `runsc`): the proxy writes `HostConfig.Runtime` into every create (the key is accepted only with that value) and inspects a container before its start, refusing a different runtime or an inspect that fails. `verify.sh` runs `check-runtime.sh`: FAIL when the daemon default or the probe box differs, SKIP when unset. Names only: a `runsc` entry that points at runc passes | ✅ offline-verified; live probe needs gVisor on the VM |
+| 19 | Audit, kill switch, removal (S6: A9, A10, A11) | The proxy prints one JSON line per create/start/stop/remove (`ts, op, kind, box, uid, reason, status`) to stdout, so `docker logs osionos-ide-socket-proxy` carries it; retention is the docker log config, set `max-size`/`max-file` for 30 days. `scripts/ide-plane.sh off` and `remove-user <uid\|digest> --yes`, see below | ✅ offline-verified (bats, docker fake); live run is user-run |
+
 Offline-verified (no live daemon): **2, 4, 5, 6, 8, 9, 10-auth, 11, 13, 14** via
 `node --test tests/bridge/ide-sandbox-*.test.mjs` and the proxy `--selfcheck`s; the rest
 need the live daemon + `verify.sh`.
@@ -473,8 +477,29 @@ found by name: `osio-ide-home-<h>` is `sha256(userId)[0:32]`, and each `osio-ide
 `docker inspect` before the container is removed). The owner's line in the socket proxy's ledger
 (`/ledger/uid-ledger.jsonl`) stays: it keeps that uid from ever being reissued to someone else, which
 would hand the next user whatever files of the first still sit on docker-ide. Delete the line only after
-both volumes are gone, and only if it is the last one (allocation is highest + 1). Nothing automates
-this yet; it is a tracked follow-up, not done here.
+both volumes are gone, and only if it is the last one (allocation is highest + 1).
+
+One command does the whole of it (the volumes first, the ledger line last, and not at all without `--yes`):
+
+```sh
+DOCKER_HOST=unix:///run/docker-ide.sock bash scripts/ide-plane.sh remove-user <uid|home-digest> --yes
+```
+
+It edits the ledger inside `osionos-ide-socket-proxy` on the main daemon and restarts that container, so
+its in-memory copy cannot write the line back. Caveat: a box whose container is already gone leaves its
+workspace volume behind (found only through the container's mounts); list `osio-ide-vol-*` by hand.
+
+### Kill switch (user-run)
+
+Order matters: set `OSIONOS_IDE_ACCESS=off` for the bridge and the ide-server and recreate them, then
+stop the boxes, otherwise a terminal reconnect starts its box again:
+
+```sh
+DOCKER_HOST=unix:///run/docker-ide.sock bash scripts/ide-plane.sh off      # prints "stopped <n>"
+```
+
+Boxes are stopped, not removed; the Funnel for the IDE node is switched off separately. The audit trail:
+`docker logs osionos-ide-socket-proxy | grep '^{'`.
 
 ## P3–P7 routes (server halves — built + verified offline)
 
