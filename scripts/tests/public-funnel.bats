@@ -82,6 +82,7 @@ load public-funnel-helpers
   run_pf down
   [ "$status" -eq 0 ]
   has "containers keep running on localhost"
+  has "Funnel closed on: main, apps"
   [ ! -s "$T/funnel" ]
   [ ! -s "$T/funnel-apps" ]
   grep -qx '\[apps\] funnel reset' "$T/ts.log"
@@ -93,6 +94,38 @@ load public-funnel-helpers
   run_pf down
   [ "$status" -eq 0 ]
   [ ! -s "$T/funnel" ]
+  has "Funnel closed on: main"
+  lacks "apps"
+}
+
+@test "down FAILs naming the socket when the apps node has state on disk but does not answer, after resetting main" {
+  printf '443\n' >"$T/funnel"
+  rm "$T/apps-node"
+  mkdir -p "$T/state/tailscale-osionos-apps"
+  run_pf down
+  [ "$status" -eq 1 ]
+  has "$T/state/tailscale-osionos-apps/tailscaled.sock"
+  lacks "Funnel closed on: main, apps"
+  [ ! -s "$T/funnel" ]
+}
+
+@test "up 443 whose post-open verify fails resets the apps node as well, not only the main one" {
+  echo "10000 4000" >>"$T/funnel-apps"
+  run_pf up 443
+  [ "$status" -ne 0 ]
+  has "FAIL  exposure2"
+  [ ! -s "$T/funnel" ]
+  [ ! -s "$T/funnel-apps" ]
+}
+
+@test "up apps whose post-open verify fails resets the main node as well, not only the apps one" {
+  printf '443\n8443\n' >"$T/funnel"
+  : >"$T/funnel-apps"
+  run_pf up apps
+  [ "$status" -ne 0 ]
+  has "FAIL  exposure"
+  [ ! -s "$T/funnel" ]
+  [ ! -s "$T/funnel-apps" ]
 }
 
 @test "verify fails on an extra port beyond the expected set" {

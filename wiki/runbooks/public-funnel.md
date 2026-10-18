@@ -78,7 +78,9 @@ serves. The marketplace rows are changed by a user-run SQL script (dry run unles
 
 ## Rollback
 
-`make public-down` runs `tailscale funnel reset`: nothing is reachable from the internet. The
+`make public-down` runs `tailscale funnel reset` on both nodes and prints which it reset; exit 1 means
+one could not be (an apps node with state on disk whose socket is silent): start it or check it with
+`status`, nothing is claimed closed until it exits 0. The
 containers keep running on localhost, still in public configuration; `make link-frontends-start`
 recreates them from the local build (not exercised in this change).
 

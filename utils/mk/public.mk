@@ -37,8 +37,9 @@ public-up: ## Rebuild as :public, recreate the frontends, then open the Funnel
 
 public-down: ## Close the Funnel at once (the containers keep running on localhost)
 ## Usage: make public-down
-## `tailscale funnel reset`: nothing is reachable from the internet afterwards. The public
-## containers are NOT stopped or rebuilt; they still serve 127.0.0.1.
+## `tailscale funnel reset` on the main node and on the apps node when it answers; it prints which
+## nodes were reset and exits 1 when one could not be (an apps node with state but a silent socket).
+## The public containers are NOT stopped or rebuilt; they still serve 127.0.0.1.
 	@$(PUBLIC_SCRIPT) down
 
 public-status: ## Show the node name and which Funnel ports are open
