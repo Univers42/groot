@@ -73,6 +73,9 @@ fi
 # JWT_SECRET, SERVICE_ROLE_KEY and database passwords are production's, not the shared dev
 # stack's, and it carries FLY_TOKEN and PAT_DOCKER. Kept in the vault, sealed to the pusher.
 [ "$verb" = push ] && set -- "$@" --private '.env.grobase-remote'
+# vendor/scripts of a synced apps/grobase sits at apps/grobase/vendor/scripts, where `vendor/*`
+# (a pattern anchored at the repo root) does not reach its backups/.env.example.
+[ "$verb" = push ] && set -- "$@" --private 'apps/*/vendor/*'
 
 VAULT_ENV_ORG="$ORG" VAULT_ENV_PROJECT="$PROJECT" VAULT_ENV_NAME="$ENVNAME" \
 	REPO_DIR="$REPO" CTL_IMAGE="$CTL_IMAGE" CTL_CFG_DIR="$CTL_CFG_DIR" \
