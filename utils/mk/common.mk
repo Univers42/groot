@@ -172,13 +172,3 @@ DOCKER_NODE_VAULT := docker run --rm --user "$(HOST_UID):$(HOST_GID)" -e HOST_UI
 NODE_RUN := $(if $(NODE_BIN),$(NODE_BIN),$(DOCKER_NODE) node)
 NODE_RUN_SHARED := $(if $(NODE_BIN),$(NODE_BIN),$(DOCKER_NODE_SHARED) node)
 
-help:
-	@echo -e "\033[1;38;5;39m───────────────────────────────────────────────────────────────\033[0m"
-	@echo -e "\033[1;38;5;39m        Track Binocle: Makefile Pipeline & Utilities         \033[0m"
-	@echo -e "\033[1;38;5;39m───────────────────────────────────────────────────────────────\033[0m"
-	@printf "\033[1;38;5;45mUsage:\033[0m make [target]\n\n"
-	@awk 'BEGIN { section = "" } /^[a-zA-Z0-9][^: ]*:/ { target=$$1; sub(":.*", "", target); getline; if ($$0 ~ /^## /) { desc = substr($$0, 4); if (desc ~ /^== /) { section = substr(desc, 4); printf("\n\033[1;38;5;220m%s\033[0m\n", section); } else { printf("  \033[1;38;5;81m%-22s\033[0m %s\n", target, desc); } } }' $(MAKEFILE_LIST)
-	@echo -e "\033[1;38;5;39m───────────────────────────────────────────────────────────────\033[0m"
-	@echo -e "\033[1;38;5;245mFor docs: make docs or see README.md\033[0m"
-
-.PHONY: help all all-local local up-local pulls pushes repair-detached bootstrap certs certs-trust certs-trust-system certs-trust-browser-host certs-doctor certs-trust-local certs-trust-user certs-trust-check env-format buildx-setup compose-build docker-prefetch-images vault-up vault-seed vault-publish vault-status vault-policy-sync vault-invite-token vault-fly-invite-token vault-reader-token vault-writer-token vault-fetch-shared vault-shared-doctor vault-session-node-check vault-session-check vault-login-user vault-login-approle vault-login-jwt vault-login-fly-admin vault-session-status vault-get-secrets vault-kv-export vault-session-reader-token vault-session-writer-token vault-logout check-env login-user login-approle login-jwt get-secrets logout env-fetch-shared vault-publish-shared vault-status-shared vault-repair-shared vault-github-oidc vault-fly-create vault-fly-deploy vault-fly-publish vault-fly-github vault-fly admin-cred-lost vault-fly-reset vault-rotate-approles vault-verify-approles env-fetch env-backup env-restore-test db-password-check db-password-apply compose-wait up up-infra app-images app-login app-images-push mail-up mail-logs mail-down calendar-up calendar-logs calendar-down healthcheck showcase playground playground-preview docs version baas-build baas-push baas-update baas-smoke baas-release-smtp docker-clean docker-clean-volumes docker-rm-all docker_verify docker_reclaim_cache
