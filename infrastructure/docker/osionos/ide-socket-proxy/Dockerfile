@@ -11,6 +11,7 @@ COPY init-shape.mjs /app/init-shape.mjs
 COPY uid-ledger.mjs /app/uid-ledger.mjs
 COPY uid-endpoint.mjs /app/uid-endpoint.mjs
 COPY json-guard.mjs /app/json-guard.mjs
+COPY runtime-pin.mjs /app/runtime-pin.mjs
 COPY volume-shape.mjs /app/volume-shape.mjs
 # verify.sh runs `node /app/proxy.mjs --selfcheck` in this image, which imports its cases.
 COPY create-shape.selfcheck.mjs /app/create-shape.selfcheck.mjs

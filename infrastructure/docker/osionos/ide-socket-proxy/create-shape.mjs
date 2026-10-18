@@ -40,7 +40,8 @@ const REQUIRED_HOST_CONFIG = [
   "NetworkMode", "CapDrop", "SecurityOpt", "ReadonlyRootfs", "Mounts",
   "Tmpfs", "PidsLimit", "Memory", "MemorySwap", "NanoCpus", "Ulimits", "RestartPolicy",
 ];
-const OPTIONAL_HOST_CONFIG = ["StorageOpt", "OomScoreAdj"];
+// Runtime is accepted only when it equals the runtime the plane requires (OSIONOS_IDE_REQUIRE_RUNTIME).
+const OPTIONAL_HOST_CONFIG = ["StorageOpt", "OomScoreAdj", "Runtime"];
 // NoCopy: without it an emptied volume is re-filled from the image and its root reset to 10001:10001 755,
 // which locks the user out of their own home (verdict G2).
 const REQUIRED_MOUNT_KEYS = ["Type", "Source", "Target", "VolumeOptions"];
@@ -68,6 +69,7 @@ export function shapeLimits(env) {
     maxMemory: 1073741824,
     maxNanoCpus: 1000000000,
     maxPids: 512,
+    requiredRuntime: env.OSIONOS_IDE_REQUIRE_RUNTIME || "",
   };
 }
 
@@ -183,6 +185,7 @@ export function createShapeViolation(body, path, limits) {
 
   // The bridge marks boxes as the kernel's first OOM choice; any other value is refused.
   if ("OomScoreAdj" in hc && hc.OomScoreAdj !== 500) return "OomScoreAdj";
+  if ("Runtime" in hc && (limits.requiredRuntime === "" || hc.Runtime !== limits.requiredRuntime)) return "Runtime";
 
   if (hc.StorageOpt) {
     if (!sameKeys(hc.StorageOpt, ["size"])) return "StorageOpt";

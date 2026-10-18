@@ -40,10 +40,10 @@ NAT_CHECK=/usr/local/sbin/osionos-ide-egress-nat
 PLANE_PROJECT=osionos-ide-plane
 pass=0; fail=0; skipped=0
 # 44 + 4 persistent-home probes (a)-(d) + 3 identity probes (e)-(g) + 1 /tmp probe + 4 per-user-uid
-# probes (ADR 0011); the green line is
-# `RESULT: 55 passed, 0 failed, 1 skipped (expected 56)` where the one skip is the runner image,
-# absent on a VM without the code runner.
-EXPECTED=56
+# probes (ADR 0011) + 1 runtime assertion (K11); the green line is
+# `RESULT: 55 passed, 0 failed, 2 skipped (expected 57)` where the skips are the runner image,
+# absent on a VM without the code runner, and the runtime assertion while OSIONOS_IDE_REQUIRE_RUNTIME is unset.
+EXPECTED=57
 # The VM's default gateway (user-mode QEMU: 10.0.2.2 is the physical host's loopback, where 4242
 # is the VM's own forwarded ssh). Elsewhere set a port that listens on that gateway.
 GATEWAY_PORT="${OSIONOS_IDE_VERIFY_GATEWAY_PORT:-4242}"
@@ -391,6 +391,16 @@ if [ "$(sx_retry 'whoami' | tr -d '\n')" = "coder" ]; then ok "a passwd file tha
 echo "== Resource caps (conditions 14,15,16) =="
 if [ "$(sx 'ulimit -c')" = "0" ]; then ok "core dumps disabled (RLIMIT_CORE=0)"; else bad "core dumps disabled (RLIMIT_CORE=0)"; fi
 deny "fallocate -l 2000M /tmp/big" "tmpfs write bounded by quota"
+
+echo "== Runtime assertion (K11/R1) =="
+# FAIL when OSIONOS_IDE_REQUIRE_RUNTIME is set and the daemon or the probe box runs another runtime
+# (a silent fallback to runc); SKIP when it is unset.
+runtime_message=$(DOCKER_HOST="unix://${OSIONOS_IDE_DOCKER_SOCK:-/run/docker-ide.sock}" sh "$(dirname "$0")/check-runtime.sh" "$BOX_A")
+case $? in
+  0) ok "$runtime_message" ;;
+  3) skip "$runtime_message" ;;
+  *) bad "$runtime_message" ;;
+esac
 
 echo "== Socket-proxy body filter (conditions 8,9) =="
 # The create-body vetting (Privileged/Binds/host-modes/CapAdd reject + endpoint
