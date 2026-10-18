@@ -1,6 +1,6 @@
 # Running the IDE boxes on the seat's rootless docker is out of scope
 
-- Decided: 2026-10-18 · by devil (first IDE ruling, [ADR 0022](../docs/adr/0022-terminals-the-operator-first-every-verified-user-on-a-second-secret-free-vm.md))
+- Decided: 2026-10-18 · by devil (first IDE ruling, [ADR 0022](../docs/adr/0022-terminals-stay-allowlist-only-the-operator-first.md))
 - Holds while: the IDE host's uid owns the prod VM disk or a prod credential, or the host's rootless docker
   lacks the `cpu` and `io` cgroup controllers
 

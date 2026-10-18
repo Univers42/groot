@@ -1,6 +1,6 @@
 # A shell for every verified user on the prod kernel is out of scope
 
-- Decided: 2026-10-18 · by devil (two rulings, recorded in [ADR 0022](../docs/adr/0022-terminals-the-operator-first-every-verified-user-on-a-second-secret-free-vm.md))
+- Decided: 2026-10-18 · by devil (two rulings, recorded in [ADR 0022](../docs/adr/0022-terminals-stay-allowlist-only-the-operator-first.md))
 - Holds while: the kernel that would run strangers' code is the baas VM kernel, which also runs prod Postgres,
   GoTrue and the mail sender, and the guest reports SRSO and TSA as `Vulnerable`
 
@@ -24,7 +24,8 @@ The boundary the plan relies on is not the one that applies.
   secret that signs every session, and the Titan sender. No working exploit was measured; UNKNOWN = FAIL.
 - Separately, `IOWeight` is inert on that VM, so a box competes with prod Postgres for I/O.
 - What would have to change: the boxes move to a kernel that holds none of that, or prod leaves this one.
-  The accepted route is the secret-free ide VM in the ADR.
+  A second, secret-free VM on this seat was built and dropped on 2026-10-19 (no durable disk, see
+  `ide-terminal-for-every-user-on-the-seat.md`); terminals stay allowlist-only.
 
 ## Prior requests
 
