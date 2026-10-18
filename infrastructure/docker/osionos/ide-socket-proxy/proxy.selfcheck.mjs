@@ -15,7 +15,7 @@ import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CANON_PATH, DIGEST, host, mk } from "./create-shape.selfcheck.mjs";
+import { CANON_PATH, DIGEST, OWNER, host, mk } from "./create-shape.selfcheck.mjs";
 
 const PROXY = fileURLToPath(new URL("./proxy.mjs", import.meta.url));
 
@@ -141,6 +141,32 @@ async function pinnedPlaneAssertsRuntime(proxy, daemon, state, chk) {
   chk("pinned: an init container is gated the same way", (await send(proxy.port, "POST", `/containers/ideinit-${DIGEST}/start`)).status, 403);
 }
 
+async function auditLinesAreWritten(proxy, chk) {
+  const headers = { "x-ide-reason": "open-workspace" };
+  const earlier = proxy.auditLines().length;
+  await send(proxy.port, "POST", CANON_PATH, JSON.stringify(mk()), headers);
+  await send(proxy.port, "POST", `${BOX}/start`, undefined, headers);
+  await send(proxy.port, "POST", `${BOX}/stop?t=5`, undefined, { "x-ide-reason": "Bad Reason!" });
+  await send(proxy.port, "DELETE", `${BOX}?force=true`);
+  await send(proxy.port, "GET", `${BOX}/json`);
+  await settle();
+  const lines = proxy.auditLines().slice(earlier);
+  chk("audit: one line per create/start/stop/remove, none for a read", lines.map((l) => l.op).join(","), "create,start,stop,remove");
+  chk("audit: box digest", lines.every((l) => l.box === DIGEST), true);
+  chk("audit: uid from the create", lines.map((l) => l.uid).join(","), "20000,20000,20000,20000");
+  chk("audit: asserted reason kept", lines[0].reason, "open-workspace");
+  chk("audit: malformed reason replaced", lines[2].reason, "unspecified");
+  chk("audit: daemon status recorded", lines.map((l) => l.status).join(","), "201,204,204,204");
+  const text = JSON.stringify(lines);
+  chk("audit: no env value, owner or label in a line", ["HTTP_PROXY", "ide-egress", OWNER, "osio.ide"].some((secret) => text.includes(secret)), false);
+  chk("audit: ts is ISO", /^\d{4}-\d\d-\d\dT[\d:.]+Z$/.test(lines[0].ts), true);
+}
+
+async function refusedStartIsAudited(proxy, chk) {
+  const last = proxy.auditLines().at(-1);
+  chk("audit: runtime refusal logged", `${last.op} ${last.reason} ${last.status}`, "start runtime-mismatch 403");
+}
+
 export async function proxyFailures() {
   const fail = [];
   const chk = (label, got, want) => { if (got !== want) fail.push(`${label}: got ${JSON.stringify(got).slice(0, 160)}, want ${JSON.stringify(want).slice(0, 160)}`); };
@@ -155,6 +181,8 @@ export async function proxyFailures() {
     await repeatedKeysAreRefused(plain, daemon, chk);
     await unsetPlaneKeepsToday(plain, daemon, chk);
     await pinnedPlaneAssertsRuntime(pinned, daemon, state, chk);
+    await refusedStartIsAudited(pinned, chk);
+    await auditLinesAreWritten(plain, chk);
   } finally {
     plain.stop();
     pinned.stop();
@@ -167,5 +195,5 @@ export async function proxyFailures() {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const fail = await proxyFailures();
   if (fail.length) { process.stderr.write(`proxy selfcheck FAIL:\n${fail.join("\n")}\n`); process.exit(1); }
-  process.stdout.write("proxy selfcheck OK: vetted bytes only, repeated keys refused, runtime pinned\n");
+  process.stdout.write("proxy selfcheck OK: vetted bytes only, repeated keys refused, runtime pinned, audit lines written\n");
 }
