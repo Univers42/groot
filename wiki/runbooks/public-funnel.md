@@ -18,10 +18,11 @@ Funnel allows only 443, 8443 and 10000. Not exposed: the whiteboard (3007), mail
 Consequences for a visitor: no whiteboard tab, no LiveKit calls, no mail/calendar apps, and
 `table:` live views fall back to polling because the app is built with no BaaS realtime token.
 
-The bundles are built keyless (`VITE_BAAS_API_KEY`, `VITE_BAAS_KONG_KEY`, `VITE_BAAS_REALTIME_TOKEN`
-and the IDE URL are forced empty in `docker-compose.public.yml`) under the `:public` image tags, so
+The bundles are built keyless (`VITE_BAAS_API_KEY`, `VITE_BAAS_KONG_KEY`, `VITE_BAAS_REALTIME_TOKEN`,
+the IDE URL and the mail, calendar and whiteboard URLs are forced empty in `docker-compose.public.yml`) under the `:public` image tags, so
 the `:local` images are never overwritten. On the bridge, `OSIONOS_AGENT_CLAUDE`,
-`OSIONOS_IDE_ALLOWED_SUBJECTS`, `OSIONOS_RUNNER_URL` and `OSIONOS_SQL_RO` are forced empty, and
+`OSIONOS_IDE_ALLOWED_SUBJECTS`, `OSIONOS_RUNNER_URL`, `OSIONOS_SQL_RO`, `OSIONOS_IDE_TOKEN_SECRET` (the IDE mint then answers 404) and
+`OSIONOS_IDE_ACCESS` are forced empty, and
 nginx answers 404 to `/api/agent/claude/stream` and rate-limits `/api/geocode` to 1 r/s, burst 5
 (`infrastructure/tls/public.d/`; measured in a throwaway nginx: stream 404, 14 of 20 rapid
 geocode requests 503).
@@ -44,6 +45,18 @@ geocode requests 503).
 fact — node name, exposed ports, no secret in either public bundle, bridge and gateway
 environment, the two edge probes, `.env.public` ignored and mode 600 — and exits 1 on any FAIL.
 A SKIP (for example a secret unset in every env file) is a check that did not run, not a pass.
+
+Surface checks (`scripts/lib/public-verify-surfaces.sh`):
+
+- `bridge-env` also fails when `OSIONOS_IDE_TOKEN_SECRET` is set on the bridge.
+- `ide-access` fails when `OSIONOS_IDE_ACCESS` on the bridge, or on `osionos-ide-server` when the
+  project runs one, is anything but unset, `allowlist` or `off` (so `verified` and `approved` are
+  red). The message names the key and the mode, never a secret. No IDE route ships in public, so
+  a mode that admits every verified account is a shell on the shared host.
+- `bundle-links` scans the served app image and fails on any `http(s)://localhost:PORT`, listing
+  the distinct `localhost:PORT` values. Such a link makes the visitor's browser frame their own
+  machine in the Mail, Calendar and Whiteboard tabs. An image that cannot be scanned is a FAIL.
+  It misses a URL built at run time or written as `127.0.0.1`.
 
 ## Rollback
 
