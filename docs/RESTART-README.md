@@ -41,7 +41,7 @@ no trailer. Verify any pasted handoff against `git log` / `git branch -a` before
 1. Empty workspaces + 502 on /api/pages/all. A fresh `make all` restored the git snapshot
    (apps/grobase/data-snapshots, 2026-07-28) whose osionos_pages lacks cover_position/template_surface; the
    bridge's column list got 400 and surfaced 502. Fix: models-migrate runs inside `make all`
-   (infrastructure/makes/pipeline.mk:5, scripts/apply-models-migrations.sh, IF NOT EXISTS), and when secrets/
+   (utils/mk/pipeline.mk, target all, scripts/apply-models-migrations.sh, IF NOT EXISTS), and when secrets/
    holds the vault seeds scripts/restore-if-empty.sh replays them (current schema) instead of the snapshot.
    Manual fix on any machine: psql the two files models/osionos-page-cover-position-migration.sql and
    models/osionos-admin-migration.sql, then reload the app in a private window (old page ids are cached).
@@ -51,7 +51,7 @@ no trailer. Verify any pasted handoff against `git log` / `git branch -a` before
    `--check` names drift by KEY, never a value. VITE_BAAS_REALTIME_TOKEN is NOT derived (seed-live-demo mints
    a tenant token into it) — never add it to the mapping.
 3. Teammate "no manifest for project groot". The personal `42ctl push` seals to the caller alone. Fix: the
-   team-scoped push/pull (VAULT42_ORG=univers42, VAULT42_ENV=prod in infrastructure/makes/repo.mk).
+   team-scoped push/pull (VAULT42_ORG=univers42, VAULT42_ENV=prod in utils/mk/repo.mk).
    With VAULT42_SOURCE=team a failed pull aborts `make all` instead of silently self-generating secrets and
    pinning the data volumes to them (the LOCAL-mode trap).
 

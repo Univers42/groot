@@ -201,7 +201,7 @@ The browser opens the socket; the arrow points along the event's direction.
 ## Sources
 
 - groot: `docker-compose.yml`, `infrastructure/tls/nginx.conf`,
-  `infrastructure/docker/osionos/app.Dockerfile`, `infrastructure/makes/docker.mk`.
+  `infrastructure/docker/osionos/app.Dockerfile`, `utils/mk/docker.mk`.
 - grobase (`30b73e4b`): `CLAUDE.md`, `infra/docker/services/kong/conf/kong.yml`,
   `orchestrators/compose/base/{gateway,control-plane,data-plane}.yml`,
   `src/data-plane-router/crates/*`, `src/control-plane/internal/{tenants,orchestrator}`.

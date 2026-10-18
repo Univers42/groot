@@ -144,7 +144,7 @@ docker logs track-binocle-osionos-runner   # expect "listening on :7900 — N la
 ```
 
 Persist `COMPOSE_PROFILES=runner` (later `runner,ide`) in `~/groot/.env.local`
-so a subsequent `make up` does not silently drop the profile. **Checkpoint:** a
+so a later restart does not silently drop the profile. `make frontends-up` restarts the runner only when `./.env.local` has `OSIONOS_RUNNER_URL=` set (and the sandbox proxy only on `OSIONOS_IDE_SANDBOX=1`). **Checkpoint:** a
 `.c` page's Run button now compiles with gcc and prints to `RunConsole`.
 
 ### Part B — activate the sandbox plane (terminal, fs-sync, tasks, clangd)
@@ -303,5 +303,5 @@ text surface only. Do not pull in VS Code workbench packages.
 - Ask before anything destructive beyond the approved prune, and before any
   change to the sandbox plane's security posture.
 - Prefer the repo's own `make` targets and scripts over ad-hoc commands
-  (`infrastructure/makes/*.mk` — e.g. `make secrets-ensure` for credentials,
+  (`utils/mk/*.mk` — e.g. `make secrets-ensure` for credentials,
   `make certs` for the local CA).

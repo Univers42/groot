@@ -184,7 +184,7 @@ you verify by re-running the gates yourself. Commit in the submodule first, then
      through grobase only).
    - `tools/seeds/seed_groot_lab.sh`: refuses staging/prod, keeps passwords in a git-ignored env
      file, and works through bridge routes.
-   - `infrastructure/makes/lab.mk` (`lab-seed`, `lab-e2e`, each followed by a `## ` help line).
+   - `utils/mk/lab.mk` (`lab-seed`, `lab-e2e`, each followed by a `## ` help line).
    - Specs `tests/e2e/specs/cl1-*`, `cl4-*`, `cl5-*`.
    - Enforce only at zero unexplained shadow disagreements, both directions. A CUT, budget or
      store error answers 503, never a legacy fallback.
