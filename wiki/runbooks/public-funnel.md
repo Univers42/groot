@@ -49,7 +49,7 @@ A SKIP (for example a secret unset in every env file) is a check that did not ru
 
 `make public-down` runs `tailscale funnel reset`: nothing is reachable from the internet. The
 containers keep running on localhost, still in public configuration; `make link-frontends-start`
-returns them to the local build.
+recreates them from the local build (not exercised in this change).
 
 ## Limits
 
