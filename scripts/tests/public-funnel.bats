@@ -75,7 +75,7 @@ OSIONOS_BRIDGE_SHARED_SECRET=bridge-FFFF-6666
 ENV
   printf 'OSIONOS_ADMIN_EMAILS=admin@example.test\nOSIONOS_ALLOWED_ORIGIN=https://osionos.tail10f2ea.ts.net:8443\n' >"$T/env-bridge"
   printf 'AUTH_DEMO_INSECURE=false\nTURNSTILE_BYPASS_LOCAL=false\nAUTH_REQUIRE_EMAIL_VERIFICATION=true\n' >"$T/env-gw"
-  echo 'Auth gateway listening on http://localhost:8787/api/auth (rate-limit store: redis, trusted proxy hops: 3)' >"$T/gw.log"
+  printf '%s\n' 'Auth gateway listening on http://localhost:8787/api/auth and /api/newsletter (rate-limit store: memory, trusted proxy hops: 3)' '[auth-gateway] connected to Redis for shared rate-limit/lockout state.' >"$T/gw.log"
   : >"$T/funnel"
   : >"$T/ts.log"
 }
@@ -248,7 +248,7 @@ set_env() { sed -i "s|^$1=.*|$1=$2|" "$T/repo/.env.public"; }
   [ "$status" -eq 1 ]
   has "FAIL  gateway-env"
   has "no 'trusted proxy hops: 3'"
-  has "no 'rate-limit store: redis'"
+  has "no Redis connection"
 }
 
 @test "verify fails when the edge serves the claude stream or does not rate-limit geocode" {

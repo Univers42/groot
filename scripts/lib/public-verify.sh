@@ -155,7 +155,9 @@ check_gateway_env() {
   if [ -z "$hops" ]; then fail gateway-env "AUTH_TRUSTED_PROXY_HOPS is unset in .env.public"
   elif grep -qF "trusted proxy hops: $hops)" <<<"$logs"; then pass gateway-env "boot log: trusted proxy hops: $hops"
   else fail gateway-env "boot log has no 'trusted proxy hops: $hops'"; fi
-  expect gateway-env "boot log: rate-limit store: redis" "boot log has no 'rate-limit store: redis'" grep -qF "rate-limit store: redis" <<<"$logs"
+  # The listen line prints the store before its async Redis connect finishes, so a healthy
+  # gateway says "store: memory" there and "connected to Redis" a moment later (measured 2026-10-18).
+  expect gateway-env "boot log: Redis store connected" "boot log shows no Redis connection" grep -qE "connected to Redis for shared rate-limit|rate-limit store: redis" <<<"$logs"
 }
 
 # Caveat: the geocode probe is rate-based. It expects the 1 r/s burst 5 bucket to be full, so
