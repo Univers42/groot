@@ -216,6 +216,7 @@ else
   # The proxy refuses a create whose image differs from its own setting, so it must render the
   # same value as the ide-server for whatever pin the environment carries.
   srv_image=$(svc "osionos-ide-server" | jq -r '.environment.OSIONOS_IDE_SANDBOX_IMAGE // empty')
+  sp_check "runtime assertion (K11) reaches the proxy" '.environment | has("OSIONOS_IDE_REQUIRE_RUNTIME")'
   sp_check "sandbox image equals the ide-server's" ".environment.OSIONOS_IDE_SANDBOX_IMAGE == \"${srv_image:-unset}\""
 fi
 

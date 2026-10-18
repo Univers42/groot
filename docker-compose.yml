@@ -760,6 +760,9 @@ services:
       # The create-body vetting allows exactly this image; it must be the one osionos-ide-server
       # asks for, so both interpolate the same variable (a pinned sha256 id from ship-images.sh).
       OSIONOS_IDE_SANDBOX_IMAGE: ${OSIONOS_IDE_SANDBOX_IMAGE:-osionos-ide-sandbox:latest}
+      # K11: with a runtime named here (e.g. runsc) the proxy writes it into every create and refuses
+      # a start under another. Empty (the default) leaves the plane as before.
+      OSIONOS_IDE_REQUIRE_RUNTIME: ${OSIONOS_IDE_REQUIRE_RUNTIME:-}
     volumes:
       # Host bind of the isolated daemon's socket (docker-ide.socket owns the file,
       # so a daemon restart keeps the inode this mount holds). Long syntax so the
