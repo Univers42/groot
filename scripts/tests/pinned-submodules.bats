@@ -78,12 +78,12 @@ populate_pinned() {
 }
 
 recipe() {
-  make -s -C "$REPO" -n "$1" GIT_COMMIT_MESSAGE=bats
+  make -s -C "$REPO" -n "$@" GIT_COMMIT_MESSAGE=bats
 }
 
 run_recipe() {
   local body
-  body=$(recipe "$1")
+  body=$(recipe "$@")
   run bash -c "cd \"$W\" && bash -eu -o pipefail -c \"\$0\"" "$body"
 }
 
@@ -362,4 +362,66 @@ clone_super() {
   run make -C "$REPO" -pq __no_such_target__
   block=$(printf '%s\n' "$output" | awk '/^frontends-up:/ {on = 1} on && /^$/ {exit} on')
   [[ "$block" == "frontends-up: "*submodules-pinned* ]]
+}
+
+# Superproject whose apps/parent follows main and records its nested lib at lib_1 in both of its
+# commits, while lib's main is at lib_2, which contains lib_1: the drawnosaurus / engine shape.
+# apps/parent main moves one commit past the gitlink.
+parent_pin_fixture() {
+  upstream lib
+  git clone -q --bare "$T/src/lib" "$T/lib.git"
+  git init -q "$T/src/parent"
+  git -C "$T/src/parent" submodule add -q "file://$T/lib.git" lib
+  git -C "$T/src/parent/lib" checkout -q "$lib_1"
+  git -C "$T/src/parent" add lib
+  git -C "$T/src/parent" commit -qm one
+  echo 2 >"$T/src/parent/f"
+  git -C "$T/src/parent" add f
+  git -C "$T/src/parent" commit -qm two
+  parent_2=$(git -C "$T/src/parent" rev-parse HEAD)
+  git clone -q --bare "$T/src/parent" "$T/parent.git"
+  git init -q "$T/super"
+  git -C "$T/super" submodule add -q "file://$T/parent.git" apps/parent
+  git -C "$T/super/apps/parent" checkout -q "$parent_2~1"
+  clone_super
+  git -C "$W" submodule update -q --init --recursive
+}
+
+@test "syncro leaves a parent-pinned nested submodule at the commit its parent records" {
+  parent_pin_fixture
+  run_recipe syncro-submodule PARENT_PINNED=apps/parent/lib
+  [ "$status" -eq 0 ]
+  [ "$(head_of apps/parent)" = "$parent_2" ]
+  [ "$(head_of apps/parent/lib)" = "$lib_1" ]
+  [[ "$output" == *"left at their gitlink with everything under them: "*"apps/parent/lib"* ]]
+}
+
+@test "negative control: with PARENT_PINNED empty syncro moves the nested submodule to its tip" {
+  parent_pin_fixture
+  run_recipe syncro-submodule PARENT_PINNED=
+  [ "$status" -eq 0 ]
+  [ "$(head_of apps/parent)" = "$parent_2" ]
+  [ "$(head_of apps/parent/lib)" = "$lib_2" ]
+}
+
+# apps/parent on main (so only the nested lib is a candidate) and lib detached with an edit
+# that repair-detached would commit.
+parent_dirty_lib() {
+  parent_pin_fixture
+  git -C "$W/apps/parent" checkout -q -B main origin/main
+  echo edited >>"$W/apps/parent/lib/f"
+}
+
+@test "repair-detached leaves a dirty parent-pinned nested submodule uncommitted" {
+  parent_dirty_lib
+  run_recipe repair-detached PARENT_PINNED=apps/parent/lib
+  [ "$status" -eq 0 ]
+  [ "$(head_of apps/parent/lib)" = "$lib_1" ]
+  [ -n "$(git -C "$W/apps/parent/lib" status --porcelain)" ]
+}
+
+@test "negative control: with PARENT_PINNED empty repair-detached commits the nested edit" {
+  parent_dirty_lib
+  run_recipe repair-detached PARENT_PINNED=
+  [ "$(head_of apps/parent/lib)" != "$lib_1" ]
 }
