@@ -132,6 +132,9 @@ demo rows to the app's API key (`make link-live-data-ensure`) and trusts the
 local CA in this user's browser stores (`make certs-trust-user`, no sudo). Both end with
 `make link-verify`: one request per grobase service from inside every frontend, the TLS edge,
 then the browser stores — [`wiki/runbooks/grobase-link.md`](wiki/runbooks/grobase-link.md).
+To serve the frontends to the internet through this host's Tailscale Funnel (443 first, then
+8443 and 10000), `make public-env` and `make public-up`; `make public-down` closes it:
+[`wiki/runbooks/public-funnel.md`](wiki/runbooks/public-funnel.md).
 `make roundtrip` then proves persistence (account, sign-in, editor hand-off, a page, the rows
 in postgres) and `make link-e2e` runs the Playwright smoke through the link.
 
