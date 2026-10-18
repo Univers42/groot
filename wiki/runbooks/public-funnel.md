@@ -67,14 +67,20 @@ Static previews of Mail and Calendar, no bridge and no account, served by a seco
 1. Mint a Tailscale auth key: single-use, tagged (the tag's ACL needs the `funnel` nodeAttr),
    pre-approved, NOT ephemeral. Then `pbpaste | bash scripts/public-node.sh start` (the key is read
    from stdin only). `bash scripts/public-node.sh status` prints the DNS name and the Funnel ports.
+   `public-node.sh stop` resets that node's Funnel before it stops the daemon; the daemon's output is
+   dropped unless `PUBLIC_APPS_LOG=1` (then `tailscaled.log` in the node's state dir, which grows).
 2. In `.env.public` set `PUBLIC_MAIL_ORIGIN=https://<node dns name>` and
    `PUBLIC_CALENDAR_ORIGIN=https://<node dns name>:8443` (both or neither; the host must not be
-   `PUBLIC_ORIGIN`'s). Rebuild the images (`make public-up` builds the osionos app with both URLs).
-3. `bash scripts/public-funnel.sh up apps` runs `verify --pre`, opens 443 -> 127.0.0.1:3102 and
-   8443 -> 127.0.0.1:3103 on the apps node, then verifies again. `down` resets both nodes.
+   `PUBLIC_ORIGIN`'s).
+3. Open the apps node FIRST: `make public-up PUBLIC_PORTS=apps` (rebuilds the images, the osionos
+   app with both URLs among them, then runs `bash scripts/public-funnel.sh up apps`: `verify --pre`,
+   443 -> 127.0.0.1:3102 and 8443 -> 127.0.0.1:3103 on the apps node, then verifies again).
+   `up apps` refuses to run unless both origins are set.
+4. Only then `make public-up` (443) or `PUBLIC_PORTS=all`. With the origins set, the post-open
+   verify of the main node includes the apps checks, so while the apps node is not serving it FAILs
+   and that failure resets BOTH nodes.
 
-With either origin set, `up 443` and `up all` FAIL their post-open verify until the apps node
-serves. The marketplace rows are changed by a user-run SQL script (dry run unless `-v apply=1`).
+`down` resets both nodes. The marketplace rows are changed by a user-run SQL script (dry run unless `-v apply=1`).
 
 ## Rollback
 

@@ -17,7 +17,8 @@
 # check FAILs on it). A daemon whose state is in memory also loses the node name and the Funnel
 # config on restart; `verify` then fails on the name and `up` has to be run again.
 # With PUBLIC_MAIL_ORIGIN and PUBLIC_CALENDAR_ORIGIN set, the apps checks need the apps node
-# serving: `up 443` or `up all` then FAILs its post-open verify (and resets) until `up apps` ran.
+# serving: run `up apps` FIRST. `up 443` or `up all` before it FAILs its post-open verify and
+# resets BOTH nodes. `up apps` dies before opening anything when the origins are unset.
 set -euo pipefail
 
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
