@@ -227,7 +227,7 @@ STUB
 @test "DOCKER_ROOTLESS is 1 on a rootless daemon and empty on a rootful one; the IDE relay's uid follows it" {
   local repo="$BATS_TEST_DIRNAME/../.." bin="$BATS_TEST_TMPDIR/rootless-bin"
   mkdir -p "$bin"
-  print_rootless() { PATH="$bin:$PATH" make -s --no-print-directory -C "$repo" -f infrastructure/makes/common.mk -E 'p: ; @echo "[$(DOCKER_ROOTLESS)]"' p; }
+  print_rootless() { PATH="$bin:$PATH" make -s --no-print-directory -C "$repo" -f utils/mk/common.mk -E 'p: ; @echo "[$(DOCKER_ROOTLESS)]"' p; }
   printf '#!/bin/sh\necho "[name=seccomp,profile=builtin name=rootless name=cgroupns]"\n' >"$bin/docker"
   chmod +x "$bin/docker"
   run print_rootless
@@ -236,11 +236,11 @@ STUB
   run print_rootless
   [ "$output" = "[]" ]
   grep -q 'GROBASE_LINK_UID="$(if $(DOCKER_ROOTLESS),0,$$(id -u))" GROBASE_LINK_GID="$(if $(DOCKER_ROOTLESS),0,$$(id -g))"' \
-    "$repo/infrastructure/makes/grobase-link.mk"
+    "$repo/utils/mk/grobase-link.mk"
 }
 
 @test "make link: the grobase-link-ide relay is started on ide-linked in ssh and direct modes" {
-  local mk="$BATS_TEST_DIRNAME/../../infrastructure/makes/grobase-link.mk"
+  local mk="$BATS_TEST_DIRNAME/../../utils/mk/grobase-link.mk"
   grep -q '= ssh \] || \[ "\$\$(\$(LINK_SCRIPT) mode)" = direct \]; then' "$mk"
   grep -q 'if \$(LINK_SCRIPT) ide-linked; then' "$mk"
 }
