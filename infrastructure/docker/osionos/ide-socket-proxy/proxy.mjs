@@ -36,6 +36,7 @@ import { UID_PATH, handleUidRequest } from "./uid-endpoint.mjs";
 import { createAudit } from "./audit.mjs";
 import { findDuplicateKey } from "./json-guard.mjs";
 import { START_PATH_RE, inspectRuntime, pinRuntime } from "./runtime-pin.mjs";
+import { unsafeCreateBody } from "./escalation-denylist.mjs";
 import { unsafeNetworkBody, unsafeVolumeBody } from "./volume-shape.mjs";
 
 const LISTEN_PORT = Number(process.env.IDE_SOCKET_PROXY_PORT || 2375);
@@ -76,23 +77,6 @@ const ALLOW = [
 
 function isAllowed(method, path) {
   return ALLOW.some(([m, re]) => m === method && re.test(path));
-}
-
-/** Reject a create body that would escalate out of the sandbox (condition 8). */
-export function unsafeCreateBody(body) {
-  const host = body?.HostConfig ?? {};
-  if (host.Privileged === true) return "Privileged";
-  if (Array.isArray(host.Binds) && host.Binds.length) return "Binds";
-  if (Array.isArray(host.CapAdd) && host.CapAdd.length) return "CapAdd";
-  if (Array.isArray(host.Devices) && host.Devices.length) return "Devices";
-  if (/^(host|container:)/.test(String(host.NetworkMode ?? ""))) return "NetworkMode";
-  if (["host"].includes(String(host.PidMode ?? ""))) return "PidMode";
-  if (["host"].includes(String(host.IpcMode ?? ""))) return "IpcMode";
-  if (["host"].includes(String(host.UTSMode ?? ""))) return "UTSMode";
-  if (host.UsernsMode === "host") return "UsernsMode";
-  if (Array.isArray(host.Mounts) && host.Mounts.some((m) => m?.Type === "bind")) return "bind-mount";
-  if (Array.isArray(host.SecurityOpt) && host.SecurityOpt.some((o) => /seccomp=unconfined|apparmor=unconfined|systempaths=unconfined/i.test(String(o)))) return "SecurityOpt";
-  return null;
 }
 
 /** A container create, box or init by its name: the shape first (the box shape is also run
