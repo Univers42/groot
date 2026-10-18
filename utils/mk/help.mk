@@ -1,7 +1,7 @@
 # Help is generated from the `##` markers in the makefiles themselves, so a new
 # target documents itself and nothing is hand-listed. Convention: the awk header.
 MAKE_HELP_AWK := utils/scripts/make-help.awk
-HELP_SECTIONS := Pipeline|Link (grobase anywhere)|Backend (grobase)|Secrets (vault42)|Apps|Tests|Demo data|Certificates|Docker|Git & submodules|Formatting|Help
+HELP_SECTIONS := Pipeline|Link (grobase anywhere)|Public (Funnel)|Backend (grobase)|Secrets (vault42)|Apps|Tests|Demo data|Certificates|Docker|Git & submodules|Formatting|Help
 
 # Recursive on purpose: expands when the root `.PHONY:` line is read, after every
 # module is included, so a module never lists its own targets as phony.
