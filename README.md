@@ -81,11 +81,11 @@ media server for video rooms).
 
 | Requirement | Detail | Source |
 |---|---|---|
-| **Linux host** | Tested on Debian 13; the CA-trust step uses `sudo` + `update-ca-certificates` | `infrastructure/makes/certs.mk` |
+| **Linux host** | Tested on Debian 13; the CA-trust step uses `sudo` + `update-ca-certificates` | `utils/mk/certs.mk` |
 | **Docker Engine ≥ 25** + **Compose v2** | Healthchecks use `start_interval`, which needs Docker 25. Tested with Docker 29.8. | `docker-compose.yml:10` |
 | **RAM ≥ 8 GB** | Measured: the VM peaked at ~6.5 GB of 8 GB during `make all` | measured, 2026-09-30 |
 | **Disk ≥ 30 GB free for Docker** | Measured on the dev VM with the stack running (`docker system df`, 2026-10-01): images 13.5 GB, build cache 9.5 GB, volumes 1.4 GB | measured |
-| **GNU Make, git, curl, openssl** | Make drives everything; curl runs the health check; openssl generates the local secrets | `infrastructure/makes/app.mk`, `scripts/gen-local-env.sh:68` |
+| **GNU Make, git, curl, openssl** | Make drives everything; curl runs the health check; openssl generates the local secrets | `utils/mk/app.mk`, `scripts/gen-local-env.sh:68` |
 | **A GitHub SSH key** | `.gitmodules` uses `git@github.com:` URLs, so the recursive clone needs SSH access to GitHub | `.gitmodules` |
 | **Google Chrome** | Current stable — the browser the project is evaluated on | |
 | `certutil` (optional) | Imports the local CA into the browsers' NSS stores. Absent, `make certs-trust-user` unpacks `libnss3-tools` into `~/.cache/born2root/nss` without root; if that fails it warns and exits 0, and the CA is imported by hand (see [Access](#access-and-the-local-ca)) | `scripts/certs-trust-user.sh` |
@@ -94,7 +94,7 @@ media server for video rooms).
 in containers.
 
 `make all` asks for **one `sudo` password** the first time: it copies the local CA into the system
-trust store. This is intended (`certs-trust-local` in `infrastructure/makes/certs.mk`). Without
+trust store. This is intended (`certs-trust-local` in `utils/mk/certs.mk`). Without
 sudo, `CERT_TRUST_MODE=user` trusts the browsers only and `skip` trusts nothing (see
 [Access](#access-and-the-local-ca)).
 
@@ -108,7 +108,7 @@ host can reach the guest): 443, 3001, 3002, 3003, 3007 (always loopback), 4000, 
 
 This is the path rehearsed on a clean machine. It checks out the release tag and does **not**
 follow submodule branch tips (`SKIP_SYNC=1`, see `sync-submodules-soft` in
-`infrastructure/makes/pipeline.mk`).
+`utils/mk/pipeline.mk`).
 
 ```bash
 git clone --recursive git@github.com:Univers42/groot.git
@@ -143,7 +143,7 @@ including random `OSIONOS_*` secrets and the demo account's `DEMO_LOGIN_PASSWORD
 (`scripts/gen-local-env.sh`). An older `.env.local` without it gets one minted on the next
 `make all`, which says so by name.
 
-`make all` runs, in order (`infrastructure/makes/pipeline.mk`): submodule sync → secrets →
+`make all` runs, in order (`utils/mk/pipeline.mk`): submodule sync → secrets →
 local TLS certificates → trust the local CA → grobase backend → derive `.env.local` → restore
 data if the engines are empty → set the demo account's password → SQL migrations → frontends → health check → URL list.
 
@@ -177,11 +177,19 @@ What the check does not do:
 
 The osionos pointer's own `branch = main` override is out of scope here (tracked with the pin audit).
 
+### Finding make targets
+
+`make help` lists every root target by section; `make help-<target>` prints one target's summary,
+prerequisites and usage lines (for example `make help-link`). Each target in `utils/mk/*.mk`
+carries its summary after `##` on the target line and sits under a `##@ Section` heading; those
+markers are the only source of the help output. The convention and the list of deleted targets
+are in [ADR 0016](docs/adr/0016-self-documenting-pruned-root-make.md).
+
 ### Checks
 
 | Command | What it proves |
 |---|---|
-| `make healthcheck` | grobase auth, bridge, osionos, website (and HTTP→HTTPS redirect), auth gateway, drawnosaurus board list (`infrastructure/makes/app.mk`) |
+| `make healthcheck` | grobase auth, bridge, osionos, website (and HTTP→HTTPS redirect), auth gateway, drawnosaurus board list (`utils/mk/app.mk`) |
 | `make e2e` | Playwright smoke in a pinned container against the running stack: DW3 Whiteboard tab, DW8 two browsers on one board, DW9 the board inside osionos, DW10 Mail/Calendar (`tests/e2e/README.md`) |
 | `make mail-up calendar-up` | Start the opt-in Mail and Calendar apps. Without them DW10 **skips** and prints the reason; it never passes silently. |
 | `make e2e-clean` | Soft-delete the `e2e-*` boards the smoke leaves behind |
@@ -295,7 +303,7 @@ Details: [`DATA-MIGRATION.md`](DATA-MIGRATION.md).
 | `docker compose down` | Stop the frontends (data is kept) |
 
 **Backend editions.** `make all` starts grobase in the **`devlean`** edition
-(`GROBASE_EDITION ?= devlean`, `infrastructure/makes/grobase.mk:48`; listed in grobase's
+(`GROBASE_EDITION ?= devlean` in `utils/mk/grobase.mk`; listed in grobase's
 `orchestrators/makes/00-config.mk:68`): the core engines (PostgreSQL, MySQL, MongoDB, Redis,
 MinIO), the full application / control / data planes and realtime — without the heavy extra
 engines and without the monitoring stack. `GROBASE_EDITION=migrate` adds every snapshot engine;
