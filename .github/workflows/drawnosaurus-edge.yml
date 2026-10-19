@@ -1,0 +1,48 @@
+name: drawnosaurus front door (:3007)
+
+# Runs the real infrastructure/tls/nginx.conf in the image compose runs it in, in front of a
+# stub drawnosaurus-gateway, and checks the :3007 server block: CORS for the osionos origin
+# only (answered at the edge, upstream's headers hidden), DELETE and /v1/share still denied,
+# the framing rule kept. Seconds, no secrets, no stack.
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - ".github/workflows/drawnosaurus-edge.yml"
+      - "infrastructure/tls/nginx.conf"
+      - "tests/drawnosaurus-edge/**"
+  pull_request:
+    paths:
+      - ".github/workflows/drawnosaurus-edge.yml"
+      - "infrastructure/tls/nginx.conf"
+      - "tests/drawnosaurus-edge/**"
+  workflow_dispatch:
+
+concurrency:
+  group: drawnosaurus-edge-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  cors:
+    name: :3007 CORS + deny rules against the real nginx.conf (bats)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: nginx from mirror.gcr.io under its public.ecr.aws name
+        # Same reason as graph-studio.yml: public.ecr.aws rate-limits anonymous pulls per runner IP.
+        run: |
+          docker pull -q mirror.gcr.io/library/nginx:1.27-alpine
+          docker tag mirror.gcr.io/library/nginx:1.27-alpine public.ecr.aws/docker/library/nginx:1.27-alpine
+      - name: install bats
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bats
+      - name: bats tests/drawnosaurus-edge (no skips allowed)
+        # explicit `shell: bash` adds -o pipefail: without it, tee's exit status hides a bats failure
+        shell: bash
+        run: |
+          bats tests/drawnosaurus-edge | tee "$RUNNER_TEMP/bats.log"
+          if grep -q '# skip' "$RUNNER_TEMP/bats.log"; then echo "::error::a drawnosaurus-edge test was skipped"; exit 1; fi
