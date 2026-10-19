@@ -45,6 +45,8 @@ on:
       - "scripts/**"
       - "Makefile"
       - "docker-compose.yml"
+      # its build args are checked against the Dockerfiles that build them (build-args.bats)
+      - "docker-compose.public.yml"
       - ".dockerignore"
       - "docker-bake.hcl"
       - "apps/grobase"

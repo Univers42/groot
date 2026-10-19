@@ -274,9 +274,9 @@ services:
         VITE_PRISMATICA_URL: https://localhost:${OPPOSITE_OSIRIS_HOST_PORT:-4322}
         VITE_MAIL_APP_URL: https://localhost:${MAIL_HOST_PORT:-3002}
         VITE_CALENDAR_APP_URL: https://localhost:${CALENDAR_HOST_PORT:-3003}
-        # The Whiteboard embed tab (drawnosaurus). Baked at build like the two above, so
-        # the tab is gated by the osio.whiteboard flag (default OFF), not by this being
-        # empty — see featureFlags.ts. Turn on per-session with ?osio.whiteboard=1.
+        # The Whiteboard (drawnosaurus). Baked at build like the two above; empty hides every
+        # whiteboard entry point (osionos appUrls.ts, whiteboardAvailability.ts), and the
+        # osio.whiteboard flag (default ON) is only a kill-switch: ?osio.whiteboard=0.
         VITE_WHITEBOARD_APP_URL: https://localhost:${DRAWNOSAURUS_HOST_PORT:-3007}
         # IDE server browser origin. Baked at build; empty = the IDE shows "not configured".
         VITE_OSIONOS_IDE_URL: ${VITE_OSIONOS_IDE_URL:-https://localhost:8446}
