@@ -61,6 +61,9 @@ ExecStart=/usr/bin/dockerd \
   --containerd-namespace=osionos-ide \
   --containerd-plugins-namespace=osionos-ide-plugins \
   --config-file=/etc/docker-ide/daemon.json
+# --bridge=none makes dockerd delete any interface named docker0 on start, the MAIN
+# daemon's default bridge included; this puts it back (restore-docker0.sh says why).
+ExecStartPost=-/usr/local/sbin/osionos-ide-restore-docker0
 ExecReload=/bin/kill -s HUP $MAINPID
 Restart=on-failure
 RestartSec=3
