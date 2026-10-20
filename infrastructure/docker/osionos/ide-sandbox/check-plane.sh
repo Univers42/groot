@@ -113,14 +113,23 @@ c2() {
   [ -n "$secret" ] ||
     { bad "C2 token-secret-in-no-home-file:cannot-decide(no OSIONOS_IDE_TOKEN_SECRET in $ENV_FILE)"; return; }
   # grep exits 1 for "no match" only; 2 (an unreadable path) may still have listed files,
-  # so the output is kept whatever the status, and no match plus an error is undecided.
+  # so the output is kept whatever the status. No match plus errors is decided only when
+  # every error is a path the operator may not read.
+  # Caveat: such a path is not searched. Inception's ~/data is owned by its containers'
+  # uids (2026-10-20: six paths, rc=2, C2 undecidable); it is counted in the ok line.
   rc=0
-  files="$(printf '%s' "$secret" | timeout 60 ssh "$HOST" "grep -rlsF --exclude-dir=.cache -f - \"\$HOME\"")" || rc=$?
+  errf="$(mktemp)"
+  files="$(printf '%s' "$secret" | timeout 60 ssh "$HOST" "grep -rlF --exclude-dir=.cache -f - \"\$HOME\"" 2>"$errf")" || rc=$?
   unset secret
+  denied="$(grep -c '^grep: .*: Permission denied$' "$errf" || true)"
+  other="$(grep '^grep: ' "$errf" | grep -vc ': Permission denied$' || true)"
+  rm -f "$errf"
   if [ -n "$files" ]; then
     bad "C2 token-secret-in-no-home-file:FOUND($(printf '%s' "$files" | tr '\n' ','))"
   elif [ "$rc" -eq 1 ]; then
     ok "C2 token-secret-in-no-home-file"
+  elif [ "$rc" -eq 2 ] && [ "$denied" -gt 0 ] && [ "$other" -eq 0 ]; then
+    ok "C2 token-secret-in-no-home-file ($denied path(s) the operator may not read: not searched)"
   else
     bad "C2 token-secret-in-no-home-file:cannot-decide(grep rc=$rc)"
   fi
