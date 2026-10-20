@@ -58,6 +58,32 @@ Surface checks (`scripts/lib/public-verify-surfaces.sh`):
   machine in the Mail, Calendar and Whiteboard tabs. An image that cannot be scanned is a FAIL.
   It misses a URL built at run time or written as `127.0.0.1`.
 
+## Website on Vercel, entry on the data-center node
+
+Running since 2026-10-21: the website is prismatica on Vercel (`PUBLIC_SITE_ORIGIN`) and the
+Funnel entry is the born2root data-center VM's node (`PUBLIC_ORIGIN=https://baas.tail10f2ea.ts.net`),
+whose 443 already serves grobase's WAF. The containers still run on this host; the VM reaches the
+host's loopback at `10.0.2.2` (QEMU user networking). `public-up` opens the Funnel on the local
+tailscaled only, so on the VM the mappings are set by hand (`ssh b2b`):
+
+```sh
+tailscale funnel --bg --https=8443 https+insecure://10.0.2.2:3001
+tailscale funnel --bg --https=8443 --set-path=/api/auth https+insecure://10.0.2.2:8787/api/auth
+tailscale funnel --bg --https=8443 --set-path=/api/newsletter https+insecure://10.0.2.2:8787/api/newsletter
+tailscale funnel --bg --https=10000 https+insecure://10.0.2.2:4000
+```
+
+Vercel rewrites `/api/auth/*` and `/api/newsletter/*` to `:8443`, and `/auth`, `/query` and
+`/storage` to the VM's 443 (`apps/opposite-osiris/vercel.json`).
+
+- Close with `tailscale funnel --https=8443 off` and `--https=10000 off` on the VM. Never
+  `make public-down` against it: `funnel reset` also closes 443, grobase's entrance.
+- `verify --pre` fails `node-name` and `nobridge` (Funnel targets unreadable) because it reads this
+  host's tailscaled; check the VM's mappings with `tailscale serve status` there.
+- `AUTH_TRUSTED_PROXY_HOPS=2`, measured with a forged `X-Forwarded-For`: tailscaled replaces the
+  header with the address it sees, so the forgery is dropped, and every visitor who comes through
+  Vercel arrives as a Vercel egress address, one shared rate-limit bucket.
+
 ## Mail and Calendar previews (second node)
 
 Static previews of Mail and Calendar, no bridge and no account, served by a second Funnel node
