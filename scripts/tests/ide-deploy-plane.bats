@@ -137,9 +137,11 @@ FAKE
 shift
 echo "ssh $*" >> "$CALLS"
 case " $* " in
-  *"grep -rlsF"*)
+  *"grep -rlF"*)
     cat >/dev/null
     if [ -n "${C2_FILES:-}" ]; then printf '%s\n' "$C2_FILES"; exit 0; fi
+    # C2_STDERR: what grep says on stderr (an unreadable path), one line per entry.
+    [ -z "${C2_STDERR:-}" ] || printf '%s\n' "$C2_STDERR" >&2
     exit "${C2_RC:-1}"
     ;;
   *"stat -c %g /run/docker-ide.sock"*) printf '%s\n' "${IDE_SOCK_GID-1002}" ;;
@@ -290,6 +292,23 @@ BOTH='osionos-ide-socket-proxy:latest track-binocle/osionos-bridge:local'
   [[ "$output" == *"FAIL C10"* ]]
 }
 
+@test "C2 decides when every grep error is a path the operator may not read" {
+  valid_env
+  IDE_SHIP_HOST=vm OSIONOS_IDE_ENV_FILE="$ENV_FILE" C2_RC=2 \
+    C2_STDERR="grep: /home/oper/data/mariadb/mysql: Permission denied
+grep: /home/oper/data/wordpress/wp-config.php: Permission denied" check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ok C2 token-secret-in-no-home-file (2 path(s) the operator may not read: not searched)"* ]]
+}
+
+@test "C2 stays undecided when grep fails for another reason" {
+  valid_env
+  IDE_SHIP_HOST=vm OSIONOS_IDE_ENV_FILE="$ENV_FILE" C2_RC=2 \
+    C2_STDERR="grep: /home/oper/x: Input/output error" check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL C2 token-secret-in-no-home-file:cannot-decide(grep rc=2)"* ]]
+}
+
 @test "a token secret found in a VM home file fails C2, naming the file, exits 1" {
   valid_env
   IDE_SHIP_HOST=vm OSIONOS_IDE_ENV_FILE="$ENV_FILE" C2_FILES='/home/oper/.bash_history' check
@@ -305,7 +324,7 @@ BOTH='osionos-ide-socket-proxy:latest track-binocle/osionos-bridge:local'
   [[ "$output" == *"FAIL C6"*"cannot-decide(box run rc=125)"* ]]
 }
 
-@test "a C2 grep that hit an unreadable path and matched nothing is undecided" {
+@test "a C2 grep that exited 2 and said nothing on stderr is undecided" {
   valid_env
   IDE_SHIP_HOST=vm OSIONOS_IDE_ENV_FILE="$ENV_FILE" C2_RC=2 check
   [ "$status" -eq 1 ]
