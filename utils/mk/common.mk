@@ -59,10 +59,40 @@ COMPOSE_RUNNING_SERVICES ?=
 COMPOSE_COMPLETED_SERVICES ?=
 FRONTEND_DIR := apps/opposite-osiris
 BOOL ?= false
-WEBSITE_URL := https://localhost:4322
-OSIONOS_URL := https://localhost:3001
-BRIDGE_URL := https://localhost:4000
-AUTH_URL := https://localhost:8787/api/auth
+# ── host ports ─────────────────────────────────────────────────────────────────
+# The compose files publish their ports as ${NAME_HOST_PORT:-N}, and NOTHING chose them: when
+# another process already held a default, the container that published it failed (measured
+# 2026-10-21: a QEMU VM forward took 127.0.0.1:8444 and local-https-proxy exited 255; a
+# standalone dev server held 4322 and the same proxy could not start). scripts/host-ports.sh
+# resolve picks a free port per NAME and records the choice in .env.ports (git-ignored).
+#
+# .env.ports is INCLUDED, so make re-executes itself when the file is remade: the chosen ports
+# are then in the environment of every recipe of that run, and compose gives the shell
+# environment precedence over --env-file — the exported values reach every compose call
+# without touching one. The resolver never rewrites the file when its content would not
+# change: a touched mtime would restart the whole run for nothing.
+-include .env.ports
+# Every NAME it defines, exported so the recipes (and their compose calls) see them.
+HOST_PORT_NAMES := $(shell sed -n 's/^\([A-Z][A-Z0-9_]*\)=.*/\1/p' $(wildcard .env.ports))
+ifneq ($(strip $(HOST_PORT_NAMES)),)
+export $(HOST_PORT_NAMES)
+endif
+# The allocator runs only for the targets that start containers: `make help` and the other
+# read-only targets must not move a port. The rule runs EVERY time (a port can be taken
+# between two runs), but the resolver never rewrites .env.ports when its content would not
+# change: a touched mtime would restart the whole make run for nothing.
+HOST_PORT_TARGETS = all frontends-up link link-frontends-start link-frontends-up update_web public-up mail-up calendar-up drawnosaurus-up
+.PHONY: host-ports-check
+host-ports-check:
+.env.ports: scripts/host-ports.sh host-ports-check
+	@if [ -n "$(filter $(MAKECMDGOALS),$(HOST_PORT_TARGETS))" ]; then bash scripts/host-ports.sh resolve; fi
+# Every target that starts containers waits for the choice.
+$(HOST_PORT_TARGETS): .env.ports
+# The URLs every consumer prints. The port is the chosen one, the old literal the fallback.
+WEBSITE_URL := https://localhost:$(if $(OPPOSITE_OSIRIS_HOST_PORT),$(OPPOSITE_OSIRIS_HOST_PORT),4322)
+OSIONOS_URL := https://localhost:$(if $(OSIONOS_APP_HOST_PORT),$(OSIONOS_APP_HOST_PORT),3001)
+BRIDGE_URL := https://localhost:$(if $(OSIONOS_BRIDGE_HOST_PORT),$(OSIONOS_BRIDGE_HOST_PORT),4000)
+AUTH_URL := https://localhost:$(if $(AUTH_GATEWAY_HOST_PORT),$(AUTH_GATEWAY_HOST_PORT),8787)/api/auth
 DRAWNOSAURUS_URL := https://localhost:$(if $(DRAWNOSAURUS_HOST_PORT),$(DRAWNOSAURUS_HOST_PORT),3007)
 # grobase's scripts/ops/resolve-ports.sh moves Kong to the next FREE host port when 8000 is
 # already taken (an old stack still shutting down is enough), so a hardcoded 8000 fails the

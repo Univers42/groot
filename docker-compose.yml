@@ -13,6 +13,11 @@ services:
   local-https-proxy:
     image: public.ecr.aws/docker/library/nginx:1.27-alpine
     volumes:
+      # Rendered from infrastructure/tls/nginx.conf.template by scripts/host-ports.sh resolve
+      # (the osionos origin follows the chosen OSIONOS_APP_HOST_PORT). The template is
+      # substituted on the HOST, not by the image's envsubst step: that step's filter and
+      # output dir are overridden by docker-compose.public.yml, and the plain file here must
+      # stay valid nginx on its own (the CI copies it into a container as is).
       - ./infrastructure/tls/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./apps/grobase/certs:/etc/track-binocle/certs:ro
     ports:
