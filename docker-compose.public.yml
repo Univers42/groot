@@ -1,5 +1,6 @@
 # Public mode overlay: the frontends as the internet sees them, through the host's Tailscale
-# Funnel (443 website, 8443 osionos app, 10000 bridge). Layered LAST, after the link overlay
+# Funnel (443 website, 8443 osionos app, 10000 bridge). PUBLIC_SITE_ORIGIN moves the website
+# elsewhere (prismatica on Vercel); unset, it is PUBLIC_ORIGIN. Layered LAST, after the link overlay
 # and any PUBLIC_COMPOSE_EXTRA file:
 #   docker compose -f docker-compose.yml -f docker-compose.grobase-link.yml \
 #     -f docker-compose.public.yml --env-file .env.local --env-file .env.public config
@@ -30,7 +31,7 @@ services:
     build:
       args:
         VITE_API_URL: ${PUBLIC_ORIGIN:?set PUBLIC_ORIGIN in .env.public}:10000
-        VITE_PRISMATICA_URL: ${PUBLIC_ORIGIN}
+        VITE_PRISMATICA_URL: ${PUBLIC_SITE_ORIGIN:-${PUBLIC_ORIGIN}}
         VITE_BAAS_URL: ${PUBLIC_ORIGIN}:8443
         VITE_BAAS_API_KEY: ""
         VITE_BAAS_KONG_KEY: ""
@@ -48,13 +49,13 @@ services:
     image: track-binocle/opposite-osiris-web:public
     build:
       args:
-        PUBLIC_SITE_URL: ${PUBLIC_ORIGIN}
+        PUBLIC_SITE_URL: ${PUBLIC_SITE_ORIGIN:-${PUBLIC_ORIGIN}}
         PUBLIC_OSIONOS_APP_URL: ${PUBLIC_ORIGIN}:8443
         PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION: "true"
 
   auth-gateway:
     environment:
-      PUBLIC_SITE_URL: ${PUBLIC_ORIGIN}
+      PUBLIC_SITE_URL: ${PUBLIC_SITE_ORIGIN:-${PUBLIC_ORIGIN}}
       PUBLIC_OSIONOS_APP_URL: ${PUBLIC_ORIGIN}:8443
       AUTH_REQUIRE_EMAIL_VERIFICATION: "true"
       PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION: "true"
