@@ -162,10 +162,14 @@ first_error() {
 # mode runs every file regardless (IF NOT EXISTS makes that free). It also
 # cannot see a cross-file dependency gap (see "ORDERING" above) — it only
 # inspects what a file creates, never what it references.
+# The line is lowercased by hand: IGNORECASE is a gawk extension, and under
+# mawk (Debian's awk) an upper-case CREATE TABLE was never matched, so baas
+# reported "converged" while public.auth_session_cutoffs was missing and the
+# bridge answered 503 (2026-10-21).
 pending() {
-	awk 'BEGIN{IGNORECASE=1}
-		match($0, /create table (if not exists )?(public\.)?[a-z_]+/) {
-			t = substr($0, RSTART, RLENGTH)
+	awk '{ l = tolower($0) }
+		match(l, /create table (if not exists )?(public\.)?[a-z_]+/) {
+			t = substr(l, RSTART, RLENGTH)
 			sub(/.* /, "", t); sub(/public\./, "", t); print t
 		}' "$1" | sort -u | while IFS= read -r t; do
 		[ -n "${t}" ] || continue
