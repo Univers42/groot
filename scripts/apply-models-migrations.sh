@@ -46,7 +46,7 @@
 #        osionos-folder-surface-migration.sql  osionos-wiki-surface-migration.sql
 #
 # ORDERING
-#   Everything else applies in plain alphabetical glob order EXCEPT the six
+#   Everything else applies in plain alphabetical glob order EXCEPT the seven
 #   files below, which must run first and in this exact sequence — each is a
 #   real cross-file dependency (a table/function another file's DDL requires
 #   at run time, not merely IF NOT EXISTS-shaped), so alphabetical order alone
@@ -74,6 +74,11 @@
 #         (needed by osionos-comments-migration.sql)
 #     osionos-page-search-migration.sql defines public.osionos_page_blocks()
 #         (needed by osionos-page-links-migration.sql)
+#     osionos-page-version-migration.sql adds public.osionos_pages.version and
+#         public.osionos_page_append() (needed by the bridge's append RPC); it
+#         comes after osionos-bridge-migration.sql (which creates osionos_pages)
+#         and after osionos-page-search-migration.sql (the page-search column is
+#         generated over content, the column the version trigger watches).
 #   Ponytail: `pending()` below only detects a file's OWN missing CREATE TABLE
 #   targets, never what it references — it cannot see this bug class, so a
 #   regression here will NOT show as a `--check` gap on a converged database.
@@ -100,7 +105,7 @@ trap 'rm -f "${ERR_FILE}"' EXIT
 # Dependency order (see "ORDERING" above) — each must run before the plain
 # alphabetical pass reaches its dependent. Space-separated: no filename here
 # contains a space or glob character.
-ORDERED_FIRST="auth-gateway-users-reconcile-migration.sql osionos-bridge-migration.sql osionos-chat-migration.sql osionos-social-migration.sql osionos-engagement-migration.sql osionos-page-search-migration.sql"
+ORDERED_FIRST="auth-gateway-users-reconcile-migration.sql osionos-bridge-migration.sql osionos-chat-migration.sql osionos-social-migration.sql osionos-engagement-migration.sql osionos-page-search-migration.sql osionos-page-version-migration.sql"
 ORDERED_LAST="osionos-service-role-only-migration.sql realtime-cdc-off-migration.sql"
 
 note() { printf '[models] %s\n' "$*" >&2; }
