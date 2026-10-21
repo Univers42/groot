@@ -91,6 +91,9 @@
 #
 #   osionos-service-role-only-migration.sql runs LAST (ORDERED_LAST), after
 #   everything: it revokes what earlier files and older boots granted.
+#   users-pii-grants-migration.sql runs after it, last of all: it fixes the
+#   public.users column grants (no anon email, no password_hash for anyone).
+#   apply-models.sh runs it last too, by name (GRANTS_LAST), not by glob collation.
 #
 # Usage:  sh scripts/apply-models-migrations.sh [--check]
 #           --check  report unapplied DDL and exit non-zero; change nothing.
@@ -111,7 +114,7 @@ trap 'rm -f "${ERR_FILE}"' EXIT
 # alphabetical pass reaches its dependent. Space-separated: no filename here
 # contains a space or glob character.
 ORDERED_FIRST="auth-gateway-users-reconcile-migration.sql osionos-bridge-migration.sql osionos-chat-migration.sql osionos-social-migration.sql osionos-engagement-migration.sql osionos-page-search-migration.sql"
-ORDERED_LAST="osionos-service-role-only-migration.sql realtime-cdc-off-migration.sql"
+ORDERED_LAST="osionos-service-role-only-migration.sql realtime-cdc-off-migration.sql users-pii-grants-migration.sql"
 
 note() { printf '[models] %s\n' "$*" >&2; }
 

@@ -103,3 +103,10 @@ SELECT 'cutoff_realtime_triggers',
                    WHERE t.tgrelid = 'public.auth_session_cutoffs'::regclass
                      AND NOT t.tgisinternal AND t.tgfoid = to_regproc('public.realtime_notify')) END,
        coalesce(to_regclass('public.auth_session_cutoffs')::text, 'public.auth_session_cutoffs MISSING');
+
+-- users_pii: the credential/PII columns of public.users a role can SELECT. has_column_privilege is
+-- true for a table-level grant too, so a blanket GRANT SELECT or a PUBLIC grant shows here. The
+-- allowed set is anon: none of these, authenticated: email only (ADR 0014).
+SELECT 'users_pii', count(*), coalesce(string_agg(r || '.' || c, ' ' ORDER BY r, c), '')
+  FROM (VALUES ('anon','email'), ('anon','password_hash'), ('authenticated','password_hash')) AS x(r, c)
+ WHERE has_column_privilege(r, 'public.users', c, 'SELECT');
