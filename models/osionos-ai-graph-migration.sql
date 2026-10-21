@@ -51,6 +51,10 @@ BEGIN
         IF to_regclass('public.' || part_name) IS NULL THEN
             EXECUTE format('CREATE TABLE public.%I PARTITION OF public.ai_page_vectors FOR VALUES WITH (MODULUS 16, REMAINDER %s)', part_name, i);
         END IF;
+        -- A partition is a table of its own: it can be read directly, and it inherits neither
+        -- the parent's grants nor its RLS flag. Closed like the parent, on every replay.
+        EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', part_name);
+        EXECUTE format('REVOKE ALL ON public.%I FROM PUBLIC, anon, authenticated', part_name);
     END LOOP;
 END $$;
 
