@@ -497,10 +497,10 @@ services:
     mem_limit: 6g
     cpus: 8
 
-  # osionos-ai-embed — the local embedder: Hugging Face TEI on the CPU,
-  # serving intfloat/multilingual-e5-small (384 dims) for the indexer and for
-  # the query embeddings of a retrieval. The model is ALREADY cached in the
-  # named volume below, so a first start downloads nothing.
+  # osionos-ai-embed — the local embedder of the QUERIES: Hugging Face TEI on
+  # the CPU, serving intfloat/multilingual-e5-small (384 dims) for the query
+  # embeddings of a retrieval. The model is ALREADY cached in the named volume
+  # below, so a first start downloads nothing.
   # The image tag is pinned to a release of 2026-09-15: a fresh pull never
   # runs an unreviewed binary.
   # NO published port: the embedder is reached over the internal network
@@ -524,8 +524,48 @@ services:
     # The caps of osionos-ai-llm, the measurement behind them: query p95
     # 9.24 ms and backfill 18.2 chunks/s on 8 CPUs (osionos repo branch
     # feat/ai-spike-gateway, services/osionos-ai/spikes/local-models/RESULTS.md).
+    # The CPU is SPLIT with the bulk embedder below (2 + 6): this one answers
+    # the queries of the people, the other one the backfill. The measurement
+    # behind the split is in the osionos repo branch feat/ai-indexer-throughput
+    # (services/osionos-ai/spikes/indexer/RESULTS.md): with ONE shared
+    # embedder the p95 of an interactive query went from 147 ms to 864 ms
+    # during a backfill.
     mem_limit: 6g
-    cpus: 8
+    cpus: 2
+
+  # osionos-ai-embed-bulk — the SECOND local embedder: the SAME image and the
+  # SAME model as the one above, and the SAME volume — READ-ONLY, it only
+  # reads the model, it never writes to it. It is the one the INDEXER asks
+  # (OSIONOS_AI_EMBED_BULK_URL): a backfill sends calls of thirty-two inputs,
+  # the service answers the calls in the order it received them, and a query
+  # that lands during one waits for the whole call. Two instances of the same
+  # model (never two models: the vectors of the bulk and of the query have to
+  # live in the same space) and the CPU split between them, so the queries of
+  # the people never wait for a backfill.
+  # The indexer falls back to OSIONOS_AI_EMBED_URL when this one is not set,
+  # so a deployment without it behaves exactly as before.
+  osionos-ai-embed-bulk:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4
+    profiles: ["ai"]
+    command: ["--model-id", "intfloat/multilingual-e5-small", "--port", "80"]
+    volumes:
+      - osionos_ai_models_tei:/data:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:80/health"]
+      interval: 30s
+      start_interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 12
+    networks:
+      - default
+    restart: unless-stopped
+    # The measurement behind the split (osionos repo branch
+    # feat/ai-indexer-throughput, services/osionos-ai/spikes/indexer/RESULTS.md):
+    # the backfill does NOT slow the queries down any more, and it is not
+    # slower than the one shared embedder was.
+    mem_limit: 6g
+    cpus: 6
 
   # osionos-ai-indexer — the index worker: the SAME image as the service (the
   # one the `osionos-ai` service above builds), but its entrypoint is the
@@ -538,14 +578,17 @@ services:
       # The same database the service writes its conversations to: the chunks
       # and the queue live in the same Postgres.
       OSIONOS_AI_DATABASE_URL: '${OSIONOS_AI_DATABASE_URL:-postgres://postgres:${OSIONOS_AI_DB_PASSWORD:-osionos-ai-dev}@osionos-ai-db:5432/osionos_ai}'
-      # The embedder it asks for the chunk embeddings (the service asks the
-      # same one for the query embeddings).
+      # The embedder it asks for the chunk embeddings: the BULK one, the second
+      # embedder of the profile. The service asks the QUERY one for the query
+      # embeddings of a retrieval (OSIONOS_AI_EMBED_URL), and the indexer
+      # falls back to it when the bulk one is not there.
       OSIONOS_AI_EMBED_URL: http://osionos-ai-embed:80
+      OSIONOS_AI_EMBED_BULK_URL: http://osionos-ai-embed-bulk:80
       OSIONOS_AI_EMBED_MODEL: intfloat/multilingual-e5-small
     depends_on:
       osionos-ai-db:
         condition: service_healthy
-      osionos-ai-embed:
+      osionos-ai-embed-bulk:
         condition: service_healthy
     networks:
       - default
