@@ -44,6 +44,10 @@ services:
         VITE_MAIL_APP_URL: ${PUBLIC_MAIL_ORIGIN:-}
         VITE_CALENDAR_APP_URL: ${PUBLIC_CALENDAR_ORIGIN:-}
         VITE_WHITEBOARD_APP_URL: ""
+        # Shared spaces live: presence, carets, block-by-block page sync. Safe only because the
+        # realtime gateway it talks to (baas) denies unscoped namespaces: born2root's
+        # profiles/server.toml sets REALTIME_NAMESPACE_FALLBACK=deny.
+        VITE_OSIO_COLLAB_SHARED: "1"
 
   opposite-osiris-web:
     image: track-binocle/opposite-osiris-web:public
