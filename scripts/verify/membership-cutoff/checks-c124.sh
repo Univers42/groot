@@ -48,18 +48,18 @@ check_c124() {
   # A forced insert failure aborts the delete. The CHECK has to be there: a
   # constraint that was never added would let the delete through, and the check
   # would prove nothing.
-  U3="55555555-5555-4555-8555-555555555555"
-  q "INSERT INTO auth.users (id) VALUES ('${U3}') ON CONFLICT DO NOTHING;" >/dev/null
+  U6="55555555-5555-4555-8555-555555555555"
+  q "INSERT INTO auth.users (id) VALUES ('${U6}') ON CONFLICT DO NOTHING;" >/dev/null
   W5="99999999-9999-4999-8999-999999999999"
-  q "INSERT INTO public.osionos_workspaces (id, owner_id, name, slug) VALUES ('${W5}','${U3}','w5','w5-${U3}') ON CONFLICT DO NOTHING;" >/dev/null
-  q "INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role, permissions) VALUES ('${W5}','${U3}','owner',ARRAY['read']) ON CONFLICT DO NOTHING;" >/dev/null
+  q "INSERT INTO public.osionos_workspaces (id, owner_id, name, slug) VALUES ('${W5}','${U6}','w5','w5-${U6}') ON CONFLICT DO NOTHING;" >/dev/null
+  q "INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role, permissions) VALUES ('${W5}','${U6}','owner',ARRAY['read']) ON CONFLICT DO NOTHING;" >/dev/null
   if ! q "ALTER TABLE public.auth_session_cutoffs ADD CONSTRAINT mc_fail_check CHECK (false) NOT VALID;" >/dev/null; then
     printf 'FAIL c124 forced-failure  the CHECK constraint was not added: the delete would have gone through\n' >&2
     q "ALTER TABLE public.auth_session_cutoffs DROP CONSTRAINT IF EXISTS mc_fail_check;" >/dev/null
     return 1
   fi
   # delete should now fail
-  if q "DELETE FROM public.osionos_workspace_members WHERE workspace_id='${W5}' AND user_id='${U3}';" >/dev/null 2>&1; then
+  if q "DELETE FROM public.osionos_workspace_members WHERE workspace_id='${W5}' AND user_id='${U6}';" >/dev/null 2>&1; then
     printf 'FAIL c124 forced-failure  delete succeeded despite failing insert\n' >&2
     q "ALTER TABLE public.auth_session_cutoffs DROP CONSTRAINT IF EXISTS mc_fail_check;" >/dev/null
     return 1
