@@ -80,6 +80,9 @@ services:
       OSIONOS_BRIDGE_PORT: 4000
       OSIONOS_APP_URL: ${OSIONOS_APP_URL:-https://localhost:3001}
       OSIONOS_ALLOWED_ORIGIN: ${OSIONOS_ALLOWED_ORIGIN:-https://localhost:3001}
+      # Account administrators, comma-separated emails; empty = nobody. The bridge
+      # ships without any administrator, so a deployment that wants one names it here.
+      OSIONOS_ADMIN_EMAILS: ${OSIONOS_ADMIN_EMAILS:-}
       # BaaS reads/writes go to the grobase-owned mini-baas Kong over the
       # external mini-baas network (container-name DNS).
       OSIONOS_BAAS_URL: http://mini-baas-kong:8000
