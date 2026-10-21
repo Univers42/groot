@@ -65,6 +65,12 @@ create table if not exists public.ai_runs (
 	ended_at          timestamptz
 );
 
+-- Why the run ended the way it did. A run that asked the user for the right to
+-- write ends 'succeeded' — it did its job — and its finish_reason says
+-- 'awaiting_approval': the state that waits is the approval row's, not the
+-- run's, so the run may be terminal and the question still open.
+alter table public.ai_runs add column if not exists finish_reason text;
+
 create index if not exists ai_runs_owner_created_idx
 	on public.ai_runs (owner_id, created_at desc);
 -- Stale-run sweep: only rows still 'running' are candidates for the reaper.
@@ -128,6 +134,55 @@ create index if not exists ai_connections_owner_created_idx
 comment on table public.ai_connections is
 	'AI assistant connections (P2): the users own model access. Personal scope only in v2 — owner_user_id is the only gate. The secret is envelope-encrypted: secret_box under a per-secret data key, wrapped_dek under the KEK (kek_id); last4 is the only readable part of the key.';
 
+-- The approvals of P4a: a write the assistant asked for, and the human who
+-- decides it.
+--
+-- The row IS the state of the decision. A run that asks for the right to write
+-- ends TERMINAL — it did its job — and the approval row is what waits: the
+-- run may be finished while the question is still open, and the row is what
+-- the sweeper, the card and the decision route read.
+--
+-- The write tool never writes: it validates the arguments, stores them here,
+-- and asks. The write happens when the user decides, with the token of THAT
+-- request — no token is ever stored here.
+create table if not exists public.ai_approvals (
+	id              uuid primary key default gen_random_uuid(),
+	run_id          uuid not null references public.ai_runs (id) on delete cascade,
+	conversation_id uuid not null,
+	owner_id        uuid not null,
+	workspace_id    uuid not null,
+	tool            text not null,
+	args            jsonb not null,
+	args_sha256     text not null,
+	status          text not null check (status in ('pending','executing','executed','failed','declined','expired','unknown')),
+	result          jsonb,
+	error           text,
+	created_at      timestamptz not null default now(),
+	decided_at      timestamptz,
+	expires_at      timestamptz not null
+);
+
+-- The duplicate key: the same call, in the same run, with the same arguments.
+-- The hash is over a canonical (sorted-key) serialization of the arguments, so
+-- two calls that differ only in the order of their keys are the same call.
+-- The index is partial: a DECLINED approval frees the call again, a pending or
+-- an executed one does not.
+create unique index if not exists ai_approvals_one_live_per_call
+	on public.ai_approvals (run_id, tool, args_sha256)
+	where status in ('pending','executing','executed');
+
+-- The sweeper: the rows that are still 'executing' (a write whose outcome was
+-- never recorded) and the ones to delete once they are old enough.
+create index if not exists ai_approvals_status_created_idx
+	on public.ai_approvals (status, created_at);
+
+-- The approvals of a user: their own, the newest first.
+create index if not exists ai_approvals_owner_created_idx
+	on public.ai_approvals (owner_id, created_at desc);
+
+comment on table public.ai_approvals is
+	'AI assistant write approvals (P4a): one row per write the assistant asked for and the user has not decided yet (or has). The row carries the state: pending, executing, executed, failed, declined, expired, unknown. No token is stored here — the write happens with the token of the request that decided.';
+
 comment on table public.ai_conversations is 'AI assistant conversations; one row per thread, scoped to an owner and workspace.';
 comment on table public.ai_messages     is 'AI assistant transcript rows; parts is the message part array (text/tool/…), cascade-deleted with the conversation.';
 comment on table public.ai_runs         is 'AI assistant runs; client-generated id is the idempotency key, cascade-deleted with the conversation.';
@@ -138,6 +193,7 @@ alter table public.ai_messages      enable row level security;
 alter table public.ai_runs          enable row level security;
 alter table public.ai_usage_daily   enable row level security;
 alter table public.ai_connections   enable row level security;
+alter table public.ai_approvals     enable row level security;
 
 drop policy if exists ai_conversations_service_role_all on public.ai_conversations;
 create policy ai_conversations_service_role_all
@@ -164,11 +220,17 @@ create policy ai_connections_service_role_all
 	on public.ai_connections for all
 	to service_role using (true) with check (true);
 
+drop policy if exists ai_approvals_service_role_all on public.ai_approvals;
+create policy ai_approvals_service_role_all
+	on public.ai_approvals for all
+	to service_role using (true) with check (true);
+
 grant all on public.ai_conversations to service_role;
 grant all on public.ai_messages      to service_role;
 grant all on public.ai_runs          to service_role;
 grant all on public.ai_usage_daily   to service_role;
 grant all on public.ai_connections   to service_role;
+grant all on public.ai_approvals     to service_role;
 
 -- ai_* is outside the osionos_* catalog pass (see header): close PostgREST's
 -- anon/authenticated roles here, not pattern-matched elsewhere.
@@ -177,5 +239,6 @@ revoke all on public.ai_messages      from public, anon, authenticated;
 revoke all on public.ai_runs          from public, anon, authenticated;
 revoke all on public.ai_usage_daily   from public, anon, authenticated;
 revoke all on public.ai_connections   from public, anon, authenticated;
+revoke all on public.ai_approvals     from public, anon, authenticated;
 
 notify pgrst, 'reload schema';
