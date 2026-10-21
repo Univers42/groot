@@ -113,21 +113,40 @@ COMMENT ON COLUMN public.ai_chunks.visibility IS
 -- -----------------------------------------------------------------------------
 -- 2. ai_index_queue — change-capture queue, coalesced to one row per page
 -- -----------------------------------------------------------------------------
+-- priority is the LANE of the row: 0 is an edit a person just made, 1 is bulk
+-- work (the initial backfill, a re-embed after a model swap). The worker
+-- claims the edits first (order by priority, dirty_at), so a person never
+-- waits behind a whole workspace.
 CREATE TABLE IF NOT EXISTS public.ai_index_queue (
     page_id     UUID PRIMARY KEY,
     workspace_id UUID NOT NULL,
+    priority    SMALLINT NOT NULL DEFAULT 0,
     dirty_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     attempts    INT NOT NULL DEFAULT 0,
     last_error  TEXT
 );
 
-CREATE INDEX IF NOT EXISTS ai_index_queue_dirty_idx
-    ON public.ai_index_queue (dirty_at);
+-- A queue that was created before the lanes existed gets the column: the rows
+-- that are already there are edits (0) until a bulk statement says otherwise.
+ALTER TABLE public.ai_index_queue
+    ADD COLUMN IF NOT EXISTS priority SMALLINT NOT NULL DEFAULT 0;
+
+-- The claim reads the lanes first, then the age of the row. The index on
+-- (dirty_at) alone is replaced by this one.
+DROP INDEX IF EXISTS public.ai_index_queue_dirty_idx;
+CREATE INDEX IF NOT EXISTS ai_index_queue_priority_dirty_idx
+    ON public.ai_index_queue (priority, dirty_at);
 
 COMMENT ON TABLE public.ai_index_queue IS
     'Pages that need (re)indexing. One row per page — INSERT ... ON CONFLICT '
-    'coalesces rapid edits. Worker picks up by dirty_at, resets attempts on '
-    're-queue, deletes row on success.';
+    'coalesces rapid edits. priority is the lane: 0 an edit of a person, 1 bulk '
+    'work (backfill, re-embed). The worker picks up by (priority, dirty_at), '
+    'resets attempts on re-queue, deletes row on success.';
+
+COMMENT ON COLUMN public.ai_index_queue.priority IS
+    'The lane of the row: 0 (default) an edit a person just made, 1 bulk work '
+    '(the initial backfill, a re-embed after a model swap). An edit PROMOTES a '
+    'queued bulk row to 0; a bulk enqueue never demotes an edit.';
 
 -- -----------------------------------------------------------------------------
 -- 3. Helper: extract collaborator UUIDs from the collaborators JSONB
@@ -215,11 +234,15 @@ LANGUAGE PLPGSQL
 AS $$
 BEGIN
     -- Coalesce: one queue row per page. Reset attempts/error on re-queue.
-    INSERT INTO public.ai_index_queue (page_id, workspace_id, dirty_at, attempts, last_error)
-    VALUES (NEW.id, NEW.workspace_id, NOW(), 0, NULL)
+    -- An EDIT is lane 0, and it PROMOTES a row that is waiting in the bulk
+    -- lane: least(existing, new) is 0 whatever the row was. A person never
+    -- waits behind a backfill.
+    INSERT INTO public.ai_index_queue (page_id, workspace_id, priority, dirty_at, attempts, last_error)
+    VALUES (NEW.id, NEW.workspace_id, 0, NOW(), 0, NULL)
     ON CONFLICT (page_id) DO UPDATE SET
         dirty_at = NOW(),
         workspace_id = EXCLUDED.workspace_id,
+        priority = LEAST(public.ai_index_queue.priority, EXCLUDED.priority),
         attempts = 0,
         last_error = NULL;
 
@@ -254,7 +277,8 @@ CREATE TRIGGER ai_enqueue_page_upd
 
 COMMENT ON FUNCTION public.ai_enqueue_page() IS
     'Queues a page for (re)indexing. Coalesces rapid edits to one row. '
-    'Notifies worker via pg_notify(''ai_index'', page_id). '
+    'Always lane 0 (an edit of a person), and it PROMOTES a row that waits in '
+    'the bulk lane. Notifies worker via pg_notify(''ai_index'', page_id). '
     'Fires on INSERT and on UPDATE of title/content/workspace_id/archived_at '
     'when changed. Archived pages are queued too (the worker deletes their '
     'chunks); un-archiving re-indexes them.';
@@ -351,11 +375,37 @@ COMMENT ON FUNCTION public.ai_delete_page_chunks() IS
 -- 7. Backfill: queue all non-archived pages for initial indexing
 -- -----------------------------------------------------------------------------
 -- Idempotent: ON CONFLICT DO NOTHING (queue has PK on page_id).
-INSERT INTO public.ai_index_queue (page_id, workspace_id)
-SELECT id, workspace_id
+-- The backfill is BULK work: the rows it inserts are lane 1, so the edits of
+-- a person (lane 0) are claimed first. A page that is already queued as an
+-- edit keeps its lane: ON CONFLICT DO NOTHING never demotes it.
+INSERT INTO public.ai_index_queue (page_id, workspace_id, priority)
+SELECT id, workspace_id, 1
 FROM public.osionos_pages
 WHERE archived_at IS NULL
 ON CONFLICT (page_id) DO NOTHING;
+
+-- -----------------------------------------------------------------------------
+-- 7b. Re-embed after a model swap: the whole index is bulk again
+-- -----------------------------------------------------------------------------
+-- The chunks carry the model that made them, so a new model means every chunk
+-- has to be embedded again. The pages are queued as BULK (lane 1): a person
+-- must not wait behind a whole workspace.
+--
+-- It is NOT part of the migration: it is run by hand, once, when the model
+-- changes — the migration is applied to a live database, and re-queuing
+-- everything on every apply would re-index the world.
+--
+--   INSERT INTO public.ai_index_queue (page_id, workspace_id, priority)
+--   SELECT id, workspace_id, 1
+--   FROM public.osionos_pages
+--   WHERE archived_at IS NULL
+--   ON CONFLICT (page_id) DO UPDATE SET
+--       dirty_at = NOW(),
+--       priority = LEAST(public.ai_index_queue.priority, 1),
+--       attempts = 0,
+--       last_error = NULL;
+--
+-- The same rule as the trigger: least(existing, 1) keeps an edit in lane 0.
 
 -- -----------------------------------------------------------------------------
 -- 8. RLS: service_role only (exactly like osionos-ai-migration.sql)
