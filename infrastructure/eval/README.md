@@ -44,10 +44,16 @@ sh infrastructure/eval/seed-users.sh 12
 # 5. Run the gate
 sh infrastructure/eval/smoke.sh
 
-# 6. The rag profile (embedder + AI indexer), optional
-OSIONOS_AI_IMAGE=track-binocle/osionos-ai:ai-dev \
+# 6. The rag profile (embedder + AI indexer), optional. The image must be
+#    built from the SAME osionos commit as these models (an older image
+#    queries columns the migrations no longer match, e.g. "priority"):
+#    from the osionos app checkout,
+#    docker build -t osionos-ai-eval:<sha> -f <groot>/infrastructure/docker/osionos/ai.Dockerfile .
+#    The embedder downloads its model from Hugging Face on first start; a 429
+#    there fails it. Seed eval_tei_models from a local cache instead when you have one.
+OSIONOS_AI_IMAGE=osionos-ai-eval:<sha> \
   docker compose -p ai-eval-smoke -f infrastructure/eval/compose.yml --profile rag up -d
-sh infrastructure/eval/smoke.sh --allow-skip
+sh infrastructure/eval/smoke.sh
 ```
 
 `migrate.sh` reads grobase from `${GROBASE_DIR:-$REPO_ROOT/apps/grobase}` (the submodule, read-only). Set
