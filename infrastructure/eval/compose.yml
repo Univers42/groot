@@ -1,0 +1,224 @@
+# Eval data plane — an isolated mirror of the live BaaS stack.
+#
+# Same SHAPE as the live definitions (apps/grobase/orchestrators/compose/base/
+# auth-api.yml and data-engines.yml): Postgres + GoTrue + PostgREST + nginx
+# edge, plus a TEI embedder and the AI indexer behind the `rag` profile.
+# Same image TAGS — not necessarily the same digests (see README, Caveat).
+#
+# Three rules this file keeps, because breaking them is how the live stack
+# gets hurt:
+#   1. NO env_file: .env on any service. Each service gets ONLY the variables
+#      it needs, spelled out in its own `environment:` block. The old version
+#      handed every container the JWT secret.
+#   2. Every published port binds 127.0.0.1. Nothing is reachable from the
+#      LAN.
+#   3. `container_name` only on eval-pg — the migrate guard addresses it by
+#      that exact name. Every other service is addressed by its compose
+#      service name (the project prefix keeps it out of the way of the live
+#      stack).
+name: eval
+
+networks:
+  # Its own bridge network, joined by nothing else. No fixed subnet: a hard
+  # 172.20.0.0/16 collides with a network that already exists on the VM.
+  eval-net:
+    driver: bridge
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Postgres — holds the full osionos schema + every AI migration. The RAG
+  # migration needs `vector`; both extensions ship in this image.
+  # ---------------------------------------------------------------------------
+  eval-pg:
+    image: ${EVAL_PG_IMAGE:-ghcr.io/univers42/grobase-postgres:latest}
+    pull_policy: missing
+    container_name: eval-pg
+    volumes:
+      - eval_pg:/var/lib/postgresql/data
+      # Runs once, on a fresh data directory: creates the auth schema and
+      # sets the postgres role's search_path, so GoTrue's migrator records
+      # its versions in auth.schema_migrations and not in public.
+      - ./pg-init.sh:/docker-entrypoint-initdb.d/00-eval-auth-schema.sh:ro
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    # The live command (data-engines.yml:31-36): pg_net preloaded, logical
+    # WAL. Without pg_net the CDC migrations fail; without logical WAL the
+    # realtime triggers have nothing to publish.
+    command: >
+      postgres
+        -c shared_preload_libraries=pg_net
+        -c wal_level=logical
+        -c pg_net.database_name=postgres
+    ports:
+      - "127.0.0.1:${EVAL_PG_PORT:-15432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d postgres || exit 1"]
+      interval: 15s
+      start_interval: 2s
+      timeout: 3s
+      start_period: 20s
+      retries: 5
+    mem_limit: 512m
+    cpus: 1
+    networks:
+      - eval-net
+
+  # ---------------------------------------------------------------------------
+  # GoTrue — user auth. Autoconfirm on, signup off, no SMTP, no external
+  # providers. It creates the auth.* schema objects the grobase migrations
+  # reference (007_permissions_system.sql:135 reads auth.users).
+  # ---------------------------------------------------------------------------
+  eval-gotrue:
+    image: ${EVAL_GOTRUE_IMAGE:-ghcr.io/univers42/grobase-gotrue:latest}
+    pull_policy: missing
+    # It starts before migrate.sh has run the bootstrap, so the `auth` schema
+    # does not exist yet and the first boot fails. Restart until it does.
+    restart: unless-stopped
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@eval-pg:5432/postgres
+      GOTRUE_DISABLE_SIGNUP: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_SITE_URL: http://127.0.0.1:${EVAL_EDGE_PORT:-18000}
+      API_EXTERNAL_URL: http://127.0.0.1:${EVAL_EDGE_PORT:-18000}/auth/v1
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9999/health || exit 1"]
+      interval: 15s
+      start_interval: 5s
+      timeout: 3s
+      start_period: 15s
+      retries: 8
+    mem_limit: 128m
+    cpus: 0.25
+    networks:
+      - eval-net
+    depends_on:
+      eval-pg:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # PostgREST — the REST surface over the `public` schema.
+  # PostgREST reads PGRST_* ONLY: the old PGPUBLICSCHEMA / PGPGPASSWORD /
+  # PG_* variables did nothing at all. It connects as `authenticator`, the
+  # NOBYPASSRLS role — never the superuser, which would bypass RLS.
+  # ---------------------------------------------------------------------------
+  eval-postgrest:
+    image: ${EVAL_POSTGREST_IMAGE:-ghcr.io/univers42/grobase-postgrest:latest}
+    pull_policy: missing
+    # Same reason as GoTrue: the `authenticator` role only exists after the
+    # bootstrap has run.
+    restart: unless-stopped
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${AUTHENTICATOR_PASSWORD}@eval-pg:5432/postgres
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_SERVER_PORT: 3000
+    healthcheck:
+      test: ["CMD", "/bin/busybox", "wget", "-q", "-O", "/dev/null", "-T", "4", "http://127.0.0.1:3000/"]
+      interval: 15s
+      start_interval: 5s
+      timeout: 5s
+      start_period: 15s
+      retries: 5
+    mem_limit: 256m
+    cpus: 0.25
+    networks:
+      - eval-net
+    depends_on:
+      eval-pg:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # Nginx edge — routes /rest/v1/ → postgrest, /auth/v1/ → gotrue (prefixes
+  # stripped the way live Kong does), /health → 200.
+  # ---------------------------------------------------------------------------
+  eval-edge:
+    image: nginx:1.27-alpine
+    pull_policy: missing
+    volumes:
+      - ./edge.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "127.0.0.1:${EVAL_EDGE_PORT:-18000}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "-T", "4", "http://127.0.0.1/health"]
+      interval: 15s
+      start_interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+    mem_limit: 64m
+    cpus: 0.1
+    networks:
+      - eval-net
+    depends_on:
+      - eval-postgrest
+      - eval-gotrue
+
+  # ---------------------------------------------------------------------------
+  # Profile `rag` — only started with `docker compose --profile rag up -d`.
+  #
+  # eval-embed — TEI embedder: intfloat/multilingual-e5-small (384 dims).
+  # NO published port: only the indexer talks to it, over eval-net.
+  # ---------------------------------------------------------------------------
+  eval-embed:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4
+    pull_policy: missing
+    profiles: ["rag"]
+    command: ["--model-id", "intfloat/multilingual-e5-small", "--port", "80"]
+    environment:
+      MODEL_HOME: /data
+    volumes:
+      - eval_tei_models:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:80/health"]
+      interval: 30s
+      start_interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 12
+    mem_limit: 3g
+    cpus: 4
+    networks:
+      - eval-net
+
+  # ---------------------------------------------------------------------------
+  # eval-indexer — writes the chunks into the SAME Postgres as osionos_pages.
+  # entrypoint and env exactly like groot docker-compose.yml's osionos-ai-indexer,
+  # pointed at eval-pg and eval-embed.
+  # ---------------------------------------------------------------------------
+  eval-indexer:
+    image: ${OSIONOS_AI_IMAGE:-track-binocle/osionos-ai:local}
+    pull_policy: missing
+    profiles: ["rag"]
+    entrypoint: ["node", "--experimental-strip-types", "src/indexer/main.ts"]
+    environment:
+      OSIONOS_AI_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@eval-pg:5432/postgres
+      # The embedder's BASE url on eval-net. The old value was the indexer's
+      # OWN loopback (127.0.0.1:…/embed) — inside the indexer container that
+      # is the indexer itself, and the embedding request never left.
+      OSIONOS_AI_EMBED_URL: http://eval-embed:80
+      OSIONOS_AI_EMBED_MODEL: intfloat/multilingual-e5-small
+    mem_limit: 512m
+    cpus: 1
+    networks:
+      - eval-net
+    depends_on:
+      eval-pg:
+        condition: service_healthy
+      eval-embed:
+        condition: service_healthy
+
+volumes:
+  eval_pg:
+  eval_tei_models:
