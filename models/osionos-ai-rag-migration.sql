@@ -17,6 +17,16 @@
 -- owner_id, collaborators[] entries with {userId, role != null}.
 
 CREATE EXTENSION IF NOT EXISTS vector;
+-- A database whose pgvector was created under another schema keeps it there, and the
+-- IF NOT EXISTS above then does nothing (live b2b: auth, 2026-10-22). halfvec, <=> and the
+-- service's own ::halfvec casts resolve through the default search_path, so the extension
+-- moves to public. Columns, indexes and views hold its types by OID and follow it.
+DO $$
+BEGIN
+    IF (SELECT extnamespace <> 'public'::regnamespace FROM pg_extension WHERE extname = 'vector') THEN
+        ALTER EXTENSION vector SET SCHEMA public;
+    END IF;
+END $$;
 
 -- -----------------------------------------------------------------------------
 -- 1. ai_chunks — partitioned by workspace_id (16 hash partitions)
