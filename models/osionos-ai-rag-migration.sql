@@ -68,6 +68,10 @@ BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_class WHERE relname = part_name) THEN
             EXECUTE format('CREATE TABLE public.%I PARTITION OF public.ai_chunks FOR VALUES WITH (MODULUS 16, REMAINDER %s)', part_name, i);
         END IF;
+        -- A partition is a table of its own: it can be read directly, and it inherits neither
+        -- the parent's grants nor its RLS flag. Closed like the parent, on every replay.
+        EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', part_name);
+        EXECUTE format('REVOKE ALL ON public.%I FROM PUBLIC, anon, authenticated', part_name);
     END LOOP;
 END $$;
 
@@ -226,6 +230,59 @@ COMMENT ON FUNCTION public.ai_page_visibility(TEXT) IS
     'anything that is not private/shared/public — NULL included — is ''private''.';
 
 -- -----------------------------------------------------------------------------
+-- 3c. The page's graph vector: written by the indexer, gone with the page
+-- -----------------------------------------------------------------------------
+-- The page vector (models/osionos-ai-graph-migration.sql) is the token-length
+-- weighted mean of the page's chunk vectors. The indexer writes it in the
+-- SAME transaction as the chunks, under the page's advisory lock (C104).
+--
+-- Both functions are GUARDED: a database without the graph migration has no
+-- ai_page_vectors, and the indexer must not fail there. The table is looked
+-- up at run time, so the same function works with and without the migration.
+
+CREATE OR REPLACE FUNCTION public.ai_write_page_vector(
+    p_workspace_id UUID,
+    p_page_id UUID,
+    p_embedding HALFVEC,
+    p_model TEXT
+)
+RETURNS VOID
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF to_regclass('public.ai_page_vectors') IS NULL THEN
+        RETURN;
+    END IF;
+    INSERT INTO public.ai_page_vectors (workspace_id, page_id, embedding, embedding_model)
+    VALUES (p_workspace_id, p_page_id, p_embedding, p_model)
+    ON CONFLICT (workspace_id, page_id) DO UPDATE
+        SET embedding = EXCLUDED.embedding,
+            embedding_model = EXCLUDED.embedding_model,
+            updated_at = NOW();
+END;
+$$;
+
+COMMENT ON FUNCTION public.ai_write_page_vector(UUID, UUID, HALFVEC, TEXT) IS
+    'Writes the page''s graph vector, the weighted mean of its chunk vectors. '
+    'A no-op when the graph migration is not applied.';
+
+CREATE OR REPLACE FUNCTION public.ai_drop_page_vector(p_page_id UUID)
+RETURNS VOID
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF to_regclass('public.ai_page_vectors') IS NULL THEN
+        RETURN;
+    END IF;
+    DELETE FROM public.ai_page_vectors WHERE page_id = p_page_id;
+END;
+$$;
+
+COMMENT ON FUNCTION public.ai_drop_page_vector(UUID) IS
+    'Drops the graph vector of a page: it goes with the page, in the page '
+    'write''s own transaction. A no-op when the graph migration is not applied.';
+
+-- -----------------------------------------------------------------------------
 -- 4. Trigger: enqueue page for (re)indexing on content/title/workspace/archive changes
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.ai_enqueue_page()
@@ -310,6 +367,16 @@ BEGIN
           AND source_id = NEW.id;
     END IF;
 
+    -- The page's graph vector (models/osionos-ai-graph-migration.sql) is filed
+    -- under the workspace it was indexed in. A move leaves it behind in the old
+    -- partition, and an archived page is no longer readable, so its vector must
+    -- not answer a related-page read. Both are dropped HERE, in the page write's
+    -- own transaction (C104). Guarded so a database without the graph migration
+    -- still runs this function.
+    IF OLD.workspace_id IS DISTINCT FROM NEW.workspace_id OR NEW.archived_at IS NOT NULL THEN
+        PERFORM public.ai_drop_page_vector(NEW.id);
+    END IF;
+
     UPDATE public.ai_chunks
     SET visibility = PUBLIC.AI_PAGE_VISIBILITY(NEW.visibility),
         owner_id = NEW.owner_id,
@@ -323,16 +390,19 @@ BEGIN
 END;
 $$;
 
--- AFTER UPDATE OF visibility, collaborators, owner_id, workspace_id: only when
--- those change
+-- AFTER UPDATE OF visibility, collaborators, owner_id, workspace_id, archived_at:
+-- only when those change. archived_at is here because an archived page must
+-- lose its graph vector in the same transaction (C104); the enqueue trigger
+-- re-queues it and the worker drops its chunks.
 DROP TRIGGER IF EXISTS ai_sync_page_acl_trg ON public.osionos_pages;
 CREATE TRIGGER ai_sync_page_acl_trg
-    AFTER UPDATE OF visibility, collaborators, owner_id, workspace_id ON public.osionos_pages
+    AFTER UPDATE OF visibility, collaborators, owner_id, workspace_id, archived_at ON public.osionos_pages
     FOR EACH ROW
     WHEN (OLD.visibility IS DISTINCT FROM NEW.visibility
        OR OLD.collaborators IS DISTINCT FROM NEW.collaborators
        OR OLD.owner_id IS DISTINCT FROM NEW.owner_id
-       OR OLD.workspace_id IS DISTINCT FROM NEW.workspace_id)
+       OR OLD.workspace_id IS DISTINCT FROM NEW.workspace_id
+       OR OLD.archived_at IS DISTINCT FROM NEW.archived_at)
     EXECUTE FUNCTION public.ai_sync_page_acl();
 
 COMMENT ON FUNCTION public.ai_sync_page_acl() IS
@@ -356,6 +426,11 @@ BEGIN
     WHERE workspace_id = OLD.workspace_id
       AND source_kind = 'page'
       AND source_id = OLD.id;
+
+    -- The graph vector goes with the page, in the same transaction (C104).
+    -- The function is guarded: a database without the graph migration runs it
+    -- and it does nothing.
+    PERFORM public.ai_drop_page_vector(OLD.id);
 
     DELETE FROM public.ai_index_queue WHERE page_id = OLD.id;
 
@@ -430,6 +505,13 @@ GRANT ALL ON public.ai_index_queue  TO service_role;
 -- header): close PostgREST's anon/authenticated roles here, not pattern-matched elsewhere.
 REVOKE ALL ON public.ai_chunks       FROM PUBLIC, ANON, AUTHENTICATED;
 REVOKE ALL ON public.ai_index_queue  FROM PUBLIC, ANON, AUTHENTICATED;
+
+-- The page-vector writers run as their caller; PUBLIC's default EXECUTE would let any
+-- PostgREST role call them. The page triggers call them as the bridge (service_role).
+REVOKE ALL ON FUNCTION public.ai_write_page_vector(UUID, UUID, HALFVEC, TEXT) FROM PUBLIC, ANON, AUTHENTICATED;
+REVOKE ALL ON FUNCTION public.ai_drop_page_vector(UUID) FROM PUBLIC, ANON, AUTHENTICATED;
+GRANT EXECUTE ON FUNCTION public.ai_write_page_vector(UUID, UUID, HALFVEC, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.ai_drop_page_vector(UUID) TO service_role;
 
 -- -----------------------------------------------------------------------------
 -- 9. Reload PostgREST schema cache

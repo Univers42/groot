@@ -14,12 +14,13 @@ public
 vendor
 src
 tests
-# The scripts/ directory holds ninety-odd modules; the service imports four.
+# The scripts/ directory holds ninety-odd modules; the service imports five.
 # They are re-included one by one, so the closure is visible in both files.
 scripts/*
 !scripts/bridge-session-token.mjs
 !scripts/bridge-session-cutoff.mjs
 !scripts/bridge-baas-body.mjs
 !scripts/bridge-page-read.mjs
+!scripts/bridge-live-workspaces.mjs
 services/osionos-ai/tests
 services/osionos-ai/node_modules
