@@ -1211,9 +1211,11 @@ volumes:
   osionos-browser-test-pnpm-store:
   # The AI plane (compose profile `ai`): the dev Postgres of the assistant and
   # the model cache of llama.cpp. The model volume keeps its exact name —
-  # another task mounts the same cache.
+  # another task mounts the same cache. The database stays project-scoped: it
+  # is the dev Postgres of this stack alone.
   osionos_ai_db:
   osionos_ai_models_llm:
+    name: osionos_ai_models_llm
 
 networks:
   # The grobase backend stack's network (docker project `mini-baas`), declared
