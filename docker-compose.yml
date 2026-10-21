@@ -524,14 +524,15 @@ services:
     # The caps of osionos-ai-llm, the measurement behind them: query p95
     # 9.24 ms and backfill 18.2 chunks/s on 8 CPUs (osionos repo branch
     # feat/ai-spike-gateway, services/osionos-ai/spikes/local-models/RESULTS.md).
-    # The CPU is SPLIT with the bulk embedder below (2 + 6): this one answers
+    # The CPU is SPLIT with the bulk embedder below (3 + 5): this one answers
     # the queries of the people, the other one the backfill. The measurement
     # behind the split is in the osionos repo branch feat/ai-indexer-throughput
     # (services/osionos-ai/spikes/indexer/RESULTS.md): with ONE shared
     # embedder the p95 of an interactive query went from 147 ms to 864 ms
-    # during a backfill.
+    # during a backfill; with the split it is 10.8 ms, and the backfill is
+    # 41 % faster than the "before".
     mem_limit: 6g
-    cpus: 2
+    cpus: 3
 
   # osionos-ai-embed-bulk — the SECOND local embedder: the SAME image and the
   # SAME model as the one above, and the SAME volume — READ-ONLY, it only
@@ -563,9 +564,12 @@ services:
     # The measurement behind the split (osionos repo branch
     # feat/ai-indexer-throughput, services/osionos-ai/spikes/indexer/RESULTS.md):
     # the backfill does NOT slow the queries down any more, and it is not
-    # slower than the one shared embedder was.
+    # slower than the one shared embedder was. The split is 3 + 5: the query
+    # embedder needs a core or two for the load of a few people, and the bulk
+    # embedder takes the rest — the ROUND bounds the backfill, not the
+    # embedder, so the third CPU of the bulk one would buy nothing.
     mem_limit: 6g
-    cpus: 6
+    cpus: 5
 
   # osionos-ai-indexer — the index worker: the SAME image as the service (the
   # one the `osionos-ai` service above builds), but its entrypoint is the
