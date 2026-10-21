@@ -19,11 +19,12 @@
 #   fresh   roles -> grobase 001_initial_schema + 012 realtime hook -> shim -> runner -> checks
 #   legacy  roles -> the pre-1e407614 default privileges -> 001 -> shim -> runner
 #           -> an old-bootstrap boot (blanket GRANT, DEFAULT revoked) -> runner -> checks
-#   Checks: c no anon/authenticated privilege on an osionos_% relation or on
-#   auth_session_cutoffs · d no policy for PUBLIC/anon/authenticated · e1/e2 service_role
+#   Checks: c no anon/authenticated privilege on an osionos_% or ai_% relation (partitions
+#   included) or on auth_session_cutoffs · d no policy for PUBLIC/anon/authenticated · e1/e2 service_role
 #   has full CRUD and round-trips a row · e3 it upserts a session cut-off as the
 #   auth-gateway does · e4 a late, older upsert leaves the newer cut-off in place · f six probes, and S1-S3 on auth_session_cutoffs, refused with 42501 · h no SECURITY DEFINER osionos_% function
-#   they may execute · g a second runner pass changes no ACL, policy or RLS flag ·
+#   they may execute · h-ai no ai_% writer function they may execute · P1 a direct read of an
+#   ai_chunks partition refused with 42501 · g a second runner pass changes no ACL, policy or RLS flag ·
 #   n the final notifications type CHECK admits every type the models files declare ·
 #   r no public table keeps a realtime_notify() trigger (it broadcasts rows past every grant),
 #   and r-cutoffs asserts it for auth_session_cutoffs by name ·
@@ -253,6 +254,8 @@ run_checks() {
 	probe "$1" S2 anon "INSERT INTO public.auth_session_cutoffs (user_id) VALUES ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb')"
 	probe "$1" S3 authenticated "UPDATE public.auth_session_cutoffs SET sessions_valid_after = 'epoch'"
 	check_count "$1" h secdef_exec
+	check_count "$1" h-ai ai_write_fn_exec
+	probe "$1" P1 anon "SELECT count(*) FROM public.ai_chunks_p00"
 	check_count "$1" n notify_types_missing
 	check_count "$1" r realtime_triggers
 	check_count "$1" r-cutoffs cutoff_realtime_triggers

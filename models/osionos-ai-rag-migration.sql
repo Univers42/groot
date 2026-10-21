@@ -68,6 +68,10 @@ BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_class WHERE relname = part_name) THEN
             EXECUTE format('CREATE TABLE public.%I PARTITION OF public.ai_chunks FOR VALUES WITH (MODULUS 16, REMAINDER %s)', part_name, i);
         END IF;
+        -- A partition is a table of its own: it can be read directly, and it inherits neither
+        -- the parent's grants nor its RLS flag. Closed like the parent, on every replay.
+        EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', part_name);
+        EXECUTE format('REVOKE ALL ON public.%I FROM PUBLIC, anon, authenticated', part_name);
     END LOOP;
 END $$;
 
@@ -501,6 +505,13 @@ GRANT ALL ON public.ai_index_queue  TO service_role;
 -- header): close PostgREST's anon/authenticated roles here, not pattern-matched elsewhere.
 REVOKE ALL ON public.ai_chunks       FROM PUBLIC, ANON, AUTHENTICATED;
 REVOKE ALL ON public.ai_index_queue  FROM PUBLIC, ANON, AUTHENTICATED;
+
+-- The page-vector writers run as their caller; PUBLIC's default EXECUTE would let any
+-- PostgREST role call them. The page triggers call them as the bridge (service_role).
+REVOKE ALL ON FUNCTION public.ai_write_page_vector(UUID, UUID, HALFVEC, TEXT) FROM PUBLIC, ANON, AUTHENTICATED;
+REVOKE ALL ON FUNCTION public.ai_drop_page_vector(UUID) FROM PUBLIC, ANON, AUTHENTICATED;
+GRANT EXECUTE ON FUNCTION public.ai_write_page_vector(UUID, UUID, HALFVEC, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.ai_drop_page_vector(UUID) TO service_role;
 
 -- -----------------------------------------------------------------------------
 -- 9. Reload PostgREST schema cache
