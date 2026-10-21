@@ -142,13 +142,22 @@ umask 077
   cat "$BOOTSTRAP_SQL"
 } > "$TMP/bootstrap.sql"
 
+# GoTrue boots next to the (idempotent) bootstrap and their role grants can
+# collide: "tuple concurrently updated" (VM, 2026-10-21) alone is retried.
 note "step a: grobase db-bootstrap.psql"
-if ! docker exec -i "$PG_CTN" psql -U postgres -d "$PG_DB_NAME" -v ON_ERROR_STOP=1 -f - \
-  < "$TMP/bootstrap.sql" > "$TMP/boot.out" 2> "$TMP/boot.err"; then
+boot_try=1
+until docker exec -i "$PG_CTN" psql -U postgres -d "$PG_DB_NAME" -v ON_ERROR_STOP=1 -f - \
+  < "$TMP/bootstrap.sql" > "$TMP/boot.out" 2> "$TMP/boot.err"; do
+  if [ "$boot_try" -lt 3 ] && grep -q 'tuple concurrently updated' "$TMP/boot.err"; then
+    note "step a: concurrent update with GoTrue's boot — retrying ($boot_try/3)"
+    boot_try=$((boot_try + 1))
+    sleep 3
+    continue
+  fi
   printf '[migrate] ERROR: db-bootstrap.psql failed:\n' >&2
   redact < "$TMP/boot.err" | head -20 >&2
   exit 1
-fi
+done
 note "step a: db-bootstrap.psql applied"
 
 # ---------------------------------------------------------------------------
@@ -273,18 +282,12 @@ if ! PG_CONTAINER=eval-pg PG_DB=postgres MODELS_DIR="$MODELS_DIR" "$RUNNER"; the
   die "the models migrations failed — see the [models] lines above"
 fi
 
-# The apply exits 1 when a migration FAILED, so its exit code is the
-# convergence check. The runner's own --check is not run again here: it
-# reports a pending gap for every file that creates a table inside a
-# format() string (the RAG migration's partition line reads as a table named
-# "public"), so on a converged database it never passes. The tables that
-# matter are asserted by smoke.sh, check 4.
+# The apply's exit code is the convergence check: the runner's --check never
+# passes here (it reads the RAG migration's format()'d partition line as a
+# table named "public"). smoke.sh check 4 asserts the tables that matter.
 
-# ---------------------------------------------------------------------------
-# PostgREST caches the schema it serves. It started before these migrations,
-# so its cache is stale — tell it to reload (the same NOTIFY the RAG
-# migration sends) and restart it so the reload is not a race.
-# ---------------------------------------------------------------------------
+# PostgREST started before these migrations, so its schema cache is stale:
+# NOTIFY a reload and restart it so the reload is not a race.
 POSTGREST_CTN=$(find_service eval-postgrest)
 if [ -n "$POSTGREST_CTN" ]; then
   note "reloading the PostgREST schema cache"
