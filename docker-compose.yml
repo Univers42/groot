@@ -373,11 +373,23 @@ services:
       OSIONOS_AI_EMBED_URL: http://osionos-ai-embed:80
       # The platform allowlist: ONE model, the local one, free.
       OSIONOS_AI_PLATFORM_MODELS: '${OSIONOS_AI_PLATFORM_MODELS:-[{"id":"qwen3-4b","label":"Qwen3 4B (local)","inputMicroUsdPerMTok":0,"outputMicroUsdPerMTok":0,"default":true}]}'
+      # The speech-to-text server of the dictation: INTERNAL, on the network
+      # that only it and this service join. Without it the dictation answers
+      # 503 voice_unavailable — the assistant works, the dictation does not.
+      OSIONOS_AI_STT_URL: http://osionos-ai-stt:8000
+      OSIONOS_AI_STT_MODEL: ${OSIONOS_AI_STT_MODEL:-Systran/faster-whisper-small}
+      # The deadline of one transcription, and the seconds of audio a user may
+      # dictate in a day.
+      OSIONOS_AI_STT_TIMEOUT_MS: ${OSIONOS_AI_STT_TIMEOUT_MS:-20000}
+      OSIONOS_AI_STT_SECONDS_PER_DAY: ${OSIONOS_AI_STT_SECONDS_PER_DAY:-600}
     expose:
       - "4300"
     networks:
       - default
       - mini-baas
+      # The speech-to-text server is on this network, and on no other: it is
+      # unreachable from the bridge, from the web container and from the host.
+      - osionos-ai-stt-net
     depends_on:
       osionos-ai-db:
         condition: service_healthy
@@ -570,6 +582,66 @@ services:
     # embedder, so the third CPU of the bulk one would buy nothing.
     mem_limit: 6g
     cpus: 5
+
+  # osionos-ai-stt — the speech-to-text server of the dictation: speaches
+  # (MIT), serving Systran/faster-whisper-small on the CPU.
+  #
+  # INTERNAL: it joins `osionos-ai-stt-net` (internal: true, NO egress) and
+  # nothing else — not the default network, not mini-baas. It has NO published
+  # port: only osionos-ai reaches it, over the internal network.
+  #
+  # The image is pinned to a release and to a digest:
+  #   ghcr.io/speaches-ai/speaches:0.8.3-cpu
+  #   sha256:21e3df06d842fb7802ab470dd77c25f0e8c0d22950e8d8c6ae886e851af53ef8
+  # The image config was built on 2025-09-19, well over the seven days a
+  # fresh build never runs an unreviewed binary.
+  #
+  # The model is pinned too:
+  #   Systran/faster-whisper-small, revision 536b0662742c02347bc0e980a01041f333bce120
+  #   model.bin sha256 3e305921506d8872816023e4c273e75d2419fb89b24da97b4fe7bce14170d671
+  # It is PRE-FETCHED into the named volume below — that one-shot command is
+  # the only step of this stack that has egress. It runs OUTSIDE the service:
+  # `compose run` would keep HF_HUB_OFFLINE=1 and the internal-only network,
+  # so the download could never start.
+  # Caveat: written from the image layout, not yet run end to end here.
+  #
+  #   docker run --rm -e HF_HUB_OFFLINE=0 --entrypoint python \
+  #     -v osionos_ai_models_stt:/home/ubuntu/.cache/huggingface/hub \
+  #     ghcr.io/speaches-ai/speaches:0.8.3-cpu@sha256:21e3df06d842fb7802ab470dd77c25f0e8c0d22950e8d8c6ae886e851af53ef8 \
+  #     -c "from huggingface_hub import snapshot_download; import os; \
+  #       p = snapshot_download('Systran/faster-whisper-small', revision='536b0662742c02347bc0e980a01041f333bce120'); \
+  #       r = os.path.join(os.path.dirname(p), '..', 'refs', 'main'); \
+  #       os.makedirs(os.path.dirname(r), exist_ok=True); open(r, 'w').write('536b0662742c02347bc0e980a01041f333bce120')"
+  #
+  # Caveat: the cpus and the memory below are PROVISIONAL. The A1 spike
+  # measures faster-whisper-small against large-v3-turbo on this machine, and
+  # it sets the final values — and maybe the model itself.
+  osionos-ai-stt:
+    image: ghcr.io/speaches-ai/speaches:0.8.3-cpu@sha256:21e3df06d842fb7802ab470dd77c25f0e8c0d22950e8d8c6ae886e851af53ef8
+    profiles: ["ai"]
+    environment:
+      # The model is already in the cache: the server never reaches the net.
+      HF_HUB_OFFLINE: "1"
+      # The model the transcription route asks for.
+      SPEACHES_MODEL: Systran/faster-whisper-small
+      LOG_LEVEL: warning
+    volumes:
+      - osionos_ai_models_stt:/home/ubuntu/.cache/huggingface/hub
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      start_interval: 10s
+      timeout: 5s
+      start_period: 120s
+      retries: 12
+    networks:
+      - osionos-ai-stt-net
+    restart: unless-stopped
+    # Caveat: provisional — the A1 spike sets the final values.
+    mem_limit: 2g
+    cpus: 4
 
   # osionos-ai-indexer — the index worker: the SAME image as the service (the
   # one the `osionos-ai` service above builds), but its entrypoint is the
@@ -1341,6 +1413,10 @@ volumes:
     name: osionos_ai_models_llm
   osionos_ai_models_tei:
     name: osionos_ai_models_tei
+  # The cache of the speech-to-text model (Systran/faster-whisper-small),
+  # pre-fetched by the one-shot command of the osionos-ai-stt block.
+  osionos_ai_models_stt:
+    name: osionos_ai_models_stt
 
 networks:
   # The grobase backend stack's network (docker project `mini-baas`), declared
@@ -1351,6 +1427,12 @@ networks:
   mini-baas:
     name: mini-baas_mini-baas
     external: true
+  # The speech-to-text server of the dictation: `internal: true` = NO egress.
+  # ONLY osionos-ai-stt and osionos-ai join it — the STT server is unreachable
+  # from the bridge, from the web container and from the host, and it cannot
+  # reach the internet either (the model is pre-fetched into its volume).
+  osionos-ai-stt-net:
+    internal: true
   # Internal-only network for the IDE code runner: `internal: true` = NO egress
   # (the Docker daemon enforces it without needing unprivileged user namespaces),
   # so executed user code can reach neither the internet nor mini-baas. Only the
