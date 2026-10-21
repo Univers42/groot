@@ -74,6 +74,9 @@
 #         (needed by osionos-comments-migration.sql)
 #     osionos-page-search-migration.sql defines public.osionos_page_blocks()
 #         (needed by osionos-page-links-migration.sql)
+#     osionos-page-links-migration.sql  creates osionos_page_links (needed by
+#         osionos-ai-graph-migration.sql, whose edge read RETURNS SETOF it and
+#         sorts before it)
 #   Ponytail: `pending()` below only detects a file's OWN missing CREATE TABLE
 #   targets, never what it references — it cannot see this bug class, so a
 #   regression here will NOT show as a `--check` gap on a converged database.
@@ -100,7 +103,7 @@ trap 'rm -f "${ERR_FILE}"' EXIT
 # Dependency order (see "ORDERING" above) — each must run before the plain
 # alphabetical pass reaches its dependent. Space-separated: no filename here
 # contains a space or glob character.
-ORDERED_FIRST="auth-gateway-users-reconcile-migration.sql osionos-bridge-migration.sql osionos-chat-migration.sql osionos-social-migration.sql osionos-engagement-migration.sql osionos-page-search-migration.sql"
+ORDERED_FIRST="auth-gateway-users-reconcile-migration.sql osionos-bridge-migration.sql osionos-chat-migration.sql osionos-social-migration.sql osionos-engagement-migration.sql osionos-page-search-migration.sql osionos-page-links-migration.sql"
 ORDERED_LAST="osionos-service-role-only-migration.sql realtime-cdc-off-migration.sql"
 
 note() { printf '[models] %s\n' "$*" >&2; }
