@@ -202,6 +202,11 @@ services:
     pull_policy: missing
     profiles: ["rag"]
     entrypoint: ["node", "--experimental-strip-types", "src/indexer/main.ts"]
+    # The image's HEALTHCHECK probes the API port, which the indexer never
+    # opens: left on, the container is "unhealthy" and `up --wait` fails.
+    healthcheck:
+      disable: true
+    restart: unless-stopped
     environment:
       OSIONOS_AI_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@eval-pg:5432/postgres
       # The embedder's BASE url on eval-net. The old value was the indexer's

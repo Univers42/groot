@@ -669,7 +669,10 @@ services:
     networks:
       - default
     # NO healthcheck on purpose: it serves nothing, it only writes to the
-    # index. It is restarted on exit (restart: unless-stopped).
+    # index. The image's HEALTHCHECK probes the API port, which the indexer
+    # never opens, so it is disabled here. It is restarted on exit.
+    healthcheck:
+      disable: true
     restart: unless-stopped
     mem_limit: 512m
 
