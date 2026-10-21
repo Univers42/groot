@@ -70,6 +70,12 @@ create index if not exists ai_runs_owner_created_idx
 -- Stale-run sweep: only rows still 'running' are candidates for the reaper.
 create index if not exists ai_runs_running_created_idx
 	on public.ai_runs (created_at) where status = 'running';
+-- One running run per conversation. Two concurrent POSTs on the same
+-- conversation do not race: the second one hits this unique violation and is
+-- refused with 409 run_in_progress. The index is partial, so a finished run
+-- never blocks the next one.
+create unique index if not exists ai_runs_one_running_per_conversation
+	on public.ai_runs (conversation_id) where status = 'running';
 
 -- Daily spend ledger. subject is a user id as text, or the literal 'platform'
 -- for the global breaker. ONE row per (subject, day).
