@@ -28,7 +28,11 @@
 #   1. Files whose DDL references the auth-gateway's INTEGER users.id — they
 #      target the auth gateway's own database, and applying them here fails on
 #      a uuid/integer foreign-key clash (measured, not assumed):
-#        gdpr-migration.sql  user.sql  auth-security-migration.sql
+#        gdpr-migration.sql  user.sql
+#      auth-security-migration.sql WAS on this list and does NOT belong to it
+#      any more: it reads the type of public.users.id from the catalog, so it
+#      applies to this database's uuid users as well as to the integer users of
+#      the databases that run user.sql. See ORDERING below.
 #      auth-gateway-users-reconcile-migration.sql was on this list and does NOT
 #      belong to it: it is additive uuid-native DDL (five ADD COLUMN IF NOT
 #      EXISTS on public.users, two unique indexes, one trigger) and applies with
@@ -74,6 +78,12 @@
 #         (needed by osionos-comments-migration.sql)
 #     osionos-page-search-migration.sql defines public.osionos_page_blocks()
 #         (needed by osionos-page-links-migration.sql)
+#   The auth-security-migration.sql file is deliberately NOT one of those six: it runs
+#   in the plain alphabetical pass, after ORDERED_FIRST has reconciled public.users, and needs two things this database already has when the runner starts: public.users
+#   (its auth_audit_events.user_id column takes whatever type public.users.id has, read
+#   from the catalog) and the three roles anon, authenticated and service_role (its
+#   grants). It creates its own table and function, so no other file in models/ depends
+#   on it.
 #   Ponytail: `pending()` below only detects a file's OWN missing CREATE TABLE
 #   targets, never what it references — it cannot see this bug class, so a
 #   regression here will NOT show as a `--check` gap on a converged database.
@@ -107,7 +117,7 @@ note() { printf '[models] %s\n' "$*" >&2; }
 
 skipped() {
 	case "$1" in
-	gdpr-migration.sql | user.sql | auth-security-migration.sql)
+	gdpr-migration.sql | user.sql)
 		return 0
 		;;
 	rls-hardening-migration.sql | seeds.sql)
@@ -165,9 +175,13 @@ first_error() {
 # The line is lowercased by hand: IGNORECASE is a gawk extension, and under
 # mawk (Debian's awk) an upper-case CREATE TABLE was never matched, so baas
 # reported "converged" while public.auth_session_cutoffs was missing and the
-# bridge answered 503 (2026-10-21).
+# bridge answered 503 (2026-10-21). A `--` comment is dropped before matching:
+# lowercased, auth-session-cutoffs.sql's "grobase's CREATE TABLE hook" read as a
+# missing table `hook` and kept the file pending forever.
+# Caveat: a `--` inside a string literal before a CREATE TABLE on the same line
+# hides that table from --check (none in models/ today); apply mode is unaffected.
 pending() {
-	awk '{ l = tolower($0) }
+	awk '{ l = tolower($0); sub(/--.*/, "", l) }
 		match(l, /create table (if not exists )?(public\.)?[a-z_]+/) {
 			t = substr(l, RSTART, RLENGTH)
 			sub(/.* /, "", t); sub(/public\./, "", t); print t
