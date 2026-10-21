@@ -92,6 +92,9 @@ ARG VITE_BAAS_LIVE_MOUNTS=
 ARG VITE_BAAS_REALTIME_TOKEN=
 ARG VITE_BAAS_TENANT_ID=
 ARG VITE_CHAT_WS=true
+# Shared-space live collaboration (presence, carets, block sync). Default off: it needs a
+# realtime gateway that denies unscoped namespaces (REALTIME_NAMESPACE_FALLBACK=deny).
+ARG VITE_OSIO_COLLAB_SHARED=
 # Giphy search key (GIPHY_API in .env.local). Public beta-style key, client-side
 # by design; empty = the GIF picker shows a "not configured" toast.
 ARG VITE_GIPHY_API_KEY=
@@ -138,9 +141,10 @@ ENV VITE_API_URL=$VITE_API_URL \
 # plane + wsTransport) is populated ONLY from .env FILES, not the Dockerfile ENV,
 # and the host .env is .dockerignored. Write the realtime build env here so
 # liveRealtimeUrl()/resolveLiveRealtimeToken() get a non-empty VITE_BAAS_URL +
-# valid token and the chat WebSocket actually connects.
-RUN printf 'VITE_BAAS_URL=%s\nVITE_BAAS_REALTIME_TOKEN=%s\nVITE_CHAT_WS=%s\nVITE_GIPHY_API_KEY=%s\n' \
-      "$VITE_BAAS_URL" "$VITE_BAAS_REALTIME_TOKEN" "$VITE_CHAT_WS" "$VITE_GIPHY_API_KEY" > .env.production.local
+# valid token and the chat WebSocket actually connects. Feature flags resolve
+# against that same object (@osionos/feature-flags), so a VITE_OSIO_* flag goes here too.
+RUN printf 'VITE_BAAS_URL=%s\nVITE_BAAS_REALTIME_TOKEN=%s\nVITE_CHAT_WS=%s\nVITE_GIPHY_API_KEY=%s\nVITE_OSIO_COLLAB_SHARED=%s\n' \
+      "$VITE_BAAS_URL" "$VITE_BAAS_REALTIME_TOKEN" "$VITE_CHAT_WS" "$VITE_GIPHY_API_KEY" "$VITE_OSIO_COLLAB_SHARED" > .env.production.local
 
 # Build, then strip source maps from the shipped image (they tripled its size
 # and leak source; keep them only in local builds) and precompress static
