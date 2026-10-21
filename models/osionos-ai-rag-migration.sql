@@ -13,7 +13,8 @@
 -- Shared block walker (osionos_page_blocks, osionos_page_text) from
 -- osionos-page-search-migration.sql.
 -- "Can read" predicate from bridge-page-read.mjs: visibility in
--- {private,shared,public}, owner_id, collaborators[] with {userId, role != null}.
+-- {private,shared,public} (anything else, NULL included, is 'private'),
+-- owner_id, collaborators[] entries with {userId, role != null}.
 
 CREATE EXTENSION IF NOT EXISTS vector;
 
@@ -27,7 +28,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 -- The service RE-CHECKS every candidate page with the bridge's predicate
 -- (bridge-page-read.mjs) before returning it. This avoids a stale-copy window
 -- for permission changes: the AFTER UPDATE trigger on visibility/collaborators/
--- owner syncs these columns SYNCHRONOUSLY in the same transaction.
+-- owner/workspace syncs these columns SYNCHRONOUSLY in the same transaction.
 -- 'simple' dictionary for tsvector: multilingual workspaces; no stemming
 -- assumptions. The bridge uses 'simple' for display_name/username search too
 -- (osionos-social-migration.sql:23-24).
@@ -99,9 +100,15 @@ COMMENT ON COLUMN public.ai_chunks.embedding IS
     '384-dim half-precision vector (e.g. all-MiniLM-L6-v2). HALFVEC saves 50% space vs vector.';
 
 COMMENT ON COLUMN public.ai_chunks.collaborator_ids IS
-    'UUID[] of collaborator user_ids with non-null role (same predicate as '
-    'bridge-page-read.mjs isPageCollaborator). Updated synchronously by '
-    'ai_sync_page_acl trigger.';
+    'UUID[] of collaborator user_ids whose entry has a non-null role — ANY '
+    'non-null role counts ("" , 0, false, an object), exactly like '
+    'bridge-page-read.mjs isPageCollaborator (role != null). '
+    'Updated synchronously by ai_sync_page_acl trigger.';
+
+COMMENT ON COLUMN public.ai_chunks.visibility IS
+    'The page visibility, NORMALIZED (ai_page_visibility): private, shared or '
+    'public — never NULL, never an unknown value. The indexer must store the '
+    'same normalized value as the ai_sync_page_acl trigger.';
 
 -- -----------------------------------------------------------------------------
 -- 2. ai_index_queue — change-capture queue, coalesced to one row per page
@@ -127,8 +134,22 @@ COMMENT ON TABLE public.ai_index_queue IS
 -- -----------------------------------------------------------------------------
 -- IMMUTABLE so it can be used in trigger bodies without volatility concerns.
 -- Ignores malformed entries (null, non-object, missing userId, non-uuid userId,
--- missing/non-string role) instead of failing the page write — matches
+-- missing role, JSON-null role) instead of failing the page write — matches
 -- bridge-page-read.mjs isPageCollaborator which silently skips bad entries.
+--
+-- The rule is the BRIDGE's rule, rule for rule:
+--   - a non-array collaborators (object, scalar, null) is an empty list, like
+--     the bridge's `Array.isArray(row?.collaborators) ? row.collaborators : []`.
+--     jsonb_array_elements on a non-array RAISES, and a raised trigger kills
+--     the page write;
+--   - an entry counts when it is an object, its 'role' key exists with a
+--     non-null JSON value (ANY non-null value counts — "", 0, false, an
+--     object), and its 'userId' is the caller's id. A missing role or a JSON
+--     null role does NOT count: the bridge's `entry.role != null` is false for
+--     undefined and for null. A role that is not a non-empty STRING would
+--     hide a page the bridge lets the user read;
+--   - user ids are uuids, so a non-uuid userId string can never equal one:
+--     the uuid shape test IS the id test (uuids are case-insensitive here).
 
 CREATE OR REPLACE FUNCTION public.ai_collaborator_ids(collaborators JSONB)
 RETURNS UUID[]
@@ -136,23 +157,57 @@ LANGUAGE SQL
 IMMUTABLE
 PARALLEL SAFE
 AS $$
-    SELECT COALESCE(ARRAY_AGG(DISTINCT (entry->>'userId')::UUID) FILTER (WHERE
-           entry IS NOT NULL
-       AND jsonb_typeof(entry) = 'object'
-       AND entry ? 'userId'
-       AND entry->>'userId' ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
-       AND entry ? 'role'
-       AND jsonb_typeof(entry->'role') = 'string'
-       AND entry->>'role' <> ''), '{}'::UUID[])
-    FROM JSONB_ARRAY_ELEMENTS(COALESCE(collaborators, '[]'::JSONB)) AS entry;
+    SELECT COALESCE(ARRAY_AGG(DISTINCT user_id), '{}'::UUID[])
+    FROM (
+        SELECT (entry->>'userId')::UUID AS user_id
+        FROM JSONB_ARRAY_ELEMENTS(
+                 CASE WHEN jsonb_typeof(collaborators) = 'array'
+                      THEN collaborators
+                      ELSE '[]'::JSONB
+                 END) AS entry
+        WHERE entry IS NOT NULL
+          AND jsonb_typeof(entry) = 'object'
+          AND entry ? 'userId'
+          -- user ids are uuids: a non-uuid string can never equal a user id
+          AND entry->>'userId' ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+          AND entry ? 'role'
+          AND jsonb_typeof(entry->'role') <> 'null'
+    ) AS ids;
 $$;
 
 COMMENT ON FUNCTION public.ai_collaborator_ids(JSONB) IS
-    'Extracts UUID[] of collaborator user_ids that have a non-null string role. '
-    'Silently skips malformed entries (matches bridge-page-read.mjs).';
+    'Extracts UUID[] of collaborator user_ids whose entry has a non-null role '
+    '(ANY non-null role counts, like the bridge''s role != null). A non-array '
+    'collaborators is an empty list. Silently skips malformed entries '
+    '(matches bridge-page-read.mjs isPageCollaborator).';
 
 -- -----------------------------------------------------------------------------
--- 4. Trigger: enqueue page for (re)indexing on content/title/workspace changes
+-- 3b. Helper: normalize a page visibility the way the bridge does
+-- -----------------------------------------------------------------------------
+-- bridge-page-read.mjs pageVisibility(): anything that is not one of
+-- {private, shared, public} — NULL included — is 'private'. The chunks store
+-- the NORMALIZED value, so the pre-filter and the bridge can never disagree
+-- about the same page. The indexer MUST normalize the same way when it
+-- writes a chunk (see ai_sync_page_acl below).
+
+CREATE OR REPLACE FUNCTION public.ai_page_visibility(visibility TEXT)
+RETURNS TEXT
+LANGUAGE SQL
+IMMUTABLE
+PARALLEL SAFE
+AS $$
+    SELECT CASE
+        WHEN visibility IN ('private', 'shared', 'public') THEN visibility
+        ELSE 'private'
+    END;
+$$;
+
+COMMENT ON FUNCTION public.ai_page_visibility(TEXT) IS
+    'Normalizes a page visibility like bridge-page-read.mjs pageVisibility(): '
+    'anything that is not private/shared/public — NULL included — is ''private''.';
+
+-- -----------------------------------------------------------------------------
+-- 4. Trigger: enqueue page for (re)indexing on content/title/workspace/archive changes
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.ai_enqueue_page()
 RETURNS TRIGGER
@@ -181,32 +236,58 @@ CREATE TRIGGER ai_enqueue_page_ins
     AFTER INSERT ON public.osionos_pages
     FOR EACH ROW EXECUTE FUNCTION public.ai_enqueue_page();
 
--- AFTER UPDATE OF title, content, workspace_id: only when those columns actually change
+-- AFTER UPDATE OF title, content, workspace_id, archived_at: only when those
+-- columns actually change. archived_at is in the list because archiving a
+-- page must reach the index too: the chunks of an archived page stay in the
+-- index until the worker deletes them, so without this an archived page would
+-- keep answering searches until some other edit re-queued it. Un-archiving
+-- re-queues it, and the worker re-indexes it.
 DROP TRIGGER IF EXISTS ai_enqueue_page_upd ON public.osionos_pages;
 CREATE TRIGGER ai_enqueue_page_upd
-    AFTER UPDATE OF title, content, workspace_id ON public.osionos_pages
+    AFTER UPDATE OF title, content, workspace_id, archived_at ON public.osionos_pages
     FOR EACH ROW
     WHEN (OLD.title IS DISTINCT FROM NEW.title
        OR OLD.content IS DISTINCT FROM NEW.content
-       OR OLD.workspace_id IS DISTINCT FROM NEW.workspace_id)
+       OR OLD.workspace_id IS DISTINCT FROM NEW.workspace_id
+       OR OLD.archived_at IS DISTINCT FROM NEW.archived_at)
     EXECUTE FUNCTION public.ai_enqueue_page();
 
 COMMENT ON FUNCTION public.ai_enqueue_page() IS
     'Queues a page for (re)indexing. Coalesces rapid edits to one row. '
     'Notifies worker via pg_notify(''ai_index'', page_id). '
-    'Fires on INSERT and on UPDATE of title/content/workspace_id when changed. '
-    'Archived/deleted pages are also queued (worker deletes their chunks).';
+    'Fires on INSERT and on UPDATE of title/content/workspace_id/archived_at '
+    'when changed. Archived pages are queued too (the worker deletes their '
+    'chunks); un-archiving re-indexes them.';
 
 -- -----------------------------------------------------------------------------
--- 5. Trigger: synchronous ACL sync on visibility/collaborators/owner changes
+-- 5. Trigger: synchronous ACL sync on visibility/collaborators/owner/workspace
 -- -----------------------------------------------------------------------------
+-- The chunks carry COPIES of the page's ACL fields. visibility is stored
+-- NORMALIZED (public.ai_page_visibility — the bridge's pageVisibility(), so
+-- NULL or any unknown value becomes 'private'). The INDEXER MUST store the
+-- same normalized value when it writes a chunk: a raw visibility would make
+-- the pre-filter and the bridge disagree about the same page.
+
 CREATE OR REPLACE FUNCTION public.ai_sync_page_acl()
 RETURNS TRIGGER
 LANGUAGE PLPGSQL
 AS $$
 BEGIN
+    -- The page moved to another workspace: its chunks are still filed under
+    -- the OLD workspace, where a member of that workspace alone would match
+    -- them in the pre-filter. The worker only re-files them on its next tick
+    -- (up to 10 s later), so drop them HERE, in this same transaction. The
+    -- enqueue trigger has already re-queued the page under its new
+    -- workspace, so the worker re-creates the chunks there.
+    IF OLD.workspace_id IS DISTINCT FROM NEW.workspace_id THEN
+        DELETE FROM public.ai_chunks
+        WHERE workspace_id = OLD.workspace_id
+          AND source_kind = 'page'
+          AND source_id = NEW.id;
+    END IF;
+
     UPDATE public.ai_chunks
-    SET visibility = NEW.visibility,
+    SET visibility = PUBLIC.AI_PAGE_VISIBILITY(NEW.visibility),
         owner_id = NEW.owner_id,
         collaborator_ids = PUBLIC.AI_COLLABORATOR_IDS(NEW.collaborators),
         updated_at = NOW()
@@ -218,21 +299,26 @@ BEGIN
 END;
 $$;
 
--- AFTER UPDATE OF visibility, collaborators, owner_id: only when those change
+-- AFTER UPDATE OF visibility, collaborators, owner_id, workspace_id: only when
+-- those change
 DROP TRIGGER IF EXISTS ai_sync_page_acl_trg ON public.osionos_pages;
 CREATE TRIGGER ai_sync_page_acl_trg
-    AFTER UPDATE OF visibility, collaborators, owner_id ON public.osionos_pages
+    AFTER UPDATE OF visibility, collaborators, owner_id, workspace_id ON public.osionos_pages
     FOR EACH ROW
     WHEN (OLD.visibility IS DISTINCT FROM NEW.visibility
        OR OLD.collaborators IS DISTINCT FROM NEW.collaborators
-       OR OLD.owner_id IS DISTINCT FROM NEW.owner_id)
+       OR OLD.owner_id IS DISTINCT FROM NEW.owner_id
+       OR OLD.workspace_id IS DISTINCT FROM NEW.workspace_id)
     EXECUTE FUNCTION public.ai_sync_page_acl();
 
 COMMENT ON FUNCTION public.ai_sync_page_acl() IS
     'Synchronously updates denormalized ACL columns in ai_chunks when a page''s '
-    'visibility, collaborators, or owner changes. Runs in the SAME transaction '
-    'as the page write — a page made private can NEVER be retrieved from a '
-    'stale copy. Uses ai_collaborator_ids() which ignores malformed entries.';
+    'visibility, collaborators, owner or workspace changes. Runs in the SAME '
+    'transaction as the page write — a page made private can NEVER be '
+    'retrieved from a stale copy. A page moved to another workspace loses its '
+    'chunks from the old workspace in that same transaction. visibility is '
+    'stored normalized (ai_page_visibility); the indexer must do the same. '
+    'Uses ai_collaborator_ids() which ignores malformed entries.';
 
 -- -----------------------------------------------------------------------------
 -- 6. Trigger: delete chunks + queue row on page DELETE
