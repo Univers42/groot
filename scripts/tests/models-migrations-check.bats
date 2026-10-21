@@ -47,3 +47,10 @@ STUB
   PRESENT=osionos_a run -1 sh "$BATS_TEST_DIRNAME/../apply-models-migrations.sh" --check
   [[ "$output" == *"(missing table: osionos_b)"* ]]
 }
+
+@test "a CREATE TABLE named in a comment is not a pending table" {
+  printf -- "-- realtime trigger grobase's CREATE TABLE hook gives it.\nCREATE TABLE IF NOT EXISTS public.auth_session_cutoffs (user_id uuid); -- create table not_this\n" \
+    >"$MODELS_DIR/auth-session-cutoffs.sql"
+  PRESENT=auth_session_cutoffs run -0 sh "$BATS_TEST_DIRNAME/../apply-models-migrations.sh" --check
+  [[ "$output" == *"converged"* ]]
+}
