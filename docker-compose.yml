@@ -300,6 +300,11 @@ services:
         VITE_BAAS_GRAPH_GENERATORS: ${VITE_BAAS_GRAPH_GENERATORS:-}
         VITE_BAAS_NOTES_TABLE: ${VITE_BAAS_NOTES_TABLE:-}
         VITE_BAAS_OVERLAY_TABLE: ${VITE_BAAS_OVERLAY_TABLE:-}
+        # The AI assistant is OPT-IN: empty = the app shows no AI action and
+        # talks to no AI service. Set VITE_AI_URL (https://localhost:4000 in
+        # dev) and rebuild this image to turn it on — the only switch, on both
+        # sides (src/features/ai/api/aiClient.ts reads VITE_AI_URL alone).
+        VITE_AI_URL: ${VITE_AI_URL:-}
     expose:
       - "80"
     depends_on:
@@ -315,6 +320,163 @@ services:
       retries: 20
     restart: unless-stopped
     mem_limit: 128m
+
+  # ---------------------------------------------------------------------------
+  # The AI plane — OPT-IN (compose profile `ai`).
+  #
+  # A plain `docker compose up` starts NONE of these four: the profile is
+  # gated, so the stack behaves exactly as before until someone asks for the
+  # assistant with `docker compose --profile ai up -d --build`.
+  #
+  # The service is the osionos app repo's own services/osionos-ai, packaged by
+  # infrastructure/docker/osionos/ai.Dockerfile. It is reached from the
+  # browser through the :4000 vhost of local-https-proxy (/api/ai/ -> the
+  # service, SSE unbuffered) — no published port of its own.
+  # ---------------------------------------------------------------------------
+
+  # osionos-ai — the assistant service: conversations, runs, the model gateway.
+  osionos-ai:
+    image: ${OSIONOS_AI_IMAGE:-track-binocle/osionos-ai:local}
+    profiles: ["ai"]
+    build:
+      context: ./apps/osionos/app
+      dockerfile: ../../../infrastructure/docker/osionos/ai.Dockerfile
+    env_file:
+      - path: ./.env.local
+        required: false
+      # secrets injected at up-time from ./.env.local: OSIONOS_APP_SESSION_SECRET
+      # (the secret the bridge signs the session tokens with) and SERVICE_ROLE_KEY
+      # (what the session-cutoff poller reads). They are NOT in `environment:`
+      # below on purpose: an entry there overrides the env_file, and an empty
+      # default would clobber the real secret.
+    environment:
+      OSIONOS_AI_PORT: 4300
+      OSIONOS_ALLOWED_ORIGIN: ${OSIONOS_ALLOWED_ORIGIN:-https://localhost:3001}
+      # BaaS reads/writes go to the grobase-owned mini-baas Kong over the
+      # external mini-baas network (container-name DNS) — the bridge's URL.
+      OSIONOS_BAAS_URL: http://mini-baas-kong:8000
+      # The dev stack's own Postgres (the `osionos-ai-db` service below).
+      # Point this at a real grobase Postgres in .env.local to get the real
+      # pages and workspace members.
+      OSIONOS_AI_DATABASE_URL: '${OSIONOS_AI_DATABASE_URL:-postgres://postgres:${OSIONOS_AI_DB_PASSWORD:-osionos-ai-dev}@osionos-ai-db:5432/osionos_ai}'
+      # The dev stack's own Redis (the `osionos-ai-redis` service below).
+      OSIONOS_AI_REDIS_URL: ${OSIONOS_AI_REDIS_URL:-redis://osionos-ai-redis:6379}
+      # The upstream: the local llama.cpp by default, OpenRouter (or anything
+      # OpenAI-compatible) when OSIONOS_AI_UPSTREAM_BASE_URL says so.
+      OSIONOS_AI_UPSTREAM_BASE_URL: ${OSIONOS_AI_UPSTREAM_BASE_URL:-http://osionos-ai-llm:8080/v1}
+      # The platform allowlist: ONE model, the local one, free.
+      OSIONOS_AI_PLATFORM_MODELS: '${OSIONOS_AI_PLATFORM_MODELS:-[{"id":"qwen3-4b","label":"Qwen3 4B (local)","inputMicroUsdPerMTok":0,"outputMicroUsdPerMTok":0,"default":true}]}'
+    expose:
+      - "4300"
+    networks:
+      - default
+      - mini-baas
+    depends_on:
+      osionos-ai-db:
+        condition: service_healthy
+      osionos-ai-redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "fetch(''http://127.0.0.1:4300/api/ai/health'').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"',
+        ]
+      interval: 30s
+      start_interval: 2s
+      timeout: 3s
+      start_period: 45s
+      retries: 24
+    restart: unless-stopped
+    mem_limit: 512m
+
+  # osionos-ai-db — the dev stack's own Postgres for the AI tables. grobase's
+  # Postgres is not on this daemon (link mode reaches it through a relay), so
+  # the AI service needs a database of its own here. The init files are
+  # applied on the FIRST start of an empty volume: the stand-in (the osionos
+  # tables the page context reads) and then the AI migration.
+  osionos-ai-db:
+    image: pgvector/pgvector:0.8.0-pg16
+    profiles: ["ai"]
+    environment:
+      POSTGRES_DB: osionos_ai
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${OSIONOS_AI_DB_PASSWORD:-osionos-ai-dev}
+    volumes:
+      - osionos_ai_db:/var/lib/postgresql/data
+      - ./infrastructure/docker/osionos/ai-db-init/00-standin.sql:/docker-entrypoint-initdb.d/00-standin.sql:ro
+      - ./models/osionos-ai-migration.sql:/docker-entrypoint-initdb.d/10-osionos-ai.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d osionos_ai"]
+      interval: 30s
+      start_interval: 2s
+      timeout: 3s
+      start_period: 10s
+      retries: 12
+    networks:
+      - default
+    restart: unless-stopped
+    mem_limit: 512m
+
+  # osionos-ai-redis — the run streams and the rate counters. Every key of the
+  # service carries a TTL, so the eviction policy can be volatile-lru.
+  osionos-ai-redis:
+    image: redis:7-alpine
+    profiles: ["ai"]
+    command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "volatile-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      start_interval: 2s
+      timeout: 3s
+      start_period: 5s
+      retries: 12
+    networks:
+      - default
+    restart: unless-stopped
+    mem_limit: 128m
+
+  # osionos-ai-llm — the dev chat model: llama.cpp serving Qwen3 4B on the
+  # CPU, no API key. The model is downloaded on the FIRST start (~2.5 GB) into
+  # the named volume below, so the first answer waits for it. The image tag is
+  # pinned to a release that was at least 7 days old when this was written
+  # (b11580, 2026-10-13): a fresh build never runs an unreviewed binary.
+  osionos-ai-llm:
+    image: ghcr.io/ggml-org/llama.cpp:server-b11580
+    profiles: ["ai"]
+    command:
+      [
+        "-hf",
+        "unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M",
+        "--alias",
+        "qwen3-4b",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8080",
+        "-c",
+        "8192",
+        "-t",
+        "8",
+        "--jinja",
+      ]
+    environment:
+      LLAMA_CACHE: /models
+    volumes:
+      - osionos_ai_models_llm:/models
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      start_interval: 10s
+      timeout: 5s
+      # The model download alone takes minutes on a cold volume.
+      start_period: 900s
+      retries: 12
+    networks:
+      - default
+    restart: unless-stopped
+    mem_limit: 6g
+    cpus: 8
 
   mail-bridge:
     image: ${MAIL_BRIDGE_IMAGE:-track-binocle/mail-bridge:local}
@@ -1047,6 +1209,11 @@ volumes:
   calendar-node-modules:
   osionos-browser-test-node-modules:
   osionos-browser-test-pnpm-store:
+  # The AI plane (compose profile `ai`): the dev Postgres of the assistant and
+  # the model cache of llama.cpp. The model volume keeps its exact name —
+  # another task mounts the same cache.
+  osionos_ai_db:
+  osionos_ai_models_llm:
 
 networks:
   # The grobase backend stack's network (docker project `mini-baas`), declared
