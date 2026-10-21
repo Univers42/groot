@@ -97,6 +97,11 @@ ARG VITE_CHAT_WS=true
 ARG VITE_GIPHY_API_KEY=
 # IDE server browser origin. Baked at build; empty = the IDE shows "not configured".
 ARG VITE_OSIONOS_IDE_URL=
+# The AI assistant is OPT-IN: empty = the app shows no AI action and talks to no
+# AI service. It is the ONLY switch (the client reads VITE_AI_URL alone, never
+# the bridge's URL) — set it in .env.local and rebuild this image to turn the
+# assistant on.
+ARG VITE_AI_URL=
 # osionos's build-time gate for the legacy second brain (src/shared/config/legacySecondBrain.ts;
 # vite.config.ts `define` reads it from the build env). "false" = every second-brain entry
 # point opens graph_render's <graph-studio>, served below under /graph-studio/<sha>/.
@@ -126,7 +131,8 @@ ENV VITE_API_URL=$VITE_API_URL \
     VITE_BAAS_REALTIME_TOKEN=$VITE_BAAS_REALTIME_TOKEN \
     VITE_BAAS_TENANT_ID=$VITE_BAAS_TENANT_ID \
     VITE_LEGACY_SECOND_BRAIN=$VITE_LEGACY_SECOND_BRAIN \
-    VITE_OSIONOS_IDE_URL=$VITE_OSIONOS_IDE_URL
+    VITE_OSIONOS_IDE_URL=$VITE_OSIONOS_IDE_URL \
+    VITE_AI_URL=$VITE_AI_URL
 
 # vite's import.meta.env OBJECT (whole-object reads in the vendored realtime
 # plane + wsTransport) is populated ONLY from .env FILES, not the Dockerfile ENV,
