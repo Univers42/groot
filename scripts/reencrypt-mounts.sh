@@ -35,8 +35,14 @@
 #   containers' own env, exactly as the seeders first built them, and are never
 #   printed.
 #
-# Usage:  bash scripts/reencrypt-mounts.sh [--check]
+# Usage:  bash scripts/reencrypt-mounts.sh [--check | --force NAME...]
 #           --check  report which mounts are broken; change nothing.
+#           --force  also re-seal the named mounts when /connect answers 200: a DSN that
+#                    still decrypts but carries an engine password changed since. On baas
+#                    (2026-10-21) osionos-finance and mongo-activity opened fine and every
+#                    schema call failed behind them (mssql 18456 "Login failed for user
+#                    'sa'", mongo "SCRAM failure"), while the engines accepted their own
+#                    containers' credentials. /connect cannot see that; the data plane can.
 #
 # Only the osionos demo mounts are repaired — the DSNs of other tenants' mounts
 # (website, vault42, red-tetris, gourmand) are owned by THEIR contracts and are
@@ -50,7 +56,14 @@ REG_CTN="${ADAPTER_REGISTRY_CONTAINER:-mini-baas-adapter-registry-go}"
 PG_CTN="${PG_CONTAINER:-mini-baas-postgres}"
 TENANT="${OSIONOS_BAAS_TENANT_ID:-agency}"
 CHECK_ONLY=0
-[ "${1:-}" = "--check" ] && CHECK_ONLY=1
+FORCE=" "
+case "${1:-}" in
+--check) CHECK_ONLY=1 ;;
+--force)
+	shift
+	FORCE=" $* "
+	;;
+esac
 
 note() { printf '[mounts] %s\n' "$*" >&2; }
 die()  { printf '[mounts] ✗ %s\n' "$*" >&2; exit 1; }
@@ -171,15 +184,17 @@ main() {
 	running "${PG_CTN}"  || { note "${PG_CTN} not running — skipping"; exit 0; }
 	load_service_auth
 
-	local broken=0 repaired=0 id name engine code dsn tmp tmpname
+	local broken=0 repaired=0 id name engine code dsn tmp tmpname forced
 	while IFS='|' read -r id name engine; do
 		[ -n "${id}" ] || continue
 		code="$(connect_code "${id}")"
-		if [ "${code}" = "200" ]; then
+		forced=""
+		case "${FORCE}" in *" ${name} "*) forced=" (forced)" ;; esac
+		if [ "${code}" = "200" ] && [ -z "${forced}" ]; then
 			continue
 		fi
 		broken=$((broken + 1))
-		note "${name} (${engine}): /connect → ${code}"
+		note "${name} (${engine}): /connect → ${code}${forced}"
 		[ "${CHECK_ONLY}" -eq 1 ] && continue
 
 		if ! dsn="$(dsn_for "${name}")"; then
