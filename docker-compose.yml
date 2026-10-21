@@ -556,10 +556,15 @@ services:
   #   Systran/faster-whisper-small, revision 536b0662742c02347bc0e980a01041f333bce120
   #   model.bin sha256 3e305921506d8872816023e4c273e75d2419fb89b24da97b4fe7bce14170d671
   # It is PRE-FETCHED into the named volume below — that one-shot command is
-  # the only step of this stack that has egress:
+  # the only step of this stack that has egress. It runs OUTSIDE the service:
+  # `compose run` would keep HF_HUB_OFFLINE=1 and the internal-only network,
+  # so the download could never start.
+  # Caveat: written from the image layout, not yet run end to end here.
   #
-  #   docker compose --profile ai run --rm --no-deps osionos-ai-stt \
-  #     python -c "from huggingface_hub import snapshot_download; import os; \
+  #   docker run --rm -e HF_HUB_OFFLINE=0 --entrypoint python \
+  #     -v osionos_ai_models_stt:/home/ubuntu/.cache/huggingface/hub \
+  #     ghcr.io/speaches-ai/speaches:0.8.3-cpu@sha256:21e3df06d842fb7802ab470dd77c25f0e8c0d22950e8d8c6ae886e851af53ef8 \
+  #     -c "from huggingface_hub import snapshot_download; import os; \
   #       p = snapshot_download('Systran/faster-whisper-small', revision='536b0662742c02347bc0e980a01041f333bce120'); \
   #       r = os.path.join(os.path.dirname(p), '..', 'refs', 'main'); \
   #       os.makedirs(os.path.dirname(r), exist_ok=True); open(r, 'w').write('536b0662742c02347bc0e980a01041f333bce120')"
