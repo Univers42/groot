@@ -371,6 +371,10 @@ services:
       # embeddings of a retrieval. NOT a hard dependency — a run that starts
       # while it is down answers without sources (degraded, not broken).
       OSIONOS_AI_EMBED_URL: http://osionos-ai-embed:80
+      # The bridge, for the bytes of an image attached to a run: fetched with
+      # the caller's token, so the bridge's own read rules decide. Required in
+      # production (src/config.ts refuses to start without it).
+      OSIONOS_AI_BRIDGE_URL: http://osionos-bridge:4000
       # The platform allowlist: ONE model, the local one, free.
       OSIONOS_AI_PLATFORM_MODELS: '${OSIONOS_AI_PLATFORM_MODELS:-[{"id":"qwen3-4b","label":"Qwen3 4B (local)","inputMicroUsdPerMTok":0,"outputMicroUsdPerMTok":0,"default":true}]}'
       # The speech-to-text server of the dictation: INTERNAL, on the network
