@@ -14,7 +14,7 @@ client has no base URL to call). Turning it on is two commands (below) and one e
 docker compose --profile ai up -d --build
 ```
 
-That starts four services, none of which publishes a port:
+That starts six services, none of which publishes a port:
 
 | Service | What it is | Image |
 |---|---|---|
@@ -22,6 +22,8 @@ That starts four services, none of which publishes a port:
 | `osionos-ai-db` | the dev Postgres of the AI tables | `pgvector/pgvector:0.8.0-pg16` |
 | `osionos-ai-redis` | the run streams and the rate counters | `redis:7-alpine` |
 | `osionos-ai-llm` | the dev chat model (llama.cpp, CPU, no API key) | `ghcr.io/ggml-org/llama.cpp:server-b11580` |
+| `osionos-ai-embed` | the local embedder (Hugging Face TEI, CPU) | `ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4` |
+| `osionos-ai-indexer` | the index worker (same image as the service, other entrypoint) | `track-binocle/osionos-ai:local` |
 
 Then turn the feature on in the browser:
 
@@ -69,10 +71,11 @@ secret.
 
 grobase's Postgres is not on this Docker daemon — in link mode it runs elsewhere and is reached
 through a link relay — so the dev stack brings its own small Postgres for the AI tables. On its
-first start it applies two files: `infrastructure/docker/osionos/ai-db-init/00-standin.sql` (the
+first start it applies three files, in this order: `infrastructure/docker/osionos/ai-db-init/00-standin.sql` (the
 osionos tables the page context reads, copied from the test-only fixture of
-`services/osionos-ai/scripts/test.sh`) and `models/osionos-ai-migration.sql` (the real AI
-tables: conversations, messages, runs, the daily spend).
+`services/osionos-ai/scripts/test.sh`), `models/osionos-ai-migration.sql` (the real AI
+tables: conversations, messages, runs, the daily spend) and `models/osionos-ai-rag-migration.sql`
+(the RAG index — see "Workspace index" below).
 
 **Those osionos tables are empty**, so the page context of a run reads nothing: every page the
 client sends comes back in `run.started.skippedPageIds`, and the answer is written without any
@@ -82,6 +85,61 @@ grobase Postgres to get the real pages.
 
 The init files run only on the FIRST start of an empty `osionos_ai_db` volume. After that,
 `docker compose down -v` (which drops the volume) is the way to apply them again.
+
+## Workspace index
+
+The workspace index (the RAG chunks the assistant answers from) is three things in the
+profile `ai`:
+
+- `osionos-ai-db` gets the RAG migration as a third init file,
+  `models/osionos-ai-rag-migration.sql` → `/docker-entrypoint-initdb.d/20-osionos-ai-rag.sql`.
+  It creates `ai_chunks` (the chunks, partitioned 16 ways by workspace), `ai_index_queue`
+  (the change queue) and the triggers that queue a page on write and sync its ACL
+  columns. It needs only what the stand-in creates — the `osionos_pages` table and the
+  three roles (`service_role`, `anon`, `authenticated`) — and creates the `vector`
+  extension itself.
+- `osionos-ai-embed` is the embedder: Hugging Face TEI on the CPU, serving
+  `intfloat/multilingual-e5-small` (384 dims) on port 80 of the internal network. **No
+  published port**: the index never leaves this host.
+- `osionos-ai-indexer` is the worker: the same image as `osionos-ai`, but its entrypoint
+  is `node --experimental-strip-types src/indexer/main.ts`. It embeds the queued pages
+  and writes the chunks. It has no healthcheck on purpose — it serves nothing, it only
+  writes to the index, and it is restarted on exit.
+
+The service itself asks the same embedder for the query embeddings
+(`OSIONOS_AI_EMBED_URL`), but does **not** wait for it: with the embedder down a run
+answers without sources instead of failing.
+
+### The model cache
+
+The model lives in the `osionos_ai_models_tei` volume, mounted at `/data` of the embedder.
+That volume keeps its exact name (like `osionos_ai_models_llm`), so it is the same cache
+whatever the compose project is called. `intfloat/multilingual-e5-small` is already cached
+there — the first start downloads nothing.
+
+### An existing database does NOT get the RAG migration
+
+The init files run only on the FIRST start of an empty `osionos_ai_db` volume. A volume
+that already exists (the usual case) keeps the schema it has: the RAG migration is
+**not** re-run, and the indexer then finds no `ai_chunks` table. Apply it by hand — the
+file is mounted read-only in the container, so it is applied where it already sits:
+
+```sh
+docker compose --profile ai exec -T osionos-ai-db psql -U postgres -d osionos_ai -f /docker-entrypoint-initdb.d/20-osionos-ai-rag.sql
+```
+
+The migration is idempotent (`IF NOT EXISTS` everywhere, `DROP ... IF EXISTS` on the
+triggers and the policies), so running it twice is harmless.
+
+### The backfill rate
+
+The measured backfill is **18.2 chunks/s on 8 CPUs** (query p95 9.24 ms for the same
+setup) — osionos repo, branch `feat/ai-spike-gateway`,
+`services/osionos-ai/spikes/local-models/RESULTS.md`. The embedder is the bottleneck and
+it is CPU-bound: the rate does not grow with the number of workers, only with the CPUs
+the embedder gets. A large first index therefore takes a while — scale the embedder
+replicas (each with its own `cpus` share) before backfilling a big workspace, not the
+indexer.
 
 ## Public mode
 

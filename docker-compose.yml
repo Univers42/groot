@@ -324,7 +324,7 @@ services:
   # ---------------------------------------------------------------------------
   # The AI plane — OPT-IN (compose profile `ai`).
   #
-  # A plain `docker compose up` starts NONE of these four: the profile is
+  # A plain `docker compose up` starts NONE of these six: the profile is
   # gated, so the stack behaves exactly as before until someone asks for the
   # assistant with `docker compose --profile ai up -d --build`.
   #
@@ -364,6 +364,10 @@ services:
       # The upstream: the local llama.cpp by default, OpenRouter (or anything
       # OpenAI-compatible) when OSIONOS_AI_UPSTREAM_BASE_URL says so.
       OSIONOS_AI_UPSTREAM_BASE_URL: ${OSIONOS_AI_UPSTREAM_BASE_URL:-http://osionos-ai-llm:8080/v1}
+      # The embedder: the same local TEI the indexer uses, for the query
+      # embeddings of a retrieval. NOT a hard dependency — a run that starts
+      # while it is down answers without sources (degraded, not broken).
+      OSIONOS_AI_EMBED_URL: http://osionos-ai-embed:80
       # The platform allowlist: ONE model, the local one, free.
       OSIONOS_AI_PLATFORM_MODELS: '${OSIONOS_AI_PLATFORM_MODELS:-[{"id":"qwen3-4b","label":"Qwen3 4B (local)","inputMicroUsdPerMTok":0,"outputMicroUsdPerMTok":0,"default":true}]}'
     expose:
@@ -376,6 +380,11 @@ services:
         condition: service_healthy
       osionos-ai-redis:
         condition: service_healthy
+      # The embedder is NOT waited for (service_started, not service_healthy):
+      # retrieval degrades to no sources when it is down, so a run must never
+      # be held up by it.
+      osionos-ai-embed:
+        condition: service_started
     healthcheck:
       test:
         [
@@ -393,8 +402,9 @@ services:
   # osionos-ai-db — the dev stack's own Postgres for the AI tables. grobase's
   # Postgres is not on this daemon (link mode reaches it through a relay), so
   # the AI service needs a database of its own here. The init files are
-  # applied on the FIRST start of an empty volume: the stand-in (the osionos
-  # tables the page context reads) and then the AI migration.
+  # applied on the FIRST start of an empty volume, in this order: the stand-in
+  # (the osionos tables the page context reads), then the AI migration, then
+  # the RAG migration (the index the indexer writes).
   osionos-ai-db:
     image: pgvector/pgvector:0.8.0-pg16
     profiles: ["ai"]
@@ -406,6 +416,12 @@ services:
       - osionos_ai_db:/var/lib/postgresql/data
       - ./infrastructure/docker/osionos/ai-db-init/00-standin.sql:/docker-entrypoint-initdb.d/00-standin.sql:ro
       - ./models/osionos-ai-migration.sql:/docker-entrypoint-initdb.d/10-osionos-ai.sql:ro
+      # The RAG index: the chunks, the change queue, the ACL triggers. It
+      # needs ONLY what the stand-in creates: the `osionos_pages` table (its
+      # triggers and its backfill read it) and the three roles it grants to
+      # (service_role) and revokes from (anon, authenticated). It creates the
+      # `vector` extension itself and reads nothing from 10-osionos-ai.sql.
+      - ./models/osionos-ai-rag-migration.sql:/docker-entrypoint-initdb.d/20-osionos-ai-rag.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d osionos_ai"]
       interval: 30s
@@ -477,6 +493,63 @@ services:
     restart: unless-stopped
     mem_limit: 6g
     cpus: 8
+
+  # osionos-ai-embed — the local embedder: Hugging Face TEI on the CPU,
+  # serving intfloat/multilingual-e5-small (384 dims) for the indexer and for
+  # the query embeddings of a retrieval. The model is ALREADY cached in the
+  # named volume below, so a first start downloads nothing.
+  # The image tag is pinned to a release of 2026-09-15: a fresh pull never
+  # runs an unreviewed binary.
+  # NO published port: the embedder is reached over the internal network
+  # only, the index never leaves this host.
+  osionos-ai-embed:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4
+    profiles: ["ai"]
+    command: ["--model-id", "intfloat/multilingual-e5-small", "--port", "80"]
+    volumes:
+      - osionos_ai_models_tei:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:80/health"]
+      interval: 30s
+      start_interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 12
+    networks:
+      - default
+    restart: unless-stopped
+    # The caps of osionos-ai-llm, the measurement behind them: query p95
+    # 9.24 ms and backfill 18.2 chunks/s on 8 CPUs (osionos repo branch
+    # feat/ai-spike-gateway, services/osionos-ai/spikes/local-models/RESULTS.md).
+    mem_limit: 6g
+    cpus: 8
+
+  # osionos-ai-indexer — the index worker: the SAME image as the service (the
+  # one the `osionos-ai` service above builds), but its entrypoint is the
+  # indexer. It embeds the pages into ai_chunks and drains ai_index_queue.
+  osionos-ai-indexer:
+    image: ${OSIONOS_AI_IMAGE:-track-binocle/osionos-ai:local}
+    profiles: ["ai"]
+    entrypoint: ["node", "--experimental-strip-types", "src/indexer/main.ts"]
+    environment:
+      # The same database the service writes its conversations to: the chunks
+      # and the queue live in the same Postgres.
+      OSIONOS_AI_DATABASE_URL: '${OSIONOS_AI_DATABASE_URL:-postgres://postgres:${OSIONOS_AI_DB_PASSWORD:-osionos-ai-dev}@osionos-ai-db:5432/osionos_ai}'
+      # The embedder it asks for the chunk embeddings (the service asks the
+      # same one for the query embeddings).
+      OSIONOS_AI_EMBED_URL: http://osionos-ai-embed:80
+      OSIONOS_AI_EMBED_MODEL: intfloat/multilingual-e5-small
+    depends_on:
+      osionos-ai-db:
+        condition: service_healthy
+      osionos-ai-embed:
+        condition: service_healthy
+    networks:
+      - default
+    # NO healthcheck on purpose: it serves nothing, it only writes to the
+    # index. It is restarted on exit (restart: unless-stopped).
+    restart: unless-stopped
+    mem_limit: 512m
 
   mail-bridge:
     image: ${MAIL_BRIDGE_IMAGE:-track-binocle/mail-bridge:local}
@@ -1210,12 +1283,14 @@ volumes:
   osionos-browser-test-node-modules:
   osionos-browser-test-pnpm-store:
   # The AI plane (compose profile `ai`): the dev Postgres of the assistant and
-  # the model cache of llama.cpp. The model volume keeps its exact name —
-  # another task mounts the same cache. The database stays project-scoped: it
-  # is the dev Postgres of this stack alone.
+  # the model caches of llama.cpp and of the embedder. The model volumes keep
+  # their exact name — another task mounts the same caches. The database stays
+  # project-scoped: it is the dev Postgres of this stack alone.
   osionos_ai_db:
   osionos_ai_models_llm:
     name: osionos_ai_models_llm
+  osionos_ai_models_tei:
+    name: osionos_ai_models_tei
 
 networks:
   # The grobase backend stack's network (docker project `mini-baas`), declared
