@@ -80,6 +80,11 @@ COMMENT ON TABLE public.ai_page_vectors IS
 -- header buffer would truncate. One module (scripts/bridge-graph-edges.mjs)
 -- calls these two functions; the ACL decision is made on the live page rows
 -- below, never on the edge row's workspace_id.
+--
+-- Both functions take at most 1000 ids per array (MAX_IDS_PER_CALL of
+-- scripts/bridge-graph-edges.mjs, which cuts a bigger set into calls of that
+-- size) and answer nothing above it. Both link arrays NULL answers nothing: it
+-- would be every link of the database.
 
 CREATE OR REPLACE FUNCTION public.osionos_bridge_graph_links(
     p_source_ids UUID[] DEFAULT NULL,
@@ -91,7 +96,10 @@ STABLE
 AS $$
     SELECT l.*
     FROM public.osionos_page_links l
-    WHERE (p_source_ids IS NULL OR l.source_page_id = ANY(p_source_ids))
+    WHERE (p_source_ids IS NOT NULL OR p_target_ids IS NOT NULL)
+      AND coalesce(cardinality(p_source_ids), 0) <= 1000
+      AND coalesce(cardinality(p_target_ids), 0) <= 1000
+      AND (p_source_ids IS NULL OR l.source_page_id = ANY(p_source_ids))
       AND (p_target_ids IS NULL OR l.target_page_id = ANY(p_target_ids))
     ORDER BY l.source_page_id, l.target_page_id;
 $$;
@@ -120,7 +128,8 @@ STABLE
 AS $$
     SELECT p.id, p.workspace_id, p.owner_id, p.visibility, p.collaborators, p.title, p.icon, p.archived_at
     FROM public.osionos_pages p
-    WHERE p.id = ANY(p_ids)
+    WHERE coalesce(cardinality(p_ids), 0) <= 1000
+      AND p.id = ANY(p_ids)
     ORDER BY p.id;
 $$;
 
