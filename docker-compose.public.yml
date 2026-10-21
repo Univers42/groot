@@ -128,6 +128,7 @@ services:
     volumes:
       - ./infrastructure/tls/public.d/bridge-public.conf:/etc/nginx/track-binocle.d/bridge-public.conf:ro
       - ./infrastructure/tls/public.d/http-limits.conf:/etc/nginx/track-binocle.d/http-limits.conf:ro
+      - ./infrastructure/tls/public.d/ai-public.conf:/etc/nginx/track-binocle.d/ai-public.conf:ro
       - ./infrastructure/tls/public.d/apps.conf.template:/etc/nginx/templates/http-apps.conf.template:ro
 
 networks:
