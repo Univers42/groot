@@ -73,7 +73,7 @@ BOOL ?= false
 # change: a touched mtime would restart the whole run for nothing.
 -include .env.ports
 # Every NAME it defines, exported so the recipes (and their compose calls) see them.
-HOST_PORT_NAMES := $(shell sed -n 's/^\([A-Z][A-Z0-9_]*\)=.*/\1/p' $(wildcard .env.ports))
+HOST_PORT_NAMES := $(if $(wildcard .env.ports),$(shell sed -n 's/^\([A-Z][A-Z0-9_]*\)=.*/\1/p' .env.ports))
 ifneq ($(strip $(HOST_PORT_NAMES)),)
 export $(HOST_PORT_NAMES)
 endif
