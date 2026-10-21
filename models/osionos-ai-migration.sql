@@ -1,7 +1,7 @@
 -- AI assistant tables for the `osionos-ai` service: conversations, messages,
--- runs, and the daily spend ledger. The service keeps them in the SAME
--- Postgres as osionos_pages; connections/keys (P2) and the RAG index (P3) are
--- NOT part of this file.
+-- runs, the daily spend ledger, and the users' own model connections (P2). The
+-- service keeps them in the SAME Postgres as osionos_pages; the RAG index (P3)
+-- is NOT part of this file.
 --
 -- The bridge (service_role) is the only reader and writer; anon and
 -- authenticated get no privilege on any of them. These tables are named `ai_*`,
@@ -92,6 +92,42 @@ comment on table public.ai_usage_daily is
 	 UPDATE ai_usage_daily SET reserved_microusd = reserved + $r WHERE subject = $s AND day = $d
 	 AND spent + reserved + $r <= $limit RETURNING 1 (no row -> refuse); settle = reserved -= $r, spent += $actual.';
 
+-- The connections of P2: how a user brings their own model access (an API
+-- key, or their own OpenAI-compatible endpoint).
+--
+-- PERSONAL SCOPE ONLY in v2: owner_user_id is the only gate, and a connection
+-- never belongs to a workspace. The workspace scope — a connection shared by a
+-- workspace, with its own members — comes later, in its own table; this one
+-- keeps the personal rows readable by their owner alone.
+--
+-- The secret never leaves the server: secret_box holds the key under a
+-- per-secret data key, and wrapped_dek holds that data key under the KEK of
+-- the deployment (kek_id names it). The plaintext is nowhere in this database,
+-- and last4 is the only part of the key that is readable.
+create table if not exists public.ai_connections (
+	id             uuid primary key default gen_random_uuid(),
+	owner_user_id  uuid not null,
+	kind           text not null check (kind in ('api_key','oauth','endpoint')),
+	provider       text not null,
+	label          text not null,
+	base_url       text,
+	last4          text,
+	secret_box     bytea,
+	wrapped_dek    bytea,
+	kek_id         text,
+	status         text not null default 'untested' check (status in ('ok','error','untested')),
+	status_message text,
+	created_at     timestamptz not null default now(),
+	updated_at     timestamptz not null default now()
+);
+
+-- The inbox of a user's connections: their own, the newest first.
+create index if not exists ai_connections_owner_created_idx
+	on public.ai_connections (owner_user_id, created_at desc);
+
+comment on table public.ai_connections is
+	'AI assistant connections (P2): the users own model access. Personal scope only in v2 — owner_user_id is the only gate. The secret is envelope-encrypted: secret_box under a per-secret data key, wrapped_dek under the KEK (kek_id); last4 is the only readable part of the key.';
+
 comment on table public.ai_conversations is 'AI assistant conversations; one row per thread, scoped to an owner and workspace.';
 comment on table public.ai_messages     is 'AI assistant transcript rows; parts is the message part array (text/tool/…), cascade-deleted with the conversation.';
 comment on table public.ai_runs         is 'AI assistant runs; client-generated id is the idempotency key, cascade-deleted with the conversation.';
@@ -101,6 +137,7 @@ alter table public.ai_conversations enable row level security;
 alter table public.ai_messages      enable row level security;
 alter table public.ai_runs          enable row level security;
 alter table public.ai_usage_daily   enable row level security;
+alter table public.ai_connections   enable row level security;
 
 drop policy if exists ai_conversations_service_role_all on public.ai_conversations;
 create policy ai_conversations_service_role_all
@@ -122,10 +159,16 @@ create policy ai_usage_daily_service_role_all
 	on public.ai_usage_daily for all
 	to service_role using (true) with check (true);
 
+drop policy if exists ai_connections_service_role_all on public.ai_connections;
+create policy ai_connections_service_role_all
+	on public.ai_connections for all
+	to service_role using (true) with check (true);
+
 grant all on public.ai_conversations to service_role;
 grant all on public.ai_messages      to service_role;
 grant all on public.ai_runs          to service_role;
 grant all on public.ai_usage_daily   to service_role;
+grant all on public.ai_connections   to service_role;
 
 -- ai_* is outside the osionos_* catalog pass (see header): close PostgREST's
 -- anon/authenticated roles here, not pattern-matched elsewhere.
@@ -133,5 +176,6 @@ revoke all on public.ai_conversations from public, anon, authenticated;
 revoke all on public.ai_messages      from public, anon, authenticated;
 revoke all on public.ai_runs          from public, anon, authenticated;
 revoke all on public.ai_usage_daily   from public, anon, authenticated;
+revoke all on public.ai_connections   from public, anon, authenticated;
 
 notify pgrst, 'reload schema';
