@@ -39,6 +39,13 @@ is the acceptance record: architecture, the 16 conditions, operator steps.
   at connect time and dials that literal IP — hostnames resolving to `169.254.169.254`
   or a backend IP are refused (**conditions 3, 5, 6**). The `internal` sandbox net
   makes it the sole route off-box.
+  Allowed names are exact (plus dotted children), 19 in `BASE_ALLOW`. The user-space toolchain
+  hosts are `static.rust-lang.org` (rustup-init and toolchains), `nodejs.org` (node tarballs),
+  `astral.sh`, `conda.anaconda.org` and `micro.mamba.pm` (micromamba), `registry.yarnpkg.com`.
+  Not allowed, so some installer entry points fail: `sh.rustup.rs` (fetch `rustup-init` from
+  `static.rust-lang.org` instead), `releases.astral.sh` (where `astral.sh/uv/install.sh` redirects;
+  use `pip install uv`) and `api.anaconda.org` (uploads; where `micro.mamba.pm/api/...` redirects;
+  use `micro.mamba.pm/install.sh`, which pulls from GitHub).
 - **PAT** is injected per git op via `docker exec -e GIT_PAT` (P6); the credential
   helper emits it **only** when `GIT_PAT` is in the git process env (condition 13).
   Core dumps are disabled (condition 14).
