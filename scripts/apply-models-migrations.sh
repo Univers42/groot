@@ -175,9 +175,13 @@ first_error() {
 # The line is lowercased by hand: IGNORECASE is a gawk extension, and under
 # mawk (Debian's awk) an upper-case CREATE TABLE was never matched, so baas
 # reported "converged" while public.auth_session_cutoffs was missing and the
-# bridge answered 503 (2026-10-21).
+# bridge answered 503 (2026-10-21). A `--` comment is dropped before matching:
+# lowercased, auth-session-cutoffs.sql's "grobase's CREATE TABLE hook" read as a
+# missing table `hook` and kept the file pending forever.
+# Caveat: a `--` inside a string literal before a CREATE TABLE on the same line
+# hides that table from --check (none in models/ today); apply mode is unaffected.
 pending() {
-	awk '{ l = tolower($0) }
+	awk '{ l = tolower($0); sub(/--.*/, "", l) }
 		match(l, /create table (if not exists )?(public\.)?[a-z_]+/) {
 			t = substr(l, RSTART, RLENGTH)
 			sub(/.* /, "", t); sub(/public\./, "", t); print t
