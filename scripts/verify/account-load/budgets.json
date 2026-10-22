@@ -2,36 +2,36 @@
   "directory_search": {
     "p95_ms": 150,
     "no_seq_scan": ["users", "user_profiles", "osionos_bridge_identities"],
-    "why": "Search uses GIN index on search_doc (tsvector) and pg_trgm indexes on display_name/username in osionos_bridge_identities. The view osionos_people_directory joins users + user_profiles + bridge_identities; planner should push predicates to the bridge_identities scan. Budget 150ms allows trigram + FTS union on 10K rows. P0-1 adds expression index on search_doc for the view."
+    "why": "Target: Index Scan on osionos_bridge_identities using trigram GIN (display_name, username) and search_doc GIN, joined to users/user_profiles via PK. Today: Seq Scan on all three base tables of the osionos_people_directory view because the view has no indexes. P1-1 rebuilds the directory over a new osionos_profiles table with trigram + search_doc GIN indexes."
   },
   "directory_by_ids": {
     "p95_ms": 60,
     "no_seq_scan": ["users", "user_profiles", "osionos_bridge_identities"],
-    "why": "IN list of 50 UUIDs on osionos_bridge_identities.user_id (UNIQUE index) joined to users + user_profiles. Point lookups via index; 60ms budget covers 50 index probes + profile JSONB construction. P0-1 ensures the view uses the bridge_identities index."
+    "why": "Target: 50 Index Scans on osionos_bridge_identities.user_id (UNIQUE) joined to users/user_profiles via PK. Today: Seq Scan on all three base tables because the view has no indexes. P1-1 rebuilds the directory over osionos_profiles with trigram + search_doc GIN indexes."
   },
   "identity_by_email_hash": {
     "p95_ms": 150,
     "no_seq_scan": ["osionos_bridge_identities"],
-    "why": "Lookup by email_hash on osionos_bridge_identities has NO index (email_hash is not indexed). Expects Seq Scan on 10K rows. Budget 150ms reflects unindexed scan; P0-1 adds osionos_bridge_identities_email_hash_idx to eliminate the scan."
+    "why": "Target: Index Scan on osionos_bridge_identities.email_hash. Today: Seq Scan because no index exists on email_hash. P0-1 adds osionos_bridge_identities_email_hash_idx."
   },
   "feed_shares_for_user": {
     "p95_ms": 60,
     "no_seq_scan": ["osionos_feed_shares"],
-    "why": "Filter on osionos_feed_shares.user_id has NO index (only page_id is indexed). Expects Seq Scan on ~50K rows. Budget 60ms reflects current unindexed scan; P0-1 adds osionos_feed_shares_user_target_idx on (user_id, target) to eliminate the scan."
+    "why": "Target: Index Scan on osionos_feed_shares(user_id, target, created_at) for the eq + in filter with ORDER BY + LIMIT. Today: Seq Scan because only page_id is indexed. P0-1 adds osionos_feed_shares_user_target_idx on (user_id, target, created_at)."
   },
   "connections_for_user": {
     "p95_ms": 60,
     "no_seq_scan": ["osionos_connections"],
-    "why": "OR condition on requester_id and addressee_id, each with dedicated index (requester_idx, addressee_idx). Planner uses BitmapOr to combine. Budget 60ms covers bitmap heap scan on ~20K rows."
+    "why": "Target: BitmapOr of two Index Scans (requester_idx on requester_id, addressee_idx on addressee_id) combined via BitmapOr. Today: same — indexes exist. Budget 60ms covers bitmap heap scan on ~20K rows."
   },
   "workspace_members_of_large_workspace": {
     "p95_ms": 60,
     "no_seq_scan": ["osionos_workspace_members", "osionos_workspaces"],
-    "why": "Lookup by workspace_id (PK leading column) on osionos_workspace_members + PK lookup on osionos_workspaces. Both are index scans. Budget 60ms for joining ~200 member rows with workspace data."
+    "why": "Target: Index Scan on osionos_workspace_members.workspace_id (PK leading column) + PK lookup on osionos_workspaces. Today: same — indexes exist. Budget 60ms for joining ~200 member rows with workspace data."
   },
   "pages_of_workspace": {
     "p95_ms": 60,
     "no_seq_scan": ["osionos_pages", "osionos_workspaces", "osionos_workspace_members"],
-    "why": "Embedded lookup: filter on osionos_pages.id (PK) + workspace embed with members filtered to user_id. Uses PK index on pages + PK on workspaces + PK on workspace_members. Budget 60ms for single-row fetch with embed."
+    "why": "Target: PK Index Scan on osionos_pages.id + PK on osionos_workspaces.id + PK on osionos_workspace_members(workspace_id, user_id) for the embed. Today: same — all PK indexes exist. Budget 60ms for single-row fetch with embed."
   }
 }
