@@ -8,23 +8,26 @@
 -- alone can know:
 --   - the consent (C48): beacon_consent must be TRUE for the user, and no row
 --     means FALSE — nothing is written for a user who never said yes;
---   - the bucket (C49): a beacon row's ts is the start of its hour, and a
---     partial UNIQUE index over (user, item_kind, item_id, event, surface, ts)
---     keeps one row per user, item, event, surface and hour — one account
---     cannot move a count by clicking (C50). A repeated view keeps its longest
---     dwell;
+--   - the bucket (C49, C50): a beacon row's ts is the start of its UTC day,
+--     and a partial UNIQUE index over (user, item_kind, item_id, event,
+--     surface, ts) keeps one row per user, item, event, surface and day — a
+--     thousand clicks of one account are one row. A repeated view keeps its
+--     longest dwell;
 --   - the daily cap: at most 2000 beacon rows per user per UTC day.
 --
--- Caveat: the hour bucket is coarse — two real views of a page an hour apart
--- count twice, two within the hour count once, and the time-split evaluation
--- sees beacon events at hour resolution only.
+-- C50 binds the READERS too: one user still writes one row per SURFACE, so a
+-- trending count, a popularity or a posterior counts DISTINCT user_id per item
+-- per day, never rows.
+--
+-- Caveat: the day bucket is coarse — two real views of a page on one day count
+-- once, and the time-split evaluation sees beacon events at day resolution only.
 --
 -- Idempotent: IF NOT EXISTS / OR REPLACE. Needs osionos-user-events-migration.sql.
 
 -- -----------------------------------------------------------------------------
--- 1. One row per (user, item, event, surface, hour) for the beacon's surfaces.
+-- 1. One row per (user, item, event, surface, day) for the beacon's surfaces.
 --    The partition key (ts) is in the index, as Postgres requires; the beacon
---    writes ts = date_trunc('hour', now()), so the key IS the bucket. Trigger
+--    writes ts = the start of the UTC day, so the key IS the bucket. Trigger
 --    rows (surface 'trigger') keep their exact time and are not deduplicated.
 -- -----------------------------------------------------------------------------
 CREATE UNIQUE INDEX IF NOT EXISTS ai_events_beacon_bucket_idx
@@ -91,7 +94,7 @@ BEGIN
     )
     INSERT INTO public.ai_events AS e
            (ts, user_id, item_kind, item_id, workspace_id, event, weight, surface, rec_id, rank, dwell_ms)
-    SELECT date_trunc('hour', now()), p_user, 'page', c.item_id, c.workspace_id, c.event,
+    SELECT date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC', p_user, 'page', c.item_id, c.workspace_id, c.event,
            CASE c.event WHEN 'click' THEN 1 WHEN 'view' THEN 1 ELSE 0 END,
            c.surface, c.rec_id, c.rank, CASE WHEN c.event = 'view' THEN c.dwell_ms END
       FROM checked c
@@ -106,7 +109,7 @@ $$;
 
 COMMENT ON FUNCTION public.ai_events_beacon(UUID, JSONB) IS
     'The beacon write (M3, C48–C50): nothing without beacon_consent = TRUE; '
-    'one row per (user, page, event, surface, hour); impressions and clicks '
+    'one row per (user, page, event, surface, UTC day); impressions and clicks '
     'need a rec_id and a rank; at most 50 events per call and 2000 per user per '
     'UTC day (54000). The bridge vouches for the user, the page and the slate. '
     'service_role only.';
