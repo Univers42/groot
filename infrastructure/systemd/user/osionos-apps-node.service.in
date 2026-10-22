@@ -1,0 +1,21 @@
+# Rendered and installed by `scripts/public-node.sh autostart`; removed by `autostart-off`.
+# No ExecStop on purpose: `public-node.sh stop` closes the Funnel (an operator's decision), while a
+# reboot or a crash must bring it back. SIGTERM ends tailscaled and keeps the serve config in the
+# state dir, so the next start re-serves Mail and Calendar. Not After=network-online.target: a user
+# manager cannot order on a system target, so a start before the network is retried instead.
+[Unit]
+Description=osionos apps node: Mail and Calendar previews on their own Tailscale Funnel
+
+[Service]
+Type=forking
+PIDFile=@STATE_DIR@/tailscaled.pid
+Environment=PUBLIC_APPS_NODE=@NODE@
+Environment=TAILSCALED_BIN=@TAILSCALED_BIN@
+Environment=TAILSCALE_BIN=@TAILSCALE_BIN@
+StandardInput=null
+ExecStart=/usr/bin/bash @GROOT@/scripts/public-node.sh start
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

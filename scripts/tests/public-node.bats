@@ -118,6 +118,17 @@ lacks() {
   [ ! -f "$T/node-running" ]
 }
 
+# A slow first start after a boot (the autostart unit's) used to reset the Funnel on its way out.
+@test "a start that fails keeps the Funnel config: only stop resets it" {
+  STARTING_N=100000 run_node start
+  [ "$status" -ne 0 ]
+  STDIN_KEY="" run_node start
+  [ "$status" -ne 0 ]
+  FORCE_STATE=Stopped run_node start
+  [ "$status" -ne 0 ]
+  [ ! -e "$T/reset.log" ]
+}
+
 @test "start refuses when a tailscaled already answers on the socket" {
   touch "$T/node-running"
   STDIN_KEY="$KEY" run_node start
@@ -222,4 +233,48 @@ lacks() {
   [ "$status" -eq 0 ]
   [ -d "$T/state/tailscale-other-apps/var" ]
   PUBLIC_APPS_NODE=other-apps run_node stop
+}
+
+autostart_stubs() {
+  printf '#!/bin/sh\necho "$*" >>"$T/systemctl.log"\ncase "$*" in *is-active*) exit "${UNIT_ACTIVE_RC:-3}" ;; esac\n' >"$T/bin/systemctl"
+  printf '#!/bin/sh\necho yes\n' >"$T/bin/loginctl"
+  chmod +x "$T/bin/systemctl" "$T/bin/loginctl"
+  export PATH="$T/bin:$PATH" XDG_CONFIG_HOME="$T/config"
+  UNITFILE="$T/config/systemd/user/osionos-apps-node.service"
+}
+
+@test "autostart renders the unit with this clone's paths, enables and starts it" {
+  autostart_stubs
+  run_node autostart
+  [ "$status" -eq 0 ]
+  grep -qxF "ExecStart=/usr/bin/bash $(cd "$BATS_TEST_DIRNAME/../.." && pwd)/scripts/public-node.sh start" "$UNITFILE"
+  grep -qxF "PIDFile=$DIR/tailscaled.pid" "$UNITFILE"
+  grep -qxF "Environment=TAILSCALED_BIN=$T/bin/tailscaled" "$UNITFILE"
+  lacks "@"
+  [ "$(grep -c '@' "$UNITFILE" || true)" -eq 0 ]
+  grep -qx -- "--user enable osionos-apps-node.service" "$T/systemctl.log"
+  grep -qx -- "--user start osionos-apps-node.service" "$T/systemctl.log"
+  [ "$(grep -c '^ExecStop' "$UNITFILE" || true)" -eq 0 ]
+}
+
+@test "autostart hands a running daemon over without closing its Funnel" {
+  autostart_stubs
+  STDIN_KEY="$KEY" run_node start
+  [ -f "$T/node-running" ]
+  run_node autostart
+  [ "$status" -eq 0 ]
+  sleep 0.5
+  [ ! -f "$T/node-running" ]
+  [ ! -e "$T/reset.log" ]
+}
+
+@test "autostart leaves an active unit running; autostart-off disables and removes it" {
+  autostart_stubs
+  UNIT_ACTIVE_RC=0 run_node autostart
+  [ "$status" -eq 0 ]
+  [ "$(grep -c -- '--user start' "$T/systemctl.log" || true)" -eq 0 ]
+  run_node autostart-off
+  [ "$status" -eq 0 ]
+  [ ! -e "$UNITFILE" ]
+  grep -qx -- "--user disable --now osionos-apps-node.service" "$T/systemctl.log"
 }
