@@ -15,7 +15,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { firstRun, importDump, applyAuthSessionCutoffs } from "./firstrun.mjs";
+import { firstRun, importDump, applyPostGoTrueMigrations } from "./firstrun.mjs";
 import { startRestProxy } from "./restProxy.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -82,8 +82,9 @@ export async function startSuite(opts) {
     children.push({ name: "gotrue", child: gotrue });
     await waitUntil("gotrue", () => httpOk(`http://127.0.0.1:${ports.gotrue}/health`), { tries: 90 });
 
-    // 2b'. auth.users now exists: the table the bridge's session-cutoff poll reads (P9).
-    await applyAuthSessionCutoffs({ host: "127.0.0.1", port: ports.pg, db: "postgres", superUser: "postgres", superPass, migrationsDir });
+    // 2b'. auth.users now exists: apply the session cutoffs (P9) and the account
+    //      foundation (P0-4), the two tables the bridge's guard reads.
+    await applyPostGoTrueMigrations({ host: "127.0.0.1", port: ports.pg, db: "postgres", superUser: "postgres", superPass, migrationsDir });
 
     // 2c. One-time account/data import (now that gotrue owns auth.users).
     if (await importDump({ host: "127.0.0.1", port: ports.pg, db: "postgres", superUser: "postgres", superPass, dataDir })) {

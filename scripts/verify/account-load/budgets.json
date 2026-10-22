@@ -1,0 +1,102 @@
+{
+  "directory_search": {
+    "p95_ms": 150,
+    "no_seq_scan": [
+      "users",
+      "user_profiles",
+      "osionos_bridge_identities"
+    ],
+    "why": "Target: Index Scan on osionos_bridge_identities using trigram GIN (display_name, username) and search_doc GIN, joined to users/user_profiles via PK. Today: Seq Scan on all three base tables of the osionos_people_directory view because the view has no indexes. P1-1 rebuilds the directory over a new osionos_profiles table with trigram + search_doc GIN indexes."
+  },
+  "directory_by_ids": {
+    "p95_ms": 60,
+    "no_seq_scan": [
+      "users",
+      "user_profiles",
+      "osionos_bridge_identities"
+    ],
+    "why": "Target: 50 Index Scans on osionos_bridge_identities.user_id (UNIQUE) joined to users/user_profiles via PK. Today: Seq Scan on all three base tables because the view has no indexes. P1-1 rebuilds the directory over osionos_profiles with trigram + search_doc GIN indexes."
+  },
+  "identity_by_email_hash": {
+    "p95_ms": 150,
+    "no_seq_scan": [
+      "osionos_bridge_identities"
+    ],
+    "why": "Target: Index Scan on osionos_bridge_identities.email_hash. Today: Seq Scan because no index exists on email_hash. P0-1 adds osionos_bridge_identities_email_hash_idx."
+  },
+  "feed_shares_for_user": {
+    "p95_ms": 60,
+    "no_seq_scan": [
+      "osionos_feed_shares"
+    ],
+    "why": "Target: Index Scan on osionos_feed_shares(user_id, target, created_at) for the eq + in filter with ORDER BY + LIMIT. Today: Seq Scan because only page_id is indexed. P0-1 adds osionos_feed_shares_user_target_idx on (user_id, target, created_at)."
+  },
+  "connections_for_user": {
+    "p95_ms": 60,
+    "no_seq_scan": [
+      "osionos_connections"
+    ],
+    "why": "Target: BitmapOr of two Index Scans (requester_idx on requester_id, addressee_idx on addressee_id) combined via BitmapOr. Today: same \u2014 indexes exist. Budget 60ms covers bitmap heap scan on ~20K rows."
+  },
+  "workspace_members_of_large_workspace": {
+    "p95_ms": 60,
+    "no_seq_scan": [
+      "osionos_workspace_members",
+      "osionos_workspaces"
+    ],
+    "why": "Target: coMemberPath shape \u2014 anchor on user_id (osionos_workspace_members_user_idx) joining workspaces (PK) and their other members (PK on workspace_id, user_id). Today: same \u2014 indexes exist. Budget 60ms for co-member read on the caller workspaces."
+  },
+  "pages_of_workspace": {
+    "p95_ms": 60,
+    "no_seq_scan": [
+      "osionos_pages",
+      "osionos_workspaces",
+      "osionos_workspace_members"
+    ],
+    "why": "Target: PK Index Scan on osionos_pages.id + PK on osionos_workspaces.id + PK on osionos_workspace_members(workspace_id, user_id) for the embed. Today: same \u2014 all PK indexes exist. Budget 60ms for single-row fetch with embed."
+  },
+  "p1_directory_search_common": {
+    "p95_ms": 150,
+    "no_seq_scan": [
+      "osionos_profiles"
+    ],
+    "why": "Target: Index Scan on osionos_profiles_display_name_user_idx (display_name, user_id), walking it in order and stopping at LIMIT 200, with a nested loop to user_profiles and osionos_bridge_identities by user_id. P1-1 rebuilds the directory over osionos_profiles, whose own columns are the ones the view selects \u2014 no COALESCE, so the index applies. The term matches every seeded user, so the ordered walk is the cheap plan."
+  },
+  "p1_directory_search_rare": {
+    "p95_ms": 150,
+    "no_seq_scan": [
+      "osionos_profiles"
+    ],
+    "require_plan_nodes": [
+      "Bitmap Index Scan"
+    ],
+    "why": "Target: BitmapOr of Bitmap Index Scans on the trigram GIN indexes (display_name, username, headline) and the search_doc GIN index. The term matches two of the seeded users, so a btree walk would remove 4001 rows to find them: no_seq_scan alone is not enough, the plan has to be a GIN bitmap, and require_plan_nodes is what says so. Caveat: a trigram ILIKE needs at least 3 characters to use the index."
+  },
+  "p1_directory_by_ids": {
+    "p95_ms": 60,
+    "no_seq_scan": [
+      "osionos_profiles"
+    ],
+    "why": "Target: 50 Index Scans on the osionos_profiles primary key (user_id), one per id, joined to user_profiles and osionos_bridge_identities by their user_id indexes. The directory is a view over osionos_profiles now, so the lookup must not scan it."
+  },
+  "colleague_join_200": {
+    "p95_ms": 50,
+    "no_seq_scan": [
+      "osionos_workspace_members"
+    ],
+    "why": "Target: one member joins a workspace that holds 199 members, and the colleague-edges trigger writes 199 edges in the same transaction — an index scan on the members table, then 199 inserts on osionos_connections. The workspace is dedicated to this measurement: the query creates it and holds 170 members, so the harness's 30 runs (30 joins, one fresh member each) end at exactly 200 members and every run stays in the <= 200 branch. Caveat: EXPLAIN ANALYZE executes the INSERT, so the 30 runs are 30 real joins, and a 31st run would push the workspace past 200 and measure the skip branch instead — the threshold is the spec's, not a budget. The skip branch cannot pass silently: colleague_join_200_edges asserts that every pair of the workspace's members has an edge, so a skipped join fails that query instead."
+  },
+  "colleague_join_200_edges": {
+    "p95_ms": 300,
+    "why": "The assertion, not a budget: every pair of the dedicated workspace's members must have a colleague edge (C(n,2) of them). A join the trigger skipped — the 200-member cap — leaves the count short and this query fails with a division by zero, so the gate cannot measure the skip branch and call it a pass. It runs after colleague_join_200 (the files are measured in name order), so it sees the state the 30 joins left. There is no no_seq_scan budget: the assertion counts the edges of one workspace and a sequential scan of the connections table is the honest way to count them."
+  },
+  "feed_page_counts": {
+    "p95_ms": 60,
+    "no_seq_scan": [
+      "osionos_feed_likes",
+      "osionos_feed_comments",
+      "osionos_feed_shares"
+    ],
+    "why": "Target: three bitmap index scans on page_id (osionos_feed_likes_page_idx, osionos_feed_comments_page_idx, osionos_feed_shares_page_idx) and one index scan for the viewer's own like, in ONE call — the three reads the bridge made per post card (bridge-feed.mjs:145-153 likes, :174-180 comments, :307-309 shares) become one round trip. A feed table must not be read sequentially: an empty table is cheaper to read sequentially, so the query that seeds them (colleague_join_200) also ANALYZEs them before this one runs."
+  }
+}

@@ -94,6 +94,14 @@ services:
       AUTH_GATEWAY_URL: ${AUTH_GATEWAY_URL:-http://auth-gateway:8787}
       OSIONOS_BRIDGE_PERSISTENCE: ${OSIONOS_BRIDGE_PERSISTENCE:-auto}
       OSIONOS_BRIDGE_REQUIRE_BAAS: ${OSIONOS_BRIDGE_REQUIRE_BAAS:-false}
+      # P0-4 session/account-plane state is shared with the auth-gateway, which
+      # already uses this Redis. Blank falls back to the bridge's bounded
+      # in-memory store (the desktop/local case).
+      OSIONOS_BRIDGE_REDIS_URL: ${OSIONOS_BRIDGE_REDIS_URL:-redis://mini-baas-redis:6379}
+      # local-https-proxy sets X-Real-IP (infrastructure/tls/nginx.conf:44), so
+      # the bridge must read that header rather than trusting a client-supplied
+      # X-Forwarded-For. A direct container call carries no such header.
+      OSIONOS_BRIDGE_CLIENT_IP_HEADER: ${OSIONOS_BRIDGE_CLIENT_IP_HEADER:-x-real-ip}
       CLAUDE_BIN: ${CLAUDE_BIN:-claude}
       # LiveKit video tokens (scripts/bridge-rtc.mjs): same key pair as the
       # livekit service below; LIVEKIT_URL is the in-network admin/twirp base,
