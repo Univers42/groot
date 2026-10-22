@@ -488,6 +488,125 @@ SELECT 'p1_noop_no_bump',
        'a no-op leaves the version, a real change moves it by one';
 ROLLBACK;
 
+-- p1_deletion_grace: the grace on a deletion request is the server's, not
+-- the caller's.
+-- (a) The account role may not choose the date: its INSERT grant names only
+--     (user_id, successor_user_id), so a scheduled_for column is refused with
+--     42501.
+-- (b) The account role may not move the date either: it holds no UPDATE
+--     grant on the table at all, so the UPDATE is refused with 42501.
+-- (c) The executor's path (P5-6, the service role) may write the row, but
+--     the grace is a floor: a request that asks for less than 14 days is
+--     refused with 23514.
+-- (d) A request that names the user as their own successor is refused with
+--     23514.
+-- Each statement is caught and its SQLSTATE read, so an expectation that is
+-- not met is counted instead of aborting the whole check. The role is set
+-- again before the second statement: an exception handler's rollback can take
+-- the role with it.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+                               ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'),
+                               ('cccccccc-cccc-cccc-cccc-cccccccccccc');
+INSERT INTO public.osionos_account_deletion_requests (user_id)
+VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+DO $$
+DECLARE
+  v_state text := '';
+BEGIN
+  SET LOCAL ROLE osionos_account_user;
+  -- The table is created here, by the role: the role owns it, so it can
+  -- write its outcome, and the superuser can read it back.
+  CREATE TEMP TABLE IF NOT EXISTS p1_grace_out (what text PRIMARY KEY, state text) ON COMMIT DROP;
+  PERFORM set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","aud":"osionos-account","role":"osionos_account_user"}', true);
+  BEGIN
+    INSERT INTO public.osionos_account_deletion_requests (user_id, scheduled_for)
+    VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', now());
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  INSERT INTO p1_grace_out VALUES ('insert', v_state);
+  v_state := '';
+  SET LOCAL ROLE osionos_account_user;
+  BEGIN
+    UPDATE public.osionos_account_deletion_requests SET scheduled_for = now()
+     WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  INSERT INTO p1_grace_out VALUES ('update', v_state);
+  RESET ROLE;
+END $$;
+DO $$
+DECLARE
+  v_state text := '';
+BEGIN
+  BEGIN
+    INSERT INTO public.osionos_account_deletion_requests (user_id, scheduled_for)
+    VALUES ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', now());
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  INSERT INTO p1_grace_out VALUES ('floor', v_state);
+  v_state := '';
+  BEGIN
+    INSERT INTO public.osionos_account_deletion_requests (user_id, successor_user_id)
+    VALUES ('cccccccc-cccc-cccc-cccc-cccccccccccc', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  INSERT INTO p1_grace_out VALUES ('successor', v_state);
+END $$;
+SELECT 'p1_deletion_grace',
+       (CASE WHEN (SELECT state FROM p1_grace_out WHERE what = 'insert') = '42501' THEN 0 ELSE 1 END)
+     + (CASE WHEN (SELECT state FROM p1_grace_out WHERE what = 'update') = '42501' THEN 0 ELSE 1 END)
+     + (CASE WHEN (SELECT state FROM p1_grace_out WHERE what = 'floor') = '23514' THEN 0 ELSE 1 END)
+     + (CASE WHEN (SELECT state FROM p1_grace_out WHERE what = 'successor') = '23514' THEN 0 ELSE 1 END),
+       'the role cannot set the date, the grace is a floor, the successor is not the user';
+ROLLBACK;
+
+-- p1_view_opt_out: the directory view reports the profile's own opt-out, and
+-- it keeps the columns the old bridge image selects by name — a dropped or
+-- renamed column has to fail the gate.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+                               ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+INSERT INTO public.osionos_profiles (user_id, display_name, directory_opt_out) VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'A', true),
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'B', false);
+SET LOCAL ROLE service_role;
+DO $$
+DECLARE
+  v_optout text;
+BEGIN
+  SELECT coalesce(directory_opt_out::text, 'missing') INTO v_optout
+    FROM public.osionos_people_directory
+   WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  PERFORM set_config('osionos.check.p1_optout_true', v_optout, true);
+  SELECT coalesce(directory_opt_out::text, 'missing') INTO v_optout
+    FROM public.osionos_people_directory
+   WHERE user_id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+  PERFORM set_config('osionos.check.p1_optout_false', v_optout, true);
+END $$;
+RESET ROLE;
+DO $$
+DECLARE
+  v_cols text;
+BEGIN
+  SELECT coalesce(string_agg(column_name, ',' ORDER BY ordinal_position), '') INTO v_cols
+    FROM information_schema.columns
+   WHERE table_schema = 'public' AND table_name = 'osionos_people_directory';
+  PERFORM set_config('osionos.check.p1_view_columns', v_cols, true);
+END $$;
+SELECT 'p1_view_opt_out',
+       (CASE WHEN current_setting('osionos.check.p1_optout_true') = 'true' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.p1_optout_false') = 'false' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.p1_view_columns')
+                 = 'user_id,display_name,username,profile,last_seen_at,directory_opt_out,search_doc,headline'
+            THEN 0 ELSE 1 END),
+       'the view reports the opt-out and keeps the columns the bridge selects';
+ROLLBACK;
+
 -- p1_never_raises: nothing the bridge or the gateway does may fail a
 -- registration. An insert whose username collides with a profile, an insert
 -- with no auth.users row, and the legacy identity write all succeed — and the

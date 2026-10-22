@@ -73,11 +73,15 @@ each one is a consequence of this decision:
 
 Other consequences:
 
+- The migration file is over the 300-line house rule: the spec mandates one ORDERED_LAST file, and it
+  holds four tables, nine functions, five triggers, the directory view and the backfill.
 - The lock order is the hot paths' order: registration takes `public.users` and then
   `osionos_profiles`, sign-in takes `osionos_bridge_identities` and then `osionos_profiles`, and the
   file takes `users`, `identities`, then the new tables, under a 5 s `lock_timeout`. A registration
   waits for the whole file (about 250 ms at 10K rows), and a writer that holds a lock for more than
   5 s makes the replay abort on `lock_timeout` (55P03), failing that boot until the next one.
+  `scripts/verify/account-lock-race.sh` races the three against each other and reports the
+  deadlocks and the timeouts apart.
 - The account role may SELECT every column of a profile (they are all public profile fields) and
   UPDATE only the thirteen the user owns. The avatar and banner columns stay out of reach until
   P0-6 owns them, and `version` and the timestamps stay the server's.
