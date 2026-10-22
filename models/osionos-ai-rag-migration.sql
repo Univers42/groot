@@ -460,13 +460,24 @@ COMMENT ON FUNCTION public.ai_delete_page_chunks() IS
 -- 7. Backfill: queue all non-archived pages for initial indexing
 -- -----------------------------------------------------------------------------
 -- Idempotent: ON CONFLICT DO NOTHING (queue has PK on page_id).
+-- The runner re-applies this file, so a re-apply must not re-queue the pages
+-- the indexer already drained: only pages with no chunks yet are queued (#109;
+-- the probe is served by ai_chunks_ws_source_idx).
 -- The backfill is BULK work: the rows it inserts are lane 1, so the edits of
 -- a person (lane 0) are claimed first. A page that is already queued as an
 -- edit keeps its lane: ON CONFLICT DO NOTHING never demotes it.
+-- Caveat: an empty page yields no chunks, so it is queued again on every
+-- apply (one cheap read by the indexer); chunked pages never are.
 INSERT INTO public.ai_index_queue (page_id, workspace_id, priority)
-SELECT id, workspace_id, 1
-FROM public.osionos_pages
-WHERE archived_at IS NULL
+SELECT p.id, p.workspace_id, 1
+FROM public.osionos_pages p
+WHERE p.archived_at IS NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM public.ai_chunks c
+      WHERE c.workspace_id = p.workspace_id
+        AND c.source_kind = 'page'
+        AND c.source_id = p.id
+  )
 ON CONFLICT (page_id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
