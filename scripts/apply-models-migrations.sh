@@ -112,6 +112,24 @@
 #       ai-events.sh reads this runner's own order and fails if the file does
 #       not sort after the tables it captures from.
 #
+#   osionos-ugc-moderation-migration.sql (the soft moderation state, the
+#       append-only moderation audit and the moderation queue) is in the
+#       alphabetical pass and is NAMED so it sorts after the tables it reads
+#       and triggers on: osionos-chat-migration.sql (osionos_feed_comments),
+#       osionos-comments-migration.sql (osionos_page_comments) and
+#       osionos-feed-engagement-migration.sql (osionos_feed_comments.parent_id
+#       and its updated_at column). It also JOINs osionos_pages, which
+#       osionos-bridge-migration.sql creates, and osionos_workspaces.visibility,
+#       which osionos-social-migration.sql adds — both are in ORDERED_FIRST, so
+#       they are applied before the alphabetical pass whatever their name says.
+#       A trigger on a table that does not exist yet is a hard error, so this
+#       order is a correctness fact, not a style choice: it is the same trick
+#       osionos-user-events-migration.sql uses. The file is NOT called
+#       osionos-ai-moderation-migration.sql: that name sorts BEFORE the tables
+#       it needs, and the alphabetical pass is the only slot both runners
+#       share. scripts/verify/moderation-state.sh reads this runner's own order
+#       and fails if the file does not sort after them.
+#
 #   osionos-service-role-only-migration.sql runs LAST (ORDERED_LAST), after
 #   everything: it revokes what earlier files and older boots granted.
 #   users-pii-grants-migration.sql runs after it, last of all: it fixes the
