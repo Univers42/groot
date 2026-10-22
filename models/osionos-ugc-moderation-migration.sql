@@ -498,13 +498,14 @@ RETURNS BIGINT
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, pg_temp
+-- The erase switch is on for THIS CALL only (a function SET clause is restored
+-- on return): set_config(…, true) would leave it on for the rest of the caller's
+-- transaction, where a later UPDATE of the audit would pass the guard.
+SET osionos.moderation_erase = 'on'
 AS $$
 DECLARE
     n BIGINT;
 BEGIN
-    -- The erase switch is on for this transaction: the append-only trigger
-    -- lets the two DELETEs of this function through.
-    PERFORM set_config('osionos.moderation_erase', 'on', true);
     DELETE FROM public.ai_moderation_events WHERE author_id = p_user;
     GET DIAGNOSTICS n = ROW_COUNT;
     -- An admin's erasure keeps the decision, not the name.
@@ -523,11 +524,11 @@ RETURNS BIGINT
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, pg_temp
+SET osionos.moderation_erase = 'on'
 AS $$
 DECLARE
     n BIGINT;
 BEGIN
-    PERFORM set_config('osionos.moderation_erase', 'on', true);
     DELETE FROM public.ai_moderation_events WHERE ts < now() - p_keep;
     GET DIAGNOSTICS n = ROW_COUNT;
     RETURN n;
