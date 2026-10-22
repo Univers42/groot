@@ -108,6 +108,10 @@
 #   UPDATE(username) column grant that file makes on osionos_profiles, and it
 #   grants EXECUTE on the atomic username change to the role that file
 #   creates. It has to run after that file, never before it.
+#   osionos-account-profession-migration.sql runs right after it: it adds the
+#   profession column and grants it to the account role, so the column has to
+#   exist before the grant, and every bridge image that names the column has
+#   to come after the schema. It has to run after that file, never before it.
 #   osionos-service-role-only-migration.sql runs LAST (ORDERED_LAST), after
 #   everything: it revokes what earlier files and older boots granted.
 #   users-pii-grants-migration.sql runs after it, last of all: it fixes the
@@ -133,7 +137,7 @@ trap 'rm -f "${ERR_FILE}"' EXIT
 # alphabetical pass reaches its dependent. Space-separated: no filename here
 # contains a space or glob character.
 ORDERED_FIRST="auth-gateway-users-reconcile-migration.sql osionos-bridge-migration.sql osionos-chat-migration.sql osionos-social-migration.sql osionos-engagement-migration.sql osionos-page-search-migration.sql"
-ORDERED_LAST="osionos-account-foundation-migration.sql osionos-account-profiles-migration.sql osionos-account-username-migration.sql osionos-publish-account-migration.sql osionos-service-role-only-migration.sql realtime-cdc-off-migration.sql users-pii-grants-migration.sql"
+ORDERED_LAST="osionos-account-foundation-migration.sql osionos-account-profiles-migration.sql osionos-account-username-migration.sql osionos-account-profession-migration.sql osionos-publish-account-migration.sql osionos-service-role-only-migration.sql realtime-cdc-off-migration.sql users-pii-grants-migration.sql"
 
 note() { printf '[models] %s\n' "$*" >&2; }
 
