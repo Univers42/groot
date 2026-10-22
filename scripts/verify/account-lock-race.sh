@@ -21,18 +21,22 @@
 # WHAT IT RUNS
 #   A throwaway grobase postgres (--rm --network none) -> 001 -> 012 -> shim
 #   -> the real runner (scripts/apply-models-migrations.sh) -> 20 rounds, each
-#   with three statements in flight at once:
+#   with four statements in flight at once:
 #     1. a replay of models/osionos-account-profiles-migration.sql (it takes
 #        the table locks the hot paths want);
 #     2. a sign-in: UPDATE osionos_bridge_identities SET profile = ... (the
 #        trigger then writes the profile);
-#     3. a profile write for the SAME user: UPDATE osionos_profiles SET bio.
+#     3. a profile write for the SAME user: UPDATE osionos_profiles SET bio;
+#     4. the atomic username change for the SAME user: the call to
+#        osionos_account_change_username, as the account role with forged
+#        claims, with a fresh name every round.
 #   Every statement's error output is read for 40P01 (deadlock) and 55P03
 #   (lock timeout).
 #
 # THE RESULT
 #   RESULT: <n> runs, <d> deadlocks (40P01), <t> lock timeouts (55P03)
-#   Exit 0 when no round deadlocked, 1 otherwise.
+#   Exit 0 when no round deadlocked and the username change ran in every
+#   round, 1 otherwise.
 #
 # Caveat: the file's own lock_timeout is 5 s, so a writer that holds a lock
 #   for longer than that makes the REPLAY abort with 55P03 — a failed boot
@@ -48,11 +52,16 @@
 #   mini-baas / osionos containers are never read, written or stopped.
 #
 # Usage:  [GROBASE_PG_IMAGE=…] [MODELS_DIR=…] sh scripts/verify/account-lock-race.sh
-# Exit:  0 no deadlock · 1 a deadlock · 2 docker missing
+# Exit:  0 no deadlock and every leg ran · 1 a deadlock or a leg that errored ·
+#        2 docker missing
 #
 # Ponytail: P1-2s extends this with the atomic username change (one SECURITY
-#   DEFINER function that writes the profile and then the identity row), which
-#   takes the two locks in the opposite order of the two statements above.
+#   DEFINER function that writes the identity row first and the profile
+#   second, so it takes the same lock order as the replay and the two
+#   statements above). The function carries its own 3 s lock_timeout, so a
+#   replay that holds the identities table longer than that makes the call
+#   fail with 55P03 — counted apart from the deadlocks, because a timeout is a
+#   budget and a deadlock is a bug.
 set -eu
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -73,6 +82,7 @@ CTN=''
 WORK=''
 deadlocks=0
 timeouts=0
+errors=0
 
 note() { printf '[account-lock-race] %s\n' "$*" >&2; }
 
@@ -125,8 +135,9 @@ VALUES ('prismatica', '21111111-1111-1111-1111-111111111111', '${RACE_USER}', 'l
 SQL
 }
 
-# One round: the replay, the sign-in and the profile write, all in flight.
-# The three error files are read for the two SQLSTATEs that matter.
+# One round: the replay, the sign-in, the profile write and the username
+# change, all in flight. The four error files are read for the two SQLSTATEs
+# that matter.
 round() {
 	n="$1"
 	# 1. the replay of the migration file
@@ -145,10 +156,22 @@ SQL
 UPDATE public.osionos_profiles SET bio = 'race ${n}' WHERE user_id = '${RACE_USER}';
 SQL
 	profile_pid=$!
+	# 4. the atomic username change, for the same user, as the account role
+	#    with forged claims and a fresh name every round
+	docker exec -i "${CTN}" psql -U "${PG_USER}" -d "${PG_DB}" -v ON_ERROR_STOP=1 -q \
+		>"${WORK}/username-${n}.out" 2>"${WORK}/username-${n}.err" <<SQL &
+BEGIN;
+SET LOCAL ROLE osionos_account_user;
+SELECT set_config('request.jwt.claims', '{"sub":"${RACE_USER}","aud":"osionos-account","role":"osionos_account_user"}', true);
+SELECT public.osionos_account_change_username('race${n}');
+COMMIT;
+SQL
+	username_pid=$!
 	wait "${replay_pid}" || true
 	wait "${signin_pid}" || true
 	wait "${profile_pid}" || true
-	for f in "${WORK}"/replay-"${n}".err "${WORK}"/signin-"${n}".err "${WORK}"/profile-"${n}".err; do
+	wait "${username_pid}" || true
+	for f in "${WORK}"/replay-"${n}".err "${WORK}"/signin-"${n}".err "${WORK}"/profile-"${n}".err "${WORK}"/username-"${n}".err; do
 		if grep -q '40P01\|deadlock detected' "${f}" 2>/dev/null; then
 			deadlocks=$((deadlocks + 1))
 			note "round ${n}: DEADLOCK in $(basename "${f}")"
@@ -160,6 +183,15 @@ SQL
 			sed 's/^/  | /' "${f}" >&2
 		fi
 	done
+	# The username leg must not fail for any other reason: a leg that errors
+	# is a round that proved nothing, and a race that silently stopped
+	# running looks exactly like a race that never deadlocked.
+	if grep -q 'ERROR:' "${WORK}/username-${n}.err" 2>/dev/null &&
+		! grep -q '40P01\|deadlock detected\|55P03\|lock timeout' "${WORK}/username-${n}.err" 2>/dev/null; then
+		errors=$((errors + 1))
+		note "round ${n}: ERROR in username-${n}.err"
+		sed 's/^/  | /' "${WORK}/username-${n}.err" >&2
+	fi
 }
 
 main() {
@@ -208,6 +240,10 @@ main() {
 	done
 	printf 'RESULT: %s runs, %s deadlocks (40P01), %s lock timeouts (55P03)\n' \
 		"${ROUNDS}" "${deadlocks}" "${timeouts}"
+	[ "${errors}" -eq 0 ] || {
+		note "${errors} round(s) failed the username change for another reason than a deadlock or a timeout"
+		exit 1
+	}
 	[ "${deadlocks}" -eq 0 ] || exit 1
 	exit 0
 }
