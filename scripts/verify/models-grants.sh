@@ -29,6 +29,8 @@
 #   and r-cutoffs asserts it for auth_session_cutoffs by name ·
 #   rt grobase's CREATE TABLE hook that re-arms new tables exists and is disabled ·
 #   u anon cannot SELECT public.users.email or password_hash, authenticated cannot SELECT password_hash
+#   sd the two self-data indexes the sys: sources read through — (owner_id, updated_at DESC) on
+#   osionos_pages and on osionos_tasks — exist with that shape
 #
 #   The account plane (models/osionos-account-foundation-migration.sql, ADR 0028),
 #   in scripts/verify/models-grants/account-checks.sql, piped after checks.sql into
@@ -485,6 +487,7 @@ run_checks() {
 	check_count "$1" r-cutoffs cutoff_realtime_triggers
 	check_count "$1" rt realtime_event_trigger
 	check_count "$1" u users_pii
+	check_count "$1" sd1 self_data_indexes_missing
 	check_count "$1" k1 account_role_reach
 	check_count "$1" k2 account_plane_rls
 	check_count "$1" k3 account_plane_expected
