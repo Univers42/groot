@@ -88,7 +88,8 @@ SELECT 'account_plane_expected', count(*), coalesce(string_agg(t, ' ' ORDER BY t
                    'osionos_profiles',
                    'osionos_user_settings',
                    'osionos_username_history',
-                   'osionos_account_deletion_requests']) AS t
+                   'osionos_account_deletion_requests',
+                   'osionos_personal_access_tokens']) AS t
  WHERE to_regclass('public.' || t) IS NULL
     OR coalesce(obj_description(to_regclass('public.' || t), 'pg_class'), '') <> 'osionos:account-plane';
 
@@ -130,7 +131,11 @@ WITH expected(tbl, cols, opclass, uniq, pred) AS (
     ('osionos_user_settings',        'user_id,section',             'btree',         true,  NULL),
     ('osionos_username_history',     'id',                          'btree',         true,  NULL),
     ('osionos_username_history',     'lower(username),released_at', 'btree',         false, NULL),
-    ('osionos_account_deletion_requests', 'user_id',               'btree',         true,  NULL)
+    ('osionos_account_deletion_requests', 'user_id',               'btree',         true,  NULL),
+    -- P5-1-a: the personal access tokens. The unique index on the hash is the
+    -- lookup a bearer token is resolved with; the owner index is the list.
+    ('osionos_personal_access_tokens', 'token_hash',               'btree',         true,  NULL),
+    ('osionos_personal_access_tokens', 'user_id,created_at',       'btree',         false, NULL)
 ),
 found AS (
   SELECT c.relname AS tbl,
