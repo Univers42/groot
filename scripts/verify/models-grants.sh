@@ -34,6 +34,8 @@
 #   guard tests that same pair) · feed_counts_exec_grants
 #   public.osionos_feed_page_counts is executable by service_role and by no
 #   other role
+#   sd the two self-data indexes the sys: sources read through — (owner_id, updated_at DESC) on
+#   osionos_pages and on osionos_tasks — exist with that shape
 #
 #   The account plane (models/osionos-account-foundation-migration.sql, ADR 0028),
 #   in scripts/verify/models-grants/account-checks.sql, piped after checks.sql into
@@ -563,6 +565,7 @@ run_checks() {
 	# P0-5a: the colleague-edges trigger and the feed counts function.
 	check_count "$1" colleague_edges_trigger colleague_edges_trigger
 	check_count "$1" feed_counts_exec_grants feed_counts_exec_grants
+	check_count "$1" sd1 self_data_indexes_missing
 	check_count "$1" k1 account_role_reach
 	check_count "$1" k2 account_plane_rls
 	check_count "$1" k3 account_plane_expected
