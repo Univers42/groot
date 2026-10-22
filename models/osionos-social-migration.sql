@@ -124,7 +124,7 @@ CREATE TABLE IF NOT EXISTS public.osionos_user_reports (
   reporter_id UUID NOT NULL,
   subject_user_id UUID,
   subject_kind TEXT NOT NULL DEFAULT 'user'
-    CHECK (subject_kind IN ('user', 'message', 'channel', 'workspace')),
+    CHECK (subject_kind IN ('user', 'message', 'channel', 'workspace', 'page', 'feed_comment', 'page_comment')),
   subject_id TEXT,
   category TEXT NOT NULL DEFAULT 'other',
   details TEXT,
@@ -134,6 +134,60 @@ CREATE TABLE IF NOT EXISTS public.osionos_user_reports (
 );
 CREATE INDEX IF NOT EXISTS osionos_user_reports_status_idx
   ON public.osionos_user_reports (status, created_at DESC);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 5b. Report subjects — every moderated kind, and one report per reporter
+--
+-- The client already reports a 'page' (apps/osionos/app/src/store/social/
+-- types.ts) and the moderation plan adds comments, but the CHECK above
+-- admitted four kinds only: a page report failed with 23514. The list is
+-- widened here, and the CHECK is REPLACED rather than altered in place: an
+-- already-installed database may carry the constraint under another name, so
+-- the real name is looked up (pg_constraint + pg_get_constraintdef) and each
+-- matching constraint is dropped before the new one is added. Replaying this
+-- file leaves exactly one subject_kind CHECK.
+--
+-- The second guarantee is "one report per reporter and subject": a UNIQUE
+-- index on (reporter_id, subject_kind, subject_id). It is created ONLY when
+-- the table holds no duplicate group — a table that already holds duplicates
+-- refuses the index, and deleting, merging or rewriting those rows would
+-- destroy user data. The NOTICE is the signal to clean them up by hand.
+DO $$
+DECLARE
+  cname TEXT;
+BEGIN
+  FOR cname IN
+    SELECT con.conname
+    FROM pg_constraint con
+    WHERE con.conrelid = 'public.osionos_user_reports'::regclass
+      AND con.contype = 'c'
+      AND pg_get_constraintdef(con.oid) LIKE '%subject_kind%'
+  LOOP
+    EXECUTE format('ALTER TABLE public.osionos_user_reports DROP CONSTRAINT %I', cname);
+  END LOOP;
+
+  ALTER TABLE public.osionos_user_reports
+    ADD CONSTRAINT osionos_user_reports_subject_kind_check
+    CHECK (subject_kind IN ('user', 'message', 'channel', 'workspace', 'page', 'feed_comment', 'page_comment'));
+END $$;
+
+DO $$
+DECLARE
+  dup_groups BIGINT;
+BEGIN
+  SELECT count(*) INTO dup_groups FROM (
+    SELECT 1 FROM public.osionos_user_reports
+    GROUP BY reporter_id, subject_kind, coalesce(subject_id, '')
+    HAVING count(*) > 1
+  ) dupes;
+
+  IF dup_groups = 0 THEN
+    EXECUTE 'CREATE UNIQUE INDEX IF NOT EXISTS osionos_user_reports_reporter_subject_key
+      ON public.osionos_user_reports (reporter_id, subject_kind, coalesce(subject_id, ''''))';
+  ELSE
+    RAISE NOTICE 'osionos_user_reports: % duplicate (reporter_id, subject_kind, subject_id) group(s) - no unique index osionos_user_reports_reporter_subject_key created; clean them up by hand', dup_groups;
+  END IF;
+END $$;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 6. Workspace 3-state visibility + join requests ("Collaboration")
