@@ -216,7 +216,8 @@ check_runner_order() {
 		note "${MIGRATION} is not in the runner's alphabetical pass"
 		return 1
 	}
-	for need in osionos-bridge-migration.sql osionos-chat-migration.sql \
+	for need in osionos-ai-jobs-migration.sql \
+		osionos-bridge-migration.sql osionos-chat-migration.sql \
 		osionos-comments-migration.sql osionos-favorites-migration.sql \
 		osionos-feed-engagement-migration.sql osionos-social-migration.sql; do
 		at="$(printf '%s\n' "${order}" | grep -n "^${need}\$" | cut -d: -f1 || true)"
@@ -261,7 +262,7 @@ apply_fixture() {
 	set -- osionos-bridge-migration.sql osionos-chat-migration.sql \
 		osionos-social-migration.sql osionos-engagement-migration.sql \
 		osionos-comments-migration.sql osionos-favorites-migration.sql \
-		osionos-feed-engagement-migration.sql
+		osionos-feed-engagement-migration.sql osionos-ai-jobs-migration.sql
 	for base in "$@"; do
 		apply_file "${MODELS}/${base}" || {
 			note "the fixture could not apply ${base}"

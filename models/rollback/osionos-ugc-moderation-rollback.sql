@@ -25,9 +25,10 @@
 --   The audit: every ai_moderation_events row is dropped with the table. An
 --   audit that is gone is an audit that cannot answer. The erase of a user
 --   that already happened is not undone.
---   The queue: every ai_jobs row is dropped with the table. The subjects that
---   were never checked are still unchecked; the re-apply re-queues nothing,
---   because the queue is fed by the WRITES, not by the migration.
+--   The queue: the table is osionos-ai-jobs-migration.sql's and stays; its
+--   'moderate' rows are deleted. The subjects that were never checked are
+--   still unchecked; the re-apply re-queues nothing, because the queue is fed
+--   by the WRITES, not by the migration.
 --
 --   The events file stays valid after this rollback: its ai_erase_user()
 --   calls ai_moderation_erase_user() dynamically, and the call is skipped
@@ -54,9 +55,14 @@ DROP FUNCTION IF EXISTS public.ai_moderation_events_prune(interval);
 -- The third new object: the append-only guard.
 DROP FUNCTION IF EXISTS public.ai_moderation_events_guard();
 
--- The two new tables.
+-- The new table, and this file's rows of the queue.
 DROP TABLE IF EXISTS public.ai_moderation_events;
-DROP TABLE IF EXISTS public.ai_jobs;
+DO $$
+BEGIN
+    IF to_regclass('public.ai_jobs') IS NOT NULL THEN
+        DELETE FROM public.ai_jobs WHERE kind = 'moderate';
+    END IF;
+END $$;
 
 -- The partial indexes, then the two columns on each comment table. The
 -- content of a comment was never touched by the migration, so this is the
