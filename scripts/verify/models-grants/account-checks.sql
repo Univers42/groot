@@ -88,7 +88,8 @@ SELECT 'account_plane_expected', count(*), coalesce(string_agg(t, ' ' ORDER BY t
                    'osionos_profiles',
                    'osionos_user_settings',
                    'osionos_username_history',
-                   'osionos_account_deletion_requests']) AS t
+                   'osionos_account_deletion_requests',
+                   'osionos_published_pages']) AS t
  WHERE to_regclass('public.' || t) IS NULL
     OR coalesce(obj_description(to_regclass('public.' || t), 'pg_class'), '') <> 'osionos:account-plane';
 
@@ -706,6 +707,100 @@ SELECT 'p1_isolation_forged',
      + (CASE WHEN EXISTS (SELECT 1 FROM public.osionos_account_deletion_requests
                            WHERE user_id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb') THEN 0 ELSE 1 END),
        'B is neither readable nor changed';
+ROLLBACK;
+
+-- p5_published_read: the account role reads its OWN published pages and nothing
+-- else. Four facts, one row:
+--   (a) with A's claims the role sees exactly A's own published row (1);
+--   (b) B's published row is invisible to it (0);
+--   (c) the snapshot body is out of reach: SELECT content is refused with
+--       42501, because the grant names five columns and content is not one of
+--       them;
+--   (d) the service role still reads the table — the public GET depends on it.
+-- The fixture is the FK chain the table carries: an auth.users row per user, a
+-- workspace and a page per published row (osionos_published_pages.page_id ->
+-- osionos_pages.id -> osionos_workspaces.id).
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+                               ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+INSERT INTO public.osionos_workspaces (id, owner_id, name, slug) VALUES
+  ('33333333-3333-3333-3333-333333333333', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'p5 a', 'p5-a'),
+  ('44444444-4444-4444-4444-444444444444', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'p5 b', 'p5-b');
+INSERT INTO public.osionos_pages (id, workspace_id, owner_id, title) VALUES
+  ('55555555-5555-5555-5555-555555555555', '33333333-3333-3333-3333-333333333333', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'p5 a page'),
+  ('66666666-6666-6666-6666-666666666666', '44444444-4444-4444-4444-444444444444', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'p5 b page');
+INSERT INTO public.osionos_published_pages (token, page_id, owner_id, title, icon, content) VALUES
+  ('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '55555555-5555-5555-5555-555555555555', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'p5 a published', 'doc', '{"blocks":[]}'),
+  ('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', '66666666-6666-6666-6666-666666666666', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'p5 b published', 'doc', '{"blocks":[]}');
+SET LOCAL ROLE osionos_account_user;
+DO $$ BEGIN
+  PERFORM set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","aud":"osionos-account","role":"osionos_account_user"}', true);
+END $$;
+-- (a) and (b): the rows the role may see. B's row is named by its token, not
+-- by owner_id: the role holds no privilege on owner_id, so a filter on it
+-- would be refused with 42501 instead of answering the question.
+-- Every read is caught: a check that raises takes the whole stream with it,
+-- and the two isolation rows come after this one.
+DO $$
+DECLARE
+  v_own text := 'err';
+  v_other text := 'err';
+  v_state text := '';
+BEGIN
+  BEGIN
+    SELECT count(*)::text INTO v_own FROM public.osionos_published_pages;
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+    v_own := 'err:' || v_state;
+  END;
+  BEGIN
+    SELECT count(*)::text INTO v_other FROM public.osionos_published_pages
+     WHERE token = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+    v_other := 'err:' || v_state;
+  END;
+  PERFORM set_config('osionos.check.p5_own', v_own, true);
+  PERFORM set_config('osionos.check.p5_other', v_other, true);
+END $$;
+-- (c) the body is out of reach. The refusal is caught and its SQLSTATE read:
+-- an expectation that is not met is counted, not raised.
+DO $$
+DECLARE
+  v_state text := '';
+BEGIN
+  BEGIN
+    PERFORM content FROM public.osionos_published_pages;
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p5_content', v_state, true);
+END $$;
+RESET ROLE;
+-- (d) the service role still reads the table: the public GET reads the
+-- snapshot as service_role.
+SET LOCAL ROLE service_role;
+DO $$
+DECLARE
+  v_svc text := 'err';
+  v_state text := '';
+BEGIN
+  BEGIN
+    SELECT count(*)::text INTO v_svc FROM public.osionos_published_pages;
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+    v_svc := 'err:' || v_state;
+  END;
+  PERFORM set_config('osionos.check.p5_svc', v_svc, true);
+END $$;
+RESET ROLE;
+-- A missing measurement fails: an unset GUC is not a zero.
+SELECT 'p5_published_read',
+       (CASE WHEN coalesce(current_setting('osionos.check.p5_own', true), '') = '1' THEN 0 ELSE 1 END)
+     + (CASE WHEN coalesce(current_setting('osionos.check.p5_other', true), '') = '0' THEN 0 ELSE 1 END)
+     + (CASE WHEN coalesce(current_setting('osionos.check.p5_content', true), '') = '42501' THEN 0 ELSE 1 END)
+     + (CASE WHEN coalesce(current_setting('osionos.check.p5_svc', true), '') = '2' THEN 0 ELSE 1 END),
+       'A sees its own published row, B sees none, the body is refused, the service role reads all';
 ROLLBACK;
 
 -- The two isolation rows are LAST: a regressed regex in the uid helper raises
