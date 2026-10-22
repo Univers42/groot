@@ -130,8 +130,26 @@
 #       share. scripts/verify/moderation-state.sh reads this runner's own order
 #       and fails if the file does not sort after them.
 #
+#   osionos-rec-factors-migration.sql (the recommender's model registry, its
+#       zero-padded factor vectors, the guarded promotion and the erasure) is
+#       in the alphabetical pass and sorts BEFORE
+#       osionos-user-events-migration.sql ("r" < "u"). That order is fine
+#       ONLY because the new file references NOTHING in the events file: it
+#       creates its own three tables and its own three functions, and it
+#       reads no ai_events table. The events file's ai_erase_user() resolves
+#       ai_rec_erase_user() at CALL time (to_regprocedure(...) IS NOT NULL ->
+#       EXECUTE), so the two files work in either order and each of them works
+#       alone. The extension it needs (pgvector) is created by
+#       osionos-social-migration.sql, which is in ORDERED_FIRST, so the
+#       extension exists before the alphabetical pass whatever the name says.
+#       The file says so in its own header.
+#
 #   osionos-service-role-only-migration.sql runs LAST (ORDERED_LAST), after
-#   everything: it revokes what earlier files and older boots granted.
+#   everything: it revokes what earlier files and older boots granted. Its
+#   sweep matches the osionos\_% NAME PATTERN, so the ai\_% relations are
+#   outside it: ai_events, ai_jobs, ai_rec_models, ai_rec_item_factors and
+#   ai_rec_user_factors close themselves with their own REVOKE, in their own
+#   file, on every replay. There is nothing to add to that file.
 #   users-pii-grants-migration.sql runs after it, last of all: it fixes the
 #   public.users column grants (no anon email, no password_hash for anyone).
 #   apply-models.sh runs it last too, by name (GRANTS_LAST), not by glob collation.
