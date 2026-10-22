@@ -13,7 +13,7 @@ const { spawn } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
 const { existsSync, statSync, mkdirSync, readFileSync, writeFileSync } = require("node:fs");
 const crypto = require("node:crypto");
-const { isExternalHttpUrl, isAppPageUrl, isAllowedSubframeUrl, senderAllowed, baasResponseHeaders, inlineScriptHashes, frameOriginsFrom, rendererCsp, editionOf, cspHeaderName, webSecurityFor } = require("./desktop-guards");
+const { createExternalOpenThrottle, isExternalHttpUrl, isAppPageUrl, isAllowedSubframeUrl, senderAllowed, baasResponseHeaders, inlineScriptHashes, frameOriginsFrom, rendererCsp, editionOf, cspHeaderName, webSecurityFor } = require("./desktop-guards");
 
 // The local mini-baas query-router speaks plain HTTP. The renderer runs from the
 // secure `app://` origin, where a direct http://localhost:8002 fetch is upgraded
@@ -125,8 +125,12 @@ let mainWindow = null;
 // frame never leaves app://osionos: the Mail/Calendar buttons set location.href to an external
 // URL, which would strand the user on a page with no titlebar, so it opens in the system browser.
 app.on("web-contents-created", (_e, contents) => {
+  const openThrottle = createExternalOpenThrottle();
   contents.setWindowOpenHandler(({ url }) => {
-    if (isExternalHttpUrl(url)) shell.openExternal(url);
+    if (isExternalHttpUrl(url)) {
+      if (openThrottle.allow()) shell.openExternal(url);
+      else console.warn("window.open throttled for host " + new URL(url).host);
+    }
     return { action: "deny" };
   });
   contents.on("will-attach-webview", (e) => e.preventDefault());

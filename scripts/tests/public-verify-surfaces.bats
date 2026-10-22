@@ -86,3 +86,23 @@ load public-funnel-helpers
     grep -qE "^ +$key: \"\"$" "$overlay" || { echo "overlay does not empty $key" >&2; return 1; }
   done
 }
+
+@test "osionos :3001 sending both anti-framing headers on every probed path passes" {
+  run_pf verify --pre
+  [ "$status" -eq 0 ]
+  has "PASS  frame-headers  osionos :3001 sends X-Frame-Options DENY and frame-ancestors 'none'"
+}
+
+@test "a /storage/v1 response without X-Frame-Options goes red, the path named" {
+  printf 'HTTP/2 200\r\ncontent-security-policy: frame-ancestors %s\r\n\r\n' "'none'" >"$T/hdr-3001-storage"
+  run_pf verify --pre
+  [ "$status" -ne 0 ]
+  [[ "$out" == *"FAIL  frame-headers"*"/storage/v1/object/public/x"* ]]
+}
+
+@test "frame-ancestors 'self' is not accepted" {
+  printf 'HTTP/2 200\r\nx-frame-options: DENY\r\ncontent-security-policy: frame-ancestors %s\r\n\r\n' "'self'" >"$T/hdr-3001"
+  run_pf verify --pre
+  [ "$status" -ne 0 ]
+  [[ "$out" == *"FAIL  frame-headers"* ]]
+}
