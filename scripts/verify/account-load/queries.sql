@@ -151,6 +151,26 @@ SELECT md5(('page-' || p::text))::uuid, gen_random_uuid(), 'seed comment'
 ANALYZE public.osionos_feed_likes, public.osionos_feed_comments;
 
 -- ============================================================
+-- colleague_join_200_edges
+-- The invariant the measured join must keep: every pair of the dedicated
+-- workspace's members has a colleague edge. A join that the trigger SKIPPED
+-- (the 200-member cap) would leave the count short of C(n,2), and this query
+-- fails on it — the divisor is 0 at RUN time, not a folded constant, so the
+-- query only fails when the invariant is broken.
+-- QUERY: colleague_join_200_edges
+SELECT 1 / (CASE WHEN
+         (SELECT count(*)
+            FROM public.osionos_connections c
+           WHERE c.requester_id IN (SELECT user_id FROM public.osionos_workspace_members
+                                     WHERE workspace_id = '0a5a0000-0000-4000-8000-000000000001')
+             AND c.addressee_id IN (SELECT user_id FROM public.osionos_workspace_members
+                                     WHERE workspace_id = '0a5a0000-0000-4000-8000-000000000001'))
+       = (SELECT n * (n - 1) / 2 FROM (SELECT count(*) AS n
+                                        FROM public.osionos_workspace_members
+                                       WHERE workspace_id = '0a5a0000-0000-4000-8000-000000000001') t)
+       THEN 1 ELSE 0 END) AS every_pair_has_an_edge;
+
+-- ============================================================
 -- feed_page_counts
 -- bridge-feed.mjs:145-153 (likes), :174-180 (the comment count) and :307-309
 -- (shares) read three tables per post card and counted the rows in JS. The

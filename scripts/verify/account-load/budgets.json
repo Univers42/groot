@@ -84,7 +84,11 @@
     "no_seq_scan": [
       "osionos_workspace_members"
     ],
-    "why": "Target: one member joins a workspace that holds 199 members, and the colleague-edges trigger writes 199 edges in the same transaction — an index scan on the members table, then 199 inserts on osionos_connections. The workspace is dedicated to this measurement: the query creates it and holds 170 members, so the harness's 30 runs (30 joins, one fresh member each) end at exactly 200 members and every run stays in the <= 200 branch. Caveat: EXPLAIN ANALYZE executes the INSERT, so the 30 runs are 30 real joins, and a 31st run would push the workspace past 200 and measure the skip branch instead — the threshold is the spec's, not a budget."
+    "why": "Target: one member joins a workspace that holds 199 members, and the colleague-edges trigger writes 199 edges in the same transaction — an index scan on the members table, then 199 inserts on osionos_connections. The workspace is dedicated to this measurement: the query creates it and holds 170 members, so the harness's 30 runs (30 joins, one fresh member each) end at exactly 200 members and every run stays in the <= 200 branch. Caveat: EXPLAIN ANALYZE executes the INSERT, so the 30 runs are 30 real joins, and a 31st run would push the workspace past 200 and measure the skip branch instead — the threshold is the spec's, not a budget. The skip branch cannot pass silently: colleague_join_200_edges asserts that every pair of the workspace's members has an edge, so a skipped join fails that query instead."
+  },
+  "colleague_join_200_edges": {
+    "p95_ms": 300,
+    "why": "The assertion, not a budget: every pair of the dedicated workspace's members must have a colleague edge (C(n,2) of them). A join the trigger skipped — the 200-member cap — leaves the count short and this query fails with a division by zero, so the gate cannot measure the skip branch and call it a pass. It runs after colleague_join_200 (the files are measured in name order), so it sees the state the 30 joins left. There is no no_seq_scan budget: the assertion counts the edges of one workspace and a sequential scan of the connections table is the honest way to count them."
   },
   "feed_page_counts": {
     "p95_ms": 60,

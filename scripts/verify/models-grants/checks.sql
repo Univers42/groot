@@ -128,21 +128,35 @@ SELECT 'colleague_edges_trigger',
                     AND tgname = 'osionos_workspace_members_colleague_edges_trg'),
                 'the colleague-edges trigger is missing');
 
--- feed_counts_exec_grants: public.osionos_feed_page_counts belongs to
--- service_role alone. The bridge calls it with the service key; anon,
--- authenticated and the account role must not execute it. A function that does
--- not exist is a violation too — the row must not pass on a missing object.
+-- feed_counts_exec_grants: the two functions this package creates are
+-- service_role's alone. The bridge calls them with the service key; anon,
+-- authenticated and the account role must not execute them. A function that
+-- does not exist is a violation too — the row must not pass on a missing
+-- object — and so is a function that still carries the PUBLIC default: its
+-- ACL is either absent (the default gives PUBLIC EXECUTE) or holds a "=X/"
+-- entry. REVOKE … FROM PUBLIC is what removes it.
+WITH fns(name, sig) AS (
+  VALUES ('osionos_feed_page_counts', 'public.osionos_feed_page_counts(uuid, uuid)'),
+         ('osionos_colleague_edges_on_join', 'public.osionos_colleague_edges_on_join()')
+), fn AS (
+  SELECT f.name, to_regprocedure(f.sig) AS oid FROM fns f
+)
 SELECT 'feed_counts_exec_grants', count(*), coalesce(string_agg(who, ' ' ORDER BY who), '')
   FROM (
-    SELECT 'function_missing' AS who
-     WHERE to_regprocedure('public.osionos_feed_page_counts(uuid, uuid)') IS NULL
+    SELECT name || '_missing' AS who
+      FROM fn WHERE oid IS NULL
     UNION ALL
-    SELECT 'service_role_may_not_execute'
-     WHERE to_regprocedure('public.osionos_feed_page_counts(uuid, uuid)') IS NOT NULL
-       AND NOT has_function_privilege('service_role', 'public.osionos_feed_page_counts(uuid, uuid)', 'EXECUTE')
+    SELECT name || '_service_role_may_not_execute'
+      FROM fn
+     WHERE oid IS NOT NULL AND NOT has_function_privilege('service_role', oid, 'EXECUTE')
     UNION ALL
-    SELECT r.rolname || '_may_execute'
-      FROM unnest(ARRAY['anon','authenticated','osionos_account_user']) AS r(rolname)
-     WHERE to_regprocedure('public.osionos_feed_page_counts(uuid, uuid)') IS NOT NULL
-       AND has_function_privilege(r.rolname, 'public.osionos_feed_page_counts(uuid, uuid)', 'EXECUTE')
+    SELECT name || '_' || r.rolname || '_may_execute'
+      FROM fn CROSS JOIN unnest(ARRAY['anon','authenticated','osionos_account_user']) AS r(rolname)
+     WHERE oid IS NOT NULL AND has_function_privilege(r.rolname, oid, 'EXECUTE')
+    UNION ALL
+    SELECT name || '_public_may_execute'
+      FROM fn JOIN pg_proc p ON p.oid = fn.oid
+     WHERE p.proacl IS NULL
+        OR EXISTS (SELECT 1 FROM aclexplode(p.proacl) a
+                    WHERE a.grantee = 0 AND a.privilege_type = 'EXECUTE')
   ) AS violations;
