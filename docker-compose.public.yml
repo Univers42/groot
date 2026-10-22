@@ -121,6 +121,8 @@ services:
       OSIONOS_AI_IMAGES: ""
       OSIONOS_AI_PAT: ""
       OSIONOS_AI_STT_URL: ""
+      # Describe image (M7) stays off in public until the user decides.
+      OSIONOS_AI_VLM_URL: ""
       # The platform connection on public: OpenRouter's free models only (R-C10), the key and
       # the list from .env.public, never .env.local, so the dev stack keeps its local model.
       OSIONOS_AI_UPSTREAM_BASE_URL: https://openrouter.ai/api/v1
@@ -177,6 +179,9 @@ services:
     profiles: !override ["ai-dev-only"]
   osionos-ai-stt:
     profiles: !override ["ai-dev-only"]
+  # Started only by --profile ai-vlm, which the public stack never passes.
+  osionos-ai-vlm:
+    profiles: !override ["ai-vlm"]
 
   # Static previews for the apps node (second Funnel node). Prod target = nginx serving dist/, built
   # with every bridge/BaaS URL empty so the apps make no request outside their own origin. They
