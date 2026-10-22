@@ -8,6 +8,11 @@
 --   erasure of a user's derived vectors. The nightly job fills it. This file
 --   is the READ side of that model — the two things the serving bridge must
 --   know to answer "For you" for one user, and nothing else:
+--
+--   M3c-4b-1 adds two columns to that registry so the champion carries what
+--   serving needs to fold a user in: its item Gram matrix (Y^T Y, factors^2
+--   numbers) and the event weights it was trained with. Both nullable; null
+--   means "no fold-in".
 --     1. public.ai_rec_user_context(p_user, p_recent): the champion's
 --        hyperparameters, the user's stored vector if the nightly model has
 --        seen them, their recent POSITIVE interactions with the item vectors
@@ -112,6 +117,59 @@
 --   Every statement is IF NOT EXISTS / DROP ... IF EXISTS / CREATE OR REPLACE
 --   shaped, so the file is replayed on every boot. It never writes a row of
 --   anything: it reads the registry, the factors and the log.
+
+-- -----------------------------------------------------------------------------
+-- 0. The champion carries what serving needs to fold a user in.
+--
+--    Two columns on the registry, both nullable: a model written before this
+--    change (or before the job stores them) stays valid, and serving treats
+--    null as "no fold-in" (it uses the stored user vector).
+--
+--      item_gram    -- row-major Y^T Y of the model's item factors,
+--                      factors^2 numbers. Too big to recompute per request,
+--                      trivial to compute once when the model is written.
+--      event_weights -- the weights of osml/events.py the model was trained
+--                      with (a JSON object), so serving applies the champion's
+--                      own weights and a weight change never mismatches an
+--                      older champion.
+-- -----------------------------------------------------------------------------
+ALTER TABLE public.ai_rec_models
+    ADD COLUMN IF NOT EXISTS item_gram REAL[],
+    ADD COLUMN IF NOT EXISTS event_weights JSONB;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conname = 'ai_rec_models_item_gram_check'
+           AND conrelid = 'public.ai_rec_models'::regclass
+    ) THEN
+        ALTER TABLE public.ai_rec_models
+            ADD CONSTRAINT ai_rec_models_item_gram_check
+            CHECK (item_gram IS NULL OR cardinality(item_gram) = factors * factors);
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conname = 'ai_rec_models_event_weights_check'
+           AND conrelid = 'public.ai_rec_models'::regclass
+    ) THEN
+        ALTER TABLE public.ai_rec_models
+            ADD CONSTRAINT ai_rec_models_event_weights_check
+            CHECK (event_weights IS NULL OR jsonb_typeof(event_weights) = 'object');
+    END IF;
+END $$;
+
+COMMENT ON COLUMN public.ai_rec_models.item_gram IS
+    'Row-major Y^T Y of the model''s item factors: factors^2 numbers. Stored '
+    'when the model is written so serving can fold a user in without '
+    'recomputing it per request. NULL means "no fold-in": serving uses the '
+    'stored user vector.';
+
+COMMENT ON COLUMN public.ai_rec_models.event_weights IS
+    'The weights of osml/events.py the model was trained with, as a JSON '
+    'object. Stored so serving applies the champion''s own weights and a '
+    'weight change never mismatches an older champion. NULL means "no '
+    'fold-in".';
 
 -- -----------------------------------------------------------------------------
 -- 1. The context: what the service must know about ONE user to score them.
@@ -257,7 +315,9 @@ BEGIN
             'id',             v_model.id,
             'factors',        v_model.factors,
             'regularization', v_model.regularization,
-            'alpha',          v_model.alpha
+            'alpha',          v_model.alpha,
+            'item_gram',      v_model.item_gram,
+            'event_weights',  v_model.event_weights
         ),
         'user_vector', v_user_vec,
         'recent',      v_recent,
@@ -272,9 +332,13 @@ COMMENT ON FUNCTION public.ai_rec_user_context(UUID, INTEGER) IS
     'their recent real items of the last 180 days with the count of each '
     'event and the champion''s vector for that item, and the items they '
     'marked not interested. An opted-out user gets {"opted_out": true} and '
-    'nothing else; no champion gets {"model": null}. The event WEIGHTS are '
-    'not applied here: they live in the ML package, and the bridge applies '
-    'them. service_role only.';
+    'nothing else; no champion gets {"model": null}. The champion''s item '
+    'Gram matrix (item_gram, row-major Y^T Y, factors^2 numbers) and its '
+    'event weights (event_weights) are returned inside model so the bridge '
+    'can fold a user in with the champion''s own inputs; both are null when '
+    'the model was written without them, and serving treats null as "no '
+    'fold-in". The event WEIGHTS are not applied here: they live in the ML '
+    'package, and the bridge applies them. service_role only.';
 
 -- -----------------------------------------------------------------------------
 -- 2. The nearest items: the champion's rows, nearest first, on the HNSW index.
