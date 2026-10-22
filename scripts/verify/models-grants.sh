@@ -41,16 +41,27 @@
 #   policy filters on the uid helper, keyed on what the policy does (SELECT and
 #   DELETE read through polqual, INSERT writes through polwithcheck, UPDATE and
 #   ALL constrain the written row) · k3 the expected account tables exist and are
-#   marked · k4 the account indexes exist · k7 the role has the right shape and
-#   no membership beyond authenticator · k8 the role may SELECT exactly nine
-#   session columns and nothing else · k5 the role sees only its own rows (1) ·
+#   marked · k4 the account indexes exist, compared on their whole shape (the
+#   key columns with their expressions, the access method, the uniqueness and
+#   the partial predicate) · k7 the role has the right shape and no membership
+#   beyond authenticator · k8 the role may SELECT exactly nine session columns
+#   and nothing else · k5 the role sees only its own rows (1) ·
 #   k6 no forged claim set sees any (0) · K1-K6 six probes on the account plane,
 #   refused with 42501 · account_secdef_exec the account role may execute no
-#   SECURITY DEFINER osionos_% function · standalone the account foundation file
-#   applied alone leaves no realtime trigger on the sessions table or on the
-#   audit table, no anon/authenticated privilege and exactly the nine column
-#   grants — what the ledger runner (scripts/apply-models.sh) relies on, and
-#   what the later passes hide
+#   SECURITY DEFINER osionos_% function · p1 the profile plane's own checks:
+#   p1_role_column_acl the role's exact column reach on the four new tables,
+#   p1_role_writes_profile the role writes its own profile and one row only,
+#   p1_settings_merge two merges land and a null deletes a key, p1_hold the
+#   held name is refused to B and reclaimed by A, p1_never_raises a colliding
+#   username and a missing auth.users row do not fail a registration,
+#   p1_isolation_own the role sees its own row in each of the four tables (4)
+#   and p1_isolation_forged it sees and changes nothing of B's ·
+#   standalone the account foundation file applied alone leaves no realtime
+#   trigger on the sessions table or on the audit table, no anon/authenticated
+#   privilege and exactly the nine column grants — what the ledger runner
+#   (scripts/apply-models.sh) relies on, and what the later passes hide; the
+#   account profiles file applied after it leaves the same for the four new
+#   tables and the directory view, and its NOTIFY comes after the COMMIT
 #
 # ISOLATION
 #   Throwaway containers only (--rm --network none, no port, no volume); the live
@@ -200,6 +211,23 @@ check_svc() {
 	fi
 }
 
+# check_eq <scenario> <id> <label> <expected> — a `<label>|<count>|<detail>` row
+# that must hold an exact value. check_count counts failures; the isolation row
+# counts the tables in which the role saw its own row (four of them).
+check_eq() {
+	line="$(grep "^$3|" "${WORK}/checks-$1.out" || true)"
+	if [ -z "${line}" ]; then
+		fail "$1" "$2" "checks.sql printed no ${3} row"
+		return 0
+	fi
+	n="$(printf '%s\n' "${line}" | cut -d'|' -f2)"
+	if [ "$n" = "$4" ]; then
+		pass "$1" "$2" "$4"
+	else
+		fail "$1" "$2" "${n:-no row} — expected $4"
+	fi
+}
+
 # probe <scenario> <id> <role> <statement> — a rolled-back transaction that must be
 # refused with exactly SQLSTATE 42501; success and any other code are both a FAIL.
 probe() {
@@ -260,10 +288,18 @@ check_idempotent() {
 # dropped so the file has to recreate it. The ledger runner
 # (scripts/apply-models.sh) may run this file with no service-role-only and no
 # realtime-cdc-off pass after it, so the file has to be self-sufficient.
+# The account profiles file is applied after it, for the same reason: it
+# creates four more tables and the directory view, and it has to leave no
+# realtime trigger and no anon/authenticated privilege behind either.
 check_standalone() {
 	file="${MODELS_DIR}/osionos-account-foundation-migration.sql"
+	profiles="${MODELS_DIR}/osionos-account-profiles-migration.sql"
 	if [ ! -f "${file}" ]; then
 		fail "$1" "standalone" "no ${file}"
+		return 0
+	fi
+	if [ ! -f "${profiles}" ]; then
+		fail "$1" "standalone" "no ${profiles}"
 		return 0
 	fi
 	if ! printf '%s\n' \
@@ -285,6 +321,19 @@ check_standalone() {
 		fail "$1" "standalone" "could not drop public.osionos_sessions"
 		return 0
 	fi
+	# The four profile tables and the view go too: the realtime hook only arms
+	# a table when it is CREATED, so a table that is still there would make the
+	# realtime row vacuous.
+	if ! printf '%s\n' \
+		'DROP VIEW IF EXISTS public.osionos_people_directory;' \
+		'DROP TABLE IF EXISTS public.osionos_profiles;' \
+		'DROP TABLE IF EXISTS public.osionos_user_settings;' \
+		'DROP TABLE IF EXISTS public.osionos_username_history;' \
+		'DROP TABLE IF EXISTS public.osionos_account_deletion_requests;' |
+		psql_stdin >"${WORK}/standalone-$1.log" 2>&1; then
+		fail "$1" "standalone" "could not drop the profile tables"
+		return 0
+	fi
 	# The audit table's realtime trigger is re-armed on purpose: the file claims
 	# to drop it (the table now carries ip_hash and user_agent), and nothing
 	# after the solo apply would drop it for us.
@@ -298,6 +347,23 @@ check_standalone() {
 		fail "$1" "standalone" "the account foundation file did not apply alone"
 		sed 's/^/  | /' "${WORK}/standalone-$1.log" >&2
 		return 0
+	fi
+	# The profiles file is applied without -q: the command tags are what the
+	# NOTIFY assertion reads, and -q hides them.
+	if ! docker exec -i "${CTN}" psql -U "${PG_USER}" -d "${PG_DB}" -v ON_ERROR_STOP=1 \
+		<"${profiles}" >"${WORK}/standalone-$1.tags" 2>&1; then
+		fail "$1" "standalone" "the account profiles file did not apply after the foundation"
+		sed 's/^/  | /' "${WORK}/standalone-$1.tags" >&2
+		return 0
+	fi
+	# The NOTIFY must come AFTER the COMMIT: the view is dropped and recreated,
+	# and PostgREST has to reload the schema only once the new view exists.
+	commit_line="$(grep -n '^COMMIT$' "${WORK}/standalone-$1.tags" | tail -1 | cut -d: -f1)"
+	notify_line="$(grep -n '^NOTIFY$' "${WORK}/standalone-$1.tags" | tail -1 | cut -d: -f1)"
+	if [ -n "${notify_line}" ] && [ -n "${commit_line}" ] && [ "${notify_line}" -gt "${commit_line}" ]; then
+		pass "$1" "standalone_notify" "after the COMMIT"
+	else
+		fail "$1" "standalone_notify" "the NOTIFY is not after the COMMIT (notify=${notify_line:-none} commit=${commit_line:-none})"
 	fi
 	if ! psql_rows >"${WORK}/standalone-$1.out" 2>"${WORK}/standalone-$1.err" <<'SQL'
 SELECT 'sessions_realtime_triggers', count(*)::text, ''
@@ -318,6 +384,24 @@ SELECT 'sessions_column_acl', coalesce(string_agg(a.attname, ',' ORDER BY a.attn
   FROM pg_attribute a
  WHERE a.attrelid = 'public.osionos_sessions'::regclass AND a.attnum > 0 AND NOT a.attisdropped
    AND has_column_privilege('osionos_account_user', a.attrelid, a.attname, 'SELECT');
+SELECT r.rel || '_realtime_triggers', count(t.tgrelid)::text, ''
+  FROM unnest(ARRAY['osionos_profiles','osionos_user_settings','osionos_username_history',
+                    'osionos_account_deletion_requests','osionos_people_directory']) AS r(rel)
+  LEFT JOIN pg_class c ON c.relname = r.rel AND c.relnamespace = 'public'::regnamespace
+  LEFT JOIN pg_trigger t ON t.tgrelid = c.oid AND NOT t.tgisinternal
+                         AND t.tgfoid = to_regproc('public.realtime_notify')
+ GROUP BY r.rel ORDER BY r.rel;
+SELECT r.rel || '_anon_auth_privs',
+       (SELECT count(*)::text
+          FROM (VALUES ('anon'),('authenticated')) AS x(rolname)
+          CROSS JOIN (VALUES ('SELECT',true),('INSERT',true),('UPDATE',true),('REFERENCES',true),
+                             ('DELETE',false),('TRUNCATE',false),('TRIGGER',false)) AS p(priv, col_level)
+         WHERE has_table_privilege(x.rolname, 'public.' || r.rel, p.priv)
+            OR (p.col_level AND has_any_column_privilege(x.rolname, 'public.' || r.rel, p.priv))) AS v,
+       ''
+  FROM unnest(ARRAY['osionos_profiles','osionos_user_settings','osionos_username_history',
+                    'osionos_account_deletion_requests','osionos_people_directory']) AS r(rel)
+ ORDER BY r.rel;
 SQL
 	then
 		fail "$1" "standalone" "the standalone assertions did not run"
@@ -329,6 +413,11 @@ SQL
 	assert_standalone "$1" sessions_anon_auth_privs 0
 	assert_standalone "$1" sessions_column_acl \
 		'id,created_at,expires_at,last_seen_at,auth_method,ip_prefix,user_agent,revoked_at,revoked_reason'
+	for rel in osionos_profiles osionos_user_settings osionos_username_history \
+	           osionos_account_deletion_requests osionos_people_directory; do
+		assert_standalone "$1" "${rel}_realtime_triggers" 0
+		assert_standalone "$1" "${rel}_anon_auth_privs" 0
+	done
 }
 
 # assert_standalone <scenario> <label> <expected> — one named row of the
@@ -378,6 +467,13 @@ run_checks() {
 	check_count "$1" k4 account_indexes_missing
 	check_count "$1" k7 account_role_shape
 	check_count "$1" k8 account_session_columns
+	check_count "$1" p1_role_column_acl p1_role_column_acl
+	check_count "$1" p1_role_writes_profile p1_role_writes_profile
+	check_count "$1" p1_settings_merge p1_settings_merge
+	check_count "$1" p1_hold p1_hold
+	check_count "$1" p1_never_raises p1_never_raises
+	check_eq "$1" p1_isolation_own p1_isolation_own 4
+	check_count "$1" p1_isolation_forged p1_isolation_forged
 	check_count "$1" h2 account_secdef_exec
 	probe "$1" K1 authenticated "SELECT count(*) FROM public.osionos_sessions"
 	probe "$1" K2 osionos_account_user "SELECT refresh_hash FROM public.osionos_sessions"

@@ -54,5 +54,26 @@
       "osionos_workspace_members"
     ],
     "why": "Target: PK Index Scan on osionos_pages.id + PK on osionos_workspaces.id + PK on osionos_workspace_members(workspace_id, user_id) for the embed. Today: same \u2014 all PK indexes exist. Budget 60ms for single-row fetch with embed."
+  },
+  "p1_directory_search_common": {
+    "p95_ms": 150,
+    "no_seq_scan": [
+      "osionos_profiles"
+    ],
+    "why": "Target: Index Scan on osionos_profiles_display_name_user_idx (display_name, user_id), walking it in order and stopping at LIMIT 200, with a nested loop to user_profiles and osionos_bridge_identities by user_id. P1-1 rebuilds the directory over osionos_profiles, whose own columns are the ones the view selects \u2014 no COALESCE, so the index applies. The term matches every seeded user, so the ordered walk is the cheap plan."
+  },
+  "p1_directory_search_rare": {
+    "p95_ms": 150,
+    "no_seq_scan": [
+      "osionos_profiles"
+    ],
+    "why": "Target: BitmapOr of Bitmap Index Scans on the trigram GIN indexes (display_name, username, headline) and the search_doc GIN index. The term matches two of the seeded users, so a btree walk would remove 4001 rows to find them: no_seq_scan alone is not enough, the plan has to be a GIN bitmap. Caveat: a trigram ILIKE needs at least 3 characters to use the index."
+  },
+  "p1_directory_by_ids": {
+    "p95_ms": 60,
+    "no_seq_scan": [
+      "osionos_profiles"
+    ],
+    "why": "Target: 50 Index Scans on the osionos_profiles primary key (user_id), one per id, joined to user_profiles and osionos_bridge_identities by their user_id indexes. The directory is a view over osionos_profiles now, so the lookup must not scan it."
   }
 }
