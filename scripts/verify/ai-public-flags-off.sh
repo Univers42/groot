@@ -16,7 +16,7 @@ REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO"
 
 json=$(
-	OSIONOS_AI_IMAGES=on OSIONOS_AI_PAT=on OSIONOS_AI_STT_URL=https://x \
+	OSIONOS_AI_IMAGES=on OSIONOS_AI_PAT=on OSIONOS_AI_STT_URL=https://x OSIONOS_AI_VLM_URL=http://vlm.invalid \
 	OSIONOS_MODERATION_ACTIONS=hold \
 	PUBLIC_ORIGIN=https://verify.invalid \
 	AUTH_LINK_SIGNING_KEY=verify-only \
@@ -47,6 +47,7 @@ svc='.services["osionos-ai"]'
 check "osionos-ai OSIONOS_AI_IMAGES is empty" "$svc.environment.OSIONOS_AI_IMAGES == \"\""
 check "osionos-ai OSIONOS_AI_PAT is empty" "$svc.environment.OSIONOS_AI_PAT == \"\""
 check "osionos-ai OSIONOS_AI_STT_URL is empty" "$svc.environment.OSIONOS_AI_STT_URL == \"\""
+check "osionos-ai OSIONOS_AI_VLM_URL is empty" "$svc.environment.OSIONOS_AI_VLM_URL == \"\""
 check "osionos-bridge OSIONOS_MODERATION_ACTIONS is log" ".services[\"osionos-bridge\"].environment.OSIONOS_MODERATION_ACTIONS == \"log\""
 check "osionos-ai OSIONOS_ALLOWED_ORIGIN is the app origin" "$svc.environment.OSIONOS_ALLOWED_ORIGIN == \"https://verify.invalid:8443\""
 check "osionos-ai upstream is OpenRouter" "$svc.environment.OSIONOS_AI_UPSTREAM_BASE_URL == \"https://openrouter.ai/api/v1\""
@@ -57,7 +58,7 @@ for s in osionos-ai osionos-ai-redis osionos-ai-embed osionos-ai-embed-bulk osio
 	check "$s is rendered" ".services[\"$s\"] != null"
 	check "$s has a memory limit" "(.services[\"$s\"].mem_limit // 0 | tonumber? // 0) > 0"
 done
-for s in osionos-ai-db osionos-ai-llm osionos-ai-stt osionos-ai-sd osionos-ai-guard; do
+for s in osionos-ai-db osionos-ai-llm osionos-ai-stt osionos-ai-sd osionos-ai-guard osionos-ai-vlm; do
 	check "$s is NOT rendered" ".services[\"$s\"] == null"
 done
 
