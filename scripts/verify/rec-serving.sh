@@ -368,8 +368,10 @@ check_1() {
 
 	# The champion: 16 factors, so the vectors are 16 real numbers padded to
 	# 64. It is promoted the way the factors file promotes a model.
-	run_sql "INSERT INTO public.ai_rec_models (algo, factors, regularization, alpha, iterations, events_used, trained_until, metrics, is_synthetic, code_sha)
-VALUES ('ials', 16, 0.1, 0.01, 10, 2000, now(), '{\"ndcg10\": 0.31}'::jsonb, false, 'e1e1e1e');" || {
+	run_sql "INSERT INTO public.ai_rec_models (algo, factors, regularization, alpha, iterations, events_used, trained_until, metrics, is_synthetic, code_sha, item_gram, event_weights)
+VALUES ('ials', 16, 0.1, 0.01, 10, 2000, now(), '{\"ndcg10\": 0.31}'::jsonb, false, 'e1e1e1e',
+        (SELECT array_agg(x::real) FROM generate_series(1, 256) x),
+        '{\"like\": 1.0, \"share\": 3.0}'::jsonb);" || {
 		note "the champion model failed"
 		return 1
 	}
@@ -444,6 +446,21 @@ INSERT INTO public.ai_events (ts, user_id, item_kind, item_id, workspace_id, eve
 	out="$(q "SELECT (public.ai_rec_user_context('${U_VEC}') -> 'model' ->> 'factors') = '16';")"
 	[ "${out}" = "t" ] || {
 		DETAIL="the context says another factor count: ${out:-nothing}"
+		return 1
+	}
+	out="$(q "SELECT jsonb_array_length(public.ai_rec_user_context('${U_VEC}') -> 'model' -> 'item_gram');")"
+	[ "${out}" = "256" ] || {
+		DETAIL="the item_gram has ${out:-no} number(s), expected 256"
+		return 1
+	}
+	out="$(q "SELECT (public.ai_rec_user_context('${U_VEC}') -> 'model' -> 'item_gram' -> 0) = '1'::jsonb AND (public.ai_rec_user_context('${U_VEC}') -> 'model' -> 'item_gram' -> 255) = '256'::jsonb;")"
+	[ "${out}" = "t" ] || {
+		DETAIL="the item_gram is not 1..256 in order"
+		return 1
+	}
+	out="$(q "SELECT (public.ai_rec_user_context('${U_VEC}') -> 'model' -> 'event_weights') = '{\"like\": 1.0, \"share\": 3.0}'::jsonb;")"
+	[ "${out}" = "t" ] || {
+		DETAIL="the event_weights are not the stored object: ${out:-nothing}"
 		return 1
 	}
 	out="$(q "SELECT jsonb_array_length(public.ai_rec_user_context('${U_VEC}') -> 'user_vector');")"
@@ -545,6 +562,18 @@ INSERT INTO public.ai_events (ts, user_id, item_kind, item_id, workspace_id, eve
 	out="$(q "SELECT jsonb_array_length(public.ai_rec_user_context('${U_NEW}', 0) -> 'recent');")"
 	[ "${out}" = "1" ] || {
 		DETAIL="p_recent 0 returned ${out:-no} item(s), expected the clamped 1"
+		return 1
+	}
+	# The CHECKs: a 255-number Gram on a 16-factor model is refused (23514),
+	# and a non-object event_weights is refused (23514).
+	st="$(state_of "INSERT INTO public.ai_rec_models (algo, factors, regularization, alpha, iterations, events_used, trained_until, metrics, is_synthetic, code_sha, item_gram) VALUES ('ials', 16, 0.1, 0.01, 10, 1, now(), '{\"ndcg10\": 0.1}'::jsonb, false, 'bad1bad1', (SELECT array_agg(x::real) FROM generate_series(1, 255) x));")"
+	[ "${st}" = "23514" ] || {
+		DETAIL="a 255-number Gram was refused with ${st:-no error}, expected 23514"
+		return 1
+	}
+	st="$(state_of "INSERT INTO public.ai_rec_models (algo, factors, regularization, alpha, iterations, events_used, trained_until, metrics, is_synthetic, code_sha, event_weights) VALUES ('ials', 16, 0.1, 0.01, 10, 1, now(), '{\"ndcg10\": 0.1}'::jsonb, false, 'bad2bad2', '[1]'::jsonb);")"
+	[ "${st}" = "23514" ] || {
+		DETAIL="event_weights '[1]' was refused with ${st:-no error}, expected 23514"
 		return 1
 	}
 	DESCR="the opted-out user gets nothing else, no champion gives {\"model\": null}, the new user gets its 3 items with their counts and their 16-number vectors"
@@ -730,6 +759,13 @@ check_5() {
 		left="$(q "SELECT to_regprocedure('${call}') IS NOT NULL;")"
 		[ "${left}" = "f" ] || {
 			DETAIL="${call} survived the rollback"
+			return 1
+		}
+	done
+	for col in item_gram event_weights; do
+		left="$(q "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='ai_rec_models' AND column_name='${col}');")"
+		[ "${left}" = "f" ] || {
+			DETAIL="column ${col} survived the rollback"
 			return 1
 		}
 	done
