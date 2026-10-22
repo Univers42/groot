@@ -466,12 +466,17 @@ CREATE TRIGGER osionos_profiles_on_user_insert AFTER INSERT ON public.users
 -- It never touches display_name (the identities row rewrites it at sign-in)
 -- and never raises: an invalid value keeps the old one, with a warning.
 --
--- IT COPIES ONLY WHAT CHANGED. The identities row is written by the bridge on
--- every sign-in and by the legacy path whenever one field moves; a copy of
--- everything would overwrite a value the user typed through the new account
--- route with an older value from the blob. So on an UPDATE only the fields
--- whose source moved are copied; on an INSERT everything is, because there is
--- nothing to compare against.
+-- IT COPIES ONLY WHAT CHANGED, FIELD BY FIELD. The identities row is written
+-- by the bridge on every sign-in and by the legacy path whenever one field
+-- moves; a copy of everything would overwrite a value the user typed through
+-- the new account route with an older value from the blob. So on an UPDATE
+-- each field of the blob is copied only when ITS OWN key moved: a write that
+-- moves the avatar key leaves the headline, the bio and the location alone.
+-- The avatar package (P0-6, scripts/migrate-legacy-avatars.mjs) rewrites the
+-- blob of every user with a data: avatar to drop it, so a copy of the whole
+-- blob would take the headline, the bio and the location of every such user
+-- back to what the blob held. On an INSERT everything is copied, because
+-- there is nothing to compare against.
 CREATE OR REPLACE FUNCTION public.osionos_profile_from_identity() RETURNS trigger
   LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
 DECLARE
@@ -479,35 +484,49 @@ DECLARE
   v_bio text;
   v_location text;
   v_username text;
-  v_profile_changed boolean;
+  v_headline_changed boolean;
+  v_bio_changed boolean;
+  v_location_changed boolean;
   v_optout_changed boolean;
   v_username_changed boolean;
 BEGIN
   IF TG_OP = 'INSERT' THEN
-    v_profile_changed := true;
+    v_headline_changed := true;
+    v_bio_changed := true;
+    v_location_changed := true;
     v_optout_changed := true;
     v_username_changed := true;
   ELSE
-    v_profile_changed := NEW.profile IS DISTINCT FROM OLD.profile;
+    v_headline_changed := NEW.profile->>'headline' IS DISTINCT FROM OLD.profile->>'headline';
+    v_bio_changed := NEW.profile->>'bio' IS DISTINCT FROM OLD.profile->>'bio';
+    v_location_changed := NEW.profile->>'location' IS DISTINCT FROM OLD.profile->>'location';
     v_optout_changed := NEW.directory_opt_out IS DISTINCT FROM OLD.directory_opt_out;
     v_username_changed := NEW.username IS DISTINCT FROM OLD.username;
   END IF;
-  IF v_profile_changed THEN
+  IF v_headline_changed OR v_bio_changed OR v_location_changed THEN
     BEGIN
-      v_headline := nullif(btrim(coalesce(NEW.profile->>'headline', '')), '');
-      IF v_headline IS NOT NULL AND (char_length(v_headline) > 200 OR v_headline ~ '[[:cntrl:]]') THEN
-        RAISE WARNING 'osionos: headline for % is invalid — the old one is kept', NEW.user_id;
-        v_headline := NULL;
+      -- A field whose key did not move keeps the profile's value: its variable
+      -- stays NULL and the coalesce below writes the old value back.
+      IF v_headline_changed THEN
+        v_headline := nullif(btrim(coalesce(NEW.profile->>'headline', '')), '');
+        IF v_headline IS NOT NULL AND (char_length(v_headline) > 200 OR v_headline ~ '[[:cntrl:]]') THEN
+          RAISE WARNING 'osionos: headline for % is invalid — the old one is kept', NEW.user_id;
+          v_headline := NULL;
+        END IF;
       END IF;
-      v_bio := nullif(coalesce(NEW.profile->>'bio', ''), '');
-      IF v_bio IS NOT NULL AND (char_length(v_bio) > 2000 OR v_bio ~ '[\x00-\x09\x0B-\x1F\x7F]') THEN
-        RAISE WARNING 'osionos: bio for % is invalid — the old one is kept', NEW.user_id;
-        v_bio := NULL;
+      IF v_bio_changed THEN
+        v_bio := nullif(coalesce(NEW.profile->>'bio', ''), '');
+        IF v_bio IS NOT NULL AND (char_length(v_bio) > 2000 OR v_bio ~ '[\x00-\x09\x0B-\x1F\x7F]') THEN
+          RAISE WARNING 'osionos: bio for % is invalid — the old one is kept', NEW.user_id;
+          v_bio := NULL;
+        END IF;
       END IF;
-      v_location := nullif(btrim(coalesce(NEW.profile->>'location', '')), '');
-      IF v_location IS NOT NULL AND (char_length(v_location) > 120 OR v_location ~ '[[:cntrl:]]') THEN
-        RAISE WARNING 'osionos: location for % is invalid — the old one is kept', NEW.user_id;
-        v_location := NULL;
+      IF v_location_changed THEN
+        v_location := nullif(btrim(coalesce(NEW.profile->>'location', '')), '');
+        IF v_location IS NOT NULL AND (char_length(v_location) > 120 OR v_location ~ '[[:cntrl:]]') THEN
+          RAISE WARNING 'osionos: location for % is invalid — the old one is kept', NEW.user_id;
+          v_location := NULL;
+        END IF;
       END IF;
       -- The row is left alone when the copy would not change it: an UPDATE
       -- that rewrites a row with the values it already holds still bumps the

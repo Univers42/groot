@@ -402,10 +402,27 @@ BEGIN
    WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
   PERFORM set_config('osionos.check.p1_sync_after_profile', coalesce(v_bio, '-'), true);
 END $$;
+-- The bio is typed again, and the identity write that follows moves another
+-- key of the blob (the avatar) and not the bio: the bio keeps the typed
+-- value. The avatar package rewrites that key for every user with a data:
+-- avatar, so a copy of the whole blob would take the bio back.
+UPDATE public.osionos_profiles SET bio = 'typed'
+ WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+UPDATE public.osionos_bridge_identities SET profile = jsonb_set(profile, '{avatar}', '"x"')
+ WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+DO $$
+DECLARE
+  v_bio text;
+BEGIN
+  SELECT bio INTO v_bio FROM public.osionos_profiles
+   WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  PERFORM set_config('osionos.check.p1_sync_after_avatar', coalesce(v_bio, '-'), true);
+END $$;
 SELECT 'p1_sync_changed_only',
        (CASE WHEN current_setting('osionos.check.p1_sync_after_username') = 'typed' THEN 0 ELSE 1 END)
-     + (CASE WHEN current_setting('osionos.check.p1_sync_after_profile') = 'legacy2' THEN 0 ELSE 1 END),
-       'a username write leaves the typed bio, a profile write copies it';
+     + (CASE WHEN current_setting('osionos.check.p1_sync_after_profile') = 'legacy2' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.p1_sync_after_avatar') = 'typed' THEN 0 ELSE 1 END),
+       'a username write and an avatar write leave the typed bio, a bio write copies it';
 ROLLBACK;
 
 -- p1_noop_no_bump: a write that changes nothing leaves the profile's version
