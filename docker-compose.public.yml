@@ -114,6 +114,14 @@ services:
       OSIONOS_AI_IMAGES: ""
       OSIONOS_AI_PAT: ""
       OSIONOS_AI_STT_URL: ""
+      # The platform connection on public: OpenRouter's free models only (R-C10), the key and
+      # the list from .env.public, never .env.local, so the dev stack keeps its local model.
+      OSIONOS_AI_UPSTREAM_BASE_URL: https://openrouter.ai/api/v1
+      OSIONOS_AI_UPSTREAM_API_KEY: ${OSIONOS_AI_PUBLIC_UPSTREAM_API_KEY:?set OSIONOS_AI_PUBLIC_UPSTREAM_API_KEY in .env.public (OpenRouter, free models only)}
+      OSIONOS_AI_PLATFORM_MODELS: ${OSIONOS_AI_PUBLIC_PLATFORM_MODELS:?set OSIONOS_AI_PUBLIC_PLATFORM_MODELS in .env.public (zero-price entries only)}
+      OSIONOS_AI_KEK: ${OSIONOS_AI_PUBLIC_KEK:?set OSIONOS_AI_PUBLIC_KEK in .env.public (32 random bytes, base64)}
+      OSIONOS_AI_USER_DAILY_MICROUSD: ${OSIONOS_AI_PUBLIC_USER_DAILY_MICROUSD:?set in .env.public}
+      OSIONOS_AI_PLATFORM_DAILY_MICROUSD: ${OSIONOS_AI_PUBLIC_PLATFORM_DAILY_MICROUSD:?set in .env.public}
     depends_on: !override
       osionos-ai-redis:
         condition: service_healthy
