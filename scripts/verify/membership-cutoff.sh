@@ -15,7 +15,7 @@ PGRST_CTN="ai-mc-pgrst"
 PG_IMAGE="${PG_IMAGE:-pgvector/pgvector:0.8.0-pg16}"
 PGRST_IMAGE="${PGRST_IMAGE:-postgrest/postgrest:v12.2.3}"
 PGRST_PORT="${PGRST_PORT:-33201}"
-JWT_SECRET="ai-mc-verify-secret-0123456789abcdefghij"
+JWT_SECRET="$(openssl rand -hex 32)"
 PV_SUBNET="${PV_SUBNET:-10.123.45.0/24}"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/membership-cutoff.XXXXXX")"
 # The models the token-trusting routes read, in the runner's order (ORDERED_FIRST
