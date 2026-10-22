@@ -395,8 +395,18 @@ services:
       # The price of one image on the ledger (C74): the local engine costs no
       # money, but an image that books 0 never reaches the cap of a day.
       OSIONOS_AI_IMAGE_MICROUSD: ${OSIONOS_AI_IMAGE_MICROUSD:-2000}
+      # The gate of the image prompt (C72), L1: the guard service.
+      OSIONOS_AI_PROMPT_GUARD_URL: http://osionos-ai-guard:8080
+      # The name the guard answers to (the alias of its llama-server).
+      OSIONOS_AI_PROMPT_GUARD_MODEL: guard
+      # The models of the output check (C73): the dir of the two classifiers.
+      OSIONOS_AI_IMAGE_CHECK_DIR: /image-check
     expose:
       - "4300"
+    # The two classifiers of the output check, read-only: the service loads
+    # them at boot and never writes to them.
+    volumes:
+      - osionos_ai_image_check:/image-check:ro
     networks:
       - default
       - mini-baas
@@ -405,6 +415,8 @@ services:
       - osionos-ai-stt-net
       # The image engine, the same way.
       - osionos-ai-sd-net
+      # The guard of the image prompt, the same way.
+      - osionos-ai-guard-net
     depends_on:
       osionos-ai-db:
         condition: service_healthy
@@ -725,6 +737,61 @@ services:
       - osionos-ai-sd-net
     restart: unless-stopped
     mem_limit: 8g
+
+  # osionos-ai-guard — the gate of the image prompt (M1): Qwen3Guard-Gen-0.6B
+  # on llama.cpp, the L1 of the prompt gate (devil C72). The service asks it
+  # about every prompt of an image (POST /v1/chat/completions) and the model
+  # answers "Safety: Safe" or refuses: a prompt that is not Safe never
+  # reaches the engine. Its own profile: the guard exists only where the
+  # images can be on.
+  #
+  # Measured on the CPU (osionos spikes/a1/results/safety/RESULTS.md): one
+  # call p50 658 ms, p95 1306 ms alone; four clients at once p95 5389 ms per
+  # call (400 calls in 220 s = 1.8 calls/s); a stopped server refuses the
+  # next call in 9.5 ms — the gate fails closed at once; 0 unparsed answers in
+  # 5713 calls. The model is pre-fetched once into `osionos_ai_guard_models`,
+  # the only step with egress:
+  #
+  #   docker run --rm -v osionos_ai_guard_models:/models curlimages/curl:8.11.1 sh -c '\
+  #     curl -fL -o /models/Qwen3Guard-Gen-0.6B.Q8_0.gguf \
+  #       https://huggingface.co/mradermacher/Qwen3Guard-Gen-0.6B-GGUF/resolve/2a59799e089fba3807d534a89c6b95bdf38ee76a/Qwen3Guard-Gen-0.6B.Q8_0.gguf'
+  #   sha256  Qwen3Guard-Gen-0.6B.Q8_0.gguf 127e8833aa16c6839613cd08df5409440302e8c61e90617914b3100f2141411a (804753920 bytes)
+  #
+  # The image is the one A1 measured (spikes/a1/guard-server.sh:34), pinned by
+  # its digest: a fresh pull never runs an unreviewed binary.
+  osionos-ai-guard:
+    image: ghcr.io/ggml-org/llama.cpp@sha256:ba384e66b3f3b6474dc0285ed44466b6f025c7106865d915f1fe5ae2a2da7411
+    profiles: ["ai-gpu-vulkan"]
+    command:
+      [
+        "--jinja",
+        "-c", "4096",
+        "-np", "4",
+        # Four threads, not the six of the spike: the host runs the other
+        # planes of the stack at the same time.
+        "-t", "4",
+        "-m", "/models/Qwen3Guard-Gen-0.6B.Q8_0.gguf",
+        "--alias", "guard",
+        "--host", "0.0.0.0",
+        "--port", "8080",
+      ]
+    volumes:
+      - osionos_ai_guard_models:/models:ro
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      start_interval: 10s
+      timeout: 5s
+      # The model is on the disk: the server only has to load it.
+      start_period: 60s
+      retries: 12
+    networks:
+      - osionos-ai-guard-net
+    restart: unless-stopped
+    mem_limit: 1536m
+    cpus: 4
 
   # osionos-ai-indexer — the index worker: the SAME image as the service (the
   # one the `osionos-ai` service above builds), but its entrypoint is the
@@ -1507,6 +1574,15 @@ volumes:
   # command of the osionos-ai-sd block.
   osionos_sd_models:
     name: osionos_sd_models
+  # The model of the prompt guard, pre-fetched by the one-shot command of the
+  # osionos-ai-guard block.
+  osionos_ai_guard_models:
+    name: osionos_ai_guard_models
+  # The models of the output check on the generated images (C73): filled by
+  # osionos `services/osionos-ai/scripts/fetch-image-check.sh <dir>`, which
+  # checks every byte against the lock of the spike (`spikes/a1/models.lock`).
+  osionos_ai_image_check:
+    name: osionos_ai_image_check
 
 networks:
   # The grobase backend stack's network (docker project `mini-baas`), declared
@@ -1527,6 +1603,11 @@ networks:
   # osionos-ai join it — the engine also serves /v1/images/edits, which the
   # service never calls (C72) and nothing else can reach.
   osionos-ai-sd-net:
+    internal: true
+  # The guard of the image prompt: `internal: true` = NO egress. ONLY
+  # osionos-ai-guard and osionos-ai join it — the model is pre-fetched into
+  # its volume, and the guard answers on this network and on no other.
+  osionos-ai-guard-net:
     internal: true
   # Internal-only network for the IDE code runner: `internal: true` = NO egress
   # (the Docker daemon enforces it without needing unprivileged user namespaces),
