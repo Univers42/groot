@@ -1,6 +1,6 @@
 #!/bin/sh
 # ai-public-flags-off.sh — release R-C4..R-C6, R-C5, R-C11: the public overlay
-# starts only the five AI services, forces every public-risky flag off, caps
+# starts only the six AI services, forces every public-risky flag off, caps
 # memory, publishes no port and never points at the dev osionos-ai-db.
 #
 # Renders the compose config (no container starts) with every flag exported as
@@ -23,6 +23,7 @@ json=$(
 	AUTH_TRUSTED_PROXY_HOPS=1 \
 	OSIONOS_ADMIN_EMAILS=none \
 	OSIONOS_AI_PUBLIC_DATABASE_URL=postgres://osionos_ai@mini-baas-postgres:5432/db \
+	OSML_PUBLIC_DATABASE_URL=postgres://osml_job@mini-baas-postgres:5432/db \
 	OSIONOS_AI_PUBLIC_UPSTREAM_API_KEY=verify-only OSIONOS_AI_PUBLIC_KEK=verify-only \
 	OSIONOS_AI_PUBLIC_PLATFORM_MODELS='[{"id":"m:free","label":"m","inputMicroUsdPerMTok":0,"outputMicroUsdPerMTok":0,"default":true}]' \
 	OSIONOS_AI_PUBLIC_USER_DAILY_MICROUSD=1 OSIONOS_AI_PUBLIC_PLATFORM_DAILY_MICROUSD=1 \
@@ -52,7 +53,7 @@ check "osionos-ai upstream is OpenRouter" "$svc.environment.OSIONOS_AI_UPSTREAM_
 check "osionos-ai publishes no port" "($svc.ports // []) | length == 0"
 check "osionos-app bundle points the assistant at the proxy" ".services[\"osionos-app\"].build.args.VITE_AI_URL == \"https://verify.invalid:10000\""
 
-for s in osionos-ai osionos-ai-redis osionos-ai-embed osionos-ai-embed-bulk osionos-ai-indexer; do
+for s in osionos-ai osionos-ai-redis osionos-ai-embed osionos-ai-embed-bulk osionos-ai-indexer osionos-ml-job; do
 	check "$s is rendered" ".services[\"$s\"] != null"
 	check "$s has a memory limit" "(.services[\"$s\"].mem_limit // 0 | tonumber? // 0) > 0"
 done
@@ -63,7 +64,16 @@ done
 for s in osionos-ai osionos-ai-indexer; do
 	check "$s database URL is not osionos-ai-db" ".services[\"$s\"].environment.OSIONOS_AI_DATABASE_URL | contains(\"osionos-ai-db\") | not"
 	check "$s joins mini-baas" ".services[\"$s\"].networks | has(\"mini-baas\")"
-	check "$s depends on nothing outside the five" "[(.services[\"$s\"].depends_on // {}) | keys[] | select(. == \"osionos-ai-db\" or . == \"osionos-ai-llm\" or . == \"osionos-ai-stt\")] | length == 0"
+	check "$s depends on nothing outside the six" "[(.services[\"$s\"].depends_on // {}) | keys[] | select(. == \"osionos-ai-db\" or . == \"osionos-ai-llm\" or . == \"osionos-ai-stt\")] | length == 0"
+done
+
+check "osionos-ml-job database URL is the public one" ".services[\"osionos-ml-job\"].environment.DATABASE_URL == \"postgres://osml_job@mini-baas-postgres:5432/db\""
+check "osionos-ml-job sends no dev password" ".services[\"osionos-ml-job\"].environment.PGPASSWORD == \"\""
+check "osionos-ml-job waits on no dev database" "(.services[\"osionos-ml-job\"].depends_on // {}) | length == 0"
+check "osionos-ml-job publishes no port" "(.services[\"osionos-ml-job\"].ports // []) | length == 0"
+
+for s in osionos-bridge osionos-ai osionos-ai-indexer osionos-ml-job; do
+	check "$s runs a :public image" ".services[\"$s\"].image | endswith(\":public\")"
 done
 
 if [ "$status" -eq 0 ]; then echo "PASS $n checks"; else echo "FAIL: see above ($n checks)"; fi

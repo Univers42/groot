@@ -840,6 +840,32 @@ services:
     restart: unless-stopped
     mem_limit: 512m
 
+  # The recommender's nightly training (M3, services/osionos-ml): the event log in,
+  # a candidate model out, promoted only when it is not worse than the champion.
+  # It sleeps until 03:30 UTC first, so a deploy or a restart never trains at once.
+  # Caveat: a night the container is down is skipped, not caught up; the next run
+  # trains on the whole window anyway.
+  osionos-ml-job:
+    image: ${OSIONOS_ML_IMAGE:-track-binocle/osionos-ml:local}
+    profiles: ["ai"]
+    build:
+      context: ./apps/osionos/app/services/osionos-ml
+    entrypoint: ["sh", "-c", "while :; do sleep $$(( (86400 + 12600 - $$(date -u +%s) % 86400) % 86400 + 1 )); python -m osml.job; done"]
+    environment:
+      # Role osml_job on the live database: LOGIN, member of service_role only,
+      # no grant of its own (services/osionos-ml/scripts/test-db.sh proves it is enough).
+      DATABASE_URL: '${OSML_DATABASE_URL:-postgresql://postgres@osionos-ai-db:5432/osionos_ai}'
+      PGPASSWORD: ${OSIONOS_AI_DB_PASSWORD:-osionos-ai-dev}
+    depends_on:
+      osionos-ai-db:
+        condition: service_healthy
+    networks:
+      - default
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+    mem_limit: 1g
+
   mail-bridge:
     image: ${MAIL_BRIDGE_IMAGE:-track-binocle/mail-bridge:local}
     profiles:
