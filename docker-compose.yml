@@ -668,12 +668,11 @@ services:
     networks:
       - osionos-ai-classify-net
     restart: unless-stopped
-    # RSS 3.38 GiB after the A1 encoder run (spikes/a1/results/encoders/RESULTS.md:35)
-    # + 30 % = 4.39 GiB, rounded up to 5g.
-    # Caveat: a host note records 6.4 GiB for this model during a long spike
-    # run; a batch heavier than the measured one can OOM-kill it at 5g (the
-    # restart policy brings it back). Raise it if `docker stats` says so.
-    mem_limit: 5g
+    # RSS 3.38 GiB after the A1 encoder run (spikes/a1/results/encoders/RESULTS.md:35),
+    # but 6.4 GiB was seen during a long spike run: the limit covers that peak.
+    # Caveat: both are A1 batch shapes; a heavier batch can still pass 7g, and
+    # the restart policy then brings it back. Raise it if `docker stats` says so.
+    mem_limit: 7g
     cpus: 3
 
   # osionos-ai-sentiment — the sentiment classifier of the jobs worker (M6):
