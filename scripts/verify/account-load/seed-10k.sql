@@ -5,7 +5,8 @@
 --
 -- Rows:
 --   10,000 auth.users + public.users + osionos_bridge_identities (with email_hash)
---   1,000 workspaces with 1–50 members (skewed: a few large ones, 200+ members)
+--   10,000 private workspaces (one per user, from osionos_bridge_upsert_workspace)
+--   1,000 shared workspaces with 1–50 members (skewed: a few large ones, 200+ members)
 --   100,000 pages
 --   20,000 connections
 --   50,000 feed shares
@@ -51,9 +52,7 @@ SELECT
 FROM generate_series(1, 10000) AS i;
 
 -- osionos_bridge_identities (from osionos-bridge-migration + osionos-social-migration)
--- Columns: provider, subject, user_id, email_hash, display_name, username, profile, private_workspace_id,
--- created_at, updated_at, last_seen_at, directory_opt_out, bio_embedding, search_doc
--- Note: search_doc is GENERATED ALWAYS STORED, bio_embedding is nullable
+-- private_workspace_id is set to a unique private workspace ID (see section 1b)
 INSERT INTO public.osionos_bridge_identities (
     provider, subject, user_id, email_hash, display_name, username, profile,
     private_workspace_id, created_at, updated_at, last_seen_at, directory_opt_out
@@ -66,7 +65,7 @@ SELECT
     'User ' || i,
     'user' || i,
     jsonb_build_object('avatar', 'https://example.com/avatar' || i || '.png', 'headline', 'Headline ' || i),
-    md5(('workspace-' || i::text))::uuid,
+    md5(('private-workspace-' || i::text))::uuid,
     '2024-01-01 00:00:00+00'::timestamptz + (i || ' minutes')::interval,
     '2024-01-01 00:00:00+00'::timestamptz + (i || ' minutes')::interval,
     '2024-01-01 00:00:00+00'::timestamptz + (i || ' minutes')::interval,
@@ -74,12 +73,44 @@ SELECT
 FROM generate_series(1, 10000) AS i;
 
 -- ============================================================
--- 2. WORKSPACES (1,000 workspaces with 1-50 members, skewed)
+-- 1b. PRIVATE WORKSPACES (one per user, from osionos_bridge_upsert_workspace)
+-- ============================================================
+-- Every signed-in user gets a private workspace:
+--   id = private_workspace_id from identity row
+--   owner_id = user_id
+--   name = display_name || '''s osionos'
+--   slug = lower(regexp_replace(name, '[^a-zA-Z0-9]+', '-', 'g')) trimmed + '-' + left(subject, 8)
+--   source = 'bridge'
+--   settings = {bridgeProvider, role, permissions}
+-- Plus one owner membership row per workspace.
+
+INSERT INTO public.osionos_workspaces (id, owner_id, name, slug, source, settings, created_at, updated_at)
+SELECT
+    md5(('private-workspace-' || i::text))::uuid,
+    md5(('user-' || i::text))::uuid,
+    'User ' || i || '''s osionos',
+    'user-' || i || '-s-osionos-' || substr(md5(('private-workspace-' || i::text)), 1, 8),
+    'bridge',
+    jsonb_build_object('bridgeProvider', 'prismatica', 'role', 'owner', 'permissions', ARRAY['create','read','update','delete','admin']),
+    '2024-01-01 00:00:00+00'::timestamptz + (i || ' minutes')::interval,
+    '2024-01-01 00:00:00+00'::timestamptz + (i || ' minutes')::interval
+FROM generate_series(1, 10000) AS i;
+
+INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role, permissions, created_at, updated_at)
+SELECT
+    md5(('private-workspace-' || i::text))::uuid,
+    md5(('user-' || i::text))::uuid,
+    'owner',
+    ARRAY['create','read','update','delete','admin'],
+    '2024-01-01 00:00:00+00'::timestamptz + (i || ' minutes')::interval,
+    '2024-01-01 00:00:00+00'::timestamptz + (i || ' minutes')::interval
+FROM generate_series(1, 10000) AS i;
+
+-- ============================================================
+-- 2. SHARED WORKSPACES (1,000 workspaces with 1-50 members, skewed)
 -- ============================================================
 
--- Create 1,000 workspaces
--- First 10 are "large" workspaces with 200+ members each
--- Remaining 990 have 1-50 members (deterministic distribution)
+-- Create 1,000 shared workspaces
 INSERT INTO public.osionos_workspaces (id, owner_id, name, slug, source, settings, created_at, updated_at)
 SELECT
     md5(('workspace-' || w::text))::uuid,
@@ -92,13 +123,7 @@ SELECT
     '2024-01-01 00:00:00+00'::timestamptz + (w || ' hours')::interval
 FROM generate_series(1, 1000) AS w;
 
--- Workspace members
--- For each workspace w, determine member count:
---   w <= 10: 200 + (w * 10) members (200-300 range for large workspaces)
---   w > 10: 1 + ((w * 7) % 50) members (1-50 range)
--- Members are selected deterministically using md5-based offsets
-
--- Large workspaces (1-10): 200-300 members each
+-- Workspace members for large workspaces (1-10): 200-300 members each
 INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role, permissions, created_at, updated_at)
 SELECT
     md5(('workspace-' || w::text))::uuid,
@@ -114,6 +139,19 @@ CROSS JOIN LATERAL (
     SELECT ((w * 1000 + u * 37) % 10000) + 1 AS user_idx
     FROM generate_series(0, 199 + w * 10) AS u
 ) members;
+
+-- Ensure user 1 (d6d77053-92bc-7af6-3332-8bea8c4c6904) belongs to all 10 large workspaces
+-- so coMemberPath has a caller in multiple workspaces.
+INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role, permissions, created_at, updated_at)
+SELECT
+    md5(('workspace-' || w::text))::uuid,
+    md5(('user-1'))::uuid,
+    'viewer',
+    ARRAY['read'],
+    '2024-01-01 00:00:00+00'::timestamptz + (w || ' hours')::interval,
+    '2024-01-01 00:00:00+00'::timestamptz + (w || ' hours')::interval
+FROM generate_series(1, 10) AS w
+ON CONFLICT (workspace_id, user_id) DO NOTHING;
 
 -- Small/medium workspaces (11-1000): 1-50 members each
 INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role, permissions, created_at, updated_at)
@@ -136,7 +174,7 @@ CROSS JOIN LATERAL (
 -- 3. PAGES (100,000 pages across workspaces)
 -- ============================================================
 
--- Distribute 100,000 pages across 1,000 workspaces (100 per workspace)
+-- Distribute 100,000 pages across 1,000 shared workspaces (100 per workspace)
 -- Pages have varying surface types and visibility
 INSERT INTO public.osionos_pages (
     id, workspace_id, parent_page_id, owner_id, title, icon, cover,
@@ -170,9 +208,6 @@ FROM generate_series(1, 100000) AS p;
 -- 4. CONNECTIONS (20,000 connections)
 -- ============================================================
 
--- Create 20,000 connections between users using deterministic unique pairs.
--- Use a pairing function that generates unique (requester, addressee) pairs.
--- Generate extra rows and use ON CONFLICT DO NOTHING to handle any collisions.
 INSERT INTO public.osionos_connections (
     requester_id, addressee_id, status, intro_message, source, created_at, responded_at
 )
@@ -201,7 +236,6 @@ ON CONFLICT (pair_key) DO NOTHING;
 -- 5. FEED SHARES (50,000 feed shares)
 -- ============================================================
 
--- 50,000 shares across pages and users
 INSERT INTO public.osionos_feed_shares (page_id, user_id, target, created_at)
 SELECT
     md5(('page-' || ((s * 17) % 100000 + 1)::text))::uuid,
@@ -209,18 +243,5 @@ SELECT
     CASE (s % 3) WHEN 0 THEN 'profile' WHEN 1 THEN 'link' ELSE 'dm' END,
     '2024-01-01 00:00:00+00'::timestamptz + (s || ' seconds')::interval
 FROM generate_series(1, 50000) AS s;
-
-
-
--- Verify counts
--- SELECT 'users' AS table_name, count(*) FROM auth.users
--- UNION ALL SELECT 'public.users', count(*) FROM public.users
--- UNION ALL SELECT 'user_profiles', count(*) FROM public.user_profiles
--- UNION ALL SELECT 'bridge_identities', count(*) FROM public.osionos_bridge_identities
--- UNION ALL SELECT 'workspaces', count(*) FROM public.osionos_workspaces
--- UNION ALL SELECT 'workspace_members', count(*) FROM public.osionos_workspace_members
--- UNION ALL SELECT 'pages', count(*) FROM public.osionos_pages
--- UNION ALL SELECT 'connections', count(*) FROM public.osionos_connections
--- UNION ALL SELECT 'feed_shares', count(*) FROM public.osionos_feed_shares;
 
 COMMIT;
