@@ -72,31 +72,36 @@ ALTER ROLE osionos_account_user NOLOGIN NOINHERIT NOBYPASSRLS NOSUPERUSER NOCREA
 
 -- A role that is a member of another role reaches that role's privileges through
 -- it; the account role must be a member of nothing.
+-- The grantor is named on purpose: REVOKE without GRANTED BY only removes the
+-- memberships the current role granted, so a membership handed out by a
+-- CREATEROLE role survived the plain revoke (with a WARNING) and the account
+-- role kept that role's privileges. GRANTED BY names the grantor, CASCADE
+-- removes what it granted in turn.
 DO $$
 DECLARE
   r record;
 BEGIN
   FOR r IN
-    SELECT g.rolname
+    SELECT g.rolname, m.grantor::regrole::text AS grantor
       FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid
      WHERE m.member = (SELECT oid FROM pg_roles WHERE rolname = 'osionos_account_user')
   LOOP
-    EXECUTE format('REVOKE %I FROM osionos_account_user', r.rolname);
+    EXECUTE format('REVOKE %I FROM osionos_account_user GRANTED BY %I CASCADE', r.rolname, r.grantor);
   END LOOP;
 END
 $$;
 
 -- PostgREST connects as `authenticator` and switches to the role the token names;
 -- without this membership the account role is unreachable over HTTP.
+-- WITH INHERIT FALSE, SET TRUE: the authenticator may SWITCH to the account role
+-- but must not INHERIT its privileges. The option lives on the membership, not
+-- on the role: db-bootstrap.psql alters an existing authenticator without
+-- NOINHERIT, and a membership granted to an INHERIT role would otherwise hand
+-- the account role's privileges to the authenticator itself.
 DO $$
-DECLARE
-  v_grant boolean := false;
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticator') THEN
-    SELECT NOT pg_has_role('authenticator', 'osionos_account_user', 'MEMBER') INTO v_grant;
-    IF v_grant THEN
-      GRANT osionos_account_user TO authenticator;
-    END IF;
+    GRANT osionos_account_user TO authenticator WITH INHERIT FALSE, SET TRUE;
   END IF;
 END
 $$;
@@ -170,6 +175,9 @@ GRANT ALL ON public.osionos_sessions TO service_role;
 -- Column grants, not a table grant: the role can never select=* (PostgREST
 -- answers 42501), so a caller names the columns it wants. A table-level grant
 -- here would hand the role ip_hash, refresh_hash and the user_id of every row.
+-- The REVOKE first: a table-level grant left over from an earlier run (or from
+-- a hand-made grant) survives a replay, and only this line takes it back.
+REVOKE ALL ON public.osionos_sessions FROM osionos_account_user;
 GRANT SELECT (id, created_at, expires_at, last_seen_at, auth_method, ip_prefix, user_agent, revoked_at, revoked_reason)
   ON public.osionos_sessions TO osionos_account_user;
 DROP POLICY IF EXISTS osionos_sessions_service_role_all ON public.osionos_sessions;
@@ -182,7 +190,22 @@ CREATE POLICY osionos_sessions_owner_read ON public.osionos_sessions FOR SELECT 
 -- The marker every account-plane table carries; the grants checks read it.
 COMMENT ON TABLE public.osionos_sessions IS 'osionos:account-plane';
 
--- 4. The audit columns the bridge guard writes.
+-- 4. The indexes today's queries miss. This step runs BEFORE step 5 on purpose:
+-- the sign-in function osionos_bridge_upsert_workspace locks the identities
+-- table and then the audit table (osionos-bridge-migration.sql:279,354), so
+-- taking the audit table's lock first deadlocks a concurrent sign-in
+-- (reproduced: 40P01). The identities lock comes first here, the audit lock
+-- second, and the two orders then agree.
+-- A replay takes the same locks: CREATE INDEX IF NOT EXISTS locks the table
+-- before it finds the index already there, so the order matters on a
+-- converged database too, not only on the first run.
+-- Caveat: a plain CREATE INDEX takes a write lock for its duration — fine at
+-- today's row counts (both tables are small), wrong for a table with millions of
+-- rows (build it CONCURRENTLY, outside this transaction).
+CREATE INDEX IF NOT EXISTS osionos_bridge_identities_email_hash_idx ON public.osionos_bridge_identities (email_hash);
+CREATE INDEX IF NOT EXISTS osionos_feed_shares_user_target_idx ON public.osionos_feed_shares (user_id, target, created_at DESC);
+
+-- 5. The audit columns the bridge guard writes.
 -- The ALTER runs only when one of the four columns is missing: a converged replay
 -- then takes no AccessExclusiveLock on a table the bridge writes on every sign-in.
 DO $$
@@ -201,22 +224,12 @@ $$;
 
 -- Same reason as the sessions table: the table now carries ip_hash and
 -- user_agent, and on an adopted database cdc-off may never have run.
+-- Caveat: DROP TRIGGER takes an AccessExclusiveLock on the table, so this line
+-- locks the audit table too — it belongs after the identities index, not before.
 DROP TRIGGER IF EXISTS osionos_bridge_audit_events_realtime_trigger ON public.osionos_bridge_audit_events;
 
 -- No foreign key on actor_id: an audit row must outlive the user it describes.
 CREATE INDEX IF NOT EXISTS osionos_bridge_audit_events_actor_idx ON public.osionos_bridge_audit_events (actor_id, created_at DESC) WHERE actor_id IS NOT NULL;
-
--- 5. The indexes today's queries miss. This step runs BEFORE step 4 on purpose:
--- the sign-in function osionos_bridge_upsert_workspace locks the identities
--- table and then the audit table (osionos-bridge-migration.sql:279,354), so
--- taking the audit table's lock first deadlocks a concurrent sign-in
--- (reproduced: 40P01). The identities index takes its lock before the audit
--- columns do, and both orders then agree.
--- Caveat: a plain CREATE INDEX takes a write lock for its duration — fine at
--- today's row counts (both tables are small), wrong for a table with millions of
--- rows (build it CONCURRENTLY, outside this transaction).
-CREATE INDEX IF NOT EXISTS osionos_bridge_identities_email_hash_idx ON public.osionos_bridge_identities (email_hash);
-CREATE INDEX IF NOT EXISTS osionos_feed_shares_user_target_idx ON public.osionos_feed_shares (user_id, target, created_at DESC);
 
 -- 6. PostgREST caches the schema; a new table and a new role are invisible to it
 -- until it reloads.
