@@ -725,6 +725,20 @@ ROLLBACK;
 -- short name is refused as a format error (22023) before any lock is taken,
 -- and would prove nothing.
 
+-- p2s_function_config: the function's own settings, pinned. The search_path
+-- and the 3 s lock_timeout are the contract's, and nothing else may be set on
+-- the function: a call without the lock_timeout holds a PostgREST pool
+-- connection for the whole duration of a boot replay.
+-- The comparison is on the WHOLE set, so a setting that is removed, added or
+-- changed is a failure.
+SELECT 'p2s_function_config',
+       (CASE WHEN (SELECT array_agg(t.c ORDER BY t.c)
+                     FROM pg_proc p CROSS JOIN LATERAL unnest(p.proconfig) AS t(c)
+                    WHERE p.oid = to_regprocedure('public.osionos_account_change_username(text)'))
+                  = ARRAY['lock_timeout=3s','search_path=pg_catalog, public']::text[]
+             THEN 0 ELSE 1 END),
+       'the function sets exactly search_path=pg_catalog, public and lock_timeout=3s';
+
 -- p2s_change, p2s_history_once, p2s_version_once and p2s_keeps_typed_fields:
 -- one change writes both tables, one history row and one version, and the
 -- typed fields survive it.
@@ -896,6 +910,81 @@ SELECT 'p2s_atomic',
        '23505, and the profile row, the identity row and the history rows are identical to before';
 ROLLBACK;
 
+-- p2s_taken_by_profile: the name is another user's PROFILE name — no identity
+-- holds it and no history row holds it either. It is the pre-P1-1 collision
+-- state that p2s_atomic sets up for the identities only.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+                                ('cccccccc-cccc-cccc-cccc-cccccccccccc');
+INSERT INTO public.osionos_profiles (user_id, display_name, username) VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'A', 'alice1');
+INSERT INTO public.osionos_bridge_identities (provider, subject, user_id, email_hash, display_name, username) VALUES
+  ('prismatica', '11111111-1111-1111-1111-111111111111',
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'p2staken', 'A', 'alice1');
+-- C's profile holds 'taken2'. C has NO identity row, so no identity holds the
+-- name, and the profile row was inserted directly, so no history row holds it
+-- either: only the profile's unique index stands in the way.
+INSERT INTO public.osionos_profiles (user_id, display_name, username) VALUES
+  ('cccccccc-cccc-cccc-cccc-cccccccccccc', 'C', 'taken2');
+DO $$
+DECLARE
+  v_profile jsonb;
+  v_identity jsonb;
+  v_history jsonb;
+BEGIN
+  SELECT to_jsonb(p) INTO v_profile FROM public.osionos_profiles p
+   WHERE p.user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  SELECT to_jsonb(i) INTO v_identity FROM public.osionos_bridge_identities i
+   WHERE i.user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  SELECT coalesce(jsonb_agg(to_jsonb(h) ORDER BY h.id), '[]'::jsonb) INTO v_history
+    FROM public.osionos_username_history h
+   WHERE h.user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  PERFORM set_config('osionos.check.p2s_taken_p0', coalesce(v_profile::text, '{}'), true);
+  PERFORM set_config('osionos.check.p2s_taken_i0', coalesce(v_identity::text, '{}'), true);
+  PERFORM set_config('osionos.check.p2s_taken_h0', coalesce(v_history::text, '[]'), true);
+END $$;
+SET LOCAL ROLE osionos_account_user;
+DO $$ BEGIN
+  PERFORM set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","aud":"osionos-account","role":"osionos_account_user"}', true);
+END $$;
+DO $$
+DECLARE
+  v_state text := '';
+BEGIN
+  BEGIN
+    PERFORM public.osionos_account_change_username('taken2');
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p2s_taken_state', v_state, true);
+END $$;
+RESET ROLE;
+DO $$
+DECLARE
+  v_profile jsonb;
+  v_identity jsonb;
+  v_history jsonb;
+BEGIN
+  SELECT to_jsonb(p) INTO v_profile FROM public.osionos_profiles p
+   WHERE p.user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  SELECT to_jsonb(i) INTO v_identity FROM public.osionos_bridge_identities i
+   WHERE i.user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  SELECT coalesce(jsonb_agg(to_jsonb(h) ORDER BY h.id), '[]'::jsonb) INTO v_history
+    FROM public.osionos_username_history h
+   WHERE h.user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  PERFORM set_config('osionos.check.p2s_taken_p1', coalesce(v_profile::text, '{}'), true);
+  PERFORM set_config('osionos.check.p2s_taken_i1', coalesce(v_identity::text, '{}'), true);
+  PERFORM set_config('osionos.check.p2s_taken_h1', coalesce(v_history::text, '[]'), true);
+END $$;
+SELECT 'p2s_taken_by_profile',
+       (CASE WHEN current_setting('osionos.check.p2s_taken_state') = '23505'
+              AND current_setting('osionos.check.p2s_taken_p0') = current_setting('osionos.check.p2s_taken_p1')
+              AND current_setting('osionos.check.p2s_taken_i0') = current_setting('osionos.check.p2s_taken_i1')
+              AND current_setting('osionos.check.p2s_taken_h0') = current_setting('osionos.check.p2s_taken_h1')
+             THEN 0 ELSE 1 END),
+       'the name is held by another profile: 23505, and nothing of the caller moved';
+ROLLBACK;
+
 -- p2s_hold: a name A released less than 90 days ago belongs to A. B is
 -- refused with 23505, A takes it back.
 BEGIN;
@@ -1039,7 +1128,8 @@ DECLARE
     '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","aud":"other-aud","role":"osionos_account_user"}',
     '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","aud":["osionos-account"],"role":"osionos_account_user"}',
     '{"sub":"AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA","aud":"osionos-account","role":"osionos_account_user"}',
-    '{"sub":"not-a-uuid","aud":"osionos-account","role":"osionos_account_user"}'
+    '{"sub":"not-a-uuid","aud":"osionos-account","role":"osionos_account_user"}',
+    '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","aud":"osionos-account","role":"authenticated"}'
   ];
   v_claim text;
   v_state text;
@@ -1065,7 +1155,7 @@ BEGIN
 END $$;
 RESET ROLE;
 SELECT 'p2s_no_uid', current_setting('osionos.check.p2s_nouid')::bigint,
-       'no claims, a wrong aud, an array aud, an upper-case sub and a malformed sub are all 42501 — measured: '
+       'no claims, a wrong aud, an array aud, an upper-case sub, a malformed sub and a wrong role are all 42501 — measured: '
        || current_setting('osionos.check.p2s_nouid_states');
 ROLLBACK;
 
