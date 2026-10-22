@@ -361,7 +361,10 @@ services:
       # The dev stack's own Postgres (the `osionos-ai-db` service below).
       # Point this at a real grobase Postgres in .env.local to get the real
       # pages and workspace members.
-      OSIONOS_AI_DATABASE_URL: '${OSIONOS_AI_DATABASE_URL:-postgres://postgres:${OSIONOS_AI_DB_PASSWORD:-osionos-ai-dev}@osionos-ai-db:5432/osionos_ai}'
+      # The dev password travels as PGPASSWORD, which node-postgres reads when the
+      # URL carries none, so no URL in this file holds a literal password.
+      OSIONOS_AI_DATABASE_URL: '${OSIONOS_AI_DATABASE_URL:-postgres://postgres@osionos-ai-db:5432/osionos_ai}'
+      PGPASSWORD: ${OSIONOS_AI_DB_PASSWORD:-osionos-ai-dev}
       # The dev stack's own Redis (the `osionos-ai-redis` service below).
       OSIONOS_AI_REDIS_URL: ${OSIONOS_AI_REDIS_URL:-redis://osionos-ai-redis:6379}
       # The upstream: the local llama.cpp by default, OpenRouter (or anything
@@ -803,7 +806,10 @@ services:
     environment:
       # The same database the service writes its conversations to: the chunks
       # and the queue live in the same Postgres.
-      OSIONOS_AI_DATABASE_URL: '${OSIONOS_AI_DATABASE_URL:-postgres://postgres:${OSIONOS_AI_DB_PASSWORD:-osionos-ai-dev}@osionos-ai-db:5432/osionos_ai}'
+      # The dev password travels as PGPASSWORD, which node-postgres reads when the
+      # URL carries none, so no URL in this file holds a literal password.
+      OSIONOS_AI_DATABASE_URL: '${OSIONOS_AI_DATABASE_URL:-postgres://postgres@osionos-ai-db:5432/osionos_ai}'
+      PGPASSWORD: ${OSIONOS_AI_DB_PASSWORD:-osionos-ai-dev}
       # The embedder it asks for the chunk embeddings: the BULK one, the second
       # embedder of the profile. The service asks the QUERY one for the query
       # embeddings of a retrieval (OSIONOS_AI_EMBED_URL), and the indexer
