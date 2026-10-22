@@ -89,13 +89,69 @@ services:
       # No IDE route ships in public: an empty secret makes the mint answer 404, an empty mode is off.
       OSIONOS_IDE_TOKEN_SECRET: ""
       OSIONOS_IDE_ACCESS: ""
+      # Moderation logs, never holds or removes, until the per-language precision floor (devil C83);
+      # the bridge reads it in scripts/bridge-moderation.mjs moderationMode().
+      OSIONOS_MODERATION_ACTIONS: "log"
 
   # Image generation stays off in public until the prompt gate and the output
   # gate exist (devil C70/C72/C73): environment: beats .env.local, so a stray
   # OSIONOS_AI_IMAGES=on there cannot turn it on. scripts/verify/ai-images-public-off.sh.
+  #
+  # The public AI set is five services (release verdict R-C4..R-C6, R-C11):
+  # osionos-ai, -redis, -embed, -embed-bulk, -indexer. The others of the `ai`
+  # profile move to a profile public never enables, so `--profile ai` starts
+  # only the five. scripts/verify/ai-public-flags-off.sh proves it.
   osionos-ai:
+    ports: !reset []
+    # The live (grobase) database, role osionos_ai: never the dev osionos-ai-db
+    # with its default password (R-C5). The grobase link relays Kong only, so the
+    # URL names the VM's tailnet-only TCP serve of its Postgres (runbook § Public mode).
+    # Caveat: every device of the tailnet reaches that port; the role's password is the gate.
+    # environment: beats env_file, so empty here means off.
     environment:
+      OSIONOS_AI_DATABASE_URL: ${OSIONOS_AI_PUBLIC_DATABASE_URL:?set OSIONOS_AI_PUBLIC_DATABASE_URL in .env.public (the live grobase DB, role osionos_ai)}
+      OSIONOS_ALLOWED_ORIGIN: ${PUBLIC_ORIGIN}:8443
       OSIONOS_AI_IMAGES: ""
+      OSIONOS_AI_PAT: ""
+      OSIONOS_AI_STT_URL: ""
+    depends_on: !override
+      osionos-ai-redis:
+        condition: service_healthy
+      osionos-ai-embed:
+        condition: service_started
+    mem_limit: 512m
+
+  osionos-ai-indexer:
+    environment:
+      OSIONOS_AI_DATABASE_URL: ${OSIONOS_AI_PUBLIC_DATABASE_URL:?set OSIONOS_AI_PUBLIC_DATABASE_URL in .env.public (the live grobase DB, role osionos_ai)}
+    networks: !override
+      - default
+      - mini-baas
+    depends_on: !override
+      osionos-ai-embed-bulk:
+        condition: service_healthy
+    mem_limit: 512m
+
+  osionos-ai-redis:
+    mem_limit: 128m
+
+  # Caveat: the caps are sized for the host's headroom, not measured under load
+  # (R-C6 asks for docker stats after startup). The bulk embedder gets fewer CPUs
+  # than the dev 5 so a backfill cannot starve the live app.
+  osionos-ai-embed:
+    mem_limit: 1536m
+
+  osionos-ai-embed-bulk:
+    mem_limit: 1536m
+    cpus: 2
+
+  # Not started on public: voice is off, the model is OpenRouter, the db is the live one.
+  osionos-ai-db:
+    profiles: !override ["ai-dev-only"]
+  osionos-ai-llm:
+    profiles: !override ["ai-dev-only"]
+  osionos-ai-stt:
+    profiles: !override ["ai-dev-only"]
 
   # Static previews for the apps node (second Funnel node). Prod target = nginx serving dist/, built
   # with every bridge/BaaS URL empty so the apps make no request outside their own origin. They
