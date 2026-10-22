@@ -144,6 +144,11 @@ indexer.
 ## Public mode
 
 `docker-compose.public.yml` mounts `infrastructure/tls/public.d/ai-public.conf` into the
-`:4000` vhost: 2 r/s per client, burst 10, a refused request is a 429. The bucket is global, not
-per visitor (behind Funnel every client arrives from tailscaled's loopback address) — the safe
-direction for a quota-backed upstream.
+`:4000` vhost: 2 r/s per client, burst 10, a refused request is a 429. The bucket is per real client: the zone is keyed on the LAST entry of
+`X-Forwarded-For` (`$ai_client`, `public.d/http-limits.conf`), which Funnel appends. A client
+that reaches `127.0.0.1:4000` directly could forge it; only the host can.
+
+Five AI services run on public (`osionos-ai`, `-redis`, `-embed`, `-embed-bulk`, `-indexer`); the
+db, llm and stt move to the never-enabled `ai-dev-only` profile. Start them with the public
+overlay and `--profile ai`, naming the five; `scripts/verify/ai-public-flags-off.sh` proves the
+flags, caps, ports and DB target.
