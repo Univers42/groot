@@ -31,10 +31,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS osionos_identities_username_uidx
   ON public.osionos_bridge_identities (lower(username)) WHERE username IS NOT NULL;
 CREATE INDEX IF NOT EXISTS osionos_identities_search_gin
   ON public.osionos_bridge_identities USING gin (search_doc);
-CREATE INDEX IF NOT EXISTS osionos_identities_name_trgm
-  ON public.osionos_bridge_identities USING gin (display_name gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS osionos_identities_username_trgm
-  ON public.osionos_bridge_identities USING gin (username gin_trgm_ops);
+-- The opclass is schema-qualified at run time: on the baas database pg_trgm lives in schema
+-- `auth`, not `public`, and an unqualified gin_trgm_ops fails at parse time there
+-- (rehearsal on a restored copy of the live database, 2026-10-22).
+DO $$
+DECLARE
+    ops TEXT;
+BEGIN
+    SELECT format('%I.gin_trgm_ops', n.nspname) INTO STRICT ops
+      FROM pg_opclass c
+      JOIN pg_namespace n ON n.oid = c.opcnamespace
+      JOIN pg_am a ON a.oid = c.opcmethod
+     WHERE c.opcname = 'gin_trgm_ops' AND a.amname = 'gin';
+    EXECUTE format('CREATE INDEX IF NOT EXISTS osionos_identities_name_trgm
+        ON public.osionos_bridge_identities USING gin (display_name %s)', ops);
+    EXECUTE format('CREATE INDEX IF NOT EXISTS osionos_identities_username_trgm
+        ON public.osionos_bridge_identities USING gin (username %s)', ops);
+END $$;
 -- hnsw needs no training data and tolerates incremental inserts (vs ivfflat).
 CREATE INDEX IF NOT EXISTS osionos_identities_embed_hnsw
   ON public.osionos_bridge_identities USING hnsw (bio_embedding vector_cosine_ops);

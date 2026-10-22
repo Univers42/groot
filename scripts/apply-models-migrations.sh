@@ -265,11 +265,12 @@ first_error() {
 # missing table `hook` and kept the file pending forever.
 # Caveat: a `--` inside a string literal before a CREATE TABLE on the same line
 # hides that table from --check (none in models/ today); apply mode is unaffected.
+# A table created through dynamic SQL (EXECUTE format(...)) is invisible to --check too.
 pending() {
 	awk '{ l = tolower($0); sub(/--.*/, "", l) }
-		match(l, /create table (if not exists )?(public\.)?[a-z_]+/) {
+		match(l, /create table (if not exists )?(public\.)?[a-z_][a-z0-9_]*/) {
 			t = substr(l, RSTART, RLENGTH)
-			sub(/.* /, "", t); sub(/public\./, "", t); print t
+			sub(/.* /, "", t); sub(/public\./, "", t); if (t != "public") print t
 		}' "$1" | sort -u | while IFS= read -r t; do
 		[ -n "${t}" ] || continue
 		hit="$(docker exec "${PG_CTN}" psql -U postgres -d "${PG_DB}" -tAc \
@@ -297,17 +298,22 @@ realtime_armed() {
 		2>/dev/null || echo "(query failed)"
 }
 
+# apply_one <file> [defer] — with `defer`, a failure is queued in ${deferred} for a retry
+# after the alphabetical pass instead of being reported.
 apply_one() {
 	f="$1"
 	base="$(basename "${f}")"
 	miss="$(pending "${f}")"
-	if psql_in <"${f}" >/dev/null 2>"${ERR_FILE}"; then
+	rc=0
+	psql_in <"${f}" >/dev/null 2>"${ERR_FILE}" || rc=$?
+	if [ "${rc}" -eq 0 ]; then
 		if [ -n "${miss}" ]; then
 			note "applied: ${base}"
 			applied=$((applied + 1))
 		fi
+	elif [ "${2:-}" = defer ]; then
+		deferred="${deferred} ${base}"
 	else
-		rc=$?
 		note "FAILED: ${base} — $(first_error "${ERR_FILE}" "${rc}")"
 		failed=$((failed + 1))
 	fi
@@ -353,7 +359,7 @@ main() {
 		exit 0
 	fi
 
-	applied=0 failed=0
+	applied=0 failed=0 deferred=""
 
 	for base in ${ORDERED_FIRST}; do
 		f="${MODELS_DIR}/${base}"
@@ -371,7 +377,21 @@ main() {
 		skipped "${base}" && continue
 		is_ordered "${base}" && continue
 		is_ordered_last "${base}" && continue
-		apply_one "${f}"
+		apply_one "${f}" defer
+	done
+	# A file that references a table a LATER file creates fails once in alphabetical order
+	# (osionos-rec-beacon indexes ai_events, which osionos-user-events creates): retry the
+	# failures until a round makes no progress, then report what still fails.
+	while [ -n "${deferred}" ]; do
+		left="${deferred}"
+		deferred=""
+		for base in ${left}; do
+			apply_one "${MODELS_DIR}/${base}" defer
+		done
+		[ "${deferred}" = "${left}" ] && break
+	done
+	for base in ${deferred}; do
+		apply_one "${MODELS_DIR}/${base}"
 	done
 
 	for base in ${ORDERED_LAST}; do
