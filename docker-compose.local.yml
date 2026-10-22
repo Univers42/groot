@@ -21,6 +21,9 @@ services:
       # The desktop renderer runs from the app:// origin.
       OSIONOS_APP_URL: app://osionos
       OSIONOS_ALLOWED_ORIGIN: app://osionos
+      # The lean edition has no mini-baas Redis; the bridge falls back to its
+      # bounded in-memory store.
+      OSIONOS_BRIDGE_REDIS_URL: ""
     # The lean local edition runs WITHOUT the mini-baas stack: detach from the
     # external mini-baas network (chat/feed realtime publishes + the perms
     # proxy degrade gracefully — chat/profile/feed persistence only needs the
