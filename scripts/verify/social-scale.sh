@@ -40,11 +40,17 @@
 #     b7  osionos_feed_page_counts answers the four numbers
 #     b8  a broken trigger is loud: an error outside the four caught SQLSTATEs
 #         aborts the join
-#     race  20 rounds of a join against a replay of the file: no deadlock
+#     b9  the 200/201 boundary: a join that brings a workspace to exactly 200
+#         members writes the edges, one that brings it to 201 writes none
+#     b10 two joins to the same workspace at the same time: the edge between
+#         the two newcomers exists (the advisory lock serialises the joins)
+#     race  20 rounds of a join against a replay of the file: no deadlock, and
+#         every leg's exit code is read (a leg that exits non-zero fails the
+#         run, a 55P03 lock timeout included)
 #
 # THE RESULT
 #   RESULT: <n> checks passed, <m> failed, <r> runs, <d> deadlocks (40P01),
-#           <t> lock timeouts (55P03)
+#           <t> lock timeouts (55P03), <l> leg failures
 #   Exit 0 when every check passed and no round deadlocked, 1 otherwise.
 #
 # Caveat: the file's own lock_timeout is 5 s, so a writer that holds a lock
@@ -87,6 +93,7 @@ passed=0
 failed=0
 deadlocks=0
 timeouts=0
+leg_failures=0
 
 # The fixtures. The ids are fixed so a failure is reproducible.
 WS3='0a5a0000-0000-4000-8000-000000000001'
@@ -104,14 +111,25 @@ H='0a5a0000-0000-4000-8000-000000000401'
 I='0a5a0000-0000-4000-8000-000000000402'
 WS201='0a5a0000-0000-4000-8000-000000000005'
 LOUD='0a5a0000-0000-4000-8000-000000000403'
+# The 200/201 boundary: a workspace of 199 members (the join brings it to
+# exactly 200) and a workspace of 200 members (the join brings it to 201).
+WSN200='0a5a0000-0000-4000-8000-000000000006'
+WSN201='0a5a0000-0000-4000-8000-000000000007'
+JOIN200='0a5a0000-0000-4000-8000-000000000404'
+JOIN201='0a5a0000-0000-4000-8000-000000000405'
+# The concurrent-join workspace: 150 members, so the trigger of a join has
+# enough work (149 edges) for the two joins to overlap.
+WSCONC='0a5a0000-0000-4000-8000-000000000008'
+CONCA='0a5a0000-0000-4000-8000-000000000501'
+CONCB='0a5a0000-0000-4000-8000-000000000502'
 OWNER='0a5a0000-0000-4000-8000-0000000000ff'
 
 note() { printf '[social-scale] %s\n' "$*" >&2; }
 pass() { passed=$((passed + 1)) && printf 'PASS %s %s\n' "$1" "${2:-}"; }
 fail() { failed=$((failed + 1)) && printf 'FAIL %s %s\n' "$1" "${2:-}"; }
 finish() {
-	printf 'RESULT: %s checks passed, %s failed, %s runs, %s deadlocks (40P01), %s lock timeouts (55P03)\n' \
-		"${passed}" "${failed}" "${ROUNDS}" "${deadlocks}" "${timeouts}"
+	printf 'RESULT: %s checks passed, %s failed, %s runs, %s deadlocks (40P01), %s lock timeouts (55P03), %s leg failures\n' \
+		"${passed}" "${failed}" "${ROUNDS}" "${deadlocks}" "${timeouts}" "${leg_failures}"
 	exit "$1"
 }
 cleanup() {
@@ -168,7 +186,10 @@ fixtures() {
 		('${WSTIE}', '${OWNER}', 'wstie', 'p05-wstie'),
 		('${WS2}', '${OWNER}', 'ws2', 'p05-ws2'),
 		('${WS1}', '${OWNER}', 'ws1', 'p05-ws1'),
-		('${WS201}', '${OWNER}', 'ws201', 'p05-ws201')
+		('${WS201}', '${OWNER}', 'ws201', 'p05-ws201'),
+		('${WSN200}', '${OWNER}', 'wsn200', 'p05-wsn200'),
+		('${WSN201}', '${OWNER}', 'wsn201', 'p05-wsn201'),
+		('${WSCONC}', '${OWNER}', 'wsconc', 'p05-wsconc')
 		ON CONFLICT (id) DO NOTHING" >/dev/null
 	# ws3: A joins first, B second (a day later), C joins after the trigger.
 	scalar "INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role, created_at) VALUES
@@ -190,6 +211,22 @@ fixtures() {
 	# skips it too, so it must hold no edge at all.
 	scalar "INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role)
 		SELECT '${WS201}', gen_random_uuid(), 'viewer' FROM generate_series(1, 201)" >/dev/null
+	# wsn200: 199 members — the join below brings it to EXACTLY 200, which is
+	# the last size that still gets the edges.
+	scalar "INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role)
+		SELECT '${WSN200}', gen_random_uuid(), 'viewer' FROM generate_series(1, 199)" >/dev/null
+	# wsn201: 200 members — the join below brings it to 201, which must get
+	# none.
+	scalar "INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role)
+		SELECT '${WSN201}', gen_random_uuid(), 'viewer' FROM generate_series(1, 200)" >/dev/null
+	# wsconc: 150 members, so the trigger of a join has 149 edges to write and
+	# the two concurrent joins overlap.
+	scalar "INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role)
+		SELECT '${WSCONC}', gen_random_uuid(), 'viewer' FROM generate_series(1, 150)" >/dev/null
+	# The barrier the two concurrent legs wait on. A SEQUENCE and not a table:
+	# nextval is not rolled back, so the second leg's number is visible to the
+	# first one while both are still inside their own transactions.
+	scalar "CREATE SEQUENCE IF NOT EXISTS public.p05_barrier_seq" >/dev/null
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -230,6 +267,12 @@ check_large_workspace() {
 		(SELECT user_id FROM public.osionos_workspace_members WHERE workspace_id = '${WS201}')
 		OR addressee_id IN
 		(SELECT user_id FROM public.osionos_workspace_members WHERE workspace_id = '${WS201}')")"
+	# An empty before-read is a failure, not a zero: "the workspace holds no
+	# edge" and "the read failed" must not look the same.
+	if [ -z "${before}" ]; then
+		fail b3 large_workspace_before_read "the before-read is empty — the count did not answer"
+		return 0
+	fi
 	scalar "INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role)
 		VALUES ('${WS201}', gen_random_uuid(), 'viewer')" >/dev/null
 	after="$(scalar "SELECT count(*) FROM public.osionos_connections WHERE requester_id IN
@@ -293,9 +336,7 @@ SQL
 # b6 — the backfill: the first apply pairs, the replay pairs nothing
 # ─────────────────────────────────────────────────────────────────────────────
 check_backfill() {
-	# The first apply: the trigger is created and the backfill runs. Three
-	# pairs are missing — (A,B), (D,E) and (F,G). The 201-member workspace is
-	# skipped, and ws1 holds a single member.
+	# The first apply: the trigger is created and the backfill runs.
 	if docker exec -i "${CTN}" psql -U "${PG_USER}" -d "${PG_DB}" -v ON_ERROR_STOP=1 -q \
 		>"${WORK}/first-apply.log" 2>&1 <"${SOCIAL_FILE}"
 	then
@@ -307,10 +348,20 @@ check_backfill() {
 	if [ "${rc}" -ne 0 ]; then
 		sed 's/^/  | /' "${WORK}/first-apply.log" >&2
 	fi
-	if grep -q 'backfill inserted 3 colleague edge' "${WORK}/first-apply.log"; then
-		pass b6 "backfill_count = 3"
+	# The expected count is computed from the fixtures: every pair of the members
+	# of every workspace of at most 200 members (the 201-member workspace is
+	# skipped). Hard-coding it would break every time a fixture changes.
+	expected="$(scalar "SELECT coalesce(sum(n * (n - 1) / 2), 0) FROM (
+		SELECT count(*) AS n
+		  FROM public.osionos_workspace_members
+		 WHERE workspace_id IN ('${WS3}', '${WSTIE}', '${WS2}', '${WS1}',
+		                         '${WSN200}', '${WSN201}', '${WSCONC}')
+		 GROUP BY workspace_id
+		HAVING count(*) <= 200) t")"
+	if grep -q "backfill inserted ${expected} colleague edge" "${WORK}/first-apply.log"; then
+		pass b6 "backfill_count = ${expected}"
 	else
-		fail b6 backfill_count "$(grep -o 'backfill inserted [0-9]* colleague edge(s)' "${WORK}/first-apply.log" || echo 'no notice')"
+		fail b6 backfill_count "expected ${expected} — $(grep -o 'backfill inserted [0-9]* colleague edge(s)' "${WORK}/first-apply.log" || echo 'no notice')"
 	fi
 	# The orientation: the requester is the member who joined later, and a tie
 	# is broken by the greater user_id.
@@ -321,6 +372,12 @@ check_backfill() {
 	check_eq b6 backfill_orientation 3 "${n}"
 	# The replay: the guard sees the trigger and skips the backfill.
 	before="$(scalar "SELECT count(*) FROM public.osionos_connections")"
+	# An empty before-read is a failure: "the replay inserted nothing" and
+	# "the count did not answer" must not look the same.
+	if [ -z "${before}" ]; then
+		fail b6 replay_before_read "the before-read is empty — the count did not answer"
+		return 0
+	fi
 	if docker exec -i "${CTN}" psql -U "${PG_USER}" -d "${PG_DB}" -v ON_ERROR_STOP=1 -q \
 		>"${WORK}/replay.log" 2>&1 <"${SOCIAL_FILE}"
 	then
@@ -418,6 +475,82 @@ SQL
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# b9 — the 200/201 boundary: a join that brings a workspace to exactly 200
+#      members writes the edges, one that brings it to 201 writes none
+# ─────────────────────────────────────────────────────────────────────────────
+check_boundary() {
+	# The 199-member workspace: the join makes it 200, which is the last size
+	# the trigger still pairs.
+	scalar "INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role)
+		VALUES ('${WSN200}', '${JOIN200}', 'viewer')" >/dev/null
+	n="$(scalar "SELECT count(*) FROM public.osionos_connections
+		WHERE requester_id = '${JOIN200}'")"
+	check_eq b9 edges_at_200 199 "${n}"
+	# The 200-member workspace: the join makes it 201, which is past the cap.
+	scalar "INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role)
+		VALUES ('${WSN201}', '${JOIN201}', 'viewer')" >/dev/null
+	n="$(scalar "SELECT count(*) FROM public.osionos_connections
+		WHERE requester_id = '${JOIN201}'")"
+	check_eq b9 no_edges_at_201 0 "${n}"
+	n="$(scalar "SELECT count(*) FROM public.osionos_workspace_members
+		WHERE workspace_id = '${WSN201}'")"
+	check_eq b9 the_workspace_holds_201 201 "${n}"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# b10 — two joins to the same workspace at the same time: the edge between the
+#      two newcomers must exist
+# ─────────────────────────────────────────────────────────────────────────────
+# Both legs wait on the same barrier (a sequence: nextval is not rolled back),
+# so both are inside their own transaction before either inserts. Under READ
+# COMMITTED neither trigger can see the other's uncommitted member row, so
+# without the advisory lock neither writes the edge between the two newcomers.
+# The legs are released together by the barrier, not by a sleep: a sleep
+# leaves the race to the clock.
+check_concurrent_joins() {
+	leg() {
+		user="$1"
+		out="$2"
+		docker exec -i "${CTN}" psql -U "${PG_USER}" -d "${PG_DB}" -v ON_ERROR_STOP=1 -q \
+			>"${out}.out" 2>"${out}.err" <<SQL
+BEGIN;
+SELECT nextval('public.p05_barrier_seq');
+DO \$\$
+BEGIN
+  WHILE (SELECT last_value FROM public.p05_barrier_seq) < 2 LOOP
+    PERFORM pg_sleep(0.005);
+  END LOOP;
+END
+\$\$;
+INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role)
+VALUES ('${WSCONC}', '${user}', 'viewer');
+COMMIT;
+SQL
+	}
+	leg "${CONCA}" "${WORK}/conc-a" &
+	pid_a=$!
+	leg "${CONCB}" "${WORK}/conc-b" &
+	pid_b=$!
+	if wait "${pid_a}"; then rc_a=0; else rc_a=$?; fi
+	if wait "${pid_b}"; then rc_b=0; else rc_b=$?; fi
+	check_eq b10 both_legs_succeeded 0 "${rc_a}"
+	check_eq b10 both_legs_succeeded_2 0 "${rc_b}"
+	if [ "${rc_a}" -ne 0 ]; then
+		sed 's/^/  | /' "${WORK}/conc-a.err" >&2
+	fi
+	if [ "${rc_b}" -ne 0 ]; then
+		sed 's/^/  | /' "${WORK}/conc-b.err" >&2
+	fi
+	n="$(scalar "SELECT count(*) FROM public.osionos_connections
+		WHERE (requester_id = '${CONCA}' AND addressee_id = '${CONCB}')
+		   OR (requester_id = '${CONCB}' AND addressee_id = '${CONCA}')")"
+	check_eq b10 the_edge_between_the_two_newcomers 1 "${n}"
+	n="$(scalar "SELECT count(*) FROM public.osionos_workspace_members
+		WHERE workspace_id = '${WSCONC}' AND user_id IN ('${CONCA}', '${CONCB}')")"
+	check_eq b10 both_joined 2 "${n}"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # the race: a join against a replay of the file
 # ─────────────────────────────────────────────────────────────────────────────
 round() {
@@ -431,17 +564,30 @@ INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role)
 VALUES ('${WS1}', gen_random_uuid(), 'viewer');
 SQL
 	join_pid=$!
-	wait "${replay_pid}" || true
-	wait "${join_pid}" || true
-	for f in "${WORK}/replay-${n}.err" "${WORK}/join-${n}.err"; do
+	# The exit codes are the verdict, the stderr only names the cause: a leg
+	# that exits non-zero FAILED, whatever it printed.
+	if wait "${replay_pid}"; then replay_rc=0; else replay_rc=$?; fi
+	if wait "${join_pid}"; then join_rc=0; else join_rc=$?; fi
+	for name in replay join; do
+		if [ "${name}" = "replay" ]; then rc="${replay_rc}"; else rc="${join_rc}"; fi
+		f="${WORK}/${name}-${n}.err"
 		if grep -q '40P01\|deadlock detected' "${f}" 2>/dev/null; then
 			deadlocks=$((deadlocks + 1))
-			note "round ${n}: DEADLOCK in $(basename "${f}")"
+			note "round ${n}: DEADLOCK in ${name}"
 			sed 's/^/  | /' "${f}" >&2
+			fail race "round ${n}: the ${name} leg deadlocked"
+			continue
 		fi
 		if grep -q '55P03\|lock timeout' "${f}" 2>/dev/null; then
 			timeouts=$((timeouts + 1))
-			note "round ${n}: LOCK TIMEOUT in $(basename "${f}")"
+			note "round ${n}: LOCK TIMEOUT in ${name}"
+			sed 's/^/  | /' "${f}" >&2
+			fail race "round ${n}: the ${name} leg hit the lock timeout"
+			continue
+		fi
+		if [ "${rc}" -ne 0 ]; then
+			leg_failures=$((leg_failures + 1))
+			fail race "round ${n}: the ${name} leg exited ${rc} — $(head -1 "${f}" | cut -c1-120)"
 			sed 's/^/  | /' "${f}" >&2
 		fi
 	done
@@ -499,6 +645,8 @@ main() {
 	check_blocked_pair
 	check_failing_insert
 	check_loud_trigger
+	check_boundary
+	check_concurrent_joins
 	check_feed_counts
 	i=0
 	while [ "${i}" -lt "${ROUNDS}" ]; do

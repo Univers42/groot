@@ -63,6 +63,21 @@
 --
 -- Idempotent: a second run creates no trigger, no backfill row and no grant.
 -- (check g of scripts/verify/models-grants.sh)
+--
+-- THE BACKFILL, MEASURED (2026-10-22)
+--   On a database seeded with scripts/verify/account-load/seed-10k.sql — the
+--   account-load fixture, with THIS file held back from the runner so the
+--   trigger and the backfill do not run yet — the seed leaves 10 990 workspaces
+--   of at most 200 members, 36 245 members in them and 437 905 candidate
+--   pairs. The backfill statement was copied out of this file and timed on its
+--   own:
+--     sed -n '/-- BACKFILL STATEMENT/,/ON CONFLICT (pair_key) DO NOTHING;/p' \
+--       models/osionos-social-scale-migration.sql | sed '1d' > /tmp/backfill.sql
+--     psql "$ACC" -v ON_ERROR_STOP=1 -c '\timing on' -f /tmp/backfill.sql
+--   It took 3 913 ms and inserted 10 620 rows (the other pairs already had an
+--   edge). That is how long the SHARE ROW EXCLUSIVE lock below is held: under
+--   the 30 s that would ask for a per-workspace batching, so the backfill
+--   stays ONE statement.
 
 BEGIN;
 
@@ -73,6 +88,15 @@ BEGIN;
 -- rather than queueing every join behind it.
 SET LOCAL lock_timeout = '5s';
 
+-- Caveat: the statement_timeout bounds the BACKFILL, not the whole file. The
+-- backfill took 3 913 ms on the 10K seed (the header says how that was
+-- measured) and it is quadratic per workspace, so a database big enough to
+-- need more than 30 s never boots past this file: the boot fails loudly
+-- instead of holding both tables against every join for minutes, and the next
+-- boot retries it. Raising the timeout is the fix; the Caveat on the lock
+-- below says what the hold costs meanwhile.
+SET LOCAL statement_timeout = '30s';
+
 -- The trigger makes a join take public.osionos_workspace_members and then
 -- public.osionos_connections. This replay takes the two in the SAME order, so a
 -- replay and a join can never deadlock (40P01): whoever holds the members table
@@ -80,7 +104,8 @@ SET LOCAL lock_timeout = '5s';
 -- SHARE ROW EXCLUSIVE blocks the writes the trigger does (RowExclusive) for the
 -- duration of the backfill.
 -- Caveat: the lock is held for the whole file, so a long backfill holds both
--- tables against every join for that long.
+-- tables against every join for that long — 3.9 s on the 10K seed, and the
+-- statement_timeout above is what stops it from being minutes.
 LOCK TABLE public.osionos_workspace_members, public.osionos_connections IN SHARE ROW EXCLUSIVE MODE;
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -101,6 +126,20 @@ BEGIN
   -- failures an edge insert can have. Anything else propagates: a broken trigger
   -- must be loud, not silent forever.
   BEGIN
+    -- Two joins to the SAME workspace that commit together cannot see each
+    -- other's member row, so neither of them writes the edge between the two
+    -- newcomers. The advisory lock serialises the joins of one workspace: the
+    -- second one waits for the first to commit, and its next statement then
+    -- sees the committed row.
+    -- The isolation-level assumption: READ COMMITTED — the lock is released at
+    -- the end of the transaction, and every statement below takes a fresh
+    -- snapshot, so the count and the peers are read AFTER the other join
+    -- committed.
+    -- Caveat: the lock is held to the end of the transaction, and a
+    -- transaction that joins two workspaces takes the two locks in whatever
+    -- order it joins them — two such transactions in opposite orders can
+    -- deadlock (40P01), which the exception block does not catch.
+    PERFORM pg_advisory_xact_lock(hashtext('osionos_colleague_edges'), hashtext(NEW.workspace_id::text));
     -- The member count is taken INSIDE the trigger, so the threshold is the
     -- workspace's size at join time. NEW is already in the table (AFTER INSERT),
     -- so the count includes the member who just joined and one join inserts at
@@ -134,6 +173,11 @@ END;
 $fn$;
 
 REVOKE ALL ON FUNCTION public.osionos_colleague_edges_on_join() FROM PUBLIC;
+-- The explicit revokes: REVOKE … FROM PUBLIC removes the default EXECUTE
+-- every function carries, but a role that got EXECUTE through an
+-- ALTER DEFAULT PRIVILEGES … GRANT EXECUTE ON FUNCTIONS keeps it, so the two
+-- roles that must never reach this function are named one by one.
+REVOKE ALL ON FUNCTION public.osionos_colleague_edges_on_join() FROM anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.osionos_colleague_edges_on_join() TO service_role;
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -167,9 +211,12 @@ BEGIN
     -- ON CONFLICT (pair_key) DO NOTHING is what makes a replay insert nothing:
     -- a pair that already has an edge keeps it, whatever its status or its
     -- direction.
-    -- Caveat: the backfill is quadratic per workspace. A database with 1 000
-    -- workspaces of 200 members inserts about 20 million rows; it runs once,
-    -- on the boot that creates the trigger, and the NOTICE says how many.
+    -- Caveat: the backfill is quadratic per workspace. The 10K seed alone
+    -- leaves 437 905 candidate pairs, and a database with 1 000 workspaces of
+    -- 200 members would insert about 20 million rows; it runs once, on the
+    -- boot that creates the trigger, and the NOTICE says how many.
+    -- BACKFILL STATEMENT — the header's measurement copies this block
+    -- verbatim (the sed line is in the header); it is one statement.
     WITH small_workspaces AS (
       SELECT workspace_id
         FROM public.osionos_workspace_members
@@ -259,6 +306,9 @@ DO $do$
 BEGIN
   IF to_regprocedure('public.osionos_feed_page_counts(uuid, uuid)') IS NOT NULL THEN
     EXECUTE 'REVOKE ALL ON FUNCTION public.osionos_feed_page_counts(uuid, uuid) FROM PUBLIC';
+    -- The explicit revokes, for the same reason as the trigger function's: a
+    -- default privilege would survive the PUBLIC revoke.
+    EXECUTE 'REVOKE ALL ON FUNCTION public.osionos_feed_page_counts(uuid, uuid) FROM anon, authenticated';
     EXECUTE 'GRANT EXECUTE ON FUNCTION public.osionos_feed_page_counts(uuid, uuid) TO service_role';
   END IF;
 END
