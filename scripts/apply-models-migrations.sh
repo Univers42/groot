@@ -144,12 +144,35 @@
 #       extension exists before the alphabetical pass whatever the name says.
 #       The file says so in its own header.
 #
+#   osionos-rec-serving-migration.sql (the two reads that serve the champion:
+#       a user's context for the fold-in, and the champion's nearest items
+#       through the HNSW index) is in the alphabetical pass and sorts AFTER
+#       osionos-rec-factors-migration.sql ("factors" < "serving"). That order
+#       HOLDS, and it is a correctness fact, not a style choice: the query
+#       behind ai_rec_nearest is a plain SQL function, and a SQL function's
+#       body is VALIDATED when it is created, so the factor tables have to
+#       exist when this file is applied. The alphabetical pass applies the
+#       factors file first, so they do.
+#
+#       It sorts BEFORE osionos-user-events-migration.sql ("serving" <
+#       "user"), and that order is fine ONLY because the events tables are
+#       read from PL/pgSQL, which resolves a relation at CALL time and not at
+#       creation time: ai_rec_user_context reads public.ai_events and
+#       public.ai_personalization_settings when it is called, never when it is
+#       created. The runner applies both files in the same boot, so the tables
+#       are there before the first call. It is the same trick the events file
+#       uses in reverse, where ai_erase_user() resolves ai_rec_erase_user() at
+#       CALL time. The file says so in its own header, and
+#       scripts/verify/rec-serving.sh proves it: it applies the serving file
+#       twice on a database that has the factors file and NOT the events file.
+#
 #   osionos-service-role-only-migration.sql runs LAST (ORDERED_LAST), after
 #   everything: it revokes what earlier files and older boots granted. Its
 #   sweep matches the osionos\_% NAME PATTERN, so the ai\_% relations are
-#   outside it: ai_events, ai_jobs, ai_rec_models, ai_rec_item_factors and
-#   ai_rec_user_factors close themselves with their own REVOKE, in their own
-#   file, on every replay. There is nothing to add to that file.
+#   outside it: ai_events, ai_jobs, ai_rec_models, ai_rec_item_factors,
+#   ai_rec_user_factors and the ai_rec_* serving functions close themselves
+#   with their own REVOKE, in their own file, on every replay. There is
+#   nothing to add to that file.
 #   users-pii-grants-migration.sql runs after it, last of all: it fixes the
 #   public.users column grants (no anon email, no password_hash for anyone).
 #   apply-models.sh runs it last too, by name (GRANTS_LAST), not by glob collation.
