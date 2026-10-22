@@ -219,6 +219,9 @@ CROSS JOIN LATERAL (VALUES (1), (100), (1000), (5000), (9999)) AS v(u)
 WHERE idx = 1;
 SQL
 
+	# Run self-test for has_seq_scan_on
+	self_test_has_seq_scan_on || die "self-test" "has_seq_scan_on" "self-test failed"
+
 	# Split queries.sql into individual query files
 	mkdir -p "${WORK}/queries"
 	awk -v work="${WORK}/queries" '
