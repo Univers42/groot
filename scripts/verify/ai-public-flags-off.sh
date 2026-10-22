@@ -72,5 +72,9 @@ check "osionos-ml-job sends no dev password" ".services[\"osionos-ml-job\"].envi
 check "osionos-ml-job waits on no dev database" "(.services[\"osionos-ml-job\"].depends_on // {}) | length == 0"
 check "osionos-ml-job publishes no port" "(.services[\"osionos-ml-job\"].ports // []) | length == 0"
 
+for s in osionos-bridge osionos-ai osionos-ai-indexer osionos-ml-job; do
+	check "$s runs a :public image" ".services[\"$s\"].image | endswith(\":public\")"
+done
+
 if [ "$status" -eq 0 ]; then echo "PASS $n checks"; else echo "FAIL: see above ($n checks)"; fi
 exit "$status"
