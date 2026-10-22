@@ -41,16 +41,18 @@
   "workspace_members_of_large_workspace": {
     "p95_ms": 60,
     "no_seq_scan": [
-      "osionos_workspace_members"
+      "osionos_workspace_members",
+      "osionos_workspaces"
     ],
-    "why": "Target: coMemberPath shape \u2014 anchor on user_id (osionos_workspace_members_user_idx) joining workspaces (PK) and their other members (PK on workspace_id, user_id). osionos_workspaces Seq Scan is a Hash Join build side on a small lookup table, expected. Today: same \u2014 indexes exist. Budget 60ms for co-member read on the caller workspaces."
+    "why": "Target: coMemberPath shape \u2014 anchor on user_id (osionos_workspace_members_user_idx) joining workspaces (PK) and their other members (PK on workspace_id, user_id). Today: same \u2014 indexes exist. Budget 60ms for co-member read on the caller workspaces."
   },
   "pages_of_workspace": {
     "p95_ms": 60,
     "no_seq_scan": [
       "osionos_pages",
+      "osionos_workspaces",
       "osionos_workspace_members"
     ],
-    "why": "Target: PK Index Scan on osionos_pages.id + PK on osionos_workspaces.id + PK on osionos_workspace_members(workspace_id, user_id) for the embed. The osionos_workspaces Seq Scan is a Hash Join build side on a small (1K-row) lookup table, expected. Today: same \u2014 all PK indexes exist. Budget 60ms for single-row fetch with embed."
+    "why": "Target: PK Index Scan on osionos_pages.id + PK on osionos_workspaces.id + PK on osionos_workspace_members(workspace_id, user_id) for the embed. Today: same \u2014 all PK indexes exist. Budget 60ms for single-row fetch with embed."
   }
 }
