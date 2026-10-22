@@ -4,7 +4,6 @@
 # WHY: Separated to keep each file ≤300 lines. Handles EXPLAIN ANALYZE runs,
 # percentile computation, seq-scan detection, pass/fail, JSON output.
 # Ponytail: small, no deps beyond POSIX sh + awk + python3.
-
 # Compute p50/p95 nearest-rank on sorted numeric values.
 # Input: file with one float ms per line from EXPLAIN JSON "Execution Time".
 # Output: "p50 p95" with 2 decimals. Nearest-rank: p = sorted[ceil(q/100*n)-1].
@@ -25,7 +24,6 @@ percentiles() {
 			printf "%.2f %.2f\n", a[p50_idx], a[p95_idx]
 		}' "$1"
 }
-
 # Extract all relation names with Seq Scan or Parallel Seq Scan in the plan.
 # Input: plan JSON from EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON).
 # Output: comma-separated relation names, or "none".
@@ -59,14 +57,12 @@ except Exception:
     print('parse_error')
 "
 }
-
 # Check if a plan JSON contains a Seq Scan on any of the given tables.
 # Returns 0 if found, 1 otherwise.
 # Usage: echo <plan_json> | has_seq_scan_on <table>...
 has_seq_scan_on() {
 	python3 -c "
 import sys, json
-
 def find_seq_scan_on(obj, target_tables):
     if isinstance(obj, dict):
         if obj.get('Node Type') in ('Seq Scan', 'Parallel Seq Scan'):
@@ -81,7 +77,6 @@ def find_seq_scan_on(obj, target_tables):
             if find_seq_scan_on(item, target_tables):
                 return True
     return False
-
 try:
     lines = sys.stdin.read().strip().split('\n')
     json_lines = [l.rstrip(' +') for l in lines if l.strip() and not l.strip().startswith('-') and 'QUERY PLAN' not in l and not all(c == '-' for c in l.strip())]
@@ -103,7 +98,6 @@ except Exception:
     sys.exit(1)
 " "$@" 2>/dev/null
 }
-
 # Run a single query RUNS times, collect times and seq-scan info.
 # Inputs: query_file, runs, budget_ms, seq_scan_tables (space-separated)
 # Outputs: writes times to times_file, seq_scans to seq_scans_file, budgeted scans to budgeted_flag
@@ -148,7 +142,6 @@ HEREDOC
 		fi
 	done
 }
-
 # Determine pass/fail and print result line.
 # Inputs: id, p50, p95, seq_scans_file, budget_ms, budgeted_scan_flag
 # Returns: 0 for pass, 1 for fail
@@ -182,7 +175,6 @@ evaluate_query() {
 		return 1
 	fi
 }
-
 # Build JSON output for all queries.
 # Inputs: work_dir, runs, seed_time, repo_root, image, git_sha, timestamp
 write_json_output() {
@@ -249,56 +241,5 @@ write_json_output() {
 		echo '}'
 	} >"${output_json}"
 }
-
-# Self-test: feed a canned EXPLAIN JSON with Seq Scan on budgeted tables
-# and assert has_seq_scan_on detects it. Exits 1 if self-test fails.
-# Usage: self_test_has_seq_scan_on
-self_test_has_seq_scan_on() {
-	# Canned EXPLAIN JSON simulating a query on a view that does Seq Scan on base tables
-	canned_json='[
-  {
-    "Plan": {
-      "Node Type": "Hash Join",
-      "Plans": [
-        {
-          "Node Type": "Seq Scan",
-          "Relation Name": "user_profiles",
-          "Alias": "up"
-        },
-        {
-          "Node Type": "Seq Scan",
-          "Relation Name": "osionos_bridge_identities",
-          "Alias": "bi"
-        },
-        {
-          "Node Type": "Seq Scan",
-          "Relation Name": "users",
-          "Alias": "u"
-        }
-      ]
-    }
-  }
-]'
-	# Test 1: has_seq_scan_on should find user_profiles
-	if ! echo "$canned_json" | has_seq_scan_on user_profiles 2>/dev/null; then
-		note "SELF-TEST FAILED: has_seq_scan_on missed user_profiles in canned JSON"
-		return 1
-	fi
-	# Test 2: has_seq_scan_on should find osionos_bridge_identities
-	if ! echo "$canned_json" | has_seq_scan_on osionos_bridge_identities 2>/dev/null; then
-		note "SELF-TEST FAILED: has_seq_scan_on missed osionos_bridge_identities in canned JSON"
-		return 1
-	fi
-	# Test 3: has_seq_scan_on should find users
-	if ! echo "$canned_json" | has_seq_scan_on users 2>/dev/null; then
-		note "SELF-TEST FAILED: has_seq_scan_on missed users in canned JSON"
-		return 1
-	fi
-	# Test 4: has_seq_scan_on should NOT find a non-existent table
-	if echo "$canned_json" | has_seq_scan_on nonexistent_table 2>/dev/null; then
-		note "SELF-TEST FAILED: has_seq_scan_on false positive on nonexistent_table"
-		return 1
-	fi
-	note "Self-test passed: has_seq_scan_on correctly detects Seq Scan on budgeted tables"
-	return 0
-}
+# shellcheck disable=SC1091
+. "${FIX}/self-test.sh"
