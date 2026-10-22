@@ -55,7 +55,7 @@ Every value below is `${NAME:-default}` in `docker-compose.yml`, so `.env.local`
 | Variable | Default | What it changes |
 |---|---|---|
 | `OSIONOS_AI_DATABASE_URL` | the dev Postgres of `osionos-ai-db` | a real grobase Postgres (then the pages and the workspace members are the real ones) |
-| `OSIONOS_AI_DB_PASSWORD` | `osionos-ai-dev` | the password of that dev Postgres (and of the URL built from it) |
+| `OSIONOS_AI_DB_PASSWORD` | `osionos-ai-dev` | the password of that dev Postgres, passed to the AI service and the indexer as `PGPASSWORD` |
 | `OSIONOS_AI_REDIS_URL` | `redis://osionos-ai-redis:6379` | a shared Redis (the run streams survive a restart of the service) |
 | `OSIONOS_AI_UPSTREAM_BASE_URL` | `http://osionos-ai-llm:8080/v1` | another OpenAI-compatible upstream (OpenRouter: `https://openrouter.ai/api/v1` + `OSIONOS_AI_UPSTREAM_API_KEY`) |
 | `OSIONOS_AI_PLATFORM_MODELS` | one local model, `qwen3-4b`, free | the platform allowlist the client sees (the ids, the labels, the prices) |
