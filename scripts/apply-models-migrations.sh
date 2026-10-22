@@ -92,6 +92,26 @@
 #   regression here will NOT show as a `--check` gap on a converged database.
 #   The only real detector is a full apply on a from-scratch database.
 #
+#   osionos-user-events-migration.sql (the ai_events log and its capture
+#       triggers) is in the alphabetical pass and is NAMED so it sorts after the
+#       engagement tables it captures from: osionos-chat-migration.sql
+#       (osionos_feed_likes, osionos_feed_comments), osionos-comments-
+#       migration.sql (osionos_page_comments), osionos-favorites-migration.sql
+#       (osionos_page_favorites) and osionos-feed-engagement-migration.sql
+#       (osionos_feed_reactions, osionos_feed_shares). It also reads
+#       osionos_connections, which osionos-social-migration.sql creates — that
+#       one is in ORDERED_FIRST, so it is applied before the alphabetical pass
+#       whatever its name says. A trigger on a table that does not exist yet is
+#       a hard error, so this order is a correctness fact, not a style choice:
+#       it is the same trick osionos-membership-cutoff-migration.sql uses to
+#       sort after auth-session-cutoffs.sql.
+#       The file is NOT called osionos-ai-events-migration.sql: that name sorts
+#       BEFORE the tables it needs, and the alphabetical pass is the only slot
+#       both runners share (this one and the ledger runner
+#       scripts/apply-models.sh, whose glob is the same). scripts/verify/
+#       ai-events.sh reads this runner's own order and fails if the file does
+#       not sort after the tables it captures from.
+#
 #   osionos-service-role-only-migration.sql runs LAST (ORDERED_LAST), after
 #   everything: it revokes what earlier files and older boots granted.
 #   users-pii-grants-migration.sql runs after it, last of all: it fixes the
