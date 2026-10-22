@@ -12,10 +12,17 @@
 -- SECURITY DEFINER function runs with its owner's rights — a grant here would
 -- hand the account role the owner's reach (checks.sql's own secdef_exec row
 -- covers anon and authenticated only).
+-- ONE function is exempt, by signature: osionos_account_change_username(text)
+-- (models/osionos-account-username-migration.sql). It is the one SECURITY
+-- DEFINER function the account role may call, because it re-reads the caller's
+-- claims itself (inside a SECURITY DEFINER function current_user is the owner,
+-- so the uid helper cannot answer) and writes only the caller's own rows. Any
+-- other function still counts.
 SELECT 'account_secdef_exec', count(*), coalesce(string_agg(p.oid::regprocedure::text, ' '), '')
   FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
  WHERE n.nspname = 'public' AND p.prosecdef AND p.proname LIKE 'osionos\_%'
-   AND has_function_privilege('osionos_account_user', p.oid, 'EXECUTE');
+   AND has_function_privilege('osionos_account_user', p.oid, 'EXECUTE')
+   AND p.oid::regprocedure::text <> 'osionos_account_change_username(text)';
 
 -- account_role_reach: relations the account role reaches that anon does not
 -- reach, and that are not marked as account-plane. anon is the yardstick on
@@ -89,6 +96,7 @@ SELECT 'account_plane_expected', count(*), coalesce(string_agg(t, ' ' ORDER BY t
                    'osionos_user_settings',
                    'osionos_username_history',
                    'osionos_account_deletion_requests',
+                   'osionos_published_pages',
                    'osionos_personal_access_tokens']) AS t
  WHERE to_regclass('public.' || t) IS NULL
     OR coalesce(obj_description(to_regclass('public.' || t), 'pg_class'), '') <> 'osionos:account-plane';
@@ -232,14 +240,15 @@ SELECT 'account_session_columns', count(*), coalesce(string_agg(v, ' ' ORDER BY 
 -- The set is compared in both directions, so a privilege that is missing AND
 -- one that is extra are both a failure.
 -- The expected set is the spec's: SELECT on every column of the profiles (they
--- are all public profile fields), UPDATE on the thirteen the user owns, the
--- settings' SELECT/INSERT/UPDATE, the history's SELECT on three columns, and
--- the deletion request's SELECT/INSERT plus the table-level DELETE (a cancel).
+-- are all public profile fields), UPDATE on the twelve the user owns — the
+-- username is NOT one of them since P1-2s, the settings' SELECT/INSERT/UPDATE,
+-- the history's SELECT on three columns, and the deletion request's
+-- SELECT/INSERT plus the table-level DELETE (a cancel).
 -- Caveat: a table-level grant is reported as a table privilege, not as a
 -- column one, so the two are kept apart with the '*' column name.
 WITH expected(tbl, col, priv) AS (
             SELECT 'osionos_profiles', c, 'SELECT' FROM unnest(ARRAY['user_id','display_name','username','pronouns','headline','bio','location','company','website','links','timezone','orcid','patreon','avatar_url','banner_url','directory_opt_out','version','created_at','updated_at','search_doc']) c
-  UNION ALL SELECT 'osionos_profiles', c, 'UPDATE' FROM unnest(ARRAY['display_name','username','pronouns','headline','bio','location','company','website','links','timezone','orcid','patreon','directory_opt_out']) c
+  UNION ALL SELECT 'osionos_profiles', c, 'UPDATE' FROM unnest(ARRAY['display_name','pronouns','headline','bio','location','company','website','links','timezone','orcid','patreon','directory_opt_out']) c
   UNION ALL SELECT 'osionos_user_settings', c, 'SELECT' FROM unnest(ARRAY['user_id','section','value','version','updated_at']) c
   UNION ALL SELECT 'osionos_user_settings', c, 'INSERT' FROM unnest(ARRAY['user_id','section','value']) c
   UNION ALL SELECT 'osionos_user_settings', c, 'UPDATE' FROM unnest(ARRAY['user_id','section','value','version','updated_at']) c
@@ -323,6 +332,11 @@ ROLLBACK;
 
 -- p1_hold: a name released less than 90 days ago is held by the user who
 -- released it. B may not take it; A may reclaim it.
+-- Both calls go through osionos_account_change_username: since P1-2s the role
+-- holds no UPDATE grant on the username column, so a direct UPDATE is refused
+-- with 42501 — and B's refusal would then pass for the wrong reason. The
+-- SQLSTATE is read, not "did it raise": B must be refused with 23505 (the
+-- hold), and A must succeed.
 BEGIN;
 INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
                                ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
@@ -338,37 +352,34 @@ DO $$ BEGIN
 END $$;
 DO $$
 DECLARE
-  refused boolean := false;
+  v_state text := '';
 BEGIN
   BEGIN
-    UPDATE public.osionos_profiles SET username = 'heldname'
-     WHERE user_id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+    PERFORM public.osionos_account_change_username('heldname');
   EXCEPTION WHEN others THEN
-    refused := true;
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
   END;
-  PERFORM set_config('osionos.check.p1_hold_b', refused::text, true);
+  PERFORM set_config('osionos.check.p1_hold_b', v_state, true);
 END $$;
 DO $$ BEGIN
   PERFORM set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","aud":"osionos-account","role":"osionos_account_user"}', true);
 END $$;
 DO $$
 DECLARE
-  reclaimed boolean := false;
+  v_state text := '';
 BEGIN
   BEGIN
-    UPDATE public.osionos_profiles SET username = 'heldname'
-     WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
-    reclaimed := true;
+    PERFORM public.osionos_account_change_username('heldname');
   EXCEPTION WHEN others THEN
-    reclaimed := false;
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
   END;
-  PERFORM set_config('osionos.check.p1_hold_a', reclaimed::text, true);
+  PERFORM set_config('osionos.check.p1_hold_a', v_state, true);
 END $$;
 RESET ROLE;
 SELECT 'p1_hold',
-       (CASE WHEN current_setting('osionos.check.p1_hold_b')::boolean THEN 0 ELSE 1 END)
-     + (CASE WHEN current_setting('osionos.check.p1_hold_a')::boolean THEN 0 ELSE 1 END),
-       'B is refused the held name, A reclaims it';
+       (CASE WHEN current_setting('osionos.check.p1_hold_b') = '23505' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.p1_hold_a') = '' THEN 0 ELSE 1 END),
+       'B is refused the held name (23505), A reclaims it';
 ROLLBACK;
 
 -- p1_sync_changed_only: the legacy sync copies what CHANGED on the identity
@@ -711,6 +722,876 @@ SELECT 'p1_isolation_forged',
      + (CASE WHEN EXISTS (SELECT 1 FROM public.osionos_account_deletion_requests
                            WHERE user_id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb') THEN 0 ELSE 1 END),
        'B is neither readable nor changed';
+ROLLBACK;
+
+-- The P1-2s checks: the atomic username change
+-- (models/osionos-account-username-migration.sql). Every one of them runs as
+-- the account role with forged claims, in a transaction that is rolled back.
+-- Every sample name is a valid one (^[A-Za-z0-9_][A-Za-z0-9_.-]{2,31}$): a
+-- short name is refused as a format error (22023) before any lock is taken,
+-- and would prove nothing.
+
+-- p2s_function_config: the function's own settings, pinned. The search_path
+-- and the 3 s lock_timeout are the contract's, and nothing else may be set on
+-- the function: a call without the lock_timeout holds a PostgREST pool
+-- connection for the whole duration of a boot replay.
+-- The comparison is on the WHOLE set, so a setting that is removed, added or
+-- changed is a failure.
+SELECT 'p2s_function_config',
+       (CASE WHEN (SELECT array_agg(t.c ORDER BY t.c)
+                     FROM pg_proc p CROSS JOIN LATERAL unnest(p.proconfig) AS t(c)
+                    WHERE p.oid = to_regprocedure('public.osionos_account_change_username(text)'))
+                  = ARRAY['lock_timeout=3s','search_path=pg_catalog, public']::text[]
+             THEN 0 ELSE 1 END),
+       'the function sets exactly search_path=pg_catalog, public and lock_timeout=3s';
+
+-- p2s_change, p2s_history_once, p2s_version_once and p2s_keeps_typed_fields:
+-- one change writes both tables, one history row and one version, and the
+-- typed fields survive it.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+INSERT INTO public.osionos_profiles (user_id, display_name, username) VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'A', 'alice1');
+INSERT INTO public.osionos_bridge_identities (provider, subject, user_id, email_hash, display_name, username, profile)
+VALUES ('prismatica', '11111111-1111-1111-1111-111111111111',
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'p2shash', 'A', 'alice1',
+        '{"bio":"legacy-bio","headline":"legacy-head","location":"legacy-loc"}');
+-- The identity's insert copied the legacy blob onto the profile; the typed
+-- values are what the account route wrote after it.
+UPDATE public.osionos_profiles
+   SET bio = 'typed-bio', headline = 'typed-head', location = 'typed-loc'
+ WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+DO $$
+DECLARE
+  v_version integer;
+  v_history bigint;
+BEGIN
+  SELECT version INTO v_version FROM public.osionos_profiles
+   WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  SELECT count(*) INTO v_history FROM public.osionos_username_history
+   WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  PERFORM set_config('osionos.check.p2s_v0', v_version::text, true);
+  PERFORM set_config('osionos.check.p2s_h0', v_history::text, true);
+END $$;
+SET LOCAL ROLE osionos_account_user;
+DO $$ BEGIN
+  PERFORM set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","aud":"osionos-account","role":"osionos_account_user"}', true);
+END $$;
+DO $$
+DECLARE
+  v_state text := '';
+BEGIN
+  BEGIN
+    PERFORM public.osionos_account_change_username('bobby1');
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p2s_state', v_state, true);
+END $$;
+RESET ROLE;
+DO $$
+DECLARE
+  v_version integer;
+  v_history bigint;
+BEGIN
+  SELECT version INTO v_version FROM public.osionos_profiles
+   WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  SELECT count(*) INTO v_history FROM public.osionos_username_history
+   WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  PERFORM set_config('osionos.check.p2s_v1', v_version::text, true);
+  PERFORM set_config('osionos.check.p2s_h1', v_history::text, true);
+END $$;
+SELECT 'p2s_change',
+       (CASE WHEN current_setting('osionos.check.p2s_state') = ''
+              AND (SELECT username FROM public.osionos_profiles
+                    WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') = 'bobby1'
+              AND (SELECT username FROM public.osionos_bridge_identities
+                    WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') = 'bobby1'
+              AND (SELECT count(*) FROM public.osionos_username_history
+                    WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+                      AND username = 'alice1') = 1
+              AND current_setting('osionos.check.p2s_v1')::integer
+                  - current_setting('osionos.check.p2s_v0')::integer = 1
+             THEN 0 ELSE 1 END),
+       'both tables say bobby1, one history row holds alice1, the version moved by one';
+SELECT 'p2s_history_once',
+       (CASE WHEN current_setting('osionos.check.p2s_h1')::bigint
+                  - current_setting('osionos.check.p2s_h0')::bigint = 1
+             THEN 0 ELSE 1 END),
+       'the change wrote exactly one history row, the sync trigger wrote none';
+SELECT 'p2s_version_once',
+       (CASE WHEN current_setting('osionos.check.p2s_v1')::integer
+                  - current_setting('osionos.check.p2s_v0')::integer = 1
+             THEN 0 ELSE 1 END),
+       'the version moved by exactly one';
+SELECT 'p2s_keeps_typed_fields',
+       (CASE WHEN (SELECT bio FROM public.osionos_profiles
+                    WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') = 'typed-bio'
+              AND (SELECT headline FROM public.osionos_profiles
+                    WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') = 'typed-head'
+              AND (SELECT location FROM public.osionos_profiles
+                    WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') = 'typed-loc'
+              AND (SELECT bio FROM public.osionos_profiles
+                    WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
+                  IS DISTINCT FROM (SELECT profile->>'bio' FROM public.osionos_bridge_identities
+                                    WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
+             THEN 0 ELSE 1 END),
+       'the typed bio, headline and location survived the change';
+ROLLBACK;
+
+-- p2s_atomic: a name another identity still holds is refused with 23505 (not
+-- 22023), and nothing of the caller's moves.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+                                ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+INSERT INTO public.osionos_profiles (user_id, display_name, username) VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'A', 'alice1');
+INSERT INTO public.osionos_bridge_identities (provider, subject, user_id, email_hash, display_name, username) VALUES
+  ('prismatica', '11111111-1111-1111-1111-111111111111',
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'p2satom', 'A', 'alice1');
+-- B's identity holds 'taken1' and B's profile has NO name: the pre-P1-1
+-- collision state. The identity row is written BEFORE the profile row, so the
+-- sync trigger has no profile to copy the name into.
+INSERT INTO public.osionos_bridge_identities (provider, subject, user_id, email_hash, display_name, username) VALUES
+  ('prismatica', '22222222-2222-2222-2222-222222222222',
+        'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'p2satom2', 'B', 'taken1');
+INSERT INTO public.osionos_profiles (user_id, display_name, username) VALUES
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'B', NULL);
+DO $$
+DECLARE
+  v_profile jsonb;
+  v_identity jsonb;
+  v_history jsonb;
+BEGIN
+  SELECT to_jsonb(p) INTO v_profile FROM public.osionos_profiles p
+   WHERE p.user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  SELECT to_jsonb(i) INTO v_identity FROM public.osionos_bridge_identities i
+   WHERE i.user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  SELECT coalesce(jsonb_agg(to_jsonb(h) ORDER BY h.id), '[]'::jsonb) INTO v_history
+    FROM public.osionos_username_history h
+   WHERE h.user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  PERFORM set_config('osionos.check.p2s_atom_p0', coalesce(v_profile::text, '{}'), true);
+  PERFORM set_config('osionos.check.p2s_atom_i0', coalesce(v_identity::text, '{}'), true);
+  PERFORM set_config('osionos.check.p2s_atom_h0', coalesce(v_history::text, '[]'), true);
+END $$;
+SET LOCAL ROLE osionos_account_user;
+DO $$ BEGIN
+  PERFORM set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","aud":"osionos-account","role":"osionos_account_user"}', true);
+END $$;
+DO $$
+DECLARE
+  v_state text := '';
+BEGIN
+  BEGIN
+    PERFORM public.osionos_account_change_username('taken1');
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p2s_atom_state', v_state, true);
+END $$;
+RESET ROLE;
+DO $$
+DECLARE
+  v_profile jsonb;
+  v_identity jsonb;
+  v_history jsonb;
+BEGIN
+  SELECT to_jsonb(p) INTO v_profile FROM public.osionos_profiles p
+   WHERE p.user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  SELECT to_jsonb(i) INTO v_identity FROM public.osionos_bridge_identities i
+   WHERE i.user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  SELECT coalesce(jsonb_agg(to_jsonb(h) ORDER BY h.id), '[]'::jsonb) INTO v_history
+    FROM public.osionos_username_history h
+   WHERE h.user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  PERFORM set_config('osionos.check.p2s_atom_p1', coalesce(v_profile::text, '{}'), true);
+  PERFORM set_config('osionos.check.p2s_atom_i1', coalesce(v_identity::text, '{}'), true);
+  PERFORM set_config('osionos.check.p2s_atom_h1', coalesce(v_history::text, '[]'), true);
+END $$;
+SELECT 'p2s_atomic',
+       (CASE WHEN current_setting('osionos.check.p2s_atom_state') = '23505'
+              AND current_setting('osionos.check.p2s_atom_p0') = current_setting('osionos.check.p2s_atom_p1')
+              AND current_setting('osionos.check.p2s_atom_i0') = current_setting('osionos.check.p2s_atom_i1')
+              AND current_setting('osionos.check.p2s_atom_h0') = current_setting('osionos.check.p2s_atom_h1')
+             THEN 0 ELSE 1 END),
+       '23505, and the profile row, the identity row and the history rows are identical to before';
+ROLLBACK;
+
+-- p2s_taken_by_profile: the name is another user's PROFILE name — no identity
+-- holds it and no history row holds it either. It is the pre-P1-1 collision
+-- state that p2s_atomic sets up for the identities only.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+                                ('cccccccc-cccc-cccc-cccc-cccccccccccc');
+INSERT INTO public.osionos_profiles (user_id, display_name, username) VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'A', 'alice1');
+INSERT INTO public.osionos_bridge_identities (provider, subject, user_id, email_hash, display_name, username) VALUES
+  ('prismatica', '11111111-1111-1111-1111-111111111111',
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'p2staken', 'A', 'alice1');
+-- C's profile holds 'taken2'. C has NO identity row, so no identity holds the
+-- name, and the profile row was inserted directly, so no history row holds it
+-- either: only the profile's unique index stands in the way.
+INSERT INTO public.osionos_profiles (user_id, display_name, username) VALUES
+  ('cccccccc-cccc-cccc-cccc-cccccccccccc', 'C', 'taken2');
+DO $$
+DECLARE
+  v_profile jsonb;
+  v_identity jsonb;
+  v_history jsonb;
+BEGIN
+  SELECT to_jsonb(p) INTO v_profile FROM public.osionos_profiles p
+   WHERE p.user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  SELECT to_jsonb(i) INTO v_identity FROM public.osionos_bridge_identities i
+   WHERE i.user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  SELECT coalesce(jsonb_agg(to_jsonb(h) ORDER BY h.id), '[]'::jsonb) INTO v_history
+    FROM public.osionos_username_history h
+   WHERE h.user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  PERFORM set_config('osionos.check.p2s_taken_p0', coalesce(v_profile::text, '{}'), true);
+  PERFORM set_config('osionos.check.p2s_taken_i0', coalesce(v_identity::text, '{}'), true);
+  PERFORM set_config('osionos.check.p2s_taken_h0', coalesce(v_history::text, '[]'), true);
+END $$;
+SET LOCAL ROLE osionos_account_user;
+DO $$ BEGIN
+  PERFORM set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","aud":"osionos-account","role":"osionos_account_user"}', true);
+END $$;
+DO $$
+DECLARE
+  v_state text := '';
+BEGIN
+  BEGIN
+    PERFORM public.osionos_account_change_username('taken2');
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p2s_taken_state', v_state, true);
+END $$;
+RESET ROLE;
+DO $$
+DECLARE
+  v_profile jsonb;
+  v_identity jsonb;
+  v_history jsonb;
+BEGIN
+  SELECT to_jsonb(p) INTO v_profile FROM public.osionos_profiles p
+   WHERE p.user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  SELECT to_jsonb(i) INTO v_identity FROM public.osionos_bridge_identities i
+   WHERE i.user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  SELECT coalesce(jsonb_agg(to_jsonb(h) ORDER BY h.id), '[]'::jsonb) INTO v_history
+    FROM public.osionos_username_history h
+   WHERE h.user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  PERFORM set_config('osionos.check.p2s_taken_p1', coalesce(v_profile::text, '{}'), true);
+  PERFORM set_config('osionos.check.p2s_taken_i1', coalesce(v_identity::text, '{}'), true);
+  PERFORM set_config('osionos.check.p2s_taken_h1', coalesce(v_history::text, '[]'), true);
+END $$;
+SELECT 'p2s_taken_by_profile',
+       (CASE WHEN current_setting('osionos.check.p2s_taken_state') = '23505'
+              AND current_setting('osionos.check.p2s_taken_p0') = current_setting('osionos.check.p2s_taken_p1')
+              AND current_setting('osionos.check.p2s_taken_i0') = current_setting('osionos.check.p2s_taken_i1')
+              AND current_setting('osionos.check.p2s_taken_h0') = current_setting('osionos.check.p2s_taken_h1')
+             THEN 0 ELSE 1 END),
+       'the name is held by another profile: 23505, and nothing of the caller moved';
+ROLLBACK;
+
+-- p2s_hold: a name A released less than 90 days ago belongs to A. B is
+-- refused with 23505, A takes it back.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+                                ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+INSERT INTO public.osionos_profiles (user_id, display_name, username) VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'A', 'alice1'),
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'B', 'bobby1');
+INSERT INTO public.osionos_bridge_identities (provider, subject, user_id, email_hash, display_name, username) VALUES
+  ('prismatica', '11111111-1111-1111-1111-111111111111',
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'p2shold', 'A', 'alice1'),
+  ('prismatica', '22222222-2222-2222-2222-222222222222',
+        'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'p2shold2', 'B', 'bobby1');
+-- A releases the name: the history holds it for 90 days.
+UPDATE public.osionos_profiles SET username = 'released1'
+ WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+UPDATE public.osionos_bridge_identities SET username = 'released1'
+ WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+SET LOCAL ROLE osionos_account_user;
+DO $$ BEGIN
+  PERFORM set_config('request.jwt.claims', '{"sub":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","aud":"osionos-account","role":"osionos_account_user"}', true);
+END $$;
+DO $$
+DECLARE
+  v_state text := '';
+BEGIN
+  BEGIN
+    PERFORM public.osionos_account_change_username('alice1');
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p2s_hold_b', v_state, true);
+END $$;
+DO $$ BEGIN
+  PERFORM set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","aud":"osionos-account","role":"osionos_account_user"}', true);
+END $$;
+DO $$
+DECLARE
+  v_state text := '';
+BEGIN
+  BEGIN
+    PERFORM public.osionos_account_change_username('alice1');
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p2s_hold_a', v_state, true);
+END $$;
+RESET ROLE;
+SELECT 'p2s_hold',
+       (CASE WHEN current_setting('osionos.check.p2s_hold_b') = '23505'
+              AND current_setting('osionos.check.p2s_hold_a') = ''
+             THEN 0 ELSE 1 END),
+       'B cannot take the held name, A takes it back';
+ROLLBACK;
+
+-- p2s_invalid: a name that is not usable is refused with 22023, before any
+-- lock is taken. 'ab' is too short, 'admin' is reserved, '-x1' starts with a
+-- dash, and NULL is no name at all.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+INSERT INTO public.osionos_profiles (user_id, display_name, username) VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'A', 'alice1');
+SET LOCAL ROLE osionos_account_user;
+DO $$ BEGIN
+  PERFORM set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","aud":"osionos-account","role":"osionos_account_user"}', true);
+END $$;
+DO $$
+DECLARE
+  v_names text[] := ARRAY['ab', 'admin', '-x1', NULL];
+  v_name text;
+  v_state text;
+  v_seen integer := 0;
+  v_bad integer := 0;
+  v_states text := '';
+BEGIN
+  -- The subscripts, not FOREACH: a NULL element must be visited, and the
+  -- fourth name IS the NULL one.
+  FOR i IN 1..array_length(v_names, 1) LOOP
+    v_seen := v_seen + 1;
+    v_name := v_names[i];
+    v_state := '';
+    BEGIN
+      PERFORM public.osionos_account_change_username(v_name);
+    EXCEPTION WHEN others THEN
+      GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+    END;
+    IF v_state <> '22023' THEN
+      v_bad := v_bad + 1;
+    END IF;
+    v_states := v_states || CASE WHEN v_states = '' THEN '' ELSE '/' END || coalesce(v_state, 'none');
+  END LOOP;
+  -- A name that was never tried is not a refused name.
+  PERFORM set_config('osionos.check.p2s_invalid', (v_bad + abs(4 - v_seen))::text, true);
+  PERFORM set_config('osionos.check.p2s_invalid_states', v_states, true);
+END $$;
+RESET ROLE;
+SELECT 'p2s_invalid', current_setting('osionos.check.p2s_invalid')::bigint,
+       'ab, admin, -x1 and NULL are all refused with 22023 — measured: '
+       || current_setting('osionos.check.p2s_invalid_states');
+ROLLBACK;
+
+-- p2s_no_direct: the role may not write the username column itself. The
+-- function is the only path.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+INSERT INTO public.osionos_profiles (user_id, display_name, username) VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'A', 'alice1');
+SET LOCAL ROLE osionos_account_user;
+DO $$ BEGIN
+  PERFORM set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","aud":"osionos-account","role":"osionos_account_user"}', true);
+END $$;
+DO $$
+DECLARE
+  v_state text := '';
+BEGIN
+  BEGIN
+    UPDATE public.osionos_profiles SET username = 'zelda1';
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p2s_direct', v_state, true);
+END $$;
+RESET ROLE;
+SELECT 'p2s_no_direct',
+       (CASE WHEN current_setting('osionos.check.p2s_direct') = '42501' THEN 0 ELSE 1 END),
+       'the role cannot write the username column itself';
+ROLLBACK;
+
+-- p2s_no_uid: a caller the token does not identify is refused with 42501 —
+-- never with a cast error (22P02). The five claim sets are: none, a wrong
+-- aud, an array aud, an upper-case sub and a malformed sub.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+INSERT INTO public.osionos_profiles (user_id, display_name, username) VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'A', 'alice1');
+SET LOCAL ROLE osionos_account_user;
+DO $$
+DECLARE
+  v_claims text[] := ARRAY[
+    '',
+    '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","aud":"other-aud","role":"osionos_account_user"}',
+    '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","aud":["osionos-account"],"role":"osionos_account_user"}',
+    '{"sub":"AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA","aud":"osionos-account","role":"osionos_account_user"}',
+    '{"sub":"not-a-uuid","aud":"osionos-account","role":"osionos_account_user"}',
+    '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","aud":"osionos-account","role":"authenticated"}'
+  ];
+  v_claim text;
+  v_state text;
+  v_bad integer := 0;
+  v_states text := '';
+BEGIN
+  FOR i IN 1..array_length(v_claims, 1) LOOP
+    v_claim := v_claims[i];
+    PERFORM set_config('request.jwt.claims', v_claim, true);
+    v_state := '';
+    BEGIN
+      PERFORM public.osionos_account_change_username('bobby1');
+    EXCEPTION WHEN others THEN
+      GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+    END;
+    IF v_state <> '42501' THEN
+      v_bad := v_bad + 1;
+    END IF;
+    v_states := v_states || CASE WHEN v_states = '' THEN '' ELSE '/' END || coalesce(v_state, 'none');
+  END LOOP;
+  PERFORM set_config('osionos.check.p2s_nouid', v_bad::text, true);
+  PERFORM set_config('osionos.check.p2s_nouid_states', v_states, true);
+END $$;
+RESET ROLE;
+SELECT 'p2s_no_uid', current_setting('osionos.check.p2s_nouid')::bigint,
+       'no claims, a wrong aud, an array aud, an upper-case sub, a malformed sub and a wrong role are all 42501 — measured: '
+       || current_setting('osionos.check.p2s_nouid_states');
+ROLLBACK;
+
+-- p2s_case: a case-only rename is a real change. It writes, the version moves
+-- by one, and the name it released is held like any other.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+                                ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+INSERT INTO public.osionos_profiles (user_id, display_name, username) VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'A', 'Bob'),
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'B', 'bobby1');
+INSERT INTO public.osionos_bridge_identities (provider, subject, user_id, email_hash, display_name, username) VALUES
+  ('prismatica', '11111111-1111-1111-1111-111111111111',
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'p2scase', 'A', 'Bob'),
+  ('prismatica', '22222222-2222-2222-2222-222222222222',
+        'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'p2scase2', 'B', 'bobby1');
+DO $$
+DECLARE
+  v_version integer;
+BEGIN
+  SELECT version INTO v_version FROM public.osionos_profiles
+   WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  PERFORM set_config('osionos.check.p2s_case_v0', v_version::text, true);
+END $$;
+SET LOCAL ROLE osionos_account_user;
+DO $$ BEGIN
+  PERFORM set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","aud":"osionos-account","role":"osionos_account_user"}', true);
+END $$;
+DO $$
+DECLARE
+  v_state text := '';
+BEGIN
+  BEGIN
+    PERFORM public.osionos_account_change_username('bob');
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p2s_case_a', v_state, true);
+END $$;
+RESET ROLE;
+DO $$
+DECLARE
+  v_version integer;
+BEGIN
+  SELECT version INTO v_version FROM public.osionos_profiles
+   WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  PERFORM set_config('osionos.check.p2s_case_v1', v_version::text, true);
+END $$;
+-- B may not take the name A released, and A may take it back.
+SET LOCAL ROLE osionos_account_user;
+DO $$ BEGIN
+  PERFORM set_config('request.jwt.claims', '{"sub":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","aud":"osionos-account","role":"osionos_account_user"}', true);
+END $$;
+DO $$
+DECLARE
+  v_state text := '';
+BEGIN
+  BEGIN
+    PERFORM public.osionos_account_change_username('Bob');
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p2s_case_b', v_state, true);
+END $$;
+DO $$ BEGIN
+  PERFORM set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","aud":"osionos-account","role":"osionos_account_user"}', true);
+END $$;
+DO $$
+DECLARE
+  v_state text := '';
+BEGIN
+  BEGIN
+    PERFORM public.osionos_account_change_username('Bob');
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p2s_case_again', v_state, true);
+END $$;
+RESET ROLE;
+SELECT 'p2s_case',
+       (CASE WHEN current_setting('osionos.check.p2s_case_a') = ''
+              AND current_setting('osionos.check.p2s_case_v1')::integer
+                  - current_setting('osionos.check.p2s_case_v0')::integer = 1
+              AND current_setting('osionos.check.p2s_case_b') = '23505'
+              AND current_setting('osionos.check.p2s_case_again') = ''
+              AND (SELECT username FROM public.osionos_profiles
+                    WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') = 'Bob'
+             THEN 0 ELSE 1 END),
+       'Bob -> bob writes and moves the version by one, B cannot take Bob, A takes it back';
+ROLLBACK;
+
+-- p2s_no_identity: a user with a profile and no identities row has no legacy
+-- name to keep in step, and can still change their name.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('cccccccc-cccc-cccc-cccc-cccccccccccc');
+INSERT INTO public.osionos_profiles (user_id, display_name, username) VALUES
+  ('cccccccc-cccc-cccc-cccc-cccccccccccc', 'C', NULL);
+SET LOCAL ROLE osionos_account_user;
+DO $$ BEGIN
+  PERFORM set_config('request.jwt.claims', '{"sub":"cccccccc-cccc-cccc-cccc-cccccccccccc","aud":"osionos-account","role":"osionos_account_user"}', true);
+END $$;
+DO $$
+DECLARE
+  v_state text := '';
+BEGIN
+  BEGIN
+    PERFORM public.osionos_account_change_username('cname1');
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p2s_noident', v_state, true);
+END $$;
+RESET ROLE;
+SELECT 'p2s_no_identity',
+       (CASE WHEN current_setting('osionos.check.p2s_noident') = ''
+              AND (SELECT username FROM public.osionos_profiles
+                    WHERE user_id = 'cccccccc-cccc-cccc-cccc-cccccccccccc') = 'cname1'
+             THEN 0 ELSE 1 END),
+       'a user with no identities row changes their name';
+ROLLBACK;
+
+-- p2s_same_name: the same name is not a change. The call returns the name, the
+-- version stays where it was, and no history row is written.
+-- The state is built so that both halves can be read from it: the identity row
+-- is written BEFORE the profile row, with the drifted name 'alicia1', so the
+-- sync trigger has no profile to copy it into. A plain UPDATE of the identity
+-- row would fire that trigger, which would copy the name into the profile and
+-- write a history row during the setup. The version and the history baseline
+-- are taken only after the state is built.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+INSERT INTO public.osionos_bridge_identities (provider, subject, user_id, email_hash, display_name, username) VALUES
+  ('prismatica', '11111111-1111-1111-1111-111111111111',
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'p2ssame', 'A', 'alicia1');
+INSERT INTO public.osionos_profiles (user_id, display_name, username) VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'A', 'alice1');
+DO $$
+DECLARE
+  v_version integer;
+  v_history bigint;
+BEGIN
+  SELECT version INTO v_version FROM public.osionos_profiles
+   WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  SELECT count(*) INTO v_history FROM public.osionos_username_history
+   WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  PERFORM set_config('osionos.check.p2s_same_v0', v_version::text, true);
+  PERFORM set_config('osionos.check.p2s_same_h0', v_history::text, true);
+END $$;
+SET LOCAL ROLE osionos_account_user;
+DO $$ BEGIN
+  PERFORM set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","aud":"osionos-account","role":"osionos_account_user"}', true);
+END $$;
+DO $$
+DECLARE
+  v_state text := '';
+BEGIN
+  BEGIN
+    PERFORM public.osionos_account_change_username('alice1');
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p2s_same_drift', v_state, true);
+END $$;
+RESET ROLE;
+DO $$
+DECLARE
+  v_version integer;
+  v_history bigint;
+BEGIN
+  SELECT version INTO v_version FROM public.osionos_profiles
+   WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  SELECT count(*) INTO v_history FROM public.osionos_username_history
+   WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  PERFORM set_config('osionos.check.p2s_same_v1', v_version::text, true);
+  PERFORM set_config('osionos.check.p2s_same_h1', v_history::text, true);
+END $$;
+-- The identity now holds 'alice1' too: the same call again is the same-name
+-- case — the profile, the version and the history stay where they are.
+SET LOCAL ROLE osionos_account_user;
+DO $$ BEGIN
+  PERFORM set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","aud":"osionos-account","role":"osionos_account_user"}', true);
+END $$;
+DO $$
+DECLARE
+  v_state text := '';
+BEGIN
+  BEGIN
+    PERFORM public.osionos_account_change_username('alice1');
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p2s_same_plain', v_state, true);
+END $$;
+RESET ROLE;
+DO $$
+DECLARE
+  v_version integer;
+  v_history bigint;
+BEGIN
+  SELECT version INTO v_version FROM public.osionos_profiles
+   WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  SELECT count(*) INTO v_history FROM public.osionos_username_history
+   WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  PERFORM set_config('osionos.check.p2s_same_v2', v_version::text, true);
+  PERFORM set_config('osionos.check.p2s_same_h2', v_history::text, true);
+END $$;
+SELECT 'p2s_same_name',
+       (CASE WHEN current_setting('osionos.check.p2s_same_drift') = ''
+              AND current_setting('osionos.check.p2s_same_v1')::integer
+                  = current_setting('osionos.check.p2s_same_v0')::integer
+              AND current_setting('osionos.check.p2s_same_h1')::bigint
+                  = current_setting('osionos.check.p2s_same_h0')::bigint
+              AND (SELECT username FROM public.osionos_bridge_identities
+                    WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') = 'alice1'
+              AND current_setting('osionos.check.p2s_same_plain') = ''
+              AND current_setting('osionos.check.p2s_same_v2')::integer
+                  = current_setting('osionos.check.p2s_same_v1')::integer
+              AND current_setting('osionos.check.p2s_same_h2')::bigint
+                  = current_setting('osionos.check.p2s_same_h1')::bigint
+             THEN 0 ELSE 1 END),
+       'the same name writes nothing, and the drifted identity is brought in step';
+ROLLBACK;
+
+-- p2s_no_profile: a user with an identities row and no profile row gets
+-- P0002, and the identities row is left exactly as it was.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('dddddddd-dddd-dddd-dddd-dddddddddddd');
+INSERT INTO public.osionos_bridge_identities (provider, subject, user_id, email_hash, display_name, username) VALUES
+  ('prismatica', '33333333-3333-3333-3333-333333333333',
+        'dddddddd-dddd-dddd-dddd-dddddddddddd', 'p2snoprof', 'D', 'dname1');
+DO $$
+DECLARE
+  v_identity jsonb;
+BEGIN
+  SELECT to_jsonb(i) INTO v_identity FROM public.osionos_bridge_identities i
+   WHERE i.user_id = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
+  PERFORM set_config('osionos.check.p2s_noprof_i0', coalesce(v_identity::text, '{}'), true);
+END $$;
+SET LOCAL ROLE osionos_account_user;
+DO $$ BEGIN
+  PERFORM set_config('request.jwt.claims', '{"sub":"dddddddd-dddd-dddd-dddd-dddddddddddd","aud":"osionos-account","role":"osionos_account_user"}', true);
+END $$;
+DO $$
+DECLARE
+  v_state text := '';
+BEGIN
+  BEGIN
+    PERFORM public.osionos_account_change_username('dname2');
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p2s_noprof_state', v_state, true);
+END $$;
+RESET ROLE;
+DO $$
+DECLARE
+  v_identity jsonb;
+BEGIN
+  SELECT to_jsonb(i) INTO v_identity FROM public.osionos_bridge_identities i
+   WHERE i.user_id = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
+  PERFORM set_config('osionos.check.p2s_noprof_i1', coalesce(v_identity::text, '{}'), true);
+END $$;
+SELECT 'p2s_no_profile',
+       (CASE WHEN current_setting('osionos.check.p2s_noprof_state') = 'P0002'
+              AND current_setting('osionos.check.p2s_noprof_i0') = current_setting('osionos.check.p2s_noprof_i1')
+              AND NOT EXISTS (SELECT 1 FROM public.osionos_profiles
+                               WHERE user_id = 'dddddddd-dddd-dddd-dddd-dddddddddddd')
+             THEN 0 ELSE 1 END),
+       'P0002, and the identities row is identical to before';
+ROLLBACK;
+
+-- p2s_reverse_drift: the identity holds 'alice1' and the profile 'alicia1'.
+-- The change repairs the profile: it holds 'alice1', the version moved by one
+-- and one history row holds 'alicia1'. The state is built as in p2s_same_name:
+-- the identity row is written before the profile row, so the sync trigger
+-- never copies a name into a profile that does not exist yet.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+INSERT INTO public.osionos_bridge_identities (provider, subject, user_id, email_hash, display_name, username) VALUES
+  ('prismatica', '11111111-1111-1111-1111-111111111111',
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'p2srev', 'A', 'alice1');
+INSERT INTO public.osionos_profiles (user_id, display_name, username) VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'A', 'alicia1');
+DO $$
+DECLARE
+  v_version integer;
+  v_history bigint;
+BEGIN
+  SELECT version INTO v_version FROM public.osionos_profiles
+   WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  SELECT count(*) INTO v_history FROM public.osionos_username_history
+   WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  PERFORM set_config('osionos.check.p2s_rev_v0', v_version::text, true);
+  PERFORM set_config('osionos.check.p2s_rev_h0', v_history::text, true);
+END $$;
+SET LOCAL ROLE osionos_account_user;
+DO $$ BEGIN
+  PERFORM set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","aud":"osionos-account","role":"osionos_account_user"}', true);
+END $$;
+DO $$
+DECLARE
+  v_state text := '';
+BEGIN
+  BEGIN
+    PERFORM public.osionos_account_change_username('alice1');
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p2s_rev_state', v_state, true);
+END $$;
+RESET ROLE;
+DO $$
+DECLARE
+  v_version integer;
+  v_history bigint;
+BEGIN
+  SELECT version INTO v_version FROM public.osionos_profiles
+   WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  SELECT count(*) INTO v_history FROM public.osionos_username_history
+   WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  PERFORM set_config('osionos.check.p2s_rev_v1', v_version::text, true);
+  PERFORM set_config('osionos.check.p2s_rev_h1', v_history::text, true);
+END $$;
+SELECT 'p2s_reverse_drift',
+       (CASE WHEN current_setting('osionos.check.p2s_rev_state') = ''
+              AND (SELECT username FROM public.osionos_profiles
+                    WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') = 'alice1'
+              AND current_setting('osionos.check.p2s_rev_v1')::integer
+                  - current_setting('osionos.check.p2s_rev_v0')::integer = 1
+              AND (SELECT count(*) FROM public.osionos_username_history
+                    WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+                      AND username = 'alicia1') = 1
+              AND current_setting('osionos.check.p2s_rev_h1')::bigint
+                  - current_setting('osionos.check.p2s_rev_h0')::bigint = 1
+             THEN 0 ELSE 1 END),
+       'the profile is repaired, one version, one history row';
+ROLLBACK;
+
+-- p5_published_read: the account role reads its OWN published pages and nothing
+-- else. Four facts, one row:
+--   (a) with A's claims the role sees exactly A's own published row (1);
+--   (b) B's published row is invisible to it (0);
+--   (c) the snapshot body is out of reach: SELECT content is refused with
+--       42501, because the grant names five columns and content is not one of
+--       them;
+--   (d) the service role still reads the table — the public GET depends on it.
+-- The fixture is the FK chain the table carries: an auth.users row per user, a
+-- workspace and a page per published row (osionos_published_pages.page_id ->
+-- osionos_pages.id -> osionos_workspaces.id).
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+                               ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+INSERT INTO public.osionos_workspaces (id, owner_id, name, slug) VALUES
+  ('33333333-3333-3333-3333-333333333333', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'p5 a', 'p5-a'),
+  ('44444444-4444-4444-4444-444444444444', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'p5 b', 'p5-b');
+INSERT INTO public.osionos_pages (id, workspace_id, owner_id, title) VALUES
+  ('55555555-5555-5555-5555-555555555555', '33333333-3333-3333-3333-333333333333', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'p5 a page'),
+  ('66666666-6666-6666-6666-666666666666', '44444444-4444-4444-4444-444444444444', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'p5 b page');
+INSERT INTO public.osionos_published_pages (token, page_id, owner_id, title, icon, content) VALUES
+  ('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '55555555-5555-5555-5555-555555555555', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'p5 a published', 'doc', '{"blocks":[]}'),
+  ('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', '66666666-6666-6666-6666-666666666666', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'p5 b published', 'doc', '{"blocks":[]}');
+SET LOCAL ROLE osionos_account_user;
+DO $$ BEGIN
+  PERFORM set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","aud":"osionos-account","role":"osionos_account_user"}', true);
+END $$;
+-- (a) and (b): the rows the role may see. B's row is named by its token, not
+-- by owner_id: the role holds no privilege on owner_id, so a filter on it
+-- would be refused with 42501 instead of answering the question.
+-- Every read is caught: a check that raises takes the whole stream with it,
+-- and the two isolation rows come after this one.
+DO $$
+DECLARE
+  v_own text := 'err';
+  v_other text := 'err';
+  v_state text := '';
+BEGIN
+  BEGIN
+    SELECT count(*)::text INTO v_own FROM public.osionos_published_pages;
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+    v_own := 'err:' || v_state;
+  END;
+  BEGIN
+    SELECT count(*)::text INTO v_other FROM public.osionos_published_pages
+     WHERE token = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+    v_other := 'err:' || v_state;
+  END;
+  PERFORM set_config('osionos.check.p5_own', v_own, true);
+  PERFORM set_config('osionos.check.p5_other', v_other, true);
+END $$;
+-- (c) the body is out of reach. The refusal is caught and its SQLSTATE read:
+-- an expectation that is not met is counted, not raised.
+DO $$
+DECLARE
+  v_state text := '';
+BEGIN
+  BEGIN
+    PERFORM content FROM public.osionos_published_pages;
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p5_content', v_state, true);
+END $$;
+RESET ROLE;
+-- (d) the service role still reads the table: the public GET reads the
+-- snapshot as service_role.
+SET LOCAL ROLE service_role;
+DO $$
+DECLARE
+  v_svc text := 'err';
+  v_state text := '';
+BEGIN
+  BEGIN
+    SELECT count(*)::text INTO v_svc FROM public.osionos_published_pages;
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+    v_svc := 'err:' || v_state;
+  END;
+  PERFORM set_config('osionos.check.p5_svc', v_svc, true);
+END $$;
+RESET ROLE;
+-- A missing measurement fails: an unset GUC is not a zero.
+SELECT 'p5_published_read',
+       (CASE WHEN coalesce(current_setting('osionos.check.p5_own', true), '') = '1' THEN 0 ELSE 1 END)
+     + (CASE WHEN coalesce(current_setting('osionos.check.p5_other', true), '') = '0' THEN 0 ELSE 1 END)
+     + (CASE WHEN coalesce(current_setting('osionos.check.p5_content', true), '') = '42501' THEN 0 ELSE 1 END)
+     + (CASE WHEN coalesce(current_setting('osionos.check.p5_svc', true), '') = '2' THEN 0 ELSE 1 END),
+       'A sees its own published row, B sees none, the body is refused, the service role reads all';
 ROLLBACK;
 
 -- The two isolation rows are LAST: a regressed regex in the uid helper raises

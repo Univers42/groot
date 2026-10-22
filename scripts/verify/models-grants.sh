@@ -62,6 +62,24 @@
 #   fail a registration,
 #   p1_isolation_own the role sees its own row in each of the four tables (4)
 #   and p1_isolation_forged it sees and changes nothing of B's ·
+#   p2s the atomic username change (models/osionos-account-username-migration.sql):
+#   p2s_change the change writes both tables, one history row and one version,
+#   p2s_history_once the change wrote exactly one history row,
+#   p2s_atomic a name another identity holds is refused with 23505 and nothing
+#   of the caller moves, p2s_hold the held name is refused to B and reclaimed by
+#   A, p2s_invalid a short, a reserved, a malformed and a null name are all
+#   22023, p2s_no_direct the role cannot write the username column itself,
+#   p2s_no_uid six forged claim sets are all 42501 and never 22P02,
+#   p2s_version_once the version moved by exactly one, p2s_keeps_typed_fields
+#   the typed bio, headline and location survive the change, p2s_case a
+#   case-only rename is a real change, p2s_no_identity a user with no
+#   identities row can still change their name, p2s_same_name the same name
+#   writes nothing and a drifted identity is brought in step, p2s_no_profile a
+#   user with no profile row gets P0002, p2s_reverse_drift the change repairs a
+#   profile that drifted the other way, p2s_function_config the function sets
+#   exactly search_path=pg_catalog, public and lock_timeout=3s,
+#   p2s_taken_by_profile a name another user's profile holds is refused with
+#   23505 and nothing of the caller moves ·
 #   standalone the account foundation file applied alone leaves no realtime
 #   trigger on the sessions table or on the audit table, no anon/authenticated
 #   privilege and exactly the nine column grants — what the ledger runner
@@ -506,8 +524,25 @@ run_checks() {
 	check_count "$1" p1_never_raises p1_never_raises
 	check_eq "$1" p1_isolation_own p1_isolation_own 4
 	check_count "$1" p1_isolation_forged p1_isolation_forged
+	check_count "$1" p5_published_read p5_published_read
 	check_count "$1" p5_pat_column_acl p5_pat_column_acl
 	check_count "$1" h2 account_secdef_exec
+	check_count "$1" p2s_change p2s_change
+	check_count "$1" p2s_history_once p2s_history_once
+	check_count "$1" p2s_atomic p2s_atomic
+	check_count "$1" p2s_hold p2s_hold
+	check_count "$1" p2s_invalid p2s_invalid
+	check_count "$1" p2s_no_direct p2s_no_direct
+	check_count "$1" p2s_no_uid p2s_no_uid
+	check_count "$1" p2s_version_once p2s_version_once
+	check_count "$1" p2s_keeps_typed_fields p2s_keeps_typed_fields
+	check_count "$1" p2s_case p2s_case
+	check_count "$1" p2s_no_identity p2s_no_identity
+	check_count "$1" p2s_same_name p2s_same_name
+	check_count "$1" p2s_no_profile p2s_no_profile
+	check_count "$1" p2s_reverse_drift p2s_reverse_drift
+	check_count "$1" p2s_function_config p2s_function_config
+	check_count "$1" p2s_taken_by_profile p2s_taken_by_profile
 	probe "$1" K1 authenticated "SELECT count(*) FROM public.osionos_sessions"
 	probe "$1" K2 osionos_account_user "SELECT refresh_hash FROM public.osionos_sessions"
 	probe "$1" K3 osionos_account_user "UPDATE public.osionos_sessions SET revoked_at = now()"

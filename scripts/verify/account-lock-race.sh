@@ -21,23 +21,35 @@
 # WHAT IT RUNS
 #   A throwaway grobase postgres (--rm --network none) -> 001 -> 012 -> shim
 #   -> the real runner (scripts/apply-models-migrations.sh) -> 20 rounds, each
-#   with three statements in flight at once:
+#   with four statements in flight at once:
 #     1. a replay of models/osionos-account-profiles-migration.sql (it takes
 #        the table locks the hot paths want);
 #     2. a sign-in: UPDATE osionos_bridge_identities SET profile = ... (the
 #        trigger then writes the profile);
-#     3. a profile write for the SAME user: UPDATE osionos_profiles SET bio.
+#     3. a profile write for the SAME user: UPDATE osionos_profiles SET bio;
+#     4. the atomic username change for the SAME user: the call to
+#        osionos_account_change_username, as the account role with forged
+#        claims, with a fresh name every round.
 #   Every statement's error output is read for 40P01 (deadlock) and 55P03
-#   (lock timeout).
+#   (lock timeout), and after every round both rows are read back: the
+#   identity row and the profile row must hold the round's name.
 #
 # THE RESULT
 #   RESULT: <n> runs, <d> deadlocks (40P01), <t> lock timeouts (55P03)
-#   Exit 0 when no round deadlocked, 1 otherwise.
+#   Exit 0 when no round deadlocked AND every round moved the name to the
+#   round's own name, 1 otherwise. The read-back is what makes the exit code
+#   mean something: a function that writes nothing at all deadlocks nothing
+#   either, and without it this script would pass a function that never ran.
 #
 # Caveat: the file's own lock_timeout is 5 s, so a writer that holds a lock
 #   for longer than that makes the REPLAY abort with 55P03 — a failed boot
 #   until the next one, not a deadlock. The timeout is reported apart from the
 #   deadlocks, because a timeout is a budget and a deadlock is a bug.
+#
+# Caveat: the function's own lock_timeout is 3 s, so a replay that holds the
+#   identities table longer than that makes every round fail with 55P03 and
+#   no name move. The read-back catches that too: such a run exits 1 instead
+#   of reporting a race that never happened.
 #
 # Caveat: one round is one attempt at the race. A deadlock that needs a
 #   particular interleaving may not show up in 20 rounds; the round count is
@@ -48,11 +60,16 @@
 #   mini-baas / osionos containers are never read, written or stopped.
 #
 # Usage:  [GROBASE_PG_IMAGE=…] [MODELS_DIR=…] sh scripts/verify/account-lock-race.sh
-# Exit:  0 no deadlock · 1 a deadlock · 2 docker missing
+# Exit:  0 no deadlock and every round moved the name · 1 a deadlock, a leg
+#        that errored, or a round whose name did not move · 2 docker missing
 #
 # Ponytail: P1-2s extends this with the atomic username change (one SECURITY
-#   DEFINER function that writes the profile and then the identity row), which
-#   takes the two locks in the opposite order of the two statements above.
+#   DEFINER function that writes the identity row first and the profile
+#   second, so it takes the same lock order as the replay and the two
+#   statements above). The function carries its own 3 s lock_timeout, so a
+#   replay that holds the identities table longer than that makes the call
+#   fail with 55P03 — counted apart from the deadlocks, because a timeout is a
+#   budget and a deadlock is a bug.
 set -eu
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -73,6 +90,7 @@ CTN=''
 WORK=''
 deadlocks=0
 timeouts=0
+errors=0
 
 note() { printf '[account-lock-race] %s\n' "$*" >&2; }
 
@@ -87,6 +105,12 @@ trap cleanup EXIT INT TERM
 
 psql_stdin() {
 	docker exec -i "${CTN}" psql -U "${PG_USER}" -d "${PG_DB}" -v ON_ERROR_STOP=1 -q
+}
+
+# The read-back: one row, one line, the identity's name and the profile's
+# name separated by a pipe. -At so the answer is the value itself.
+psql_at() {
+	docker exec -i "${CTN}" psql -U "${PG_USER}" -d "${PG_DB}" -v ON_ERROR_STOP=1 -q -At
 }
 
 apply() {
@@ -125,8 +149,9 @@ VALUES ('prismatica', '21111111-1111-1111-1111-111111111111', '${RACE_USER}', 'l
 SQL
 }
 
-# One round: the replay, the sign-in and the profile write, all in flight.
-# The three error files are read for the two SQLSTATEs that matter.
+# One round: the replay, the sign-in, the profile write and the username
+# change, all in flight. The four error files are read for the two SQLSTATEs
+# that matter.
 round() {
 	n="$1"
 	# 1. the replay of the migration file
@@ -145,10 +170,22 @@ SQL
 UPDATE public.osionos_profiles SET bio = 'race ${n}' WHERE user_id = '${RACE_USER}';
 SQL
 	profile_pid=$!
+	# 4. the atomic username change, for the same user, as the account role
+	#    with forged claims and a fresh name every round
+	docker exec -i "${CTN}" psql -U "${PG_USER}" -d "${PG_DB}" -v ON_ERROR_STOP=1 -q \
+		>"${WORK}/username-${n}.out" 2>"${WORK}/username-${n}.err" <<SQL &
+BEGIN;
+SET LOCAL ROLE osionos_account_user;
+SELECT set_config('request.jwt.claims', '{"sub":"${RACE_USER}","aud":"osionos-account","role":"osionos_account_user"}', true);
+SELECT public.osionos_account_change_username('race${n}');
+COMMIT;
+SQL
+	username_pid=$!
 	wait "${replay_pid}" || true
 	wait "${signin_pid}" || true
 	wait "${profile_pid}" || true
-	for f in "${WORK}"/replay-"${n}".err "${WORK}"/signin-"${n}".err "${WORK}"/profile-"${n}".err; do
+	wait "${username_pid}" || true
+	for f in "${WORK}"/replay-"${n}".err "${WORK}"/signin-"${n}".err "${WORK}"/profile-"${n}".err "${WORK}"/username-"${n}".err; do
 		if grep -q '40P01\|deadlock detected' "${f}" 2>/dev/null; then
 			deadlocks=$((deadlocks + 1))
 			note "round ${n}: DEADLOCK in $(basename "${f}")"
@@ -160,6 +197,24 @@ SQL
 			sed 's/^/  | /' "${f}" >&2
 		fi
 	done
+	# The username leg must not fail for any other reason: a leg that errors
+	# is a round that proved nothing, and a race that silently stopped
+	# running looks exactly like a race that never deadlocked.
+	if grep -q 'ERROR:' "${WORK}/username-${n}.err" 2>/dev/null &&
+		! grep -q '40P01\|deadlock detected\|55P03\|lock timeout' "${WORK}/username-${n}.err" 2>/dev/null; then
+		errors=$((errors + 1))
+		note "round ${n}: ERROR in username-${n}.err"
+		sed 's/^/  | /' "${WORK}/username-${n}.err" >&2
+	fi
+	# THE ROUND MUST HAVE MOVED THE NAME. Without this a function that writes
+	# nothing at all passes the race: no deadlock, no error, exit 0, and
+	# nothing was ever raced. Both rows are read back in a fresh session,
+	# after the change committed.
+	back="$(psql_at <"${WORK}/readback.sql" 2>/dev/null || true)"
+	if [ "${back}" != "race${n}|race${n}" ]; then
+		errors=$((errors + 1))
+		note "round ${n}: the name did not move (read back '${back}', wanted 'race${n}|race${n}')"
+	fi
 }
 
 main() {
@@ -201,6 +256,14 @@ main() {
 		note "the race user could not be created"
 		exit 2
 	}
+	# The read-back query, written once: the identity's name and the
+	# profile's name, separated by a pipe. A name that is not there reads
+	# '-' rather than nothing, so a missing row is a wrong answer and not an
+	# empty one.
+	printf '%s\n' \
+		"SELECT coalesce((SELECT username FROM public.osionos_bridge_identities WHERE user_id = '${RACE_USER}'), '-')" \
+		"    || '|' || coalesce((SELECT username FROM public.osionos_profiles WHERE user_id = '${RACE_USER}'), '-');" \
+		>"${WORK}/readback.sql"
 	i=0
 	while [ "${i}" -lt "${ROUNDS}" ]; do
 		i=$((i + 1))
@@ -208,6 +271,10 @@ main() {
 	done
 	printf 'RESULT: %s runs, %s deadlocks (40P01), %s lock timeouts (55P03)\n' \
 		"${ROUNDS}" "${deadlocks}" "${timeouts}"
+	[ "${errors}" -eq 0 ] || {
+		note "${errors} round(s) failed the username change: an error other than a deadlock or a timeout, or a name that did not move"
+		exit 1
+	}
 	[ "${deadlocks}" -eq 0 ] || exit 1
 	exit 0
 }
