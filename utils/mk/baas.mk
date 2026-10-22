@@ -78,3 +78,16 @@ models-grants-verify: ## Prove on a throwaway DB that only service_role reaches 
 ## outside its own containers; non-zero on any failure, and a missing image is a FAIL rather than a
 ## SKIP.
 	@sh scripts/verify/models-grants.sh
+
+account-load: ## Run 10K-user seed + query budgets on throwaway DB (baseline for P0-5/P1-1)
+## Spins up a throwaway grobase postgres (--network none), applies grobase init + 012 + shim +
+## apply-models-migrations.sh, seeds 10K users + workspaces + pages + connections + feed shares,
+## runs ANALYZE, then executes each query from scripts/verify/account-load/queries.sql RUNS times
+## (default 30) with EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON). Records p50/p95 execution time
+## and whether plan contains Seq Scan on tables listed in budgets.json. Outputs PASS/FAIL per
+## query and JSON to target/account-load/<timestamp>.json. Exit 0 = all within budget, 1 = breach,
+## 2 = docker missing. Use --baseline to report without failing.
+	@sh scripts/verify/account-load.sh
+
+account-load-baseline: ## Run account-load in baseline mode (reports only, exit 0)
+	@sh scripts/verify/account-load.sh --baseline
