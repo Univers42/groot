@@ -41,6 +41,12 @@
 --   files it did not run) has no role and no table, and the bridge answers 503
 --   account_plane_unavailable — never a leak.
 --
+-- APPLIED AS A SUPERUSER
+--   The membership revoke below names the grantor (GRANTED BY), and only a
+--   superuser may revoke a grant another role made, so a non-superuser apply
+--   fails fast on the guard rather than leaving the account role inside a role
+--   it must not reach.
+--
 -- DESKTOP
 --   P0-4 must wire apps/osionos-electron/native/firstrun.mjs to this file, and
 --   that wiring is not free: osionos_feed_shares never exists on the desktop
@@ -52,6 +58,18 @@
 -- (check g of scripts/verify/models-grants.sh).
 
 BEGIN;
+
+-- Fail fast, and say why: the membership revoke below names the grantor
+-- (GRANTED BY ... CASCADE), and only a superuser may revoke a grant another
+-- role made. A non-superuser apply would otherwise warn and leave the account
+-- role inside service_role.
+DO $$
+BEGIN
+  IF NOT (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) THEN
+    RAISE EXCEPTION 'osionos-account-foundation-migration.sql must run as a superuser (REVOKE ... GRANTED BY ... CASCADE)';
+  END IF;
+END
+$$;
 
 -- Caveat: a busy table makes this file fail (the whole transaction rolls back)
 -- instead of waiting; the next run retries it. 5 s is a budget, not a promise.
@@ -77,6 +95,12 @@ ALTER ROLE osionos_account_user NOLOGIN NOINHERIT NOBYPASSRLS NOSUPERUSER NOCREA
 -- CREATEROLE role survived the plain revoke (with a WARNING) and the account
 -- role kept that role's privileges. GRANTED BY names the grantor, CASCADE
 -- removes what it granted in turn.
+-- Caveat: the loop removes only what the account role is a member OF. A
+-- membership granted TO the account role — some role other than authenticator
+-- that a DBA added by hand — is left in place: revoking someone else's
+-- membership on every boot is a bigger decision than this file makes. What
+-- catches it is k7, the 'has_member:' rows in account-checks.sql, and not a
+-- remediation here.
 DO $$
 DECLARE
   r record;
