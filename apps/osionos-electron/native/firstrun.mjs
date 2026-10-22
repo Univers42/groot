@@ -43,6 +43,7 @@ const MIGRATIONS = [
   "osionos-object-databases-migration.sql",
   "osionos-page-cover-position-migration.sql",
   "osionos-page-search-migration.sql",
+  "osionos-page-version-migration.sql",
   "osionos-app-connections-migration.sql",
   "osionos-code-surface-migration.sql",
   SERVICE_ROLE_ONLY,

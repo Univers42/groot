@@ -78,7 +78,10 @@
 #         (needed by osionos-comments-migration.sql)
 #     osionos-page-search-migration.sql defines public.osionos_page_blocks()
 #         (needed by osionos-page-links-migration.sql)
-#   The auth-security-migration.sql file is deliberately NOT one of those six: it runs
+#     osionos-page-links-migration.sql  creates osionos_page_links (needed by
+#         osionos-ai-graph-migration.sql, whose edge read RETURNS SETOF it and
+#         sorts before it)
+#   The auth-security-migration.sql file is deliberately NOT one of those seven: it runs
 #   in the plain alphabetical pass, after ORDERED_FIRST has reconciled public.users, and needs two things this database already has when the runner starts: public.users
 #   (its auth_audit_events.user_id column takes whatever type public.users.id has, read
 #   from the catalog) and the three roles anon, authenticated and service_role (its
@@ -89,36 +92,87 @@
 #   regression here will NOT show as a `--check` gap on a converged database.
 #   The only real detector is a full apply on a from-scratch database.
 #
-#   osionos-account-foundation-migration.sql runs after the alphabetical pass and
-#   before the service-role-only pass. Alphabetical order would put it first
-#   ('account' sorts before 'feed') and it would fail on relations that do not
-#   exist yet: it indexes osionos_feed_shares (created by
-#   osionos-feed-engagement-migration.sql, alphabetical) and alters
-#   osionos_bridge_audit_events (created by osionos-bridge-migration.sql, in
-#   ORDERED_FIRST). It also creates public.osionos_sessions, an osionos_*
-#   relation, so it must exist BEFORE the catalog pass below: a table created
-#   after that pass keeps the legacy default privileges (anon/authenticated
-#   SELECT) instead of being revoked from them.
-#   osionos-account-profiles-migration.sql runs right after it, for the same
-#   reason: it grants to the role the foundation file creates, and it creates
-#   four more osionos_* relations plus the directory view, which the catalog
-#   pass below must see so their default privileges are revoked from
-#   anon/authenticated.
-#   osionos-account-username-migration.sql runs right after it: it revokes the
-#   UPDATE(username) column grant that file makes on osionos_profiles, and it
-#   grants EXECUTE on the atomic username change to the role that file
-#   creates. It has to run after that file, never before it.
-#   osionos-account-profession-migration.sql runs right after it: it adds the
-#   profession column and grants it to the account role, so the column has to
-#   exist before the grant, and every bridge image that names the column has
-#   to come after the schema. It has to run after that file, never before it.
-#   osionos-personal-access-tokens-migration.sql runs after those (and after
-#   osionos-publish-account-migration.sql), before the service-role-only pass:
-#   it grants to the same role and it creates one more osionos_* relation, which
-#   the catalog pass below must see so the token table's default privileges are
-#   revoked from anon/authenticated too.
+#   osionos-user-events-migration.sql (the ai_events log and its capture
+#       triggers) is in the alphabetical pass and is NAMED so it sorts after the
+#       engagement tables it captures from: osionos-chat-migration.sql
+#       (osionos_feed_likes, osionos_feed_comments), osionos-comments-
+#       migration.sql (osionos_page_comments), osionos-favorites-migration.sql
+#       (osionos_page_favorites) and osionos-feed-engagement-migration.sql
+#       (osionos_feed_reactions, osionos_feed_shares). It also reads
+#       osionos_connections, which osionos-social-migration.sql creates — that
+#       one is in ORDERED_FIRST, so it is applied before the alphabetical pass
+#       whatever its name says. A trigger on a table that does not exist yet is
+#       a hard error, so this order is a correctness fact, not a style choice:
+#       it is the same trick osionos-membership-cutoff-migration.sql uses to
+#       sort after auth-session-cutoffs.sql.
+#       The file is NOT called osionos-ai-events-migration.sql: that name sorts
+#       BEFORE the tables it needs, and the alphabetical pass is the only slot
+#       both runners share (this one and the ledger runner
+#       scripts/apply-models.sh, whose glob is the same). scripts/verify/
+#       ai-events.sh reads this runner's own order and fails if the file does
+#       not sort after the tables it captures from.
+#
+#   osionos-ugc-moderation-migration.sql (the soft moderation state, the
+#       append-only moderation audit and the moderation queue) is in the
+#       alphabetical pass and is NAMED so it sorts after the tables it reads
+#       and triggers on: osionos-chat-migration.sql (osionos_feed_comments),
+#       osionos-comments-migration.sql (osionos_page_comments) and
+#       osionos-feed-engagement-migration.sql (osionos_feed_comments.parent_id
+#       and its updated_at column). It also JOINs osionos_pages, which
+#       osionos-bridge-migration.sql creates, and osionos_workspaces.visibility,
+#       which osionos-social-migration.sql adds — both are in ORDERED_FIRST, so
+#       they are applied before the alphabetical pass whatever their name says.
+#       A trigger on a table that does not exist yet is a hard error, so this
+#       order is a correctness fact, not a style choice: it is the same trick
+#       osionos-user-events-migration.sql uses. The file is NOT called
+#       osionos-ai-moderation-migration.sql: that name sorts BEFORE the tables
+#       it needs, and the alphabetical pass is the only slot both runners
+#       share. scripts/verify/moderation-state.sh reads this runner's own order
+#       and fails if the file does not sort after them.
+#
+#   osionos-rec-factors-migration.sql (the recommender's model registry, its
+#       zero-padded factor vectors, the guarded promotion and the erasure) is
+#       in the alphabetical pass and sorts BEFORE
+#       osionos-user-events-migration.sql ("r" < "u"). That order is fine
+#       ONLY because the new file references NOTHING in the events file: it
+#       creates its own three tables and its own three functions, and it
+#       reads no ai_events table. The events file's ai_erase_user() resolves
+#       ai_rec_erase_user() at CALL time (to_regprocedure(...) IS NOT NULL ->
+#       EXECUTE), so the two files work in either order and each of them works
+#       alone. The extension it needs (pgvector) is created by
+#       osionos-social-migration.sql, which is in ORDERED_FIRST, so the
+#       extension exists before the alphabetical pass whatever the name says.
+#       The file says so in its own header.
+#
+#   osionos-rec-serving-migration.sql (the two reads that serve the champion:
+#       a user's context for the fold-in, and the champion's nearest items
+#       through the HNSW index) is in the alphabetical pass and sorts AFTER
+#       osionos-rec-factors-migration.sql ("factors" < "serving"). That order
+#       HOLDS, and it is a correctness fact, not a style choice: the query
+#       behind ai_rec_nearest is a plain SQL function, and a SQL function's
+#       body is VALIDATED when it is created, so the factor tables have to
+#       exist when this file is applied. The alphabetical pass applies the
+#       factors file first, so they do.
+#
+#       It sorts BEFORE osionos-user-events-migration.sql ("serving" <
+#       "user"), and that order is fine ONLY because the events tables are
+#       read from PL/pgSQL, which resolves a relation at CALL time and not at
+#       creation time: ai_rec_user_context reads public.ai_events and
+#       public.ai_personalization_settings when it is called, never when it is
+#       created. The runner applies both files in the same boot, so the tables
+#       are there before the first call. It is the same trick the events file
+#       uses in reverse, where ai_erase_user() resolves ai_rec_erase_user() at
+#       CALL time. The file says so in its own header, and
+#       scripts/verify/rec-serving.sh proves it: it applies the serving file
+#       twice on a database that has the factors file and NOT the events file.
+#
 #   osionos-service-role-only-migration.sql runs LAST (ORDERED_LAST), after
-#   everything: it revokes what earlier files and older boots granted.
+#   everything: it revokes what earlier files and older boots granted. Its
+#   sweep matches the osionos\_% NAME PATTERN, so the ai\_% relations are
+#   outside it: ai_events, ai_jobs, ai_rec_models, ai_rec_item_factors,
+#   ai_rec_user_factors and the ai_rec_* serving functions close themselves
+#   with their own REVOKE, in their own file, on every replay. There is
+#   nothing to add to that file.
 #   users-pii-grants-migration.sql runs after it, last of all: it fixes the
 #   public.users column grants (no anon email, no password_hash for anyone).
 #   apply-models.sh runs it last too, by name (GRANTS_LAST), not by glob collation.
@@ -141,7 +195,7 @@ trap 'rm -f "${ERR_FILE}"' EXIT
 # Dependency order (see "ORDERING" above) — each must run before the plain
 # alphabetical pass reaches its dependent. Space-separated: no filename here
 # contains a space or glob character.
-ORDERED_FIRST="auth-gateway-users-reconcile-migration.sql osionos-bridge-migration.sql osionos-chat-migration.sql osionos-social-migration.sql osionos-engagement-migration.sql osionos-page-search-migration.sql"
+ORDERED_FIRST="auth-gateway-users-reconcile-migration.sql osionos-bridge-migration.sql osionos-chat-migration.sql osionos-social-migration.sql osionos-engagement-migration.sql osionos-page-search-migration.sql osionos-page-links-migration.sql"
 ORDERED_LAST="osionos-account-foundation-migration.sql osionos-account-profiles-migration.sql osionos-account-username-migration.sql osionos-account-profession-migration.sql osionos-publish-account-migration.sql osionos-personal-access-tokens-migration.sql osionos-self-data-indexes-migration.sql osionos-service-role-only-migration.sql realtime-cdc-off-migration.sql users-pii-grants-migration.sql"
 
 note() { printf '[models] %s\n' "$*" >&2; }
@@ -211,11 +265,12 @@ first_error() {
 # missing table `hook` and kept the file pending forever.
 # Caveat: a `--` inside a string literal before a CREATE TABLE on the same line
 # hides that table from --check (none in models/ today); apply mode is unaffected.
+# A table created through dynamic SQL (EXECUTE format(...)) is invisible to --check too.
 pending() {
 	awk '{ l = tolower($0); sub(/--.*/, "", l) }
-		match(l, /create table (if not exists )?(public\.)?[a-z_]+/) {
+		match(l, /create table (if not exists )?(public\.)?[a-z_][a-z0-9_]*/) {
 			t = substr(l, RSTART, RLENGTH)
-			sub(/.* /, "", t); sub(/public\./, "", t); print t
+			sub(/.* /, "", t); sub(/public\./, "", t); if (t != "public") print t
 		}' "$1" | sort -u | while IFS= read -r t; do
 		[ -n "${t}" ] || continue
 		hit="$(docker exec "${PG_CTN}" psql -U postgres -d "${PG_DB}" -tAc \
@@ -243,17 +298,22 @@ realtime_armed() {
 		2>/dev/null || echo "(query failed)"
 }
 
+# apply_one <file> [defer] — with `defer`, a failure is queued in ${deferred} for a retry
+# after the alphabetical pass instead of being reported.
 apply_one() {
 	f="$1"
 	base="$(basename "${f}")"
 	miss="$(pending "${f}")"
-	if psql_in <"${f}" >/dev/null 2>"${ERR_FILE}"; then
+	rc=0
+	psql_in <"${f}" >/dev/null 2>"${ERR_FILE}" || rc=$?
+	if [ "${rc}" -eq 0 ]; then
 		if [ -n "${miss}" ]; then
 			note "applied: ${base}"
 			applied=$((applied + 1))
 		fi
+	elif [ "${2:-}" = defer ]; then
+		deferred="${deferred} ${base}"
 	else
-		rc=$?
 		note "FAILED: ${base} — $(first_error "${ERR_FILE}" "${rc}")"
 		failed=$((failed + 1))
 	fi
@@ -299,7 +359,7 @@ main() {
 		exit 0
 	fi
 
-	applied=0 failed=0
+	applied=0 failed=0 deferred=""
 
 	for base in ${ORDERED_FIRST}; do
 		f="${MODELS_DIR}/${base}"
@@ -317,7 +377,21 @@ main() {
 		skipped "${base}" && continue
 		is_ordered "${base}" && continue
 		is_ordered_last "${base}" && continue
-		apply_one "${f}"
+		apply_one "${f}" defer
+	done
+	# A file that references a table a LATER file creates fails once in alphabetical order
+	# (osionos-rec-beacon indexes ai_events, which osionos-user-events creates): retry the
+	# failures until a round makes no progress, then report what still fails.
+	while [ -n "${deferred}" ]; do
+		left="${deferred}"
+		deferred=""
+		for base in ${left}; do
+			apply_one "${MODELS_DIR}/${base}" defer
+		done
+		[ "${deferred}" = "${left}" ] && break
+	done
+	for base in ${deferred}; do
+		apply_one "${MODELS_DIR}/${base}"
 	done
 
 	for base in ${ORDERED_LAST}; do
