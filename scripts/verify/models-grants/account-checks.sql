@@ -240,15 +240,18 @@ SELECT 'account_session_columns', count(*), coalesce(string_agg(v, ' ' ORDER BY 
 -- The set is compared in both directions, so a privilege that is missing AND
 -- one that is extra are both a failure.
 -- The expected set is the spec's: SELECT on every column of the profiles (they
--- are all public profile fields), UPDATE on the twelve the user owns — the
+-- are all public profile fields), UPDATE on the thirteen the user owns — the
 -- username is NOT one of them since P1-2s, the settings' SELECT/INSERT/UPDATE,
 -- the history's SELECT on three columns, and the deletion request's
 -- SELECT/INSERT plus the table-level DELETE (a cancel).
 -- Caveat: a table-level grant is reported as a table privilege, not as a
 -- column one, so the two are kept apart with the '*' column name.
+-- Caveat: a table-level grant on the profiles would be reported by
+-- information_schema.column_privileges as a column privilege on EVERY column,
+-- so it shows up here as an extra row and not as a missing one.
 WITH expected(tbl, col, priv) AS (
-            SELECT 'osionos_profiles', c, 'SELECT' FROM unnest(ARRAY['user_id','display_name','username','pronouns','headline','bio','location','company','website','links','timezone','orcid','patreon','avatar_url','banner_url','directory_opt_out','version','created_at','updated_at','search_doc']) c
-  UNION ALL SELECT 'osionos_profiles', c, 'UPDATE' FROM unnest(ARRAY['display_name','pronouns','headline','bio','location','company','website','links','timezone','orcid','patreon','directory_opt_out']) c
+            SELECT 'osionos_profiles', c, 'SELECT' FROM unnest(ARRAY['user_id','display_name','username','pronouns','headline','bio','location','company','website','links','timezone','orcid','patreon','avatar_url','banner_url','directory_opt_out','version','created_at','updated_at','search_doc','profession']) c
+  UNION ALL SELECT 'osionos_profiles', c, 'UPDATE' FROM unnest(ARRAY['display_name','pronouns','headline','bio','location','company','website','links','timezone','orcid','patreon','directory_opt_out','profession']) c
   UNION ALL SELECT 'osionos_user_settings', c, 'SELECT' FROM unnest(ARRAY['user_id','section','value','version','updated_at']) c
   UNION ALL SELECT 'osionos_user_settings', c, 'INSERT' FROM unnest(ARRAY['user_id','section','value']) c
   UNION ALL SELECT 'osionos_user_settings', c, 'UPDATE' FROM unnest(ARRAY['user_id','section','value','version','updated_at']) c
@@ -1593,6 +1596,44 @@ SELECT 'p5_published_read',
      + (CASE WHEN coalesce(current_setting('osionos.check.p5_svc', true), '') = '2' THEN 0 ELSE 1 END),
        'A sees its own published row, B sees none, the body is refused, the service role reads all';
 ROLLBACK;
+
+-- p2_4_profession_check: the profession column's CHECK (P2-4-d1,
+-- models/osionos-account-profession-migration.sql). Three facts, one row: a
+-- constraint named osionos_profiles_profession_check exists on
+-- public.osionos_profiles, it is on the profession column, and its definition
+-- names all eight ids.
+-- The definition is read as TEXT (the notify_types_missing pattern): a CHECK
+-- that is not an IN-list reports every id missing — a false FAIL, never a
+-- false pass.
+-- A missing table or a missing constraint is a violation, not a zero: a check
+-- that reads 0 because it found nothing proves nothing.
+WITH c AS (
+  SELECT conkey, pg_get_constraintdef(oid) AS def
+    FROM pg_constraint
+   WHERE conrelid = to_regclass('public.osionos_profiles')
+     AND conname = 'osionos_profiles_profession_check'
+     AND contype = 'c'
+),
+ids(id) AS (
+  SELECT unnest(ARRAY['student','developer','designer','data-analyst','researcher','creator','founder','teacher'])
+)
+SELECT 'p2_4_profession_check', count(*), coalesce(string_agg(v, ' ' ORDER BY v), '')
+  FROM (
+    SELECT 'no_constraint' AS v
+      WHERE NOT EXISTS (SELECT 1 FROM c)
+    UNION ALL
+    SELECT 'not_on_profession'
+      WHERE EXISTS (SELECT 1 FROM c)
+        AND NOT EXISTS (SELECT 1 FROM c, pg_attribute a
+                         WHERE a.attrelid = to_regclass('public.osionos_profiles')
+                           AND a.attname = 'profession'
+                           AND c.conkey = ARRAY[a.attnum])
+    UNION ALL
+    SELECT 'missing_id:' || i.id
+      FROM ids i
+     WHERE EXISTS (SELECT 1 FROM c)
+       AND NOT EXISTS (SELECT 1 FROM c WHERE c.def LIKE '%''' || i.id || '''%')
+  ) AS violations;
 
 -- The two isolation rows are LAST: a regressed regex in the uid helper raises
 -- 22P02 and blanks every row after it.
