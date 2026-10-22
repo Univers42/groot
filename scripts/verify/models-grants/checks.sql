@@ -241,3 +241,61 @@ SELECT 'p5_pat_column_acl',
      || ' delete=' || coalesce(current_setting('osionos.check.p5_delete', true), 'unset')
      || ' acl=' || coalesce((SELECT string_agg(v, ' ' ORDER BY v) FROM violations), 'exact');
 ROLLBACK;
+
+-- p5_pat_row_rules: the token table's own row rules. The service role is the
+-- only writer, so three rows must never exist and the table has to refuse
+-- them itself: a fine-grained token that grants nothing, a classic token that
+-- grants nothing, and a row that is revoked without a reason.
+-- The count is the number of the three that were NOT refused with 23514. A
+-- probe that fails with another SQLSTATE counts as not refused too: a row
+-- that lands for the wrong reason is still a row that lands.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+SET LOCAL ROLE service_role;
+DO $$
+DECLARE
+  v_state text := '';
+BEGIN
+  -- A fine-grained token with no grant at all.
+  v_state := '';
+  BEGIN
+    INSERT INTO public.osionos_personal_access_tokens
+      (user_id, name, kind, scopes, grants, token_hash, expires_at)
+    VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'neither', 'fine_grained', '{}', '[]'::jsonb,
+            repeat('a', 64), now() + interval '1 hour');
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p5_rule_neither', v_state, true);
+  -- A classic token with no scope at all.
+  v_state := '';
+  BEGIN
+    INSERT INTO public.osionos_personal_access_tokens
+      (user_id, name, kind, scopes, grants, token_hash, expires_at)
+    VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'scope', 'classic', '{}', '[]'::jsonb,
+            repeat('b', 64), now() + interval '1 hour');
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p5_rule_scope', v_state, true);
+  -- A row that is revoked without a reason.
+  v_state := '';
+  BEGIN
+    INSERT INTO public.osionos_personal_access_tokens
+      (user_id, name, kind, scopes, grants, token_hash, expires_at, revoked_at)
+    VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'revoked', 'classic', ARRAY['pages:read'], '[]'::jsonb,
+            repeat('c', 64), now() + interval '1 hour', now());
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p5_rule_revoked', v_state, true);
+END $$;
+RESET ROLE;
+SELECT 'p5_pat_row_rules',
+       (CASE WHEN current_setting('osionos.check.p5_rule_neither', true) = '23514' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.p5_rule_scope', true) = '23514' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.p5_rule_revoked', true) = '23514' THEN 0 ELSE 1 END),
+       'neither=' || coalesce(current_setting('osionos.check.p5_rule_neither', true), 'unset')
+     || ' scope=' || coalesce(current_setting('osionos.check.p5_rule_scope', true), 'unset')
+     || ' revoked=' || coalesce(current_setting('osionos.check.p5_rule_revoked', true), 'unset');
+ROLLBACK;

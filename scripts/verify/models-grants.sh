@@ -477,7 +477,52 @@ assert_standalone() {
 	fi
 }
 
+# check_ordered_last <scenario> — the runner's ORDERED_LAST list, pinned. The
+# catalog pass (osionos-service-role-only-migration.sql) is what revokes what
+# the legacy default privileges handed to a relation the runner creates, so a
+# file that runs after it is outside the revocation the runner exists for; and
+# the token file grants to the role the foundation file creates, so it has to
+# run after it. The order is a thing to prove, not to assume.
+check_ordered_last() {
+	pinned_tail="osionos-service-role-only-migration.sql realtime-cdc-off-migration.sql users-pii-grants-migration.sql"
+	line="$(grep -E '^ORDERED_LAST=' "${RUNNER}" | tail -1 || true)"
+	if [ -z "${line}" ]; then
+		fail "$1" "ordered_last" "no ORDERED_LAST line in ${RUNNER}"
+		return 0
+	fi
+	list="$(printf '%s\n' "${line}" | sed -e 's/^ORDERED_LAST="//' -e 's/"$//')"
+	tail3="$(printf '%s\n' "${list}" | awk 'NF < 3 { print ""; next } { s = ""; for (i = NF - 2; i <= NF; i++) { s = s (s == "" ? "" : " ") $i } print s }')"
+	if [ "${tail3}" != "${pinned_tail}" ]; then
+		fail "$1" "ordered_last" "the tail is '${tail3}', expected '${pinned_tail}'"
+		return 0
+	fi
+	pos_foundation=0
+	pos_token=0
+	i=0
+	for f in ${list}; do
+		i=$((i + 1))
+		if [ "${f}" = "osionos-account-foundation-migration.sql" ]; then
+			pos_foundation="${i}"
+		fi
+		if [ "${f}" = "osionos-personal-access-tokens-migration.sql" ]; then
+			pos_token="${i}"
+		fi
+	done
+	if [ "${pos_foundation}" -eq 0 ] || [ "${pos_token}" -eq 0 ]; then
+		fail "$1" "ordered_last" "the list names neither the foundation file nor the token file: ${list}"
+		return 0
+	fi
+	if [ "${pos_foundation}" -ge "${pos_token}" ]; then
+		fail "$1" "ordered_last" "the foundation file is not before the token file: ${list}"
+		return 0
+	fi
+	pass "$1" "ordered_last" "the tail is pinned"
+}
+
 run_checks() {
+	# The runner's file order is a fact about the script, not about this
+	# database, so it is read from the script itself.
+	check_ordered_last "$1"
 	# A checks.sql error is echoed, then read back anyway: a missing row is a FAIL.
 	# checks.sql and account-checks.sql go into ONE psql: one stream, so the two
 	# isolation rows stay last, and one transaction for the k5/k6 GUCs.
@@ -526,6 +571,7 @@ run_checks() {
 	check_count "$1" p1_isolation_forged p1_isolation_forged
 	check_count "$1" p5_published_read p5_published_read
 	check_count "$1" p5_pat_column_acl p5_pat_column_acl
+	check_count "$1" p5_pat_row_rules p5_pat_row_rules
 	check_count "$1" h2 account_secdef_exec
 	check_count "$1" p2s_change p2s_change
 	check_count "$1" p2s_history_once p2s_history_once

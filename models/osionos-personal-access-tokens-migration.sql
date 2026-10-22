@@ -64,15 +64,14 @@ SET LOCAL lock_timeout = '5s';
 -- show: a prefix of the secret buys nothing (eight characters of a 256-bit
 -- secret are not a name).
 -- kind is classic (a list of scopes) or fine_grained (a list of grants); the
--- two CHECKs below are the "one or the other, never both, never neither" rule,
+-- CHECKs below are the "one or the other, never both, never neither" rule,
 -- enforced by the database as well as by the bridge.
 -- last_used_at is when the token was last used. The bridge writes it
 -- best-effort, at most once per token per hour, so the value is accurate to
 -- the hour; NULL means never used.
--- Caveat: the table is stricter than the bridge in one place and looser in
--- another. Stricter: a row whose expiry is not in the future cannot exist at
--- all. Looser: a classic token with an empty scope list is accepted here (the
--- bridge refuses that body before it ever reaches this table).
+-- Caveat: the table checks the SHAPE of a token, not its vocabulary: a scope
+-- the bridge would refuse is stored if the service role writes it. The bridge
+-- is the only place the vocabulary is enforced.
 CREATE TABLE IF NOT EXISTS public.osionos_personal_access_tokens (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -89,12 +88,17 @@ CREATE TABLE IF NOT EXISTS public.osionos_personal_access_tokens (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   revoked_at TIMESTAMPTZ,
   revoked_reason TEXT CHECK (revoked_reason IN ('user','admin')),
-  -- The expiry is required at the storage layer: a row without a future expiry
-  -- cannot exist.
+  -- The expiry is required at the storage layer: expires_at must be after the
+  -- row's own created_at, and the service role can set created_at — so this
+  -- proves an expiry exists, not that it is in the future (the cap is P5-1-b's).
   CHECK (expires_at > created_at),
   CHECK (kind = 'classic' OR scopes = '{}'),
   CHECK (kind = 'fine_grained' OR jsonb_array_length(grants) = 0),
-  CHECK (jsonb_typeof(grants) = 'array')
+  -- never neither: a token that grants nothing is refused, not stored
+  CHECK (scopes <> '{}' OR jsonb_array_length(grants) > 0),
+  CHECK (jsonb_typeof(grants) = 'array'),
+  -- revoked together or not at all, as osionos_sessions does
+  CHECK ((revoked_at IS NULL) = (revoked_reason IS NULL))
 );
 
 -- 2. The indexes, named and IF NOT EXISTS (an unnamed CREATE INDEX makes a
