@@ -615,9 +615,15 @@ BEGIN
     IF to_regprocedure('public.ai_rec_erase_user(uuid)') IS NOT NULL THEN
         EXECUTE 'SELECT public.ai_rec_erase_user($1)' INTO f USING p_user;
     END IF;
-    -- The count is the number of ai_events rows erased: the two erasures are
-    -- two tables with two counts, and this function answers for its own. The
-    -- moderation count (m) and the factor count (f) are deliberately
+    -- The personal access tokens go too (C113), when that file is applied
+    -- (models/osionos-ai-access-tokens-migration.sql). Same DYNAMIC and
+    -- GUARDED call; its count is discarded like the two above.
+    IF to_regprocedure('public.ai_access_tokens_erase_user(uuid)') IS NOT NULL THEN
+        EXECUTE 'SELECT public.ai_access_tokens_erase_user($1)' INTO f USING p_user;
+    END IF;
+    -- The count is the number of ai_events rows erased: the erasures are
+    -- separate tables with separate counts, and this function answers for its own. The
+    -- moderation count (m) and the factor and token counts (f) are deliberately
     -- DISCARDED.
     RETURN n;
 END $$;
