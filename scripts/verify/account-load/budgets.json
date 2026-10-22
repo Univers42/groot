@@ -1,0 +1,58 @@
+{
+  "directory_search": {
+    "p95_ms": 150,
+    "no_seq_scan": [
+      "users",
+      "user_profiles",
+      "osionos_bridge_identities"
+    ],
+    "why": "Target: Index Scan on osionos_bridge_identities using trigram GIN (display_name, username) and search_doc GIN, joined to users/user_profiles via PK. Today: Seq Scan on all three base tables of the osionos_people_directory view because the view has no indexes. P1-1 rebuilds the directory over a new osionos_profiles table with trigram + search_doc GIN indexes."
+  },
+  "directory_by_ids": {
+    "p95_ms": 60,
+    "no_seq_scan": [
+      "users",
+      "user_profiles",
+      "osionos_bridge_identities"
+    ],
+    "why": "Target: 50 Index Scans on osionos_bridge_identities.user_id (UNIQUE) joined to users/user_profiles via PK. Today: Seq Scan on all three base tables because the view has no indexes. P1-1 rebuilds the directory over osionos_profiles with trigram + search_doc GIN indexes."
+  },
+  "identity_by_email_hash": {
+    "p95_ms": 150,
+    "no_seq_scan": [
+      "osionos_bridge_identities"
+    ],
+    "why": "Target: Index Scan on osionos_bridge_identities.email_hash. Today: Seq Scan because no index exists on email_hash. P0-1 adds osionos_bridge_identities_email_hash_idx."
+  },
+  "feed_shares_for_user": {
+    "p95_ms": 60,
+    "no_seq_scan": [
+      "osionos_feed_shares"
+    ],
+    "why": "Target: Index Scan on osionos_feed_shares(user_id, target, created_at) for the eq + in filter with ORDER BY + LIMIT. Today: Seq Scan because only page_id is indexed. P0-1 adds osionos_feed_shares_user_target_idx on (user_id, target, created_at)."
+  },
+  "connections_for_user": {
+    "p95_ms": 60,
+    "no_seq_scan": [
+      "osionos_connections"
+    ],
+    "why": "Target: BitmapOr of two Index Scans (requester_idx on requester_id, addressee_idx on addressee_id) combined via BitmapOr. Today: same \u2014 indexes exist. Budget 60ms covers bitmap heap scan on ~20K rows."
+  },
+  "workspace_members_of_large_workspace": {
+    "p95_ms": 60,
+    "no_seq_scan": [
+      "osionos_workspace_members",
+      "osionos_workspaces"
+    ],
+    "why": "Target: coMemberPath shape \u2014 anchor on user_id (osionos_workspace_members_user_idx) joining workspaces (PK) and their other members (PK on workspace_id, user_id). Today: same \u2014 indexes exist. Budget 60ms for co-member read on the caller workspaces."
+  },
+  "pages_of_workspace": {
+    "p95_ms": 60,
+    "no_seq_scan": [
+      "osionos_pages",
+      "osionos_workspaces",
+      "osionos_workspace_members"
+    ],
+    "why": "Target: PK Index Scan on osionos_pages.id + PK on osionos_workspaces.id + PK on osionos_workspace_members(workspace_id, user_id) for the embed. Today: same \u2014 all PK indexes exist. Budget 60ms for single-row fetch with embed."
+  }
+}
