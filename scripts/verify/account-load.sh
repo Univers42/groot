@@ -26,7 +26,6 @@
 # Ponytail: container bring-up copied from models-grants.sh until shared helper lands.
 #
 set -eu
-
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 FIX="${REPO}/scripts/verify/account-load"
 RUNNER="${REPO}/scripts/apply-models-migrations.sh"
@@ -40,34 +39,29 @@ PG_DB=postgres
 RUNS="${RUNS:-30}"
 BASELINE=0
 [ "${1:-}" = "--baseline" ] && BASELINE=1
-
 CTN=''
 WORK=''
 passed=0
 failed=0
-
 # shellcheck disable=SC1091
 . "${FIX}/measure.sh"
-
+# shellcheck disable=SC1091
+. "${FIX}/self-test.sh"
 note() { printf '[account-load] %s\n' "$*" >&2; }
-
 # shellcheck disable=SC2317
 pass_query() { passed=$((passed + 1)) && printf 'PASS %s p50=%s p95=%s seq_scan=%s budget=%s\n' "$1" "$2" "$3" "$4" "$5"; }
 # shellcheck disable=SC2317
 fail_query() { failed=$((failed + 1)) && printf 'FAIL %s p50=%s p95=%s seq_scan=%s budget=%s\n' "$1" "$2" "$3" "$4" "$5"; }
 # shellcheck disable=SC2317
 fail_step() { failed=$((failed + 1)) && printf 'FAIL %s %s %s\n' "$1" "$2" "$3"; }
-
 die() {
 	fail_step "$@"
 	finish 1
 }
-
 finish() {
 	printf 'RESULT: %s passed, %s failed\n' "${passed}" "${failed}"
 	exit "$1"
 }
-
 cleanup() {
 	# shellcheck disable=SC2317
 	if [ -n "${CTN}" ]; then
@@ -79,17 +73,14 @@ cleanup() {
 	rm -rf "${WORK}"
 }
 trap 'cleanup' EXIT INT TERM
-
 # shellcheck disable=SC2317
 psql_stdin() {
 	docker exec -i "${CTN}" psql -U "${PG_USER}" -d "${PG_DB}" -v ON_ERROR_STOP=1 -q
 }
-
 # shellcheck disable=SC2317
 psql_rows() {
 	docker exec -i "${CTN}" psql -U "${PG_USER}" -d "${PG_DB}" -v ON_ERROR_STOP=1 -q -At
 }
-
 apply() {
 	if psql_stdin <"$1" >"${WORK}/apply.log" 2>&1; then
 		return 0
@@ -98,7 +89,6 @@ apply() {
 	sed 's/^/  | /' "${WORK}/apply.log" >&2
 	return 1
 }
-
 wait_ready() {
 	i=0
 	while [ "${i}" -lt "${READY_TIMEOUT}" ]; do
@@ -110,7 +100,6 @@ wait_ready() {
 	done
 	return 1
 }
-
 run_runner() {
 	log="${WORK}/runner-$1.log"
 	if PG_CONTAINER="${CTN}" MODELS_DIR="${MODELS_DIR}" sh "${RUNNER}" >"${log}" 2>&1; then
@@ -135,7 +124,6 @@ run_runner() {
 	fi
 	note "runner: ${last}"
 }
-
 ensure_image() {
 	if docker image inspect "${IMAGE}" >/dev/null 2>&1; then
 		return 0
@@ -147,7 +135,6 @@ ensure_image() {
 	printf 'FAIL image %s\n' "${IMAGE}"
 	exit 1
 }
-
 main() {
 	command -v docker >/dev/null 2>&1 || {
 		note "docker is required"
@@ -159,34 +146,26 @@ main() {
 	[ -f "${FIX}/seed-10k.sql" ] || die "setup" "seed" "no ${FIX}/seed-10k.sql"
 	[ -f "${FIX}/queries.sql" ] || die "setup" "queries" "no ${FIX}/queries.sql"
 	[ -f "${FIX}/budgets.json" ] || die "setup" "budgets" "no ${FIX}/budgets.json"
-	[ -f "${FIX}/measure.sh" ] || die "setup" "measure" "no ${FIX}/measure.sh"
+	[ -f "${FIX}/self-test.sh" ] || die "setup" "self-test" "no ${FIX}/self-test.sh"
 	ensure_image
-
 	WORK="$(mktemp -d "${TMPDIR:-/tmp}/account-load.XXXXXX")"
 	CTN="account-load-$$"
-
 	note "container ${CTN} (image: ${IMAGE})"
 	docker run --rm --network none --name "${CTN}" -e POSTGRES_HOST_AUTH_METHOD=trust \
 		-d "${IMAGE}" >/dev/null 2>&1 || die "setup" "container" "${IMAGE} did not start"
 	wait_ready || die "setup" "container" "pg_isready never answered in ${READY_TIMEOUT}s"
-
 	# Apply roles fixture (creates anon, authenticated, service_role roles)
 	apply "${REPO}/scripts/verify/models-grants/roles.sql" || die "setup" "roles" "roles.sql"
-
 	# Apply grobase initial schema (strip # comments)
 	grep -v '^#' "${GROBASE_INIT}" >"${WORK}/001.sql" || die "setup" "grobase" "could not read ${GROBASE_INIT}"
 	apply "${WORK}/001.sql" || die "setup" "grobase" "001_initial_schema.sql"
-
 	# Apply realtime triggers
 	grep -v '^#' "${GROBASE_REALTIME}" >"${WORK}/012.sql" || die "setup" "grobase" "could not read ${GROBASE_REALTIME}"
 	apply "${WORK}/012.sql" || die "setup" "grobase" "012_realtime_triggers_all_tables.sql"
-
 	# Apply shim (for auth.users, user_profiles)
 	apply "${REPO}/scripts/verify/models-grants/shim.sql" || die "setup" "shim" "shim.sql"
-
 	# Run the real migrations runner
 	run_runner "first"
-
 	# Seed 10K users
 	note "seeding 10K users..."
 	seed_start="$(date +%s)"
@@ -201,13 +180,11 @@ main() {
 	if [ "${seed_time}" -gt 120 ]; then
 		note "WARNING: seed time ${seed_time}s exceeds 120s budget"
 	fi
-
 	# ANALYZE for planner statistics
 	note "running ANALYZE..."
 	psql_stdin <<'SQL' >/dev/null 2>&1
 ANALYZE;
 SQL
-
 	# Create _known_users table for queries (regular table, persists across psql sessions)
 	note "creating _known_users table..."
 	psql_stdin <<'SQL' >/dev/null 2>&1
@@ -218,10 +195,8 @@ FROM generate_series(1, 5) AS idx
 CROSS JOIN LATERAL (VALUES (1), (100), (1000), (5000), (9999)) AS v(u)
 WHERE idx = 1;
 SQL
-
 	# Run self-test for has_seq_scan_on
 	self_test_has_seq_scan_on || die "self-test" "has_seq_scan_on" "self-test failed"
-
 	# Split queries.sql into individual query files
 	mkdir -p "${WORK}/queries"
 	awk -v work="${WORK}/queries" '
@@ -233,7 +208,6 @@ SQL
 		}
 		id { print > outfile }
 	' "${FIX}/queries.sql"
-
 	# Measure each query
 	note "running ${RUNS}x each query..."
 	for query_file in "${WORK}/queries"/*.sql; do
@@ -276,7 +250,6 @@ print(' '.join(tables))
 			fail_query "${id}" "0.00" "0.00" "none" "${budget_ms}"
 		fi
 	done
-
 	# Write JSON output
 	timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 	git_sha="$(git rev-parse HEAD 2>/dev/null || echo 'unknown')"
@@ -296,5 +269,4 @@ print(' '.join(tables))
 	fi
 	finish 1
 }
-
 main "$@"

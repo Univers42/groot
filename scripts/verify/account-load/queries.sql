@@ -10,6 +10,8 @@
 -- user1000 = d51aafc7-f082-03a1-6a05-cb5d2cc71824
 -- user5000 = 151be6ec-b3ad-c263-e4ca-fc267a98d04e
 -- user9999 = 592298ec-9e05-5baf-586b-bc439cd8f0a8
+-- workspace1 = 668953d2-25f2-b4fd-7d72-1e8cf024a277
+-- page1     = 30bc93c6-e5fb-81fc-8947-80d053feff40
 
 -- ============================================================
 -- directory_search
@@ -137,14 +139,19 @@ ORDER BY created_at DESC;
 -- workspace_members_of_large_workspace
 -- bridge-social-core.mjs:236-244 — coMemberPath(userId) uses:
 --   osionos_workspace_members?user_id=eq.{userId}&select=user_id,workspace_id,workspace:osionos_workspaces!workspace_id(members:osionos_workspace_members!workspace_id(user_id))
--- For a large workspace (workspace 1 has ~200+ members), test the co-member read.
+--   with limits 200 workspaces, 500 members per workspace
+-- Measures coMemberPath shape: anchor on caller's user_id, join caller's workspaces
+-- and their other members (member.user_id <> caller), with bridge limits.
 -- QUERY: workspace_members_of_large_workspace
-SELECT wm.workspace_id, wm.user_id, wm.role, wm.permissions,
-       w.id, w.owner_id, w.name, w.slug, w.settings, w.created_at, w.updated_at
+SELECT wm.user_id, wm.workspace_id,
+       w.id, w.owner_id, w.name, w.slug, w.settings, w.created_at, w.updated_at,
+       m.user_id AS member_user_id
 FROM public.osionos_workspace_members wm
 JOIN public.osionos_workspaces w ON w.id = wm.workspace_id
-WHERE wm.workspace_id = (SELECT id FROM public.osionos_workspaces WHERE slug LIKE 'workspace-1-%' LIMIT 1)
-ORDER BY wm.created_at;
+LEFT JOIN public.osionos_workspace_members m ON m.workspace_id = w.id AND m.user_id <> wm.user_id
+WHERE wm.user_id = 'd6d77053-92bc-7af6-3332-8bea8c4c6904'
+ORDER BY w.updated_at DESC
+LIMIT 200;
 
 -- ============================================================
 -- pages_of_workspace (fetchPageRowWithMember shape)
@@ -160,6 +167,6 @@ SELECT p.id, p.workspace_id, p.parent_page_id, p.owner_id, p.title, p.icon, p.co
 FROM public.osionos_pages p
 JOIN public.osionos_workspaces w ON w.id = p.workspace_id
 JOIN public.osionos_workspace_members wm ON wm.workspace_id = w.id
-WHERE p.id = (SELECT id FROM public.osionos_pages WHERE workspace_id = (SELECT id FROM public.osionos_workspaces WHERE slug LIKE 'workspace-1-%' LIMIT 1) LIMIT 1)
+WHERE p.id = '30bc93c6-e5fb-81fc-8947-80d053feff40'
   AND wm.user_id = 'd6d77053-92bc-7af6-3332-8bea8c4c6904'
 LIMIT 1;
