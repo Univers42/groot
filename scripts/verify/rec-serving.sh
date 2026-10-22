@@ -92,6 +92,7 @@ I2=00000000-0000-4000-8000-000000000002
 I3=00000000-0000-4000-8000-000000000003
 I4=00000000-0000-4000-8000-000000000004
 I5=00000000-0000-4000-8000-000000000005
+I6=00000000-0000-4000-8000-000000000006
 
 # The 16 REAL coordinates of the champion: the model has 16 factors and the
 # stored vectors are 64-dimensional, zero-padded past the 16. The user
@@ -420,6 +421,7 @@ INSERT INTO public.ai_events (ts, user_id, item_kind, item_id, workspace_id, eve
   (now() - interval '2 days',   '${U_NEW}', 'page', '${I3}', '${WS}', 'react',           false),
   (now() - interval '3 days',   '${U_NEW}', 'page', '${I4}', '${WS}', 'not_interested',  false),
   (now() - interval '4 days',   '${U_NEW}', 'page', '${I5}', '${WS}', 'like',            true),
+  (now() - interval '30 minutes', '${U_NEW}', 'page', '${I6}', '${WS}', 'impression',    false),
   (now() - interval '200 days', '${U_NEW}', 'page', '${I1}', '${WS}', 'like',            false);" || {
 		note "the settings and the events failed"
 		return 1
@@ -513,6 +515,12 @@ INSERT INTO public.ai_events (ts, user_id, item_kind, item_id, workspace_id, eve
 	out="$(q "SELECT NOT EXISTS (SELECT 1 FROM jsonb_array_elements(public.ai_rec_user_context('${U_NEW}') -> 'recent') r WHERE r ->> 'item_id' = '${I4}');")"
 	[ "${out}" = "t" ] || {
 		DETAIL="the not-interested item is in the recent list"
+		return 1
+	}
+	# An impression is not an interaction: the item only shown is nowhere.
+	out="$(q "SELECT NOT EXISTS (SELECT 1 FROM jsonb_array_elements(public.ai_rec_user_context('${U_NEW}') -> 'recent') r WHERE r ->> 'item_id' = '${I6}');")"
+	[ "${out}" = "t" ] || {
+		DETAIL="the impression-only item is in the recent list"
 		return 1
 	}
 	# The synthetic event is not a preference: its item is nowhere.
