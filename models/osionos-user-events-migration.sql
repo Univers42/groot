@@ -592,11 +592,22 @@ SET search_path = public, pg_temp
 AS $$
 DECLARE
     n BIGINT;
+    m BIGINT;
 BEGIN
     -- The capture is off for this transaction: an erasure writes no event.
     PERFORM set_config('osionos.ai_events', 'off', true);
     DELETE FROM public.ai_events WHERE user_id = p_user;
     GET DIAGNOSTICS n = ROW_COUNT;
+    -- The moderation audit is erased too, when that file is applied
+    -- (models/osionos-ugc-moderation-migration.sql). The call is DYNAMIC and
+    -- GUARDED: this file stays valid on a database that never had the
+    -- moderation migration, and the two files work in either order.
+    IF to_regprocedure('public.ai_moderation_erase_user(uuid)') IS NOT NULL THEN
+        EXECUTE 'SELECT public.ai_moderation_erase_user($1)' INTO m USING p_user;
+    END IF;
+    -- The count is the number of ai_events rows erased: the two erasures are
+    -- two tables with two counts, and this function answers for its own. The
+    -- moderation count (m) is deliberately DISCARDED.
     RETURN n;
 END $$;
 
@@ -606,7 +617,10 @@ COMMENT ON FUNCTION public.ai_erase_user(UUID) IS
     'erases 0. The capture is turned off for the transaction, so the erasure '
     'writes no event of its own. The ai_personalization_settings row of the '
     'user is KEPT: it is a preference, not activity, and keeping it is what '
-    'makes the opt-out survive the erasure. FACTORS, PROFILE VECTORS AND SLATES '
+    'makes the opt-out survive the erasure. The moderation audit is erased '
+    'too, when models/osionos-ugc-moderation-migration.sql is applied: the '
+    'call is dynamic and guarded, so this file stays valid without it. '
+    'FACTORS, PROFILE VECTORS AND SLATES '
     'DO NOT EXIST YET: a later slice MUST add their tables here, or the erasure '
     'leaves the derived data behind.';
 
