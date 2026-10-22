@@ -469,7 +469,9 @@ SELECT ${mid}, 'page', ('00000000-0000-4000-8000-' || lpad(i::text, 12, '0'))::u
 	esac
 	# The HNSW top-20, and the exact top-20: the index scan is off for the
 	# exact one, so it is a scan and a sort.
-	q "${query}" | sort >"${WORK}/hnsw.txt"
+	# The same planner settings as the EXPLAIN above: on 2,000 rows the planner
+	# may prefer a scan and a sort, and the comparison would be exact vs exact.
+	q "SET enable_seqscan = off; ${query}" | sort >"${WORK}/hnsw.txt"
 	q "SET enable_indexscan = off; SET enable_bitmapscan = off;
 SELECT item_id FROM public.ai_rec_item_factors WHERE model_id = ${mid} ORDER BY -(factors <#> '${Q64}'::vector) DESC LIMIT 20;" |
 		sort >"${WORK}/exact.txt"
