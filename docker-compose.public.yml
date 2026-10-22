@@ -79,6 +79,9 @@ services:
       AUTH_TRUSTED_PROXY_HOPS: ${AUTH_TRUSTED_PROXY_HOPS:?set AUTH_TRUSTED_PROXY_HOPS in .env.public (measure it)}
 
   osionos-bridge:
+    # The :public tags keep the public images apart from the ai-dev stack's :local ones
+    # (a public build must never overwrite them); until now only the release overlay set them.
+    image: track-binocle/osionos-bridge:public
     environment:
       OSIONOS_APP_URL: ${PUBLIC_ORIGIN}:8443
       OSIONOS_ALLOWED_ORIGIN: ${PUBLIC_ORIGIN}:8443
@@ -105,6 +108,7 @@ services:
   # profile move to a profile public never enables, so `--profile ai` starts
   # only the five. scripts/verify/ai-public-flags-off.sh proves it.
   osionos-ai:
+    image: track-binocle/osionos-ai:public
     ports: !reset []
     # The live (grobase) database, role osionos_ai: never the dev osionos-ai-db
     # with its default password (R-C5). The grobase link relays Kong only, so the
@@ -133,6 +137,7 @@ services:
     mem_limit: 512m
 
   osionos-ai-indexer:
+    image: track-binocle/osionos-ai:public
     environment:
       OSIONOS_AI_DATABASE_URL: ${OSIONOS_AI_PUBLIC_DATABASE_URL:?set OSIONOS_AI_PUBLIC_DATABASE_URL in .env.public (the live grobase DB, role osionos_ai)}
     networks: !override
@@ -145,6 +150,15 @@ services:
 
   osionos-ai-redis:
     mem_limit: 128m
+
+  # The nightly recommender training, on the live database as role osml_job.
+  osionos-ml-job:
+    image: track-binocle/osionos-ml:public
+    environment:
+      DATABASE_URL: ${OSML_PUBLIC_DATABASE_URL:?set OSML_PUBLIC_DATABASE_URL in .env.public (the live grobase DB, role osml_job)}
+      PGPASSWORD: ""
+    depends_on: !reset {}
+    mem_limit: 1g
 
   # Caveat: the caps are sized for the host's headroom, not measured under load
   # (R-C6 asks for docker stats after startup). The bulk embedder gets fewer CPUs
