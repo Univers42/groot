@@ -211,6 +211,19 @@ run_runner() {
 	note "$1: ${last}"
 }
 
+# check_ordered_last_tail <scenario> — the runner's ORDERED_LAST list must end with exactly
+# the three files below, so the service-role-only pass, the realtime pass and the PII pass
+# run last (in that order). A file appended after users-pii-grants-migration.sql breaks it.
+check_ordered_last_tail() {
+  tail3="$(grep '^ORDERED_LAST=' "${REPO}/scripts/apply-models-migrations.sh" | sed 's/^ORDERED_LAST="//; s/"$//' | tr ' ' '\n' | tail -3 | tr '\n' ' ' | sed 's/ $//')"
+  expected="osionos-service-role-only-migration.sql realtime-cdc-off-migration.sql users-pii-grants-migration.sql"
+  if [ "${tail3}" = "${expected}" ]; then
+    pass "$1" "ordered_last_tail" "ok"
+  else
+    fail "$1" "ordered_last_tail" "${tail3} — expected ${expected}"
+  fi
+}
+
 # check_count <scenario> <id> <label> — a `<label>|<count>|<detail>` row from checks.sql.
 check_count() {
 	line="$(grep "^$3|" "${WORK}/checks-$1.out" || true)"
@@ -458,6 +471,7 @@ assert_standalone() {
 }
 
 run_checks() {
+	check_ordered_last_tail "$1"
 	# A checks.sql error is echoed, then read back anyway: a missing row is a FAIL.
 	# checks.sql and account-checks.sql go into ONE psql: one stream, so the two
 	# isolation rows stay last, and one transaction for the k5/k6 GUCs.
