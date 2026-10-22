@@ -110,3 +110,192 @@ SELECT 'cutoff_realtime_triggers',
 SELECT 'users_pii', count(*), coalesce(string_agg(r || '.' || c, ' ' ORDER BY r, c), '')
   FROM (VALUES ('anon','email'), ('anon','password_hash'), ('authenticated','password_hash')) AS x(r, c)
  WHERE has_column_privilege(r, 'public.users', c, 'SELECT');
+
+-- p5_pat_column_acl: the account role's exact reach on the personal access token
+-- table (P5-1-a). The published columns of the owner's own rows and nothing
+-- else: token_hash is the sha256 of the secret and answers 42501, and the role
+-- never writes this table — the bridge writes it through the service role
+-- (ADR 0003), because the account role must not be able to write a hash.
+-- The fixture is two users and one token each, inserted and rolled back here.
+-- The catalog half compares the column ACL in both directions, so a privilege
+-- that is missing AND one that is extra are both a failure.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+                               ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+DO $$
+DECLARE
+  v_missing boolean := false;
+BEGIN
+  BEGIN
+    INSERT INTO public.osionos_personal_access_tokens
+      (user_id, name, kind, scopes, token_hash, expires_at) VALUES
+      ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'A token', 'classic', ARRAY['pages:read'],
+       repeat('a', 64), now() + interval '1 hour'),
+      ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'B token', 'classic', ARRAY['pages:read'],
+       repeat('b', 64), now() + interval '1 hour');
+  EXCEPTION WHEN others THEN
+    -- A missing table is a FAIL, not a broken check: the fixture is reported
+    -- and the probes below answer "refused" for the wrong reason.
+    v_missing := true;
+  END;
+  PERFORM set_config('osionos.check.p5_fixture', CASE WHEN v_missing THEN 'no_table' ELSE 'ok' END, true);
+END $$;
+DO $$
+DECLARE
+  v_own bigint := -1;
+  v_other bigint := -1;
+  v_state text := '';
+BEGIN
+  -- The role reads with A's claims: the uid helper turns them into a row owner.
+  SET LOCAL ROLE osionos_account_user;
+  PERFORM set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","aud":"osionos-account","role":"osionos_account_user"}', true);
+  -- The published columns are readable, and only the owner's row is visible.
+  BEGIN
+    SELECT count(*) INTO v_own FROM public.osionos_personal_access_tokens WHERE id IS NOT NULL;
+    SELECT count(*) INTO v_other FROM public.osionos_personal_access_tokens
+     WHERE user_id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+  EXCEPTION WHEN others THEN
+    v_own := -1;
+    v_other := -1;
+  END;
+  PERFORM set_config('osionos.check.p5_own', v_own::text, true);
+  PERFORM set_config('osionos.check.p5_other', v_other::text, true);
+  -- token_hash is not the role's.
+  v_state := '';
+  SET LOCAL ROLE osionos_account_user;
+  BEGIN
+    PERFORM (SELECT token_hash FROM public.osionos_personal_access_tokens LIMIT 1);
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p5_hash', v_state, true);
+  -- The role never writes this table.
+  v_state := '';
+  SET LOCAL ROLE osionos_account_user;
+  BEGIN
+    INSERT INTO public.osionos_personal_access_tokens
+      (user_id, name, kind, scopes, token_hash, expires_at)
+    VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'x', 'classic', ARRAY['pages:read'],
+            repeat('c', 64), now() + interval '1 hour');
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p5_insert', v_state, true);
+  v_state := '';
+  SET LOCAL ROLE osionos_account_user;
+  BEGIN
+    UPDATE public.osionos_personal_access_tokens SET name = 'x';
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p5_update', v_state, true);
+  v_state := '';
+  SET LOCAL ROLE osionos_account_user;
+  BEGIN
+    DELETE FROM public.osionos_personal_access_tokens;
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p5_delete', v_state, true);
+END $$;
+RESET ROLE;
+WITH granted(col) AS (
+  SELECT unnest(ARRAY['id','user_id','name','kind','scopes','grants','created_at','expires_at',
+                       'last_used_at','revoked_at','revoked_reason'])
+),
+t AS (SELECT to_regclass('public.osionos_personal_access_tokens') AS oid),
+violations AS (
+  SELECT 'selects:' || a.attname AS v
+    FROM t, pg_attribute a
+   WHERE t.oid IS NOT NULL AND a.attrelid = t.oid AND a.attnum > 0 AND NOT a.attisdropped
+     AND has_column_privilege('osionos_account_user', a.attrelid, a.attname, 'SELECT')
+     AND a.attname NOT IN (SELECT col FROM granted)
+  UNION ALL
+  SELECT 'missing:' || g.col
+    FROM t, granted g
+   WHERE t.oid IS NOT NULL
+     AND NOT has_column_privilege('osionos_account_user', t.oid, g.col, 'SELECT')
+  UNION ALL
+  SELECT 'table_privilege:' || p.priv
+    FROM t, unnest(ARRAY['INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) AS p(priv)
+   WHERE t.oid IS NOT NULL AND has_table_privilege('osionos_account_user', t.oid, p.priv)
+  UNION ALL
+  SELECT 'column_privilege:' || p.priv
+    FROM t, unnest(ARRAY['INSERT','UPDATE','REFERENCES']) AS p(priv)
+   WHERE t.oid IS NOT NULL AND has_any_column_privilege('osionos_account_user', t.oid, p.priv)
+)
+SELECT 'p5_pat_column_acl',
+       (CASE WHEN current_setting('osionos.check.p5_own', true) = '1' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.p5_other', true) = '0' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.p5_hash', true) = '42501' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.p5_insert', true) = '42501' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.p5_update', true) = '42501' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.p5_delete', true) = '42501' THEN 0 ELSE 1 END)
+     + (SELECT count(*) FROM violations),
+       'fixture=' || coalesce(current_setting('osionos.check.p5_fixture', true), 'unset')
+     || ' own=' || coalesce(current_setting('osionos.check.p5_own', true), 'unset')
+     || ' other=' || coalesce(current_setting('osionos.check.p5_other', true), 'unset')
+     || ' hash=' || coalesce(current_setting('osionos.check.p5_hash', true), 'unset')
+     || ' insert=' || coalesce(current_setting('osionos.check.p5_insert', true), 'unset')
+     || ' update=' || coalesce(current_setting('osionos.check.p5_update', true), 'unset')
+     || ' delete=' || coalesce(current_setting('osionos.check.p5_delete', true), 'unset')
+     || ' acl=' || coalesce((SELECT string_agg(v, ' ' ORDER BY v) FROM violations), 'exact');
+ROLLBACK;
+
+-- p5_pat_row_rules: the token table's own row rules. The service role is the
+-- only writer, so three rows must never exist and the table has to refuse
+-- them itself: a fine-grained token that grants nothing, a classic token that
+-- grants nothing, and a row that is revoked without a reason.
+-- The count is the number of the three that were NOT refused with 23514. A
+-- probe that fails with another SQLSTATE counts as not refused too: a row
+-- that lands for the wrong reason is still a row that lands.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+SET LOCAL ROLE service_role;
+DO $$
+DECLARE
+  v_state text := '';
+BEGIN
+  -- A fine-grained token with no grant at all.
+  v_state := '';
+  BEGIN
+    INSERT INTO public.osionos_personal_access_tokens
+      (user_id, name, kind, scopes, grants, token_hash, expires_at)
+    VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'neither', 'fine_grained', '{}', '[]'::jsonb,
+            repeat('a', 64), now() + interval '1 hour');
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p5_rule_neither', v_state, true);
+  -- A classic token with no scope at all.
+  v_state := '';
+  BEGIN
+    INSERT INTO public.osionos_personal_access_tokens
+      (user_id, name, kind, scopes, grants, token_hash, expires_at)
+    VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'scope', 'classic', '{}', '[]'::jsonb,
+            repeat('b', 64), now() + interval '1 hour');
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p5_rule_scope', v_state, true);
+  -- A row that is revoked without a reason.
+  v_state := '';
+  BEGIN
+    INSERT INTO public.osionos_personal_access_tokens
+      (user_id, name, kind, scopes, grants, token_hash, expires_at, revoked_at)
+    VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'revoked', 'classic', ARRAY['pages:read'], '[]'::jsonb,
+            repeat('c', 64), now() + interval '1 hour', now());
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.p5_rule_revoked', v_state, true);
+END $$;
+RESET ROLE;
+SELECT 'p5_pat_row_rules',
+       (CASE WHEN current_setting('osionos.check.p5_rule_neither', true) = '23514' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.p5_rule_scope', true) = '23514' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.p5_rule_revoked', true) = '23514' THEN 0 ELSE 1 END),
+       'neither=' || coalesce(current_setting('osionos.check.p5_rule_neither', true), 'unset')
+     || ' scope=' || coalesce(current_setting('osionos.check.p5_rule_scope', true), 'unset')
+     || ' revoked=' || coalesce(current_setting('osionos.check.p5_rule_revoked', true), 'unset');
+ROLLBACK;

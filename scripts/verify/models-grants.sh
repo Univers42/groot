@@ -315,15 +315,25 @@ check_idempotent() {
 # The account profiles file is applied after it, for the same reason: it
 # creates four more tables and the directory view, and it has to leave no
 # realtime trigger and no anon/authenticated privilege behind either.
+# The personal access tokens file is applied after it, for the same reason: it
+# creates one more osionos_* relation, grants it to the account role and drops
+# the realtime trigger the CREATE TABLE hook armed on it. Its table is dropped
+# first, like the others: the hook only arms a table when it is CREATED, so a
+# table that is still there would make the realtime row vacuous.
 check_standalone() {
 	file="${MODELS_DIR}/osionos-account-foundation-migration.sql"
 	profiles="${MODELS_DIR}/osionos-account-profiles-migration.sql"
+	pat="${MODELS_DIR}/osionos-personal-access-tokens-migration.sql"
 	if [ ! -f "${file}" ]; then
 		fail "$1" "standalone" "no ${file}"
 		return 0
 	fi
 	if [ ! -f "${profiles}" ]; then
 		fail "$1" "standalone" "no ${profiles}"
+		return 0
+	fi
+	if [ ! -f "${pat}" ]; then
+		fail "$1" "standalone" "no ${pat}"
 		return 0
 	fi
 	if ! printf '%s\n' \
@@ -353,7 +363,8 @@ check_standalone() {
 		'DROP TABLE IF EXISTS public.osionos_profiles;' \
 		'DROP TABLE IF EXISTS public.osionos_user_settings;' \
 		'DROP TABLE IF EXISTS public.osionos_username_history;' \
-		'DROP TABLE IF EXISTS public.osionos_account_deletion_requests;' |
+		'DROP TABLE IF EXISTS public.osionos_account_deletion_requests;' \
+		'DROP TABLE IF EXISTS public.osionos_personal_access_tokens;' |
 		psql_stdin >"${WORK}/standalone-$1.log" 2>&1; then
 		fail "$1" "standalone" "could not drop the profile tables"
 		return 0
@@ -378,6 +389,14 @@ check_standalone() {
 		<"${profiles}" >"${WORK}/standalone-$1.tags" 2>&1; then
 		fail "$1" "standalone" "the account profiles file did not apply after the foundation"
 		sed 's/^/  | /' "${WORK}/standalone-$1.tags" >&2
+		return 0
+	fi
+	# The token file is applied alone after it: the table it creates is the one
+	# the realtime hook arms, so its own DROP TRIGGER is the only thing that can
+	# take the trigger away.
+	if ! psql_stdin <"${pat}" >"${WORK}/standalone-$1.log" 2>&1; then
+		fail "$1" "standalone" "the personal access tokens file did not apply after the profiles"
+		sed 's/^/  | /' "${WORK}/standalone-$1.log" >&2
 		return 0
 	fi
 	# The NOTIFY must come AFTER the COMMIT: the view is dropped and recreated,
@@ -410,7 +429,8 @@ SELECT 'sessions_column_acl', coalesce(string_agg(a.attname, ',' ORDER BY a.attn
    AND has_column_privilege('osionos_account_user', a.attrelid, a.attname, 'SELECT');
 SELECT r.rel || '_realtime_triggers', count(t.tgrelid)::text, ''
   FROM unnest(ARRAY['osionos_profiles','osionos_user_settings','osionos_username_history',
-                    'osionos_account_deletion_requests','osionos_people_directory']) AS r(rel)
+                    'osionos_account_deletion_requests','osionos_people_directory',
+                    'osionos_personal_access_tokens']) AS r(rel)
   LEFT JOIN pg_class c ON c.relname = r.rel AND c.relnamespace = 'public'::regnamespace
   LEFT JOIN pg_trigger t ON t.tgrelid = c.oid AND NOT t.tgisinternal
                          AND t.tgfoid = to_regproc('public.realtime_notify')
@@ -424,7 +444,8 @@ SELECT r.rel || '_anon_auth_privs',
             OR (p.col_level AND has_any_column_privilege(x.rolname, 'public.' || r.rel, p.priv))) AS v,
        ''
   FROM unnest(ARRAY['osionos_profiles','osionos_user_settings','osionos_username_history',
-                    'osionos_account_deletion_requests','osionos_people_directory']) AS r(rel)
+                    'osionos_account_deletion_requests','osionos_people_directory',
+                    'osionos_personal_access_tokens']) AS r(rel)
  ORDER BY r.rel;
 SQL
 	then
@@ -438,7 +459,8 @@ SQL
 	assert_standalone "$1" sessions_column_acl \
 		'id,created_at,expires_at,last_seen_at,auth_method,ip_prefix,user_agent,revoked_at,revoked_reason'
 	for rel in osionos_profiles osionos_user_settings osionos_username_history \
-	           osionos_account_deletion_requests osionos_people_directory; do
+	           osionos_account_deletion_requests osionos_people_directory \
+	           osionos_personal_access_tokens; do
 		assert_standalone "$1" "${rel}_realtime_triggers" 0
 		assert_standalone "$1" "${rel}_anon_auth_privs" 0
 	done
@@ -455,7 +477,52 @@ assert_standalone() {
 	fi
 }
 
+# check_ordered_last <scenario> — the runner's ORDERED_LAST list, pinned. The
+# catalog pass (osionos-service-role-only-migration.sql) is what revokes what
+# the legacy default privileges handed to a relation the runner creates, so a
+# file that runs after it is outside the revocation the runner exists for; and
+# the token file grants to the role the foundation file creates, so it has to
+# run after it. The order is a thing to prove, not to assume.
+check_ordered_last() {
+	pinned_tail="osionos-service-role-only-migration.sql realtime-cdc-off-migration.sql users-pii-grants-migration.sql"
+	line="$(grep -E '^ORDERED_LAST=' "${RUNNER}" | tail -1 || true)"
+	if [ -z "${line}" ]; then
+		fail "$1" "ordered_last" "no ORDERED_LAST line in ${RUNNER}"
+		return 0
+	fi
+	list="$(printf '%s\n' "${line}" | sed -e 's/^ORDERED_LAST="//' -e 's/"$//')"
+	tail3="$(printf '%s\n' "${list}" | awk 'NF < 3 { print ""; next } { s = ""; for (i = NF - 2; i <= NF; i++) { s = s (s == "" ? "" : " ") $i } print s }')"
+	if [ "${tail3}" != "${pinned_tail}" ]; then
+		fail "$1" "ordered_last" "the tail is '${tail3}', expected '${pinned_tail}'"
+		return 0
+	fi
+	pos_foundation=0
+	pos_token=0
+	i=0
+	for f in ${list}; do
+		i=$((i + 1))
+		if [ "${f}" = "osionos-account-foundation-migration.sql" ]; then
+			pos_foundation="${i}"
+		fi
+		if [ "${f}" = "osionos-personal-access-tokens-migration.sql" ]; then
+			pos_token="${i}"
+		fi
+	done
+	if [ "${pos_foundation}" -eq 0 ] || [ "${pos_token}" -eq 0 ]; then
+		fail "$1" "ordered_last" "the list names neither the foundation file nor the token file: ${list}"
+		return 0
+	fi
+	if [ "${pos_foundation}" -ge "${pos_token}" ]; then
+		fail "$1" "ordered_last" "the foundation file is not before the token file: ${list}"
+		return 0
+	fi
+	pass "$1" "ordered_last" "the tail is pinned"
+}
+
 run_checks() {
+	# The runner's file order is a fact about the script, not about this
+	# database, so it is read from the script itself.
+	check_ordered_last "$1"
 	# A checks.sql error is echoed, then read back anyway: a missing row is a FAIL.
 	# checks.sql and account-checks.sql go into ONE psql: one stream, so the two
 	# isolation rows stay last, and one transaction for the k5/k6 GUCs.
@@ -503,6 +570,8 @@ run_checks() {
 	check_eq "$1" p1_isolation_own p1_isolation_own 4
 	check_count "$1" p1_isolation_forged p1_isolation_forged
 	check_count "$1" p5_published_read p5_published_read
+	check_count "$1" p5_pat_column_acl p5_pat_column_acl
+	check_count "$1" p5_pat_row_rules p5_pat_row_rules
 	check_count "$1" h2 account_secdef_exec
 	check_count "$1" p2s_change p2s_change
 	check_count "$1" p2s_history_once p2s_history_once
