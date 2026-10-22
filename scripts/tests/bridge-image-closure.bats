@@ -76,6 +76,25 @@ missing_from_image() {
     <(image_scripts "$app" "$dockerfile" | LC_ALL=C sort -u)
 }
 
+# The directories a reached module reads beside itself, `new URL('./DIR/…', import.meta.url)`.
+# Caveat: only that literal shape is seen; a path built another way (path.join, a variable) is
+# not, so a missing directory read that way still passes here and crashes the container.
+data_dirs() {
+  local app="$1" dockerfile="$2" module
+  while IFS= read -r module; do
+    [ -f "$app/scripts/$module" ] || continue
+    grep -oE "new URL\([\`'\"]\./[A-Za-z0-9_-]+/" "$app/scripts/$module" | sed -E 's#.*\./##; s#/$##'
+  done < <(mjs_closure "$app/scripts" "$(entry_point "$dockerfile")") | LC_ALL=C sort -u
+}
+
+# The data directories the entry point reads that no COPY line carries; empty when it boots.
+missing_data_dirs() {
+  local app="$1" dockerfile="$2" dir
+  for dir in $(data_dirs "$app" "$dockerfile"); do
+    grep -qE "^COPY[[:space:]].*scripts/$dir/?[[:space:]]" "$dockerfile" || printf '%s\n' "$dir"
+  done
+}
+
 # A fixture build context: scripts/NAME=CONTENT pairs, plus a Dockerfile whose COPY line lists $COPY.
 fixture() {
   APP_DIR=$BATS_TEST_TMPDIR/app
@@ -158,6 +177,33 @@ fixture() {
     "bridge-social-core.mjs=import { open } from './bridge-realtime-socket.mjs';" \
     "bridge-realtime-socket.mjs="
   run missing_from_image "$APP_DIR" "$FIXTURE_DOCKERFILE"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "the real bridge.Dockerfile copies every directory a loaded module reads beside itself" {
+  APP=$REPO/apps/osionos/app
+  [ -f "$APP/scripts/bridge-api.mjs" ] || skip "apps/osionos/app is not checked out"
+  run missing_data_dirs "$APP" "$BRIDGE_DOCKERFILE"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ] || {
+    echo "the bridge image would lack the data directories: $output" >&2
+    false
+  }
+}
+
+@test "negative control: a word list read beside a module, not copied, is named" {
+  COPY="scripts/bridge-*.mjs" fixture "bridge-api.mjs=import './bridge-mod.mjs';" \
+    "bridge-mod.mjs=readFileSync(new URL(\`./word-lists/en.txt\`, import.meta.url));"
+  run missing_data_dirs "$APP_DIR" "$FIXTURE_DOCKERFILE"
+  [ "$output" = word-lists ]
+}
+
+@test "twin: the same word list with its own COPY line is not named" {
+  COPY="scripts/bridge-*.mjs" fixture "bridge-api.mjs=import './bridge-mod.mjs';" \
+    "bridge-mod.mjs=readFileSync(new URL(\`./word-lists/en.txt\`, import.meta.url));"
+  printf 'COPY scripts/word-lists/ ./scripts/word-lists/\n' >>"$FIXTURE_DOCKERFILE"
+  run missing_data_dirs "$APP_DIR" "$FIXTURE_DOCKERFILE"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
