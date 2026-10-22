@@ -653,10 +653,12 @@ $$;
 
 COMMENT ON FUNCTION public.ai_export_user(UUID) IS
     'Every ai_events row of the user, oldest first, for a data export. '
-    'THE FACTORS EXIST NOW (models/osionos-rec-factors-migration.sql) but they '
-    'are NOT in this export: a later slice MUST add them here, or the export '
-    'is missing the derived data. PROFILE VECTORS AND SLATES DO NOT EXIST '
-    'YET: a later slice MUST add them here too.';
+    'THE FACTORS ARE EXPORTED BY ai_rec_export_user(), in '
+    'models/osionos-rec-factors-migration.sql, WHEN THAT FILE IS APPLIED: the '
+    'recommender''s derived vectors are a SEPARATE function, because this one '
+    'returns SETOF ai_events - the row shape the bridge reads - and a JSONB '
+    'object would break that caller. The bridge calls BOTH. PROFILE VECTORS '
+    'AND SLATES DO NOT EXIST YET: a later slice MUST add them here too.';
 
 -- The functions are service_role only: PUBLIC''s default EXECUTE would let any
 -- PostgREST role call the erasure.

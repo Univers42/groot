@@ -7,7 +7,7 @@
 --   offline and reports nDCG@10 on a labelled synthetic log. The trained
 --   model has to live in Postgres: the Node service serves it from there, and
 --   a model that only exists in a Python process is a model nobody else can
---   read. This file creates five things:
+--   read. This file creates six things:
 --     1. the REGISTRY (public.ai_rec_models): one row per trained model, with
 --        its hyperparameters, its offline metrics and its status;
 --     2. the FACTORS (public.ai_rec_item_factors and
@@ -18,7 +18,9 @@
 --     4. the PRUNE (public.ai_rec_prune): the old retired models and the
 --        stale candidates go;
 --     5. the ERASURE (public.ai_rec_erase_user): a user's derived vectors go
---        with the user.
+--        with the user;
+--     6. the EXPORT (public.ai_rec_export_user): a user's data export carries
+--        those same derived vectors, unpadded to their model's factor count.
 --
 -- WHY THE FACTORS ARE 64-DIMENSIONAL, ALWAYS
 --   M3c-1 tunes the factor count in {8, 16, 32, 64}, and the model row says
@@ -80,6 +82,26 @@
 --   calls the moderation erasure: the events file stays valid on a database
 --   that never had this migration, and the two files work in either order.
 --
+-- WHY THE EXPORT IS HERE
+--   The erasure covers the DERIVED data, so the export has to cover it too:
+--   a data export that holds the raw log and leaves the vectors behind is
+--   half an export. The export is the ERASURE'S MIRROR: it returns the very
+--   rows the erasure deletes - the user's own vectors in every model, and
+--   the rows where the user is an ITEM - row for row, so what a user takes
+--   away is exactly what a user's deletion removes.
+--
+--   The vectors are UNPADDED: the column holds 64 numbers, but a 16-factor
+--   model's vector has 16 real ones and 48 zeros, and 48 zeros are not the
+--   user's data. The export says how many are real ("factors": 16) and
+--   hands over exactly that many numbers, the same slicing the serving file
+--   does (f.factors::real[])[1:m.factors].
+--
+--   It is a SEPARATE function and not a change to ai_export_user: the events
+--   file's export returns SETOF ai_events, and the bridge reads exactly that
+--   row shape (osionos scripts/bridge-personalization.mjs:96-101). Changing
+--   the return type would break that caller, so the vectors get their own
+--   function here and the bridge calls BOTH.
+--
 -- WHAT IS NOT HERE
 --   The TRAINING JOB that reads ai_events, trains and writes the factors is
 --   NOT here: this file is the home of the model, not the job that fills it.
@@ -91,7 +113,7 @@
 --   This file is models/osionos-rec-factors-migration.sql, and it sorts
 --   BEFORE models/osionos-user-events-migration.sql ("r" < "u"). That order is
 --   fine ONLY because this file references NOTHING in the events file: it
---   creates its own three tables and its own three functions, and it reads no
+--   creates its own three tables and its own four functions, and it reads no
 --   ai_events table. The events file's ai_erase_user() resolves
 --   ai_rec_erase_user() at CALL time, so the two files work in either order
 --   and each of them works alone — the same trick the moderation file uses.
@@ -381,7 +403,80 @@ COMMENT ON FUNCTION public.ai_rec_erase_user(UUID) IS
     'dynamically, so the events file stays valid without it.';
 
 -- -----------------------------------------------------------------------------
--- 6. The grants: service_role only.
+-- 6. The export: the derived vectors travel with the user's data.
+--
+--    Two arrays, and they are the ERASURE'S ROWS: "user_vectors" holds the
+--    user's own factor vector in every model, "as_item" holds the rows where
+--    the user is an ITEM (the user as a suggested person). Both are ordered by
+--    model_id, and both are [] (never null) when the user has nothing.
+--
+--    Each entry says WHICH model it came from (model_id), what that model is
+--    (status), how far it was trained (trained_until), how many factors it
+--    really has (factors) and the vector itself - UNPADDED, because the
+--    stored 64 numbers are the real ones plus zeros, and the zeros are not
+--    the user's data.
+--
+--    A SEPARATE function: the events file's ai_export_user returns SETOF
+--    ai_events, the shape the bridge reads, and a JSONB object would break
+--    that caller. The bridge calls BOTH.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.ai_rec_export_user(p_user UUID)
+RETURNS JSONB
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+    SELECT jsonb_build_object(
+        'user_vectors', coalesce((
+            SELECT jsonb_agg(
+                       jsonb_build_object(
+                           'model_id',      m.id,
+                           'status',        m.status,
+                           'trained_until', m.trained_until,
+                           'factors',       m.factors,
+                           'vector',        to_jsonb((f.factors::real[])[1:m.factors])
+                       )
+                       ORDER BY m.id
+                   )
+              FROM public.ai_rec_user_factors f
+              JOIN public.ai_rec_models m ON m.id = f.model_id
+             WHERE f.user_id = p_user
+        ), '[]'::jsonb),
+        'as_item', coalesce((
+            SELECT jsonb_agg(
+                       jsonb_build_object(
+                           'model_id',      m.id,
+                           'status',        m.status,
+                           'trained_until', m.trained_until,
+                           'factors',       m.factors,
+                           'vector',        to_jsonb((f.factors::real[])[1:m.factors])
+                       )
+                       ORDER BY m.id
+                   )
+              FROM public.ai_rec_item_factors f
+              JOIN public.ai_rec_models m ON m.id = f.model_id
+             WHERE f.item_kind = 'user'
+               AND f.item_id = p_user
+        ), '[]'::jsonb)
+    );
+$$;
+
+COMMENT ON FUNCTION public.ai_rec_export_user(UUID) IS
+    'The derived vectors of the user, for a data export: user_vectors is the '
+    'user''s own factor vector in every model, as_item is the rows where the '
+    'user is the item (the user as a suggested person). Each entry says the '
+    'model (model_id, status, trained_until), the model''s true factor count '
+    '(factors) and the vector UNPADDED to that count - the stored 64 numbers '
+    'are the real ones plus zeros, and the zeros are not the user''s data. '
+    'Both arrays are ordered by model_id and are [] (never null) when empty. '
+    'These are the very rows public.ai_rec_erase_user erases, row for row: '
+    'the export is the erasure''s mirror image. It is a SEPARATE function '
+    'because the events file''s ai_export_user returns SETOF ai_events, the '
+    'shape the bridge reads; the bridge calls both. service_role only.';
+
+-- -----------------------------------------------------------------------------
+-- 7. The grants: service_role only.
 --
 --    ai_* is outside the osionos_* catalog pass of
 --    models/osionos-service-role-only-migration.sql, so the REVOKE happens
@@ -418,9 +513,11 @@ REVOKE ALL ON public.ai_rec_user_factors FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.ai_rec_promote(BIGINT, BOOLEAN) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.ai_rec_prune(INTEGER) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.ai_rec_erase_user(UUID) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.ai_rec_export_user(UUID) FROM PUBLIC, anon, authenticated;
 
 GRANT EXECUTE ON FUNCTION public.ai_rec_promote(BIGINT, BOOLEAN) TO service_role;
 GRANT EXECUTE ON FUNCTION public.ai_rec_prune(INTEGER) TO service_role;
 GRANT EXECUTE ON FUNCTION public.ai_rec_erase_user(UUID) TO service_role;
+GRANT EXECUTE ON FUNCTION public.ai_rec_export_user(UUID) TO service_role;
 
 NOTIFY pgrst, 'reload schema';
