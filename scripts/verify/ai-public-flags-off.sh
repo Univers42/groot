@@ -6,9 +6,9 @@
 # Renders the compose config (no container starts) with every flag exported as
 # "on", base + public overlay + the `ai` profile, and asserts on the JSON.
 # The variables the overlay requires get throwaway values.
-# Caveat: it proves the RENDERED config, not the code: a flag the service reads
-# under a name this script does not list (OSIONOS_AI_PAT, _IMAGES, _STT_URL,
-# _MODERATION_ACTIONS) is not covered.
+# Caveat: it proves the RENDERED config, not the code: only the names it exports
+# (OSIONOS_AI_PAT, _IMAGES, _STT_URL, the bridge's OSIONOS_MODERATION_ACTIONS) are
+# covered; a flag the code reads under another name is not.
 set -eu
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -16,7 +16,7 @@ cd "$REPO"
 
 json=$(
 	OSIONOS_AI_IMAGES=on OSIONOS_AI_PAT=on OSIONOS_AI_STT_URL=http://x \
-	OSIONOS_AI_MODERATION_ACTIONS=enforce \
+	OSIONOS_MODERATION_ACTIONS=hold \
 	PUBLIC_ORIGIN=https://verify.invalid \
 	AUTH_LINK_SIGNING_KEY=verify-only \
 	AUTH_TRUSTED_PROXY_HOPS=1 \
@@ -42,7 +42,7 @@ svc='.services["osionos-ai"]'
 check "osionos-ai OSIONOS_AI_IMAGES is empty" "$svc.environment.OSIONOS_AI_IMAGES == \"\""
 check "osionos-ai OSIONOS_AI_PAT is empty" "$svc.environment.OSIONOS_AI_PAT == \"\""
 check "osionos-ai OSIONOS_AI_STT_URL is empty" "$svc.environment.OSIONOS_AI_STT_URL == \"\""
-check "osionos-ai OSIONOS_AI_MODERATION_ACTIONS is log" "$svc.environment.OSIONOS_AI_MODERATION_ACTIONS == \"log\""
+check "osionos-bridge OSIONOS_MODERATION_ACTIONS is log" ".services[\"osionos-bridge\"].environment.OSIONOS_MODERATION_ACTIONS == \"log\""
 check "osionos-ai OSIONOS_ALLOWED_ORIGIN is the app origin" "$svc.environment.OSIONOS_ALLOWED_ORIGIN == \"https://verify.invalid:8443\""
 check "osionos-ai publishes no port" "($svc.ports // []) | length == 0"
 

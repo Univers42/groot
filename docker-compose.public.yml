@@ -89,6 +89,9 @@ services:
       # No IDE route ships in public: an empty secret makes the mint answer 404, an empty mode is off.
       OSIONOS_IDE_TOKEN_SECRET: ""
       OSIONOS_IDE_ACCESS: ""
+      # Moderation logs, never holds or removes, until the per-language precision floor (devil C83);
+      # the bridge reads it in scripts/bridge-moderation.mjs moderationMode().
+      OSIONOS_MODERATION_ACTIONS: "log"
 
   # Image generation stays off in public until the prompt gate and the output
   # gate exist (devil C70/C72/C73): environment: beats .env.local, so a stray
@@ -111,7 +114,6 @@ services:
       OSIONOS_AI_IMAGES: ""
       OSIONOS_AI_PAT: ""
       OSIONOS_AI_STT_URL: ""
-      OSIONOS_AI_MODERATION_ACTIONS: "log"
     depends_on: !override
       osionos-ai-redis:
         condition: service_healthy
