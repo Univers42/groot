@@ -13,7 +13,7 @@
 # sources live in /app/services/osionos-ai/src and reach the bridge modules
 # they import through /app/scripts (../../../scripts/bridge-session-token.mjs
 # from services/osionos-ai/src/auth.ts, ../../../../scripts/bridge-page-read.mjs
-# from services/osionos-ai/src/runs/prompt.ts). Those four modules are the
+# from services/osionos-ai/src/runs/prompt.ts). Those six modules are the
 # IMPORT CLOSURE of services/osionos-ai/src into scripts/ — bridge-session-token
 # imports bridge-session-cutoff, which imports bridge-baas-body:
 #   services/osionos-ai/src/auth.ts        -> scripts/bridge-session-token.mjs
@@ -21,6 +21,7 @@
 #                                           -> scripts/bridge-baas-body.mjs
 #   services/osionos-ai/src/runs/prompt.ts -> scripts/bridge-page-read.mjs
 #   services/osionos-ai/src/retrieval/acl.ts -> scripts/bridge-live-workspaces.mjs
+#   services/osionos-ai/src/retrieval/related.ts -> scripts/bridge-graph-edges.mjs -> scripts/bridge-page-read.mjs
 # They are named one by one below, so a new import that is not copied fails at
 # boot with ERR_MODULE_NOT_FOUND instead of running half-configured.
 #
@@ -51,8 +52,8 @@ COPY --from=deps /app/services/osionos-ai/node_modules ./services/osionos-ai/nod
 # The service itself: its manifest, its sources. No tests, no dev deps.
 COPY services/osionos-ai/package.json services/osionos-ai/tsconfig.json ./services/osionos-ai/
 COPY services/osionos-ai/src ./services/osionos-ai/src
-# The five bridge modules of the import closure (see the header).
-COPY scripts/bridge-session-token.mjs scripts/bridge-session-cutoff.mjs scripts/bridge-baas-body.mjs scripts/bridge-page-read.mjs scripts/bridge-live-workspaces.mjs ./scripts/
+# The six bridge modules of the import closure (see the header).
+COPY scripts/bridge-session-token.mjs scripts/bridge-session-cutoff.mjs scripts/bridge-baas-body.mjs scripts/bridge-page-read.mjs scripts/bridge-live-workspaces.mjs scripts/bridge-graph-edges.mjs ./scripts/
 
 USER node
 EXPOSE 4300
