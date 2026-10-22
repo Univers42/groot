@@ -58,7 +58,7 @@ for s in osionos-ai osionos-ai-redis osionos-ai-embed osionos-ai-embed-bulk osio
 	check "$s is rendered" ".services[\"$s\"] != null"
 	check "$s has a memory limit" "(.services[\"$s\"].mem_limit // 0 | tonumber? // 0) > 0"
 done
-for s in osionos-ai-db osionos-ai-llm osionos-ai-stt osionos-ai-sd osionos-ai-guard osionos-ai-vlm; do
+for s in osionos-ai-db osionos-ai-llm osionos-ai-stt osionos-ai-sd osionos-ai-guard osionos-ai-vlm osionos-ai-tox osionos-ai-sentiment osionos-ai-jobs; do
 	check "$s is NOT rendered" ".services[\"$s\"] == null"
 done
 
