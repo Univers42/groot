@@ -345,6 +345,8 @@ jobs:
           # --ignore flags when a rustls-0.2x tiberius release lands.
           # 0346/0349 (2026-10-14) hit the same rustls 0.21 via tiberius; the 0.23 line is fixed
           # at 0.23.46 in grobase 8b9321a6, whose deny.toml accepts the same two with reasons.
+          # 0382 (2026-10-20) likewise: 0.103 line fixed at 0.103.16 in grobase 53f4eec3; only
+          # tiberius's rustls-webpki 0.101.7 still carries it.
           cd "${{ matrix.ws }}"
           cargo audit \
             --ignore RUSTSEC-2026-0098 \
@@ -354,7 +356,8 @@ jobs:
             --ignore RUSTSEC-2026-0002 \
             --ignore RUSTSEC-2026-0097 \
             --ignore RUSTSEC-2026-0346 \
-            --ignore RUSTSEC-2026-0349
+            --ignore RUSTSEC-2026-0349 \
+            --ignore RUSTSEC-2026-0382
 
   # ── 5d. SCA — govulncheck (Go control plane, blocking) ─────────────────────
   sca-govulncheck:
