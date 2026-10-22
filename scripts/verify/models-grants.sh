@@ -502,6 +502,7 @@ run_checks() {
 	check_count "$1" p1_never_raises p1_never_raises
 	check_eq "$1" p1_isolation_own p1_isolation_own 4
 	check_count "$1" p1_isolation_forged p1_isolation_forged
+	check_count "$1" p5_published_read p5_published_read
 	check_count "$1" h2 account_secdef_exec
 	check_count "$1" p2s_change p2s_change
 	check_count "$1" p2s_history_once p2s_history_once
