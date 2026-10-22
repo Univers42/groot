@@ -32,3 +32,11 @@ DROP FUNCTION IF EXISTS public.ai_rec_user_context(UUID, INTEGER);
 
 -- The query behind ai_rec_nearest.
 DROP FUNCTION IF EXISTS public.ai_rec_nearest_rows(BIGINT, vector, INTEGER, TEXT, SMALLINT);
+
+-- The champion's fold-in inputs (M3c-4b-1): the constraints first, then the
+-- columns. Both IF EXISTS, so a model written without them (or a rollback
+-- run twice) is a no-op.
+ALTER TABLE public.ai_rec_models DROP CONSTRAINT IF EXISTS ai_rec_models_item_gram_check;
+ALTER TABLE public.ai_rec_models DROP CONSTRAINT IF EXISTS ai_rec_models_event_weights_check;
+ALTER TABLE public.ai_rec_models DROP COLUMN IF EXISTS item_gram;
+ALTER TABLE public.ai_rec_models DROP COLUMN IF EXISTS event_weights;
