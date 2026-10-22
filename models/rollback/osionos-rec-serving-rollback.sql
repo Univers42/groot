@@ -27,6 +27,7 @@
 --   functions, and nothing else does either.
 
 -- The serving functions.
+DROP FUNCTION IF EXISTS public.ai_rec_popular(INTEGER, INTERVAL, INTEGER);
 DROP FUNCTION IF EXISTS public.ai_rec_nearest(BIGINT, REAL[], INTEGER, TEXT);
 DROP FUNCTION IF EXISTS public.ai_rec_user_context(UUID, INTEGER);
 

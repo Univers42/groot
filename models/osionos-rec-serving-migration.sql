@@ -476,4 +476,60 @@ REVOKE ALL ON FUNCTION public.ai_rec_nearest_rows(BIGINT, vector, INTEGER, TEXT,
 GRANT EXECUTE ON FUNCTION public.ai_rec_user_context(UUID, INTEGER) TO service_role;
 GRANT EXECUTE ON FUNCTION public.ai_rec_nearest(BIGINT, REAL[], INTEGER, TEXT) TO service_role;
 
+-- -----------------------------------------------------------------------------
+-- 5. ai_rec_popular — the NON-PERSONALISED order (devil C48).
+--
+--    When "For you" cannot personalise (the user opted out, there is no
+--    trained model, or the user is new) the bridge serves this order instead
+--    of an empty strip. It reads NO user's own history: only the aggregate.
+--
+--    A page ranks by how many DISTINCT users gave it a positive explicit
+--    event in the window (C50: one account, however many rows, counts once).
+--    Impressions, views, clicks, connects and not_interested are not
+--    positive. Synthetic rows are not real preferences. A page needs
+--    p_min_users distinct users (default 3) so that a handful of accounts
+--    cannot hoist a page, and a single user's taste is not readable from the
+--    aggregate. p_limit is clamped to 1..200.
+--
+--    Caveat: a popular page the viewer cannot read is dropped by the bridge
+--    (ACL and blocks, C55), so a small workspace may get fewer than limit
+--    items, or none: the strip is then empty, as before.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.ai_rec_popular(
+    p_limit     INTEGER  DEFAULT 100,
+    p_window    INTERVAL DEFAULT '30 days',
+    p_min_users INTEGER  DEFAULT 3
+)
+RETURNS TABLE(item_id UUID, users BIGINT)
+LANGUAGE plpgsql
+STABLE
+SET search_path = public, pg_temp
+AS $$
+#variable_conflict use_column
+BEGIN
+    -- plpgsql, not sql: ai_events is read at CALL time, so this file still
+    -- applies on a database without the events migration (check 0).
+    RETURN QUERY
+    SELECT e.item_id, COUNT(DISTINCT e.user_id)
+      FROM public.ai_events e
+     WHERE e.item_kind = 'page'
+       AND e.event IN ('like', 'react', 'share', 'comment', 'favorite')
+       AND NOT e.is_synthetic
+       AND e.ts >= now() - p_window
+     GROUP BY e.item_id
+    HAVING COUNT(DISTINCT e.user_id) >= GREATEST(p_min_users, 1)
+     ORDER BY COUNT(DISTINCT e.user_id) DESC, e.item_id
+     LIMIT LEAST(GREATEST(COALESCE(p_limit, 100), 1), 200);
+END;
+$$;
+
+COMMENT ON FUNCTION public.ai_rec_popular(INTEGER, INTERVAL, INTEGER) IS
+    'The non-personalised order "For you" falls back to (C48): pages ranked by '
+    'DISTINCT users with a positive explicit event (like, react, share, comment, '
+    'favorite) in the window, at least p_min_users of them. p_limit clamped to '
+    '1..200. service_role only.';
+
+REVOKE ALL ON FUNCTION public.ai_rec_popular(INTEGER, INTERVAL, INTEGER) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.ai_rec_popular(INTEGER, INTERVAL, INTEGER) TO service_role;
+
 NOTIFY pgrst, 'reload schema';
