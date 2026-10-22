@@ -146,6 +146,14 @@ services:
   osionos-ai-redis:
     mem_limit: 128m
 
+  # The nightly recommender training, on the live database as role osml_job.
+  osionos-ml-job:
+    environment:
+      DATABASE_URL: ${OSML_PUBLIC_DATABASE_URL:?set OSML_PUBLIC_DATABASE_URL in .env.public (the live grobase DB, role osml_job)}
+      PGPASSWORD: ""
+    depends_on: !reset {}
+    mem_limit: 1g
+
   # Caveat: the caps are sized for the host's headroom, not measured under load
   # (R-C6 asks for docker stats after startup). The bulk embedder gets fewer CPUs
   # than the dev 5 so a backfill cannot starve the live app.
