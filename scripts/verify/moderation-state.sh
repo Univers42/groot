@@ -490,6 +490,16 @@ check_4() {
 		DETAIL="${cleared} moderation row(s) left after ai_erase_user"
 		return 1
 	}
+	# The switch must not outlive the erasure: a later UPDATE in the SAME
+	# transaction is still refused.
+	run_sql "BEGIN; SELECT public.ai_moderation_erase_user('${U3}'); UPDATE public.ai_moderation_events SET action = 'allow'; COMMIT;" && {
+		DETAIL="an UPDATE after ai_moderation_erase_user in the same transaction got through"
+		return 1
+	}
+	grep -q 'append-only' "${WORK}/sql.err" || {
+		DETAIL="same-transaction UPDATE: $(head -1 "${WORK}/sql.err")"
+		return 1
+	}
 	DESCR="the erasure clears the authored rows, nulls the actor, keeps the other's"
 	return 0
 }
