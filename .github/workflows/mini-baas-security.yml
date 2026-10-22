@@ -440,7 +440,7 @@ jobs:
             echo "POSTGRES_USER=postgres"
             echo "POSTGRES_PASSWORD=postgres"
             echo "POSTGRES_DB=postgres"
-            echo "JWT_SECRET=ci-jwt-secret-min-32-chars-long-xx"
+            echo "JWT_SECRET=$(openssl rand -hex 32)"
             echo "KONG_CORS_ORIGIN_APP=https://localhost:3000"
             echo "KONG_CORS_ORIGIN_FRONTEND=https://localhost:4322"
             echo "KONG_CORS_ORIGIN_PLAYGROUND=https://localhost:3100"
