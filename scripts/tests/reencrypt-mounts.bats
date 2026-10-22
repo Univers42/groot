@@ -52,3 +52,33 @@ INTERNAL_SERVICE_TOKEN_PREV='
   [ "$status" -eq 1 ]
   [[ "$output" == *"no adapter-registry service token"* ]]
 }
+
+# --force: a mount whose DSN decrypts (/connect 200) but holds a stale engine password.
+force_setup() {
+  cat > "$BATS_TEST_TMPDIR/bin/docker" <<'FAKE'
+#!/bin/sh
+case "$1" in
+  ps) printf 'mini-baas-adapter-registry-go\nmini-baas-postgres\nmini-baas-mssql\n' ;;
+  inspect) printf 'INTERNAL_SERVICE_TOKEN=dummy\nMSSQL_SA_PASSWORD=dummy\n' ;;
+  exec) case "$*" in *"SELECT id::text"*) printf 'id-1|osionos-finance|mssql\n' ;; esac ;;
+  *) exit 1 ;;
+esac
+FAKE
+  printf '#!/bin/sh\nprintf 200\n' > "$BATS_TEST_TMPDIR/bin/curl"
+  chmod +x "$BATS_TEST_TMPDIR/bin/docker" "$BATS_TEST_TMPDIR/bin/curl"
+}
+
+@test "a mount answering /connect 200 is left alone without --force" {
+  force_setup
+  run bash "$ROOT/scripts/reencrypt-mounts.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"mounts open under the current key"* ]]
+}
+
+@test "--force NAME re-seals that mount although /connect answers 200" {
+  force_setup
+  run bash "$ROOT/scripts/reencrypt-mounts.sh" --force osionos-finance
+  [[ "$output" == *"osionos-finance (mssql): /connect → 200 (forced)"* ]]
+  # python3 is a stub printing no id, so the re-registration is refused and nothing adopted.
+  [[ "$output" == *"temp registration failed — left untouched"* ]]
+}

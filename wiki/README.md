@@ -69,6 +69,7 @@ zero per-project server code.
 | [fresh-machine](runbooks/fresh-machine.md) | From nothing to a verified demo on a machine that never ran the stack |
 | [grobase-link](runbooks/grobase-link.md) | Frontends here, grobase elsewhere (VM, LAN, cloud): `make link`, no sudo |
 | [another-device](runbooks/another-device.md) | The prompt for an agent on another device: vault42, the grobase CLI and `make link` over localhost, LAN, wifi, ssh, Tailscale and the internet, with the test plan |
+| [osionos-ai](runbooks/osionos-ai.md) | The AI assistant on the dev stack: the `ai` profile, `/api/ai/`, and the switch that turns it on |
 
 ### [quality/](quality/)
 

@@ -258,6 +258,7 @@ run_verify() {
   }
   check_bundle_secrets
   check_bundle_links
+  check_frame_headers
   check_bridge_env
   check_ide_access
   check_gateway_env
