@@ -129,7 +129,7 @@ trap 'rm -f "${ERR_FILE}"' EXIT
 # alphabetical pass reaches its dependent. Space-separated: no filename here
 # contains a space or glob character.
 ORDERED_FIRST="auth-gateway-users-reconcile-migration.sql osionos-bridge-migration.sql osionos-chat-migration.sql osionos-social-migration.sql osionos-engagement-migration.sql osionos-page-search-migration.sql"
-ORDERED_LAST="osionos-account-foundation-migration.sql osionos-account-profiles-migration.sql osionos-service-role-only-migration.sql realtime-cdc-off-migration.sql users-pii-grants-migration.sql"
+ORDERED_LAST="osionos-account-foundation-migration.sql osionos-account-profiles-migration.sql osionos-publish-account-migration.sql osionos-service-role-only-migration.sql realtime-cdc-off-migration.sql users-pii-grants-migration.sql"
 
 note() { printf '[models] %s\n' "$*" >&2; }
 

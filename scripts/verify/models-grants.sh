@@ -484,6 +484,7 @@ run_checks() {
 	check_count "$1" p1_never_raises p1_never_raises
 	check_eq "$1" p1_isolation_own p1_isolation_own 4
 	check_count "$1" p1_isolation_forged p1_isolation_forged
+	check_count "$1" p5_published_read p5_published_read
 	check_count "$1" h2 account_secdef_exec
 	probe "$1" K1 authenticated "SELECT count(*) FROM public.osionos_sessions"
 	probe "$1" K2 osionos_account_user "SELECT refresh_hash FROM public.osionos_sessions"
