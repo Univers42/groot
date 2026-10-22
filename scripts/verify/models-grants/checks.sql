@@ -110,3 +110,40 @@ SELECT 'cutoff_realtime_triggers',
 SELECT 'users_pii', count(*), coalesce(string_agg(r || '.' || c, ' ' ORDER BY r, c), '')
   FROM (VALUES ('anon','email'), ('anon','password_hash'), ('authenticated','password_hash')) AS x(r, c)
  WHERE has_column_privilege(r, 'public.users', c, 'SELECT');
+
+-- self_data_indexes_missing: the indexes the sys: self-data sources read through. The bridge
+-- reads the caller's own rows scoped by owner_id and ordered by updated_at DESC, so the index
+-- has to be (owner_id, updated_at DESC) — an index on owner_id alone, or one that sorts
+-- updated_at ascending, is a different index here.
+-- The comparison is on the whole shape, like account_indexes_missing: the key columns WITH their
+-- sort order (the catalog's indoption bits), the access method, the uniqueness and the partial
+-- predicate. The index name is part of the shape: the migration names it, so a renamed index
+-- reads as missing.
+-- Caveat: the columns are compared as the catalog renders them, so an index on an EXPRESSION
+-- instead of a column is reported as missing (never as present).
+WITH expected(tbl, idx, cols) AS (
+  VALUES ('osionos_pages', 'osionos_pages_owner_updated_idx', 'owner_id,updated_at DESC'),
+         ('osionos_tasks', 'osionos_tasks_owner_updated_idx', 'owner_id,updated_at DESC')
+),
+found AS (
+  SELECT c.relname AS idx,
+         t.relname AS tbl,
+         (SELECT string_agg(a.attname || CASE WHEN (i.indoption[k.ord - 1] & 1) = 1 THEN ' DESC' ELSE '' END,
+                            ',' ORDER BY k.ord)
+            FROM generate_series(1, i.indnkeyatts) AS k(ord)
+            JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = i.indkey[k.ord - 1]) AS cols,
+         (SELECT am.amname FROM pg_opclass o JOIN pg_am am ON am.oid = o.opcmethod WHERE o.oid = i.indclass[1]) AS opclass,
+         i.indisunique AS uniq,
+         i.indpred IS NULL AS plain,
+         i.indnatts = i.indnkeyatts AS key_only
+    FROM pg_index i
+    JOIN pg_class c ON c.oid = i.indexrelid
+    JOIN pg_class t ON t.oid = i.indrelid
+    JOIN pg_namespace ns ON ns.oid = t.relnamespace AND ns.nspname = 'public'
+)
+SELECT 'self_data_indexes_missing', count(*), coalesce(string_agg(e.tbl || '.' || e.idx, ' ' ORDER BY e.tbl), '')
+  FROM expected e
+ WHERE NOT EXISTS (SELECT 1 FROM found f
+                    WHERE f.idx = e.idx AND f.tbl = e.tbl
+                      AND f.cols = e.cols AND f.opclass = 'btree'
+                      AND f.uniq = false AND f.plain AND f.key_only);
