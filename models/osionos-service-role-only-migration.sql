@@ -1,8 +1,15 @@
 -- Service-role-only catalog pass for osionos_* relations.
 --
--- Invariant: every public.osionos_* relation is reachable only by service_role.
--- The bridge (service_role) is the only reader and writer. anon and
--- authenticated get no privilege on any of them.
+-- Invariant: every public.osionos_* relation is reachable only by service_role,
+-- except the tables marked COMMENT ... 'osionos:account-plane', which
+-- osionos_account_user also reaches through column grants and row-level
+-- security (checks k1-k3 of scripts/verify/models-grants.sh). The bridge
+-- (service_role) is the only reader and writer. anon and authenticated get no
+-- privilege on any of them.
+--
+-- The REVOKE loop below names PUBLIC, anon and authenticated explicitly, so the
+-- account role keeps its column grants and its policies: this pass revokes
+-- privileges, it never grants them.
 --
 -- Why a catalog pass and not per-file grants:
 --   * Databases first booted before grobase commit 1e407614 received a default

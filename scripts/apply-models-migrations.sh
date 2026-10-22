@@ -89,6 +89,16 @@
 #   regression here will NOT show as a `--check` gap on a converged database.
 #   The only real detector is a full apply on a from-scratch database.
 #
+#   osionos-account-foundation-migration.sql runs after the alphabetical pass and
+#   before the service-role-only pass. Alphabetical order would put it first
+#   ('account' sorts before 'feed') and it would fail on relations that do not
+#   exist yet: it indexes osionos_feed_shares (created by
+#   osionos-feed-engagement-migration.sql, alphabetical) and alters
+#   osionos_bridge_audit_events (created by osionos-bridge-migration.sql, in
+#   ORDERED_FIRST). It also creates public.osionos_sessions, an osionos_*
+#   relation, so it must exist BEFORE the catalog pass below: a table created
+#   after that pass keeps the legacy default privileges (anon/authenticated
+#   SELECT) instead of being revoked from them.
 #   osionos-service-role-only-migration.sql runs LAST (ORDERED_LAST), after
 #   everything: it revokes what earlier files and older boots granted.
 #   users-pii-grants-migration.sql runs after it, last of all: it fixes the
@@ -114,7 +124,7 @@ trap 'rm -f "${ERR_FILE}"' EXIT
 # alphabetical pass reaches its dependent. Space-separated: no filename here
 # contains a space or glob character.
 ORDERED_FIRST="auth-gateway-users-reconcile-migration.sql osionos-bridge-migration.sql osionos-chat-migration.sql osionos-social-migration.sql osionos-engagement-migration.sql osionos-page-search-migration.sql"
-ORDERED_LAST="osionos-service-role-only-migration.sql realtime-cdc-off-migration.sql users-pii-grants-migration.sql"
+ORDERED_LAST="osionos-account-foundation-migration.sql osionos-service-role-only-migration.sql realtime-cdc-off-migration.sql users-pii-grants-migration.sql"
 
 note() { printf '[models] %s\n' "$*" >&2; }
 

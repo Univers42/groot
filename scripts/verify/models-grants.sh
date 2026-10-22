@@ -30,6 +30,21 @@
 #   rt grobase's CREATE TABLE hook that re-arms new tables exists and is disabled ·
 #   u anon cannot SELECT public.users.email or password_hash, authenticated cannot SELECT password_hash
 #
+#   The account plane (models/osionos-account-foundation-migration.sql, ADR 0028):
+#   k1 the account role reaches no relation that anon does not reach, except the
+#   tables marked 'osionos:account-plane' · k2 every marked table has RLS on, its
+#   policies name no role but service_role and osionos_account_user, and its
+#   account-role policy filters on the uid helper · k3 the expected account tables
+#   exist and are marked · k4 the account indexes exist · k7 the role has the
+#   right shape and no membership beyond authenticator · k8 the role may SELECT
+#   exactly nine session columns and nothing else · k5 the role sees only its own
+#   rows (1) · k6 no forged claim set sees any (0) · K1-K6 six probes on the
+#   account plane, refused with 42501 · h also counts the functions the account
+#   role may execute · standalone the account foundation file applied alone
+#   leaves no realtime trigger, no anon/authenticated privilege and exactly the
+#   nine column grants — what the ledger runner (scripts/apply-models.sh) relies
+#   on, and what the later passes hide
+#
 # ISOLATION
 #   Throwaway containers only (--rm --network none, no port, no volume); the live
 #   mini-baas / osionos containers are never touched. A trap removes each container
@@ -232,6 +247,80 @@ check_idempotent() {
 	fi
 }
 
+# check_standalone <scenario> — the account foundation file applied ALONE, on a
+# database where the later passes would hide what it leaves behind: the realtime
+# hook armed again, the legacy default privilege back, and the sessions table
+# dropped so the file has to recreate it. The ledger runner
+# (scripts/apply-models.sh) may run this file with no service-role-only and no
+# realtime-cdc-off pass after it, so the file has to be self-sufficient.
+check_standalone() {
+	file="${MODELS_DIR}/osionos-account-foundation-migration.sql"
+	if [ ! -f "${file}" ]; then
+		fail "$1" "standalone" "no ${file}"
+		return 0
+	fi
+	if ! printf '%s\n' \
+		'DO $$ BEGIN' \
+		"  IF EXISTS (SELECT 1 FROM pg_event_trigger WHERE evtname = 'realtime_auto_trigger_on_create') THEN" \
+		'    ALTER EVENT TRIGGER realtime_auto_trigger_on_create ENABLE;' \
+		'  END IF;' \
+		'END $$;' | psql_stdin >"${WORK}/standalone-$1.log" 2>&1; then
+		fail "$1" "standalone" "could not re-arm the realtime hook"
+		sed 's/^/  | /' "${WORK}/standalone-$1.log" >&2
+		return 0
+	fi
+	if ! psql_stdin <"${FIX}/legacy-default.sql" >"${WORK}/standalone-$1.log" 2>&1; then
+		fail "$1" "standalone" "could not re-apply the legacy default privilege"
+		return 0
+	fi
+	if ! printf '%s\n' 'DROP TABLE IF EXISTS public.osionos_sessions;' |
+		psql_stdin >"${WORK}/standalone-$1.log" 2>&1; then
+		fail "$1" "standalone" "could not drop public.osionos_sessions"
+		return 0
+	fi
+	if ! psql_stdin <"${file}" >"${WORK}/standalone-$1.log" 2>&1; then
+		fail "$1" "standalone" "the account foundation file did not apply alone"
+		sed 's/^/  | /' "${WORK}/standalone-$1.log" >&2
+		return 0
+	fi
+	if ! psql_rows >"${WORK}/standalone-$1.out" 2>"${WORK}/standalone-$1.err" <<'SQL'
+SELECT 'sessions_realtime_triggers', count(*)::text, ''
+  FROM pg_trigger t
+ WHERE t.tgrelid = 'public.osionos_sessions'::regclass
+   AND NOT t.tgisinternal AND t.tgfoid = to_regproc('public.realtime_notify');
+SELECT 'sessions_anon_auth_privs', count(*)::text, ''
+  FROM (VALUES ('anon'),('authenticated')) AS x(rolname)
+  CROSS JOIN (VALUES ('SELECT',true),('INSERT',true),('UPDATE',true),('REFERENCES',true),
+                     ('DELETE',false),('TRUNCATE',false),('TRIGGER',false)) AS p(priv, col_level)
+ WHERE has_table_privilege(x.rolname, 'public.osionos_sessions', p.priv)
+    OR (p.col_level AND has_any_column_privilege(x.rolname, 'public.osionos_sessions', p.priv));
+SELECT 'sessions_column_acl', coalesce(string_agg(a.attname, ',' ORDER BY a.attnum), ''), ''
+  FROM pg_attribute a
+ WHERE a.attrelid = 'public.osionos_sessions'::regclass AND a.attnum > 0 AND NOT a.attisdropped
+   AND has_column_privilege('osionos_account_user', a.attrelid, a.attname, 'SELECT');
+SQL
+	then
+		fail "$1" "standalone" "the standalone assertions did not run"
+		sed 's/^/  | /' "${WORK}/standalone-$1.err" >&2
+		return 0
+	fi
+	assert_standalone "$1" sessions_realtime_triggers 0
+	assert_standalone "$1" sessions_anon_auth_privs 0
+	assert_standalone "$1" sessions_column_acl \
+		'id,created_at,expires_at,last_seen_at,auth_method,ip_prefix,user_agent,revoked_at,revoked_reason'
+}
+
+# assert_standalone <scenario> <label> <expected> — one named row of the
+# standalone step, compared to the value it must hold.
+assert_standalone() {
+	got="$(grep "^$2|" "${WORK}/standalone-$1.out" | head -1 | cut -d'|' -f2 || true)"
+	if [ "$got" = "$3" ]; then
+		pass "$1" "$2" "$3"
+	else
+		fail "$1" "$2" "${got:-no row} — expected $3"
+	fi
+}
+
 run_checks() {
 	# A checks.sql error is echoed, then read back anyway: a missing row is a FAIL.
 	if ! psql_rows <"${FIX}/checks.sql" >"${WORK}/checks-$1.out" 2>"${WORK}/checks-$1.err"; then
@@ -259,7 +348,22 @@ run_checks() {
 	check_count "$1" r-cutoffs cutoff_realtime_triggers
 	check_count "$1" rt realtime_event_trigger
 	check_count "$1" u users_pii
+	check_count "$1" k1 account_role_reach
+	check_count "$1" k2 account_plane_rls
+	check_count "$1" k3 account_plane_expected
+	check_count "$1" k4 account_indexes_missing
+	check_count "$1" k7 account_role_shape
+	check_count "$1" k8 account_session_columns
+	probe "$1" K1 authenticated "SELECT count(*) FROM public.osionos_sessions"
+	probe "$1" K2 osionos_account_user "SELECT refresh_hash FROM public.osionos_sessions"
+	probe "$1" K3 osionos_account_user "UPDATE public.osionos_sessions SET revoked_at = now()"
+	probe "$1" K4 osionos_account_user "SELECT count(*) FROM public.osionos_pages"
+	probe "$1" K5 authenticated "SELECT public.osionos_account_uid()"
+	probe "$1" K6 anon "INSERT INTO public.osionos_sessions (id, user_id, expires_at, auth_method) VALUES (gen_random_uuid(), gen_random_uuid(), now() + interval '1 hour', 'password')"
+	check_svc "$1" k5 account_isolation_own
+	check_count "$1" k6 account_isolation_forged
 	check_idempotent "$1"
+	check_standalone "$1"
 }
 
 run_scenario() {
