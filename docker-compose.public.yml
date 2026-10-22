@@ -100,9 +100,10 @@ services:
   # only the five. scripts/verify/ai-public-flags-off.sh proves it.
   osionos-ai:
     ports: !reset []
-    # The live (grobase) database through the link relay, role osionos_ai: never
-    # the dev osionos-ai-db with its default password (R-C5). The alias
-    # mini-baas-postgres lives on the mini-baas network, which both services join.
+    # The live (grobase) database, role osionos_ai: never the dev osionos-ai-db
+    # with its default password (R-C5). The grobase link relays Kong only, so the
+    # URL names the VM's tailnet-only TCP serve of its Postgres (runbook § Public mode).
+    # Caveat: every device of the tailnet reaches that port; the role's password is the gate.
     # environment: beats env_file, so empty here means off.
     environment:
       OSIONOS_AI_DATABASE_URL: ${OSIONOS_AI_PUBLIC_DATABASE_URL:?set OSIONOS_AI_PUBLIC_DATABASE_URL in .env.public (the live grobase DB, role osionos_ai)}
