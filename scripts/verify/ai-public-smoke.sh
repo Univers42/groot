@@ -30,7 +30,11 @@ expect "POST /api/ai/images is 404 (images off)" 404 "$(code -X POST -H 'content
 hdrs=$(curl -s -o /dev/null -m 10 -D - -H 'Origin: https://evil.example' "$BRIDGE/api/ai/health" 2>/dev/null || true)
 acao=$(printf '%s' "$hdrs" | grep -i '^access-control-allow-origin:' || true)
 if [ -z "$hdrs" ]; then echo "FAIL foreign Origin check: no response"; status=1
-elif [ -z "$acao" ]; then echo "PASS foreign Origin gets no access-control-allow-origin"; else echo "FAIL foreign Origin got: $acao"; status=1; fi
+# The service answers one fixed allowed origin, as the bridge does; a browser on any other origin
+# then refuses the response. Only an echo of the foreign origin, or *, would let it read.
+elif [ -z "$acao" ]; then echo "PASS foreign Origin gets no access-control-allow-origin"
+elif printf '%s' "$acao" | grep -qiE 'evil\.example|\*'; then echo "FAIL foreign Origin is allowed: $acao"; status=1
+else echo "PASS foreign Origin is not allowed (fixed $(printf '%s' "$acao" | tr -d '\r'))"; fi
 
 # A burst of 30 within the burst window: the zone allows 2 r/s + burst 10.
 n429=0
