@@ -366,6 +366,111 @@ SELECT 'p1_hold',
        'B is refused the held name, A reclaims it';
 ROLLBACK;
 
+-- p1_sync_changed_only: the legacy sync copies what CHANGED on the identity
+-- row, and nothing else. A typed value the user set through the account route
+-- must survive an identity write that moved a different field.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+INSERT INTO public.osionos_profiles (user_id, display_name, username, bio) VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'A', 'syncname', 'typed');
+INSERT INTO public.osionos_bridge_identities (provider, subject, user_id, email_hash, display_name, profile)
+VALUES ('prismatica', '11111111-1111-1111-1111-111111111111',
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'p1sync', 'A', '{"bio":"legacy"}');
+-- The identity row's insert copies everything, so the legacy bio is on the
+-- profile now; the typed one is what the account route wrote after it.
+UPDATE public.osionos_profiles SET bio = 'typed'
+ WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+-- An identity write that moves the username alone must not touch the bio.
+UPDATE public.osionos_bridge_identities SET username = 'renamed'
+ WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+DO $$
+DECLARE
+  v_bio text;
+BEGIN
+  SELECT bio INTO v_bio FROM public.osionos_profiles
+   WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  PERFORM set_config('osionos.check.p1_sync_after_username', coalesce(v_bio, '-'), true);
+END $$;
+-- An identity write that moves the profile blob copies the blob's fields.
+UPDATE public.osionos_bridge_identities SET profile = '{"bio":"legacy2"}'
+ WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+DO $$
+DECLARE
+  v_bio text;
+BEGIN
+  SELECT bio INTO v_bio FROM public.osionos_profiles
+   WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  PERFORM set_config('osionos.check.p1_sync_after_profile', coalesce(v_bio, '-'), true);
+END $$;
+SELECT 'p1_sync_changed_only',
+       (CASE WHEN current_setting('osionos.check.p1_sync_after_username') = 'typed' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.p1_sync_after_profile') = 'legacy2' THEN 0 ELSE 1 END),
+       'a username write leaves the typed bio, a profile write copies it';
+ROLLBACK;
+
+-- p1_noop_no_bump: a write that changes nothing leaves the profile's version
+-- where it was. A version that moves on a no-op makes the next If-Match fail
+-- for nothing.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+INSERT INTO public.osionos_profiles (user_id, display_name, username) VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'A', 'noopname');
+INSERT INTO public.osionos_bridge_identities (provider, subject, user_id, email_hash, display_name, username)
+VALUES ('prismatica', '11111111-1111-1111-1111-111111111111',
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'p1noop', 'A', 'noopname');
+-- The identity's insert copied the name; the profile's version is what it is.
+DO $$
+DECLARE
+  v_version integer;
+BEGIN
+  SELECT version INTO v_version FROM public.osionos_profiles
+   WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  PERFORM set_config('osionos.check.p1_noop_base', v_version::text, true);
+END $$;
+-- A write that sets the column to its own value changes nothing.
+UPDATE public.osionos_profiles SET username = username
+ WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+DO $$
+DECLARE
+  v_version integer;
+BEGIN
+  SELECT version INTO v_version FROM public.osionos_profiles
+   WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  PERFORM set_config('osionos.check.p1_noop_after_same', v_version::text, true);
+END $$;
+-- An identity write that sets the name to the name the profile already has
+-- changes nothing either.
+UPDATE public.osionos_bridge_identities SET username = 'noopname'
+ WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+DO $$
+DECLARE
+  v_version integer;
+BEGIN
+  SELECT version INTO v_version FROM public.osionos_profiles
+   WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  PERFORM set_config('osionos.check.p1_noop_after_sync', v_version::text, true);
+END $$;
+-- A real change moves the version by exactly one.
+UPDATE public.osionos_profiles SET bio = 'changed'
+ WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+DO $$
+DECLARE
+  v_version integer;
+BEGIN
+  SELECT version INTO v_version FROM public.osionos_profiles
+   WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  PERFORM set_config('osionos.check.p1_noop_after_change', v_version::text, true);
+END $$;
+SELECT 'p1_noop_no_bump',
+       (CASE WHEN current_setting('osionos.check.p1_noop_after_same')::integer
+                = current_setting('osionos.check.p1_noop_base')::integer THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.p1_noop_after_sync')::integer
+                = current_setting('osionos.check.p1_noop_base')::integer THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.p1_noop_after_change')::integer
+                = current_setting('osionos.check.p1_noop_base')::integer + 1 THEN 0 ELSE 1 END),
+       'a no-op leaves the version, a real change moves it by one';
+ROLLBACK;
+
 -- p1_never_raises: nothing the bridge or the gateway does may fail a
 -- registration. An insert whose username collides with a profile, an insert
 -- with no auth.users row, and the legacy identity write all succeed — and the

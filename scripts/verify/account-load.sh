@@ -14,6 +14,20 @@
 # WHAT: fresh grobase postgres -> 001 + 012 -> shim -> apply-models-migrations.sh
 # -> seed-10k.sql -> ANALYZE -> each query RUNS times with EXPLAIN ANALYZE.
 #
+# THE BUDGET KEYS (scripts/verify/account-load/budgets.json, one entry per query)
+#   p95_ms             the p95 of the EXPLAIN ANALYZE times, in ms
+#   no_seq_scan        the relations the plan must not scan sequentially: a
+#                      sequential scan of one of them fails the query
+#   require_plan_nodes  OPTIONAL. The EXPLAIN (FORMAT JSON) plan must hold a
+#                      node of each listed "Node Type" (e.g. "Bitmap Index
+#                      Scan"). A plan without it fails the query, and the FAIL
+#                      line names the node type that was missing. It is what
+#                      says which PLAN a query has to come back with, where
+#                      no_seq_scan only says what it must not scan: a btree
+#                      walk that removes 4001 rows passes a no-seq-scan budget
+#                      in O(N) and never touches a GIN index.
+#   why                what the plan is supposed to look like, and why
+#
 # ISOLATION: throwaway container (--rm --network none), never touches live.
 #
 # CAVEATS: 1. Idle container under-reports prod latency (no concurrency/warm cache).
@@ -49,9 +63,9 @@ failed=0
 . "${FIX}/self-test.sh"
 note() { printf '[account-load] %s\n' "$*" >&2; }
 # shellcheck disable=SC2317
-pass_query() { passed=$((passed + 1)) && printf 'PASS %s p50=%s p95=%s seq_scan=%s budget=%s\n' "$1" "$2" "$3" "$4" "$5"; }
+pass_query() { passed=$((passed + 1)) && printf 'PASS %s p50=%s p95=%s seq_scan=%s budget=%s%s\n' "$1" "$2" "$3" "$4" "$5" "$6"; }
 # shellcheck disable=SC2317
-fail_query() { failed=$((failed + 1)) && printf 'FAIL %s p50=%s p95=%s seq_scan=%s budget=%s\n' "$1" "$2" "$3" "$4" "$5"; }
+fail_query() { failed=$((failed + 1)) && printf 'FAIL %s p50=%s p95=%s seq_scan=%s budget=%s%s\n' "$1" "$2" "$3" "$4" "$5" "$6"; }
 # shellcheck disable=SC2317
 fail_step() { failed=$((failed + 1)) && printf 'FAIL %s %s %s\n' "$1" "$2" "$3"; }
 die() {
@@ -197,6 +211,7 @@ WHERE idx = 1;
 SQL
 	# Run self-test for has_seq_scan_on
 	self_test_has_seq_scan_on || die "self-test" "has_seq_scan_on" "self-test failed"
+	self_test_missing_node_types || die "self-test" "missing_node_types" "self-test failed"
 	# Split queries.sql into individual query files
 	mkdir -p "${WORK}/queries"
 	awk -v work="${WORK}/queries" '
@@ -230,24 +245,37 @@ query = data.get('${id}', {})
 tables = query.get('no_seq_scan', [])
 print(' '.join(tables))
 " 2>/dev/null)"
-		
+
+		# Get the plan node types this query must come back with (optional).
+		# They are joined with '|' because a node type holds spaces.
+		require_nodes="$(python3 -c "
+import sys, json
+with open('${FIX}/budgets.json') as f:
+    data = json.load(f)
+query = data.get('${id}', {})
+print('|'.join(query.get('require_plan_nodes', [])))
+" 2>/dev/null)"
+
 		times_file="${WORK}/times-${id}.txt"
 		seq_scans_file="${WORK}/seq_scans-${id}.txt"
 		budgeted_scan_flag="${WORK}/budgeted_scan-${id}.flag"
-		
+		missing_nodes_file="${WORK}/missing_nodes-${id}.txt"
+
 		# Run measurement
 		measure_query "${query_file}" "${RUNS}" "${budget_ms}" "${seq_scan_tables}" \
-			"${times_file}" "${seq_scans_file}" "${budgeted_scan_flag}"
-		
+			"${require_nodes}" "${times_file}" "${seq_scans_file}" "${budgeted_scan_flag}" \
+			"${missing_nodes_file}"
+
 		# Evaluate and print result
 		if [ -f "${times_file}" ]; then
 			# shellcheck disable=SC2046
 			set -- $(percentiles "${times_file}")
 			p50=$1
 			p95=$2
-			evaluate_query "${id}" "${p50}" "${p95}" "${seq_scans_file}" "${budget_ms}" "${budgeted_scan_flag}" || true
+			evaluate_query "${id}" "${p50}" "${p95}" "${seq_scans_file}" "${budget_ms}" \
+				"${budgeted_scan_flag}" "${missing_nodes_file}" || true
 		else
-			fail_query "${id}" "0.00" "0.00" "none" "${budget_ms}"
+			fail_query "${id}" "0.00" "0.00" "none" "${budget_ms}" ""
 		fi
 	done
 	# Write JSON output

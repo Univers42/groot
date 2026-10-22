@@ -91,6 +91,14 @@ Other consequences:
 - The legacy path stays until P1-2: an AFTER trigger on `osionos_bridge_identities` copies the
   profile blob's `headline`, `bio` and `location` into the profile's own columns, and takes a valid,
   free username. It never touches `display_name` and never raises.
+- The legacy path copies only what changed. The identities row is written on every sign-in and
+  whenever one field of it moves; a copy of everything would overwrite a value the user typed
+  through the new account route with an older value from the blob. On an UPDATE only the fields
+  whose source moved are copied (the profile blob, the opt-out and the username, each on its own);
+  on an INSERT everything is, because there is nothing to compare against.
+- A write that changes nothing changes nothing: the trigger's own UPDATEs skip a row they would not
+  change, and the profile's version moves only when the row really changed. A version that moves on
+  a no-op makes the next If-Match fail for nothing.
 - The directory view keeps the old column order (the old bridge image selects them by name) and
   adds `headline` at the end. `display_name`, `username`, `search_doc` and `headline` are the
   profile's own columns, with no COALESCE, so the indexes apply.
@@ -99,11 +107,16 @@ Other consequences:
     legacy table — a sequential scan of every `user_profiles` row — where a nested loop with the
     unique index on `user_id` finds the one row. The directory lookup is the query that must not
     scan a legacy table, and the plan is pinned rather than left to the cost model.
-  - The GIN indexes are built with the fast update technique off. A GIN index that keeps a pending
-    list holds its newest rows outside the index proper, so the planner's cost model and the
+  - The GIN indexes are created with the fast update technique off. A GIN index that keeps a
+    pending list holds its newest rows outside the index proper, so the planner's cost model and the
     index's statistics describe an index the query will not walk, and the directory search falls
     back to a sequential scan of the profiles. The profiles are written a few times per user, so
-    the batching the pending list buys is worth nothing here.
+    the batching the pending list buys is worth nothing here. An install that already has the index
+    without the option gets it from the one ALTER that only runs when the option is missing.
+- The rare-term directory search is gated on the plan, not only on the timing: the harness's
+  `require_plan_nodes` budget key says the plan has to come back as a bitmap index scan, because a
+  btree walk that removes 4001 rows passes a no-sequential-scan budget in O(N) and never touches a
+  GIN index.
 - Out of scope, each with the package that first reads it: emails (P3-1), follows (P2-3), presence
   (P0-5), `readme_page_id` (P2-1), and avatars in storage (P0-6 — the avatar columns exist here but
   stay NULL, and the view keeps the legacy fallback).

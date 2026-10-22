@@ -67,7 +67,10 @@
     "no_seq_scan": [
       "osionos_profiles"
     ],
-    "why": "Target: BitmapOr of Bitmap Index Scans on the trigram GIN indexes (display_name, username, headline) and the search_doc GIN index. The term matches two of the seeded users, so a btree walk would remove 4001 rows to find them: no_seq_scan alone is not enough, the plan has to be a GIN bitmap. Caveat: a trigram ILIKE needs at least 3 characters to use the index."
+    "require_plan_nodes": [
+      "Bitmap Index Scan"
+    ],
+    "why": "Target: BitmapOr of Bitmap Index Scans on the trigram GIN indexes (display_name, username, headline) and the search_doc GIN index. The term matches two of the seeded users, so a btree walk would remove 4001 rows to find them: no_seq_scan alone is not enough, the plan has to be a GIN bitmap, and require_plan_nodes is what says so. Caveat: a trigram ILIKE needs at least 3 characters to use the index."
   },
   "p1_directory_by_ids": {
     "p95_ms": 60,

@@ -24,11 +24,29 @@ percentiles() {
 			printf "%.2f %.2f\n", a[p50_idx], a[p95_idx]
 		}' "$1"
 }
+# Print the JSON of an EXPLAIN (FORMAT JSON) output. psql wraps it in a
+# header, a row of dashes and a frame; the parser below has to skip those.
+# Input: the raw EXPLAIN output on stdin. Output: the JSON, on stdout.
+plan_json() {
+	python3 -c "
+import sys
+lines = sys.stdin.read().strip().split('\n')
+json_lines = [l.rstrip(' +') for l in lines if l.strip() and not l.strip().startswith('-') and 'QUERY PLAN' not in l and not all(c == '-' for c in l.strip())]
+json_str = '\n'.join(json_lines)
+depth = 0; end_idx = 0
+for i, ch in enumerate(json_str):
+    if ch in '[{': depth += 1
+    elif ch in '}]':
+        depth -= 1
+        if depth == 0: end_idx = i + 1; break
+print(json_str[:end_idx])
+" 2>/dev/null
+}
 # Extract all relation names with Seq Scan or Parallel Seq Scan in the plan.
 # Input: plan JSON from EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON).
 # Output: comma-separated relation names, or "none".
 all_seq_scans() {
-	echo "$1" | python3 -c "
+	echo "$1" | plan_json | python3 -c "
 import sys, json
 def find_seq_scans(obj, scans):
     if isinstance(obj, dict):
@@ -39,17 +57,7 @@ def find_seq_scans(obj, scans):
     elif isinstance(obj, list):
         for item in obj: find_seq_scans(item, scans)
 try:
-    lines = sys.stdin.read().strip().split('\n')
-    json_lines = [l.rstrip(' +') for l in lines if l.strip() and not l.strip().startswith('-') and 'QUERY PLAN' not in l and not all(c == '-' for c in l.strip())]
-    json_str = '\n'.join(json_lines)
-    depth = 0; end_idx = 0
-    for i, ch in enumerate(json_str):
-        if ch in '[{': depth += 1
-        elif ch in '}]':
-            depth -= 1
-            if depth == 0: end_idx = i + 1; break
-    json_str = json_str[:end_idx]
-    data = json.loads(json_str)
+    data = json.load(sys.stdin)
     scans = []
     find_seq_scans(data, scans)
     print(','.join(sorted(set(scans))) if scans else 'none')
@@ -61,7 +69,7 @@ except Exception:
 # Returns 0 if found, 1 otherwise.
 # Usage: echo <plan_json> | has_seq_scan_on <table>...
 has_seq_scan_on() {
-	python3 -c "
+	plan_json | python3 -c "
 import sys, json
 def find_seq_scan_on(obj, target_tables):
     if isinstance(obj, dict):
@@ -78,41 +86,61 @@ def find_seq_scan_on(obj, target_tables):
                 return True
     return False
 try:
-    lines = sys.stdin.read().strip().split('\n')
-    json_lines = [l.rstrip(' +') for l in lines if l.strip() and not l.strip().startswith('-') and 'QUERY PLAN' not in l and not all(c == '-' for c in l.strip())]
-    json_str = '\n'.join(json_lines)
-    depth = 0; end_idx = 0
-    for i, ch in enumerate(json_str):
-        if ch in '[{': depth += 1
-        elif ch in '}]':
-            depth -= 1
-            if depth == 0: end_idx = i + 1; break
-    json_str = json_str[:end_idx]
-    data = json.loads(json_str)
+    data = json.load(sys.stdin)
     target_tables = set(sys.argv[1:])
-    if find_seq_scan_on(data, target_tables):
-        sys.exit(0)
-    else:
-        sys.exit(1)
+    sys.exit(0 if find_seq_scan_on(data, target_tables) else 1)
 except Exception:
     sys.exit(1)
 " "$@" 2>/dev/null
 }
+# Print the required "Node Type"s the plan does NOT contain, space separated.
+# Input: plan JSON from EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) on stdin.
+# Usage: echo <plan_json> | missing_node_types "<type>|<type>..."
+# The types come in one argument, separated by '|': a node type holds spaces
+# ("Bitmap Index Scan"), and a word-split argument list would break it apart.
+# A plan that cannot be parsed reports every required type as missing: a
+# measurement that cannot be read must not pass.
+missing_node_types() {
+	plan_json | python3 -c "
+import sys, json
+def walk(obj, found):
+    if isinstance(obj, dict):
+        nt = obj.get('Node Type')
+        if nt: found.add(nt)
+        for v in obj.values(): walk(v, found)
+    elif isinstance(obj, list):
+        for item in obj: walk(item, found)
+want = set(sys.argv[1].split('|')) if len(sys.argv) > 1 and sys.argv[1] else set()
+try:
+    data = json.load(sys.stdin)
+    found = set()
+    walk(data, found)
+    print(' '.join(sorted(want - found)))
+except Exception:
+    print(' '.join(sorted(want)))
+" "$@" 2>/dev/null
+}
 # Run a single query RUNS times, collect times and seq-scan info.
-# Inputs: query_file, runs, budget_ms, seq_scan_tables (space-separated)
-# Outputs: writes times to times_file, seq_scans to seq_scans_file, budgeted scans to budgeted_flag
+# Inputs: query_file, runs, budget_ms, seq_scan_tables (space-separated),
+#         require_nodes (space-separated), times_file, seq_scans_file,
+#         budgeted_flag, missing_nodes_file
+# Outputs: writes times to times_file, seq_scans to seq_scans_file, budgeted
+#          scans to budgeted_flag, missing plan node types to missing_nodes_file
 measure_query() {
 	query_file="$1"
 	runs="$2"
 	budget_ms="$3"
 	seq_scan_tables="$4"
-	times_file="$5"
-	seq_scans_file="$6"
-	budgeted_flag="$7"
+	require_nodes="$5"
+	times_file="$6"
+	seq_scans_file="$7"
+	budgeted_flag="$8"
+	missing_nodes_file="$9"
 	# Clear output files
 	: >"${times_file}"
 	: >"${seq_scans_file}"
 	: >"${budgeted_flag}"
+	: >"${missing_nodes_file}"
 	# Ensure plans directory exists
 	mkdir -p "${WORK}/plans"
 	for _ in $(seq 1 "${runs}"); do
@@ -140,10 +168,18 @@ HEREDOC
 				echo "budgeted" >>"${budgeted_flag}"
 			fi
 		fi
+		# The plan must contain each required node type (a GIN bitmap, say)
+		if [ -n "${require_nodes}" ]; then
+			missing="$(echo "${plan_json}" | missing_node_types "${require_nodes}")"
+			if [ -n "${missing}" ]; then
+				echo "${missing}" >>"${missing_nodes_file}"
+			fi
+		fi
 	done
 }
 # Determine pass/fail and print result line.
-# Inputs: id, p50, p95, seq_scans_file, budget_ms, budgeted_scan_flag
+# Inputs: id, p50, p95, seq_scans_file, budget_ms, budgeted_scan_flag,
+#         missing_nodes_file
 # Returns: 0 for pass, 1 for fail
 evaluate_query() {
 	id="$1"
@@ -152,6 +188,7 @@ evaluate_query() {
 	seq_scans_file="$4"
 	budget_ms="$5"
 	budgeted_scan_flag="$6"
+	missing_nodes_file="$7"
 	# Aggregate all unique seq scans across runs
 	all_scans="$(sort -u "${seq_scans_file}" | grep -v '^none$' | tr '\n' ',' | sed 's/,$//')"
 	[ -z "${all_scans}" ] && all_scans="none"
@@ -160,18 +197,25 @@ evaluate_query() {
 	if [ -s "${budgeted_scan_flag}" ]; then
 		budgeted_scan="yes"
 	fi
-	
+	# The required plan node types the plan did not contain
+	missing_nodes="none"
+	plan_detail=""
+	if [ -s "${missing_nodes_file}" ]; then
+		missing_nodes="$(sort -u "${missing_nodes_file}" | tr '\n' ',' | sed 's/,$//')"
+		plan_detail=" plan=missing ${missing_nodes}"
+	fi
 	# Self-check: p95 must not be < p50
 	if awk -v p50="${p50}" -v p95="${p95}" 'BEGIN { exit (p95 < p50) ? 0 : 1 }'; then
 		note "SELF-CHECK FAILED: ${id} p95=${p95} < p50=${p50}"
 		return 1
 	fi
-	# Pass if p95 <= budget AND no budgeted seq scan
-	if awk -v p95="${p95}" -v budget="${budget_ms}" 'BEGIN { exit (p95 <= budget) ? 0 : 1 }' && [ "${budgeted_scan}" = "no" ]; then
-		pass_query "${id}" "${p50}" "${p95}" "${all_scans}" "${budget_ms}"
+	# Pass if p95 <= budget AND no budgeted seq scan AND the plan holds every
+	# required node type
+	if awk -v p95="${p95}" -v budget="${budget_ms}" 'BEGIN { exit (p95 <= budget) ? 0 : 1 }' && [ "${budgeted_scan}" = "no" ] && [ "${missing_nodes}" = "none" ]; then
+		pass_query "${id}" "${p50}" "${p95}" "${all_scans}" "${budget_ms}" "${plan_detail}"
 		return 0
 	else
-		fail_query "${id}" "${p50}" "${p95}" "${all_scans}" "${budget_ms}"
+		fail_query "${id}" "${p50}" "${p95}" "${all_scans}" "${budget_ms}" "${plan_detail}"
 		return 1
 	fi
 }

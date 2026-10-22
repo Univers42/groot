@@ -52,8 +52,11 @@
 #   p1_role_column_acl the role's exact column reach on the four new tables,
 #   p1_role_writes_profile the role writes its own profile and one row only,
 #   p1_settings_merge two merges land and a null deletes a key, p1_hold the
-#   held name is refused to B and reclaimed by A, p1_never_raises a colliding
-#   username and a missing auth.users row do not fail a registration,
+#   held name is refused to B and reclaimed by A, p1_sync_changed_only the
+#   legacy sync copies only the identity fields that changed, p1_noop_no_bump a
+#   write that changes nothing leaves the profile's version alone,
+#   p1_never_raises a colliding username and a missing auth.users row do not
+#   fail a registration,
 #   p1_isolation_own the role sees its own row in each of the four tables (4)
 #   and p1_isolation_forged it sees and changes nothing of B's ·
 #   standalone the account foundation file applied alone leaves no realtime
@@ -471,6 +474,8 @@ run_checks() {
 	check_count "$1" p1_role_writes_profile p1_role_writes_profile
 	check_count "$1" p1_settings_merge p1_settings_merge
 	check_count "$1" p1_hold p1_hold
+	check_count "$1" p1_sync_changed_only p1_sync_changed_only
+	check_count "$1" p1_noop_no_bump p1_noop_no_bump
 	check_count "$1" p1_never_raises p1_never_raises
 	check_eq "$1" p1_isolation_own p1_isolation_own 4
 	check_count "$1" p1_isolation_forged p1_isolation_forged
