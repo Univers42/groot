@@ -90,6 +90,13 @@ services:
       OSIONOS_IDE_TOKEN_SECRET: ""
       OSIONOS_IDE_ACCESS: ""
 
+  # Image generation stays off in public until the prompt gate and the output
+  # gate exist (devil C70/C72/C73): environment: beats .env.local, so a stray
+  # OSIONOS_AI_IMAGES=on there cannot turn it on. scripts/verify/ai-images-public-off.sh.
+  osionos-ai:
+    environment:
+      OSIONOS_AI_IMAGES: ""
+
   # Static previews for the apps node (second Funnel node). Prod target = nginx serving dist/, built
   # with every bridge/BaaS URL empty so the apps make no request outside their own origin. They
   # sit on a network shared with local-https-proxy alone: no mini-baas, no grobase-link, no

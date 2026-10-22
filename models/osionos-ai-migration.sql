@@ -71,6 +71,31 @@ create table if not exists public.ai_runs (
 -- run's, so the run may be terminal and the question still open.
 alter table public.ai_runs add column if not exists finish_reason text;
 
+-- What the run makes: a chat turn ('text') or a generated image ('image').
+-- An image run has no conversation: the cover picker and the editor's /image
+-- start one without a chat, and a chat's one-running-run index must not make
+-- a text run and an image run wait for each other (NULL never collides in a
+-- unique index). A text run still needs its conversation.
+alter table public.ai_runs add column if not exists kind text not null default 'text';
+alter table public.ai_runs alter column conversation_id drop not null;
+do $$
+begin
+	if not exists (
+		select 1 from pg_constraint
+		where conname = 'ai_runs_kind_check' and conrelid = 'public.ai_runs'::regclass
+	) then
+		alter table public.ai_runs add constraint ai_runs_kind_check check (kind in ('text', 'image'));
+	end if;
+	if not exists (
+		select 1 from pg_constraint
+		where conname = 'ai_runs_text_has_conversation' and conrelid = 'public.ai_runs'::regclass
+	) then
+		alter table public.ai_runs
+			add constraint ai_runs_text_has_conversation check (kind <> 'text' or conversation_id is not null);
+	end if;
+end
+$$;
+
 create index if not exists ai_runs_owner_created_idx
 	on public.ai_runs (owner_id, created_at desc);
 -- Stale-run sweep: only rows still 'running' are candidates for the reaper.

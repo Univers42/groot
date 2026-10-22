@@ -386,6 +386,15 @@ services:
       # dictate in a day.
       OSIONOS_AI_STT_TIMEOUT_MS: ${OSIONOS_AI_STT_TIMEOUT_MS:-20000}
       OSIONOS_AI_STT_SECONDS_PER_DAY: ${OSIONOS_AI_STT_SECONDS_PER_DAY:-600}
+      # Image generation (M1): OFF unless OSIONOS_AI_IMAGES=on, and the engine
+      # is the `osionos-ai-sd` service of the `ai-gpu-vulkan` profile. ai-dev
+      # only: the public overlay forces it empty until the prompt and output
+      # gates exist (devil C70/C72/C73; scripts/verify/ai-images-public-off.sh).
+      OSIONOS_AI_IMAGES: ${OSIONOS_AI_IMAGES:-}
+      OSIONOS_AI_IMAGE_URL: http://osionos-ai-sd:1234/v1
+      # The price of one image on the ledger (C74): the local engine costs no
+      # money, but an image that books 0 never reaches the cap of a day.
+      OSIONOS_AI_IMAGE_MICROUSD: ${OSIONOS_AI_IMAGE_MICROUSD:-2000}
     expose:
       - "4300"
     networks:
@@ -394,6 +403,8 @@ services:
       # The speech-to-text server is on this network, and on no other: it is
       # unreachable from the bridge, from the web container and from the host.
       - osionos-ai-stt-net
+      # The image engine, the same way.
+      - osionos-ai-sd-net
     depends_on:
       osionos-ai-db:
         condition: service_healthy
@@ -646,6 +657,74 @@ services:
     # Caveat: provisional — the A1 spike sets the final values.
     mem_limit: 2g
     cpus: 4
+
+  # osionos-ai-sd — the image engine of the assistant (M1): stable-diffusion.cpp's
+  # sd-server on the GPU through Vulkan, built from a pinned release
+  # (infrastructure/docker/osionos/sd.Dockerfile). Its own profile: a host
+  # without a GPU runs the `ai` profile and leaves OSIONOS_AI_IMAGES off.
+  #
+  # Measured on the RX 6600 (osionos spikes/a1/results/imagegen/RESULTS.md):
+  # 512×512 in 8 steps, ~23 s warm with this release, ~7.3 GiB of VRAM at the
+  # peak including the desktop's; the chat model runs on the CPU, so the GPU
+  # has this one tenant. The text encoder is the chat model's own cached
+  # Qwen3-4B file (`osionos_ai_models_llm`, filled by osionos-ai-llm's first
+  # start); the diffusion model and the VAE are pre-fetched once into
+  # `osionos_sd_models`, the only step with egress:
+  #
+  #   docker run --rm -v osionos_sd_models:/models curlimages/curl:8.11.1 sh -c '\
+  #     B=https://huggingface.co/wbruna/Z-Image-Turbo-sdcpp-GGUF/resolve/ea7669b52d27042b4909e3413f58581c0d52d522; \
+  #     curl -fL -o /models/z_image_turbo-Q4_0.gguf $B/z_image_turbo-Q4_0.gguf && \
+  #     curl -fL -o /models/ae-f16.gguf $B/ae-f16.gguf'
+  #   sha256  z_image_turbo-Q4_0.gguf 545c2a06510949e5c62a7154a44729f92dbf1c2006836508aedd72c537c35ba6
+  #           ae-f16.gguf             1bed7b05318709e46a8cb9accc211168fc7f0b61ab594661860bbfe4d785cc46
+  #
+  # The release writes the prompt into a PNG text chunk (it has no
+  # --disable-image-metadata yet): the service strips every text chunk before
+  # it stores an image.
+  osionos-ai-sd:
+    image: track-binocle/osionos-ai-sd:local
+    profiles: ["ai-gpu-vulkan"]
+    build:
+      context: ./infrastructure/docker/osionos
+      dockerfile: sd.Dockerfile
+    command:
+      [
+        "--listen-ip", "0.0.0.0",
+        "--listen-port", "1234",
+        "--diffusion-model", "/models/z_image_turbo-Q4_0.gguf",
+        "--llm", "/llm/models--unsloth--Qwen3-4B-Instruct-2507-GGUF/blobs/3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597",
+        "--vae", "/models/ae-f16.gguf",
+        "--cfg-scale", "1.0",
+        "--steps", "8",
+        "-W", "512",
+        "-H", "512",
+        # The text encoder on the CPU is faster on every axis here: the VAE
+        # then fits in VRAM (A1: 22.5–23.0 s cold vs 28–31 s auto).
+        "--backend", "te=cpu",
+      ]
+    devices:
+      - /dev/dri:/dev/dri
+    # The render and video groups of the HOST own /dev/dri: their numeric ids
+    # differ per machine (`stat -c %g /dev/dri/renderD128`).
+    group_add:
+      - "${OSIONOS_AI_SD_RENDER_GID:-993}"
+      - "${OSIONOS_AI_SD_VIDEO_GID:-44}"
+    volumes:
+      - osionos_sd_models:/models:ro
+      - osionos_ai_models_llm:/llm:ro
+    expose:
+      - "1234"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/1234"]
+      interval: 30s
+      start_interval: 2s
+      timeout: 3s
+      start_period: 30s
+      retries: 6
+    networks:
+      - osionos-ai-sd-net
+    restart: unless-stopped
+    mem_limit: 8g
 
   # osionos-ai-indexer — the index worker: the SAME image as the service (the
   # one the `osionos-ai` service above builds), but its entrypoint is the
@@ -1424,6 +1503,10 @@ volumes:
   # pre-fetched by the one-shot command of the osionos-ai-stt block.
   osionos_ai_models_stt:
     name: osionos_ai_models_stt
+  # The image engine's diffusion model and VAE, pre-fetched by the one-shot
+  # command of the osionos-ai-sd block.
+  osionos_sd_models:
+    name: osionos_sd_models
 
 networks:
   # The grobase backend stack's network (docker project `mini-baas`), declared
@@ -1439,6 +1522,11 @@ networks:
   # from the bridge, from the web container and from the host, and it cannot
   # reach the internet either (the model is pre-fetched into its volume).
   osionos-ai-stt-net:
+    internal: true
+  # The image engine: `internal: true` = NO egress. ONLY osionos-ai-sd and
+  # osionos-ai join it — the engine also serves /v1/images/edits, which the
+  # service never calls (C72) and nothing else can reach.
+  osionos-ai-sd-net:
     internal: true
   # Internal-only network for the IDE code runner: `internal: true` = NO egress
   # (the Docker daemon enforces it without needing unprivileged user namespaces),
