@@ -110,3 +110,39 @@ SELECT 'cutoff_realtime_triggers',
 SELECT 'users_pii', count(*), coalesce(string_agg(r || '.' || c, ' ' ORDER BY r, c), '')
   FROM (VALUES ('anon','email'), ('anon','password_hash'), ('authenticated','password_hash')) AS x(r, c)
  WHERE has_column_privilege(r, 'public.users', c, 'SELECT');
+
+-- colleague_edges_trigger: the trigger that writes the colleague edges when a
+-- member joins a workspace (models/osionos-social-scale-migration.sql). The row
+-- names the TABLE and the trigger, not merely "a trigger exists": the
+-- migration's own backfill guard tests exactly this pair (tgrelid and tgname),
+-- so a trigger under another name would leave the guard blind.
+SELECT 'colleague_edges_trigger',
+       CASE WHEN to_regclass('public.osionos_workspace_members') IS NULL THEN 1
+            WHEN NOT EXISTS (SELECT 1 FROM pg_trigger
+                              WHERE tgrelid = 'public.osionos_workspace_members'::regclass
+                                AND tgname = 'osionos_workspace_members_colleague_edges_trg'
+                                AND NOT tgisinternal) THEN 1
+            ELSE 0 END,
+       coalesce((SELECT 'pg_trigger ' || tgname FROM pg_trigger
+                  WHERE tgrelid = 'public.osionos_workspace_members'::regclass
+                    AND tgname = 'osionos_workspace_members_colleague_edges_trg'),
+                'the colleague-edges trigger is missing');
+
+-- feed_counts_exec_grants: public.osionos_feed_page_counts belongs to
+-- service_role alone. The bridge calls it with the service key; anon,
+-- authenticated and the account role must not execute it. A function that does
+-- not exist is a violation too — the row must not pass on a missing object.
+SELECT 'feed_counts_exec_grants', count(*), coalesce(string_agg(who, ' ' ORDER BY who), '')
+  FROM (
+    SELECT 'function_missing' AS who
+     WHERE to_regprocedure('public.osionos_feed_page_counts(uuid, uuid)') IS NULL
+    UNION ALL
+    SELECT 'service_role_may_not_execute'
+     WHERE to_regprocedure('public.osionos_feed_page_counts(uuid, uuid)') IS NOT NULL
+       AND NOT has_function_privilege('service_role', 'public.osionos_feed_page_counts(uuid, uuid)', 'EXECUTE')
+    UNION ALL
+    SELECT r.rolname || '_may_execute'
+      FROM unnest(ARRAY['anon','authenticated','osionos_account_user']) AS r(rolname)
+     WHERE to_regprocedure('public.osionos_feed_page_counts(uuid, uuid)') IS NOT NULL
+       AND has_function_privilege(r.rolname, 'public.osionos_feed_page_counts(uuid, uuid)', 'EXECUTE')
+  ) AS violations;

@@ -78,5 +78,21 @@
       "osionos_profiles"
     ],
     "why": "Target: 50 Index Scans on the osionos_profiles primary key (user_id), one per id, joined to user_profiles and osionos_bridge_identities by their user_id indexes. The directory is a view over osionos_profiles now, so the lookup must not scan it."
+  },
+  "colleague_join_200": {
+    "p95_ms": 50,
+    "no_seq_scan": [
+      "osionos_workspace_members"
+    ],
+    "why": "Target: one member joins a workspace that holds 199 members, and the colleague-edges trigger writes 199 edges in the same transaction — an index scan on the members table, then 199 inserts on osionos_connections. The workspace is dedicated to this measurement: the query creates it and holds 170 members, so the harness's 30 runs (30 joins, one fresh member each) end at exactly 200 members and every run stays in the <= 200 branch. Caveat: EXPLAIN ANALYZE executes the INSERT, so the 30 runs are 30 real joins, and a 31st run would push the workspace past 200 and measure the skip branch instead — the threshold is the spec's, not a budget."
+  },
+  "feed_page_counts": {
+    "p95_ms": 60,
+    "no_seq_scan": [
+      "osionos_feed_likes",
+      "osionos_feed_comments",
+      "osionos_feed_shares"
+    ],
+    "why": "Target: three bitmap index scans on page_id (osionos_feed_likes_page_idx, osionos_feed_comments_page_idx, osionos_feed_shares_page_idx) and one index scan for the viewer's own like, in ONE call — the three reads the bridge made per post card (bridge-feed.mjs:145-153 likes, :174-180 comments, :307-309 shares) become one round trip. A feed table must not be read sequentially: an empty table is cheaper to read sequentially, so the query that seeds them (colleague_join_200) also ANALYZEs them before this one runs."
   }
 }
