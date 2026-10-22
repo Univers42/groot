@@ -593,6 +593,7 @@ AS $$
 DECLARE
     n BIGINT;
     m BIGINT;
+    f BIGINT;
 BEGIN
     -- The capture is off for this transaction: an erasure writes no event.
     PERFORM set_config('osionos.ai_events', 'off', true);
@@ -605,9 +606,19 @@ BEGIN
     IF to_regprocedure('public.ai_moderation_erase_user(uuid)') IS NOT NULL THEN
         EXECUTE 'SELECT public.ai_moderation_erase_user($1)' INTO m USING p_user;
     END IF;
+    -- The recommender's FACTORS are erased too, when that file is applied
+    -- (models/osionos-rec-factors-migration.sql): the user's factor vector in
+    -- every model, and the rows where the user is a suggested person. Same
+    -- DYNAMIC and GUARDED call: this file stays valid on a database that
+    -- never had the factors migration, and the two files work in either
+    -- order - the factors file references nothing of this one.
+    IF to_regprocedure('public.ai_rec_erase_user(uuid)') IS NOT NULL THEN
+        EXECUTE 'SELECT public.ai_rec_erase_user($1)' INTO f USING p_user;
+    END IF;
     -- The count is the number of ai_events rows erased: the two erasures are
     -- two tables with two counts, and this function answers for its own. The
-    -- moderation count (m) is deliberately DISCARDED.
+    -- moderation count (m) and the factor count (f) are deliberately
+    -- DISCARDED.
     RETURN n;
 END $$;
 
@@ -620,9 +631,12 @@ COMMENT ON FUNCTION public.ai_erase_user(UUID) IS
     'makes the opt-out survive the erasure. The moderation audit is erased '
     'too, when models/osionos-ugc-moderation-migration.sql is applied: the '
     'call is dynamic and guarded, so this file stays valid without it. '
-    'FACTORS, PROFILE VECTORS AND SLATES '
-    'DO NOT EXIST YET: a later slice MUST add their tables here, or the erasure '
-    'leaves the derived data behind.';
+    'THE FACTORS ARE COVERED NOW: the recommender''s factor vectors are '
+    'erased through ai_rec_erase_user() when '
+    'models/osionos-rec-factors-migration.sql is applied (the call is dynamic '
+    'and guarded, so this file stays valid without it). PROFILE VECTORS AND '
+    'SLATES DO NOT EXIST YET: a later slice MUST add their tables here, or '
+    'the erasure leaves the derived data behind.';
 
 CREATE OR REPLACE FUNCTION public.ai_export_user(p_user UUID)
 RETURNS SETOF public.ai_events
@@ -639,8 +653,10 @@ $$;
 
 COMMENT ON FUNCTION public.ai_export_user(UUID) IS
     'Every ai_events row of the user, oldest first, for a data export. '
-    'FACTORS, PROFILE VECTORS AND SLATES DO NOT EXIST YET: a later slice MUST '
-    'add them here, or the export is missing the derived data.';
+    'THE FACTORS EXIST NOW (models/osionos-rec-factors-migration.sql) but they '
+    'are NOT in this export: a later slice MUST add them here, or the export '
+    'is missing the derived data. PROFILE VECTORS AND SLATES DO NOT EXIST '
+    'YET: a later slice MUST add them here too.';
 
 -- The functions are service_role only: PUBLIC''s default EXECUTE would let any
 -- PostgREST role call the erasure.
