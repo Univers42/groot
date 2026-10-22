@@ -21,23 +21,22 @@
 #   require_plan_nodes  OPTIONAL. The EXPLAIN (FORMAT JSON) plan must hold a
 #                      node of each listed "Node Type" (e.g. "Bitmap Index
 #                      Scan"). A plan without it fails the query, and the FAIL
-#                      line names the node type that was missing. It is what
-#                      says which PLAN a query has to come back with, where
-#                      no_seq_scan only says what it must not scan: a btree
-#                      walk that removes 4001 rows passes a no-seq-scan budget
-#                      in O(N) and never touches a GIN index.
+#                      line names the node type that was missing: it says
+#                      which PLAN a query has to come back with, where
+#                      no_seq_scan only says what it must not scan.
 #   why                what the plan is supposed to look like, and why
 #
-# ISOLATION: throwaway container (--rm --network none), never touches live.
+# A QUERY THAT ERRORS FAILS. A run whose EXPLAIN fails has no measurement, and
+# percentiles() prints 0.00 for an empty file — a p95 of 0.00 passes every
+# budget. The FAIL line carries the first line of the error.
 #
+# ISOLATION: throwaway container (--rm --network none), never touches live.
 # CAVEATS: 1. Idle container under-reports prod latency (no concurrency/warm cache).
 # 2. p95 over 30 runs is coarse.
-#
 # Usage: [GROBASE_PG_IMAGE=…] [MODELS_DIR=…] [RUNS=30] sh scripts/verify/account-load.sh [--baseline]
-# Exit: 0 all within budget · 1 breach/failure · 2 docker missing.
-# --baseline: reports, exits 0 unless harness failed.
-#
-# Ponytail: container bring-up copied from models-grants.sh until shared helper lands.
+# Exit: 0 all within budget · 1 breach/failure · 2 docker missing. --baseline
+# reports, exits 0 unless harness failed. Ponytail: container bring-up copied
+# from models-grants.sh until shared helper lands.
 #
 set -eu
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -63,9 +62,9 @@ failed=0
 . "${FIX}/self-test.sh"
 note() { printf '[account-load] %s\n' "$*" >&2; }
 # shellcheck disable=SC2317
-pass_query() { passed=$((passed + 1)) && printf 'PASS %s p50=%s p95=%s seq_scan=%s budget=%s%s\n' "$1" "$2" "$3" "$4" "$5" "$6"; }
+pass_query() { passed=$((passed + 1)) && printf 'PASS %s p50=%s p95=%s seq_scan=%s budget=%s%s%s\n' "$1" "$2" "$3" "$4" "$5" "$6" "$7"; }
 # shellcheck disable=SC2317
-fail_query() { failed=$((failed + 1)) && printf 'FAIL %s p50=%s p95=%s seq_scan=%s budget=%s%s\n' "$1" "$2" "$3" "$4" "$5" "$6"; }
+fail_query() { failed=$((failed + 1)) && printf 'FAIL %s p50=%s p95=%s seq_scan=%s budget=%s%s%s\n' "$1" "$2" "$3" "$4" "$5" "$6" "$7"; }
 # shellcheck disable=SC2317
 fail_step() { failed=$((failed + 1)) && printf 'FAIL %s %s %s\n' "$1" "$2" "$3"; }
 die() {
@@ -212,6 +211,7 @@ SQL
 	# Run self-test for has_seq_scan_on
 	self_test_has_seq_scan_on || die "self-test" "has_seq_scan_on" "self-test failed"
 	self_test_missing_node_types || die "self-test" "missing_node_types" "self-test failed"
+	self_test_error_query_fails || die "self-test" "error_query_fails" "self-test failed"
 	# Split queries.sql into individual query files
 	mkdir -p "${WORK}/queries"
 	awk -v work="${WORK}/queries" '
@@ -260,11 +260,12 @@ print('|'.join(query.get('require_plan_nodes', [])))
 		seq_scans_file="${WORK}/seq_scans-${id}.txt"
 		budgeted_scan_flag="${WORK}/budgeted_scan-${id}.flag"
 		missing_nodes_file="${WORK}/missing_nodes-${id}.txt"
+		errors_file="${WORK}/errors-${id}.txt"
 
 		# Run measurement
 		measure_query "${query_file}" "${RUNS}" "${budget_ms}" "${seq_scan_tables}" \
 			"${require_nodes}" "${times_file}" "${seq_scans_file}" "${budgeted_scan_flag}" \
-			"${missing_nodes_file}"
+			"${missing_nodes_file}" "${errors_file}"
 
 		# Evaluate and print result
 		if [ -f "${times_file}" ]; then
@@ -273,9 +274,9 @@ print('|'.join(query.get('require_plan_nodes', [])))
 			p50=$1
 			p95=$2
 			evaluate_query "${id}" "${p50}" "${p95}" "${seq_scans_file}" "${budget_ms}" \
-				"${budgeted_scan_flag}" "${missing_nodes_file}" || true
+				"${budgeted_scan_flag}" "${missing_nodes_file}" "${times_file}" "${errors_file}" || true
 		else
-			fail_query "${id}" "0.00" "0.00" "none" "${budget_ms}" ""
+			fail_query "${id}" "0.00" "0.00" "none" "${budget_ms}" "" " error=no measurement"
 		fi
 	done
 	# Write JSON output

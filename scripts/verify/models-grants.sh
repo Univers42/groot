@@ -55,6 +55,9 @@
 #   held name is refused to B and reclaimed by A, p1_sync_changed_only the
 #   legacy sync copies only the identity fields that changed, p1_noop_no_bump a
 #   write that changes nothing leaves the profile's version alone,
+#   p1_deletion_grace the role cannot set the deletion date and the grace is
+#   a floor, p1_view_opt_out the directory view reports the profile's own
+#   opt-out and keeps the columns the bridge selects,
 #   p1_never_raises a colliding username and a missing auth.users row do not
 #   fail a registration,
 #   p1_isolation_own the role sees its own row in each of the four tables (4)
@@ -476,6 +479,8 @@ run_checks() {
 	check_count "$1" p1_hold p1_hold
 	check_count "$1" p1_sync_changed_only p1_sync_changed_only
 	check_count "$1" p1_noop_no_bump p1_noop_no_bump
+	check_count "$1" p1_deletion_grace p1_deletion_grace
+	check_count "$1" p1_view_opt_out p1_view_opt_out
 	check_count "$1" p1_never_raises p1_never_raises
 	check_eq "$1" p1_isolation_own p1_isolation_own 4
 	check_count "$1" p1_isolation_forged p1_isolation_forged
