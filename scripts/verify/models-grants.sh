@@ -28,7 +28,12 @@
 #   r no public table keeps a realtime_notify() trigger (it broadcasts rows past every grant),
 #   and r-cutoffs asserts it for auth_session_cutoffs by name ·
 #   rt grobase's CREATE TABLE hook that re-arms new tables exists and is disabled ·
-#   u anon cannot SELECT public.users.email or password_hash, authenticated cannot SELECT password_hash
+#   u anon cannot SELECT public.users.email or password_hash, authenticated cannot SELECT password_hash ·
+#   colleague_edges_trigger the P0-5a colleague-edges trigger exists on
+#   public.osionos_workspace_members under its own name (the migration's backfill
+#   guard tests that same pair) · feed_counts_exec_grants
+#   public.osionos_feed_page_counts is executable by service_role and by no
+#   other role
 #
 #   The account plane (models/osionos-account-foundation-migration.sql, ADR 0028),
 #   in scripts/verify/models-grants/account-checks.sql, piped after checks.sql into
@@ -467,6 +472,9 @@ run_checks() {
 	check_count "$1" r-cutoffs cutoff_realtime_triggers
 	check_count "$1" rt realtime_event_trigger
 	check_count "$1" u users_pii
+	# P0-5a: the colleague-edges trigger and the feed counts function.
+	check_count "$1" colleague_edges_trigger colleague_edges_trigger
+	check_count "$1" feed_counts_exec_grants feed_counts_exec_grants
 	check_count "$1" k1 account_role_reach
 	check_count "$1" k2 account_plane_rls
 	check_count "$1" k3 account_plane_expected

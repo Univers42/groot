@@ -101,6 +101,70 @@ WHERE user_id IN (
 );
 
 -- ============================================================
+-- colleague_join_200
+-- The join the colleague-edges trigger answers: one member joins a workspace
+-- that holds 199 members, and the trigger writes 199 colleague edges in the
+-- same transaction (the trigger's own cap is 200 members, so one join stays at
+-- 199 inserts — models/osionos-social-scale-migration.sql).
+-- The workspace is DEDICATED to this measurement: the CTEs below create it and
+-- hold 170 members, so the harness's 30 runs (30 joins, one member each) end at
+-- exactly 200 members and every run stays in the <= 200 branch. Each run
+-- inserts a member that is not in the workspace yet (a fresh uuid), so the join
+-- is never a duplicate and the trigger always has peers to pair.
+-- The statements after the measured one seed the feed tables the next query
+-- measures and ANALYZE them: the 10K seed leaves osionos_feed_likes and
+-- osionos_feed_comments empty, and an empty table is cheaper to read
+-- sequentially, so the no_seq_scan budget of feed_page_counts would measure
+-- nothing. The files are measured in name order, so this runs before
+-- feed_page_counts, and the ANALYZE gives the planner the row counts.
+-- QUERY: colleague_join_200
+WITH workspace AS (
+    INSERT INTO public.osionos_workspaces (id, owner_id, name, slug)
+    VALUES ('0a5a0000-0000-4000-8000-000000000001',
+            '0a5a0000-0000-4000-8000-0000000000ff',
+            'P0-5a colleague scale',
+            'p0-5a-colleague-scale')
+    ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
+    RETURNING id
+), seeded AS (
+    INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role, permissions)
+    SELECT w.id, gen_random_uuid(), 'viewer', ARRAY['read']
+      FROM workspace w, generate_series(1, 170) g
+     WHERE (SELECT count(*) FROM public.osionos_workspace_members m WHERE m.workspace_id = w.id) < 170
+    RETURNING 1
+)
+INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role, permissions)
+SELECT w.id, gen_random_uuid(), 'viewer', ARRAY['read']
+  FROM workspace w, (SELECT count(*) FROM seeded) s;
+-- The feed tables the next query measures. The rows are spread over 5 000
+-- pages (page-1 among them) so the filter on one page stays selective: a
+-- table whose every row matches one page is cheaper to read sequentially, and
+-- the no_seq_scan budget would measure nothing.
+INSERT INTO public.osionos_feed_likes (page_id, user_id)
+SELECT md5(('page-' || p::text))::uuid, gen_random_uuid()
+  FROM generate_series(1, 5000) p
+ WHERE NOT EXISTS (SELECT 1 FROM public.osionos_feed_likes WHERE page_id = '30bc93c6-e5fb-81fc-8947-80d053feff40');
+INSERT INTO public.osionos_feed_comments (page_id, author_id, content)
+SELECT md5(('page-' || p::text))::uuid, gen_random_uuid(), 'seed comment'
+  FROM generate_series(1, 5000) p
+ WHERE NOT EXISTS (SELECT 1 FROM public.osionos_feed_comments WHERE page_id = '30bc93c6-e5fb-81fc-8947-80d053feff40');
+ANALYZE public.osionos_feed_likes, public.osionos_feed_comments;
+
+-- ============================================================
+-- feed_page_counts
+-- bridge-feed.mjs:145-153 (likes), :174-180 (the comment count) and :307-309
+-- (shares) read three tables per post card and counted the rows in JS. The
+-- one-call replacement is public.osionos_feed_page_counts(page, viewer): three
+-- counts and one "did the viewer like it" filter, each served by an index on
+-- page_id.
+-- QUERY: feed_page_counts
+SELECT likes, liked_by_viewer, comments, shares
+FROM public.osionos_feed_page_counts(
+    '30bc93c6-e5fb-81fc-8947-80d053feff40',
+    'd6d77053-92bc-7af6-3332-8bea8c4c6904'
+);
+
+-- ============================================================
 -- identity_by_email_hash
 -- bridge-api.mjs:1520 — email_hash lookup with select=is_admin&limit=1:
 --   baasRest(config, fetchImpl, `osionos_bridge_identities?email_hash=eq.${hash}&select=is_admin&limit=1`)
