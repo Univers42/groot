@@ -227,6 +227,7 @@ services:
       - ./infrastructure/tls/public.d/http-limits.conf:/etc/nginx/track-binocle.d/http-limits.conf:ro
       - ./infrastructure/tls/public.d/ai-public.conf:/etc/nginx/track-binocle.d/ai-public.conf:ro
       - ./infrastructure/tls/public.d/apps.conf.template:/etc/nginx/templates/http-apps.conf.template:ro
+      - ./infrastructure/tls/public.d/http-locked-ai-cors.conf.template:/etc/nginx/templates/http-locked-ai-cors.conf.template:ro
 
 networks:
   apps-static-net:
