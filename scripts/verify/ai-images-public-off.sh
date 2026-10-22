@@ -17,6 +17,7 @@ imagesFlag() {
 	AUTH_LINK_SIGNING_KEY=verify-only \
 	AUTH_TRUSTED_PROXY_HOPS=1 \
 	OSIONOS_ADMIN_EMAILS=none \
+	OSIONOS_AI_PUBLIC_DATABASE_URL=postgres://verify@mini-baas-postgres:5432/db \
 	docker compose "$@" --env-file /dev/null --profile ai config --format json |
 		python3 -c 'import json, sys; print(json.load(sys.stdin)["services"]["osionos-ai"]["environment"].get("OSIONOS_AI_IMAGES", "<unset>"))'
 }
