@@ -146,12 +146,24 @@ ORDER BY created_at DESC;
 SELECT wm.user_id, wm.workspace_id,
        w.id, w.owner_id, w.name, w.slug, w.settings, w.created_at, w.updated_at,
        m.user_id AS member_user_id
-FROM public.osionos_workspace_members wm
-JOIN public.osionos_workspaces w ON w.id = wm.workspace_id
-LEFT JOIN public.osionos_workspace_members m ON m.workspace_id = w.id AND m.user_id <> wm.user_id
-WHERE wm.user_id = 'd6d77053-92bc-7af6-3332-8bea8c4c6904'
-ORDER BY w.updated_at DESC
-LIMIT 200;
+FROM (
+    SELECT user_id, workspace_id
+    FROM public.osionos_workspace_members
+    WHERE user_id = 'd6d77053-92bc-7af6-3332-8bea8c4c6904'
+    LIMIT 200
+) wm
+LEFT JOIN LATERAL (
+    SELECT id, owner_id, name, slug, settings, created_at, updated_at
+    FROM public.osionos_workspaces w
+    WHERE w.id = wm.workspace_id
+) w ON true
+LEFT JOIN LATERAL (
+    SELECT m.user_id
+    FROM public.osionos_workspace_members m
+    WHERE m.workspace_id = wm.workspace_id
+      AND m.user_id <> 'd6d77053-92bc-7af6-3332-8bea8c4c6904'
+    LIMIT 500
+) m ON true;
 
 -- ============================================================
 -- pages_of_workspace (fetchPageRowWithMember shape)
