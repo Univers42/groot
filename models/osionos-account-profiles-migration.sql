@@ -258,7 +258,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS osionos_profiles_username_lower_uidx
 CREATE INDEX IF NOT EXISTS osionos_profiles_display_name_user_idx
   ON public.osionos_profiles (display_name, user_id);
 CREATE INDEX IF NOT EXISTS osionos_profiles_search_doc_idx
-  ON public.osionos_profiles USING gin (search_doc);
+  ON public.osionos_profiles USING gin (search_doc) WITH (fastupdate = off);
 -- The GIN indexes are built with the fast update technique OFF. A GIN index
 -- that keeps a pending list holds its newest rows outside the index proper,
 -- and the planner's cost model and the index's statistics then describe an
@@ -275,15 +275,31 @@ BEGIN
   IF v_schema IS NULL THEN
     RAISE EXCEPTION 'pg_trgm is required for the osionos profile search indexes';
   END IF;
-  EXECUTE format('CREATE INDEX IF NOT EXISTS osionos_profiles_display_name_trgm_idx ON public.osionos_profiles USING gin (display_name %I.gin_trgm_ops)', v_schema);
-  EXECUTE format('CREATE INDEX IF NOT EXISTS osionos_profiles_username_trgm_idx ON public.osionos_profiles USING gin (username %I.gin_trgm_ops)', v_schema);
-  EXECUTE format('CREATE INDEX IF NOT EXISTS osionos_profiles_headline_trgm_idx ON public.osionos_profiles USING gin (headline %I.gin_trgm_ops)', v_schema);
+  EXECUTE format('CREATE INDEX IF NOT EXISTS osionos_profiles_display_name_trgm_idx ON public.osionos_profiles USING gin (display_name %I.gin_trgm_ops) WITH (fastupdate = off)', v_schema);
+  EXECUTE format('CREATE INDEX IF NOT EXISTS osionos_profiles_username_trgm_idx ON public.osionos_profiles USING gin (username %I.gin_trgm_ops) WITH (fastupdate = off)', v_schema);
+  EXECUTE format('CREATE INDEX IF NOT EXISTS osionos_profiles_headline_trgm_idx ON public.osionos_profiles USING gin (headline %I.gin_trgm_ops) WITH (fastupdate = off)', v_schema);
 END
 $$;
-ALTER INDEX public.osionos_profiles_search_doc_idx SET (fastupdate = off);
-ALTER INDEX public.osionos_profiles_display_name_trgm_idx SET (fastupdate = off);
-ALTER INDEX public.osionos_profiles_username_trgm_idx SET (fastupdate = off);
-ALTER INDEX public.osionos_profiles_headline_trgm_idx SET (fastupdate = off);
+-- The option above only applies to an index this file creates. An install that
+-- already has one (a database that ran the file before the option existed)
+-- still needs it, and only that install does: the ALTER takes a lock, and a
+-- boot that takes it every time blocks the writers it is meant to protect.
+DO $$
+DECLARE
+  v_idx text;
+BEGIN
+  FOREACH v_idx IN ARRAY ARRAY['osionos_profiles_search_doc_idx',
+                               'osionos_profiles_display_name_trgm_idx',
+                               'osionos_profiles_username_trgm_idx',
+                               'osionos_profiles_headline_trgm_idx'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_class c
+                WHERE c.relname = v_idx AND c.relnamespace = 'public'::regnamespace
+                  AND NOT (coalesce(c.reloptions, '{}'::text[]) @> ARRAY['fastupdate=off'])) THEN
+      EXECUTE format('ALTER INDEX public.%I SET (fastupdate = off)', v_idx);
+    END IF;
+  END LOOP;
+END
+$$;
 CREATE INDEX IF NOT EXISTS osionos_username_history_name_released_idx
   ON public.osionos_username_history (lower(username), released_at);
 
@@ -320,9 +336,20 @@ GRANT EXECUTE ON FUNCTION public.osionos_user_settings_merge(text, jsonb) TO osi
 -- 7. The triggers.
 -- Every UPDATE bumps the version: the bridge's If-Match is
 -- PATCH ...&version=eq.N, and zero rows updated is a 412.
+-- An UPDATE that changes nothing does not: the row is rewritten either way, and
+-- a version that moves on a no-op makes the next If-Match fail for nothing.
 CREATE OR REPLACE FUNCTION public.osionos_profiles_touch() RETURNS trigger
   LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
 BEGIN
+  -- The comparison is made before the bump, so NEW.version still holds
+  -- OLD.version unless a caller set it (a caller that sets a version has
+  -- changed the row, and the bump below then overwrites it with OLD + 1).
+  -- The generated column is left out of the comparison: a BEFORE trigger runs
+  -- before the generated value is computed, so the new row never holds it yet
+  -- and the two rows would never compare equal.
+  IF to_jsonb(NEW) - 'search_doc' IS NOT DISTINCT FROM to_jsonb(OLD) - 'search_doc' THEN
+    RETURN NEW;
+  END IF;
   NEW.version := OLD.version + 1;
   NEW.updated_at := now();
   RETURN NEW;
@@ -438,6 +465,13 @@ CREATE TRIGGER osionos_profiles_on_user_insert AFTER INSERT ON public.users
 -- profile's own columns.
 -- It never touches display_name (the identities row rewrites it at sign-in)
 -- and never raises: an invalid value keeps the old one, with a warning.
+--
+-- IT COPIES ONLY WHAT CHANGED. The identities row is written by the bridge on
+-- every sign-in and by the legacy path whenever one field moves; a copy of
+-- everything would overwrite a value the user typed through the new account
+-- route with an older value from the blob. So on an UPDATE only the fields
+-- whose source moved are copied; on an INSERT everything is, because there is
+-- nothing to compare against.
 CREATE OR REPLACE FUNCTION public.osionos_profile_from_identity() RETURNS trigger
   LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
 DECLARE
@@ -445,45 +479,77 @@ DECLARE
   v_bio text;
   v_location text;
   v_username text;
+  v_profile_changed boolean;
+  v_optout_changed boolean;
+  v_username_changed boolean;
 BEGIN
-  BEGIN
-    v_headline := nullif(btrim(coalesce(NEW.profile->>'headline', '')), '');
-    IF v_headline IS NOT NULL AND (char_length(v_headline) > 200 OR v_headline ~ '[[:cntrl:]]') THEN
-      RAISE WARNING 'osionos: headline for % is invalid — the old one is kept', NEW.user_id;
-      v_headline := NULL;
-    END IF;
-    v_bio := nullif(coalesce(NEW.profile->>'bio', ''), '');
-    IF v_bio IS NOT NULL AND (char_length(v_bio) > 2000 OR v_bio ~ '[\x00-\x09\x0B-\x1F\x7F]') THEN
-      RAISE WARNING 'osionos: bio for % is invalid — the old one is kept', NEW.user_id;
-      v_bio := NULL;
-    END IF;
-    v_location := nullif(btrim(coalesce(NEW.profile->>'location', '')), '');
-    IF v_location IS NOT NULL AND (char_length(v_location) > 120 OR v_location ~ '[[:cntrl:]]') THEN
-      RAISE WARNING 'osionos: location for % is invalid — the old one is kept', NEW.user_id;
-      v_location := NULL;
-    END IF;
-    UPDATE public.osionos_profiles
-       SET headline = coalesce(v_headline, headline),
-           bio = coalesce(v_bio, bio),
-           location = coalesce(v_location, location),
-           directory_opt_out = coalesce(NEW.directory_opt_out, directory_opt_out)
-     WHERE user_id = NEW.user_id;
-  EXCEPTION WHEN others THEN
-    RAISE WARNING 'osionos: profile sync for % failed: %', NEW.user_id, SQLERRM;
-  END;
-  BEGIN
-    v_username := NEW.username;
-    IF v_username IS NOT NULL
-       AND (v_username !~ '^[A-Za-z0-9_][A-Za-z0-9_.-]{2,31}$' OR public.osionos_username_reserved(v_username)) THEN
-      RAISE WARNING 'osionos: username % is not usable — the old one is kept', v_username;
-      v_username := NULL;
-    END IF;
-    IF v_username IS NOT NULL THEN
-      UPDATE public.osionos_profiles SET username = v_username WHERE user_id = NEW.user_id;
-    END IF;
-  EXCEPTION WHEN others THEN
-    RAISE WARNING 'osionos: username % could not be taken: %', NEW.username, SQLERRM;
-  END;
+  IF TG_OP = 'INSERT' THEN
+    v_profile_changed := true;
+    v_optout_changed := true;
+    v_username_changed := true;
+  ELSE
+    v_profile_changed := NEW.profile IS DISTINCT FROM OLD.profile;
+    v_optout_changed := NEW.directory_opt_out IS DISTINCT FROM OLD.directory_opt_out;
+    v_username_changed := NEW.username IS DISTINCT FROM OLD.username;
+  END IF;
+  IF v_profile_changed THEN
+    BEGIN
+      v_headline := nullif(btrim(coalesce(NEW.profile->>'headline', '')), '');
+      IF v_headline IS NOT NULL AND (char_length(v_headline) > 200 OR v_headline ~ '[[:cntrl:]]') THEN
+        RAISE WARNING 'osionos: headline for % is invalid — the old one is kept', NEW.user_id;
+        v_headline := NULL;
+      END IF;
+      v_bio := nullif(coalesce(NEW.profile->>'bio', ''), '');
+      IF v_bio IS NOT NULL AND (char_length(v_bio) > 2000 OR v_bio ~ '[\x00-\x09\x0B-\x1F\x7F]') THEN
+        RAISE WARNING 'osionos: bio for % is invalid — the old one is kept', NEW.user_id;
+        v_bio := NULL;
+      END IF;
+      v_location := nullif(btrim(coalesce(NEW.profile->>'location', '')), '');
+      IF v_location IS NOT NULL AND (char_length(v_location) > 120 OR v_location ~ '[[:cntrl:]]') THEN
+        RAISE WARNING 'osionos: location for % is invalid — the old one is kept', NEW.user_id;
+        v_location := NULL;
+      END IF;
+      -- The row is left alone when the copy would not change it: an UPDATE
+      -- that rewrites a row with the values it already holds still bumps the
+      -- profile's version.
+      UPDATE public.osionos_profiles
+         SET headline = coalesce(v_headline, headline),
+             bio = coalesce(v_bio, bio),
+             location = coalesce(v_location, location)
+       WHERE user_id = NEW.user_id
+         AND (coalesce(v_headline, headline) IS DISTINCT FROM headline
+              OR coalesce(v_bio, bio) IS DISTINCT FROM bio
+              OR coalesce(v_location, location) IS DISTINCT FROM location);
+    EXCEPTION WHEN others THEN
+      RAISE WARNING 'osionos: profile sync for % failed: %', NEW.user_id, SQLERRM;
+    END;
+  END IF;
+  IF v_optout_changed THEN
+    BEGIN
+      UPDATE public.osionos_profiles
+         SET directory_opt_out = coalesce(NEW.directory_opt_out, directory_opt_out)
+       WHERE user_id = NEW.user_id
+         AND coalesce(NEW.directory_opt_out, directory_opt_out) IS DISTINCT FROM directory_opt_out;
+    EXCEPTION WHEN others THEN
+      RAISE WARNING 'osionos: opt-out sync for % failed: %', NEW.user_id, SQLERRM;
+    END;
+  END IF;
+  IF v_username_changed THEN
+    BEGIN
+      v_username := NEW.username;
+      IF v_username IS NOT NULL
+         AND (v_username !~ '^[A-Za-z0-9_][A-Za-z0-9_.-]{2,31}$' OR public.osionos_username_reserved(v_username)) THEN
+        RAISE WARNING 'osionos: username % is not usable — the old one is kept', v_username;
+        v_username := NULL;
+      END IF;
+      IF v_username IS NOT NULL THEN
+        UPDATE public.osionos_profiles SET username = v_username
+         WHERE user_id = NEW.user_id AND username IS DISTINCT FROM v_username;
+      END IF;
+    EXCEPTION WHEN others THEN
+      RAISE WARNING 'osionos: username % could not be taken: %', NEW.username, SQLERRM;
+    END;
+  END IF;
   RETURN NEW;
 END
 $$;

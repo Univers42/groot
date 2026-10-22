@@ -55,3 +55,45 @@ self_test_has_seq_scan_on() {
 	note "Self-test passed: has_seq_scan_on correctly detects Seq Scan on budgeted tables"
 	return 0
 }
+# Self-test for missing_node_types: the plan must hold a node of each
+# required "Node Type", and a plan without one has to be reported.
+self_test_missing_node_types() {
+	canned_json='[
+  {
+    "Plan": {
+      "Node Type": "Bitmap Heap Scan",
+      "Plans": [
+        {
+          "Node Type": "BitmapOr",
+          "Plans": [
+            {
+              "Node Type": "Bitmap Index Scan",
+              "Index Name": "osionos_profiles_display_name_trgm_idx"
+            }
+          ]
+        }
+      ]
+    }
+  }
+]'
+	# Test 1: the node type that is there is not reported missing
+	missing="$(echo "$canned_json" | missing_node_types "Bitmap Index Scan")"
+	if [ -n "$missing" ]; then
+		note "SELF-TEST FAILED: missing_node_types reported '${missing}' missing in a plan that has it"
+		return 1
+	fi
+	# Test 2: the node type that is not there is reported
+	missing="$(echo "$canned_json" | missing_node_types "Bitmap Index Scan|Index Only Scan")"
+	if [ "$missing" != "Index Only Scan" ]; then
+		note "SELF-TEST FAILED: missing_node_types reported '${missing}' instead of 'Index Only Scan'"
+		return 1
+	fi
+	# Test 3: a plan that cannot be parsed fails closed — every type missing
+	missing="$(echo 'not a plan' | missing_node_types "Bitmap Index Scan")"
+	if [ "$missing" != "Bitmap Index Scan" ]; then
+		note "SELF-TEST FAILED: missing_node_types did not fail closed on an unreadable plan"
+		return 1
+	fi
+	note "Self-test passed: missing_node_types reports the plan node types a query must have"
+	return 0
+}
