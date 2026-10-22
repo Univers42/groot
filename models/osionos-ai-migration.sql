@@ -96,6 +96,25 @@ begin
 end
 $$;
 
+-- The agent of a run (P5a): the id and the version of a built-in agent, pinned
+-- on the run so its answer can be explained later with the exact instructions
+-- it ran under (devil C40). NULL = the general assistant. Both or neither.
+alter table public.ai_runs add column if not exists agent_id text;
+alter table public.ai_runs add column if not exists agent_version smallint;
+do $$
+begin
+	if not exists (
+		select 1 from pg_constraint
+		where conname = 'ai_runs_agent_check' and conrelid = 'public.ai_runs'::regclass
+	) then
+		alter table public.ai_runs add constraint ai_runs_agent_check check (
+			(agent_id is null and agent_version is null)
+			or (agent_id ~ '^[a-z][a-z0-9-]{1,31}$' and agent_version >= 1)
+		);
+	end if;
+end
+$$;
+
 create index if not exists ai_runs_owner_created_idx
 	on public.ai_runs (owner_id, created_at desc);
 -- Stale-run sweep: only rows still 'running' are candidates for the reaper.
