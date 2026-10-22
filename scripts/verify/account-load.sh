@@ -7,36 +7,23 @@
 #                                                                              #
 # **************************************************************************** #
 #
-# WHY THIS EXISTS
-#   The 10K-user ceilings are in the database: an unindexed people-directory
-#   view, reads with no limit, in.() lists, scans on email_hash. Measure them
-#   where they live — the hot queries, on a seeded 10K database, in a throwaway
-#   container — so P0-5 and P1-1 can show a before/after number.
+# WHY: 10K-user ceilings are in the DB: unindexed people-directory view,
+# reads with no limit, in.() lists, scans on email_hash. Measure on a seeded
+# 10K DB in a throwaway container so P0-5/P1-1 show before/after.
 #
-# WHAT IT RUNS
-#   fresh grobase postgres -> grobase 001_initial_schema + 012 realtime hook ->
-#   shim -> apply-models-migrations.sh (real runner) -> seed-10k.sql -> ANALYZE ->
-#   each query from queries.sql run RUNS times with EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+# WHAT: fresh grobase postgres -> 001 + 012 -> shim -> apply-models-migrations.sh
+# -> seed-10k.sql -> ANALYZE -> each query RUNS times with EXPLAIN ANALYZE.
 #
-# ISOLATION
-#   Throwaway container only (--rm --network none, no port, no volume); the live
-#   mini-baas / osionos containers are never touched. A trap removes the container
-#   on every exit path. The image is grobase's postgres: models/*.sql needs pgvector.
+# ISOLATION: throwaway container (--rm --network none), never touches live.
 #
-# CAVEATS (deliberate, documented):
-#   1. Plan timing in an idle container under-reports production latency (no
-#      concurrency, warm cache, no network).
-#   2. p95 over 30 runs is a coarse estimate.
+# CAVEATS: 1. Idle container under-reports prod latency (no concurrency/warm cache).
+# 2. p95 over 30 runs is coarse.
 #
-# Usage:  [GROBASE_PG_IMAGE=…] [MODELS_DIR=…] [RUNS=30] [BASELINE=0] sh scripts/verify/account-load.sh [--baseline]
+# Usage: [GROBASE_PG_IMAGE=…] [MODELS_DIR=…] [RUNS=30] sh scripts/verify/account-load.sh [--baseline]
+# Exit: 0 all within budget · 1 breach/failure · 2 docker missing.
+# --baseline: reports, exits 0 unless harness failed.
 #
-# Exit:  0 every query within budget · 1 a breach or a failure · 2 docker missing
-#        (a missing image is a FAIL, never a SKIP). With --baseline: reports and
-#        always exits 0 unless the harness itself failed.
-#
-# Ponytail: The container bring-up logic is deliberately copied from
-#   scripts/verify/models-grants.sh until the shared helper lands in
-#   scripts/verify/lib/ (tracked in the P0-7 ledger).
+# Ponytail: container bring-up copied from models-grants.sh until shared helper lands.
 #
 set -eu
 
@@ -59,10 +46,16 @@ WORK=''
 passed=0
 failed=0
 
+# shellcheck disable=SC1091
+. "${FIX}/measure.sh"
+
 note() { printf '[account-load] %s\n' "$*" >&2; }
 
+# shellcheck disable=SC2317
 pass_query() { passed=$((passed + 1)) && printf 'PASS %s p50=%s p95=%s seq_scan=%s budget=%s\n' "$1" "$2" "$3" "$4" "$5"; }
+# shellcheck disable=SC2317
 fail_query() { failed=$((failed + 1)) && printf 'FAIL %s p50=%s p95=%s seq_scan=%s budget=%s\n' "$1" "$2" "$3" "$4" "$5"; }
+# shellcheck disable=SC2317
 fail_step() { failed=$((failed + 1)) && printf 'FAIL %s %s %s\n' "$1" "$2" "$3"; }
 
 die() {
@@ -155,49 +148,6 @@ ensure_image() {
 	exit 1
 }
 
-# Compute p50 and p95 from a file of millisecond values (one per line)
-# shellcheck disable=SC2317
-percentiles() {
-	awk '
-		{ a[NR] = $1 }
-		END {
-			if (NR == 0) { print "0 0"; exit }
-			p50_idx = int(NR * 0.50) + 1; if (p50_idx > NR) p50_idx = NR
-			p95_idx = int(NR * 0.95) + 1; if (p95_idx > NR) p95_idx = NR
-			print a[p50_idx] " " a[p95_idx]
-		}' "$1"
-}
-
-# Check if a plan JSON contains a Seq Scan on any of the given tables
-has_seq_scan() {
-	plan_json="$1"
-	shift
-	for table in "$@"; do
-		# Look for "Node Type": "Seq Scan" with "Relation Name": "<table>"
-		if echo "${plan_json}" | grep -q '"Node Type": "Seq Scan"' && echo "${plan_json}" | grep -q "\"Relation Name\": \"${table}\""; then
-			return 0
-		fi
-		# Also check for parallel seq scan
-		if echo "${plan_json}" | grep -q '"Node Type": "Parallel Seq Scan"' && echo "${plan_json}" | grep -q "\"Relation Name\": \"${table}\""; then
-			return 0
-		fi
-	done
-	return 1
-}
-
-# Compute p50 and p95 from a file of millisecond values (one per line)
-# Uses awk to avoid process substitution (not POSIX)
-percentiles() {
-	awk '
-		{ a[NR] = $1 }
-		END {
-			if (NR == 0) { print "0 0"; exit }
-			p50_idx = int(NR * 0.50) + 1; if (p50_idx > NR) p50_idx = NR
-			p95_idx = int(NR * 0.95) + 1; if (p95_idx > NR) p95_idx = NR
-			print a[p50_idx] " " a[p95_idx]
-		}' "$1"
-}
-
 main() {
 	command -v docker >/dev/null 2>&1 || {
 		note "docker is required"
@@ -209,6 +159,7 @@ main() {
 	[ -f "${FIX}/seed-10k.sql" ] || die "setup" "seed" "no ${FIX}/seed-10k.sql"
 	[ -f "${FIX}/queries.sql" ] || die "setup" "queries" "no ${FIX}/queries.sql"
 	[ -f "${FIX}/budgets.json" ] || die "setup" "budgets" "no ${FIX}/budgets.json"
+	[ -f "${FIX}/measure.sh" ] || die "setup" "measure" "no ${FIX}/measure.sh"
 	ensure_image
 
 	WORK="$(mktemp -d "${TMPDIR:-/tmp}/account-load.XXXXXX")"
@@ -268,19 +219,8 @@ CROSS JOIN LATERAL (VALUES (1), (100), (1000), (5000), (9999)) AS v(u)
 WHERE idx = 1;
 SQL
 
-	# Read queries and budgets
-	note "running ${RUNS}x each query..."
-
-	# Parse budgets.json to get per-query budget and no_seq_scan tables
-	# We'll use a simple approach: extract each query by ID from queries.sql
-	# and match with budgets.json
-
-	# First, let's extract query IDs and their SQL from queries.sql
-	# Format in queries.sql: -- QUERY: <id> followed by SQL ending with ;
-	
-	mkdir -p "${WORK}/queries"
-	
 	# Split queries.sql into individual query files
+	mkdir -p "${WORK}/queries"
 	awk -v work="${WORK}/queries" '
 		/^-- QUERY: / {
 			if (id) close(outfile)
@@ -291,7 +231,8 @@ SQL
 		id { print > outfile }
 	' "${FIX}/queries.sql"
 
-	# Process each query
+	# Measure each query
+	note "running ${RUNS}x each query..."
 	for query_file in "${WORK}/queries"/*.sql; do
 		[ -f "${query_file}" ] || continue
 		id="$(basename "${query_file}" .sql)"
@@ -303,130 +244,43 @@ SQL
 		[ -z "${budget_ms}" ] && budget_ms=0
 		
 		# Get no_seq_scan tables for this query
-		seq_scan_tables="$(grep -A10 "\"${id}\"" "${FIX}/budgets.json" | grep '"no_seq_scan"' -A5 | grep '"' | sed 's/.*"\([^"]*\)".*/\1/' | tr '\n' ' ')"
+		# Extract only the table names from the no_seq_scan array
+		seq_scan_tables="$(python3 -c "
+import sys, json
+with open('${FIX}/budgets.json') as f:
+    data = json.load(f)
+query = data.get('${id}', {})
+tables = query.get('no_seq_scan', [])
+print(' '.join(tables))
+" 2>/dev/null)"
 		
-		# Run the query RUNS times
 		times_file="${WORK}/times-${id}.txt"
-		seq_scan_count=0
+		seq_scans_file="${WORK}/seq_scans-${id}.txt"
+		budgeted_scan_flag="${WORK}/budgeted_scan-${id}.flag"
 		
-		for run in $(seq 1 "${RUNS}"); do
-			# Run EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
-			if ! psql_stdin <<HEREDOC 2>"${WORK}/explain-${id}-${run}.err" >"${WORK}/explain-${id}-${run}.out"; then
-EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
-$(cat "${query_file}");
-HEREDOC
-				note "query ${id} run ${run} failed"
-				sed 's/^/  | /' "${WORK}/explain-${id}-${run}.err" >&2
-				continue
-			fi
-			plan_json="$(cat "${WORK}/explain-${id}-${run}.out")"
-			
-			# Extract execution time from plan (in ms)
-			exec_time="$(echo "${plan_json}" | grep -o '"Execution Time": [0-9.]*' | head -1 | sed 's/.*: //')"
-			if [ -z "${exec_time}" ]; then
-				exec_time=0
-			fi
-			# Convert to integer milliseconds
-			exec_time_ms="$(printf '%.0f' "${exec_time}")"
-			echo "${exec_time_ms}" >>"${times_file}"
-			
-			# Check for Seq Scan on budgeted tables
-			if [ -n "${seq_scan_tables}" ]; then
-				if has_seq_scan "${plan_json}" "${seq_scan_tables}"; then
-					seq_scan_count=$((seq_scan_count + 1))
-				fi
-			fi
-		done
+		# Run measurement
+		measure_query "${query_file}" "${RUNS}" "${budget_ms}" "${seq_scan_tables}" \
+			"${times_file}" "${seq_scans_file}" "${budgeted_scan_flag}"
 		
-		# Compute percentiles
+		# Evaluate and print result
 		if [ -f "${times_file}" ]; then
 			# shellcheck disable=SC2046
 			set -- $(percentiles "${times_file}")
 			p50=$1
 			p95=$2
+			evaluate_query "${id}" "${p50}" "${p95}" "${seq_scans_file}" "${budget_ms}" "${budgeted_scan_flag}" || true
 		else
-			p50=0
-			p95=0
-		fi
-		
-		seq_scan_any="no"
-		if [ "${seq_scan_count}" -gt 0 ]; then
-			seq_scan_any="yes"
-		fi
-		
-		# Determine pass/fail
-		if [ "${p95}" -le "${budget_ms}" ] && [ "${seq_scan_any}" = "no" ]; then
-			pass_query "${id}" "${p50}" "${p95}" "${seq_scan_any}" "${budget_ms}"
-		else
-			fail_query "${id}" "${p50}" "${p95}" "${seq_scan_any}" "${budget_ms}"
+			fail_query "${id}" "0.00" "0.00" "none" "${budget_ms}"
 		fi
 	done
 
 	# Write JSON output
 	timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 	git_sha="$(git rev-parse HEAD 2>/dev/null || echo 'unknown')"
-	image_digest="$(docker image inspect "${IMAGE}" --format '{{.RepoDigests}}' 2>/dev/null | head -1 | sed 's/.*sha256:\([a-f0-9]*\).*/\1/' || echo 'unknown')"
-	
 	mkdir -p "${REPO}/target/account-load"
 	output_json="${REPO}/target/account-load/${timestamp}.json"
 	
-	# Build JSON output
-	{
-		echo '{'
-		echo '  "timestamp": "'"${timestamp}"'",'
-		echo '  "git_sha": "'"${git_sha}"'",'
-		echo '  "image_digest": "'"${image_digest}"'",'
-		echo '  "runs": '"${RUNS}"','
-		echo '  "seed_time_sec": '"${seed_time}"','
-		echo '  "queries": ['
-		
-		first=1
-		for query_file in "${WORK}/queries"/*.sql; do
-			[ -f "${query_file}" ] || continue
-			id="$(basename "${query_file}" .sql)"
-			times_file="${WORK}/times-${id}.txt"
-			if [ -f "${times_file}" ]; then
-				# shellcheck disable=SC2046
-			set -- $(percentiles "${times_file}")
-				p50=$1
-				p95=$2
-				# Count seq scans
-				seq_scan_count=0
-				for run in $(seq 1 "${RUNS}"); do
-					plan_json_file="${WORK}/explain-${id}-${run}.out"
-					if [ -f "${plan_json_file}" ]; then
-						plan_json="$(cat "${plan_json_file}")"
-						seq_scan_tables="$(grep -A10 "\"${id}\"" "${FIX}/budgets.json" | grep '"no_seq_scan"' -A5 | grep '"' | sed 's/.*"\([^"]*\)".*/\1/' | tr '\n' ' ')"
-						if [ -n "${seq_scan_tables}" ]; then
-							if has_seq_scan "${plan_json}" "${seq_scan_tables}"; then
-								seq_scan_count=$((seq_scan_count + 1))
-							fi
-						fi
-					fi
-				done
-				seq_scan_any="false"
-				if [ "${seq_scan_count}" -gt 0 ]; then
-					seq_scan_any="true"
-				fi
-				budget_ms="$(grep -A3 "\"${id}\"" "${FIX}/budgets.json" | grep '"p95_ms"' | sed 's/.*: *\([0-9]*\).*/\1/')"
-				[ -z "${budget_ms}" ] && budget_ms=0
-				
-				[ "${first}" -eq 1 ] || echo '    ,'
-				first=0
-				echo '    {'
-				echo '      "id": "'"${id}"'",'
-				echo '      "p50_ms": '"${p50}"','
-				echo '      "p95_ms": '"${p95}"','
-				echo '      "seq_scan_detected": '"${seq_scan_any}"','
-				echo '      "budget_ms": '"${budget_ms}"','
-				echo '      "pass": '"$( [ "${p95}" -le "${budget_ms}" ] && [ "${seq_scan_any}" = "false" ] && echo "true" || echo "false" )"
-				printf '    }'
-			fi
-		done
-		echo ''
-		echo '  ]'
-		echo '}'
-	} >"${output_json}"
+	write_json_output "${WORK}" "${RUNS}" "${seed_time}" "${REPO}" "${IMAGE}" "${git_sha}" "${timestamp}" "${output_json}"
 	
 	note "results written to ${output_json}"
 	

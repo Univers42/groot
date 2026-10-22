@@ -1,23 +1,23 @@
 {
   "directory_search": {
     "p95_ms": 150,
-    "no_seq_scan": ["osionos_bridge_identities"],
-    "why": "Search uses GIN index on search_doc (tsvector) and pg_trgm indexes on display_name/username in osionos_bridge_identities. The view osionos_people_directory joins users + user_profiles + bridge_identities; planner should push predicates to the bridge_identities scan. Budget 150ms allows trigram + FTS union on 10K rows."
+    "no_seq_scan": ["users", "user_profiles", "osionos_bridge_identities"],
+    "why": "Search uses GIN index on search_doc (tsvector) and pg_trgm indexes on display_name/username in osionos_bridge_identities. The view osionos_people_directory joins users + user_profiles + bridge_identities; planner should push predicates to the bridge_identities scan. Budget 150ms allows trigram + FTS union on 10K rows. P0-1 adds expression index on search_doc for the view."
   },
   "directory_by_ids": {
     "p95_ms": 60,
-    "no_seq_scan": ["osionos_bridge_identities"],
-    "why": "IN list of 50 UUIDs on osionos_bridge_identities.user_id (UNIQUE index). Point lookups via index; 60ms budget covers 50 index probes + profile JSONB construction."
+    "no_seq_scan": ["users", "user_profiles", "osionos_bridge_identities"],
+    "why": "IN list of 50 UUIDs on osionos_bridge_identities.user_id (UNIQUE index) joined to users + user_profiles. Point lookups via index; 60ms budget covers 50 index probes + profile JSONB construction. P0-1 ensures the view uses the bridge_identities index."
   },
   "identity_by_email_hash": {
     "p95_ms": 150,
-    "no_seq_scan": [],
-    "why": "Lookup by email_hash on osionos_bridge_identities has NO index (email_hash is not indexed). Expects Seq Scan on 10K rows. Budget 150ms reflects unindexed scan; this is a known ceiling for P0-5/P1-1 to fix with an index."
+    "no_seq_scan": ["osionos_bridge_identities"],
+    "why": "Lookup by email_hash on osionos_bridge_identities has NO index (email_hash is not indexed). Expects Seq Scan on 10K rows. Budget 150ms reflects unindexed scan; P0-1 adds osionos_bridge_identities_email_hash_idx to eliminate the scan."
   },
   "feed_shares_for_user": {
     "p95_ms": 60,
-    "no_seq_scan": [],
-    "why": "Filter on osionos_feed_shares.user_id has NO index (only page_id is indexed). Expects Seq Scan on ~50K rows. Budget 60ms reflects current unindexed scan; P0-5/P1-1 to add index on user_id."
+    "no_seq_scan": ["osionos_feed_shares"],
+    "why": "Filter on osionos_feed_shares.user_id has NO index (only page_id is indexed). Expects Seq Scan on ~50K rows. Budget 60ms reflects current unindexed scan; P0-1 adds osionos_feed_shares_user_target_idx on (user_id, target) to eliminate the scan."
   },
   "connections_for_user": {
     "p95_ms": 60,
@@ -31,7 +31,7 @@
   },
   "pages_of_workspace": {
     "p95_ms": 60,
-    "no_seq_scan": ["osionos_pages"],
-    "why": "Filter on workspace_id + archived_at IS NULL + ORDER BY updated_at DESC uses index osionos_pages_workspace_updated_idx (workspace_id, updated_at DESC). Budget 60ms for index scan with limit 100."
+    "no_seq_scan": ["osionos_pages", "osionos_workspaces", "osionos_workspace_members"],
+    "why": "Embedded lookup: filter on osionos_pages.id (PK) + workspace embed with members filtered to user_id. Uses PK index on pages + PK on workspaces + PK on workspace_members. Budget 60ms for single-row fetch with embed."
   }
 }
