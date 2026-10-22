@@ -104,10 +104,15 @@
 #   four more osionos_* relations plus the directory view, which the catalog
 #   pass below must see so their default privileges are revoked from
 #   anon/authenticated.
-#   osionos-personal-access-tokens-migration.sql runs right after it, for the
-#   same reason: it grants to the same role and it creates one more osionos_*
-#   relation, which the catalog pass below must see so the token table's
-#   default privileges are revoked from anon/authenticated too.
+#   osionos-account-username-migration.sql runs right after it: it revokes the
+#   UPDATE(username) column grant that file makes on osionos_profiles, and it
+#   grants EXECUTE on the atomic username change to the role that file
+#   creates. It has to run after that file, never before it.
+#   osionos-personal-access-tokens-migration.sql runs after those (and after
+#   osionos-publish-account-migration.sql), before the service-role-only pass:
+#   it grants to the same role and it creates one more osionos_* relation, which
+#   the catalog pass below must see so the token table's default privileges are
+#   revoked from anon/authenticated too.
 #   osionos-service-role-only-migration.sql runs LAST (ORDERED_LAST), after
 #   everything: it revokes what earlier files and older boots granted.
 #   users-pii-grants-migration.sql runs after it, last of all: it fixes the
@@ -133,7 +138,7 @@ trap 'rm -f "${ERR_FILE}"' EXIT
 # alphabetical pass reaches its dependent. Space-separated: no filename here
 # contains a space or glob character.
 ORDERED_FIRST="auth-gateway-users-reconcile-migration.sql osionos-bridge-migration.sql osionos-chat-migration.sql osionos-social-migration.sql osionos-engagement-migration.sql osionos-page-search-migration.sql"
-ORDERED_LAST="osionos-account-foundation-migration.sql osionos-account-profiles-migration.sql osionos-personal-access-tokens-migration.sql osionos-service-role-only-migration.sql realtime-cdc-off-migration.sql users-pii-grants-migration.sql"
+ORDERED_LAST="osionos-account-foundation-migration.sql osionos-account-profiles-migration.sql osionos-account-username-migration.sql osionos-publish-account-migration.sql osionos-personal-access-tokens-migration.sql osionos-service-role-only-migration.sql realtime-cdc-off-migration.sql users-pii-grants-migration.sql"
 
 note() { printf '[models] %s\n' "$*" >&2; }
 
