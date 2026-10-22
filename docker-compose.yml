@@ -412,6 +412,9 @@ services:
       OSIONOS_AI_PROMPT_GUARD_MODEL: guard
       # The models of the output check (C73): the dir of the two classifiers.
       OSIONOS_AI_IMAGE_CHECK_DIR: /image-check
+      # Describe image (M7): the local VLM, INTERNAL. Unset = the route is a 404.
+      # The public overlay forces it empty until the user decides.
+      OSIONOS_AI_VLM_URL: http://osionos-ai-vlm:8080
     expose:
       - "4300"
     # The two classifiers of the output check, read-only: the service loads
@@ -428,6 +431,8 @@ services:
       - osionos-ai-sd-net
       # The guard of the image prompt, the same way.
       - osionos-ai-guard-net
+      # The VLM of "Describe image", the same way.
+      - osionos-ai-vlm-net
     depends_on:
       osionos-ai-db:
         condition: service_healthy
@@ -803,6 +808,47 @@ services:
     restart: unless-stopped
     mem_limit: 1536m
     cpus: 4
+
+  # osionos-ai-vlm — the local vision model of "Describe image" (M7): Qwen2.5-VL-3B
+  # Q4_K_M on llama.cpp, CPU. The image is the one spikes/a1 measured
+  # (images.lock `llama-cpp-cpu`, the same digest as the guard), the flags are
+  # spikes/a1/vlm-server.sh's. Measured there: see results/vlm/RESULTS.md.
+  # The files are in the external volume below, read-only: the server never
+  # writes to them. NO published port and NO egress: it is reached by
+  # osionos-ai over osionos-ai-vlm-net, which is internal.
+  # One slot (-np 1): the service lets one describe through per replica.
+  osionos-ai-vlm:
+    image: ghcr.io/ggml-org/llama.cpp@sha256:ba384e66b3f3b6474dc0285ed44466b6f025c7106865d915f1fe5ae2a2da7411
+    profiles: ["ai"]
+    command:
+      [
+        "--jinja",
+        "-c", "4096",
+        "-np", "1",
+        "-t", "6",
+        "--mmproj", "/mnt/storage/vlm/mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf",
+        "-m", "/mnt/storage/vlm/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf",
+        "--alias", "qwen2.5-vl-3b-instruct-q4_k_m",
+        "--host", "0.0.0.0",
+        "--port", "8080",
+      ]
+    volumes:
+      - osionos_ai_a1_data:/mnt/storage:ro
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      start_interval: 10s
+      timeout: 5s
+      # Two GGUF files (1.9 GB + 0.8 GB) to map.
+      start_period: 90s
+      retries: 12
+    networks:
+      - osionos-ai-vlm-net
+    restart: unless-stopped
+    mem_limit: 6g
+    cpus: 6
 
   # osionos-ai-indexer — the index worker: the SAME image as the service (the
   # one the `osionos-ai` service above builds), but its entrypoint is the
@@ -1623,6 +1669,13 @@ volumes:
   # checks every byte against the lock of the spike (`spikes/a1/models.lock`).
   osionos_ai_image_check:
     name: osionos_ai_image_check
+  # The VLM of "Describe image" (M7): the GGUF files under /vlm. They are
+  # fetched and sha256-checked by `spikes/a1/fetch.py --only vlm` (osionos
+  # services/osionos-ai), never by compose: the volume is external and mounted
+  # read-only.
+  osionos_ai_a1_data:
+    name: osionos_ai_a1_data
+    external: true
 
 networks:
   # The grobase backend stack's network (docker project `mini-baas`), declared
@@ -1648,6 +1701,10 @@ networks:
   # osionos-ai-guard and osionos-ai join it — the model is pre-fetched into
   # its volume, and the guard answers on this network and on no other.
   osionos-ai-guard-net:
+    internal: true
+  # The VLM of "Describe image": `internal: true` = NO egress. ONLY
+  # osionos-ai-vlm and osionos-ai join it.
+  osionos-ai-vlm-net:
     internal: true
   # Internal-only network for the IDE code runner: `internal: true` = NO egress
   # (the Docker daemon enforces it without needing unprivileged user namespaces),
