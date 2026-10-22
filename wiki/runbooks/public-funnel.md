@@ -95,6 +95,12 @@ Static previews of Mail and Calendar, no bridge and no account, served by a seco
    from stdin only). `bash scripts/public-node.sh status` prints the DNS name and the Funnel ports.
    `public-node.sh stop` resets that node's Funnel before it stops the daemon; the daemon's output is
    dropped unless `PUBLIC_APPS_LOG=1` (then `tailscaled.log` in the node's state dir, which grows).
+   `bash scripts/public-node.sh autostart` then hands the node to `osionos-apps-node.service` (a
+   systemd user unit; at boot only with linger on), which restarts it after a reboot or a crash with
+   its Funnel; `autostart-off` removes the unit. A start that fails keeps the Funnel config, so a
+   slow boot never unpublishes the apps; only `stop` closes it. The unit runs the binaries named by
+   `TAILSCALED_BIN` / `TAILSCALE_BIN` at the time `autostart` ran (a system install:
+   `/usr/sbin/tailscaled`, `/usr/bin/tailscale`).
 2. In `.env.public` set `PUBLIC_MAIL_ORIGIN=https://<node dns name>` and
    `PUBLIC_CALENDAR_ORIGIN=https://<node dns name>:8443` (both or neither; the host must not be
    `PUBLIC_ORIGIN`'s).

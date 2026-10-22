@@ -147,13 +147,13 @@ END $$;
 
 -- ---------------------------------------------------------------------
 -- F5: users — cap anon enumeration to non-PII columns (keeps the public-profile
--- read policy but drops email/bio/etc. from the anon column grant).
+-- read policy but drops email/avatar/bio/etc. from the anon column grant).
 -- ---------------------------------------------------------------------
 DO $$
 BEGIN
   IF to_regclass('public.users') IS NOT NULL THEN
     REVOKE SELECT ON public.users FROM anon;
-    GRANT SELECT (id, username, avatar_url, is_email_verified) ON public.users TO anon;
+    GRANT SELECT (id, username, is_email_verified) ON public.users TO anon;
   END IF;
 END $$;
 

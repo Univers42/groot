@@ -1,21 +1,49 @@
 -- Authentication security migration for track-binocle / Prismatica
 -- Adds audit logging for sensitive authentication events.
--- Last updated: 2026-05-03
+-- Last updated: 2026-10-21
 
 BEGIN;
 
 SET LOCAL search_path = public;
 
-CREATE TABLE IF NOT EXISTS auth_audit_events (
-  id BIGSERIAL PRIMARY KEY,
-  event_type VARCHAR(64) NOT NULL,
-  user_id INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
-  email VARCHAR(255),
-  ip_address VARCHAR(255),
-  user_agent VARCHAR(1024),
-  details JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
+-- The audit table follows whatever type public.users.id has instead of hard-coding one: the
+-- auth gateway's BaaS database has a uuid users.id, while the databases that apply user.sql
+-- (grobase's track-binocle project init, osionos-electron's first run) have an integer one.
+-- A hard-coded integer fails the foreign key on a uuid users.id, and that failure is silent:
+-- the gateway's audit call 404s and every event — failed logins, password recovery, signup
+-- refusals — is dropped. The type is therefore read from the catalog at migration time.
+DO $$
+DECLARE
+  users_id_type TEXT;
+BEGIN
+  SELECT format_type(a.atttypid, a.atttypmod) INTO users_id_type
+    FROM pg_attribute a
+    JOIN pg_class c ON c.oid = a.attrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = 'public'
+     AND c.relname = 'users'
+     AND a.attname = 'id'
+     AND a.attnum > 0
+     AND NOT a.attisdropped;
+
+  IF users_id_type IS NULL THEN
+    RAISE EXCEPTION 'public.users(id) not found: auth_audit_events.user_id has no type to follow';
+  END IF;
+
+  EXECUTE format($ddl$
+    CREATE TABLE IF NOT EXISTS auth_audit_events (
+      id BIGSERIAL PRIMARY KEY,
+      event_type VARCHAR(64) NOT NULL,
+      user_id %1$s NULL REFERENCES users(id) ON DELETE SET NULL,
+      email VARCHAR(255),
+      ip_address VARCHAR(255),
+      user_agent VARCHAR(1024),
+      details JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  $ddl$, users_id_type);
+END;
+$$;
 
 CREATE INDEX IF NOT EXISTS auth_audit_events_event_created_idx ON auth_audit_events (event_type, created_at DESC);
 CREATE INDEX IF NOT EXISTS auth_audit_events_email_created_idx ON auth_audit_events (lower(email), created_at DESC);
@@ -109,7 +137,7 @@ SET search_path = public
 AS $$
 DECLARE
   normalized_email TEXT;
-  matched_user_id INTEGER;
+  matched_user_id users.id%TYPE;
   event_id BIGINT;
   violated_constraint TEXT;
 BEGIN
