@@ -48,11 +48,13 @@
 --   it must not reach.
 --
 -- DESKTOP
---   P0-4 must wire apps/osionos-electron/native/firstrun.mjs to this file, and
---   that wiring is not free: osionos_feed_shares never exists on the desktop
---   (firstrun.mjs:34-48) and auth.users exists only after GoTrue starts
---   (firstrun.mjs:109-111). The file therefore needs a guard or a split there,
---   and it runs in the post-GoTrue step.
+--   apps/osionos-electron/native/firstrun.mjs applies this file from its
+--   post-GoTrue step (applyPostGoTrueMigrations) on every boot: auth.users
+--   exists only after GoTrue starts, exactly like auth-session-cutoffs.sql.
+--   osionos_feed_shares never exists on the desktop (firstrun.mjs MIGRATIONS),
+--   so its index is guarded by to_regclass below; the other tables this file
+--   touches (osionos_bridge_identities, osionos_bridge_audit_events) come from
+--   that MIGRATIONS list.
 --
 -- Idempotent: a second run moves no grant, policy, role attribute or index
 -- (check g of scripts/verify/models-grants.sh).
@@ -227,7 +229,18 @@ COMMENT ON TABLE public.osionos_sessions IS 'osionos:account-plane';
 -- today's row counts (both tables are small), wrong for a table with millions of
 -- rows (build it CONCURRENTLY, outside this transaction).
 CREATE INDEX IF NOT EXISTS osionos_bridge_identities_email_hash_idx ON public.osionos_bridge_identities (email_hash);
-CREATE INDEX IF NOT EXISTS osionos_feed_shares_user_target_idx ON public.osionos_feed_shares (user_id, target, created_at DESC);
+-- osionos_feed_shares is created by osionos-feed-engagement-migration.sql, which the
+-- desktop edition does not ship. There the table never exists, and an unguarded CREATE
+-- INDEX would fail this whole transaction on every boot.
+-- Caveat: on the desktop that index never exists; the server always has the table, so
+-- models-grants still checks the index there.
+DO $$
+BEGIN
+  IF to_regclass('public.osionos_feed_shares') IS NOT NULL THEN
+    CREATE INDEX IF NOT EXISTS osionos_feed_shares_user_target_idx ON public.osionos_feed_shares (user_id, target, created_at DESC);
+  END IF;
+END
+$$;
 
 -- 5. The audit columns the bridge guard writes.
 -- The ALTER runs only when one of the four columns is missing: a converged replay

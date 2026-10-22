@@ -31,6 +31,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // osionos_* to anon and authenticated.
 const SERVICE_ROLE_ONLY = "osionos-service-role-only-migration.sql";
 const AUTH_SESSION_CUTOFFS = "auth-session-cutoffs.sql";
+const ACCOUNT_FOUNDATION = "osionos-account-foundation-migration.sql";
 const MIGRATIONS = [
   "user.sql",
   "gdpr-migration.sql",
@@ -106,14 +107,17 @@ export async function firstRun(cfg) {
   }
 }
 
-// Applied on every boot, AFTER gotrue: auth_session_cutoffs references auth.users, which
-// only gotrue's own migrations create, so it cannot sit in MIGRATIONS. The bridge enforces
-// cutoffs whenever it has a service key and BaaS URL and answers 503 until it can read this
-// table, so a desktop install without it would serve nothing. The file is idempotent.
-export async function applyAuthSessionCutoffs(cfg) {
+// Applied on every boot, AFTER gotrue: both files reference auth.users, which only
+// gotrue's own migrations create, so they cannot sit in MIGRATIONS. The bridge enforces
+// session cutoffs and loads public.osionos_sessions whenever it has a service key and BaaS
+// URL, and answers 503 until it can read both, so a desktop install without them would
+// serve nothing. Both files are idempotent.
+export async function applyPostGoTrueMigrations(cfg) {
   const client = await connectWithRetry(cfg);
   try {
-    await client.query(readFileSync(join(cfg.migrationsDir, AUTH_SESSION_CUTOFFS), "utf8"));
+    for (const file of [AUTH_SESSION_CUTOFFS, ACCOUNT_FOUNDATION]) {
+      await client.query(readFileSync(join(cfg.migrationsDir, file), "utf8"));
+    }
   } finally {
     await client.end();
   }
