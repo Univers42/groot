@@ -1,2 +1,3 @@
 -- Pre-1e407614 db-bootstrap.psql:23-24 (removed 2026-09-25): ran on every boot.
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO anon, authenticated;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'osionos_account_user') THEN CREATE ROLE osionos_account_user LOGIN BYPASSRLS; END IF; END $$; -- a hand-made account role, the shape a DBA leaves behind: the account migration must normalize it (check k7), and the guard keeps this file replayable
