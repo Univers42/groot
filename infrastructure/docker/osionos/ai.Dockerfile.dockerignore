@@ -1,5 +1,5 @@
 # Context = ./apps/osionos/app (the osionos submodule). The AI service needs
-# its own package files and sources, plus the seven bridge modules its
+# its own package files and sources, plus the ten bridge modules its
 # sources import (see the header of ai.Dockerfile) and the lists the gate of
 # the image prompt reads. Everything else is noise — and the node_modules of
 # the app would be copied into the image otherwise.
@@ -15,13 +15,17 @@ public
 vendor
 src
 tests
-# The scripts/ directory holds ninety-odd modules; the service imports six of
-# them, and the gate of the image prompt a seventh. They are re-included one
-# by one, so the closure is visible in both files.
+# The scripts/ directory holds a hundred-odd modules; the service's closure is
+# nine of them, and the gate of the image prompt a tenth. They are re-included
+# one by one, so the closure is visible in both files
+# (scripts/tests/bridge-image-closure.bats checks it).
 scripts/*
 !scripts/bridge-session-token.mjs
 !scripts/bridge-session-cutoff.mjs
 !scripts/bridge-baas-body.mjs
+!scripts/bridge-session-revocations.mjs
+!scripts/bridge-session-tracker.mjs
+!scripts/bridge-roles.mjs
 !scripts/bridge-page-read.mjs
 !scripts/bridge-live-workspaces.mjs
 !scripts/bridge-graph-edges.mjs
