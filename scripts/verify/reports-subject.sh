@@ -136,8 +136,11 @@ SQL
 
   # ── the fresh database, the migration replayed twice ──
   apply postgres "${MODELS}/osionos-social-migration.sql" social-1 || exit 1
+  oid_before="$(q postgres "SELECT oid FROM pg_constraint WHERE conname = 'osionos_user_reports_subject_kind_check';")"
   apply postgres "${MODELS}/osionos-social-migration.sql" social-2 || exit 1
   note "social migration applied twice"
+  oid_after="$(q postgres "SELECT oid FROM pg_constraint WHERE conname = 'osionos_user_reports_subject_kind_check';")"
+  check_eq c0 "a replay keeps the CHECK in place (no drop + re-add)" "${oid_before:-none}" "${oid_after:-gone}"
 
   n="$(q postgres "SELECT count(*) FROM pg_constraint con
       WHERE con.conrelid = 'public.osionos_user_reports'::regclass

@@ -156,6 +156,25 @@ DO $$
 DECLARE
   cname TEXT;
 BEGIN
+  -- The file replays on every boot: when the one subject_kind CHECK already
+  -- lists the seven kinds, the drop + re-add (an ACCESS EXCLUSIVE lock and a
+  -- full re-validation) is skipped.
+  IF (SELECT array_agg(con.conname::text)
+      FROM pg_constraint con
+      WHERE con.conrelid = 'public.osionos_user_reports'::regclass
+        AND con.contype = 'c'
+        AND pg_get_constraintdef(con.oid) LIKE '%subject_kind%'
+        AND pg_get_constraintdef(con.oid) LIKE '%page_comment%'
+        AND pg_get_constraintdef(con.oid) LIKE '%feed_comment%'
+        AND pg_get_constraintdef(con.oid) LIKE '%''page''%')
+     = ARRAY['osionos_user_reports_subject_kind_check']
+     AND (SELECT count(*) FROM pg_constraint con
+          WHERE con.conrelid = 'public.osionos_user_reports'::regclass
+            AND con.contype = 'c'
+            AND pg_get_constraintdef(con.oid) LIKE '%subject_kind%') = 1 THEN
+    RETURN;
+  END IF;
+
   FOR cname IN
     SELECT con.conname
     FROM pg_constraint con
