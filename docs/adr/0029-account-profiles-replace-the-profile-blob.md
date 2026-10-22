@@ -91,11 +91,12 @@ Other consequences:
 - The legacy path stays until P1-2: an AFTER trigger on `osionos_bridge_identities` copies the
   profile blob's `headline`, `bio` and `location` into the profile's own columns, and takes a valid,
   free username. It never touches `display_name` and never raises.
-- The legacy path copies only what changed. The identities row is written on every sign-in and
-  whenever one field of it moves; a copy of everything would overwrite a value the user typed
-  through the new account route with an older value from the blob. On an UPDATE only the fields
-  whose source moved are copied (the profile blob, the opt-out and the username, each on its own);
-  on an INSERT everything is, because there is nothing to compare against.
+- The legacy path copies only what changed, field by field. The identities row is written on every
+  sign-in and whenever one field of it moves; a copy of everything would overwrite a value the user
+  typed through the new account route with an older value from the blob. On an UPDATE each field of
+  the blob is copied only when its own key moved — a write that moves the avatar key (the avatar
+  package rewrites it for every user with a data: avatar) leaves the headline, the bio and the
+  location alone; on an INSERT everything is copied, because there is nothing to compare against.
 - A write that changes nothing changes nothing: the trigger's own UPDATEs skip a row they would not
   change, and the profile's version moves only when the row really changed. A version that moves on
   a no-op makes the next If-Match fail for nothing.
