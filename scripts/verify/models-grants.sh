@@ -80,6 +80,9 @@
 #   exactly search_path=pg_catalog, public and lock_timeout=3s,
 #   p2s_taken_by_profile a name another user's profile holds is refused with
 #   23505 and nothing of the caller moves ·
+#   p2_4 the profession column (P2-4-d1, models/osionos-account-profession-migration.sql):
+#   p2_4_profession_check the CHECK named osionos_profiles_profession_check is
+#   on the profession column and names all eight ids ·
 #   standalone the account foundation file applied alone leaves no realtime
 #   trigger on the sessions table or on the audit table, no anon/authenticated
 #   privilege and exactly the nine column grants — what the ledger runner
@@ -520,6 +523,7 @@ run_checks() {
 	check_count "$1" p2s_reverse_drift p2s_reverse_drift
 	check_count "$1" p2s_function_config p2s_function_config
 	check_count "$1" p2s_taken_by_profile p2s_taken_by_profile
+	check_count "$1" p2_4_profession_check p2_4_profession_check
 	probe "$1" K1 authenticated "SELECT count(*) FROM public.osionos_sessions"
 	probe "$1" K2 osionos_account_user "SELECT refresh_hash FROM public.osionos_sessions"
 	probe "$1" K3 osionos_account_user "UPDATE public.osionos_sessions SET revoked_at = now()"
