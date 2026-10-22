@@ -4,7 +4,8 @@
 # memory, publishes no port and never points at the dev osionos-ai-db.
 #
 # Renders the compose config (no container starts) with every flag exported as
-# "on", base + public overlay + the `ai` profile, and asserts on the JSON.
+# "on", base + public overlay + the `ai` and `dev` profiles (dev renders the app bundle), and
+# asserts on the JSON.
 # The variables the overlay requires get throwaway values.
 # Caveat: it proves the RENDERED config, not the code: only the names it exports
 # (OSIONOS_AI_PAT, _IMAGES, _STT_URL, the bridge's OSIONOS_MODERATION_ACTIONS) are
@@ -26,7 +27,7 @@ json=$(
 	OSIONOS_AI_PUBLIC_PLATFORM_MODELS='[{"id":"m:free","label":"m","inputMicroUsdPerMTok":0,"outputMicroUsdPerMTok":0,"default":true}]' \
 	OSIONOS_AI_PUBLIC_USER_DAILY_MICROUSD=1 OSIONOS_AI_PUBLIC_PLATFORM_DAILY_MICROUSD=1 \
 	docker compose -f docker-compose.yml -f docker-compose.public.yml --env-file /dev/null \
-		--profile ai config --format json
+		--profile ai --profile dev config --format json
 )
 
 n=0
@@ -49,6 +50,7 @@ check "osionos-bridge OSIONOS_MODERATION_ACTIONS is log" ".services[\"osionos-br
 check "osionos-ai OSIONOS_ALLOWED_ORIGIN is the app origin" "$svc.environment.OSIONOS_ALLOWED_ORIGIN == \"https://verify.invalid:8443\""
 check "osionos-ai upstream is OpenRouter" "$svc.environment.OSIONOS_AI_UPSTREAM_BASE_URL == \"https://openrouter.ai/api/v1\""
 check "osionos-ai publishes no port" "($svc.ports // []) | length == 0"
+check "osionos-app bundle points the assistant at the proxy" ".services[\"osionos-app\"].build.args.VITE_AI_URL == \"https://verify.invalid:10000\""
 
 for s in osionos-ai osionos-ai-redis osionos-ai-embed osionos-ai-embed-bulk osionos-ai-indexer; do
 	check "$s is rendered" ".services[\"$s\"] != null"

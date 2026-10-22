@@ -31,6 +31,9 @@ services:
     build:
       args:
         VITE_API_URL: ${PUBLIC_ORIGIN:?set PUBLIC_ORIGIN in .env.public}:10000
+        # The assistant's only switch (src/features/ai/api/aiClient.ts). The proxy behind :10000
+        # sends /api/ai/ to osionos-ai; left empty, release R5 shipped the service with no UI.
+        VITE_AI_URL: ${PUBLIC_ORIGIN}:10000
         VITE_PRISMATICA_URL: ${PUBLIC_SITE_ORIGIN:-${PUBLIC_ORIGIN}}
         VITE_BAAS_URL: ${PUBLIC_ORIGIN}:8443
         VITE_BAAS_API_KEY: ""
