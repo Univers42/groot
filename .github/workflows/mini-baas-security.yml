@@ -440,6 +440,7 @@ jobs:
             echo "POSTGRES_USER=postgres"
             echo "POSTGRES_PASSWORD=postgres"
             echo "POSTGRES_DB=postgres"
+            # A fresh throwaway secret per run: a literal here reads as a leaked key to gitleaks.
             echo "JWT_SECRET=$(openssl rand -hex 32)"
             echo "KONG_CORS_ORIGIN_APP=https://localhost:3000"
             echo "KONG_CORS_ORIGIN_FRONTEND=https://localhost:4322"
