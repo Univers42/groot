@@ -77,7 +77,6 @@ NET="ai-pv-net"
 PV_SUBNET="${PV_SUBNET:-10.88.7.0/24}"
 PG_CTN="ai-pv-pg"
 PGRST_CTN="ai-pv-pgrst"
-JWT_SECRET="ai-pv-verify-secret-0123456789abcdefghij"
 KEEP=0
 [ "${1:-}" = "--keep" ] && KEEP=1
 
