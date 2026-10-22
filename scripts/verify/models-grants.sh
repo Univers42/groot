@@ -30,20 +30,27 @@
 #   rt grobase's CREATE TABLE hook that re-arms new tables exists and is disabled ·
 #   u anon cannot SELECT public.users.email or password_hash, authenticated cannot SELECT password_hash
 #
-#   The account plane (models/osionos-account-foundation-migration.sql, ADR 0028):
-#   k1 the account role reaches no relation that anon does not reach, except the
-#   tables marked 'osionos:account-plane' · k2 every marked table has RLS on, its
-#   policies name no role but service_role and osionos_account_user, and its
-#   account-role policy filters on the uid helper · k3 the expected account tables
-#   exist and are marked · k4 the account indexes exist · k7 the role has the
-#   right shape and no membership beyond authenticator · k8 the role may SELECT
-#   exactly nine session columns and nothing else · k5 the role sees only its own
-#   rows (1) · k6 no forged claim set sees any (0) · K1-K6 six probes on the
-#   account plane, refused with 42501 · h also counts the functions the account
-#   role may execute · standalone the account foundation file applied alone
-#   leaves no realtime trigger, no anon/authenticated privilege and exactly the
-#   nine column grants — what the ledger runner (scripts/apply-models.sh) relies
-#   on, and what the later passes hide
+#   The account plane (models/osionos-account-foundation-migration.sql, ADR 0028),
+#   in scripts/verify/models-grants/account-checks.sql, piped after checks.sql into
+#   the same psql stream:
+#   k1 the account role holds no privilege on any relation that anon does not
+#   hold — compared PER PRIVILEGE, so an UPDATE anon lacks is a reach even when
+#   anon may SELECT the same table — except the tables marked
+#   'osionos:account-plane' · k2 every marked table has RLS on, its policies name
+#   no role but service_role and osionos_account_user, and its account-role
+#   policy filters on the uid helper, keyed on what the policy does (SELECT and
+#   DELETE read through polqual, INSERT writes through polwithcheck, UPDATE and
+#   ALL constrain the written row) · k3 the expected account tables exist and are
+#   marked · k4 the account indexes exist · k7 the role has the right shape and
+#   no membership beyond authenticator · k8 the role may SELECT exactly nine
+#   session columns and nothing else · k5 the role sees only its own rows (1) ·
+#   k6 no forged claim set sees any (0) · K1-K6 six probes on the account plane,
+#   refused with 42501 · account_secdef_exec the account role may execute no
+#   SECURITY DEFINER osionos_% function · standalone the account foundation file
+#   applied alone leaves no realtime trigger on the sessions table or on the
+#   audit table, no anon/authenticated privilege and exactly the nine column
+#   grants — what the ledger runner (scripts/apply-models.sh) relies on, and
+#   what the later passes hide
 #
 # ISOLATION
 #   Throwaway containers only (--rm --network none, no port, no volume); the live
@@ -278,6 +285,15 @@ check_standalone() {
 		fail "$1" "standalone" "could not drop public.osionos_sessions"
 		return 0
 	fi
+	# The audit table's realtime trigger is re-armed on purpose: the file claims
+	# to drop it (the table now carries ip_hash and user_agent), and nothing
+	# after the solo apply would drop it for us.
+	if ! printf '%s\n' "SELECT public.realtime_ensure_trigger('public','osionos_bridge_audit_events');" |
+		psql_stdin >"${WORK}/standalone-$1.log" 2>&1; then
+		fail "$1" "standalone" "could not re-arm the audit table's realtime trigger"
+		sed 's/^/  | /' "${WORK}/standalone-$1.log" >&2
+		return 0
+	fi
 	if ! psql_stdin <"${file}" >"${WORK}/standalone-$1.log" 2>&1; then
 		fail "$1" "standalone" "the account foundation file did not apply alone"
 		sed 's/^/  | /' "${WORK}/standalone-$1.log" >&2
@@ -287,6 +303,10 @@ check_standalone() {
 SELECT 'sessions_realtime_triggers', count(*)::text, ''
   FROM pg_trigger t
  WHERE t.tgrelid = 'public.osionos_sessions'::regclass
+   AND NOT t.tgisinternal AND t.tgfoid = to_regproc('public.realtime_notify');
+SELECT 'audit_realtime_triggers', count(*)::text, ''
+  FROM pg_trigger t
+ WHERE t.tgrelid = 'public.osionos_bridge_audit_events'::regclass
    AND NOT t.tgisinternal AND t.tgfoid = to_regproc('public.realtime_notify');
 SELECT 'sessions_anon_auth_privs', count(*)::text, ''
   FROM (VALUES ('anon'),('authenticated')) AS x(rolname)
@@ -305,6 +325,7 @@ SQL
 		return 0
 	fi
 	assert_standalone "$1" sessions_realtime_triggers 0
+	assert_standalone "$1" audit_realtime_triggers 0
 	assert_standalone "$1" sessions_anon_auth_privs 0
 	assert_standalone "$1" sessions_column_acl \
 		'id,created_at,expires_at,last_seen_at,auth_method,ip_prefix,user_agent,revoked_at,revoked_reason'
@@ -323,8 +344,11 @@ assert_standalone() {
 
 run_checks() {
 	# A checks.sql error is echoed, then read back anyway: a missing row is a FAIL.
-	if ! psql_rows <"${FIX}/checks.sql" >"${WORK}/checks-$1.out" 2>"${WORK}/checks-$1.err"; then
-		note "checks.sql did not run to completion"
+	# checks.sql and account-checks.sql go into ONE psql: one stream, so the two
+	# isolation rows stay last, and one transaction for the k5/k6 GUCs.
+	if ! cat "${FIX}/checks.sql" "${FIX}/account-checks.sql" |
+		psql_rows >"${WORK}/checks-$1.out" 2>"${WORK}/checks-$1.err"; then
+		note "the check files did not run to completion"
 		sed 's/^/  | /' "${WORK}/checks-$1.err" >&2
 	fi
 	check_count "$1" c privileged
@@ -354,6 +378,7 @@ run_checks() {
 	check_count "$1" k4 account_indexes_missing
 	check_count "$1" k7 account_role_shape
 	check_count "$1" k8 account_session_columns
+	check_count "$1" h2 account_secdef_exec
 	probe "$1" K1 authenticated "SELECT count(*) FROM public.osionos_sessions"
 	probe "$1" K2 osionos_account_user "SELECT refresh_hash FROM public.osionos_sessions"
 	probe "$1" K3 osionos_account_user "UPDATE public.osionos_sessions SET revoked_at = now()"
