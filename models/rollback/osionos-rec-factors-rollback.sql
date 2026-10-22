@@ -1,6 +1,6 @@
 -- The rollback of models/osionos-rec-factors-migration.sql (the recommender's
--- model registry, the padded factor vectors, the guarded promotion and the
--- erasure).
+-- model registry, the padded factor vectors, the guarded promotion, the
+-- erasure and the export).
 --
 -- THE RUNNER NEVER PICKS THIS FILE UP
 --   The runner's glob is "${MODELS_DIR}"/*.sql
@@ -27,10 +27,12 @@
 --   calls ai_rec_erase_user() dynamically, and the call is skipped when the
 --   function is not there. The moderation erasure is guarded the same way.
 
--- The service functions.
+-- The service functions. The export goes with the erase, and BEFORE the
+-- tables: it reads them, so the table cannot be dropped under it.
 DROP FUNCTION IF EXISTS public.ai_rec_promote(BIGINT, BOOLEAN);
 DROP FUNCTION IF EXISTS public.ai_rec_prune(INTEGER);
 DROP FUNCTION IF EXISTS public.ai_rec_erase_user(UUID);
+DROP FUNCTION IF EXISTS public.ai_rec_export_user(UUID);
 
 -- The factor tables, then the registry they hang from. The HNSW index goes
 -- with its table.

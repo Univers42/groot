@@ -5,7 +5,7 @@
 #                                                                              #
 #    Prove the recommender's model in Postgres: the registry with ONE         #
 #    champion, the zero-padded factors, the HNSW search, the guarded          #
-#    promotion, the prune, the erasure and the rollback.                        #
+#    promotion, the prune, the erasure, the export and the rollback.           #
 #                                                                              #
 # **************************************************************************** #
 #
@@ -28,6 +28,10 @@
 #   6  anon and authenticated cannot read a table and cannot call a function
 #   7  the rollback (twice) leaves none of the new objects behind and
 #      ai_erase_user still works
+#   8  the export: ai_rec_export_user hands over the user's vectors in two
+#      models UNPADDED (16 and 8 numbers, the ones inserted), the row where
+#      the user is an item, two EMPTY arrays for a user with nothing, and two
+#      empty arrays again once the erasure took the vectors away
 #
 # THE FIXTURE
 #   The roles of scripts/verify/models-grants/roles.sql, then the PRE-1e407614
@@ -82,10 +86,21 @@ U1=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
 U2=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
 U3=cccccccc-cccc-cccc-cccc-cccccccccccc
 
+# The users of check 8 (the export): UX1 has a vector in two models and is an
+# item in one, UX2 has nothing at all.
+UX1=dddddddd-dddd-dddd-dddd-dddddddddddd
+UX2=eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee
+
 # The 16 REAL coordinates of the two vectors of check 1. The rest (48) are
 # the padding, and the check proves the padding is zeros.
 U16="0.5 -0.25 0.125 1.5 -2 0.75 3.25 -0.5 0 1.125 -1.75 2.5 0.375 -0.625 4 0.0625"
 I16="1 2 -0.5 0.25 -3 0.125 0.5 2.75 -1 0.375 1.25 -0.25 0.0625 3.5 -0.75 1.5"
+
+# The REAL coordinates of the export's two vectors of check 8: 16 for the
+# 16-factor model, 8 for the 8-factor one. The export must hand them over
+# UNPADDED, so these are what it has to say.
+E16="0.5 -0.25 0.125 1.5 -2 0.75 3.25 -0.5 0 1.125 -1.75 2.5 0.375 -0.625 4 0.0625"
+E8="1.25 -0.5 2 0.125 -3 0.375 0.0625 4"
 
 # The query vector of the HNSW search of check 2: 64 coordinates.
 Q64="$(awk 'BEGIN { s = "["; for (i = 1; i <= 64; i++) s = s (i > 1 ? "," : "") (i / 10); printf "%s]", s }')"
@@ -124,6 +139,13 @@ run_file() {
 # q <sql> — the rows, one per line. A failing query prints nothing and is not
 # an error here: the check that asked for it decides.
 q() { printf '%s\n' "$1" | psql_q 2>/dev/null || true; }
+
+# export_field <user> <path> — one field of the export, as text. The path is
+# a jsonb path: 'user_vectors,0,factors'. A number comes out as its number,
+# a string without its quotes, a vector as its JSON array.
+export_field() {
+	q "SELECT public.ai_rec_export_user('${1}') #> '{${2}}' #>> '{}';"
+}
 
 # state_of <sql> — the SQLSTATE the statement was refused with; empty when the
 # statement was accepted.
@@ -264,6 +286,27 @@ close() {
 		d = a - b
 		if (d < 0) d = -d
 		exit (d <= 1e-5) ? 0 : 1
+	}'
+}
+
+# vec_close <json-array> <expected> — 0 when the JSON array holds EXACTLY the
+# expected numbers (a space-separated list), each within 1e-6, 1 otherwise.
+# The expected numbers are the ones the check INSERTED, so the comparison is
+# not the database with itself.
+vec_close() {
+	awk -v got="$1" -v want="$2" 'BEGIN {
+		gsub(/^[[:space:]]*\[/, "", got)
+		gsub(/\][^]]*$/, "", got)
+		gsub(/[[:space:]]/, "", got)
+		ng = split(got, ga, ",")
+		nw = split(want, wa, " ")
+		if (ng != nw) exit 1
+		for (i = 1; i <= ng; i++) {
+			d = ga[i] - wa[i]
+			if (d < 0) d = -d
+			if (d > 1e-6) exit 1
+		}
+		exit 0
 	}'
 }
 
@@ -759,7 +802,8 @@ check_6() {
 			}
 		done
 		for call in "public.ai_rec_promote(1, false)" "public.ai_rec_prune(2)" \
-			"public.ai_rec_erase_user('${U3}')"; do
+			"public.ai_rec_erase_user('${U3}')" \
+			"public.ai_rec_export_user('${U3}')"; do
 			if run_sql "SET ROLE ${role}; SELECT ${call};"; then
 				DETAIL="${role} could call ${call}"
 				return 1
@@ -772,7 +816,7 @@ check_6() {
 	done
 	# The positive control: service_role reads the tables and calls the
 	# functions (the erase of a user with no rows changes nothing).
-	run_sql "SET ROLE service_role; SELECT count(*) FROM public.ai_rec_models; SELECT public.ai_rec_erase_user('${U3}');" || {
+	run_sql "SET ROLE service_role; SELECT count(*) FROM public.ai_rec_models; SELECT public.ai_rec_erase_user('${U3}'); SELECT public.ai_rec_export_user('${U3}');" || {
 		DETAIL="service_role could not use the registry: $(head -1 "${WORK}/sql.err")"
 		return 1
 	}
@@ -799,7 +843,7 @@ check_7() {
 		}
 	done
 	for call in "public.ai_rec_promote(bigint,boolean)" "public.ai_rec_prune(integer)" \
-		"public.ai_rec_erase_user(uuid)"; do
+		"public.ai_rec_erase_user(uuid)" "public.ai_rec_export_user(uuid)"; do
 		left="$(q "SELECT to_regprocedure('${call}') IS NOT NULL;")"
 		[ "${left}" = "f" ] || {
 			DETAIL="${call} survived the rollback"
@@ -821,6 +865,171 @@ check_7() {
 	return 0
 }
 
+# 8 — the export: the derived vectors travel with the user's data.
+#
+#     The export is the erasure's MIRROR: it hands over the rows the erasure
+#     deletes - the user's own vectors in every model, and the rows where the
+#     user is an ITEM - UNPADDED, so a 16-factor model says 16 and not 64.
+check_8() {
+	# Two models: a 16-factor one and an 8-factor one. The registry is empty
+	# (the rollback of check 7 dropped it and the re-apply recreated it), so
+	# the 16-factor model can be the champion.
+	run_sql "INSERT INTO public.ai_rec_models (algo, factors, regularization, alpha, iterations, events_used, trained_until, metrics, is_synthetic, code_sha) VALUES
+  ('ials', 16, 0.1, 0.01, 10, 100, now(), '{\"ndcg10\": 0.30}'::jsonb, false, 'a8a8a8a'),
+  ('ials', 8, 0.1, 0.01, 10, 100, now(), '{\"ndcg10\": 0.31}'::jsonb, false, 'b8b8b8b');" || {
+		note "the models of the export failed"
+		return 1
+	}
+	m16="$(q "SELECT id FROM public.ai_rec_models WHERE code_sha = 'a8a8a8a';")"
+	m8="$(q "SELECT id FROM public.ai_rec_models WHERE code_sha = 'b8b8b8b';")"
+	if [ -z "${m16}" ] || [ -z "${m8}" ]; then
+		DETAIL="the models of the export are not in the registry"
+		return 1
+	fi
+	out="$(q "SELECT public.ai_rec_promote(${m16});")"
+	[ "${out}" = "promoted" ] || {
+		DETAIL="the promotion returned ${out:-nothing}, expected promoted"
+		return 1
+	}
+	# The user has a vector in BOTH models (16 and 8 real numbers) and is an
+	# item in the 16-factor model only.
+	run_sql "INSERT INTO public.ai_rec_user_factors (model_id, user_id, factors) VALUES
+  (${m16}, '${UX1}', '$(pad "${E16}")'::vector),
+  (${m8}, '${UX1}', '$(pad "${E8}")'::vector);
+INSERT INTO public.ai_rec_item_factors (model_id, item_kind, item_id, factors) VALUES
+  (${m16}, 'user', '${UX1}', '$(pad "${E16}")'::vector);" || {
+		note "the factor rows of the export failed"
+		return 1
+	}
+	# Two user vectors and one item row, ordered by model_id.
+	n="$(q "SELECT jsonb_array_length(public.ai_rec_export_user('${UX1}') -> 'user_vectors');")"
+	[ "${n}" = "2" ] || {
+		DETAIL="the export holds ${n:-no} user vector(s), expected 2"
+		return 1
+	}
+	n="$(q "SELECT jsonb_array_length(public.ai_rec_export_user('${UX1}') -> 'as_item');")"
+	[ "${n}" = "1" ] || {
+		DETAIL="the export holds ${n:-no} item row(s), expected 1"
+		return 1
+	}
+	# The FIRST user vector: the 16-factor champion, and the 16 numbers that
+	# were inserted - not the 64 of the stored column.
+	id="$(export_field "${UX1}" 'user_vectors,0,model_id')"
+	[ "${id}" = "${m16}" ] || {
+		DETAIL="the first user vector is the model ${id:-none}, expected ${m16}"
+		return 1
+	}
+	st="$(export_field "${UX1}" 'user_vectors,0,status')"
+	[ "${st}" = "champion" ] || {
+		DETAIL="the first user vector is ${st:-no status}, expected champion"
+		return 1
+	}
+	f="$(export_field "${UX1}" 'user_vectors,0,factors')"
+	[ "${f}" = "16" ] || {
+		DETAIL="the first user vector says ${f:-no} factors, expected 16"
+		return 1
+	}
+	tt="$(q "SELECT (public.ai_rec_export_user('${UX1}') #> '{user_vectors,0,trained_until}') IS NOT NULL;")"
+	[ "${tt}" = "t" ] || {
+		DETAIL="the first user vector has no trained_until"
+		return 1
+	}
+	n="$(q "SELECT jsonb_array_length(public.ai_rec_export_user('${UX1}') #> '{user_vectors,0,vector}');")"
+	[ "${n}" = "16" ] || {
+		DETAIL="the first user vector holds ${n:-no} number(s), expected 16 (unpadded)"
+		return 1
+	}
+	vec="$(export_field "${UX1}" 'user_vectors,0,vector')"
+	vec_close "${vec}" "${E16}" || {
+		DETAIL="the first user vector is ${vec:-empty}, expected ${E16}"
+		return 1
+	}
+	# The SECOND user vector: the 8-factor candidate, and its 8 numbers.
+	id="$(export_field "${UX1}" 'user_vectors,1,model_id')"
+	[ "${id}" = "${m8}" ] || {
+		DETAIL="the second user vector is the model ${id:-none}, expected ${m8}"
+		return 1
+	}
+	st="$(export_field "${UX1}" 'user_vectors,1,status')"
+	[ "${st}" = "candidate" ] || {
+		DETAIL="the second user vector is ${st:-no status}, expected candidate"
+		return 1
+	}
+	f="$(export_field "${UX1}" 'user_vectors,1,factors')"
+	[ "${f}" = "8" ] || {
+		DETAIL="the second user vector says ${f:-no} factors, expected 8"
+		return 1
+	}
+	n="$(q "SELECT jsonb_array_length(public.ai_rec_export_user('${UX1}') #> '{user_vectors,1,vector}');")"
+	[ "${n}" = "8" ] || {
+		DETAIL="the second user vector holds ${n:-no} number(s), expected 8 (unpadded)"
+		return 1
+	}
+	vec="$(export_field "${UX1}" 'user_vectors,1,vector')"
+	vec_close "${vec}" "${E8}" || {
+		DETAIL="the second user vector is ${vec:-empty}, expected ${E8}"
+		return 1
+	}
+	# The item row: the user as a suggested person, in the 16-factor model.
+	id="$(export_field "${UX1}" 'as_item,0,model_id')"
+	[ "${id}" = "${m16}" ] || {
+		DETAIL="the item row is the model ${id:-none}, expected ${m16}"
+		return 1
+	}
+	f="$(export_field "${UX1}" 'as_item,0,factors')"
+	[ "${f}" = "16" ] || {
+		DETAIL="the item row says ${f:-no} factors, expected 16"
+		return 1
+	}
+	vec="$(export_field "${UX1}" 'as_item,0,vector')"
+	vec_close "${vec}" "${E16}" || {
+		DETAIL="the item row is ${vec:-empty}, expected ${E16}"
+		return 1
+	}
+	# A user with nothing gets two EMPTY arrays, never null, and the export
+	# holds exactly its two keys.
+	notnull="$(q "SELECT public.ai_rec_export_user('${UX2}') IS NOT NULL;")"
+	[ "${notnull}" = "t" ] || {
+		DETAIL="the export of a user with nothing is null"
+		return 1
+	}
+	keys="$(q "SELECT string_agg(k, ',' ORDER BY k) FROM jsonb_object_keys(public.ai_rec_export_user('${UX2}')) k;")"
+	[ "${keys}" = "as_item,user_vectors" ] || {
+		DETAIL="the export holds the key(s) ${keys:-none}, expected as_item and user_vectors"
+		return 1
+	}
+	n="$(q "SELECT jsonb_array_length(public.ai_rec_export_user('${UX2}') -> 'user_vectors');")"
+	[ "${n}" = "0" ] || {
+		DETAIL="the export of a user with nothing holds ${n:-no} user vector(s), expected 0"
+		return 1
+	}
+	n="$(q "SELECT jsonb_array_length(public.ai_rec_export_user('${UX2}') -> 'as_item');")"
+	[ "${n}" = "0" ] || {
+		DETAIL="the export of a user with nothing holds ${n:-no} item row(s), expected 0"
+		return 1
+	}
+	# The erasure takes the vectors away, and the export follows: the two
+	# arrays are empty again. The erase counts 3 rows: 2 user vectors and
+	# the 1 item row - the very rows the export held.
+	erased="$(q "SELECT public.ai_rec_erase_user('${UX1}');")"
+	[ "${erased}" = "3" ] || {
+		DETAIL="the erase returned ${erased:-nothing}, expected 3 (2 user vectors, 1 item row)"
+		return 1
+	}
+	n="$(q "SELECT jsonb_array_length(public.ai_rec_export_user('${UX1}') -> 'user_vectors');")"
+	[ "${n}" = "0" ] || {
+		DETAIL="${n} user vector(s) left in the export after the erase"
+		return 1
+	}
+	n="$(q "SELECT jsonb_array_length(public.ai_rec_export_user('${UX1}') -> 'as_item');")"
+	[ "${n}" = "0" ] || {
+		DETAIL="${n} item row(s) left in the export after the erase"
+		return 1
+	}
+	DESCR="the export hands over the user's vectors unpadded (16 and 8 numbers) and empties itself with the erasure"
+	return 0
+}
+
 main() {
 	start_pg
 	note "postgres up in ${CTN}"
@@ -830,7 +1039,7 @@ main() {
 	}
 	note "fixture applied (the migration twice, the events-only database beside it)"
 
-	for fn in check_0 check_1 check_2 check_3 check_4 check_5 check_6 check_7; do
+	for fn in check_0 check_1 check_2 check_3 check_4 check_5 check_6 check_7 check_8; do
 		DETAIL=""
 		DESCR=""
 		if "${fn}"; then
