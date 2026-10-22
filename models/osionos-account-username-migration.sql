@@ -87,8 +87,9 @@ SET LOCAL lock_timeout = '5s';
 -- The one function that writes a username.
 -- SECURITY DEFINER: the account role may not write the legacy identity row,
 -- and the profile's hold guard reads the history, which the role may not
--- select. The owner is the migration's superuser, so the function writes
--- exactly the caller's own rows and nothing else.
+-- select. The owner is the migration's superuser, so the function MAY write
+-- any row; what confines it to the caller's own rows is the WHERE user_id =
+-- v_uid clause on every statement it writes, not the ownership.
 -- ON THE NORMAL PATH THE PROFILE IS WRITTEN BY P1-1's LEGACY SYNC TRIGGER,
 -- not by this function: the trigger fires on the identities UPDATE below and
 -- copies the name into the profile. The function's own UPDATE of the profile

@@ -69,14 +69,17 @@
 #   of the caller moves, p2s_hold the held name is refused to B and reclaimed by
 #   A, p2s_invalid a short, a reserved, a malformed and a null name are all
 #   22023, p2s_no_direct the role cannot write the username column itself,
-#   p2s_no_uid five forged claim sets are all 42501 and never 22P02,
+#   p2s_no_uid six forged claim sets are all 42501 and never 22P02,
 #   p2s_version_once the version moved by exactly one, p2s_keeps_typed_fields
 #   the typed bio, headline and location survive the change, p2s_case a
 #   case-only rename is a real change, p2s_no_identity a user with no
 #   identities row can still change their name, p2s_same_name the same name
 #   writes nothing and a drifted identity is brought in step, p2s_no_profile a
 #   user with no profile row gets P0002, p2s_reverse_drift the change repairs a
-#   profile that drifted the other way ·
+#   profile that drifted the other way, p2s_function_config the function sets
+#   exactly search_path=pg_catalog, public and lock_timeout=3s,
+#   p2s_taken_by_profile a name another user's profile holds is refused with
+#   23505 and nothing of the caller moves ·
 #   standalone the account foundation file applied alone leaves no realtime
 #   trigger on the sessions table or on the audit table, no anon/authenticated
 #   privilege and exactly the nine column grants — what the ledger runner
@@ -514,6 +517,8 @@ run_checks() {
 	check_count "$1" p2s_same_name p2s_same_name
 	check_count "$1" p2s_no_profile p2s_no_profile
 	check_count "$1" p2s_reverse_drift p2s_reverse_drift
+	check_count "$1" p2s_function_config p2s_function_config
+	check_count "$1" p2s_taken_by_profile p2s_taken_by_profile
 	probe "$1" K1 authenticated "SELECT count(*) FROM public.osionos_sessions"
 	probe "$1" K2 osionos_account_user "SELECT refresh_hash FROM public.osionos_sessions"
 	probe "$1" K3 osionos_account_user "UPDATE public.osionos_sessions SET revoked_at = now()"

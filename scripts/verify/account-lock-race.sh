@@ -31,17 +31,25 @@
 #        osionos_account_change_username, as the account role with forged
 #        claims, with a fresh name every round.
 #   Every statement's error output is read for 40P01 (deadlock) and 55P03
-#   (lock timeout).
+#   (lock timeout), and after every round both rows are read back: the
+#   identity row and the profile row must hold the round's name.
 #
 # THE RESULT
 #   RESULT: <n> runs, <d> deadlocks (40P01), <t> lock timeouts (55P03)
-#   Exit 0 when no round deadlocked and the username change ran in every
-#   round, 1 otherwise.
+#   Exit 0 when no round deadlocked AND every round moved the name to the
+#   round's own name, 1 otherwise. The read-back is what makes the exit code
+#   mean something: a function that writes nothing at all deadlocks nothing
+#   either, and without it this script would pass a function that never ran.
 #
 # Caveat: the file's own lock_timeout is 5 s, so a writer that holds a lock
 #   for longer than that makes the REPLAY abort with 55P03 — a failed boot
 #   until the next one, not a deadlock. The timeout is reported apart from the
 #   deadlocks, because a timeout is a budget and a deadlock is a bug.
+#
+# Caveat: the function's own lock_timeout is 3 s, so a replay that holds the
+#   identities table longer than that makes every round fail with 55P03 and
+#   no name move. The read-back catches that too: such a run exits 1 instead
+#   of reporting a race that never happened.
 #
 # Caveat: one round is one attempt at the race. A deadlock that needs a
 #   particular interleaving may not show up in 20 rounds; the round count is
@@ -52,8 +60,8 @@
 #   mini-baas / osionos containers are never read, written or stopped.
 #
 # Usage:  [GROBASE_PG_IMAGE=…] [MODELS_DIR=…] sh scripts/verify/account-lock-race.sh
-# Exit:  0 no deadlock and every leg ran · 1 a deadlock or a leg that errored ·
-#        2 docker missing
+# Exit:  0 no deadlock and every round moved the name · 1 a deadlock, a leg
+#        that errored, or a round whose name did not move · 2 docker missing
 #
 # Ponytail: P1-2s extends this with the atomic username change (one SECURITY
 #   DEFINER function that writes the identity row first and the profile
@@ -97,6 +105,12 @@ trap cleanup EXIT INT TERM
 
 psql_stdin() {
 	docker exec -i "${CTN}" psql -U "${PG_USER}" -d "${PG_DB}" -v ON_ERROR_STOP=1 -q
+}
+
+# The read-back: one row, one line, the identity's name and the profile's
+# name separated by a pipe. -At so the answer is the value itself.
+psql_at() {
+	docker exec -i "${CTN}" psql -U "${PG_USER}" -d "${PG_DB}" -v ON_ERROR_STOP=1 -q -At
 }
 
 apply() {
@@ -192,6 +206,15 @@ SQL
 		note "round ${n}: ERROR in username-${n}.err"
 		sed 's/^/  | /' "${WORK}/username-${n}.err" >&2
 	fi
+	# THE ROUND MUST HAVE MOVED THE NAME. Without this a function that writes
+	# nothing at all passes the race: no deadlock, no error, exit 0, and
+	# nothing was ever raced. Both rows are read back in a fresh session,
+	# after the change committed.
+	back="$(psql_at <"${WORK}/readback.sql" 2>/dev/null || true)"
+	if [ "${back}" != "race${n}|race${n}" ]; then
+		errors=$((errors + 1))
+		note "round ${n}: the name did not move (read back '${back}', wanted 'race${n}|race${n}')"
+	fi
 }
 
 main() {
@@ -233,6 +256,14 @@ main() {
 		note "the race user could not be created"
 		exit 2
 	}
+	# The read-back query, written once: the identity's name and the
+	# profile's name, separated by a pipe. A name that is not there reads
+	# '-' rather than nothing, so a missing row is a wrong answer and not an
+	# empty one.
+	printf '%s\n' \
+		"SELECT coalesce((SELECT username FROM public.osionos_bridge_identities WHERE user_id = '${RACE_USER}'), '-')" \
+		"    || '|' || coalesce((SELECT username FROM public.osionos_profiles WHERE user_id = '${RACE_USER}'), '-');" \
+		>"${WORK}/readback.sql"
 	i=0
 	while [ "${i}" -lt "${ROUNDS}" ]; do
 		i=$((i + 1))
@@ -241,7 +272,7 @@ main() {
 	printf 'RESULT: %s runs, %s deadlocks (40P01), %s lock timeouts (55P03)\n' \
 		"${ROUNDS}" "${deadlocks}" "${timeouts}"
 	[ "${errors}" -eq 0 ] || {
-		note "${errors} round(s) failed the username change for another reason than a deadlock or a timeout"
+		note "${errors} round(s) failed the username change: an error other than a deadlock or a timeout, or a name that did not move"
 		exit 1
 	}
 	[ "${deadlocks}" -eq 0 ] || exit 1
