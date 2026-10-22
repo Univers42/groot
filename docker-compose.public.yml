@@ -182,6 +182,13 @@ services:
   # Started only by --profile ai-vlm, which the public stack never passes.
   osionos-ai-vlm:
     profiles: !override ["ai-vlm"]
+  # Not started on public: moderation stays at the bridge's L0 + log, sentiment is off until its licence check (devil C147, C149).
+  osionos-ai-tox:
+    profiles: !override ["ai-classify"]
+  osionos-ai-sentiment:
+    profiles: !override ["ai-classify"]
+  osionos-ai-jobs:
+    profiles: !override ["ai-classify"]
 
   # Static previews for the apps node (second Funnel node). Prod target = nginx serving dist/, built
   # with every bridge/BaaS URL empty so the apps make no request outside their own origin. They
