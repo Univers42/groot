@@ -175,10 +175,7 @@ BEGIN
     -- The user's own vector, if the nightly model has seen them. A user the
     -- model has NOT seen has no row here, and the bridge folds them in from
     -- the recent items below.
-    SELECT (SELECT array_agg(x::real ORDER BY o)
-              FROM unnest(string_to_array(trim(both '[]' from f.factors::text), ','))
-                   WITH ORDINALITY AS t(x, o)
-             WHERE o <= v_model.factors)
+    SELECT (f.factors::real[])[1:v_model.factors]
       INTO v_user_vec
       FROM public.ai_rec_user_factors f
      WHERE f.model_id = v_model.id
@@ -218,7 +215,10 @@ BEGIN
                        WHERE e.user_id = p_user
                          AND e.is_synthetic = false
                          AND e.ts >= now() - interval '180 days'
-                         AND e.event <> 'not_interested'
+                         -- An impression is not an interaction: a user is shown
+                         -- far more than they touch, and impressions would fill
+                         -- the p_recent slots the likes and comments need.
+                         AND e.event NOT IN ('not_interested', 'impression')
                        GROUP BY e.item_kind, e.item_id, e.event
                   ) e
                  GROUP BY e.item_kind, e.item_id
@@ -226,10 +226,7 @@ BEGIN
                  LIMIT v_limit
             ) g
             LEFT JOIN LATERAL (
-                SELECT (SELECT array_agg(x::real ORDER BY o)
-                          FROM unnest(string_to_array(trim(both '[]' from f.factors::text), ','))
-                               WITH ORDINALITY AS t(x, o)
-                        WHERE o <= v_model.factors) AS vec
+                SELECT (f.factors::real[])[1:v_model.factors] AS vec
                   FROM public.ai_rec_item_factors f
                  WHERE f.model_id = v_model.id
                    AND f.item_kind = g.item_kind
@@ -302,10 +299,7 @@ AS $$
            f.item_id,
            f.workspace_id,
            -(f.factors <#> p_q)::real,
-           (SELECT array_agg(x::real ORDER BY o)
-              FROM unnest(string_to_array(trim(both '[]' from f.factors::text), ','))
-                   WITH ORDINALITY AS t(x, o)
-             WHERE o <= p_factors)
+           (f.factors::real[])[1:p_factors]
       FROM public.ai_rec_item_factors f
      WHERE f.model_id = p_model
        AND f.item_kind = p_kind
@@ -383,7 +377,11 @@ BEGIN
 
     RETURN QUERY
         SELECT r.item_kind, r.item_id, r.workspace_id, r.score, r.vector
-          FROM public.ai_rec_nearest_rows(p_model, v_q, v_limit, p_kind, v_factors) r;
+          FROM public.ai_rec_nearest_rows(p_model, v_q, v_limit, p_kind, v_factors) r
+         -- relaxed_order may hand rows back slightly out of order (pgvector
+         -- 0.8 README, "Iterative Index Scans"); the LIMIT is already applied
+         -- inside, so this sort is over at most 500 rows.
+         ORDER BY r.score DESC, r.item_id;
 END $$;
 
 COMMENT ON FUNCTION public.ai_rec_nearest(BIGINT, REAL[], INTEGER, TEXT) IS
