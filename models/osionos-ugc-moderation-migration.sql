@@ -6,8 +6,9 @@
 --     1. the SOFT state of a comment (public.osionos_feed_comments and
 --        public.osionos_page_comments): moderation_state, never a delete;
 --     2. the AUDIT (public.ai_moderation_events): every decision, append-only;
---     3. the QUEUE (public.ai_jobs): the subjects the classifier has not
---        looked at yet, coalescing one row per subject and kind.
+--     3. the QUEUE's triggers: they fill public.ai_jobs (the table is
+--        osionos-ai-jobs-migration.sql's) with the subjects the classifier has
+--        not looked at yet, coalescing one row per subject and kind.
 --
 -- WHY THE STATE IS SOFT (C86)
 --   The delete paths of both comment tables are HARD and CASCADE:
@@ -221,44 +222,13 @@ COMMENT ON FUNCTION public.ai_moderation_events_guard() IS
     'append-only: a decision is never rewritten and never quietly disappears.';
 
 -- -----------------------------------------------------------------------------
--- 4. The queue (C88): public.ai_jobs.
+-- 4. The queue (C88): public.ai_jobs — its TABLE is osionos-ai-jobs-migration.sql's.
 --
---    ONE ROW PER SUBJECT AND KIND — the primary key is
---    (kind, subject_kind, subject_id). A comment that is edited is not a
---    second job: it is the same row, re-queued with the sha of the new
---    content and the attempt counter back at zero.
---
---    priority: lower runs first. run_after: a backoff — a subject that failed
---    is put back in the queue at a later moment. attempts and last_error are
---    the worker's own bookkeeping.
---
---    Only one kind exists ('moderate'): the enrichment kinds (embedding,
---    summarize, classify) are a later slice, and the CHECK is what keeps them
---    out until then.
+--    One row per subject and kind; an edited comment is the same row re-queued
+--    with the sha of the new content and the attempts back at zero. The table,
+--    its index, its kinds and its grants live in osionos-ai-jobs-migration.sql,
+--    which sorts before this file: this file only FILLS the queue (section 5).
 -- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS public.ai_jobs (
-    kind           TEXT NOT NULL CHECK (kind IN ('moderate')),
-    subject_kind   TEXT NOT NULL,
-    subject_id     TEXT NOT NULL,
-    workspace_id   UUID,
-    priority       SMALLINT NOT NULL DEFAULT 5,
-    run_after      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    attempts       INTEGER NOT NULL DEFAULT 0,
-    last_error     TEXT CHECK (length(last_error) <= 500),
-    content_sha256 TEXT,
-    enqueued_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (kind, subject_kind, subject_id)
-);
-
-COMMENT ON TABLE public.ai_jobs IS
-    'The enrichment queue the classifier reads. One row per subject and kind: '
-    'the primary key coalesces the queue, so an edited subject is the same '
-    'row re-queued. content_sha256 is the sha256 of the content the subject '
-    'was queued for. service_role only.';
-
--- The worker's read: what is due, most urgent first.
-CREATE INDEX IF NOT EXISTS ai_jobs_run_after_priority_idx
-    ON public.ai_jobs (run_after, priority);
 
 -- -----------------------------------------------------------------------------
 -- 5. The enqueue triggers (C88, C89, C94).
@@ -453,30 +423,21 @@ COMMENT ON FUNCTION public.ai_jobs_enqueue_page_comments() IS
 --    above is what actually makes it append-only; the grant only says what the
 --    service needs.
 --
---    ai_jobs is a queue the worker reads, claims, fails and retires: it needs
---    the full CRUD. It is service_role only, RLS on, with a service_role
---    policy.
+--    ai_jobs closes itself in osionos-ai-jobs-migration.sql, its owner.
 --
 --    The catalog-wide revoke of osionos-service-role-only-migration.sql
 --    matches osionos\_% only, so the ai_* relations have to close themselves —
 --    and they do it here, on every replay.
 -- -----------------------------------------------------------------------------
 ALTER TABLE public.ai_moderation_events ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.ai_jobs ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS ai_moderation_events_service_role_all ON public.ai_moderation_events;
 CREATE POLICY ai_moderation_events_service_role_all ON public.ai_moderation_events
     FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
 
-DROP POLICY IF EXISTS ai_jobs_service_role_all ON public.ai_jobs;
-CREATE POLICY ai_jobs_service_role_all ON public.ai_jobs
-    FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
-
 GRANT SELECT, INSERT ON public.ai_moderation_events TO service_role;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.ai_jobs TO service_role;
 
 REVOKE ALL ON public.ai_moderation_events FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON public.ai_jobs FROM PUBLIC, anon, authenticated;
 
 -- -----------------------------------------------------------------------------
 -- 7. The erasure and the prune (C92).
