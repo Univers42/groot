@@ -18,6 +18,9 @@ imagesFlag() {
 	AUTH_TRUSTED_PROXY_HOPS=1 \
 	OSIONOS_ADMIN_EMAILS=none \
 	OSIONOS_AI_PUBLIC_DATABASE_URL=postgres://verify@mini-baas-postgres:5432/db \
+	OSIONOS_AI_PUBLIC_UPSTREAM_API_KEY=verify-only OSIONOS_AI_PUBLIC_KEK=verify-only \
+	OSIONOS_AI_PUBLIC_PLATFORM_MODELS='[{"id":"m:free","label":"m","inputMicroUsdPerMTok":0,"outputMicroUsdPerMTok":0,"default":true}]' \
+	OSIONOS_AI_PUBLIC_USER_DAILY_MICROUSD=1 OSIONOS_AI_PUBLIC_PLATFORM_DAILY_MICROUSD=1 \
 	docker compose "$@" --env-file /dev/null --profile ai config --format json |
 		python3 -c 'import json, sys; print(json.load(sys.stdin)["services"]["osionos-ai"]["environment"].get("OSIONOS_AI_IMAGES", "<unset>"))'
 }

@@ -22,6 +22,9 @@ json=$(
 	AUTH_TRUSTED_PROXY_HOPS=1 \
 	OSIONOS_ADMIN_EMAILS=none \
 	OSIONOS_AI_PUBLIC_DATABASE_URL=postgres://osionos_ai:verify@mini-baas-postgres:5432/db \
+	OSIONOS_AI_PUBLIC_UPSTREAM_API_KEY=verify-only OSIONOS_AI_PUBLIC_KEK=verify-only \
+	OSIONOS_AI_PUBLIC_PLATFORM_MODELS='[{"id":"m:free","label":"m","inputMicroUsdPerMTok":0,"outputMicroUsdPerMTok":0,"default":true}]' \
+	OSIONOS_AI_PUBLIC_USER_DAILY_MICROUSD=1 OSIONOS_AI_PUBLIC_PLATFORM_DAILY_MICROUSD=1 \
 	docker compose -f docker-compose.yml -f docker-compose.public.yml --env-file /dev/null \
 		--profile ai config --format json
 )
@@ -44,6 +47,7 @@ check "osionos-ai OSIONOS_AI_PAT is empty" "$svc.environment.OSIONOS_AI_PAT == \
 check "osionos-ai OSIONOS_AI_STT_URL is empty" "$svc.environment.OSIONOS_AI_STT_URL == \"\""
 check "osionos-bridge OSIONOS_MODERATION_ACTIONS is log" ".services[\"osionos-bridge\"].environment.OSIONOS_MODERATION_ACTIONS == \"log\""
 check "osionos-ai OSIONOS_ALLOWED_ORIGIN is the app origin" "$svc.environment.OSIONOS_ALLOWED_ORIGIN == \"https://verify.invalid:8443\""
+check "osionos-ai upstream is OpenRouter" "$svc.environment.OSIONOS_AI_UPSTREAM_BASE_URL == \"https://openrouter.ai/api/v1\""
 check "osionos-ai publishes no port" "($svc.ports // []) | length == 0"
 
 for s in osionos-ai osionos-ai-redis osionos-ai-embed osionos-ai-embed-bulk osionos-ai-indexer; do
