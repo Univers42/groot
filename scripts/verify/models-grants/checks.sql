@@ -339,7 +339,8 @@ SELECT 'colleague_edges_trigger',
 WITH fns(name, sig) AS (
   VALUES ('osionos_feed_page_counts', 'public.osionos_feed_page_counts(uuid, uuid)'),
          ('osionos_colleague_edges_on_join', 'public.osionos_colleague_edges_on_join()'),
-         ('osionos_workspace_transfer_ownership', 'public.osionos_workspace_transfer_ownership(uuid, uuid, uuid)')
+         ('osionos_workspace_transfer_ownership', 'public.osionos_workspace_transfer_ownership(uuid, uuid, uuid)'),
+         ('osionos_workspace_mark_delete', 'public.osionos_workspace_mark_delete(uuid, uuid, timestamptz, timestamptz)')
 ), fn AS (
   SELECT f.name, to_regprocedure(f.sig) AS oid FROM fns f
 )
@@ -428,3 +429,19 @@ SELECT 'moderation_columns',
 SELECT 'audit_viewer_index',
        (to_regclass('public.osionos_bridge_audit_events_provider_created_idx') IS NULL)::int,
        '';
+
+-- lifecycle_fn_settings: the two workspace-lifecycle functions run as the caller (not
+-- SECURITY DEFINER) and pin search_path and lock_timeout. Counts every function that is missing,
+-- is prosecdef, or lacks either setting.
+SELECT 'lifecycle_fn_settings', count(*), coalesce(string_agg(name, ' ' ORDER BY name), '')
+  FROM (
+    SELECT f.name
+      FROM (VALUES ('osionos_workspace_transfer_ownership', 'public.osionos_workspace_transfer_ownership(uuid, uuid, uuid)'),
+                   ('osionos_workspace_mark_delete', 'public.osionos_workspace_mark_delete(uuid, uuid, timestamptz, timestamptz)'))
+           AS f(name, sig)
+      LEFT JOIN pg_proc p ON p.oid = to_regprocedure(f.sig)
+     WHERE p.oid IS NULL
+        OR p.prosecdef
+        OR NOT EXISTS (SELECT 1 FROM unnest(coalesce(p.proconfig, ARRAY[]::text[])) c WHERE c LIKE 'search_path=%')
+        OR NOT EXISTS (SELECT 1 FROM unnest(coalesce(p.proconfig, ARRAY[]::text[])) c WHERE c LIKE 'lock_timeout=%')
+  ) AS violations;
