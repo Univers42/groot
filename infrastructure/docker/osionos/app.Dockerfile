@@ -50,6 +50,9 @@ ARG VITE_API_URL=https://localhost:4000
 ARG VITE_PRISMATICA_URL=https://localhost:4322
 ARG VITE_MAIL_APP_URL=https://localhost:3002
 ARG VITE_CALENDAR_APP_URL=https://localhost:3003
+# Since osionos 2e24e1e8 a production build has no fallback whiteboard URL, and an empty one
+# hides every whiteboard entry point; the public overlay passes "" on purpose.
+ARG VITE_WHITEBOARD_APP_URL=https://localhost:3007
 ARG VITE_REQUIRE_BRIDGE_SESSION=true
 ARG VITE_ALLOW_OFFLINE_MODE=false
 ARG VITE_PAGE_ACTION_SYNC_ENABLED=true
@@ -89,11 +92,19 @@ ARG VITE_BAAS_LIVE_MOUNTS=
 ARG VITE_BAAS_REALTIME_TOKEN=
 ARG VITE_BAAS_TENANT_ID=
 ARG VITE_CHAT_WS=true
+# Shared-space live collaboration (presence, carets, block sync). Default off: it needs a
+# realtime gateway that denies unscoped namespaces (REALTIME_NAMESPACE_FALLBACK=deny).
+ARG VITE_OSIO_COLLAB_SHARED=
 # Giphy search key (GIPHY_API in .env.local). Public beta-style key, client-side
 # by design; empty = the GIF picker shows a "not configured" toast.
 ARG VITE_GIPHY_API_KEY=
 # IDE server browser origin. Baked at build; empty = the IDE shows "not configured".
 ARG VITE_OSIONOS_IDE_URL=
+# The AI assistant is OPT-IN: empty = the app shows no AI action and talks to no
+# AI service. It is the ONLY switch (the client reads VITE_AI_URL alone, never
+# the bridge's URL) — set it in .env.local and rebuild this image to turn the
+# assistant on.
+ARG VITE_AI_URL=
 # osionos's build-time gate for the legacy second brain (src/shared/config/legacySecondBrain.ts;
 # vite.config.ts `define` reads it from the build env). "false" = every second-brain entry
 # point opens graph_render's <graph-studio>, served below under /graph-studio/<sha>/.
@@ -103,6 +114,7 @@ ENV VITE_API_URL=$VITE_API_URL \
     VITE_PRISMATICA_URL=$VITE_PRISMATICA_URL \
     VITE_MAIL_APP_URL=$VITE_MAIL_APP_URL \
     VITE_CALENDAR_APP_URL=$VITE_CALENDAR_APP_URL \
+    VITE_WHITEBOARD_APP_URL=$VITE_WHITEBOARD_APP_URL \
     VITE_REQUIRE_BRIDGE_SESSION=$VITE_REQUIRE_BRIDGE_SESSION \
     VITE_ALLOW_OFFLINE_MODE=$VITE_ALLOW_OFFLINE_MODE \
     VITE_PAGE_ACTION_SYNC_ENABLED=$VITE_PAGE_ACTION_SYNC_ENABLED \
@@ -122,15 +134,17 @@ ENV VITE_API_URL=$VITE_API_URL \
     VITE_BAAS_REALTIME_TOKEN=$VITE_BAAS_REALTIME_TOKEN \
     VITE_BAAS_TENANT_ID=$VITE_BAAS_TENANT_ID \
     VITE_LEGACY_SECOND_BRAIN=$VITE_LEGACY_SECOND_BRAIN \
-    VITE_OSIONOS_IDE_URL=$VITE_OSIONOS_IDE_URL
+    VITE_OSIONOS_IDE_URL=$VITE_OSIONOS_IDE_URL \
+    VITE_AI_URL=$VITE_AI_URL
 
 # vite's import.meta.env OBJECT (whole-object reads in the vendored realtime
 # plane + wsTransport) is populated ONLY from .env FILES, not the Dockerfile ENV,
 # and the host .env is .dockerignored. Write the realtime build env here so
 # liveRealtimeUrl()/resolveLiveRealtimeToken() get a non-empty VITE_BAAS_URL +
-# valid token and the chat WebSocket actually connects.
-RUN printf 'VITE_BAAS_URL=%s\nVITE_BAAS_REALTIME_TOKEN=%s\nVITE_CHAT_WS=%s\nVITE_GIPHY_API_KEY=%s\n' \
-      "$VITE_BAAS_URL" "$VITE_BAAS_REALTIME_TOKEN" "$VITE_CHAT_WS" "$VITE_GIPHY_API_KEY" > .env.production.local
+# valid token and the chat WebSocket actually connects. Feature flags resolve
+# against that same object (@osionos/feature-flags), so a VITE_OSIO_* flag goes here too.
+RUN printf 'VITE_BAAS_URL=%s\nVITE_BAAS_REALTIME_TOKEN=%s\nVITE_CHAT_WS=%s\nVITE_GIPHY_API_KEY=%s\nVITE_OSIO_COLLAB_SHARED=%s\n' \
+      "$VITE_BAAS_URL" "$VITE_BAAS_REALTIME_TOKEN" "$VITE_CHAT_WS" "$VITE_GIPHY_API_KEY" "$VITE_OSIO_COLLAB_SHARED" > .env.production.local
 
 # Build, then strip source maps from the shipped image (they tripled its size
 # and leak source; keep them only in local builds) and precompress static

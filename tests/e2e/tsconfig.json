@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["playwright.config.ts", "graph-studio.config.ts", "site-audit.config.ts", "lib", "specs", "graph-studio", "site-audit"]
+  "include": ["playwright.config.ts", "graph-studio.config.ts", "site-audit.config.ts", "site.config.ts", "media.config.ts", "lib", "specs", "graph-studio", "site-audit", "media"]
 }

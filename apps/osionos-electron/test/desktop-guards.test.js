@@ -12,6 +12,7 @@ const {
   inlineScriptHashes,
   frameOriginsFrom,
   rendererCsp,
+  createExternalOpenThrottle,
   editionOf,
   cspHeaderName,
   webSecurityFor,
@@ -166,6 +167,51 @@ describe("rendererCsp", () => {
     assert.ok(!frameSrc.includes("'self'"));
     assert.ok(!frameSrc.includes("app:"));
     assert.ok(frameSrc.includes("http://localhost:3002"));
+  });
+});
+
+describe("rendererCsp pinned output", () => {
+  const tail =
+    "style-src 'self' 'unsafe-inline'; " +
+    "img-src 'self' data: blob: https: http://localhost:* http://127.0.0.1:*; " +
+    "media-src 'self' blob: data: https:; " +
+    "font-src 'self' data:; " +
+    "connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*; " +
+    "worker-src 'self' blob:; ";
+  it("default opts", () => {
+    assert.equal(
+      rendererCsp(),
+      "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; " + tail + "frame-src https:; object-src 'none'; base-uri 'none'",
+    );
+  });
+  it("with frame origins and script hashes", () => {
+    assert.equal(
+      rendererCsp({ scriptHashes: ["'sha256-abc'"], frameOrigins: ["http://localhost:3002"] }),
+      "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-abc'; " +
+        tail + "frame-src https: http://localhost:3002; object-src 'none'; base-uri 'none'",
+    );
+  });
+});
+
+describe("createExternalOpenThrottle", () => {
+  it("allows 1 of 5 calls inside the interval, then one more after it", () => {
+    let t = 1000;
+    const throttle = createExternalOpenThrottle({ intervalMs: 2000, now: () => t });
+    const results = [];
+    for (let i = 0; i < 5; i++) {
+      results.push(throttle.allow());
+      t += 300;
+    }
+    assert.equal(results.filter(Boolean).length, 1);
+    t = 1000 + 2000;
+    assert.equal(throttle.allow(), true);
+    assert.equal(throttle.allow(), false);
+  });
+  it("instances do not share state", () => {
+    const a = createExternalOpenThrottle({ now: () => 5 });
+    const b = createExternalOpenThrottle({ now: () => 5 });
+    assert.equal(a.allow(), true);
+    assert.equal(b.allow(), true);
   });
 });
 

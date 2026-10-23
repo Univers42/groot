@@ -1,0 +1,8 @@
+# System rc for micromamba (installed at /etc/conda/.condarc). conda-forge is the only
+# default channel: Anaconda's `defaults` channels fall under Anaconda's terms of service,
+# and a user who never typed a channel must not land on them.
+channels:
+  - conda-forge
+default_channels:
+  - https://conda.anaconda.org/conda-forge
+channel_priority: strict

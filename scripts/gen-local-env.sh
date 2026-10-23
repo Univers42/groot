@@ -25,11 +25,16 @@
 # An empty source value is never written. Run by `make all` (env-local-ensure) and by
 # vault42-team.sh after an applied pull.
 #
-# MINTED keys (DEMO_LOGIN_PASSWORD, OSIONOS_IDE_TOKEN_SECRET, AUTH_LINK_SIGNING_KEY) are
-# local-only secrets an
-# older .env.local predates. `--sync` mints one that is absent or empty and says so by
-# name; `--check` reports it as missing. scripts/demo-login-ensure.sh then applies the
-# password to the account.
+# Four more keys are DERIVED from the host port the compose files publish
+# (OSIONOS_APP_HOST_PORT, chosen by scripts/host-ports.sh): VITE_BAAS_URL,
+# OSIONOS_ALLOWED_ORIGIN, OSIONOS_APP_URL and PUBLIC_OSIONOS_APP_URL are all the osionos
+# app's own origin, so a moved port moves them with it. They are derived keys too —
+# `--sync` touches them and nothing else.
+#
+# MINTED keys (DEMO_LOGIN_PASSWORD, OSIONOS_IDE_TOKEN_SECRET, AUTH_LINK_SIGNING_KEY)
+# are local-only secrets an older .env.local predates. `--sync` mints one that is absent
+# or empty and says so by name; `--check` reports it as missing. scripts/demo-login-ensure.sh
+# applies only the demo password.
 #
 # MEDIA keys (UNSPLASH_ACCESS_KEY, PIXABAY_API) are read by the osionos bridge only from
 # ./.env.local, yet a fresh clone holds them only in apps/osionos/app/.env (MEDIA_ENV=<path>
@@ -55,6 +60,18 @@ note() { printf '[gen-local-env] %s\n' "$1" >&2; }
 # shellcheck source=scripts/lib/envfile.sh
 . "$REPO/scripts/lib/envfile.sh"
 
+# The host port the osionos app is published on. The environment wins (make exports it);
+# .env.ports is the record scripts/host-ports.sh wrote. 3001 is the fallback.
+if [ -z "${OSIONOS_APP_HOST_PORT:-}" ]; then
+  PORTS_FILE="${HOST_PORTS_FILE:-$REPO/.env.ports}"
+  if [ -f "$PORTS_FILE" ]; then
+    OSIONOS_APP_HOST_PORT="$(get_env "$PORTS_FILE" OSIONOS_APP_HOST_PORT || true)"
+  fi
+fi
+: "${OSIONOS_APP_HOST_PORT:=3001}"
+# port_url — the osionos app's own origin, on the chosen port.
+port_url() { printf 'https://localhost:%s' "$OSIONOS_APP_HOST_PORT"; }
+
 # The declared mapping — <key in ./.env.local>=<key in apps/grobase/.env>. Only these
 # eight are derived; --check/--sync never look at any other key.
 # A "|" lists fallbacks: the Kong-facing keys follow KONG_PUBLIC_API_KEY — the credential
@@ -64,6 +81,9 @@ DERIVED="JWT_SECRET=JWT_SECRET ANON_KEY=ANON_KEY SERVICE_ROLE_KEY=SERVICE_ROLE_K
 KONG_PUBLIC_API_KEY=KONG_PUBLIC_API_KEY|ANON_KEY KONG_SERVICE_API_KEY=KONG_SERVICE_API_KEY|SERVICE_ROLE_KEY \
 SB_KONG_KEY=KONG_PUBLIC_API_KEY|ANON_KEY VITE_BAAS_KONG_KEY=KONG_PUBLIC_API_KEY|ANON_KEY \
 ADAPTER_REGISTRY_SERVICE_TOKEN=ADAPTER_REGISTRY_SERVICE_TOKEN"
+# Derived from the host port, not from $GRO_ENV: the app's own origin, four times over.
+# A moved OSIONOS_APP_HOST_PORT moves them — that is the whole point of the key set.
+PORT_KEYS="VITE_BAAS_URL OSIONOS_ALLOWED_ORIGIN OSIONOS_APP_URL PUBLIC_OSIONOS_APP_URL"
 # Minted once per machine, never derived; an absent or empty one is minted by --sync.
 MINTED="DEMO_LOGIN_PASSWORD OSIONOS_IDE_TOKEN_SECRET AUTH_LINK_SIGNING_KEY"
 # Copied from $MEDIA_ENV, never derived: they decide nothing about the exit status.
@@ -112,7 +132,7 @@ mint_missing() {
         note "minted $key (was absent) — restart osionos-bridge and osionos-ide-server to use it." ;;
       AUTH_LINK_SIGNING_KEY)
         put_env "$OUT" "$key" "$(gen)"
-        note "minted $key (was absent) — restart auth-gateway to use it." ;;
+        note "minted AUTH_LINK_SIGNING_KEY (was absent) — restart auth-gateway to use it." ;;
       *)
         put_env "$OUT" "$key" "$(gen_password)"
         note "minted $key (was absent) — make all applies it to the demo account; make demo-login prints it." ;;
@@ -147,6 +167,7 @@ media_differing() {
 
 # drift_report: one line per derived key — "sync KEY" | "drift KEY" | "missing KEY" |
 # "unknown KEY" (source empty). Key names only. Returns 1 when anything is not in sync.
+# The four PORT keys are derived too: their source is the chosen host port.
 drift_report() {
   bad=0
   for pair in $DERIVED; do
@@ -155,6 +176,13 @@ drift_report() {
     want="$(gsrc "$src")"
     if [ -z "$want" ]; then printf 'unknown %s\n' "$dst"; bad=1
     elif ! grep -q "^$dst=" "$OUT"; then printf 'missing %s\n' "$dst"; bad=1
+    elif [ "$(val "$OUT" "$dst")" = "$want" ]; then printf 'sync %s\n' "$dst"
+    else printf 'drift %s\n' "$dst"; bad=1
+    fi
+  done
+  want="$(port_url)"
+  for dst in $PORT_KEYS; do
+    if ! grep -q "^$dst=" "$OUT"; then printf 'missing %s\n' "$dst"; bad=1
     elif [ "$(val "$OUT" "$dst")" = "$want" ]; then printf 'sync %s\n' "$dst"
     else printf 'drift %s\n' "$dst"; bad=1
     fi
@@ -175,7 +203,7 @@ check_mode() {
 missing $key"; rc=1; done
   printf '%s\n' "$report" | sed 's/^/[gen-local-env]   /' >&2
   for key in $(media_differing); do note "  media $key differs from $MSRC (informational, exit status unchanged)"; done
-  if [ "$rc" -eq 0 ]; then note "in sync with $SRC (8 derived keys)."; else
+  if [ "$rc" -eq 0 ]; then note "in sync with $SRC (8 derived keys + 4 port-derived keys)."; else
     note "DRIFT — $(basename "$OUT") disagrees with $SRC. Fix: bash scripts/gen-local-env.sh --sync"
   fi
   exit "$rc"
@@ -198,6 +226,12 @@ sync_mode() {
     if printf '%s\n' "$report" | grep -qx "unknown $dst"; then unknown="$unknown $dst"
     elif printf '%s\n' "$report" | grep -qx "drift $dst\|missing $dst"; then
       put_env "$OUT" "$dst" "$(gsrc "${pair#*=}")"
+      changed="$changed $dst"
+    fi
+  done
+  for dst in $PORT_KEYS; do
+    if printf '%s\n' "$report" | grep -qx "drift $dst\|missing $dst"; then
+      put_env "$OUT" "$dst" "$(port_url)"
       changed="$changed $dst"
     fi
   done
@@ -256,14 +290,15 @@ VITE_BAAS_KONG_KEY=$PUBLIC
 ADAPTER_REGISTRY_SERVICE_TOKEN=$ADAPTER
 # Browser-facing BaaS origin — baked into the bundle by vite, so it must be a URL a
 # BROWSER can reach. Deliberately the APP'S OWN origin: the proxy mounts Kong's
-# /auth/v1 /rest/v1 /realtime/v1 /storage/v1 /query/v1 /meta/v1 on :3001 too
+# /auth/v1 /rest/v1 /realtime/v1 /storage/v1 /query/v1 /meta/v1 on the app's port too
 # (infrastructure/tls/nginx.conf), so the whole app needs exactly ONE reachable
 # port. Any other value adds a second browser-facing port that every host
 # tunnel/port-forward must also know about — and when it doesn't, the app
 # half-loads with a dead realtime socket. liveRealtimeUrl() rewrites http->ws,
-# so this also decides the socket: wss://localhost:3001/realtime/v1/ws.
+# so this also decides the socket: wss://localhost:<app port>/realtime/v1/ws.
 # Kong's own 127.0.0.1:8000 is docker-host loopback + plain HTTP: never valid here.
-VITE_BAAS_URL=https://localhost:3001
+# The port is the one scripts/host-ports.sh chose (OSIONOS_APP_HOST_PORT).
+VITE_BAAS_URL=$(port_url)
 VITE_BAAS_REALTIME_TOKEN=$PUBLIC
 VITE_CHAT_WS=true
 
@@ -280,9 +315,9 @@ AUTH_LINK_SIGNING_KEY=$(gen)
 OSIONOS_APP_SESSION_TTL_SECONDS=2592000
 # Local demo account (dev.pro.photo@gmail.com) password — applied by make all, shown by make demo-login.
 DEMO_LOGIN_PASSWORD=$(gen_password)
-OSIONOS_ALLOWED_ORIGIN=https://localhost:3001
-OSIONOS_APP_URL=https://localhost:3001
-PUBLIC_OSIONOS_APP_URL=https://localhost:3001
+OSIONOS_ALLOWED_ORIGIN=$(port_url)
+OSIONOS_APP_URL=$(port_url)
+PUBLIC_OSIONOS_APP_URL=$(port_url)
 
 # ── Web Push (RFC 8292 VAPID); empty = push dormant (off by default) ──
 OSIONOS_VAPID_PUBLIC_KEY=$VAPID_PUBLIC

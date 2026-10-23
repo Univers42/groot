@@ -11,7 +11,7 @@ on:
       - "scripts/apply-models-migrations.sh"
       - "scripts/verify/models-grants*"
       - "scripts/verify/models-grants/**"
-      - "infrastructure/makes/baas.mk"
+      - "utils/mk/baas.mk"
       - ".github/workflows/models-grants.yml"
   push:
     branches: ["main", "develop", "feat/**", "fix/**"]
@@ -20,7 +20,7 @@ on:
       - "scripts/apply-models-migrations.sh"
       - "scripts/verify/models-grants*"
       - "scripts/verify/models-grants/**"
-      - "infrastructure/makes/baas.mk"
+      - "utils/mk/baas.mk"
       - ".github/workflows/models-grants.yml"
   workflow_dispatch:
 
