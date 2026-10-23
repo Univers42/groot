@@ -18,8 +18,8 @@
 --
 -- The dedupe: an MCP call is one question per (token, tool, arguments). The
 -- existing ai_approvals_one_live_per_call keys on run_id, and a NULL run_id
--- never collides, so the MCP calls get their own partial unique index over the
--- same live statuses. A declined or expired approval frees the call again.
+-- never collides, so the MCP calls get their own partial unique index. A
+-- decided approval (executed, declined, expired) frees the call again.
 --
 -- Idempotent: ADD COLUMN IF NOT EXISTS, CREATE INDEX IF NOT EXISTS, and every
 -- constraint is guarded by pg_constraint; replayed on every boot. A column that
@@ -103,13 +103,14 @@ $$;
 
 -- -----------------------------------------------------------------------------
 -- 4. The duplicate key of an MCP call: one live question per token, tool and
---    canonical-arguments hash. The live statuses are the ones of
---    ai_approvals_one_live_per_call (the plan-items migration added 'partial'
---    there); a NULL run_id never collides with the run index.
+--    canonical-arguments hash. Unlike ai_approvals_one_live_per_call, an
+--    'executed' row does not hold the key: the run index lives as long as one
+--    run, while a token lives for months, and the same rename asked again next
+--    week is a new question. A NULL run_id never collides with the run index.
 -- -----------------------------------------------------------------------------
 CREATE UNIQUE INDEX IF NOT EXISTS ai_approvals_one_live_per_token_call
 	ON public.ai_approvals (token_id, tool, args_sha256)
-	WHERE origin = 'mcp' AND status IN ('pending', 'executing', 'executed', 'partial');
+	WHERE origin = 'mcp' AND status IN ('pending', 'executing', 'partial');
 
 -- The pending count of one token: the cap checked before an MCP write asks.
 CREATE INDEX IF NOT EXISTS ai_approvals_token_status_idx
