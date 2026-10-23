@@ -132,7 +132,7 @@ services:
         - sh
         - -c
         - >-
-          printf 'GET /healthz HTTP/1.0\r\nHost: localhost\r\n\r\n' | timeout 7 socat -t 6 - TCP:127.0.0.1:4100 | grep -q '^HTTP/1\.[01] 200'
+          printf 'GET /healthz HTTP/1.0\r\nHost: localhost\r\n\r\n' | timeout 5 socat - TCP:127.0.0.1:4100 | grep -q '^HTTP/1\.[01] 200'
       interval: 30s
       timeout: 8s
       retries: 3

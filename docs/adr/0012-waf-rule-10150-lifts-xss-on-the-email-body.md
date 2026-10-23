@@ -66,3 +66,24 @@ may send.
 - A mail whose html trips a family that was not lifted (942, 932 and so on) is still refused. That is a new ruling,
   not an extension of 10150.
 - Conditions are in groot `.claude/agent-memory/devil/verdict-waf-10150.md` and the ruling of 2026-10-17.
+
+## Amendment 2026-10-17: what the conditions changed
+
+grobase fix/waf-10150-email-body at 1ef7986a (on a42a8077):
+
+- W150-3: 10150 lifts ARGS:json.html only. json.text keeps full inspection: no text part of the ten
+  messages the gateway sends drew a hit, and `text: <script>` answers 403.
+- W150-4: the m227 fixture carries all ten messages the site gateway sends through /email/v1/send
+  (four `renderMessage` mails, two sign-in alerts, account created, three newsletter mails). Each answers
+  200 and is refused without 10150, without its 921130 line, and without its attack-xss line.
+- W150-6: case-variant keys (`Subject`, `TO`) carrying `<script>` answer 403.
+- W150-7: grobase feat/titan-mail 88c6687b, `TestBodyCannotReachSMTPHeaders`: CRLF `Bcc:` lines and
+  boundary-shaped lines in html or text stay inside the body; a CRLF subject is Q-encoded.
+- W150-8/12: image `grobase-waf:fix-10150-1ef7986a`. Its baked REQUEST-900 conf has the same sha256 as
+  the tree file (ef5464c4...). m227 ran on that image: 143 passed, 0 failed.
+- Found by W150-4: a sign-in alert whose User-Agent is `<script>alert(1)</script>` is escaped to
+  `&lt;script&gt;...`, which CRS 932235 (unix command injection) refuses. 10150 does not lift 932235.
+  The gateway is to drop attack-shaped characters from request metadata before rendering it, so
+  that the WAF is not widened.
+
+Open: W150-1 (merge after the email acl), W150-2/9/10 (the user-run b2b deploy, after PR #41 clears its hold).

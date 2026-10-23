@@ -66,26 +66,29 @@ export const login = (email: string, password: string) => gateway("/api/auth/log
 export const recover = (email: string) => gateway("/api/auth/recover", { email, turnstileToken: TURNSTILE });
 export const resend = (email: string) => gateway("/api/auth/resend-verification", { email, turnstileToken: TURNSTILE });
 
+// The sign-in code mail grobase sends (loginotp/otp.go): "Your <app> sign-in code", body "… code is 123456".
+export const LOGIN_CODE_SUBJECT = /sign-in code$/;
+
 interface MailSummary {
   ID: string;
   Subject: string;
 }
 
-/** Every message Mailpit holds for `address` with `subject`, newest first. */
-export async function mailsTo(address: string, subject: string): Promise<MailSummary[]> {
+/** Every message Mailpit holds for `address` whose subject is `subject` (exact string, or a pattern), newest first. */
+export async function mailsTo(address: string, subject: string | RegExp): Promise<MailSummary[]> {
   const api = await request.newContext();
   try {
     const res = await api.get(`${MAILPIT_URL}/api/v1/search?query=${encodeURIComponent(`to:"${address}"`)}`);
     expect(res.status(), `Mailpit search at ${MAILPIT_URL}`).toBe(200);
     const found = ((await res.json()) as { messages?: MailSummary[] }).messages ?? [];
-    return found.filter((m) => m.Subject === subject);
+    return found.filter((m) => (typeof subject === "string" ? m.Subject === subject : subject.test(m.Subject)));
   } finally {
     await api.dispose();
   }
 }
 
 /** Waits until Mailpit holds at least `count` such messages; returns them, newest first. */
-export async function waitForMails(address: string, subject: string, count = 1, timeout = 30_000): Promise<MailSummary[]> {
+export async function waitForMails(address: string, subject: string | RegExp, count = 1, timeout = 30_000): Promise<MailSummary[]> {
   await expect
     .poll(async () => (await mailsTo(address, subject)).length, { message: `${count} "${subject}" mail(s) to ${address}`, timeout })
     .toBeGreaterThanOrEqual(count);
@@ -102,6 +105,13 @@ export async function mailText(id: string): Promise<string> {
   } finally {
     await api.dispose();
   }
+}
+
+/** The 6-digit code in a sign-in code message. */
+export async function loginCodeIn(id: string): Promise<string> {
+  const code = /code is (\d{6})/.exec(await mailText(id))?.[1];
+  if (!code) throw new Error(`no 6-digit code in message ${id}`);
+  return code;
 }
 
 export interface LinkFields {
