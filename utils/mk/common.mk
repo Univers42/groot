@@ -91,6 +91,7 @@ endif
 # between two runs), but the resolver never rewrites .env.ports when its content would not
 # change: a touched mtime would restart the whole make run for nothing.
 HOST_PORT_TARGETS = all frontends-up link link-frontends-start link-frontends-up update_web public-up mail-up calendar-up drawnosaurus-up
+##@ Host ports
 .PHONY: host-ports-check
 host-ports-check: ## Validate the chosen host ports
 .env.ports: scripts/host-ports.sh host-ports-check
