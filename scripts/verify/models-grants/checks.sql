@@ -397,3 +397,26 @@ SELECT 'self_data_indexes_missing', count(*), coalesce(string_agg(e.tbl || '.' |
                     WHERE f.idx = e.idx AND f.tbl = e.tbl
                       AND f.cols = e.cols AND f.opclass = 'btree'
                       AND f.uniq = false AND f.plain AND f.key_only);
+
+-- moderation_columns: the five decision columns exist on osionos_user_reports, the decision
+-- CHECK admits exactly warn/suspend/ban/dismiss (no more, no fewer), the state-lookup index
+-- exists, and anon/authenticated reach neither the table nor any of its columns.
+SELECT 'moderation_columns',
+       (SELECT count(*) FROM unnest(ARRAY['decision','decision_until','decision_by','decision_at','decision_note']) AS col
+         WHERE NOT EXISTS (SELECT 1 FROM pg_attribute a
+                            WHERE a.attrelid = to_regclass('public.osionos_user_reports')
+                              AND a.attname = col AND a.attnum > 0 AND NOT a.attisdropped))
+     + (SELECT count(*) FROM unnest(ARRAY['warn','suspend','ban','dismiss']) AS v
+         WHERE NOT EXISTS (SELECT 1 FROM pg_constraint c
+                            WHERE c.conname = 'osionos_user_reports_decision_check'
+                              AND pg_get_constraintdef(c.oid) LIKE '%''' || v || '''%'))
+     + (SELECT count(*) FROM pg_constraint c
+         WHERE c.conname = 'osionos_user_reports_decision_check'
+           AND (SELECT count(*) FROM regexp_matches(pg_get_constraintdef(c.oid), '''[a-z]+''', 'g')) <> 4)
+     + (to_regclass('public.osionos_user_reports_subject_decision_idx') IS NULL)::int
+     + (SELECT count(*) FROM (VALUES ('anon'),('authenticated')) AS x(rolname)
+         CROSS JOIN (VALUES ('SELECT',true),('INSERT',true),('UPDATE',true),('REFERENCES',true),
+                            ('DELETE',false),('TRUNCATE',false),('TRIGGER',false)) AS p(priv, col_level)
+        WHERE has_table_privilege(x.rolname, 'public.osionos_user_reports', p.priv)
+           OR (p.col_level AND has_any_column_privilege(x.rolname, 'public.osionos_user_reports', p.priv))),
+       '';
