@@ -15,42 +15,18 @@ SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 .DEFAULT_GOAL := help
 
-MAKE_DIR := infrastructure/makes
+MAKE_DIR := utils/mk
 
-include $(MAKE_DIR)/common.mk
-include $(MAKE_DIR)/pipeline.mk
-include $(MAKE_DIR)/repo.mk
-include $(MAKE_DIR)/certs.mk
-include $(MAKE_DIR)/certs-doctor.mk
-include $(MAKE_DIR)/docker-build.mk
-include $(MAKE_DIR)/compose.mk
-include $(MAKE_DIR)/docker.mk
-include $(MAKE_DIR)/vault.mk
-include $(MAKE_DIR)/vault-invite.mk
-include $(MAKE_DIR)/vault-shared.mk
-include $(MAKE_DIR)/vault-shared-repair.mk
-include $(MAKE_DIR)/vault-session-auth.mk
-include $(MAKE_DIR)/vault-session-admin.mk
-include $(MAKE_DIR)/vault-session-tokens.mk
-include $(MAKE_DIR)/vault-session-aliases.mk
-include $(MAKE_DIR)/fly.mk
-include $(MAKE_DIR)/vault-auth.mk
-include $(MAKE_DIR)/vault-recovery.mk
-include $(MAKE_DIR)/vault42-recover.mk
-include $(MAKE_DIR)/env.mk
-include $(MAKE_DIR)/database.mk
-include $(MAKE_DIR)/app.mk
-include $(MAKE_DIR)/playground.mk
-include $(MAKE_DIR)/mail.mk
-include $(MAKE_DIR)/calendar.mk
-include $(MAKE_DIR)/drawnosaurus.mk
-include $(MAKE_DIR)/baas.mk
-include $(MAKE_DIR)/agency.mk
-include $(MAKE_DIR)/gourmand.mk
-include $(MAKE_DIR)/grobase.mk
-include $(MAKE_DIR)/grobase-link.mk
-include $(MAKE_DIR)/baas-release.mk
-include $(MAKE_DIR)/baas-verify.mk
-include $(MAKE_DIR)/prettier.mk
-include $(MAKE_DIR)/update.mk
-include $(MAKE_DIR)/e2e.mk
+# common.mk holds the variables other modules read while they are parsed and
+# pipeline.mk holds `make all`, so both load first; every other module loads
+# itself by being in the directory.
+include $(MAKE_DIR)/common.mk $(MAKE_DIR)/pipeline.mk
+include $(sort $(filter-out $(MAKE_DIR)/common.mk $(MAKE_DIR)/pipeline.mk,$(wildcard $(MAKE_DIR)/*.mk)))
+
+# Documented targets are commands, not files (./playground is a directory).
+.PHONY: $(MAKE_HELP_PHONY)
+
+# `all` is an ordered prerequisite list (secrets, backend, env, frontends,
+# healthcheck); under -j make would start them together. Nothing here is
+# written for parallel runs.
+.NOTPARALLEL:

@@ -1,4 +1,6 @@
 # Context = ./apps/osionos/app. The bridge only needs scripts/*.mjs.
+# The COPY globs would also take the unit tests that sit beside the modules.
+scripts/*.test.mjs
 node_modules
 **/node_modules
 .git

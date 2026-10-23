@@ -151,6 +151,7 @@ function rendererCsp(opts) {
     "script-src " + scriptSrc,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https: http://localhost:* http://127.0.0.1:*",
+    "media-src 'self' blob: data: https:",
     "font-src 'self' data:",
     "connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*",
     "worker-src 'self' blob:",
@@ -160,7 +161,26 @@ function rendererCsp(opts) {
   ].join("; ");
 }
 
+// Third-party iframes can call window.open without a user gesture; each call would otherwise open a system-browser tab.
+// Caveat: time-based, not gesture-based - a genuine click within 2 s of an earlier open is dropped (user clicks again),
+// and a hostile page still gets one tab per interval. State is per throttle instance, so callers keep one per WebContents.
+function createExternalOpenThrottle(opts) {
+  const o = opts || {};
+  const intervalMs = o.intervalMs === undefined ? 2000 : o.intervalMs;
+  const now = o.now || Date.now;
+  let last = null;
+  return {
+    allow() {
+      const t = now();
+      if (last !== null && t - last < intervalMs) return false;
+      last = t;
+      return true;
+    },
+  };
+}
+
 module.exports = {
+  createExternalOpenThrottle,
   isExternalHttpUrl,
   isAppPageUrl,
   isAllowedSubframeUrl,

@@ -36,9 +36,10 @@ services:
           - mailpit
           - mini-baas-realtime
     # A real request through the relay to Kong: a dead tunnel or a moved container shows
-    # here, a listening socat alone would not. socat stops reading 0.5 s after it has sent
-    # the request unless told otherwise, so a link slower than that (a phone handover) read
-    # as unhealthy; -t 6 waits for the answer.
+    # here, a listening socat alone would not. -t 6 and shut-none: by default socat half-closes
+    # when the request ends and waits 0.5 s for the answer; over Tailscale Funnel a half-closed
+    # request gets a 502 (measured 2026-10-15: 2/6 checks passed before, 6/6 after), and a slow
+    # link (a phone handover) needs longer than 0.5 s.
     # Ponytail: an answer slower than 6 s still reads as unhealthy (compose timeout is 8 s).
     healthcheck:
       test:
@@ -46,7 +47,7 @@ services:
         - sh
         - -c
         - >-
-          printf 'GET / HTTP/1.0\r\nHost: localhost\r\n\r\n' | timeout 7 socat -t 6 - TCP:127.0.0.1:8000 | grep -q '^HTTP/'
+          printf 'GET / HTTP/1.0\r\nHost: localhost\r\n\r\n' | timeout 7 socat -t 6 - TCP:127.0.0.1:8000,shut-none | grep -q '^HTTP/'
       interval: 30s
       timeout: 8s
       retries: 3
@@ -113,7 +114,9 @@ services:
         aliases:
           - osionos-ide-server
     # The link owner's uid (make link sets it): ssh makes the forwarded socket 0600 in a 0700 dir,
-    # and root without CAP_DAC_OVERRIDE gets EACCES on it (measured 2026-10-13).
+    # and root without CAP_DAC_OVERRIDE gets EACCES on it (measured 2026-10-13). On rootless
+    # Docker make link sets 0: container root is the owner there, and the owner's own uid is
+    # unmapped inside the container (DOCKER_ROOTLESS, common.mk).
     user: "${GROBASE_LINK_UID:-1000}:${GROBASE_LINK_GID:-1000}"
     read_only: true
     cap_drop: [ALL]

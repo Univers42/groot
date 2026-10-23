@@ -13,7 +13,10 @@ services:
   local-https-proxy:
     image: public.ecr.aws/docker/library/nginx:1.27-alpine
     volumes:
+      # The nginx config is tracked; the osionos origin override is written by
+      # scripts/host-ports.sh resolve into host-ports.d/osionos-origin.conf.
       - ./infrastructure/tls/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infrastructure/tls/host-ports.d:/etc/nginx/host-ports.d:ro
       - ./apps/grobase/certs:/etc/track-binocle/certs:ro
     ports:
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${OPPOSITE_OSIRIS_HOST_PORT:-4322}:4322"
@@ -80,6 +83,9 @@ services:
       OSIONOS_BRIDGE_PORT: 4000
       OSIONOS_APP_URL: ${OSIONOS_APP_URL:-https://localhost:3001}
       OSIONOS_ALLOWED_ORIGIN: ${OSIONOS_ALLOWED_ORIGIN:-https://localhost:3001}
+      # Account administrators, comma-separated emails; empty = nobody. The bridge
+      # ships without any administrator, so a deployment that wants one names it here.
+      OSIONOS_ADMIN_EMAILS: ${OSIONOS_ADMIN_EMAILS:-}
       # BaaS reads/writes go to the grobase-owned mini-baas Kong over the
       # external mini-baas network (container-name DNS).
       OSIONOS_BAAS_URL: http://mini-baas-kong:8000
@@ -91,6 +97,14 @@ services:
       AUTH_GATEWAY_URL: ${AUTH_GATEWAY_URL:-http://auth-gateway:8787}
       OSIONOS_BRIDGE_PERSISTENCE: ${OSIONOS_BRIDGE_PERSISTENCE:-auto}
       OSIONOS_BRIDGE_REQUIRE_BAAS: ${OSIONOS_BRIDGE_REQUIRE_BAAS:-false}
+      # P0-4 session/account-plane state is shared with the auth-gateway, which
+      # already uses this Redis. Blank falls back to the bridge's bounded
+      # in-memory store (the desktop/local case).
+      OSIONOS_BRIDGE_REDIS_URL: ${OSIONOS_BRIDGE_REDIS_URL:-redis://mini-baas-redis:6379}
+      # local-https-proxy sets X-Real-IP (infrastructure/tls/nginx.conf:44), so
+      # the bridge must read that header rather than trusting a client-supplied
+      # X-Forwarded-For. A direct container call carries no such header.
+      OSIONOS_BRIDGE_CLIENT_IP_HEADER: ${OSIONOS_BRIDGE_CLIENT_IP_HEADER:-x-real-ip}
       CLAUDE_BIN: ${CLAUDE_BIN:-claude}
       # LiveKit video tokens (scripts/bridge-rtc.mjs): same key pair as the
       # livekit service below; LIVEKIT_URL is the in-network admin/twirp base,
@@ -121,6 +135,9 @@ services:
       # osionos 0cfa815, which would read a blank value as an empty URL.
       OSIONOS_QUERY_ROUTER_URL: ${OSIONOS_QUERY_ROUTER_URL:-http://mini-baas-query-router:4001}
       OSIONOS_ADAPTER_REGISTRY_URL: ${OSIONOS_ADAPTER_REGISTRY_URL:-http://mini-baas-adapter-registry-go:3021}
+      # A direct link lists the tenant's mounts on tenant-control's self-serve route with the
+      # tenant key (over Funnel the WAF refuses /admin/v1); blank = the registry above.
+      OSIONOS_TENANT_MOUNTS_URL: ${OSIONOS_TENANT_MOUNTS_URL:-}
       # Agency org workspace: scopes /api/people + default feed topic.
       OSIONOS_ORG_WORKSPACE_ID: ${OSIONOS_ORG_WORKSPACE_ID:-b1a0c1e5-0000-4000-a000-000000000001}
       # IDE code runner (P3) — DOUBLE-GATED, default DISABLED. The /api/ide/run
@@ -139,6 +156,9 @@ services:
       # Comma-separated account ids allowed a sandbox (a sandbox is a shell on a shared
       # host, so access is opt-in). Empty = nobody. The mint route checks this.
       OSIONOS_IDE_ALLOWED_SUBJECTS: ${OSIONOS_IDE_ALLOWED_SUBJECTS:-}
+      # allowlist (default) | approved | verified (BLOCKED, ide-sandbox/README.md) | off.
+      OSIONOS_IDE_ACCESS: ${OSIONOS_IDE_ACCESS:-}
+      OSIONOS_IDE_DENIED_SUBJECTS: ${OSIONOS_IDE_DENIED_SUBJECTS:-}
       # Signs the 15-minute IDE token the mint route issues. At least 32 bytes and
       # never OSIONOS_APP_SESSION_SECRET (ide-token.mjs refuses otherwise); the IDE
       # server verifies with the same value.
@@ -268,9 +288,9 @@ services:
         VITE_PRISMATICA_URL: https://localhost:${OPPOSITE_OSIRIS_HOST_PORT:-4322}
         VITE_MAIL_APP_URL: https://localhost:${MAIL_HOST_PORT:-3002}
         VITE_CALENDAR_APP_URL: https://localhost:${CALENDAR_HOST_PORT:-3003}
-        # The Whiteboard embed tab (drawnosaurus). Baked at build like the two above, so
-        # the tab is gated by the osio.whiteboard flag (default OFF), not by this being
-        # empty — see featureFlags.ts. Turn on per-session with ?osio.whiteboard=1.
+        # The Whiteboard (drawnosaurus). Baked at build like the two above; empty hides every
+        # whiteboard entry point (osionos appUrls.ts, whiteboardAvailability.ts), and the
+        # osio.whiteboard flag (default ON) is only a kill-switch: ?osio.whiteboard=0.
         VITE_WHITEBOARD_APP_URL: https://localhost:${DRAWNOSAURUS_HOST_PORT:-3007}
         # IDE server browser origin. Baked at build; empty = the IDE shows "not configured".
         VITE_OSIONOS_IDE_URL: ${VITE_OSIONOS_IDE_URL:-https://localhost:8446}
@@ -294,6 +314,11 @@ services:
         VITE_BAAS_GRAPH_GENERATORS: ${VITE_BAAS_GRAPH_GENERATORS:-}
         VITE_BAAS_NOTES_TABLE: ${VITE_BAAS_NOTES_TABLE:-}
         VITE_BAAS_OVERLAY_TABLE: ${VITE_BAAS_OVERLAY_TABLE:-}
+        # The AI assistant is OPT-IN: empty = the app shows no AI action and
+        # talks to no AI service. Set VITE_AI_URL (https://localhost:4000 in
+        # dev) and rebuild this image to turn it on — the only switch, on both
+        # sides (src/features/ai/api/aiClient.ts reads VITE_AI_URL alone).
+        VITE_AI_URL: ${VITE_AI_URL:-}
     expose:
       - "80"
     depends_on:
@@ -309,6 +334,711 @@ services:
       retries: 20
     restart: unless-stopped
     mem_limit: 128m
+
+  # ---------------------------------------------------------------------------
+  # The AI plane — OPT-IN (compose profile `ai`).
+  #
+  # A plain `docker compose up` starts NONE of these six: the profile is
+  # gated, so the stack behaves exactly as before until someone asks for the
+  # assistant with `docker compose --profile ai up -d --build`.
+  #
+  # The service is the osionos app repo's own services/osionos-ai, packaged by
+  # infrastructure/docker/osionos/ai.Dockerfile. It is reached from the
+  # browser through the :4000 vhost of local-https-proxy (/api/ai/ -> the
+  # service, SSE unbuffered) — no published port of its own.
+  # ---------------------------------------------------------------------------
+
+  # osionos-ai — the assistant service: conversations, runs, the model gateway.
+  osionos-ai:
+    image: ${OSIONOS_AI_IMAGE:-track-binocle/osionos-ai:local}
+    profiles: ["ai"]
+    build:
+      context: ./apps/osionos/app
+      dockerfile: ../../../infrastructure/docker/osionos/ai.Dockerfile
+    env_file:
+      - path: ./.env.local
+        required: false
+      # secrets injected at up-time from ./.env.local: OSIONOS_APP_SESSION_SECRET
+      # (the secret the bridge signs the session tokens with) and SERVICE_ROLE_KEY
+      # (what the session-cutoff poller reads). They are NOT in `environment:`
+      # below on purpose: an entry there overrides the env_file, and an empty
+      # default would clobber the real secret.
+    environment:
+      OSIONOS_AI_PORT: 4300
+      OSIONOS_ALLOWED_ORIGIN: ${OSIONOS_ALLOWED_ORIGIN:-https://localhost:3001}
+      # BaaS reads/writes go to the grobase-owned mini-baas Kong over the
+      # external mini-baas network (container-name DNS) — the bridge's URL.
+      OSIONOS_BAAS_URL: http://mini-baas-kong:8000
+      # The dev stack's own Postgres (the `osionos-ai-db` service below).
+      # Point this at a real grobase Postgres in .env.local to get the real
+      # pages and workspace members.
+      # The dev password travels as PGPASSWORD, which node-postgres reads when the
+      # URL carries none, so no URL in this file holds a literal password.
+      OSIONOS_AI_DATABASE_URL: '${OSIONOS_AI_DATABASE_URL:-postgres://postgres@osionos-ai-db:5432/osionos_ai}'
+      PGPASSWORD: ${OSIONOS_AI_DB_PASSWORD:-osionos-ai-dev}
+      # The dev stack's own Redis (the `osionos-ai-redis` service below).
+      OSIONOS_AI_REDIS_URL: ${OSIONOS_AI_REDIS_URL:-redis://osionos-ai-redis:6379}
+      # The upstream: the local llama.cpp by default, OpenRouter (or anything
+      # OpenAI-compatible) when OSIONOS_AI_UPSTREAM_BASE_URL says so.
+      OSIONOS_AI_UPSTREAM_BASE_URL: ${OSIONOS_AI_UPSTREAM_BASE_URL:-http://osionos-ai-llm:8080/v1}
+      # The embedder: the same local TEI the indexer uses, for the query
+      # embeddings of a retrieval. NOT a hard dependency — a run that starts
+      # while it is down answers without sources (degraded, not broken).
+      OSIONOS_AI_EMBED_URL: http://osionos-ai-embed:80
+      # The bridge, for the bytes of an image attached to a run: fetched with
+      # the caller's token, so the bridge's own read rules decide. Required in
+      # production (src/config.ts refuses to start without it).
+      OSIONOS_AI_BRIDGE_URL: http://osionos-bridge:4000
+      # The platform allowlist: ONE model, the local one, free.
+      OSIONOS_AI_PLATFORM_MODELS: '${OSIONOS_AI_PLATFORM_MODELS:-[{"id":"qwen3-4b","label":"Qwen3 4B (local)","inputMicroUsdPerMTok":0,"outputMicroUsdPerMTok":0,"default":true}]}'
+      # The speech-to-text server of the dictation: INTERNAL, on the network
+      # that only it and this service join. Without it the dictation answers
+      # 503 voice_unavailable — the assistant works, the dictation does not.
+      OSIONOS_AI_STT_URL: http://osionos-ai-stt:8000
+      OSIONOS_AI_STT_MODEL: ${OSIONOS_AI_STT_MODEL:-Systran/faster-whisper-small}
+      # The deadline of one transcription, and the seconds of audio a user may
+      # dictate in a day.
+      OSIONOS_AI_STT_TIMEOUT_MS: ${OSIONOS_AI_STT_TIMEOUT_MS:-20000}
+      OSIONOS_AI_STT_SECONDS_PER_DAY: ${OSIONOS_AI_STT_SECONDS_PER_DAY:-600}
+      # Image generation (M1): OFF unless OSIONOS_AI_IMAGES=on, and the engine
+      # is the `osionos-ai-sd` service of the `ai-gpu-vulkan` profile. ai-dev
+      # only: the public overlay forces it empty until the prompt and output
+      # gates exist (devil C70/C72/C73; scripts/verify/ai-images-public-off.sh).
+      OSIONOS_AI_IMAGES: ${OSIONOS_AI_IMAGES:-}
+      OSIONOS_AI_IMAGE_URL: http://osionos-ai-sd:1234/v1
+      # The price of one image on the ledger (C74): the local engine costs no
+      # money, but an image that books 0 never reaches the cap of a day.
+      OSIONOS_AI_IMAGE_MICROUSD: ${OSIONOS_AI_IMAGE_MICROUSD:-2000}
+      # The gate of the image prompt (C72), L1: the guard service.
+      OSIONOS_AI_PROMPT_GUARD_URL: http://osionos-ai-guard:8080
+      # The name the guard answers to (the alias of its llama-server).
+      OSIONOS_AI_PROMPT_GUARD_MODEL: guard
+      # The models of the output check (C73): the dir of the two classifiers.
+      OSIONOS_AI_IMAGE_CHECK_DIR: /image-check
+      # Describe image (M7): the local VLM, INTERNAL. Unset = the route is a 404.
+      # The public overlay forces it empty until the user decides.
+      OSIONOS_AI_VLM_URL: http://osionos-ai-vlm:8080
+    expose:
+      - "4300"
+    # The two classifiers of the output check, read-only: the service loads
+    # them at boot and never writes to them.
+    volumes:
+      - osionos_ai_image_check:/image-check:ro
+    networks:
+      - default
+      - mini-baas
+      # The speech-to-text server is on this network, and on no other: it is
+      # unreachable from the bridge, from the web container and from the host.
+      - osionos-ai-stt-net
+      # The image engine, the same way.
+      - osionos-ai-sd-net
+      # The guard of the image prompt, the same way.
+      - osionos-ai-guard-net
+      # The VLM of "Describe image", the same way.
+      - osionos-ai-vlm-net
+    depends_on:
+      osionos-ai-db:
+        condition: service_healthy
+      osionos-ai-redis:
+        condition: service_healthy
+      # The embedder is NOT waited for (service_started, not service_healthy):
+      # retrieval degrades to no sources when it is down, so a run must never
+      # be held up by it.
+      osionos-ai-embed:
+        condition: service_started
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "fetch(''http://127.0.0.1:4300/api/ai/health'').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"',
+        ]
+      interval: 30s
+      start_interval: 2s
+      timeout: 3s
+      start_period: 45s
+      retries: 24
+    restart: unless-stopped
+    mem_limit: 512m
+
+  # osionos-ai-db — the dev stack's own Postgres for the AI tables. grobase's
+  # Postgres is not on this daemon (link mode reaches it through a relay), so
+  # the AI service needs a database of its own here. The init files are
+  # applied on the FIRST start of an empty volume, in this order: the stand-in
+  # (the osionos tables the page context reads), then the AI migration, then
+  # the RAG migration (the index the indexer writes).
+  osionos-ai-db:
+    image: pgvector/pgvector:0.8.0-pg16
+    profiles: ["ai"]
+    environment:
+      POSTGRES_DB: osionos_ai
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${OSIONOS_AI_DB_PASSWORD:-osionos-ai-dev}
+    volumes:
+      - osionos_ai_db:/var/lib/postgresql/data
+      - ./infrastructure/docker/osionos/ai-db-init/00-standin.sql:/docker-entrypoint-initdb.d/00-standin.sql:ro
+      - ./models/osionos-ai-migration.sql:/docker-entrypoint-initdb.d/10-osionos-ai.sql:ro
+      # The RAG index: the chunks, the change queue, the ACL triggers. It
+      # needs ONLY what the stand-in creates: the `osionos_pages` table (its
+      # triggers and its backfill read it) and the three roles it grants to
+      # (service_role) and revokes from (anon, authenticated). It creates the
+      # `vector` extension itself and reads nothing from 10-osionos-ai.sql.
+      - ./models/osionos-ai-rag-migration.sql:/docker-entrypoint-initdb.d/20-osionos-ai-rag.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d osionos_ai"]
+      interval: 30s
+      start_interval: 2s
+      timeout: 3s
+      start_period: 10s
+      retries: 12
+    networks:
+      - default
+    restart: unless-stopped
+    mem_limit: 512m
+
+  # osionos-ai-redis — the run streams and the rate counters. Every key of the
+  # service carries a TTL, so the eviction policy can be volatile-lru.
+  osionos-ai-redis:
+    image: redis:7-alpine
+    profiles: ["ai"]
+    command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "volatile-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      start_interval: 2s
+      timeout: 3s
+      start_period: 5s
+      retries: 12
+    networks:
+      - default
+    restart: unless-stopped
+    mem_limit: 128m
+
+  # osionos-ai-llm — the dev chat model: llama.cpp serving Qwen3 4B on the
+  # CPU, no API key. The model is downloaded on the FIRST start (~2.5 GB) into
+  # the named volume below, so the first answer waits for it. The image tag is
+  # pinned to a release that was at least 7 days old when this was written
+  # (b11580, 2026-10-13): a fresh build never runs an unreviewed binary.
+  osionos-ai-llm:
+    image: ghcr.io/ggml-org/llama.cpp:server-b11580
+    profiles: ["ai"]
+    command:
+      [
+        "-hf",
+        "unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M",
+        "--alias",
+        "qwen3-4b",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8080",
+        "-c",
+        "8192",
+        "-t",
+        "8",
+        "--jinja",
+      ]
+    environment:
+      LLAMA_CACHE: /models
+    volumes:
+      - osionos_ai_models_llm:/models
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      start_interval: 10s
+      timeout: 5s
+      # The model download alone takes minutes on a cold volume.
+      start_period: 900s
+      retries: 12
+    networks:
+      - default
+    restart: unless-stopped
+    mem_limit: 6g
+    cpus: 8
+
+  # osionos-ai-embed — the local embedder of the QUERIES: Hugging Face TEI on
+  # the CPU, serving intfloat/multilingual-e5-small (384 dims) for the query
+  # embeddings of a retrieval. The model is ALREADY cached in the named volume
+  # below, so a first start downloads nothing.
+  # The image tag is pinned to a release of 2026-09-15: a fresh pull never
+  # runs an unreviewed binary.
+  # NO published port: the embedder is reached over the internal network
+  # only, the index never leaves this host.
+  osionos-ai-embed:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4
+    profiles: ["ai"]
+    command: ["--model-id", "intfloat/multilingual-e5-small", "--port", "80"]
+    volumes:
+      - osionos_ai_models_tei:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:80/health"]
+      interval: 30s
+      start_interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 12
+    networks:
+      - default
+    restart: unless-stopped
+    # The caps of osionos-ai-llm, the measurement behind them: query p95
+    # 9.24 ms and backfill 18.2 chunks/s on 8 CPUs (osionos repo branch
+    # feat/ai-spike-gateway, services/osionos-ai/spikes/local-models/RESULTS.md).
+    # The CPU is SPLIT with the bulk embedder below (3 + 5): this one answers
+    # the queries of the people, the other one the backfill. The measurement
+    # behind the split is in the osionos repo branch feat/ai-indexer-throughput
+    # (services/osionos-ai/spikes/indexer/RESULTS.md): with ONE shared
+    # embedder the p95 of an interactive query went from 147 ms to 864 ms
+    # during a backfill; with the split it is 10.8 ms, and the backfill is
+    # 41 % faster than the "before".
+    mem_limit: 6g
+    cpus: 3
+
+  # osionos-ai-embed-bulk — the SECOND local embedder: the SAME image and the
+  # SAME model as the one above, and the SAME volume — READ-ONLY, it only
+  # reads the model, it never writes to it. It is the one the INDEXER asks
+  # (OSIONOS_AI_EMBED_BULK_URL): a backfill sends calls of thirty-two inputs,
+  # the service answers the calls in the order it received them, and a query
+  # that lands during one waits for the whole call. Two instances of the same
+  # model (never two models: the vectors of the bulk and of the query have to
+  # live in the same space) and the CPU split between them, so the queries of
+  # the people never wait for a backfill.
+  # The indexer falls back to OSIONOS_AI_EMBED_URL when this one is not set,
+  # so a deployment without it behaves exactly as before.
+  osionos-ai-embed-bulk:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4
+    profiles: ["ai"]
+    command: ["--model-id", "intfloat/multilingual-e5-small", "--port", "80"]
+    volumes:
+      - osionos_ai_models_tei:/data:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:80/health"]
+      interval: 30s
+      start_interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 12
+    networks:
+      - default
+    restart: unless-stopped
+    # The measurement behind the split (osionos repo branch
+    # feat/ai-indexer-throughput, services/osionos-ai/spikes/indexer/RESULTS.md):
+    # the backfill does NOT slow the queries down any more, and it is not
+    # slower than the one shared embedder was. The split is 3 + 5: the query
+    # embedder needs a core or two for the load of a few people, and the bulk
+    # embedder takes the rest — the ROUND bounds the backfill, not the
+    # embedder, so the third CPU of the bulk one would buy nothing.
+    mem_limit: 6g
+    cpus: 5
+
+  # osionos-ai-tox — the toxicity classifier of the moderation worker (M4):
+  # textdetox/xlmr-large-toxicity-classifier-v2 on the same TEI image as the
+  # embedders (pinned by digest too), CPU, `/predict`.
+  #
+  # INTERNAL: it joins `osionos-ai-classify-net` (internal: true, NO egress)
+  # and nothing else. NO published port: only osionos-ai-jobs reaches it. The
+  # `ai` profile only; the public overlay moves it to `ai-classify`, which
+  # the public stack never passes (C85: public moderation stays at L0 + log).
+  #
+  # The model is pinned: revision 38ab1b77bd3ff7779777cfa5cda203d9912b14b9,
+  # model.safetensors sha256 fa9c7ecbf7df7008f04051c22445b39e01513bcc81edca857a6e9d33a8e8542c
+  # (spikes/a1/models.lock, tox-xlmr-large). It is PRE-FETCHED into the named
+  # volume below, the only step of this service with egress. It runs OUTSIDE
+  # the service: the service itself is offline and on an internal network.
+  # Caveat: written from the huggingface_hub cache layout, not yet run end to
+  # end here; check the sha256 of the weight file after it.
+  #
+  #   docker run --rm -v osionos_ai_models_tox:/data python:3.12-slim sh -c \
+  #     "pip install -q huggingface_hub==0.36.0 && python -c \"from huggingface_hub import snapshot_download; \
+  #       snapshot_download('textdetox/xlmr-large-toxicity-classifier-v2', revision='38ab1b77bd3ff7779777cfa5cda203d9912b14b9', cache_dir='/data')\""
+  #
+  osionos-ai-tox:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d
+    profiles: ["ai"]
+    command: ["--model-id", "textdetox/xlmr-large-toxicity-classifier-v2", "--revision", "38ab1b77bd3ff7779777cfa5cda203d9912b14b9", "--port", "80"]
+    environment:
+      # The model is already in the volume: the server never reaches the net.
+      HF_HUB_OFFLINE: "1"
+    volumes:
+      - osionos_ai_models_tox:/data:ro
+    expose:
+      - "80"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:80/health"]
+      interval: 30s
+      start_interval: 10s
+      timeout: 5s
+      start_period: 120s
+      retries: 12
+    networks:
+      - osionos-ai-classify-net
+    restart: unless-stopped
+    # RSS 3.38 GiB after the A1 encoder run (spikes/a1/results/encoders/RESULTS.md:35),
+    # but 6.4 GiB was seen during a long spike run: the limit covers that peak.
+    # Caveat: both are A1 batch shapes; a heavier batch can still pass 7g, and
+    # the restart policy then brings it back. Raise it if `docker stats` says so.
+    mem_limit: 7g
+    cpus: 3
+
+  # osionos-ai-sentiment — the sentiment classifier of the jobs worker (M6):
+  # cardiffnlp/twitter-xlm-roberta-base-sentiment-multilingual on the same TEI
+  # image, CPU, `/predict`. Same isolation as osionos-ai-tox: internal network,
+  # no port, `ai` profile only. The model card declares NO licence: the public
+  # overlay keeps it off until that check is done (devil C147, C149).
+  #
+  # The model is pinned: revision 82107f4ccba672c9ab1eee538e727e462cad21de,
+  # pytorch_model.bin sha256 15fcf039e96406ea60c56206664e597346338f5ac8988048d5ded2e69b4d2684
+  # (spikes/a1/models.lock, sent-xlmr-cardiff). PRE-FETCHED into the named
+  # volume below, the only step of this service with egress.
+  # Caveat: written from the huggingface_hub cache layout, not yet run end to
+  # end here; check the sha256 of the weight file after it.
+  #
+  #   docker run --rm -v osionos_ai_models_sentiment:/data python:3.12-slim sh -c \
+  #     "pip install -q huggingface_hub==0.36.0 && python -c \"from huggingface_hub import snapshot_download; \
+  #       snapshot_download('cardiffnlp/twitter-xlm-roberta-base-sentiment-multilingual', revision='82107f4ccba672c9ab1eee538e727e462cad21de', cache_dir='/data')\""
+  #
+  osionos-ai-sentiment:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d
+    profiles: ["ai"]
+    command: ["--model-id", "cardiffnlp/twitter-xlm-roberta-base-sentiment-multilingual", "--revision", "82107f4ccba672c9ab1eee538e727e462cad21de", "--port", "80"]
+    environment:
+      # The model is already in the volume: the server never reaches the net.
+      HF_HUB_OFFLINE: "1"
+    volumes:
+      - osionos_ai_models_sentiment:/data:ro
+    expose:
+      - "80"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:80/health"]
+      interval: 30s
+      start_interval: 10s
+      timeout: 5s
+      start_period: 120s
+      retries: 12
+    networks:
+      - osionos-ai-classify-net
+    restart: unless-stopped
+    # RSS 2.32 GiB (spikes/a1/results/encoders/RESULTS.md:68, osionos PR #96)
+    # + 30 % = 3.0 GiB.
+    mem_limit: 3g
+    cpus: 2
+
+  # osionos-ai-stt — the speech-to-text server of the dictation: speaches
+  # (MIT), serving Systran/faster-whisper-small on the CPU.
+  #
+  # INTERNAL: it joins `osionos-ai-stt-net` (internal: true, NO egress) and
+  # nothing else — not the default network, not mini-baas. It has NO published
+  # port: only osionos-ai reaches it, over the internal network.
+  #
+  # The image is pinned to a release and to a digest:
+  #   ghcr.io/speaches-ai/speaches:0.8.3-cpu
+  #   sha256:21e3df06d842fb7802ab470dd77c25f0e8c0d22950e8d8c6ae886e851af53ef8
+  # The image config was built on 2025-09-19, well over the seven days a
+  # fresh build never runs an unreviewed binary.
+  #
+  # The model is pinned too:
+  #   Systran/faster-whisper-small, revision 536b0662742c02347bc0e980a01041f333bce120
+  #   model.bin sha256 3e305921506d8872816023e4c273e75d2419fb89b24da97b4fe7bce14170d671
+  # It is PRE-FETCHED into the named volume below — that one-shot command is
+  # the only step of this stack that has egress. It runs OUTSIDE the service:
+  # `compose run` would keep HF_HUB_OFFLINE=1 and the internal-only network,
+  # so the download could never start.
+  # Caveat: written from the image layout, not yet run end to end here.
+  #
+  #   docker run --rm -e HF_HUB_OFFLINE=0 --entrypoint python \
+  #     -v osionos_ai_models_stt:/home/ubuntu/.cache/huggingface/hub \
+  #     ghcr.io/speaches-ai/speaches:0.8.3-cpu@sha256:21e3df06d842fb7802ab470dd77c25f0e8c0d22950e8d8c6ae886e851af53ef8 \
+  #     -c "from huggingface_hub import snapshot_download; import os; \
+  #       p = snapshot_download('Systran/faster-whisper-small', revision='536b0662742c02347bc0e980a01041f333bce120'); \
+  #       r = os.path.join(os.path.dirname(p), '..', 'refs', 'main'); \
+  #       os.makedirs(os.path.dirname(r), exist_ok=True); open(r, 'w').write('536b0662742c02347bc0e980a01041f333bce120')"
+  #
+  # Caveat: the cpus and the memory below are PROVISIONAL. The A1 spike
+  # measures faster-whisper-small against large-v3-turbo on this machine, and
+  # it sets the final values — and maybe the model itself.
+  osionos-ai-stt:
+    image: ghcr.io/speaches-ai/speaches:0.8.3-cpu@sha256:21e3df06d842fb7802ab470dd77c25f0e8c0d22950e8d8c6ae886e851af53ef8
+    profiles: ["ai"]
+    environment:
+      # The model is already in the cache: the server never reaches the net.
+      HF_HUB_OFFLINE: "1"
+      # The model the transcription route asks for.
+      SPEACHES_MODEL: Systran/faster-whisper-small
+      LOG_LEVEL: warning
+    volumes:
+      - osionos_ai_models_stt:/home/ubuntu/.cache/huggingface/hub
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      start_interval: 10s
+      timeout: 5s
+      start_period: 120s
+      retries: 12
+    networks:
+      - osionos-ai-stt-net
+    restart: unless-stopped
+    # Caveat: provisional — the A1 spike sets the final values.
+    mem_limit: 2g
+    cpus: 4
+
+  # osionos-ai-sd — the image engine of the assistant (M1): stable-diffusion.cpp's
+  # sd-server on the GPU through Vulkan, built from a pinned release
+  # (infrastructure/docker/osionos/sd.Dockerfile). Its own profile: a host
+  # without a GPU runs the `ai` profile and leaves OSIONOS_AI_IMAGES off.
+  #
+  # Measured on the RX 6600 (osionos spikes/a1/results/imagegen/RESULTS.md):
+  # 512×512 in 8 steps, ~23 s warm with this release, ~7.3 GiB of VRAM at the
+  # peak including the desktop's; the chat model runs on the CPU, so the GPU
+  # has this one tenant. The text encoder is the chat model's own cached
+  # Qwen3-4B file (`osionos_ai_models_llm`, filled by osionos-ai-llm's first
+  # start); the diffusion model and the VAE are pre-fetched once into
+  # `osionos_sd_models`, the only step with egress:
+  #
+  #   docker run --rm -v osionos_sd_models:/models curlimages/curl:8.11.1 sh -c '\
+  #     B=https://huggingface.co/wbruna/Z-Image-Turbo-sdcpp-GGUF/resolve/ea7669b52d27042b4909e3413f58581c0d52d522; \
+  #     curl -fL -o /models/z_image_turbo-Q4_0.gguf $B/z_image_turbo-Q4_0.gguf && \
+  #     curl -fL -o /models/ae-f16.gguf $B/ae-f16.gguf'
+  #   sha256  z_image_turbo-Q4_0.gguf 545c2a06510949e5c62a7154a44729f92dbf1c2006836508aedd72c537c35ba6
+  #           ae-f16.gguf             1bed7b05318709e46a8cb9accc211168fc7f0b61ab594661860bbfe4d785cc46
+  #
+  # The release writes the prompt into a PNG text chunk (it has no
+  # --disable-image-metadata yet): the service strips every text chunk before
+  # it stores an image.
+  osionos-ai-sd:
+    image: track-binocle/osionos-ai-sd:local
+    profiles: ["ai-gpu-vulkan"]
+    build:
+      context: ./infrastructure/docker/osionos
+      dockerfile: sd.Dockerfile
+    command:
+      [
+        "--listen-ip", "0.0.0.0",
+        "--listen-port", "1234",
+        "--diffusion-model", "/models/z_image_turbo-Q4_0.gguf",
+        "--llm", "/llm/models--unsloth--Qwen3-4B-Instruct-2507-GGUF/blobs/3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597",
+        "--vae", "/models/ae-f16.gguf",
+        "--cfg-scale", "1.0",
+        "--steps", "8",
+        "-W", "512",
+        "-H", "512",
+        # The text encoder on the CPU is faster on every axis here: the VAE
+        # then fits in VRAM (A1: 22.5–23.0 s cold vs 28–31 s auto).
+        "--backend", "te=cpu",
+      ]
+    devices:
+      - /dev/dri:/dev/dri
+    # The render and video groups of the HOST own /dev/dri: their numeric ids
+    # differ per machine (`stat -c %g /dev/dri/renderD128`).
+    group_add:
+      - "${OSIONOS_AI_SD_RENDER_GID:-993}"
+      - "${OSIONOS_AI_SD_VIDEO_GID:-44}"
+    volumes:
+      - osionos_sd_models:/models:ro
+      - osionos_ai_models_llm:/llm:ro
+    expose:
+      - "1234"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/1234"]
+      interval: 30s
+      start_interval: 2s
+      timeout: 3s
+      start_period: 30s
+      retries: 6
+    networks:
+      - osionos-ai-sd-net
+    restart: unless-stopped
+    mem_limit: 8g
+
+  # osionos-ai-guard — the gate of the image prompt (M1): Qwen3Guard-Gen-0.6B
+  # on llama.cpp, the L1 of the prompt gate (devil C72). The service asks it
+  # about every prompt of an image (POST /v1/chat/completions) and the model
+  # answers "Safety: Safe" or refuses: a prompt that is not Safe never
+  # reaches the engine. Its own profile: the guard exists only where the
+  # images can be on.
+  #
+  # Measured on the CPU (osionos spikes/a1/results/safety/RESULTS.md): one
+  # call p50 658 ms, p95 1306 ms alone; four clients at once p95 5389 ms per
+  # call (400 calls in 220 s = 1.8 calls/s); a stopped server refuses the
+  # next call in 9.5 ms — the gate fails closed at once; 0 unparsed answers in
+  # 5713 calls. The model is pre-fetched once into `osionos_ai_guard_models`,
+  # the only step with egress:
+  #
+  #   docker run --rm -v osionos_ai_guard_models:/models curlimages/curl:8.11.1 sh -c '\
+  #     curl -fL -o /models/Qwen3Guard-Gen-0.6B.Q8_0.gguf \
+  #       https://huggingface.co/mradermacher/Qwen3Guard-Gen-0.6B-GGUF/resolve/2a59799e089fba3807d534a89c6b95bdf38ee76a/Qwen3Guard-Gen-0.6B.Q8_0.gguf'
+  #   sha256  Qwen3Guard-Gen-0.6B.Q8_0.gguf 127e8833aa16c6839613cd08df5409440302e8c61e90617914b3100f2141411a (804753920 bytes)
+  #
+  # The image is the one A1 measured (spikes/a1/guard-server.sh:34), pinned by
+  # its digest: a fresh pull never runs an unreviewed binary.
+  osionos-ai-guard:
+    image: ghcr.io/ggml-org/llama.cpp@sha256:ba384e66b3f3b6474dc0285ed44466b6f025c7106865d915f1fe5ae2a2da7411
+    profiles: ["ai-gpu-vulkan"]
+    command:
+      [
+        "--jinja",
+        "-c", "4096",
+        "-np", "4",
+        # Four threads, not the six of the spike: the host runs the other
+        # planes of the stack at the same time.
+        "-t", "4",
+        "-m", "/models/Qwen3Guard-Gen-0.6B.Q8_0.gguf",
+        "--alias", "guard",
+        "--host", "0.0.0.0",
+        "--port", "8080",
+      ]
+    volumes:
+      - osionos_ai_guard_models:/models:ro
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      start_interval: 10s
+      timeout: 5s
+      # The model is on the disk: the server only has to load it.
+      start_period: 60s
+      retries: 12
+    networks:
+      - osionos-ai-guard-net
+    restart: unless-stopped
+    mem_limit: 1536m
+    cpus: 4
+
+  # osionos-ai-vlm — the local vision model of "Describe image" (M7): Qwen2.5-VL-3B
+  # Q4_K_M on llama.cpp, CPU. The image is the one spikes/a1 measured
+  # (images.lock `llama-cpp-cpu`, the same digest as the guard), the flags are
+  # spikes/a1/vlm-server.sh's. Measured there: see results/vlm/RESULTS.md.
+  # The files are in the external volume below, read-only: the server never
+  # writes to them. NO published port and NO egress: it is reached by
+  # osionos-ai over osionos-ai-vlm-net, which is internal.
+  # One slot (-np 1): the service lets one describe through per replica.
+  osionos-ai-vlm:
+    image: ghcr.io/ggml-org/llama.cpp@sha256:ba384e66b3f3b6474dc0285ed44466b6f025c7106865d915f1fe5ae2a2da7411
+    profiles: ["ai"]
+    command:
+      [
+        "--jinja",
+        "-c", "4096",
+        "-np", "1",
+        "-t", "6",
+        "--mmproj", "/mnt/storage/vlm/mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf",
+        "-m", "/mnt/storage/vlm/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf",
+        "--alias", "qwen2.5-vl-3b-instruct-q4_k_m",
+        "--host", "0.0.0.0",
+        "--port", "8080",
+      ]
+    volumes:
+      - osionos_ai_a1_data:/mnt/storage:ro
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      start_interval: 10s
+      timeout: 5s
+      # Two GGUF files (1.9 GB + 0.8 GB) to map.
+      start_period: 90s
+      retries: 12
+    networks:
+      - osionos-ai-vlm-net
+    restart: unless-stopped
+    mem_limit: 6g
+    cpus: 6
+
+  # osionos-ai-indexer — the index worker: the SAME image as the service (the
+  # one the `osionos-ai` service above builds), but its entrypoint is the
+  # indexer. It embeds the pages into ai_chunks and drains ai_index_queue.
+  osionos-ai-indexer:
+    image: ${OSIONOS_AI_IMAGE:-track-binocle/osionos-ai:local}
+    profiles: ["ai"]
+    entrypoint: ["node", "--experimental-strip-types", "src/indexer/main.ts"]
+    environment:
+      # The same database the service writes its conversations to: the chunks
+      # and the queue live in the same Postgres.
+      # The dev password travels as PGPASSWORD, which node-postgres reads when the
+      # URL carries none, so no URL in this file holds a literal password.
+      OSIONOS_AI_DATABASE_URL: '${OSIONOS_AI_DATABASE_URL:-postgres://postgres@osionos-ai-db:5432/osionos_ai}'
+      PGPASSWORD: ${OSIONOS_AI_DB_PASSWORD:-osionos-ai-dev}
+      # The embedder it asks for the chunk embeddings: the BULK one, the second
+      # embedder of the profile. The service asks the QUERY one for the query
+      # embeddings of a retrieval (OSIONOS_AI_EMBED_URL), and the indexer
+      # falls back to it when the bulk one is not there.
+      OSIONOS_AI_EMBED_URL: http://osionos-ai-embed:80
+      OSIONOS_AI_EMBED_BULK_URL: http://osionos-ai-embed-bulk:80
+      OSIONOS_AI_EMBED_MODEL: intfloat/multilingual-e5-small
+    depends_on:
+      osionos-ai-db:
+        condition: service_healthy
+      osionos-ai-embed-bulk:
+        condition: service_healthy
+    networks:
+      - default
+    # NO healthcheck on purpose: it serves nothing, it only writes to the
+    # index. The image's HEALTHCHECK probes the API port, which the indexer
+    # never opens, so it is disabled here. It is restarted on exit.
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+    mem_limit: 512m
+
+  # osionos-ai-jobs — the jobs worker: the SAME image as the service, its
+  # entrypoint is src/jobs/main.ts. It drains ai_jobs: kind `moderate` goes to
+  # osionos-ai-tox, kind `sentiment` to osionos-ai-sentiment. `ai` profile
+  # only; the public overlay moves it to `ai-classify` (C147, C85).
+  # OSIONOS_MODERATION_ACTIONS stays `log` and OSIONOS_MODERATION_CALIBRATED_POLICY
+  # is unset: an uncalibrated policy runs in log, which is what dev wants.
+  osionos-ai-jobs:
+    image: ${OSIONOS_AI_IMAGE:-track-binocle/osionos-ai:local}
+    profiles: ["ai"]
+    entrypoint: ["node", "--experimental-strip-types", "src/jobs/main.ts"]
+    environment:
+      OSIONOS_AI_DATABASE_URL: '${OSIONOS_AI_DATABASE_URL:-postgres://postgres@osionos-ai-db:5432/osionos_ai}'
+      PGPASSWORD: ${OSIONOS_AI_DB_PASSWORD:-osionos-ai-dev}
+      OSIONOS_MODERATION_ACTIONS: log
+      OSIONOS_MODERATION_L1_URL: http://osionos-ai-tox:80
+      OSIONOS_SENTIMENT_URL: http://osionos-ai-sentiment:80
+    depends_on:
+      osionos-ai-db:
+        condition: service_healthy
+      osionos-ai-tox:
+        condition: service_healthy
+      osionos-ai-sentiment:
+        condition: service_healthy
+    networks:
+      - default
+      - osionos-ai-classify-net
+    # NO healthcheck on purpose: it serves nothing (same as the indexer).
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 1
+
+  # The recommender's nightly training (M3, services/osionos-ml): the event log in,
+  # a candidate model out, promoted only when it is not worse than the champion.
+  # It sleeps until 03:30 UTC first, so a deploy or a restart never trains at once.
+  # Caveat: a night the container is down is skipped, not caught up; the next run
+  # trains on the whole window anyway.
+  osionos-ml-job:
+    image: ${OSIONOS_ML_IMAGE:-track-binocle/osionos-ml:local}
+    profiles: ["ai"]
+    build:
+      context: ./apps/osionos/app/services/osionos-ml
+    entrypoint: ["sh", "-c", "while :; do sleep $$(( (86400 + 12600 - $$(date -u +%s) % 86400) % 86400 + 1 )); python -m osml.job; done"]
+    environment:
+      # Role osml_job on the live database: LOGIN, member of service_role only,
+      # no grant of its own (services/osionos-ml/scripts/test-db.sh proves it is enough).
+      DATABASE_URL: '${OSML_DATABASE_URL:-postgresql://postgres@osionos-ai-db:5432/osionos_ai}'
+      PGPASSWORD: ${OSIONOS_AI_DB_PASSWORD:-osionos-ai-dev}
+    depends_on:
+      osionos-ai-db:
+        condition: service_healthy
+    networks:
+      - default
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+    mem_limit: 1g
 
   mail-bridge:
     image: ${MAIL_BRIDGE_IMAGE:-track-binocle/mail-bridge:local}
@@ -558,6 +1288,9 @@ services:
     depends_on:
       osionos-bridge:
         condition: service_healthy
+    # prismatica 6984374 (main, what `make all` syncs to) serves /api/auth/health and 404s the old
+    # /api/auth/availability; the pin 8559d6d and older published images serve only the old one.
+    # Fresh-Machine runs 39091236637..39140018952 died here on main's 404.
     healthcheck:
       test:
         [
@@ -761,6 +1494,9 @@ services:
       # The create-body vetting allows exactly this image; it must be the one osionos-ide-server
       # asks for, so both interpolate the same variable (a pinned sha256 id from ship-images.sh).
       OSIONOS_IDE_SANDBOX_IMAGE: ${OSIONOS_IDE_SANDBOX_IMAGE:-osionos-ide-sandbox:latest}
+      # K11: with a runtime named here (e.g. runsc) the proxy writes it into every create and refuses
+      # a start under another. Empty (the default) leaves the plane as before.
+      OSIONOS_IDE_REQUIRE_RUNTIME: ${OSIONOS_IDE_REQUIRE_RUNTIME:-}
     volumes:
       # Host bind of the isolated daemon's socket (docker-ide.socket owns the file,
       # so a daemon restart keeps the inode this mount holds). Long syntax so the
@@ -771,6 +1507,9 @@ services:
         target: /dind-run/docker.sock
         bind:
           create_host_path: false
+      # The owner<->uid ledger (ADR 0011). A named volume so it survives a container recreate; `compose down`
+      # without -v keeps it, and losing it re-learns bindings by trust on first use.
+      - osionos-ide-ledger:/ledger
     expose:
       - "2375"
     networks:
@@ -808,11 +1547,18 @@ services:
       OSIONOS_IDE_SANDBOX: ${OSIONOS_IDE_SANDBOX:-}
       OSIONOS_IDE_DOCKER_HOST: ${OSIONOS_IDE_DOCKER_HOST:-}
       OSIONOS_IDE_ALLOWED_SUBJECTS: ${OSIONOS_IDE_ALLOWED_SUBJECTS:-}
+      OSIONOS_IDE_ACCESS: ${OSIONOS_IDE_ACCESS:-}
+      OSIONOS_IDE_DENIED_SUBJECTS: ${OSIONOS_IDE_DENIED_SUBJECTS:-}
       OSIONOS_IDE_SANDBOX_IMAGE: ${OSIONOS_IDE_SANDBOX_IMAGE:-osionos-ide-sandbox:latest}
       OSIONOS_IDE_STORAGE_QUOTA: ${OSIONOS_IDE_STORAGE_QUOTA:-}
       # Boxes running at once (bridge-ide-sandbox.mjs maxRunningBoxes, default 2): size it with
       # osionos-ide.slice MemoryMax at 1 GiB a box.
       OSIONOS_IDE_MAX_BOXES: ${OSIONOS_IDE_MAX_BOXES:-}
+      # Box-create limits per hour (defaults 6 per user, 30 global) and the volume size quota
+      # (off until the user has run B3.2 on docker-ide).
+      OSIONOS_IDE_CREATES_PER_USER_HOUR: ${OSIONOS_IDE_CREATES_PER_USER_HOUR:-}
+      OSIONOS_IDE_CREATES_GLOBAL_HOUR: ${OSIONOS_IDE_CREATES_GLOBAL_HOUR:-}
+      OSIONOS_IDE_VOLUME_QUOTA: ${OSIONOS_IDE_VOLUME_QUOTA:-}
     expose:
       - "4100"
     networks:
@@ -1026,6 +1772,7 @@ services:
       - drawnosaurus-cargo-home:/cargo-home
 
 volumes:
+  osionos-ide-ledger:
   drawnosaurus-mongo-data:
   drawnosaurus-cargo-home:
   osionos-app-node-modules:
@@ -1034,6 +1781,45 @@ volumes:
   calendar-node-modules:
   osionos-browser-test-node-modules:
   osionos-browser-test-pnpm-store:
+  # The AI plane (compose profile `ai`): the dev Postgres of the assistant and
+  # the model caches of llama.cpp and of the embedder. The model volumes keep
+  # their exact name — another task mounts the same caches. The database stays
+  # project-scoped: it is the dev Postgres of this stack alone.
+  osionos_ai_db:
+  osionos_ai_models_llm:
+    name: osionos_ai_models_llm
+  osionos_ai_models_tei:
+    name: osionos_ai_models_tei
+  # The cache of the speech-to-text model (Systran/faster-whisper-small),
+  # pre-fetched by the one-shot command of the osionos-ai-stt block.
+  osionos_ai_models_stt:
+    name: osionos_ai_models_stt
+  # The classifiers' models, pre-fetched by the one-shot commands of the
+  # osionos-ai-tox and osionos-ai-sentiment blocks.
+  osionos_ai_models_tox:
+    name: osionos_ai_models_tox
+  osionos_ai_models_sentiment:
+    name: osionos_ai_models_sentiment
+  # The image engine's diffusion model and VAE, pre-fetched by the one-shot
+  # command of the osionos-ai-sd block.
+  osionos_sd_models:
+    name: osionos_sd_models
+  # The model of the prompt guard, pre-fetched by the one-shot command of the
+  # osionos-ai-guard block.
+  osionos_ai_guard_models:
+    name: osionos_ai_guard_models
+  # The models of the output check on the generated images (C73): filled by
+  # osionos `services/osionos-ai/scripts/fetch-image-check.sh <dir>`, which
+  # checks every byte against the lock of the spike (`spikes/a1/models.lock`).
+  osionos_ai_image_check:
+    name: osionos_ai_image_check
+  # The VLM of "Describe image" (M7): the GGUF files under /vlm. They are
+  # fetched and sha256-checked by `spikes/a1/fetch.py --only vlm` (osionos
+  # services/osionos-ai), never by compose: the volume is external and mounted
+  # read-only.
+  osionos_ai_a1_data:
+    name: osionos_ai_a1_data
+    external: true
 
 networks:
   # The grobase backend stack's network (docker project `mini-baas`), declared
@@ -1044,6 +1830,30 @@ networks:
   mini-baas:
     name: mini-baas_mini-baas
     external: true
+  # The speech-to-text server of the dictation: `internal: true` = NO egress.
+  # ONLY osionos-ai-stt and osionos-ai join it — the STT server is unreachable
+  # from the bridge, from the web container and from the host, and it cannot
+  # reach the internet either (the model is pre-fetched into its volume).
+  osionos-ai-stt-net:
+    internal: true
+  # The image engine: `internal: true` = NO egress. ONLY osionos-ai-sd and
+  # osionos-ai join it — the engine also serves /v1/images/edits, which the
+  # service never calls (C72) and nothing else can reach.
+  osionos-ai-sd-net:
+    internal: true
+  # The guard of the image prompt: `internal: true` = NO egress. ONLY
+  # osionos-ai-guard and osionos-ai join it — the model is pre-fetched into
+  # its volume, and the guard answers on this network and on no other.
+  osionos-ai-guard-net:
+    internal: true
+  # The VLM of "Describe image": `internal: true` = NO egress. ONLY
+  # osionos-ai-vlm and osionos-ai join it.
+  osionos-ai-vlm-net:
+    internal: true
+  # The classifiers of the jobs worker: `internal: true` = NO egress. ONLY
+  # osionos-ai-tox, osionos-ai-sentiment and osionos-ai-jobs join it.
+  osionos-ai-classify-net:
+    internal: true
   # Internal-only network for the IDE code runner: `internal: true` = NO egress
   # (the Docker daemon enforces it without needing unprivileged user namespaces),
   # so executed user code can reach neither the internet nor mini-baas. Only the

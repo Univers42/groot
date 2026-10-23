@@ -94,7 +94,7 @@ docker run --rm -e SNYK_TOKEN=<token> -v "$PWD:/p" -w /p snyk/snyk:node snyk tes
 ```
 
 Until a token is provisioned, **`pnpm/npm audit` + the repo's Semgrep job**
-(`make baas-security-scan` / `apps/baas/mini-baas-infra/scripts/security/`)
+(`bash apps/grobase/scripts/security/run-security-scans.sh --only=semgrep`)
 cover the same SCA/SAST ground locally.
 
 ## 5. SonarCloud — full static analysis

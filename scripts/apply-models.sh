@@ -26,6 +26,7 @@
 #   baseline  record all current files as applied, never running SQL
 #   check     exit 1 if any migration is pending (read-only verify gate)
 #   status    print per-file up-to-date / pending
+#   order     print the files in the order apply runs them (no database)
 #
 # ENV: PG_CONTAINER=mini-baas-postgres PG_DB=postgres PG_USER=postgres MODELS_DIR=models
 # ============================================================================
@@ -89,6 +90,18 @@ SQL
 
 file_sum() { sha256sum "$1" | cut -d' ' -f1; }
 
+# The glob follows LC_COLLATE: under en_US.UTF-8 `users-pii-grants-migration.sql` sorts before
+# `user.sql`. The users grants file must override every grant before it, so it goes last by
+# name, not by collation (ADR 0014, ML-7). Paths are word-split: MODELS_DIR has no spaces.
+GRANTS_LAST=users-pii-grants-migration.sql
+ordered_models() {
+	for f in "$MODELS_DIR"/*.sql; do
+		[ -f "$f" ] || continue
+		[ "$(basename "$f")" = "$GRANTS_LAST" ] || printf '%s\n' "$f"
+	done
+	if [ -f "$MODELS_DIR/$GRANTS_LAST" ]; then printf '%s\n' "$MODELS_DIR/$GRANTS_LAST"; fi
+}
+
 # Record every current file as applied without running any SQL.
 adopt_all() {
 	for f in "$MODELS_DIR"/*.sql; do
@@ -98,6 +111,10 @@ adopt_all() {
 }
 
 main() {
+	if [ "$CMD" = "order" ]; then
+		ordered_models
+		return 0
+	fi
 	require_pg
 	ledger_ensure
 
@@ -110,7 +127,7 @@ main() {
 
 	applied=0; skipped=0; failed=0; pending=0
 	ERRFILE=$(mktemp)
-	for f in "$MODELS_DIR"/*.sql; do
+	for f in $(ordered_models); do
 		[ -f "$f" ] || continue
 		name=$(basename "$f")
 		sum=$(file_sum "$f")
@@ -142,7 +159,7 @@ main() {
 				fi
 				;;
 			*)
-				echo "usage: apply-models.sh [apply|baseline|check|status]" >&2
+				echo "usage: apply-models.sh [apply|baseline|check|status|order]" >&2
 				exit 2
 				;;
 		esac
