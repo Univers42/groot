@@ -1,0 +1,58 @@
+# Public apps node: the static Mail (loopback 3102) and Calendar (3103) previews. Rendered by
+# the nginx image's envsubst step (NGINX_ENVSUBST_FILTER=PUBLIC_) into
+# /etc/nginx/track-binocle.d/http-apps.conf, which nginx.conf already includes at http level.
+#
+# The apps node's Funnel hands public 443 to :3102 and 8443 to :3103. Only that node's own Host
+# is served: any other name, or an empty PUBLIC_*_ORIGIN, is closed without an answer (444), so
+# the ports are inert unless the operator names the origin each answers for.
+#
+# Every response, errors included, carries the same headers (`always`). No CORS header is sent
+# and no X-Frame-Options: framing is allowed for the osionos origin only, by frame-ancestors.
+# Caveat: the Host guard compares the whole "https://host[:port]" string, so a trailing dot or an
+# explicit :443 on Calendar's name is refused (444), never accepted; Funnel sends the plain name.
+
+# The default 64-byte bucket cannot hold "3103 https://osionos-apps.tail10f2ea.ts.net:8443"
+# (nginx refuses to start: "could not build map_hash", measured 2026-10-18).
+map_hash_bucket_size 256;
+
+map $server_port $apps_upstream {
+  3102 mail-web:80;
+  3103 calendar-web:80;
+}
+
+# Mail applies inline style attributes at load, and a policy without 'unsafe-inline' blocks them;
+# Calendar renders and survives 40 clicks without it (Playwright v1.59.1, 2026-10-18).
+map $server_port $apps_style_src {
+  3102 "'unsafe-inline'";
+  default "";
+}
+
+map "$server_port $scheme://$http_host" $apps_host_ok {
+  default 0;
+  "3102 ${PUBLIC_MAIL_ORIGIN}" 1;
+  "3102 ${PUBLIC_MAIL_ORIGIN}:443" 1;
+  "3103 ${PUBLIC_CALENDAR_ORIGIN}" 1;
+}
+
+server {
+  listen 3102 ssl;
+  listen 3103 ssl;
+  server_name _;
+  ssl_certificate /etc/track-binocle/certs/localhost.pem;
+  ssl_certificate_key /etc/track-binocle/certs/localhost-key.pem;
+  ssl_protocols TLSv1.2 TLSv1.3;
+  if ($apps_host_ok = 0) { return 444; }
+
+  add_header Content-Security-Policy "default-src 'self'; script-src 'self'; connect-src 'self'; style-src 'self' $apps_style_src; base-uri 'none'; form-action 'none'; object-src 'none'; frame-ancestors ${PUBLIC_ORIGIN}:8443" always;
+  add_header Strict-Transport-Security "max-age=31536000" always;
+  add_header X-Content-Type-Options "nosniff" always;
+  add_header Referrer-Policy "no-referrer" always;
+  proxy_hide_header Access-Control-Allow-Origin;
+  proxy_hide_header X-Frame-Options;
+
+  location ~ /\. { return 404; }
+  location / {
+    limit_except GET HEAD { deny all; }
+    proxy_pass http://$apps_upstream; # nosemgrep: generic.nginx.security.dynamic-proxy-host.dynamic-proxy-host
+  }
+}

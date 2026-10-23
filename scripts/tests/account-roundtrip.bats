@@ -158,3 +158,48 @@ said_on() {
   said_on "{\"message\":\"$(printf 'm%.0s' $(seq 300))\"}" ""
   [ "${#output}" -eq 160 ]
 }
+
+# step_edge/step_availability with the network stubbed: `request` logs the URL it was asked
+# and answers a code chosen by URL from the environment. None of these paths parse a body.
+route_stubs() {
+  printf '%s' 'ASKED=$BATS_TEST_TMPDIR/asked; : >"$ASKED"
+    request() { printf "%s\n" "$2" >>"$ASKED"; case "$2" in
+      */api/auth/health) echo "$H_CODE" ;; */api/auth/availability*) echo "$A_CODE" ;; *) echo 200 ;; esac; }
+    said() { echo stubbed; }
+    edge_port() { printf -v "$3" "%s" "$1"; }'
+}
+run_route() { H_CODE=$1 A_CODE=$2 helper "$(route_stubs); $3"; }
+asked() { sed 's#https://localhost:[0-9]*##' "$BATS_TEST_TMPDIR/asked"; }
+
+@test "step_edge: the gateway answers /health, /availability is never asked" {
+  run_route 200 503 step_edge
+  [ "$status" -eq 0 ]
+  [[ "$output" == "ok   edge  "* ]]
+  [ "$(asked)" = $'/api/auth/health\n/api/auth/bridge/health' ]
+}
+
+@test "step_edge: /health 404 falls back to /availability, in that order" {
+  run_route 404 200 step_edge
+  [ "$status" -eq 0 ]
+  [[ "$output" == "ok   edge  "* ]]
+  [ "$(asked)" = $'/api/auth/health\n/api/auth/availability\n/api/auth/bridge/health' ]
+}
+
+@test "step_edge: both routes 404 fails naming the last URL asked" {
+  run_route 404 404 step_edge
+  [ "$status" -eq 1 ]
+  [[ "$output" == "FAIL edge  https://localhost:4322/api/auth/availability answers HTTP 404"* ]]
+}
+
+@test "step_edge: /health 500 fails without falling back" {
+  run_route 500 200 step_edge
+  [ "$status" -eq 1 ]
+  [[ "$output" == "FAIL edge  https://localhost:4322/api/auth/health answers HTTP 500"* ]]
+  [ "$(asked)" = "/api/auth/health" ]
+}
+
+@test "step_availability: a gateway without the route SKIPs and does not fail the run" {
+  run_route 200 404 'EMAIL=a@b.test HANDLE=h SITE=https://localhost:4322; step_availability; echo "FAILED=$FAILED"'
+  [ "$status" -eq 0 ]
+  [[ "$output" == "SKIP availability  "*"/api/auth/availability"*$'\nFAILED=0' ]]
+}

@@ -12,7 +12,7 @@ otherwise.
 | RAM ≥ 8 GB | `make all` peaked at 6.25 GB used on an 8 GB VM; for a VM, `VM_RAM_MB=8192` | [measured runs](#measured-results) |
 | Disk ≥ 30 GB free for Docker | images 13.5 GB + build cache 9.5 GB + volumes 1.4 GB, measured 2026-10-01 | [README prerequisites](../../README.md#prerequisites) |
 | Free ports | 443, 3001–3003, 3007, 4000, 4100, 4200, 4322, 4323, 7880, 7881, 8444, 8787, UDP 50000–50060, and Kong on 8000 | `docker-compose.yml`, `apps/grobase/orchestrators/compose/base/gateway.yml` |
-| One `sudo` password | `make all` copies the local CA into the system store once (`certs-trust-local`); `fresh-bringup.sh` asks for it first, with `sudo -v` | `infrastructure/makes/certs.mk:22-51`, `scripts/verify/fresh-bringup.sh` (`check_sudo`) |
+| One `sudo` password | `make all` copies the local CA into the system store once (`certs-trust-local`); `fresh-bringup.sh` asks for it first, with `sudo -v` | `utils/mk/certs.mk`, targets `certs-trust`, `certs-trust-local`, `scripts/verify/fresh-bringup.sh` (`check_sudo`) |
 | A GitHub SSH key | submodules use `git@github.com:` URLs | `.gitmodules` |
 
 `scripts/verify/fresh-bringup.sh` checks sudo, Docker, GitHub SSH and the ports before it
@@ -183,7 +183,7 @@ that still trusts the previous one warns exactly as if nothing were imported
 ## Manual demo checklist
 
 1. `make demo-login` prints the local demo account's email and password
-   (`infrastructure/makes/repo.mk:180-182`). The password exists only in `./.env.local`.
+   (`utils/mk/repo.mk`, target `demo-login`). The password exists only in `./.env.local`.
 2. Window 1: `https://localhost:4322` → Sign in → continue to osionos.
 3. In osionos: **View → Whiteboard** → **+ New Board** → give it a title.
 4. Window 2 — an **incognito window or another browser profile**, not a second window of the
@@ -200,7 +200,7 @@ that still trusts the previous one warns exactly as if nothing were imported
 | `make healthcheck` / `make e2e` gets **401** | run from a different checkout than the one running the stack: its `.env.local` keys do not match the running Kong (`scripts/gen-local-env.sh:19-24`) | run every `make` from the checkout that ran `make all` |
 | Whiteboard tab blank, or `ERR_CERT_AUTHORITY_INVALID` | the browser does not trust the **current** CA; the `:3007` iframe is refused silently | case A: `make certs-trust`; case B: re-run `make groot`, or redo `make certs-export` and compare fingerprints |
 | Landing looks stale after an update | browser cache. The landing registers no service worker; osionos does (`apps/osionos/app/src/widgets/notifications/model/usePushSubscription.ts`) | hard reload; DevTools → Application → Service workers → Unregister, then Clear site data |
-| `/var` full during the build | BuildKit cache | `make docker_reclaim_cache` (`docker builder prune -a -f`, `infrastructure/makes/docker.mk:58-61`) |
+| `/var` full during the build | BuildKit cache | `make docker_reclaim_cache` (`docker builder prune -a -f`, `utils/mk/docker.mk`, target `docker_reclaim_cache`) |
 | Ports already in use on the **host** while a VM runs | born2root's QEMU forwards 3001–3003, 4000, 4322, 8000, 8787, … to the VM (`vendor/born2root/setup/host/qemu_vm.sh:171`) | stop the VM or the host stack — they cannot share the ports |
 | `time: command not found` in the VM | `time` is a bash keyword; hellish has none | `bash -c 'time make all SKIP_SYNC=1'` |
 | `make verify_guest` fails on hostname / user | it compared the guest against the default `born2root.toml` | pass the build's config: `make verify_guest B2B_CONFIG=profiles/groot.toml` |
