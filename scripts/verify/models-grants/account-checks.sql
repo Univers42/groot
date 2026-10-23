@@ -1692,21 +1692,21 @@ SELECT 'p23_social_grants', count(*), coalesce(string_agg(v, ' ' ORDER BY v), ''
     SELECT 'osionos_follows:account role holds ' || p
       FROM unnest(ARRAY['INSERT','UPDATE','DELETE']) AS p
      WHERE to_regclass('public.osionos_follows') IS NOT NULL
-       AND (has_table_privilege('osionos_account_user', 'public.osionos_follows'::regclass, p)
+       AND (has_table_privilege('osionos_account_user', to_regclass('public.osionos_follows'), p)
          OR CASE WHEN p = 'DELETE' THEN false
-                 ELSE has_any_column_privilege('osionos_account_user', 'public.osionos_follows'::regclass, p) END)
+                 ELSE has_any_column_privilege('osionos_account_user', to_regclass('public.osionos_follows'), p) END)
     UNION ALL
     SELECT 'osionos_presence:account role holds ' || p
       FROM unnest(ARRAY['INSERT','DELETE']) AS p
      WHERE to_regclass('public.osionos_presence') IS NOT NULL
-       AND (has_table_privilege('osionos_account_user', 'public.osionos_presence'::regclass, p)
+       AND (has_table_privilege('osionos_account_user', to_regclass('public.osionos_presence'), p)
          OR CASE WHEN p = 'DELETE' THEN false
-                 ELSE has_any_column_privilege('osionos_account_user', 'public.osionos_presence'::regclass, p) END)
+                 ELSE has_any_column_privilege('osionos_account_user', to_regclass('public.osionos_presence'), p) END)
     UNION ALL
     SELECT 'osionos_follow_counts:' || r || ' may execute'
       FROM unnest(ARRAY['anon','authenticated','osionos_account_user']) AS r
      WHERE to_regprocedure('public.osionos_follow_counts(uuid,uuid)') IS NOT NULL
-       AND has_function_privilege(r, 'public.osionos_follow_counts(uuid,uuid)'::regprocedure, 'EXECUTE')
+       AND has_function_privilege(r, to_regprocedure('public.osionos_follow_counts(uuid,uuid)'), 'EXECUTE')
     UNION ALL
     SELECT 'osionos_follow_counts:' || CASE WHEN p.oid IS NULL THEN 'missing'
                                             WHEN NOT has_function_privilege('service_role', p.oid, 'EXECUTE') THEN 'service_role cannot execute'
@@ -1987,13 +1987,13 @@ SELECT 'p32_mfa_secrets', count(*), coalesce(string_agg(v, ' ' ORDER BY v), '')
       FROM unnest(ARRAY['code_hmac','generation','used_at']) AS col
      WHERE to_regclass('public.osionos_mfa_recovery_codes') IS NOT NULL
        AND NOT EXISTS (SELECT 1 FROM pg_attribute a
-                        WHERE a.attrelid = 'public.osionos_mfa_recovery_codes'::regclass
+                        WHERE a.attrelid = to_regclass('public.osionos_mfa_recovery_codes')
                           AND a.attname = col AND NOT a.attisdropped)
     UNION ALL
     SELECT 'osionos_mfa_recovery_codes:no unique (user_id, code_hmac)'
      WHERE to_regclass('public.osionos_mfa_recovery_codes') IS NOT NULL
        AND NOT EXISTS (SELECT 1 FROM pg_index i
-                        WHERE i.indrelid = 'public.osionos_mfa_recovery_codes'::regclass
+                        WHERE i.indrelid = to_regclass('public.osionos_mfa_recovery_codes')
                           AND i.indisunique AND i.indnatts = 2
                           AND (SELECT string_agg(a.attname, ',' ORDER BY a.attname)
                                  FROM pg_attribute a
