@@ -97,7 +97,9 @@ SELECT 'account_plane_expected', count(*), coalesce(string_agg(t, ' ' ORDER BY t
                    'osionos_username_history',
                    'osionos_account_deletion_requests',
                    'osionos_published_pages',
-                   'osionos_personal_access_tokens']) AS t
+                   'osionos_personal_access_tokens',
+                   'osionos_follows',
+                   'osionos_presence']) AS t
  WHERE to_regclass('public.' || t) IS NULL
     OR coalesce(obj_description(to_regclass('public.' || t), 'pg_class'), '') <> 'osionos:account-plane';
 
@@ -250,8 +252,8 @@ SELECT 'account_session_columns', count(*), coalesce(string_agg(v, ' ' ORDER BY 
 -- information_schema.column_privileges as a column privilege on EVERY column,
 -- so it shows up here as an extra row and not as a missing one.
 WITH expected(tbl, col, priv) AS (
-            SELECT 'osionos_profiles', c, 'SELECT' FROM unnest(ARRAY['user_id','display_name','username','pronouns','headline','bio','location','company','website','links','timezone','orcid','patreon','avatar_url','banner_url','directory_opt_out','version','created_at','updated_at','search_doc','profession']) c
-  UNION ALL SELECT 'osionos_profiles', c, 'UPDATE' FROM unnest(ARRAY['display_name','pronouns','headline','bio','location','company','website','links','timezone','orcid','patreon','directory_opt_out','profession']) c
+            SELECT 'osionos_profiles', c, 'SELECT' FROM unnest(ARRAY['user_id','display_name','username','pronouns','headline','bio','location','company','website','links','timezone','orcid','patreon','avatar_url','banner_url','directory_opt_out','version','created_at','updated_at','search_doc','profession','status_emoji','status_text','status_expires_at','status_busy']) c
+  UNION ALL SELECT 'osionos_profiles', c, 'UPDATE' FROM unnest(ARRAY['display_name','pronouns','headline','bio','location','company','website','links','timezone','orcid','patreon','directory_opt_out','profession','status_emoji','status_text','status_expires_at','status_busy']) c
   UNION ALL SELECT 'osionos_user_settings', c, 'SELECT' FROM unnest(ARRAY['user_id','section','value','version','updated_at']) c
   UNION ALL SELECT 'osionos_user_settings', c, 'INSERT' FROM unnest(ARRAY['user_id','section','value']) c
   UNION ALL SELECT 'osionos_user_settings', c, 'UPDATE' FROM unnest(ARRAY['user_id','section','value','version','updated_at']) c
@@ -1634,6 +1636,273 @@ SELECT 'p2_4_profession_check', count(*), coalesce(string_agg(v, ' ' ORDER BY v)
      WHERE EXISTS (SELECT 1 FROM c)
        AND NOT EXISTS (SELECT 1 FROM c WHERE c.def LIKE '%''' || i.id || '''%')
   ) AS violations;
+
+-- p23_social_grants (P2-3-root, models/osionos-social-follow-presence-migration.sql):
+-- the follow and presence tables and the counts RPC reach exactly who they should.
+-- Every violation is one string, so a failure names what is wrong.
+SELECT 'p23_social_grants', count(*), coalesce(string_agg(v, ' ' ORDER BY v), '')
+  FROM (
+    SELECT t || ':missing' AS v
+      FROM unnest(ARRAY['osionos_follows','osionos_presence']) AS t
+     WHERE to_regclass('public.' || t) IS NULL
+    UNION ALL
+    SELECT t || ':no_rls'
+      FROM unnest(ARRAY['osionos_follows','osionos_presence']) AS t
+     WHERE to_regclass('public.' || t) IS NOT NULL
+       AND NOT (SELECT relrowsecurity FROM pg_class WHERE oid = to_regclass('public.' || t))
+    UNION ALL
+    SELECT t || ':' || r || ' reaches it'
+      FROM unnest(ARRAY['osionos_follows','osionos_presence']) AS t,
+           unnest(ARRAY['anon','authenticated']) AS r
+     WHERE to_regclass('public.' || t) IS NOT NULL
+       AND (has_any_column_privilege(r, to_regclass('public.' || t), 'SELECT')
+         OR has_any_column_privilege(r, to_regclass('public.' || t), 'INSERT')
+         OR has_any_column_privilege(r, to_regclass('public.' || t), 'UPDATE')
+         OR has_table_privilege(r, to_regclass('public.' || t), 'DELETE'))
+    UNION ALL
+    SELECT t || ':service_role lacks ' || p
+      FROM unnest(ARRAY['osionos_follows','osionos_presence']) AS t,
+           unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE']) AS p
+     WHERE to_regclass('public.' || t) IS NOT NULL
+       AND NOT has_table_privilege('service_role', to_regclass('public.' || t), p)
+    UNION ALL
+    SELECT 'osionos_follows:account role holds ' || p
+      FROM unnest(ARRAY['INSERT','UPDATE','DELETE']) AS p
+     WHERE to_regclass('public.osionos_follows') IS NOT NULL
+       AND (has_table_privilege('osionos_account_user', 'public.osionos_follows'::regclass, p)
+         OR CASE WHEN p = 'DELETE' THEN false
+                 ELSE has_any_column_privilege('osionos_account_user', 'public.osionos_follows'::regclass, p) END)
+    UNION ALL
+    SELECT 'osionos_presence:account role holds ' || p
+      FROM unnest(ARRAY['INSERT','DELETE']) AS p
+     WHERE to_regclass('public.osionos_presence') IS NOT NULL
+       AND (has_table_privilege('osionos_account_user', 'public.osionos_presence'::regclass, p)
+         OR CASE WHEN p = 'DELETE' THEN false
+                 ELSE has_any_column_privilege('osionos_account_user', 'public.osionos_presence'::regclass, p) END)
+    UNION ALL
+    SELECT 'osionos_follow_counts:' || r || ' may execute'
+      FROM unnest(ARRAY['anon','authenticated','osionos_account_user']) AS r
+     WHERE to_regprocedure('public.osionos_follow_counts(uuid,uuid)') IS NOT NULL
+       AND has_function_privilege(r, 'public.osionos_follow_counts(uuid,uuid)'::regprocedure, 'EXECUTE')
+    UNION ALL
+    SELECT 'osionos_follow_counts:' || CASE WHEN p.oid IS NULL THEN 'missing'
+                                            WHEN NOT has_function_privilege('service_role', p.oid, 'EXECUTE') THEN 'service_role cannot execute'
+                                            WHEN p.prosecdef THEN 'is SECURITY DEFINER' END
+      FROM (SELECT 1) AS one
+      LEFT JOIN pg_proc p ON p.oid = to_regprocedure('public.osionos_follow_counts(uuid,uuid)')
+     WHERE p.oid IS NULL OR p.prosecdef OR NOT has_function_privilege('service_role', p.oid, 'EXECUTE')
+  ) AS violations;
+
+-- p23_presence_state: a row created with no state is 'online'; a fifth state and
+-- a 121-character text are refused with 23514 (the CHECKs, not the bridge).
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+                               ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+DO $$
+DECLARE
+  v_bad int := 0;
+  v_state text;
+BEGIN
+  INSERT INTO public.osionos_presence (user_id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+  SELECT state INTO v_state FROM public.osionos_presence WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  IF v_state IS DISTINCT FROM 'online' THEN v_bad := v_bad + 1; END IF;
+  BEGIN
+    INSERT INTO public.osionos_presence (user_id, state) VALUES ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'busy');
+    v_bad := v_bad + 1;
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  BEGIN
+    INSERT INTO public.osionos_presence (user_id, state, custom_text)
+      VALUES ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'dnd', repeat('x', 121));
+    v_bad := v_bad + 1;
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  BEGIN
+    INSERT INTO public.osionos_presence (user_id, state, custom_text)
+      VALUES ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'invisible', repeat('x', 120));
+  EXCEPTION WHEN others THEN v_bad := v_bad + 1;
+  END;
+  PERFORM set_config('osionos.check.p23_presence', v_bad::text, true);
+END $$;
+SELECT 'p23_presence_state', current_setting('osionos.check.p23_presence')::bigint,
+       'default online, unknown state and 121 chars refused, 120 chars kept';
+ROLLBACK;
+
+-- p23_status_columns: the limits hold, busy defaults to false, and the account
+-- role changes its own status and one row only.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+                               ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+INSERT INTO public.osionos_profiles (user_id, display_name) VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'A'),
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'B');
+DO $$
+DECLARE
+  v_bad int := 0;
+  v_busy boolean;
+BEGIN
+  SELECT status_busy INTO v_busy FROM public.osionos_profiles WHERE user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  IF v_busy IS DISTINCT FROM false THEN v_bad := v_bad + 1; END IF;
+  BEGIN
+    UPDATE public.osionos_profiles SET status_emoji = repeat('x', 9);
+    v_bad := v_bad + 1;
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  BEGIN
+    UPDATE public.osionos_profiles SET status_text = repeat('x', 121);
+    v_bad := v_bad + 1;
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  PERFORM set_config('osionos.check.p23_status_limits', v_bad::text, true);
+END $$;
+SET LOCAL ROLE osionos_account_user;
+DO $$ BEGIN
+  PERFORM set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","aud":"osionos-account","role":"osionos_account_user"}', true);
+END $$;
+DO $$
+DECLARE
+  n bigint;
+BEGIN
+  UPDATE public.osionos_profiles SET status_emoji = 'x', status_text = 'focus', status_busy = true,
+         status_expires_at = now() + interval '1 hour';
+  GET DIAGNOSTICS n = ROW_COUNT;
+  PERFORM set_config('osionos.check.p23_status_rows', n::text, true);
+END $$;
+RESET ROLE;
+SELECT 'p23_status_columns',
+       current_setting('osionos.check.p23_status_limits')::bigint
+     + abs(current_setting('osionos.check.p23_status_rows')::bigint - 1),
+       'limits hold, busy defaults to false, the role changed one row of its own';
+ROLLBACK;
+
+-- p23_block_trigger: a block in EITHER direction refuses the follow with 23514
+-- and the message follow_blocked; an unblocked follow, and the same follow twice
+-- under ON CONFLICT DO NOTHING, go through. Run as service_role, the bridge's role.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+                               ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'),
+                               ('cccccccc-cccc-cccc-cccc-cccccccccccc');
+INSERT INTO public.osionos_user_blocks (blocker_id, blocked_id) VALUES
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
+SET LOCAL ROLE service_role;
+DO $$
+DECLARE
+  v_bad int := 0;
+  v_pair text[];
+  v_state text;
+  v_msg text;
+BEGIN
+  -- B blocked A: A -> B is refused. A blocked C: C -> A, and A -> C, are refused.
+  FOREACH v_pair SLICE 1 IN ARRAY ARRAY[
+    ['aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'],
+    ['bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'],
+    ['cccccccc-cccc-cccc-cccc-cccccccccccc','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'],
+    ['aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','cccccccc-cccc-cccc-cccc-cccccccccccc']
+  ] LOOP
+    BEGIN
+      INSERT INTO public.osionos_follows (follower_id, followee_id) VALUES (v_pair[1]::uuid, v_pair[2]::uuid);
+      v_bad := v_bad + 1;
+    EXCEPTION WHEN others THEN
+      GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
+      IF v_state <> '23514' OR v_msg <> 'follow_blocked' THEN v_bad := v_bad + 1; END IF;
+    END;
+  END LOOP;
+  BEGIN
+    INSERT INTO public.osionos_follows (follower_id, followee_id)
+      VALUES ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'cccccccc-cccc-cccc-cccc-cccccccccccc')
+      ON CONFLICT DO NOTHING;
+    INSERT INTO public.osionos_follows (follower_id, followee_id)
+      VALUES ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'cccccccc-cccc-cccc-cccc-cccccccccccc')
+      ON CONFLICT DO NOTHING;
+  EXCEPTION WHEN others THEN v_bad := v_bad + 1;
+  END;
+  PERFORM set_config('osionos.check.p23_trigger', v_bad::text, true);
+END $$;
+RESET ROLE;
+SELECT 'p23_block_trigger', current_setting('osionos.check.p23_trigger')::bigint,
+       'four blocked follows refused with 23514 follow_blocked, an unblocked one kept';
+ROLLBACK;
+
+-- p23_counts_rpc: one row per call, the right three values, and one row of
+-- zeros and false for a user nobody follows.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+                               ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'),
+                               ('cccccccc-cccc-cccc-cccc-cccccccccccc');
+INSERT INTO public.osionos_follows (follower_id, followee_id) VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'),
+  ('cccccccc-cccc-cccc-cccc-cccccccccccc', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'),
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
+SET LOCAL ROLE service_role;
+DO $$
+DECLARE
+  v_bad int := 0;
+  v_rows int;
+  r record;
+BEGIN
+  SELECT count(*) INTO v_rows FROM public.osionos_follow_counts('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+  IF v_rows <> 1 THEN v_bad := v_bad + 1; END IF;
+  SELECT * INTO r FROM public.osionos_follow_counts('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+  IF r.follower_count <> 2 OR r.following_count <> 1 OR r.viewer_follows IS NOT TRUE THEN v_bad := v_bad + 1; END IF;
+  SELECT * INTO r FROM public.osionos_follow_counts('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+  IF r.follower_count <> 0 OR r.following_count <> 1 OR r.viewer_follows IS NOT FALSE THEN v_bad := v_bad + 1; END IF;
+  SELECT count(*) INTO v_rows FROM public.osionos_follow_counts(gen_random_uuid(), gen_random_uuid());
+  IF v_rows <> 1 THEN v_bad := v_bad + 1; END IF;
+  PERFORM set_config('osionos.check.p23_counts', v_bad::text, true);
+END $$;
+RESET ROLE;
+SELECT 'p23_counts_rpc', current_setting('osionos.check.p23_counts')::bigint,
+       'one row per call; followers, following and viewer_follows are right';
+ROLLBACK;
+
+-- p23_counts_plan: the three statements inside osionos_follow_counts() on 100K
+-- edges use an index, never a sequential scan of osionos_follows. The statements
+-- are written out here because EXPLAIN of a function call shows no inner plan.
+-- Caveat: this copy of the function body can drift from the function; the row
+-- p23_counts_rpc pins the function's answers, not its plan. And it is the
+-- planner's choice on THIS data shape (10K users, 100K edges, one user with
+-- about 200 followers): a different shape may legitimately pick another plan.
+BEGIN;
+CREATE TEMP TABLE p23_users ON COMMIT DROP AS
+  SELECT n, gen_random_uuid() AS id FROM generate_series(1, 10000) AS n;
+INSERT INTO auth.users (id) SELECT id FROM p23_users;
+INSERT INTO public.osionos_follows (follower_id, followee_id)
+  SELECT f.id, t.id
+    FROM p23_users f
+    CROSS JOIN generate_series(1, 10) AS g
+    JOIN p23_users t ON t.n = ((f.n + g - 1) % 10000) + 1
+   WHERE f.n <> t.n
+  ON CONFLICT DO NOTHING;
+INSERT INTO public.osionos_follows (follower_id, followee_id)
+  SELECT f.id, (SELECT id FROM p23_users WHERE n = 1)
+    FROM p23_users f WHERE f.n BETWEEN 5000 AND 5200
+  ON CONFLICT DO NOTHING;
+ANALYZE public.osionos_follows;
+DO $$
+DECLARE
+  v_user uuid := (SELECT id FROM p23_users WHERE n = 1);
+  v_viewer uuid := (SELECT id FROM p23_users WHERE n = 5000);
+  v_stmt text;
+  v_line text;
+  v_seq int := 0;
+  v_idx int := 0;
+BEGIN
+  FOREACH v_stmt IN ARRAY ARRAY[
+    format('SELECT count(*) FROM public.osionos_follows WHERE followee_id = %L', v_user),
+    format('SELECT count(*) FROM public.osionos_follows WHERE follower_id = %L', v_user),
+    format('SELECT 1 FROM public.osionos_follows WHERE follower_id = %L AND followee_id = %L', v_viewer, v_user)
+  ] LOOP
+    FOR v_line IN EXECUTE 'EXPLAIN ' || v_stmt LOOP
+      IF v_line LIKE '%Seq Scan on osionos_follows%' THEN v_seq := v_seq + 1; END IF;
+      IF v_line LIKE '%Index%Scan%osionos_follows%' THEN v_idx := v_idx + 1; END IF;
+    END LOOP;
+  END LOOP;
+  PERFORM set_config('osionos.check.p23_plan', (v_seq + CASE WHEN v_idx >= 3 THEN 0 ELSE 1 END)::text, true);
+END $$;
+SELECT 'p23_counts_plan', current_setting('osionos.check.p23_plan')::bigint,
+       'no sequential scan of osionos_follows, an index scan for each of the three statements';
+ROLLBACK;
 
 -- The two isolation rows are LAST: a regressed regex in the uid helper raises
 -- 22P02 and blanks every row after it.
