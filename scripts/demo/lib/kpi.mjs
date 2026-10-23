@@ -15,7 +15,7 @@ export function pct1(part, whole) {
 }
 
 function md5(textValue) {
-  return createHash('md5').update(textValue, 'utf8').digest('hex');
+  return createHash('md5').update(textValue, 'utf8').digest('hex'); // NOSONAR: matches PostgreSQL md5() for synthetic report reconciliation, never authentication.
 }
 
 // Code-point order per key, as ORDER BY … COLLATE "C" does on UTF-8 text.

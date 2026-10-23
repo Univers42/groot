@@ -16,15 +16,15 @@ import { creationOrder, hasSeedReference, pageKeyOf, reshapedProperties, resolve
 import { localClock, windowReason } from './write-window.mjs';
 
 const { values: args } = parseArgs({ options: { manifest: { type: 'string' }, pages: { type: 'string' }, bridge: { type: 'string' }, 'utc-offset': { type: 'string' } } });
-const manifest = JSON.parse(readFileSync(args.manifest, 'utf8'));
-const { pages } = JSON.parse(readFileSync(args.pages, 'utf8'));
+const manifest = JSON.parse(readFileSync(args.manifest, 'utf8')); // NOSONAR: Operator-selected --manifest is the documented local input file.
+const { pages } = JSON.parse(readFileSync(args.pages, 'utf8')); // NOSONAR: Operator-selected --pages is the documented local input file.
 const PACE_MS = 1100;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const say = (line) => process.stderr.write(`[load-pages] ${line}\n`);
 
 function saveManifest() {
-	writeFileSync(`${args.manifest}.tmp`, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
-	renameSync(`${args.manifest}.tmp`, args.manifest);
+	writeFileSync(`${args.manifest}.tmp`, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 }); // NOSONAR: Updates the same operator-selected local manifest, with private file permissions.
+	renameSync(`${args.manifest}.tmp`, args.manifest); // NOSONAR: Atomically replaces the same operator-selected local manifest.
 }
 
 // The same closed windows as vm-bootstrap.sh (write-window.mjs), at the host's UTC offset.
@@ -43,7 +43,7 @@ async function writeWindowWait() {
 
 async function call(method, path, { token, body } = {}) {
 	for (let attempt = 0; attempt < 6; attempt += 1) {
-		const response = await fetch(`${args.bridge}${path}`, {
+		const response = await fetch(`${args.bridge}${path}`, { // NOSONAR: Operator-selected --bridge is the intended authenticated service target, not input from an HTTP request.
 			method,
 			headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
 			body: body === undefined ? undefined : JSON.stringify(body),

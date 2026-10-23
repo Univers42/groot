@@ -131,7 +131,7 @@ export function buildInteractions({ seed, anchor }, idx, products, story) {
   const start = addDays(anchor, -540);
   const days = [];
   for (let day = start; day < anchor; day = addDays(day, 1)) if (isWeekday(day)) days.push(day);
-  const picked = Array.from({ length: TOTAL }, () => rng.pick(days)).sort();
+  const picked = Array.from({ length: TOTAL }, () => rng.pick(days)).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   const threads = new Map();
   const docs = picked.map((day) => interaction(rng, ctx, day, threads));
   docs.sort((a, b) => (a.occurred_at < b.occurred_at ? -1 : a.occurred_at > b.occurred_at ? 1 : 0));

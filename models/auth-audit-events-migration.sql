@@ -93,6 +93,8 @@ ALTER TABLE public.auth_audit_events ADD CONSTRAINT auth_audit_events_event_type
     'register_dev_failed',
     'register_turnstile_failed',
     'signup_refused_allowlist',
+    'signup_refused_exempt',
+    'mail_suppressed_exempt',
     'account_created_email_sent',
     'account_created_email_failed',
     'account_exists_email_sent',

@@ -2,8 +2,10 @@
 # docker-run.sh — what every one-shot `docker run` in this repo needs to agree on: whose uid
 # the container runs as, and where the local CA it must trust lives.
 #
-#   docker_run_user_args     Print `--user` and `UID:GID` on two lines, or nothing under rootless
-#                            Docker. Read it with `mapfile -t user_args < <(docker_run_user_args)`.
+#   docker_run_user_args [rootless_user]
+#                            Print `--user` and `UID:GID` on two lines. Under rootless Docker,
+#                            print nothing unless rootless_user overrides an image default.
+#                            Read it with `mapfile -t user_args < <(docker_run_user_args)`.
 #   local_ca_file ROOT       Print the local CA path: $LOCAL_CA_FILE when set, else the one under
 #                            groot ROOT, else the main worktree's when ROOT is a linked worktree
 #                            (the CA is generated and git-ignored, so no worktree has its own).
@@ -11,11 +13,13 @@
 #
 # Sourced by tests/e2e/run.sh and scripts/tools.sh; tested alone in scripts/tests/docker-run.bats.
 
-# Rootless Docker maps the host user to the container's root and nothing else, so --user fails
+# Rootless Docker maps the host user to the container's root and nothing else, so the host UID fails
 # there ("cannot setuid to unmapped uid"); root inside already is this user outside, and files
 # written to a bind mount come back owned by them either way.
 docker_run_user_args() {
   if docker info -f '{{.SecurityOptions}}' 2>/dev/null | grep -q rootless; then
+    # A non-root image default needs an explicit mapped root on a rootless daemon.
+    if [[ -n "${1:-}" ]]; then printf '%s\n' --user "$1"; fi
     return 0
   fi
   printf '%s\n' --user "$(id -u):$(id -g)"

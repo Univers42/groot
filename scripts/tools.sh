@@ -47,7 +47,7 @@ case "${1:-}" in
 esac
 
 ensure_image
-mapfile -t user_args < <(docker_run_user_args)
+mapfile -t user_args < <(docker_run_user_args 0:0)
 ca_args=()
 if ca="$(local_ca_file "$REPO")"; then ca_args=(-v "$ca:/certs/local-ca.pem:ro"); fi
 env_args=()

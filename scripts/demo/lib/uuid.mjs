@@ -10,7 +10,7 @@ function uuidBytes(uuid) {
 
 // Argument order is (name, namespace), as in the npm `uuid` package's v5().
 export function uuidv5(name, namespace) {
-  const hash = createHash('sha1').update(uuidBytes(namespace)).update(String(name), 'utf8').digest();
+  const hash = createHash('sha1').update(uuidBytes(namespace)).update(String(name), 'utf8').digest(); // NOSONAR: RFC 9562 UUIDv5 requires SHA-1; public stable row IDs, never credentials.
   hash[6] = (hash[6] & 0x0f) | 0x50;
   hash[8] = (hash[8] & 0x3f) | 0x80;
   const hex = hash.subarray(0, 16).toString('hex');

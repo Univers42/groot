@@ -44,7 +44,7 @@ function parse(argv) {
 const { args, out, spike } = parse(process.argv.slice(2));
 const full = buildDataset(args);
 const files = renderFiles(spike ? spikeDataset(full) : full);
-mkdirSync(out, { recursive: true });
+mkdirSync(out, { recursive: true }); // NOSONAR: Operator-selected --out is the documented output directory; this local CLI has no elevated authority.
 for (const [name, content] of Object.entries(files)) writeFileSync(join(out, name), content);
 const stats = JSON.parse(files['stats.json']);
 process.stdout.write(`generate: ${stats.mode} dataset in ${out}: ${Object.keys(files).length} files, ` +

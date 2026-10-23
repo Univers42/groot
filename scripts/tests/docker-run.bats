@@ -38,6 +38,13 @@ stub_docker_security() {
   [ -z "$output" ]
 }
 
+@test "rootless docker: non-root images explicitly use the mapped container root" {
+  stub_docker_security '[name=seccomp,profile=builtin name=rootless name=cgroupns]'
+  run docker_run_user_args 0:0
+  [ "$status" -eq 0 ]
+  [ "$output" = $'--user\n0:0' ]
+}
+
 @test "local_ca_file finds the CA under the given root" {
   mkdir -p "$BATS_TEST_TMPDIR/r/apps/grobase/certs"
   touch "$BATS_TEST_TMPDIR/r/apps/grobase/certs/track-binocle-local-ca.pem"
