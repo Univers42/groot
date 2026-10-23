@@ -114,6 +114,8 @@ said() {
   printf '%s\n' "${m:-$(head -n1 "$TMP/curl.err" 2>/dev/null)}"
 }
 
+# The gateway's liveness route moved from /availability to /health; same rule as the
+# auth-gateway healthcheck in docker-compose.yml: fall back only on a 404.
 step_edge() {
   local code url
   edge_port 4322 OPPOSITE_OSIRIS_HOST_PORT SITE_PORT
@@ -126,7 +128,6 @@ step_edge() {
   done
   report ok edge "$SITE (site + auth gateway) and $BRIDGE (osionos bridge) over TLS, CA ${LINK_CA#"$REPO"/}"
 }
-
 # The local Turnstile bypass accepts only this token (auth-gateway.mjs:236), not any string.
 step_register() {
   local code

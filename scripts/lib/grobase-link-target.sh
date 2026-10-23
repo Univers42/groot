@@ -140,17 +140,63 @@ resolve_host() { # a bare host or alias: ssh first, then Kong's plain port, then
     die "$1: ssh shows no mini-baas-kong there and neither http://$1:8000 nor https://$1 answers from a container"
   fi
 }
-# publish_env MODE ENV_LOCAL — where the bridge publishes realtime events and reaches
+# relay_cafile -> the CA file the relay verifies Kong with, as the relay sees it: the copy up
+# installs in LINK_DIR (/link in the relay) when GROBASE_CA_FILE is set, else the system store.
+relay_cafile() {
+  if [ -n "$CA_FILE" ]; then
+    printf '/link/ca.pem\n'
+  else
+    printf '/etc/ssl/certs/ca-certificates.crt\n'
+  fi
+}
+# capability_status URL METHOD PATH -> the HTTP status the target's Kong answers to METHOD PATH
+# sent with no credentials at all, over the relay's own address (kong_addr: the same IP and CA),
+# or 000 when nothing answers. A POST carries `{}`, which creates nothing. shut-none: socat
+# half-closes the connection when the request ends, and Funnel answers a half-closed request 502
+# (measured 2026-10-15; curl on the same IP got 401), so the write side stays open and -t10
+# waits for the answer.
+# Caveat: one request decides; a target restarting at that moment answers 000 or 502, and the
+# caller then keeps its pre-probe values until the next `make link`.
+capability_status() {
+  local host port body="" line
+  read -r host port < <(url_hostport "$1")
+  [ "$2" != POST ] || body='{}'
+  line=$(printf '%s %s HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s' \
+    "$2" "$3" "$host" "${#body}" "$body" |
+    docker run --rm -i -v "$LINK_DIR:/link:ro" "$SOCAT_IMG" -T10 -t10 - "$(kong_addr "$1" "$(relay_cafile)"),shut-none,connect-timeout=5" 2>/dev/null |
+    head -n 1) || true
+  case "$line" in
+  HTTP/1.?\ [0-9][0-9][0-9]*) printf '%s\n' "${line:9:3}" ;;
+  *) printf '000\n' ;;
+  esac
+}
+# publish_env MODE ENV_LOCAL [TARGET] — where the bridge publishes realtime events and reaches
 # query-router. ssh and local reach the realtime gateway by name (empty = docker-compose.yml's
 # default); direct mode has only the edge, whose /realtime/v1/publish admits the service_role
 # key alone (grobase kong.yml). No remote kind relays query-router or the adapter-registry
 # (SERVICES in grobase-link.sh), so ssh and direct reach them on Kong's /query/v1 and
 # service_role-only /admin/v1; empty = the bridge's container-DNS defaults.
+# Through Tailscale Funnel the WAF refuses /realtime/v1/publish and /admin/v1 (grobase rule
+# 10130), so direct mode asks TARGET, without credentials, what it serves:
+#   POST /realtime/v1/publish 403 -> publish over the public /realtime/v1/ws (no service key);
+#   GET /v1/tenants/me/mounts 401 -> list mounts on that tenant-key route; 404 -> the registry.
+# Any other answer keeps the values written before the probes existed. ssh and local never
+# write OSIONOS_TENANT_MOUNTS_URL; they only clear one a direct link left.
 publish_env() {
-  local url="" key="" query="" registry=""
+  local url="" key="" query="" registry="" mounts="" keepalive=""
   if [ "$1" = direct ]; then
     url=http://mini-baas-kong:8000/realtime
+    keepalive=1
     key=$(get_env "$2" SERVICE_ROLE_KEY) || key=""
+    if [ "$(capability_status "$3" POST /realtime/v1/publish)" = 403 ]; then
+      url=ws://mini-baas-kong:8000/realtime/v1/ws
+      key=""
+      note "direct: $3 refuses /realtime/v1/publish without credentials; the bridge publishes over /realtime/v1/ws"
+    fi
+    if [ "$(capability_status "$3" GET /v1/tenants/me/mounts)" = 401 ]; then
+      mounts=http://mini-baas-kong:8000/v1/tenants/me/mounts
+      note "direct: $3 serves /v1/tenants/me/mounts; the bridge lists mounts there with its tenant key"
+    fi
   fi
   if [ "$1" != local ]; then
     query=http://mini-baas-kong:8000/query/v1
@@ -160,6 +206,14 @@ publish_env() {
   put_env "$2" REALTIME_PUBLISH_APIKEY "$key"
   put_env "$2" OSIONOS_QUERY_ROUTER_URL "$query"
   put_env "$2" OSIONOS_ADAPTER_REGISTRY_URL "$registry"
+  if [ "$1" = direct ] || get_env "$2" OSIONOS_TENANT_MOUNTS_URL >/dev/null; then
+    put_env "$2" OSIONOS_TENANT_MOUNTS_URL "$mounts"
+  fi
+  # Kept-alive pool: a workspace open after 40 s idle 488 -> 313 ms median (2026-10-18, 8
+  # workspaces, interleaved); measured on the direct link only, so ssh/local never turn it on.
+  if [ "$1" = direct ] || get_env "$2" OSIONOS_BAAS_KEEPALIVE >/dev/null; then
+    put_env "$2" OSIONOS_BAAS_KEEPALIVE "$keepalive"
+  fi
 }
 
 # The node program rt_token_ensure runs: keeps the current token when its HS256 signature

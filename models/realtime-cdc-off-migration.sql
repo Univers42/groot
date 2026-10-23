@@ -51,6 +51,9 @@ BEGIN
      WHERE c.relnamespace = 'public'::regnamespace
        AND NOT t.tgisinternal
        AND t.tgfoid = to_regproc('public.realtime_notify')
+       -- A partition's clone of its parent's trigger goes with the parent's DROP; listed
+       -- here, its own DROP then fails with "does not exist" (ai_chunks, ai_page_vectors).
+       AND t.tgparentid = 0
      ORDER BY 2, 1
   LOOP
     BEGIN

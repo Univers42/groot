@@ -5,6 +5,7 @@ node_modules/
 .env.*
 !.env.example
 !.env.grobase-link.example
+!.env.public.example
 .env*local
 .env\ copy*
 .env*.bak
@@ -80,6 +81,11 @@ screenshots/
 *.secrets
 .secrets
 *secret*
+# the eval stack's secret GENERATOR is source, not a secret — it must be tracked
+# (the .env it writes stays ignored by the `.env` rule above)
+!infrastructure/eval/gen-secrets.sh
+# the seeded demo users' credentials — never in git
+infrastructure/eval/.users
 
 # 12G pre-extraction BaaS snapshot — never commit (git-status noise)
 apps/baas.bak/
@@ -88,3 +94,6 @@ apps/baas.bak/
 # make certs-export default destination
 /track-binocle-local-ca.pem
 secrets
+
+# host-ports resolver override files (generated, not tracked)
+infrastructure/tls/host-ports.d/*.conf

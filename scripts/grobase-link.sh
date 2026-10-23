@@ -2,6 +2,8 @@
 # grobase-link.sh — let the root frontends reach grobase wherever it runs, by the names they already use.
 # Modes: local (this daemon), ssh (ControlMaster -> unix sockets in LINK_DIR -> the grobase-link relay) and
 # direct (a Kong URL; Redis and Mailpit stood in here); GROBASE_TARGET picks it (wiki/runbooks/grobase-link.md).
+# In direct mode GROBASE_IDE_SSH=<ssh alias> also opens an ssh master used only for the IDE plane socket
+# (link_ide_direct); the BaaS stays on the URL and a refused master never fails the link.
 # Ponytail: in ssh mode a remote service without a published port is forwarded to its
 # container IP, which changes when that container is recreated; the forward then connects
 # to nothing until the next `up` re-points it.
@@ -24,6 +26,7 @@ HOST_PORT=$(setting GROBASE_LINK_HOST_PORT 28000) # loopback copy of Kong for ho
 REMOTE_DIR=$(setting GROBASE_REMOTE_DIR /opt/grobase)
 API_URL=$(setting GROBASE_API_URL "") # the WAF clients call; empty = derived from TARGET
 CA_FILE=$(setting GROBASE_CA_FILE "") # direct targets only: the CA signing that Kong's certificate
+IDE_SSH=$(setting GROBASE_IDE_SSH "") # direct targets only: an ssh alias used for the IDE plane forward, nothing else
 REMOTE_ENV="${GROBASE_REMOTE_ENV:-$REPO/.env.grobase-remote}"
 CTL="$LINK_DIR/ssh.ctl"
 STATE="$LINK_DIR/state"
@@ -137,20 +140,18 @@ up_ssh() {
 }
 
 up_direct() {
-  local cafile
   url_reachable "$1" || die "$1 does not answer from a container of this daemon"
   cmd_down_ssh # only once the URL answers: a dead target must not cost the link that works
   if [ -n "$CA_FILE" ]; then
     [ -r "$CA_FILE" ] || die "GROBASE_CA_FILE=$CA_FILE is not a readable file"
     install -m 644 "$CA_FILE" "$LINK_DIR/ca.pem" # that is /link/ca.pem in the relay
-    cafile=/link/ca.pem
   else
     rm -f "$LINK_DIR/ca.pem" # a copy from an earlier target would keep a CA we dropped
-    cafile=/etc/ssl/certs/ca-certificates.crt
   fi
-  direct_routes "$1" "$cafile" >"$ROUTES"
-  note "direct link to $1: Kong over the URL, bridge publishes through its service_role-only route;"
+  direct_routes "$1" "$(relay_cafile)" >"$ROUTES"
+  note "direct link to $1: Kong over the URL; the bridge's publish route is chosen by \`env\`;"
   note "Redis and Mailpit are local stand-ins (sessions and captured mail stay on this machine)."
+  link_ide_direct "$IDE_SSH"
 }
 
 # own_link_dir — LINK_DIR, made by and private to this user. A reboot empties XDG_RUNTIME_DIR,
@@ -241,7 +242,7 @@ cmd_env() {
   esac
   [ ! -f "$REPO/.env.local" ] || sync=--sync
   GRO_ENV="$src" bash "$REPO/scripts/gen-local-env.sh" ${sync:+"$sync"}
-  publish_env "$mode" "$REPO/.env.local" && { [ "$mode" = local ] || rt_token_ensure "$REPO/.env.local" "$src"; }
+  publish_env "$mode" "$REPO/.env.local" "$(state_get target)" && { [ "$mode" = local ] || rt_token_ensure "$REPO/.env.local" "$src"; }
 }
 
 # The settings as `up` will use them, so make and the user read one resolution, not the file.
@@ -289,6 +290,7 @@ Settings: the environment (make link KEY=value) wins, then ./.env.grobase-link (
   GROBASE_LINK_HOST_PORT  28000 (0 = none)        GROBASE_REMOTE_DIR  /opt/grobase
   GROBASE_API_URL         the WAF URL clients call, https://<vm>.<tailnet>.ts.net:8443; ssh/auto need it
   GROBASE_CA_FILE         direct targets only: the PEM CA signing that Kong's certificate; empty = the relay's system store
+  GROBASE_IDE_SSH         direct targets only: an ssh alias used solely for the IDE plane socket; empty = no ssh
 Environment only: GROBASE_LINK_DIR (XDG_RUNTIME_DIR/track-binocle-link), GROBASE_LINK_CONF (another settings file), GROBASE_REMOTE_ENV, B2B_DIR.
 Exit codes: 0 success, 1 failure or misuse.
 USAGE

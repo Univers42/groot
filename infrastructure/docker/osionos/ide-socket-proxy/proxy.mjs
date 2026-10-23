@@ -30,20 +30,37 @@ import http from "node:http";
 import net from "node:net";
 import { fileURLToPath } from "node:url";
 import { createShapeViolation, execShapeViolation, shapeLimits } from "./create-shape.mjs";
+import { INIT_PATH_RE, initShapeViolation } from "./init-shape.mjs";
+import { createLedger } from "./uid-ledger.mjs";
+import { UID_PATH, handleUidRequest } from "./uid-endpoint.mjs";
+import { createAudit } from "./audit.mjs";
+import { findDuplicateKey } from "./json-guard.mjs";
+import { START_PATH_RE, inspectRuntime, pinRuntime } from "./runtime-pin.mjs";
+import { unsafeCreateBody } from "./escalation-denylist.mjs";
+import { unsafeNetworkBody, unsafeVolumeBody } from "./volume-shape.mjs";
 
 const LISTEN_PORT = Number(process.env.IDE_SOCKET_PROXY_PORT || 2375);
 const DOCKER_SOCK = process.env.IDE_DOCKER_SOCK || "/dind-run/docker.sock";
 const ID = "ide-[0-9a-f]{32}";
+// Volume-ownership init containers get create, start, wait, json and DELETE, and nothing else:
+// no exec, attach or upgrade route names them (ADR 0011).
+const INIT_ID = "ideinit-[0-9a-f]{32}";
 const EXEC_PATH = new RegExp(`^/(v[\\d.]+/)?containers/${ID}/exec$`);
-const VOLUME_NAME_RE = /^osio-ide-vol-[0-9a-f]{32}$/;
 const MANAGED_LABEL = "osio.ide.managed";
 const LIMITS = shapeLimits(process.env);
+const audit = createAudit();
+const ledger = createLedger({ file: process.env.IDE_UID_LEDGER || "/ledger/uid-ledger.jsonl" });
 
 // Allowed (METHOD, path-regex). Anything not listed is denied.
 const ALLOW = [
   ["GET", /^\/_ping$/],
   ["GET", /^\/(v[\d.]+\/)?containers\/json(\?.*)?$/],
-  ["POST", /^\/(v[\d.]+\/)?containers\/create\?name=ide-[0-9a-f]{32}$/],
+  ["POST", /^\/(v[\d.]+\/)?containers\/create\?name=ide(init)?-[0-9a-f]{32}$/],
+  ["POST", new RegExp(`^/(v[\\d.]+/)?containers/${INIT_ID}/start$`)],
+  ["POST", new RegExp(`^/(v[\\d.]+/)?containers/${INIT_ID}/wait(\\?.*)?$`)],
+  ["GET", new RegExp(`^/(v[\\d.]+/)?containers/${INIT_ID}/json$`)],
+  ["DELETE", new RegExp(`^/(v[\\d.]+/)?containers/${INIT_ID}(\\?.*)?$`)],
+  ["POST", new RegExp(`^${UID_PATH}$`)],
   ["GET", new RegExp(`^/(v[\\d.]+/)?containers/${ID}/json$`)],
   ["POST", new RegExp(`^/(v[\\d.]+/)?containers/${ID}/start$`)],
   ["POST", new RegExp(`^/(v[\\d.]+/)?containers/${ID}/stop(\\?.*)?$`)],
@@ -62,56 +79,14 @@ function isAllowed(method, path) {
   return ALLOW.some(([m, re]) => m === method && re.test(path));
 }
 
-/** Reject a create body that would escalate out of the sandbox (condition 8). */
-export function unsafeCreateBody(body) {
-  const host = body?.HostConfig ?? {};
-  if (host.Privileged === true) return "Privileged";
-  if (Array.isArray(host.Binds) && host.Binds.length) return "Binds";
-  if (Array.isArray(host.CapAdd) && host.CapAdd.length) return "CapAdd";
-  if (Array.isArray(host.Devices) && host.Devices.length) return "Devices";
-  if (/^(host|container:)/.test(String(host.NetworkMode ?? ""))) return "NetworkMode";
-  if (["host"].includes(String(host.PidMode ?? ""))) return "PidMode";
-  if (["host"].includes(String(host.IpcMode ?? ""))) return "IpcMode";
-  if (["host"].includes(String(host.UTSMode ?? ""))) return "UTSMode";
-  if (host.UsernsMode === "host") return "UsernsMode";
-  if (Array.isArray(host.Mounts) && host.Mounts.some((m) => m?.Type === "bind")) return "bind-mount";
-  if (Array.isArray(host.SecurityOpt) && host.SecurityOpt.some((o) => /seccomp=unconfined|apparmor=unconfined|systempaths=unconfined/i.test(String(o)))) return "SecurityOpt";
-  return null;
-}
-
-/** Reject a volume create that could reach the host filesystem (condition 8).
- *  `/volumes/create` was allowlisted with NO body inspection, and unsafeCreateBody only
- *  rejects `Mounts[].Type === "bind"` — so a `local` volume created with
- *  `DriverOpts {type:none, o:bind, device:/}` and then mounted as `Type:"volume"` bound
- *  the daemon host's filesystem into a sandbox. The provisioner only ever sends
- *  `{Name, Driver:"local", Labels}`, so any driver option or other driver is refused.
- *  Name and Labels are pinned to the bridge's own shape too: `osio-ide-vol-<32hex>`
- *  derived from the same digest as the container, and exactly the managed label —
- *  otherwise a second volume carrying someone else's identity could be mounted. */
-export function unsafeVolumeBody(body) {
-  const driver = String(body?.Driver ?? "local");
-  if (driver !== "local") return "Driver";
-  const opts = body?.DriverOpts;
-  if (opts && typeof opts === "object" && Object.keys(opts).length) return "DriverOpts";
-  if (!VOLUME_NAME_RE.test(String(body?.Name ?? ""))) return "Name";
-  if (!isManagedLabels(body?.Labels)) return "Labels";
-  return null;
-}
-
-/** Labels must be exactly the one managed key — compared as a key array, never by
- *  copying body keys onto an object. */
-function isManagedLabels(labels) {
-  const keys = Object.keys(labels ?? {});
-  return keys.length === 1 && keys[0] === MANAGED_LABEL && labels[MANAGED_LABEL] === "1";
-}
-
-/** Reject a network create that leaves the isolated bridge model (condition 8).
- *  macvlan/ipvlan/host attach a sandbox to the physical network; the provisioner only
- *  ever creates `Driver:"bridge"` networks. */
-export function unsafeNetworkBody(body) {
-  if (String(body?.Driver ?? "bridge") !== "bridge") return "Driver";
-  if (body?.ConfigFrom) return "ConfigFrom";
-  return null;
+/** A container create, box or init by its name: the shape first (the box shape is also run
+ *  through the escalation denylist, the init shape is the one that may carry capabilities), then
+ *  the ledger. Resolves to a refusal reason or null. */
+export async function vetCreateBody(body, path, boundLedger = ledger) {
+  const isInit = INIT_PATH_RE.test(path);
+  const bad = isInit ? initShapeViolation(body, path, LIMITS) : createShapeViolation(body, path, LIMITS) ?? unsafeCreateBody(body);
+  if (bad) return bad;
+  return boundLedger.admit(body.Labels["osio.ide.owner"], Number(body.Labels["osio.ide.uid"]));
 }
 
 /** The body vetter for a POST endpoint, or null when the endpoint carries no body risk.
@@ -119,7 +94,7 @@ export function unsafeNetworkBody(body) {
  *  denylist — the two cover different directions, so both run. */
 function bodyVetter(path) {
   if (/\/containers\/create/.test(path)) {
-    return (body) => createShapeViolation(body, path, LIMITS) ?? unsafeCreateBody(body);
+    return (body) => vetCreateBody(body, path);
   }
   if (EXEC_PATH.test(path)) return execShapeViolation;
   if (/\/volumes\/create$/.test(path)) return unsafeVolumeBody;
@@ -139,13 +114,25 @@ function deny(res, code, message) {
   res.end(JSON.stringify({ message: `ide-socket-proxy: ${message}` }));
 }
 
-function forward(clientReq, clientRes, bodyBuffer) {
+// A vetted body goes out as `payload` with its own framing: the client's Content-Length,
+// Transfer-Encoding and Content-Encoding described bytes the daemon will no longer receive.
+function forward(clientReq, clientRes, payload, body) {
+  const headers = { ...clientReq.headers, host: "docker" };
+  if (payload) {
+    delete headers["transfer-encoding"];
+    delete headers["content-encoding"];
+    headers["content-length"] = String(payload.length);
+  }
   const upstream = http.request(
-    { socketPath: DOCKER_SOCK, method: clientReq.method, path: clientReq.url, headers: { ...clientReq.headers, host: "docker" } },
-    (upRes) => { clientRes.writeHead(upRes.statusCode ?? 502, upRes.headers); upRes.pipe(clientRes); },
+    { socketPath: DOCKER_SOCK, method: clientReq.method, path: clientReq.url, headers },
+    (upRes) => {
+      audit.record(clientReq.method, clientReq.url, { status: upRes.statusCode, headers: clientReq.headers, body });
+      clientRes.writeHead(upRes.statusCode ?? 502, upRes.headers);
+      upRes.pipe(clientRes);
+    },
   );
   upstream.on("error", () => deny(clientRes, 502, "daemon unreachable"));
-  if (bodyBuffer) upstream.end(bodyBuffer);
+  if (payload) upstream.end(payload);
   else clientReq.pipe(upstream);
 }
 
@@ -163,13 +150,35 @@ function vetBody(req, res, vet, cap) {
   });
   req.on("end", () => {
     if (over) return deny(res, 413, "body too large");
-    const raw = Buffer.concat(chunks);
+    const text = Buffer.concat(chunks).toString("utf8") || "{}";
     let body;
-    try { body = JSON.parse(raw.toString("utf8") || "{}"); } catch { return deny(res, 400, "invalid create body"); }
-    const bad = vet(body);
-    if (bad) return deny(res, 403, `create rejected: ${bad}`);
-    forward(req, res, raw);
+    // A repeated key is refused outright: JSON.parse keeps the last copy, the daemon merges them (K12).
+    try { body = JSON.parse(text); if (findDuplicateKey(text) !== null) return deny(res, 400, "duplicate key in body"); } catch { return deny(res, 400, "invalid create body"); }
+    // A vetter may be async (the ledger); a throw is a refusal, never a pass. The trailing
+    // catch matters: an unhandled rejection (deny on a response already answered) would
+    // kill the proxy, and with it every user's IDE.
+    void (async () => {
+      let bad;
+      try { bad = await vet(body); } catch { bad = "vetter failed"; }
+      if (bad) return deny(res, 403, `create rejected: ${bad}`);
+      // What was vetted is what is sent: the re-serialized object, never the client's bytes (K12).
+      const sent = LIMITS.requiredRuntime && /\/containers\/create/.test(req.url) ? pinRuntime(body, LIMITS.requiredRuntime) : body;
+      forward(req, res, Buffer.from(JSON.stringify(sent)), sent);
+    })().catch((error) => {
+      process.stderr.write(`[ide-socket-proxy] vet/forward failed: ${error?.code ?? error?.message ?? "error"}\n`);
+      if (!res.headersSent) deny(res, 502, "proxy error");
+      else res.destroy();
+    });
   });
+}
+
+/** Start only a container the daemon reports under the required runtime (K11): a mismatch, or an
+ *  inspect that gives no answer, is a refusal and an audit line. */
+async function startIfRuntimeMatches(req, res) {
+  const name = START_PATH_RE.exec(req.url)[1];
+  if (await inspectRuntime(DOCKER_SOCK, name) === LIMITS.requiredRuntime) return forward(req, res, null);
+  audit.record(req.method, req.url, { status: 403, headers: req.headers, reason: "runtime-mismatch" });
+  deny(res, 403, `start rejected: runtime is not ${LIMITS.requiredRuntime}`);
 }
 
 const server = http.createServer((req, res) => {
@@ -177,10 +186,13 @@ const server = http.createServer((req, res) => {
   const path = req.url || "/";
   if (!isAllowed(method, path)) return deny(res, 403, `endpoint not allowed: ${method} ${path}`);
 
+  if (path === UID_PATH) return handleUidRequest(req, res, ledger);
+
   // Every create (container, volume, network) and every exec create has its body
   // vetted before it reaches the daemon.
   const vet = method === "POST" ? bodyVetter(path) : null;
   if (vet) return vetBody(req, res, vet, bodyCap(path));
+  if (LIMITS.requiredRuntime && method === "POST" && START_PATH_RE.test(path)) return startIfRuntimeMatches(req, res);
   forward(req, res, null);
 });
 
@@ -211,7 +223,21 @@ if (isMain && process.argv.includes("--selfcheck")) {
   const refuse = (label, got) => { if (got === null) fail.push(`${label}: accepted, want a refusal reason`); };
 
   // The canonical bridge body and its one-field variants live with the shape cases.
-  const { DIGEST, CANON_PATH, mk, host } = await import("./create-shape.selfcheck.mjs");
+  const { DIGEST, CANON_PATH, host, shapeFailures } = await import("./create-shape.selfcheck.mjs");
+  fail.push(...shapeFailures());
+  fail.push(...await (await import("./uid-ledger.selfcheck.mjs")).ledgerFailures(vetCreateBody));
+  fail.push(...(await import("./json-guard.selfcheck.mjs")).guardFailures());
+  const INIT = `ideinit-${DIGEST}`;
+  for (const [method, route, want] of [
+    ["POST", `/containers/create?name=${INIT}`, true], ["POST", `/containers/${INIT}/start`, true],
+    ["POST", `/containers/${INIT}/wait?condition=not-running`, true], ["GET", `/containers/${INIT}/json`, true],
+    ["DELETE", `/containers/${INIT}?force=true&v=false`, true], ["POST", UID_PATH, true],
+    ["POST", `/containers/${INIT}/exec`, false], ["POST", `/containers/${INIT}/attach`, false],
+    ["POST", `/containers/${INIT}/stop`, false], ["POST", `/containers/${INIT}/archive`, false],
+    ["GET", UID_PATH, false], ["POST", `/v1.47/osio/v1/uid`, false], ["POST", "/containers/ideinit-short/start", false],
+    ["POST", `/containers/ideinit-${"G".repeat(32)}/start`, false],
+  ]) chk(`${method} ${route.replace(DIGEST, "<digest>")} allowed`, isAllowed(method, route), want);
+  chk("the upgrade path stays exec-only", /^\/(v[\d.]+\/)?exec\/[a-f0-9]+\/start$/.test(`/containers/${INIT}/attach`), false);
 
   chk("allow create", isAllowed("POST", "/containers/create?name=ide-" + "a".repeat(32)), true);
   chk("allow start", isAllowed("POST", "/containers/ide-" + "a".repeat(32) + "/start"), true);
@@ -231,6 +257,21 @@ if (isMain && process.argv.includes("--selfcheck")) {
   chk("clean body ok", unsafeCreateBody({ HostConfig: { CapDrop: ["ALL"], Mounts: [{ Type: "volume" }] } }), null);
   chk("host-bind volume rejected", unsafeVolumeBody({ Name: "x", Driver: "local", DriverOpts: { type: "none", o: "bind", device: "/" } }), "DriverOpts");
   chk("foreign volume driver rejected", unsafeVolumeBody({ Name: "x", Driver: "vieux/sshfs" }), "Driver");
+  chk("provisioner home volume ok", unsafeVolumeBody({ Name: `osio-ide-home-${DIGEST}`, Driver: "local", Labels: { [MANAGED_LABEL]: "1" } }), null);
+  chk("home volume DriverOpts refused", unsafeVolumeBody({ Name: `osio-ide-home-${DIGEST}`, Driver: "local", Labels: { [MANAGED_LABEL]: "1" }, DriverOpts: { type: "none", o: "bind", device: "/" } }), "DriverOpts");
+  const quotaVol = (suffix, DriverOpts) => unsafeVolumeBody({ Name: `${suffix}${DIGEST}`, Driver: "local", Labels: { [MANAGED_LABEL]: "1" }, DriverOpts });
+  chk("home volume 2G ok", quotaVol("osio-ide-home-", { size: "2G" }), null);
+  chk("workspace volume 5G ok", quotaVol("osio-ide-vol-", { size: "5G" }), null);
+  chk("empty DriverOpts ok", quotaVol("osio-ide-vol-", {}), null);
+  chk("size 3G refused", quotaVol("osio-ide-vol-", { size: "3G" }), "DriverOpts");
+  chk("home literal on a workspace name refused", quotaVol("osio-ide-vol-", { size: "2G" }), "DriverOpts");
+  chk("workspace literal on a home name refused", quotaVol("osio-ide-home-", { size: "5G" }), "DriverOpts");
+  chk("type/o/device refused", quotaVol("osio-ide-vol-", { type: "none", o: "bind", device: "/" }), "DriverOpts");
+  chk("size plus o refused", quotaVol("osio-ide-vol-", { size: "5G", o: "bind" }), "DriverOpts");
+  chk("size plus type refused", quotaVol("osio-ide-home-", { size: "2G", type: "none" }), "DriverOpts");
+  chk("array DriverOpts refused", quotaVol("osio-ide-vol-", ["size"]), "DriverOpts");
+  chk("other volume prefix refused", unsafeVolumeBody({ Name: `osio-ide-data-${DIGEST}`, Driver: "local", Labels: { [MANAGED_LABEL]: "1" } }), "Name");
+  chk("lower-case driveropts refused", unsafeVolumeBody({ Name: `osio-ide-vol-${DIGEST}`, Driver: "local", Labels: { [MANAGED_LABEL]: "1" }, driveropts: { type: "none", o: "bind", device: "/" } }), "keys");
   chk("provisioner volume ok", unsafeVolumeBody({ Name: `osio-ide-vol-${DIGEST}`, Driver: "local", Labels: { [MANAGED_LABEL]: "1" } }), null);
   chk("unmanaged volume name rejected", unsafeVolumeBody({ Name: "other", Driver: "local" }), "Name");
   chk("empty volume labels rejected", unsafeVolumeBody({ Name: `osio-ide-vol-${DIGEST}`, Driver: "local", Labels: {} }), "Labels");
@@ -238,9 +279,9 @@ if (isMain && process.argv.includes("--selfcheck")) {
   chk("provisioner network ok", unsafeNetworkBody({ Name: "ide-net", Driver: "bridge", Internal: true }), null);
   chk("volume create is vetted", bodyVetter("/v1.47/volumes/create") === unsafeVolumeBody, true);
   chk("network create is vetted", bodyVetter("/networks/create") === unsafeNetworkBody, true);
-  chk("create vetter runs the shape check", bodyVetter(CANON_PATH)(mk()), null);
-  refuse("create vetter refuses Privileged", bodyVetter(CANON_PATH)(host({ Privileged: true })));
-  chk("exec create is vetted", bodyVetter(`/containers/ide-${DIGEST}/exec`)({ User: "10001:10001" }), "WorkingDir");
+  refuse("create vetter refuses Privileged", await bodyVetter(CANON_PATH)(host({ Privileged: true })));
+  chk("create vetter wraps vetCreateBody", await bodyVetter(CANON_PATH)(host({ Privileged: true })), await vetCreateBody(host({ Privileged: true }), CANON_PATH));
+  chk("exec create is vetted", bodyVetter(`/containers/ide-${DIGEST}/exec`)({ User: "20000:10001" }), "User");
 
   if (fail.length) { process.stderr.write(`selfcheck FAIL:\n${fail.join("\n")}\n`); process.exit(1); }
   process.stdout.write("selfcheck OK: socket-proxy allow/deny + body filter correct\n");
@@ -248,5 +289,6 @@ if (isMain && process.argv.includes("--selfcheck")) {
 }
 
 if (isMain) {
+  await ledger.ready();
   server.listen(LISTEN_PORT, () => process.stdout.write(`[ide-socket-proxy] :${LISTEN_PORT} -> ${DOCKER_SOCK}\n`));
 }

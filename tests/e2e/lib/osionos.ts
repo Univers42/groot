@@ -6,14 +6,17 @@ import { expect, type Frame, type FrameLocator, type Page } from "@playwright/te
  * whole top bar shrinks when it lands; an open menubar then hover-switches to whatever
  * button slid under the cursor and unmounts the menu mid-click (T38). That chunk arrives
  * with the Home page, and Vite resolves a lazy import only after its CSS has loaded, so
- * the page's breadcrumbs on screen with no LoadingPane left means the reflow is done.
- * The breadcrumbs are the positive anchor: the outer LazyMainContent fallback is a bare
- * spinner with no status role, which a bare toHaveCount(0) would wave through.
- * Caveat: a chunk that lazy-loads later (on scroll, on a timer) is not awaited.
+ * the page's title on screen with no LoadingPane left means the reflow is done.
+ * The title is the positive anchor: the outer LazyMainContent fallback is a bare spinner
+ * with no status role, which a bare toHaveCount(0) would wave through. Not the pane's
+ * "Title bar" region: the pane draws it before the lazy chunk lands. Not the breadcrumbs:
+ * since the workbench title bar (osionos 924ffee1) only page tabs draw them, Home does not.
+ * Caveat: a chunk that lazy-loads later (on scroll, on a timer) is not awaited, and a Home
+ * set to the graph, database or workspace view draws no page title, so this times out there.
  */
 async function waitForSettledShell(page: Page): Promise<void> {
   const shell = page.getByTestId("app-shell");
-  await expect(shell.getByRole("main").getByRole("navigation", { name: "Page breadcrumbs" })).toBeVisible();
+  await expect(shell.getByRole("main").getByRole("textbox", { name: "Page title" })).toBeVisible();
   await expect(shell.getByRole("status", { name: "Loading" })).toHaveCount(0);
 }
 
