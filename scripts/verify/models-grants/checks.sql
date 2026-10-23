@@ -689,3 +689,76 @@ SELECT 'lifecycle_transfer_one_owner',
                AND user_id = 'e1e1e1e1-0000-4000-8000-0000000000a1') IS DISTINCT FROM 'admin')::int,
        'after a transfer: exactly one owner row, owner_id = the new owner, the old owner is admin';
 ROLLBACK;
+
+-- workspace_invites_shape: the pending-invite table (models/osionos-workspace-invites-migration.sql).
+-- Asserts the table, forced RLS, the partial unique index with its exact predicate, and then
+-- behaviour: a second LIVE invite for one (workspace, account) is refused with 23505, a new
+-- one is allowed once the first is revoked, and the role CHECK refuses 'owner' with 23514.
+-- Caveat: the predicate is compared as pg_get_indexdef text, so a harmless reformat by a new
+-- Postgres major reads as a violation (noisy, never silent); fixtures roll back.
+SELECT 'workspace_invites_table',
+       CASE WHEN to_regclass('public.osionos_workspace_invites') IS NULL THEN 1
+            WHEN NOT (SELECT relrowsecurity AND relforcerowsecurity FROM pg_class
+                       WHERE oid = 'public.osionos_workspace_invites'::regclass) THEN 1
+            ELSE 0 END,
+       'osionos_workspace_invites is missing or does not FORCE row level security';
+SELECT 'workspace_invites_live_index',
+       CASE WHEN NOT EXISTS (
+              SELECT 1 FROM pg_indexes
+               WHERE schemaname = 'public' AND tablename = 'osionos_workspace_invites'
+                 AND indexname = 'osionos_workspace_invites_live_idx'
+                 AND indexdef LIKE 'CREATE UNIQUE INDEX%(workspace_id, invited_user_id)%'
+                 AND indexdef LIKE '%WHERE ((accepted_at IS NULL) AND (revoked_at IS NULL))') THEN 1
+            ELSE 0 END,
+       coalesce((SELECT indexdef FROM pg_indexes WHERE indexname = 'osionos_workspace_invites_live_idx'),
+                'the partial unique index is missing');
+BEGIN;
+INSERT INTO public.osionos_workspaces (id, owner_id, name, slug)
+  VALUES ('e2e2e2e2-0000-4000-8000-000000000001', 'e2e2e2e2-0000-4000-8000-0000000000a1', 'wi1', 'wi-1');
+DO $$
+DECLARE
+  v_second text := 'none';
+  v_again  text := 'none';
+  v_owner  text := 'none';
+BEGIN
+  INSERT INTO public.osionos_workspace_invites
+    (id, workspace_id, email, invited_user_id, role, token_hash, expires_at, invited_by)
+  VALUES ('e2e2e2e2-0000-4000-8000-0000000000b1', 'e2e2e2e2-0000-4000-8000-000000000001', 'a@b.co',
+          'e2e2e2e2-0000-4000-8000-0000000000c1', 'editor', repeat('a', 64), now() + interval '7 days',
+          'e2e2e2e2-0000-4000-8000-0000000000a1');
+  BEGIN
+    INSERT INTO public.osionos_workspace_invites
+      (workspace_id, email, invited_user_id, role, token_hash, expires_at, invited_by)
+    VALUES ('e2e2e2e2-0000-4000-8000-000000000001', 'a@b.co', 'e2e2e2e2-0000-4000-8000-0000000000c1',
+            'viewer', repeat('b', 64), now() + interval '7 days', 'e2e2e2e2-0000-4000-8000-0000000000a1');
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_second = RETURNED_SQLSTATE;
+  END;
+  UPDATE public.osionos_workspace_invites SET revoked_at = now()
+   WHERE id = 'e2e2e2e2-0000-4000-8000-0000000000b1';
+  BEGIN
+    INSERT INTO public.osionos_workspace_invites
+      (workspace_id, email, invited_user_id, role, token_hash, expires_at, invited_by)
+    VALUES ('e2e2e2e2-0000-4000-8000-000000000001', 'a@b.co', 'e2e2e2e2-0000-4000-8000-0000000000c1',
+            'viewer', repeat('c', 64), now() + interval '7 days', 'e2e2e2e2-0000-4000-8000-0000000000a1');
+    v_again := 'ok';
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_again = RETURNED_SQLSTATE;
+  END;
+  BEGIN
+    INSERT INTO public.osionos_workspace_invites
+      (workspace_id, email, invited_user_id, role, token_hash, expires_at, invited_by)
+    VALUES ('e2e2e2e2-0000-4000-8000-000000000001', 'o@b.co', 'e2e2e2e2-0000-4000-8000-0000000000c2',
+            'owner', repeat('d', 64), now() + interval '7 days', 'e2e2e2e2-0000-4000-8000-0000000000a1');
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_owner = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.wi_second', v_second, true);
+  PERFORM set_config('osionos.check.wi_again', v_again, true);
+  PERFORM set_config('osionos.check.wi_owner', v_owner, true);
+END $$;
+SELECT 'workspace_invites_behaviour',
+       (CASE WHEN current_setting('osionos.check.wi_second', true) = '23505' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.wi_again', true) = 'ok' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.wi_owner', true) = '23514' THEN 0 ELSE 1 END),
+       'second_live=' || coalesce(current_setting('osionos.check.wi_second', true), 'unset')
+     || ' after_revoke=' || coalesce(current_setting('osionos.check.wi_again', true), 'unset')
+     || ' owner_role=' || coalesce(current_setting('osionos.check.wi_owner', true), 'unset');
+ROLLBACK;

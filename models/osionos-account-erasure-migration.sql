@@ -278,6 +278,11 @@ INSERT INTO osionos_account_data_map_seed VALUES
 -- workspaces, pages, databases
 ('osionos_workspaces', 'owner_id', 'owner', 'transfer', '{id,name,slug,created_at}', NULL, NULL, NULL, NULL),
 ('osionos_workspace_members', 'user_id', 'member', 'delete', '{workspace_id,user_id,role,created_at}', NULL, NULL, NULL, NULL),
+-- a pending invite is addressed to the invitee (the row goes with them); the people who sent or
+-- accepted it are tombstoned. `email` is a display copy of the invitee's, removed with the row.
+('osionos_workspace_invites', 'invited_user_id', 'member', 'delete', NULL, NULL, NULL, NULL, NULL),
+('osionos_workspace_invites', 'invited_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
+('osionos_workspace_invites', 'accepted_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
 ('osionos_pages', 'owner_id', 'owner', 'transfer', '{id,workspace_id,title,visibility,content,properties,created_at,updated_at}', NULL, NULL, 'workspace_id', NULL),
 ('osionos_pages', 'collaborators', 'peer', 'scrub_jsonb', NULL, NULL, NULL, 'workspace_id', NULL),
 ('osionos_page_comments', 'author_id', 'author', 'anonymise', '{id,page_id,content,created_at}', NULL, NULL, NULL, NULL),

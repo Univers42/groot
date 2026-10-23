@@ -2310,6 +2310,7 @@ CREATE FUNCTION pg_temp.p5_unregistered() RETURNS SETOF text LANGUAGE sql AS $f$
       ('osionos_feed_shares', 'target', 'share kind'), ('osionos_page_links', 'target_page_id', 'page id'),
       ('osionos_profile_template_section_grants', 'principal_type', 'label'), ('osionos_profiles', 'username', 'the row goes by user_id'),
       ('osionos_sessions', 'user_agent', 'the row goes by user_id'), ('osionos_share_rules', 'target_key', 'derived from target, same row'),
+      ('osionos_workspace_invites', 'email', 'display copy of the invitee address; the row goes by invited_user_id'),
       ('osionos_user_reports', 'decision', 'label'), ('osionos_user_reports', 'decision_note', 'moderator free text'),
       ('osionos_user_reports', 'subject_kind', 'label'), ('osionos_username_history', 'username', 'the held name, released at released_at'),
       ('users', 'email', 'replaced by the erase'), ('users', 'username', 'replaced by the erase'))
