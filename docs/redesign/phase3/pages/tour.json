@@ -1,0 +1,41 @@
+{
+  "route": "/tour",
+  "widths": {
+    "390": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/phase3/screenshots/tour-390.jpg",
+      "reducedScreenshot": "test-results/site-audit/phase3/screenshots/tour-390-reduced.jpg",
+      "darkScreenshot": "test-results/site-audit/phase3/screenshots/tour-390-dark.jpg",
+      "truncated": false,
+      "pageHeight": 2365,
+      "overflowPx": 0,
+      "consoleErrors": [],
+      "axe": [],
+      "axeDark": []
+    },
+    "768": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/phase3/screenshots/tour-768.jpg",
+      "reducedScreenshot": "test-results/site-audit/phase3/screenshots/tour-768-reduced.jpg",
+      "darkScreenshot": "test-results/site-audit/phase3/screenshots/tour-768-dark.jpg",
+      "truncated": false,
+      "pageHeight": 2066,
+      "overflowPx": 0,
+      "consoleErrors": [],
+      "axe": [],
+      "axeDark": []
+    },
+    "1440": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/phase3/screenshots/tour-1440.jpg",
+      "reducedScreenshot": "test-results/site-audit/phase3/screenshots/tour-1440-reduced.jpg",
+      "darkScreenshot": "test-results/site-audit/phase3/screenshots/tour-1440-dark.jpg",
+      "truncated": false,
+      "pageHeight": 1556,
+      "overflowPx": 0,
+      "consoleErrors": [],
+      "axe": [],
+      "axeDark": []
+    }
+  }
+}

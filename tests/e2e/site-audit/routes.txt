@@ -1,9 +1,11 @@
 # Every public route of the Prismatica site: apps/opposite-osiris/src/pages, plus the generated
-# /docs bundle served from public/docs. scripts/site-audit.sh (Lighthouse) and capture.spec.ts
-# (screenshots, axe, console) both read this file, so a route added here is measured by both.
+# /docs pages served from public/docs (the largest doc stands in for the 159). scripts/site-audit.sh
+# (Lighthouse) and capture.spec.ts (screenshots, axe, console) both read this file, so a route
+# added here is measured by both.
 # `capture-only` after a path keeps it out of Lighthouse, which aborts the whole run on a page
 # whose status is not 2xx (measured: /404 stopped the 2026-10-15 baseline at route 2).
 /
+/tour
 /404 capture-only
 /legal/privacy-policy
 /legal/terms
@@ -14,3 +16,4 @@
 /newsletter/confirm
 /newsletter/unsubscribe
 /docs/
+/docs/graph/performance-tuning/
