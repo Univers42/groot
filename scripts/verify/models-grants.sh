@@ -807,10 +807,11 @@ run_races() {
 	wait "${race_pid}" || true
 	got_a="$(grep -E '^[0-9a-f-]{36}$' "${WORK}/race1-a-$1.out" | tr '\n' ' ')"
 	got_b="$(tr '\n' ' ' <"${WORK}/race1-b-$1.out")"
-	if [ "${got_a}" = "${race_a} " ] && [ "${got_b}" = "${race_b} ${race_c} " ]; then
-		pass "$1" "p5_race_claim" "the second claimer skipped the held row and took the next two"
+	race_att="$(printf "SELECT count(*) FROM public.osionos_account_deletion_requests WHERE user_id IN ('%s','%s','%s') AND attempts = 1 AND claimed_at IS NOT NULL;\n" "${race_a}" "${race_b}" "${race_c}" | psql_rows)"
+	if [ "${got_a}" = "${race_a} " ] && [ "${got_b}" = "${race_b} ${race_c} " ] && [ "${race_att}" = 3 ]; then
+		pass "$1" "p5_race_claim" "the second claimer skipped the held row and took the next two; each claim counted one attempt"
 	else
-		fail "$1" "p5_race_claim" "expected one claimer on ${race_a} and the other on ${race_b} ${race_c}; got [${got_a}] and [${got_b}] $(head -1 "${WORK}/race1-b-$1.err")"
+		fail "$1" "p5_race_claim" "expected one claimer on ${race_a} and the other on ${race_b} ${race_c}, three claimed rows at attempts=1 (got ${race_att}); got [${got_a}] and [${got_b}] $(head -1 "${WORK}/race1-b-$1.err")"
 	fi
 	# Race 2: the erase of C holds the request open; the account role's cancel must lose.
 	printf '%s\n' 'BEGIN;' "SELECT public.osionos_account_erase('${race_c}') IS NOT NULL;" 'SELECT pg_sleep(4);' 'COMMIT;' |
