@@ -85,7 +85,7 @@ ADAPTER_REGISTRY_SERVICE_TOKEN=ADAPTER_REGISTRY_SERVICE_TOKEN"
 # A moved OSIONOS_APP_HOST_PORT moves them — that is the whole point of the key set.
 PORT_KEYS="VITE_BAAS_URL OSIONOS_ALLOWED_ORIGIN OSIONOS_APP_URL PUBLIC_OSIONOS_APP_URL"
 # Minted once per machine, never derived; an absent or empty one is minted by --sync.
-MINTED="DEMO_LOGIN_PASSWORD OSIONOS_IDE_TOKEN_SECRET"
+MINTED="DEMO_LOGIN_PASSWORD OSIONOS_IDE_TOKEN_SECRET AUTH_LINK_SIGNING_KEY"
 # Copied from $MEDIA_ENV, never derived: they decide nothing about the exit status.
 MEDIA="UNSPLASH_ACCESS_KEY PIXABAY_API"
 # NOT derived: VITE_BAAS_REALTIME_TOKEN — the generator seeds it with the anon key, but
@@ -130,6 +130,9 @@ mint_missing() {
       OSIONOS_IDE_TOKEN_SECRET)
         put_env "$OUT" "$key" "$(gen)"
         note "minted $key (was absent) — restart osionos-bridge and osionos-ide-server to use it." ;;
+      AUTH_LINK_SIGNING_KEY)
+        put_env "$OUT" "$key" "$(gen)"
+        note "minted AUTH_LINK_SIGNING_KEY (was absent) — restart auth-gateway to use it." ;;
       *)
         put_env "$OUT" "$key" "$(gen_password)"
         note "minted $key (was absent) — make all applies it to the demo account; make demo-login prints it." ;;
