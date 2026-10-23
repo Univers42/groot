@@ -183,9 +183,10 @@ capability_status() {
 # Any other answer keeps the values written before the probes existed. ssh and local never
 # write OSIONOS_TENANT_MOUNTS_URL; they only clear one a direct link left.
 publish_env() {
-  local url="" key="" query="" registry="" mounts=""
+  local url="" key="" query="" registry="" mounts="" keepalive=""
   if [ "$1" = direct ]; then
     url=http://mini-baas-kong:8000/realtime
+    keepalive=1
     key=$(get_env "$2" SERVICE_ROLE_KEY) || key=""
     if [ "$(capability_status "$3" POST /realtime/v1/publish)" = 403 ]; then
       url=ws://mini-baas-kong:8000/realtime/v1/ws
@@ -207,6 +208,11 @@ publish_env() {
   put_env "$2" OSIONOS_ADAPTER_REGISTRY_URL "$registry"
   if [ "$1" = direct ] || get_env "$2" OSIONOS_TENANT_MOUNTS_URL >/dev/null; then
     put_env "$2" OSIONOS_TENANT_MOUNTS_URL "$mounts"
+  fi
+  # Kept-alive pool: a workspace open after 40 s idle 488 -> 313 ms median (2026-10-18, 8
+  # workspaces, interleaved); measured on the direct link only, so ssh/local never turn it on.
+  if [ "$1" = direct ] || get_env "$2" OSIONOS_BAAS_KEEPALIVE >/dev/null; then
+    put_env "$2" OSIONOS_BAAS_KEEPALIVE "$keepalive"
   fi
 }
 

@@ -69,17 +69,20 @@ pulled() {
   [ -z "$extra" ] || { echo "pulled but unused: $extra"; return 1; }
 }
 
-@test "scope all keeps pulling the root compose set that up and up-infra start" {
+@test "scope all pulls none of the retired backend images" {
   prefetch all
-  grep -qF 'hashicorp/vault:1.16' "$PULLS"
-  grep -qF 'kong:3.8' "$PULLS"
-  grep -qF 'postgres-meta' "$PULLS"
+  for retired in hashicorp/vault postgres:16-alpine redis:7-alpine mailpit kong:3.8 postgrest gotrue postgres-meta; do
+    run grep -F "$retired" "$PULLS"
+    [ "$status" -eq 1 ] || { echo "still pulled: $retired"; return 1; }
+  done
 }
 
 @test "an unknown prefetch scope is refused" {
-  run prefetch everything
-  [ "$status" -ne 0 ]
-  [[ "$output" == *DOCKER_PREFETCH_SCOPE* ]]
+  for scope in everything vault; do
+    run prefetch "$scope"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *DOCKER_PREFETCH_SCOPE* ]]
+  done
 }
 
 # vault-restore pulls its helpers, then stops containers via `make up`. A failing fake make

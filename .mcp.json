@@ -1,42 +1,47 @@
 {
-	"mcpServers": {
-		"playwright": {
-			"type": "stdio",
-			"command": "bash",
-			"args": [
-				"scripts/tools.sh",
-				"playwright-mcp",
-				"--headless",
-				"--isolated",
-				"--no-sandbox",
-				"--browser",
-				"chromium",
-				"--executable-path",
-				"/usr/bin/chromium-browser"
-			]
-		},
-		"chrome-devtools": {
-			"type": "stdio",
-			"command": "bash",
-			"args": [
-				"scripts/tools.sh",
-				"chrome-devtools-mcp",
-				"--headless",
-				"--isolated",
-				"--executablePath",
-				"/usr/bin/chromium-browser",
-				"--chromeArg=--no-sandbox"
-			]
-		},
-		"osionos": {
-			"type": "stdio",
-			"command": "bash",
-			"args": ["scripts/tools.sh", "node", "apps/osionos/app/scripts/osionos-mcp-server.mjs"],
-			"env": {
-				"TOOLS_PASS_ENV": "OSIONOS_MCP_BRIDGE_URL OSIONOS_MCP_API_URL",
-				"OSIONOS_MCP_BRIDGE_URL": "https://localhost:4000",
-				"OSIONOS_MCP_API_URL": "https://localhost:4000"
-			}
-		}
-	}
+  "mcpServers": {
+    "playwright": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "scripts/tools.sh",
+        "playwright-mcp",
+        "--headless",
+        "--isolated",
+        "--no-sandbox",
+        "--browser",
+        "chromium",
+        "--executable-path",
+        "/usr/bin/chromium-browser"
+      ]
+    },
+    "chrome-devtools": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "scripts/tools.sh",
+        "chrome-devtools-mcp",
+        "--headless",
+        "--isolated",
+        "--executablePath",
+        "/usr/bin/chromium-browser",
+        "--chromeArg=--no-sandbox"
+      ]
+    },
+    "osionos": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "scripts/tools.sh",
+        "node",
+        "apps/osionos/app/scripts/osionos-mcp-server.mjs"
+      ],
+      "env": {
+        "TOOLS_PASS_ENV": "OSIONOS_MCP_BRIDGE_URL OSIONOS_MCP_API_URL NODE_EXTRA_CA_CERTS",
+        "OSIONOS_MCP_BRIDGE_URL": "https://localhost:4000",
+        "OSIONOS_MCP_API_URL": "https://localhost:4000",
+        "NODE_EXTRA_CA_CERTS": "apps/grobase/certs/track-binocle-local-ca.pem"
+      }
+    }
+  }
 }

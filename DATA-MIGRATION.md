@@ -23,7 +23,7 @@ Three independent payloads carry the state — keep them straight:
   **`keystore.v42`** (the private key) **and `contract-default.tok`** (the tenant contract that
   authorises the vault; the keystore alone gets `Unauthenticated: missing auth metadata`). Easiest is
   `scp -r OLD_HOST:~/.config/42ctl ~/.config/`. Alternatively recover the keystore via
-  `make -C apps/grobase ctl-remote ARGS="keys recover --email <you>"` (email-OTP) then `auth login`
+  `make -C apps/grobase ctl42 ARGS="keys recover --email <you>"` (email-OTP) then `auth login`
   for a fresh contract — but copying the dir is OTP-free. The keystore is unlocked by the passphrase below.
 - **vault42 passphrase:** the vault owner gives it to you out-of-band. It is never written in
   this repo (the repo is public).

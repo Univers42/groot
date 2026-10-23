@@ -1,0 +1,41 @@
+{
+  "route": "/auth/confirm",
+  "widths": {
+    "390": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/phase3/screenshots/auth-confirm-390.jpg",
+      "reducedScreenshot": "test-results/site-audit/phase3/screenshots/auth-confirm-390-reduced.jpg",
+      "darkScreenshot": "test-results/site-audit/phase3/screenshots/auth-confirm-390-dark.jpg",
+      "truncated": false,
+      "pageHeight": 1905,
+      "overflowPx": 0,
+      "consoleErrors": [],
+      "axe": [],
+      "axeDark": []
+    },
+    "768": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/phase3/screenshots/auth-confirm-768.jpg",
+      "reducedScreenshot": "test-results/site-audit/phase3/screenshots/auth-confirm-768-reduced.jpg",
+      "darkScreenshot": "test-results/site-audit/phase3/screenshots/auth-confirm-768-dark.jpg",
+      "truncated": false,
+      "pageHeight": 1527,
+      "overflowPx": 0,
+      "consoleErrors": [],
+      "axe": [],
+      "axeDark": []
+    },
+    "1440": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/phase3/screenshots/auth-confirm-1440.jpg",
+      "reducedScreenshot": "test-results/site-audit/phase3/screenshots/auth-confirm-1440-reduced.jpg",
+      "darkScreenshot": "test-results/site-audit/phase3/screenshots/auth-confirm-1440-dark.jpg",
+      "truncated": false,
+      "pageHeight": 1319,
+      "overflowPx": 0,
+      "consoleErrors": [],
+      "axe": [],
+      "axeDark": []
+    }
+  }
+}

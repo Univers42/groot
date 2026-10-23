@@ -14,8 +14,9 @@
 # Hostile-corpus gate for the IDE sandbox plane — the devil's 16
 # conditions as runnable probes. Run AFTER `bootstrap.sh` with the `ide`
 # profile up. Probes run inside TWO throwaway boxes (ide-probe-a/b)
-# in the PRODUCTION shape (uid 10001, /workspace on named volume,
-# CapDrop ALL, no-new-privileges, tmpfs /tmp 64m + /home/coder 64m,
+# in the PRODUCTION shape (each box its own uid 2000N with gid 10001, volumes given to that uid by
+# the ownership init and mounted NoCopy, ADR 0011; /workspace on named volume,
+# CapDrop ALL, no-new-privileges, tmpfs /tmp 64m exec, per-user home volume at /home/coder,
 # pids 512, memory 1 GiB swap equal, 1 CPU). Positive controls run first
 # so a broken probe tool never reads as a pass; every probe prints exactly
 # one PASS/FAIL/SKIP line, and the RESULT line checks the total against EXPECTED.
@@ -30,11 +31,19 @@ SANDBOX_NET="osio-ide-sandbox-net"
 SANDBOX_IMAGE="${OSIONOS_IDE_SANDBOX_IMAGE:-osionos-ide-sandbox:latest}"
 BOX_A=ide-probe-a
 BOX_B=ide-probe-b
+# Two different owners: their uids are what the socket proxy's ledger would have handed out first.
+UID_A=20000
+UID_B=20001
+INIT_VOLUMES="osio-ide-vol-ide-probe-init osio-ide-home-ide-probe-init osio-ide-nocopy-probe"
 RUNNER_PROBE=ide-runner-sigusr1-probe
 NAT_CHECK=/usr/local/sbin/osionos-ide-egress-nat
 PLANE_PROJECT=osionos-ide-plane
 pass=0; fail=0; skipped=0
-EXPECTED=44
+# 44 + 4 persistent-home probes (a)-(d) + 3 identity probes (e)-(g) + 1 /tmp probe + 4 per-user-uid
+# probes (ADR 0011) + 1 runtime assertion (K11); the green line is
+# `RESULT: 55 passed, 0 failed, 2 skipped (expected 57)` where the skips are the runner image,
+# absent on a VM without the code runner, and the runtime assertion while OSIONOS_IDE_REQUIRE_RUNTIME is unset.
+EXPECTED=57
 # The VM's default gateway (user-mode QEMU: 10.0.2.2 is the physical host's loopback, where 4242
 # is the VM's own forwarded ssh). Elsewhere set a port that listens on that gateway.
 GATEWAY_PORT="${OSIONOS_IDE_VERIFY_GATEWAY_PORT:-4242}"
@@ -94,26 +103,43 @@ plane_no_reach() {
 # their volumes, and the runner probe container.
 cleanup() {
   $IDE rm -f "$BOX_A" "$BOX_B" >/dev/null 2>&1
-  $IDE volume rm "osio-ide-vol-$BOX_A" "osio-ide-vol-$BOX_B" >/dev/null 2>&1
+  $IDE volume rm "osio-ide-vol-$BOX_A" "osio-ide-vol-$BOX_B" "osio-ide-home-$BOX_A" "osio-ide-home-$BOX_B" $INIT_VOLUMES >/dev/null 2>&1
   docker rm -f "$RUNNER_PROBE" >/dev/null 2>&1
 }
 trap cleanup EXIT
 
 # One throwaway box in the production shape (buildContainerSpec,
-# apps/osionos/app/scripts/ide-sandbox-spec.mjs:56-97).
+# apps/osionos/app/scripts/ide-sandbox-spec.mjs, and buildInitSpec in ide-volume-init.mjs).
 # Ponytail: these flags are copied by hand from buildContainerSpec —
 # the proxy parity test (scripts/tests/ide-proxy-parity.mjs) is what
 # catches drift in the bridge, this copy can still lag it.
 start_box() {
   $IDE rm -f "$1" >/dev/null 2>&1
-  $IDE volume rm "osio-ide-vol-$1" >/dev/null 2>&1
+  $IDE volume rm "osio-ide-vol-$1" "osio-ide-home-$1" >/dev/null 2>&1
+  init_volumes "osio-ide-vol-$1" "osio-ide-home-$1" "$(box_uid "$1")" && run_box "$1"
+}
+
+box_uid() { if [ "$1" = "$BOX_B" ]; then echo "$UID_B"; else echo "$UID_A"; fi; }
+
+# The ownership init exactly as buildInitSpec shapes it: the sandbox image at the real targets, the
+# entrypoint overridden, three capabilities, no network. Copy-up happens here, not under the box.
+# OSIONOS_IDE_INIT_PIDS: under gVisor sentry threads count as pids, 16 cannot start the init (40 measured); mirrors the proxy floor.
+init_volumes() {
+  $IDE run --rm --network none --user 0:0 --entrypoint /usr/local/sbin/osio-volume-init \
+    --cap-drop ALL --cap-add CHOWN --cap-add DAC_READ_SEARCH --cap-add FOWNER \
+    --security-opt no-new-privileges:true --read-only --pids-limit "${OSIONOS_IDE_INIT_PIDS:-16}" --memory 128m --memory-swap 128m \
+    -e OSIO_UID="$3" -v "$1":/workspace -v "$2":/home/coder "$SANDBOX_IMAGE" >/dev/null 2>&1
+}
+
+# The box alone, volumes kept: the home must outlive the container.
+run_box() {
   $IDE run -d --name "$1" \
     --network "$SANDBOX_NET" \
-    --user 10001:10001 --workdir /workspace \
+    --user "$(box_uid "$1"):10001" --workdir /workspace \
     --cap-drop ALL --security-opt no-new-privileges:true --read-only \
-    -v "osio-ide-vol-$1":/workspace \
-    --tmpfs /tmp:size=64m,mode=1777 \
-    --tmpfs /home/coder:size=64m,mode=0700,uid=10001,gid=10001 \
+    --mount "type=volume,src=osio-ide-vol-$1,dst=/workspace,volume-nocopy" \
+    --mount "type=volume,src=osio-ide-home-$1,dst=/home/coder,volume-nocopy" \
+    --tmpfs /tmp:size=64m,mode=1777,exec \
     --pids-limit 512 --memory 1g --memory-swap 1g --cpus 1 \
     --ulimit core=0:0 --ulimit nproc=512:512 --ulimit nofile=4096:4096 \
     --restart no \
@@ -124,6 +150,7 @@ start_box() {
     -e NO_PROXY=localhost,127.0.0.1 \
     -e no_proxy=localhost,127.0.0.1 \
     -e GIT_TERMINAL_PROMPT=0 \
+    -e HOME=/home/coder \
     "$SANDBOX_IMAGE" sleep infinity >/dev/null 2>&1
 }
 
@@ -245,7 +272,7 @@ else
 fi
 
 echo "== Identity =="
-if [ "$(sx 'id -u')" = "10001" ]; then ok "box runs as uid 10001 (spec user)"; else bad "box runs as uid 10001 (spec user)"; fi
+if [ "$(sx 'id -u; id -g' | tr '\n' ' ')" = "$UID_A 10001 " ]; then ok "box runs as its own uid $UID_A with gid 10001 (spec user)"; else bad "box runs as its own uid $UID_A with gid 10001 (spec user)"; fi
 
 echo "== Init =="
 # 50 orphans reparented to PID 1, then a second for it to reap them. With `sleep infinity` as
@@ -282,9 +309,99 @@ deny "command -v docker"            "no docker binary in sandbox"
 deny "unshare -Ur id"               "unprivileged userns blocked (seccomp)"
 deny "cat /proc/1/root/etc/shadow"  "no host fs escape"
 
+echo "== Persistent home (devil verdict ide-user-shell, H8) =="
+# The home is a named volume per user at the constant /home/coder; /etc stays read-only.
+# (a) the ownership init gave it to the box's uid, mode 700. (b) the volumes are per box here as per user in production.
+# (c) the file outlives the container. (d) the one writable-looking tree outside it is not.
+if sx "test \"\$(stat -c %u:%g:%a /home/coder)\" = $UID_A:10001:700 && echo a >/home/coder/probe-a && rm /home/coder/probe-a"; then ok "home is owned by the box uid, mode 700, and writable"; else bad "home is owned by the box uid, mode 700, and writable"; fi
+sx 'echo marker >/home/coder/probe-marker' >/dev/null
+if $IDE exec "$BOX_B" sh -c 'echo b >/home/coder/probe-b && test ! -e /home/coder/probe-marker' >/dev/null 2>&1; then ok "box B cannot read box A's home (distinct volumes)"; else bad "box B cannot read box A's home (distinct volumes)"; fi
+$IDE rm -f "$BOX_A" >/dev/null 2>&1
+run_box "$BOX_A" || printf 'warning: %s failed to restart — probes fail closed\n' "$BOX_A" >&2
+if [ "$(sx 'cat /home/coder/probe-marker')" = "marker" ]; then ok "a file in the home survives box remove and recreate"; else bad "a file in the home survives box remove and recreate"; fi
+deny "touch /etc/probe-x" "/etc is read-only (touch /etc/x denied)"
+
+# /tmp is exec, nosuid and nodev (ADR 0010): the mount flags AND a copied binary that runs, because
+# a flag read alone would pass on a daemon that merges the options differently.
+tmp_flags=$(sx 'grep " /tmp " /proc/self/mounts' | awk '{print $4}')
+case ",$tmp_flags," in
+  *,nosuid,*) has_nosuid=1 ;; *) has_nosuid=0 ;;
+esac
+case ",$tmp_flags," in
+  *,nodev,*) has_nodev=1 ;; *) has_nodev=0 ;;
+esac
+case ",$tmp_flags," in
+  *,noexec,*) has_noexec=1 ;; *) has_noexec=0 ;;
+esac
+if [ "$has_nosuid" = 1 ] && [ "$has_nodev" = 1 ] && [ "$has_noexec" = 0 ] && sx 'cp /bin/true /tmp/probe-true && /tmp/probe-true && rm /tmp/probe-true'; then ok "/tmp is exec, nosuid and nodev, and a copied binary runs"; else bad "/tmp is exec, nosuid and nodev, and a copied binary runs"; fi
+
+echo "== Per-user uid (ADR 0011) =="
+# Different users get different host uids, so the kernel, not a path, keeps their files apart.
+# (h) a box of another uid cannot enter this home even if its volume were mounted by mistake, with a
+# control that the owner can. (i) the two boxes' processes have different host uids, offset by their
+# uids in the remap range. (j) NoCopy keeps a fresh volume's root as Docker made it, where a copy-up
+# would hand it to the image's 10001. (k) the init, with only its three capabilities, gives a 0700
+# tree another uid left behind to the new uid: the case CHOWN alone cannot walk.
+foreign_home() {
+  $IDE run --rm --network none --user "$1:10001" --cap-drop ALL --read-only --entrypoint sh \
+    --mount "type=volume,src=osio-ide-home-$BOX_A,dst=/home/coder,volume-nocopy" \
+    "$SANDBOX_IMAGE" -c 'ls /home/coder' >/dev/null 2>&1
+}
+if foreign_home "$UID_A" && ! foreign_home "$UID_B"; then ok "another uid cannot list box A's home; its owner can"; else bad "another uid cannot list box A's home; its owner can"; fi
+pid_a=$($IDE inspect -f '{{.State.Pid}}' "$BOX_A" 2>/dev/null)
+pid_b=$($IDE inspect -f '{{.State.Pid}}' "$BOX_B" 2>/dev/null)
+host_a=$(stat -c %u "/proc/${pid_a:-0}" 2>/dev/null)
+host_b=$(stat -c %u "/proc/${pid_b:-0}" 2>/dev/null)
+if [ -n "$uidmap" ] && [ "$host_a" = $((uidmap + UID_A)) ] && [ "$host_b" = $((uidmap + UID_B)) ]; then ok "box A and box B run as different host uids ($host_a, $host_b)"; else bad "box A and box B run as different host uids (${host_a:-?}, ${host_b:-?})"; fi
+nocopy_root() { $IDE run --rm --network none --user 0:0 --entrypoint stat --mount "type=volume,src=osio-ide-nocopy-probe,dst=/home/coder$1" "$SANDBOX_IMAGE" -c %u /home/coder 2>/dev/null; }
+$IDE volume rm osio-ide-nocopy-probe >/dev/null 2>&1
+nocopy_owner=$(nocopy_root ,volume-nocopy)
+$IDE volume rm osio-ide-nocopy-probe >/dev/null 2>&1
+copyup_owner=$(nocopy_root "")
+if [ "$nocopy_owner" = 0 ] && [ "$copyup_owner" = 10001 ]; then ok "volume-nocopy leaves a fresh volume root alone (copy-up would give it to 10001)"; else bad "volume-nocopy leaves a fresh volume root alone (nocopy ${nocopy_owner:-?}, copy-up ${copyup_owner:-?})"; fi
+$IDE volume rm osio-ide-nocopy-probe osio-ide-vol-ide-probe-init osio-ide-home-ide-probe-init >/dev/null 2>&1
+$IDE run --rm --network none --user 0:0 --entrypoint sh --cap-drop ALL --cap-add CHOWN \
+  -v osio-ide-vol-ide-probe-init:/workspace -v osio-ide-home-ide-probe-init:/home/coder "$SANDBOX_IMAGE" \
+  -c 'mkdir -p /home/coder/old/deep && echo x >/home/coder/old/deep/f && chown -R 30000:10001 /home/coder/old && chmod 700 /home/coder/old /home/coder/old/deep' >/dev/null 2>&1
+init_volumes osio-ide-vol-ide-probe-init osio-ide-home-ide-probe-init "$UID_A"
+tree_owner=$($IDE run --rm --network none --user "$UID_A:10001" --cap-drop ALL --read-only --entrypoint stat \
+  --mount "type=volume,src=osio-ide-home-ide-probe-init,dst=/home/coder,volume-nocopy" "$SANDBOX_IMAGE" -c %u:%g /home/coder/old/deep/f 2>/dev/null)
+if [ "$tree_owner" = "$UID_A:10001" ]; then ok "the init gives a 0700 tree another uid left to the new uid with three capabilities"; else bad "the init gives a 0700 tree another uid left to the new uid with three capabilities (${tree_owner:-unreadable})"; fi
+
+echo "== Box identity (ADR 0009, P6) =="
+# /etc/passwd links to /tmp/.osio/passwd, which box-init writes before the Cmd starts. A `docker
+# exec` that lands in the first milliseconds can precede that write, so (e) and (g) ask again for
+# up to 5 s. (e) the numeric user resolves to coder and HOME is the create Env's. (f) a hostile
+# account file changes neither uid nor HOME: runc takes both from the numeric User and the create
+# Env. (g) a file that breaks every exec (a 100 KB line) is cured by a restart, which gives /tmp
+# a fresh tmpfs.
+sx_retry() {
+  for _ in 1 2 3 4 5; do
+    if out=$(sx "$1") && [ -n "$out" ]; then printf '%s' "$out"; return 0; fi
+    sleep 1
+  done
+  return 1
+}
+if [ "$(sx_retry 'whoami; echo $HOME' | tr '\n' ' ')" = "coder /home/coder " ]; then ok "whoami is coder and HOME is /home/coder right after start"; else bad "whoami is coder and HOME is /home/coder right after start"; fi
+sx "printf 'root:x:$UID_A:10001::/root:/bin/sh\n' >/tmp/.osio/passwd" >/dev/null
+if [ "$(sx 'id -u; echo $HOME' | tr '\n' ' ')" = "$UID_A /home/coder " ]; then ok "a hostile passwd file changes neither uid nor HOME"; else bad "a hostile passwd file changes neither uid nor HOME"; fi
+sx 'head -c 100000 /dev/zero | tr "\0" a >/tmp/.osio/passwd' >/dev/null
+$IDE restart -t 2 "$BOX_A" >/dev/null 2>&1
+if [ "$(sx_retry 'whoami' | tr -d '\n')" = "coder" ]; then ok "a passwd file that breaks every exec is cured by a box restart"; else bad "a passwd file that breaks every exec is cured by a box restart"; fi
+
 echo "== Resource caps (conditions 14,15,16) =="
 if [ "$(sx 'ulimit -c')" = "0" ]; then ok "core dumps disabled (RLIMIT_CORE=0)"; else bad "core dumps disabled (RLIMIT_CORE=0)"; fi
 deny "fallocate -l 2000M /tmp/big" "tmpfs write bounded by quota"
+
+echo "== Runtime assertion (K11/R1) =="
+# FAIL when OSIONOS_IDE_REQUIRE_RUNTIME is set and the daemon or the probe box runs another runtime
+# (a silent fallback to runc); SKIP when it is unset.
+runtime_message=$(DOCKER_HOST="unix://${OSIONOS_IDE_DOCKER_SOCK:-/run/docker-ide.sock}" sh "$(dirname "$0")/check-runtime.sh" "$BOX_A")
+case $? in
+  0) ok "$runtime_message" ;;
+  3) skip "$runtime_message" ;;
+  *) bad "$runtime_message" ;;
+esac
 
 echo "== Socket-proxy body filter (conditions 8,9) =="
 # The create-body vetting (Privileged/Binds/host-modes/CapAdd reject + endpoint
