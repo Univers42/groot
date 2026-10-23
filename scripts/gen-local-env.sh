@@ -31,10 +31,10 @@
 # app's own origin, so a moved port moves them with it. They are derived keys too —
 # `--sync` touches them and nothing else.
 #
-# MINTED keys (DEMO_LOGIN_PASSWORD, OSIONOS_IDE_TOKEN_SECRET) are local-only secrets an
-# older .env.local predates. `--sync` mints one that is absent or empty and says so by
-# name; `--check` reports it as missing. scripts/demo-login-ensure.sh then applies the
-# password to the account.
+# MINTED keys (DEMO_LOGIN_PASSWORD, OSIONOS_IDE_TOKEN_SECRET, AUTH_LINK_SIGNING_KEY)
+# are local-only secrets an older .env.local predates. `--sync` mints one that is absent
+# or empty and says so by name; `--check` reports it as missing. scripts/demo-login-ensure.sh
+# applies only the demo password.
 #
 # MEDIA keys (UNSPLASH_ACCESS_KEY, PIXABAY_API) are read by the osionos bridge only from
 # ./.env.local, yet a fresh clone holds them only in apps/osionos/app/.env (MEDIA_ENV=<path>
