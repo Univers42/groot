@@ -211,9 +211,16 @@ create table if not exists public.ai_approvals (
 -- two calls that differ only in the order of their keys are the same call.
 -- The index is partial: a DECLINED approval frees the call again, a pending or
 -- an executed one does not.
-create unique index if not exists ai_approvals_one_live_per_call
-	on public.ai_approvals (run_id, tool, args_sha256)
-	where status in ('pending','executing','executed');
+-- Once the non-blocking replacement exists, don't recreate the legacy index.
+DO $guard_live_index$
+BEGIN
+    IF to_regclass('public.ai_approvals_one_live_per_call_partial_idx') IS NULL THEN
+        CREATE UNIQUE INDEX IF NOT EXISTS ai_approvals_one_live_per_call
+            ON public.ai_approvals (run_id, tool, args_sha256)
+            WHERE status IN ('pending', 'executing', 'executed');
+    END IF;
+END
+$guard_live_index$;
 
 -- The sweeper: the rows that are still 'executing' (a write whose outcome was
 -- never recorded) and the ones to delete once they are old enough.

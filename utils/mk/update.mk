@@ -4,7 +4,8 @@
 #   make update_web   Rebuild + restart the osionos WEB app (the static nginx
 #                     image). The app bakes its sources at BUILD time, so a plain
 #                     `docker compose up` reuses the stale image — this forces the
-#                     rebuild. Then hard-reload https://localhost:3001 to see edits.
+#                     rebuild. Then hard-reload the app's own URL (the one the
+#                     host ports chose, $(OSIONOS_URL)) to see edits.
 #
 #   make update_app   Rebuild the osionos DESKTOP .deb FIRST, then (re)install it.
 #                     `install-app.sh` on its own installs whatever STALE .deb is
@@ -27,7 +28,7 @@ update_web: submodules-pinned ## Rebuild and restart the osionos web app after e
 		echo "[update_web] rebuilding osionos-app (no app .env; root .env only)…"; \
 		docker compose --env-file .env up -d --build osionos-app; \
 	fi
-	@echo "✅ osionos-app rebuilt + restarted — HARD-RELOAD https://localhost:3001 (Ctrl+Shift+R)."
+	@echo "✅ osionos-app rebuilt + restarted — HARD-RELOAD $(OSIONOS_URL) (Ctrl+Shift+R)."
 
 update_app: ## Rebuild the osionos desktop .deb, then install it (prompts for sudo)
 ## Rebuilds the full edition package (apps/osionos-electron/dist/) then installs it. install-app.sh

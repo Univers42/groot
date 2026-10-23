@@ -94,3 +94,6 @@ apps/baas.bak/
 # make certs-export default destination
 /track-binocle-local-ca.pem
 secrets
+
+# host-ports resolver override files (generated, not tracked)
+infrastructure/tls/host-ports.d/*.conf

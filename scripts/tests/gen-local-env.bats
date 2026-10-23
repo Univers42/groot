@@ -30,6 +30,9 @@ OSIONOS_BRIDGE_EMAIL_HASH_SALT=salt-keep
 DEMO_LOGIN_PASSWORD=demo-keep
 OSIONOS_IDE_TOKEN_SECRET=ide-secret-keep
 VITE_BAAS_URL=https://localhost:3001
+OSIONOS_ALLOWED_ORIGIN=https://localhost:3001
+OSIONOS_APP_URL=https://localhost:3001
+PUBLIC_OSIONOS_APP_URL=https://localhost:3001
 LOCAL
   chmod 600 "$OUT"
   # openssl stub: minting needs randomness, not a real binary (the CI bats image has none).
@@ -365,4 +368,28 @@ media_source() { printf 'UNSPLASH_ACCESS_KEY=unsplash-SRC-9f3\nPIXABAY_API=pixab
   [ "$status" -eq 0 ]
   [[ "$output" == *"media UNSPLASH_ACCESS_KEY differs from"*"osionos-app.env"* ]]
   [[ "$output" != *"media PIXABAY_API"* ]]
+}
+
+
+@test "--check: a moved host port names all four port-derived keys" {
+  run env OSIONOS_APP_HOST_PORT=4321 bash "$SCRIPT" --check
+  [ "$status" -eq 1 ]
+  for key in VITE_BAAS_URL OSIONOS_ALLOWED_ORIGIN OSIONOS_APP_URL PUBLIC_OSIONOS_APP_URL; do
+    [[ "$output" == *"drift $key"* ]]
+  done
+  [[ "$output" != *"4321"* ]]
+}
+
+@test "--sync: a moved host port updates only the four port-derived keys" {
+  before_jwt="$(val "$OUT" JWT_SECRET)"
+  before_svc="$(val "$OUT" SERVICE_ROLE_KEY)"
+  run env OSIONOS_APP_HOST_PORT=4321 bash "$SCRIPT" --sync
+  [ "$status" -eq 0 ]
+  for key in VITE_BAAS_URL OSIONOS_ALLOWED_ORIGIN OSIONOS_APP_URL PUBLIC_OSIONOS_APP_URL; do
+    [ "$(val "$OUT" "$key")" = "https://localhost:4321" ]
+  done
+  [ "$(val "$OUT" JWT_SECRET)" = "$before_jwt" ]
+  [ "$(val "$OUT" SERVICE_ROLE_KEY)" = "$before_svc" ]
+  [[ "$output" == *"VITE_BAAS_URL"* ]]
+  [[ "$output" == *"PUBLIC_OSIONOS_APP_URL"* ]]
 }
