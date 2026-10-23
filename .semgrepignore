@@ -73,6 +73,22 @@ wiki/api/
 infrastructure/tls/nginx.conf
 infrastructure/scripts/tls/nginx.conf
 
+
+# ── Reviewed Nginx routing snippets with rule-level false positives ─────────
+# Keep this list narrow and review it whenever these files change. Semgrep's
+# in-source nosemgrep suppressions are uploaded to GitHub Code Scanning as OPEN
+# alerts, so the reviewed snippets must be excluded at scan time instead.
+#
+# edge.conf: proxy destinations are fixed Docker service names set server-side;
+# variables are needed to defer Docker DNS until request time.
+# apps.conf.template: the upstream map is keyed by Nginx's server port, and the
+# Host check is an allowlist with default-deny (444), not an upstream selector.
+# bridge-public.conf: the proxy inherits the fixed server-side upstream from the
+# parent server; the public route does not control its destination.
+infrastructure/eval/edge.conf
+infrastructure/tls/public.d/apps.conf.template
+infrastructure/tls/public.d/bridge-public.conf
+
 # ── CI workflows (gated by GitHub Actions / linters, not product SAST) ───────
 .github/
 
