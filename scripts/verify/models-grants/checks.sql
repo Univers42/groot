@@ -426,3 +426,186 @@ SELECT 'moderation_columns',
 SELECT 'audit_viewer_index',
        (to_regclass('public.osionos_bridge_audit_events_provider_created_idx') IS NULL)::int,
        '';
+
+-- p5_keys_column_acl: the account role's exact reach on the user keys table
+-- (P5-3-a). It reads the eight published columns of its OWN rows and writes
+-- nothing; the bridge writes through the service role. Fixture: two users and
+-- one key each, inserted and rolled back here. The catalog half compares the
+-- column ACL in both directions, so a missing and an extra privilege both fail.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+                               ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+DO $$
+DECLARE
+  v_missing boolean := false;
+BEGIN
+  BEGIN
+    INSERT INTO public.osionos_user_keys (user_id, kind, title, public_key, fingerprint) VALUES
+      ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'ssh', 'A key', 'ssh-ed25519 AAAA', 'SHA256:a'),
+      ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'ssh', 'B key', 'ssh-ed25519 BBBB', 'SHA256:b');
+  EXCEPTION WHEN others THEN
+    v_missing := true;
+  END;
+  PERFORM set_config('osionos.check.k_fixture', CASE WHEN v_missing THEN 'no_table' ELSE 'ok' END, true);
+END $$;
+DO $$
+DECLARE
+  v_own bigint := -1;
+  v_other bigint := -1;
+  v_state text := '';
+BEGIN
+  SET LOCAL ROLE osionos_account_user;
+  PERFORM set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","aud":"osionos-account","role":"osionos_account_user"}', true);
+  BEGIN
+    SELECT count(*) INTO v_own FROM public.osionos_user_keys WHERE id IS NOT NULL;
+    SELECT count(*) INTO v_other FROM public.osionos_user_keys
+     WHERE user_id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+  EXCEPTION WHEN others THEN
+    v_own := -1;
+    v_other := -1;
+  END;
+  PERFORM set_config('osionos.check.k_own', v_own::text, true);
+  PERFORM set_config('osionos.check.k_other', v_other::text, true);
+  v_state := '';
+  SET LOCAL ROLE osionos_account_user;
+  BEGIN
+    INSERT INTO public.osionos_user_keys (user_id, kind, title, public_key, fingerprint)
+    VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'ssh', 'x', 'k', 'SHA256:c');
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_insert', v_state, true);
+  v_state := '';
+  SET LOCAL ROLE osionos_account_user;
+  BEGIN
+    UPDATE public.osionos_user_keys SET title = 'x';
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_update', v_state, true);
+  v_state := '';
+  SET LOCAL ROLE osionos_account_user;
+  BEGIN
+    DELETE FROM public.osionos_user_keys;
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_delete', v_state, true);
+END $$;
+RESET ROLE;
+WITH granted(col) AS (
+  SELECT unnest(ARRAY['id','user_id','kind','title','public_key','fingerprint','key_type','created_at'])
+),
+t AS (SELECT to_regclass('public.osionos_user_keys') AS oid),
+violations AS (
+  SELECT 'selects:' || a.attname AS v
+    FROM t, pg_attribute a
+   WHERE t.oid IS NOT NULL AND a.attrelid = t.oid AND a.attnum > 0 AND NOT a.attisdropped
+     AND has_column_privilege('osionos_account_user', a.attrelid, a.attname, 'SELECT')
+     AND a.attname NOT IN (SELECT col FROM granted)
+  UNION ALL
+  SELECT 'missing:' || g.col
+    FROM t, granted g
+   WHERE t.oid IS NOT NULL
+     AND NOT has_column_privilege('osionos_account_user', t.oid, g.col, 'SELECT')
+  UNION ALL
+  SELECT 'table_privilege:' || p.priv
+    FROM t, unnest(ARRAY['INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) AS p(priv)
+   WHERE t.oid IS NOT NULL AND has_table_privilege('osionos_account_user', t.oid, p.priv)
+  UNION ALL
+  SELECT 'column_privilege:' || p.priv
+    FROM t, unnest(ARRAY['INSERT','UPDATE','REFERENCES']) AS p(priv)
+   WHERE t.oid IS NOT NULL AND has_any_column_privilege('osionos_account_user', t.oid, p.priv)
+)
+SELECT 'p5_keys_column_acl',
+       (CASE WHEN current_setting('osionos.check.k_own', true) = '1' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_other', true) = '0' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_insert', true) = '42501' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_update', true) = '42501' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_delete', true) = '42501' THEN 0 ELSE 1 END)
+     + (SELECT count(*) FROM violations),
+       'fixture=' || coalesce(current_setting('osionos.check.k_fixture', true), 'unset')
+     || ' own=' || coalesce(current_setting('osionos.check.k_own', true), 'unset')
+     || ' other=' || coalesce(current_setting('osionos.check.k_other', true), 'unset')
+     || ' insert=' || coalesce(current_setting('osionos.check.k_insert', true), 'unset')
+     || ' update=' || coalesce(current_setting('osionos.check.k_update', true), 'unset')
+     || ' delete=' || coalesce(current_setting('osionos.check.k_delete', true), 'unset')
+     || ' acl=' || coalesce((SELECT string_agg(v, ' ' ORDER BY v) FROM violations), 'exact');
+ROLLBACK;
+
+-- p5_keys_row_rules: the table's own row rules, probed as the service role (the
+-- only writer). Five rows must be refused with the named state: a kind outside
+-- ssh/gpg, an empty title, an 81-character title, an oversized key (23514) and a
+-- second row with the same (user, kind, fingerprint) (23505); and the 51st row
+-- of one user must be refused by the trigger with P0001. The count is the
+-- number of those six that did NOT end in the expected state.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+SET LOCAL ROLE service_role;
+DO $$
+DECLARE
+  v_state text;
+  v_user constant uuid := 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+BEGIN
+  v_state := '';
+  BEGIN
+    INSERT INTO public.osionos_user_keys (user_id, kind, title, public_key, fingerprint)
+    VALUES (v_user, 'pgp', 't', 'k', 'f1');
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_kind', v_state, true);
+  v_state := '';
+  BEGIN
+    INSERT INTO public.osionos_user_keys (user_id, kind, title, public_key, fingerprint)
+    VALUES (v_user, 'ssh', '', 'k', 'f2');
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_title0', v_state, true);
+  v_state := '';
+  BEGIN
+    INSERT INTO public.osionos_user_keys (user_id, kind, title, public_key, fingerprint)
+    VALUES (v_user, 'ssh', repeat('t', 81), 'k', 'f3');
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_title81', v_state, true);
+  v_state := '';
+  BEGIN
+    INSERT INTO public.osionos_user_keys (user_id, kind, title, public_key, fingerprint)
+    VALUES (v_user, 'ssh', 't', repeat('k', 16385), 'f4');
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_size', v_state, true);
+  INSERT INTO public.osionos_user_keys (user_id, kind, title, public_key, fingerprint)
+  VALUES (v_user, 'ssh', 't', 'k', 'dup');
+  v_state := '';
+  BEGIN
+    INSERT INTO public.osionos_user_keys (user_id, kind, title, public_key, fingerprint)
+    VALUES (v_user, 'ssh', 't', 'k', 'dup');
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_dup', v_state, true);
+  INSERT INTO public.osionos_user_keys (user_id, kind, title, public_key, fingerprint)
+  SELECT v_user, 'ssh', 't', 'k', 'fill' || n FROM generate_series(1, 49) AS n;
+  v_state := '';
+  BEGIN
+    INSERT INTO public.osionos_user_keys (user_id, kind, title, public_key, fingerprint)
+    VALUES (v_user, 'ssh', 't', 'k', 'one-too-many');
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_limit', v_state, true);
+END $$;
+RESET ROLE;
+SELECT 'p5_keys_row_rules',
+       (CASE WHEN current_setting('osionos.check.k_kind', true) = '23514' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_title0', true) = '23514' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_title81', true) = '23514' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_size', true) = '23514' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_dup', true) = '23505' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_limit', true) = 'P0001' THEN 0 ELSE 1 END),
+       'kind=' || coalesce(current_setting('osionos.check.k_kind', true), 'unset')
+     || ' title0=' || coalesce(current_setting('osionos.check.k_title0', true), 'unset')
+     || ' title81=' || coalesce(current_setting('osionos.check.k_title81', true), 'unset')
+     || ' size=' || coalesce(current_setting('osionos.check.k_size', true), 'unset')
+     || ' dup=' || coalesce(current_setting('osionos.check.k_dup', true), 'unset')
+     || ' limit=' || coalesce(current_setting('osionos.check.k_limit', true), 'unset');
+ROLLBACK;
