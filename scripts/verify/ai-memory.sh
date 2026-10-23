@@ -8,12 +8,15 @@
 #                                                                              #
 # **************************************************************************** #
 #
-# WHAT IT PROVES  (models/osionos-ai-memory-migration.sql)
+# WHAT IT PROVES  (models/osionos-ai-user-memory-migration.sql)
 #   a  anon and authenticated can neither select nor insert, on both tables (C43)
 #   b  an ai_memory_audit row cannot be updated or deleted (C40)
 #   c  the body CHECK refuses 0 and 301 characters and accepts 300 (C47)
 #   d  ai_erase_user removes the user's memories and audit rows, keeps another's
 #   e  ai_runs.memory_pins exists, and the migration replays
+#   f  the file sorts after osionos-ai-migration.sql, which creates ai_runs: the
+#      models runner applies osionos-ai-*.sql in its alphabetical pass, so a
+#      name that sorts first fails on a fresh database
 #
 # ISOLATION
 #   One throwaway container: ai-memory-pg, --network none, no port, no volume.
@@ -28,7 +31,7 @@ set -eu
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 MODELS="${REPO}/models"
-MEM="${MEMORY_MIGRATION:-${MODELS}/osionos-ai-memory-migration.sql}"
+MEM="${MEMORY_MIGRATION:-${MODELS}/osionos-ai-user-memory-migration.sql}"
 CTN="ai-memory-pg"
 PG_IMAGE="${PG_IMAGE:-pgvector/pgvector:0.8.0-pg16}"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/ai-memory.XXXXXX")"
@@ -173,6 +176,14 @@ check_e() {
 	return 1
 }
 
+check_f() {
+	base="$(basename "${MEM}")"
+	last="$(printf '%s\n' osionos-ai-migration.sql "${base}" | LC_ALL=C sort | tail -1)"
+	[ "${last}" = "${base}" ] && [ "${base}" != osionos-ai-migration.sql ] && return 0
+	DETAIL="${base} sorts before osionos-ai-migration.sql"
+	return 1
+}
+
 main() {
 	start_pg
 	note "postgres up in ${CTN}; migration ${MEM}"
@@ -194,7 +205,7 @@ main() {
 	apply_file "${MODELS}/osionos-user-events-migration.sql" || exit 1
 	# First apply here, second in check_e: the replay is the idempotence proof.
 	apply_file "${MEM}" || exit 1
-	for fn in check_a check_b check_c check_d check_e; do
+	for fn in check_a check_b check_c check_d check_e check_f; do
 		DETAIL=""
 		if "${fn}"; then
 			pass "${fn}" "ok"
