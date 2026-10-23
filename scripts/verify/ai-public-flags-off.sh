@@ -16,7 +16,7 @@ REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO"
 
 json=$(
-	OSIONOS_AI_IMAGES=on OSIONOS_AI_PAT=on OSIONOS_AI_STT_URL=https://x OSIONOS_AI_VLM_URL=https://vlm.invalid \
+	OSIONOS_AI_IMAGES=on OSIONOS_AI_PAT=on OSIONOS_AI_BUILDERS=on OSIONOS_AI_STT_URL=https://x OSIONOS_AI_VLM_URL=https://vlm.invalid \
 	OSIONOS_MODERATION_ACTIONS=hold \
 	PUBLIC_ORIGIN=https://verify.invalid \
 	AUTH_LINK_SIGNING_KEY=verify-only \
@@ -45,6 +45,7 @@ check() { # check <label> <jq expression that prints true>
 
 svc='.services["osionos-ai"]'
 check "osionos-ai OSIONOS_AI_IMAGES is empty" "$svc.environment.OSIONOS_AI_IMAGES == \"\""
+check "osionos-ai OSIONOS_AI_BUILDERS is empty" "$svc.environment.OSIONOS_AI_BUILDERS == \"\""
 check "osionos-ai OSIONOS_AI_PAT is empty" "$svc.environment.OSIONOS_AI_PAT == \"\""
 check "osionos-ai OSIONOS_AI_STT_URL is empty" "$svc.environment.OSIONOS_AI_STT_URL == \"\""
 check "osionos-ai OSIONOS_AI_VLM_URL is empty" "$svc.environment.OSIONOS_AI_VLM_URL == \"\""
