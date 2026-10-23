@@ -37,9 +37,10 @@
         "apps/osionos/app/scripts/osionos-mcp-server.mjs"
       ],
       "env": {
-        "TOOLS_PASS_ENV": "OSIONOS_MCP_BRIDGE_URL OSIONOS_MCP_API_URL NODE_EXTRA_CA_CERTS",
+        "TOOLS_PASS_ENV": "OSIONOS_MCP_BRIDGE_URL OSIONOS_MCP_API_URL OSIONOS_MCP_TOKEN NODE_EXTRA_CA_CERTS",
         "OSIONOS_MCP_BRIDGE_URL": "https://localhost:4000",
         "OSIONOS_MCP_API_URL": "https://localhost:4000",
+        "OSIONOS_MCP_TOKEN": "${OSIONOS_MCP_TOKEN}",
         "NODE_EXTRA_CA_CERTS": "apps/grobase/certs/track-binocle-local-ca.pem"
       }
     }
