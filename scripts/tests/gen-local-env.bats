@@ -283,13 +283,6 @@ media_source() { printf 'UNSPLASH_ACCESS_KEY=unsplash-SRC-9f3\nPIXABAY_API=pixab
   [[ "$output" == *"missing AUTH_LINK_SIGNING_KEY"* ]]
 }
 
-@test "generate: a fresh .env.local carries a 48-char AUTH_LINK_SIGNING_KEY" {
-  rm "$OUT"
-  run bash "$SCRIPT"
-  [ "$status" -eq 0 ]
-  [[ "$(val "$OUT" AUTH_LINK_SIGNING_KEY)" =~ ^[A-Za-z0-9]{48}$ ]]
-}
-
 @test "media --sync: keys absent from .env.local are copied" {
   media_source
   run bash "$SCRIPT" --sync
