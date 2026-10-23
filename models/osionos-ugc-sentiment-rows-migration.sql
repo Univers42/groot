@@ -84,11 +84,31 @@ REVOKE ALL ON public.osionos_object_database_rows FROM PUBLIC, anon, authenticat
 -- -----------------------------------------------------------------------------
 -- 3. The subject kind. ai_sentiment still has NO author column (C140).
 -- -----------------------------------------------------------------------------
-ALTER TABLE public.ai_sentiment
-    DROP CONSTRAINT IF EXISTS ai_sentiment_subject_kind_check;
-ALTER TABLE public.ai_sentiment
-    ADD CONSTRAINT ai_sentiment_subject_kind_check
-    CHECK (subject_kind IN ('page_comment', 'database_row'));
+-- The base sentiment migration creates a page_comment-only CHECK. Widen it
+-- once when database_row first ships, then leave the validated constraint alone
+-- on every convergence pass (re-adding it scans ai_sentiment under an
+-- ACCESS EXCLUSIVE lock).
+DO $$
+DECLARE
+    existing_def TEXT;
+BEGIN
+    SELECT pg_get_constraintdef(c.oid)
+      INTO existing_def
+      FROM pg_constraint c
+     WHERE c.conrelid = 'public.ai_sentiment'::regclass
+       AND c.conname = 'ai_sentiment_subject_kind_check'
+       AND c.contype = 'c';
+
+    IF existing_def IS NULL
+       OR existing_def NOT LIKE '%page_comment%'
+       OR existing_def NOT LIKE '%database_row%' THEN
+        ALTER TABLE public.ai_sentiment
+            DROP CONSTRAINT IF EXISTS ai_sentiment_subject_kind_check;
+        ALTER TABLE public.ai_sentiment
+            ADD CONSTRAINT ai_sentiment_subject_kind_check
+            CHECK (subject_kind IN ('page_comment', 'database_row'));
+    END IF;
+END $$;
 
 -- -----------------------------------------------------------------------------
 -- 4. The projection trigger, on the state table. It replaces the bridge RPC
@@ -455,12 +475,27 @@ BEGIN
        AND c.author_id = p_user;
     GET DIAGNOSTICS n = ROW_COUNT;
 
+    -- Remove queued work first: otherwise a worker can recreate a score
+    -- after the score itself has been erased (Codex review, PR #134).
+    DELETE FROM public.ai_jobs j
+     USING public.osionos_object_database_rows r
+     WHERE j.kind = 'sentiment'
+       AND j.subject_kind = 'database_row'
+       AND j.subject_id = r.id::text
+       AND r.owner_id = p_user;
+
     DELETE FROM public.ai_sentiment s
      USING public.osionos_object_database_rows r
      WHERE s.subject_kind = 'database_row'
        AND s.subject_id = r.id::text
        AND r.owner_id = p_user;
     GET DIAGNOSTICS m = ROW_COUNT;
+
+    -- The projection holds a copy of the source text. Erase it with the
+    -- derived score; its delete trigger is also a final idempotent cleanup of
+    -- any matching score/job rows.
+    DELETE FROM public.osionos_object_database_rows r
+     WHERE r.owner_id = p_user;
 
     RETURN n + m;
 END $$;
