@@ -11,9 +11,21 @@ import { integrityErrors } from '../lib/graph.mjs';
 import { TABLES } from '../lib/tables.mjs';
 import { literal } from '../lib/sql.mjs';
 import { ARGS, fixture } from './helpers.mjs';
+import { buildDataset } from '../lib/dataset.mjs';
 
 const spike = spikeDataset(fixture().dataset);
 const files = renderFiles(spike);
+
+test('seed 844 guarantees the Marc call needed by the standalone spike', () => {
+  const full = buildDataset({ ...ARGS, seed: 844 });
+  const selected = spikeDataset(full);
+  const call = selected.interactions[0];
+  assert.equal(call.kind, 'call');
+  assert.equal(call.deal_id, null);
+  assert.ok(selected.tables.contacts.some((c) => c.id === call.contact_id && c.email.startsWith('marc.delorme@')));
+  assert.deepEqual(call, full.interactions.find((d) => d._id === call._id));
+  assert.deepEqual(integrityErrors(selected).filter((e) => TABLES.some((t) => e.startsWith(`${t.name}.`))), []);
+});
 
 function tuple(table, row) {
   return `(${table.columns.map((c) => literal(row[c.name], c.type)).join(', ')})`;

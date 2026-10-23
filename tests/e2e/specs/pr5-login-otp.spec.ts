@@ -14,6 +14,7 @@ import { openPortal } from "../lib/portal";
 // Leaves its e2e-pr5-*@example.test account behind (local backend only).
 
 const OSIONOS_ORIGIN = new URL(OSIONOS_URL).origin;
+const SETTLE_MS = 5_000;
 
 test("PR5 a wrong code is refused, a resend inside the gap sends nothing, the mailed code signs in", async ({ page }) => {
   test.setTimeout(180_000);
@@ -43,6 +44,7 @@ test("PR5 a wrong code is refused, a resend inside the gap sends nothing, the ma
 
   await portal.getByRole("button", { name: "Resend code" }).click();
   await expect(portal.getByText("Wait a moment before asking for another code."), "a resend inside the gap is refused").toBeVisible();
+  await new Promise((done) => setTimeout(done, SETTLE_MS));
   expect((await mailsTo(email, LOGIN_CODE_SUBJECT)).length, "the refused resend sent no second mail").toBe(1);
 
   await codeField.fill(code);

@@ -289,6 +289,11 @@ Produced by `scripts/site-audit.sh baseline`; raw evidence lives in [`baseline/`
 - `screenshots/` holds `<route>-<width>.jpg` plus `-reduced.jpg`;
 - `pages/` holds the axe, console, overflow and status data per route.
 
+The three linked home screenshots were recreated on 2026-10-23 from the audited
+opposite-osiris revision `8559d6dd1b3a095fe14bd4575b6eb4152e75990c` (light theme,
+1440/390 × 900 viewports, JPEG quality 70, reduced motion where named). The original
+image files were not committed; the measurements below are from the original audit run.
+
 The tables are generated into [`baseline/summary.md`](baseline/summary.md) and copied below.
 
 **Caveats:**

@@ -68,6 +68,11 @@ apps/baas/sdk-*.rootowned-stale/
 
 # debug screenshots (throwaway PNGs)
 screenshots/
+!docs/redesign/baseline/screenshots/
+docs/redesign/baseline/screenshots/*
+!docs/redesign/baseline/screenshots/home-1440.jpg
+!docs/redesign/baseline/screenshots/home-1440-reduced.jpg
+!docs/redesign/baseline/screenshots/home-390-reduced.jpg
 
 # vault42 tool state (contains secret-file patterns)
 .42ctl/

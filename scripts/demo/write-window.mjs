@@ -1,6 +1,7 @@
 // write-window.mjs — when the Arlet seed may write to baas. scripts/demo/vm/lib.sh
 // write_window_reason is the VM's copy; tests/demo-seed/vm-bootstrap.bats proves the two agree
 // for every minute of the day. :58-:07 is b2b-backup's hourly pg_dump, 00:30-00:50 b2b-var-gc.
+import { pathToFileURL } from 'node:url';
 
 export function windowReason(hour, minute) {
 	const resume = (h) => `${String(h).padStart(2, '0')}:08`;
@@ -20,7 +21,7 @@ export function localClock(date, offset) {
 	return [shifted.getUTCHours(), shifted.getUTCMinutes()];
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
 	for (let hour = 0; hour < 24; hour += 1) {
 		for (let minute = 0; minute < 60; minute += 1) process.stdout.write(`${hour} ${minute} ${windowReason(hour, minute)}\n`);
 	}

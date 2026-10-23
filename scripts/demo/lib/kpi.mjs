@@ -8,10 +8,10 @@ import { centsText, daysBetween, quarterOf, monthOf } from './prng.mjs';
 // 1e-16 of a .x5 boundary could round the other way there. The reconcile check then fails loudly.
 export function pct1(part, whole) {
   if (whole === 0) return '0.0';
-  const scaled = 1000 * part;
+  const scaled = 1000 * Math.abs(part);
   let tenths = Math.floor(scaled / whole);
   if (2 * (scaled - tenths * whole) >= whole) tenths += 1;
-  return `${Math.floor(tenths / 10)}.${tenths % 10}`;
+  return `${part < 0 ? '-' : ''}${Math.floor(tenths / 10)}.${tenths % 10}`;
 }
 
 function md5(textValue) {
@@ -63,6 +63,7 @@ export function computeKpis(tables, anchor) {
     .map((p) => p.sku).sort();
   const pipeline = groupSum(tables.deals, (d) => [d.stage],
     [['amount', (d) => d.amount_eur], ['weighted', (d) => (d.amount_eur * d.probability_pct) / 100]]);
+  for (const g of pipeline) g.weighted = Math.round(g.weighted);
   const liveLines = tables.trade_order_lines.filter((l) => orderById.get(l.order_id).status !== 'cancelled');
   const channels = groupSum(liveLines, (l) => [orderById.get(l.order_id).department, orderById.get(l.order_id).channel],
     [['net', (l) => l.line_net_eur]]);

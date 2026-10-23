@@ -1,6 +1,18 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { localClock, windowReason } from '../write-window.mjs';
+
+test('relative CLI invocation prints every minute while importing without argv stays quiet', () => {
+	const cwd = fileURLToPath(new URL('../../../', import.meta.url));
+	const cli = spawnSync(process.execPath, ['scripts/demo/write-window.mjs'], { cwd, encoding: 'utf8' });
+	assert.equal(cli.status, 0, cli.stderr);
+	assert.equal(cli.stdout.trim().split('\n').length, 1440);
+	const imported = spawnSync(process.execPath, ['--input-type=module', '-e', "delete process.argv[1]; await import('./scripts/demo/write-window.mjs')"], { cwd, encoding: 'utf8' });
+	assert.equal(imported.status, 0, imported.stderr);
+	assert.equal(imported.stdout, '');
+});
 
 test('a closed window names its cause and when writing resumes', () => {
 	assert.equal(windowReason(1, 4), "b2b-backup's hourly pg_dump; writing resumes at 01:08");

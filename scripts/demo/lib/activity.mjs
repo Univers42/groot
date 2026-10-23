@@ -134,6 +134,16 @@ export function buildInteractions({ seed, anchor }, idx, products, story) {
   const picked = Array.from({ length: TOTAL }, () => rng.pick(days)).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   const threads = new Map();
   const docs = picked.map((day) => interaction(rng, ctx, day, threads));
+  // The standalone spike needs a Marc call without a deal; random draws alone cannot
+  // guarantee it. Keep the count and full/spike identity stable for every seed.
+  if (!docs.some((d) => d.contact_id === idx.people.marc.id && d.kind === 'call' && d.deal_id === null)) {
+    docs[0] = {
+      _id: null, kind: 'call', occurred_at: docs[0].occurred_at, company_id: idx.varenne.id,
+      contact_id: idx.people.marc.id, owner_contact_id: idx.accountManager.get(idx.varenne.id).id,
+      deal_id: null, notes: 'Called about an invoice query; resent the delivery note.',
+      direction: 'inbound', duration_s: 300,
+    };
+  }
   docs.sort((a, b) => (a.occurred_at < b.occurred_at ? -1 : a.occurred_at > b.occurred_at ? 1 : 0));
   docs.forEach((doc, n) => { doc._id = idFor('interactions', n); });
   return docs;

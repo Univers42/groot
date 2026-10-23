@@ -72,16 +72,15 @@ export function simulateStock({ seed, anchor }, trade, story) {
     });
     level.set(product.id, (level.get(product.id) || 0) + quantity);
   };
-  const receive = (product, day, quantity, expedited) => {
-    const supplier = supplierFor(rng, ctx, product, day);
+  const receive = (product, day, quantity, expedited, supplier = supplierFor(rng, ctx, product, day)) => {
     const cost = supplier === product.second_supplier_id ? Math.round(product.unit_cost_eur * 1.03) : product.unit_cost_eur;
     move(product, day, 'receipt', quantity, { supplier, cost, expedited });
   };
   for (const p of stocked) move(p, trade.start, 'opening', Math.max(p.reorder_qty + p.reorder_point, 2));
   const returns = new Map();
   for (let day = trade.start; day <= anchor; day = addDays(day, 1)) {
-    for (const [productId, qty] of arrivals.get(day) || []) {
-      receive(productById.get(productId), day, qty, false);
+    for (const [productId, qty, supplier] of arrivals.get(day) || []) {
+      receive(productById.get(productId), day, qty, false, supplier);
       onOrder.set(productId, onOrder.get(productId) - qty);
     }
     for (const line of byDay.get(day) || []) {
@@ -110,7 +109,7 @@ export function simulateStock({ seed, anchor }, trade, story) {
       const arrive = addDays(day, leadFor(rng, ctx, p, supplier, day));
       onOrder.set(p.id, (onOrder.get(p.id) || 0) + p.reorder_qty);
       if (!arrivals.has(arrive)) arrivals.set(arrive, []);
-      arrivals.get(arrive).push([p.id, p.reorder_qty]);
+      arrivals.get(arrive).push([p.id, p.reorder_qty, supplier]);
     }
   }
   return moves;

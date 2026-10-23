@@ -38,8 +38,10 @@ test.describe("ST6 docs pages", () => {
   test("the arrow keys scroll the page and do not change it", async ({ page, consoleGuard }) => {
     consoleGuard.watch(page, "arrows");
     await page.goto("/docs/graph/performance-tuning/");
+    const before = await page.evaluate(() => window.scrollY);
     await page.keyboard.press("ArrowDown");
     await page.keyboard.press("ArrowDown");
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(before);
     await expect(page).toHaveURL(/\/docs\/graph\/performance-tuning\/$/);
   });
 
