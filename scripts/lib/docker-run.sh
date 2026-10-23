@@ -15,23 +15,23 @@
 # there ("cannot setuid to unmapped uid"); root inside already is this user outside, and files
 # written to a bind mount come back owned by them either way.
 docker_run_user_args() {
-	if docker info -f '{{.SecurityOptions}}' 2>/dev/null | grep -q rootless; then
-		return 0
-	fi
-	printf '%s\n' --user "$(id -u):$(id -g)"
+  if docker info -f '{{.SecurityOptions}}' 2>/dev/null | grep -q rootless; then
+    return 0
+  fi
+  printf '%s\n' --user "$(id -u):$(id -g)"
 }
 
 local_ca_file() {
-	local rel=apps/grobase/certs/track-binocle-local-ca.pem ca common
-	if [[ -n "${LOCAL_CA_FILE:-}" ]]; then
-		ca="$LOCAL_CA_FILE"
-	elif [[ -r "$1/$rel" ]]; then
-		ca="$1/$rel"
-	elif common="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
-		ca="$(dirname "$common")/$rel" # a main checkout lands back on $1/$rel: still unreadable
-	else
-		return 1
-	fi
-	[[ -r "$ca" ]] || return 1
-	printf '%s\n' "$ca"
+  local rel=apps/grobase/certs/track-binocle-local-ca.pem ca common
+  if [[ -n "${LOCAL_CA_FILE:-}" ]]; then
+    ca="$LOCAL_CA_FILE"
+  elif [[ -r "$1/$rel" ]]; then
+    ca="$1/$rel"
+  elif common="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
+    ca="$(dirname "$common")/$rel" # a main checkout lands back on $1/$rel: still unreadable
+  else
+    return 1
+  fi
+  [[ -r "$ca" ]] || return 1
+  printf '%s\n' "$ca"
 }

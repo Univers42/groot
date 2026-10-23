@@ -10,10 +10,10 @@
 
 setup() {
   ROOT="$BATS_TEST_TMPDIR/repo"
-  mkdir -p "$ROOT/scripts/lib" "$ROOT/secrets" "$ROOT/apps/grobase/scripts/vault" "$ROOT/infrastructure/makes"
+  mkdir -p "$ROOT/scripts/lib" "$ROOT/secrets" "$ROOT/apps/grobase/scripts/vault" "$ROOT/utils/mk"
   cp "$BATS_TEST_DIRNAME/../vault42-push-guard.sh" "$BATS_TEST_DIRNAME/../vault42-team.sh" "$ROOT/scripts/"
   cp "$BATS_TEST_DIRNAME/../lib/envfile.sh" "$BATS_TEST_DIRNAME/../lib/seed-check.sh" "$ROOT/scripts/lib/"
-  cp "$BATS_TEST_DIRNAME/../../infrastructure/makes/repo.mk" "$ROOT/infrastructure/makes/"
+  cp "$BATS_TEST_DIRNAME/../../utils/mk/repo.mk" "$ROOT/utils/mk/"
   printf 'ENGINE_SEEDS="postgres-all.sql.gz redis.rdb"\n' >"$ROOT/scripts/restore-if-empty.sh"
   cat >"$ROOT/apps/grobase/scripts/vault/ctl-env.sh" <<STUB
 #!/bin/sh
@@ -145,17 +145,17 @@ tree_state() { (cd "$ROOT" && find . -exec stat -c '%n %a %s' {} + | sort); }
 }
 
 @test "make vault42-push-all: shared is the team push (.env.grobase-remote sealed), blank is personal; both guarded" {
-  run make -C "$ROOT" -f infrastructure/makes/repo.mk vault42-push-all VAULT42_ORG=o VAULT42_PROJECT=p VAULT42_ENV=e
+  run make -C "$ROOT" -f utils/mk/repo.mk vault42-push-all VAULT42_ORG=o VAULT42_PROJECT=p VAULT42_ENV=e
   [ "$status" -eq 0 ]
   [[ "$output" == *"✓ every dump matches"* ]]
   grep -q -- 'personal=0 push --private \*.bak --private .env.grobase-remote' "$BATS_TEST_TMPDIR/ctl.log"
   : >"$BATS_TEST_TMPDIR/ctl.log"
-  run make -C "$ROOT" -f infrastructure/makes/repo.mk vault42-push-all VAULT42_ORG= VAULT42_ENV=
+  run make -C "$ROOT" -f utils/mk/repo.mk vault42-push-all VAULT42_ORG= VAULT42_ENV=
   [ "$status" -eq 0 ]
   grep -qx 'ctl-env personal=1 push' "$BATS_TEST_TMPDIR/ctl.log"
   : >"$ROOT/secrets/SHA256SUMS"
   : >"$BATS_TEST_TMPDIR/ctl.log"
-  run make -C "$ROOT" -f infrastructure/makes/repo.mk vault42-push-all VAULT42_ORG= VAULT42_ENV=
+  run make -C "$ROOT" -f utils/mk/repo.mk vault42-push-all VAULT42_ORG= VAULT42_ENV=
   [ "$status" -ne 0 ]
   [ ! -s "$BATS_TEST_TMPDIR/ctl.log" ]
 }

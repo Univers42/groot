@@ -6,14 +6,13 @@
 # Public by design: browser-safe anon JWT (role=anon) / Supabase publishable key / storage-key names
 apps/grobase/vendor/vite-gourmand/scripts/supabase/setup-supabase.sh:generic-api-key:28
 apps/grobase/vendor/vite-gourmand/wiki/suppabase.md:generic-api-key:1
-apps/opposite-osiris/deploy/fly/fly.toml:jwt:25
+apps/opposite-osiris/deploy/fly/fly.toml:jwt:27
 apps/opposite-osiris/src/data/legal.ts:generic-api-key:28
 apps/opposite-osiris/src/data/legal.ts:generic-api-key:29
 
 # Not a secret: SonarCloud project key (public identifier)
 QUALITY-SECURITY-TOOLING.md:generic-api-key:109
-apps/opposite-osiris/public/docs/fragment.html:generic-api-key:6880
-apps/opposite-osiris/public/docs/index.html:generic-api-key:6890
+apps/opposite-osiris/public/docs/platform/sonarcloud-quality/index.html:generic-api-key:52
 apps/opposite-osiris/vault/platform/sonarcloud-quality.xmd:generic-api-key:38
 archive/wiki-2026-09/tools/02-sast-and-code-quality.md:generic-api-key:130
 archive/wiki-2026-09/tools/README.md:generic-api-key:81
@@ -47,8 +46,15 @@ apps/grobase/scripts/verify/m67-adapter-hmac.sh:generic-api-key:80
 apps/grobase/scripts/verify/m68-key-rotate.sh:generic-api-key:86
 apps/osionos/app/tests/bridge/bridge-public.test.mjs:generic-api-key:19
 apps/osionos/app/tests/bridge/bridge-push.test.mjs:generic-api-key:22
-apps/osionos/app/tests/bridge/ide-exec-parse.test.mjs:generic-api-key:35
-apps/osionos/app/tests/bridge/ide-exec-parse.test.mjs:generic-api-key:46
+apps/osionos/app/tests/bridge/bridge-no-sandbox.test.mjs:generic-api-key:73
+apps/osionos/app/tests/bridge/bridge-realtime-socket.test.mjs:generic-api-key:13
+apps/osionos/app/tests/bridge/ide-allowed-subjects.test.mjs:generic-api-key:172
+apps/osionos/app/tests/bridge/ide-fsync-agent-exit.test.mjs:generic-api-key:110
+apps/osionos/app/tests/bridge/ide-pty-start.test.mjs:generic-api-key:69
+apps/osionos/app/tests/bridge/ide-server.test.mjs:generic-api-key:62
+apps/osionos/app/tests/bridge/ide-ws-half-close.test.mjs:generic-api-key:41
+apps/osionos/app/tests/bridge/ide-exec-parse.test.mjs:generic-api-key:34
+apps/osionos/app/tests/bridge/ide-exec-parse.test.mjs:generic-api-key:45
 
 # Doc examples: $VAR placeholders in curl lines, sample CLI output of local dev engines (archive),
 # SonarCloud issue ids, a public CI badge token

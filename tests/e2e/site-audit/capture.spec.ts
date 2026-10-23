@@ -5,9 +5,10 @@ import { join } from "node:path";
 
 // One test per public route: at each width, a screenshot, the axe violations and the console
 // errors, written under test-results/site-audit/<label>/ for scripts/site-audit.sh to keep.
-// Each width is shot twice: as a first visit sees it, and with prefers-reduced-motion. The site's
-// scroll-driven reveals start at opacity 0 and a full-page screenshot never scrolls, so only the
-// reduced capture shows what is below the fold; the pair is itself evidence of that.
+// Each width is shot three times: as a first visit sees it (light), with prefers-reduced-motion,
+// and in the dark colour scheme (with its own axe pass, since contrast differs per theme). The
+// baseline site's scroll-driven reveals started at opacity 0 and a full-page screenshot never
+// scrolls, so only the reduced capture showed what was below the fold.
 // Caveat: a full-page screenshot taller than MAX_CAPTURE_PX is cut at that height (Chromium
 // cannot raster an unbounded page); the record says so with `truncated: true`.
 
@@ -29,13 +30,18 @@ interface WidthRecord {
   status: number | null;
   screenshot: string;
   reducedScreenshot: string;
+  darkScreenshot: string;
   truncated: boolean;
   pageHeight: number;
   // Document wider than the viewport, in px: content a phone user has to scroll sideways to see.
   overflowPx: number;
   consoleErrors: string[];
-  axe: { id: string; impact: string | null; nodes: number; help: string }[];
+  axe: AxeFinding[];
+  axeDark: AxeFinding[];
 }
+
+type AxeFinding = { id: string; impact: string | null; nodes: number; help: string };
+const AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
 // Settle the page, then shoot it full-height (or cut at MAX_CAPTURE_PX). Returns the page height.
 async function settleAndShoot(page: Page, width: number, path: string): Promise<number> {
@@ -52,12 +58,26 @@ async function settleAndShoot(page: Page, width: number, path: string): Promise<
   return height;
 }
 
-async function shootReduced(browser: Browser, url: string, width: number, path: string): Promise<void> {
-  const context = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
+async function axeFindings(page: Page): Promise<AxeFinding[]> {
+  const result = await new AxeBuilder({ page }).withTags(AXE_TAGS).analyze();
+  return result.violations.map((v) => ({ id: v.id, impact: v.impact ?? null, nodes: v.nodes.length, help: v.help }));
+}
+
+// One more shot of the route in a variant context (reduced motion, or the dark scheme); returns
+// the axe findings of that variant when asked to.
+async function shootVariant(
+  browser: Browser,
+  target: { url: string; width: number; path: string },
+  variant: { reducedMotion?: "reduce"; colorScheme?: "dark" },
+  withAxe = false,
+): Promise<AxeFinding[]> {
+  const context = await browser.newContext({ viewport: { width: target.width, height: 900 }, ...variant });
   const page = await context.newPage();
-  await page.goto(url, { waitUntil: "load" });
-  await settleAndShoot(page, width, path);
+  await page.goto(target.url, { waitUntil: "load" });
+  await settleAndShoot(page, target.width, target.path);
+  const findings = withAxe ? await axeFindings(page) : [];
   await context.close();
+  return findings;
 }
 
 async function measure(browser: Browser, url: string, width: number, shot: string): Promise<WidthRecord> {
@@ -72,19 +92,23 @@ async function measure(browser: Browser, url: string, width: number, shot: strin
   const pageHeight = await settleAndShoot(page, width, shot);
   const truncated = pageHeight > MAX_CAPTURE_PX;
   const overflowPx = (await page.evaluate(() => document.documentElement.scrollWidth)) - width;
-  const axe = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
+  const axe = await axeFindings(page);
   await context.close();
   const reducedScreenshot = shot.replace(/\.jpg$/, "-reduced.jpg");
-  await shootReduced(browser, url, width, reducedScreenshot);
+  const darkScreenshot = shot.replace(/\.jpg$/, "-dark.jpg");
+  await shootVariant(browser, { url, width, path: reducedScreenshot }, { reducedMotion: "reduce" });
+  const axeDark = await shootVariant(browser, { url, width, path: darkScreenshot }, { colorScheme: "dark" }, true);
   return {
     status: response?.status() ?? null,
     screenshot: shot,
     reducedScreenshot,
+    darkScreenshot,
     truncated,
     pageHeight,
     overflowPx,
     consoleErrors,
-    axe: axe.violations.map((v) => ({ id: v.id, impact: v.impact ?? null, nodes: v.nodes.length, help: v.help })),
+    axe,
+    axeDark,
   };
 }
 
@@ -100,6 +124,7 @@ for (const route of routes) {
       expect(record[width].status, `${route} at ${width}px answered`).not.toBeNull();
       expect(statSync(shot).size, `${shot} written`).toBeGreaterThan(0);
       expect(statSync(record[width].reducedScreenshot).size, "reduced-motion shot written").toBeGreaterThan(0);
+      expect(statSync(record[width].darkScreenshot).size, "dark shot written").toBeGreaterThan(0);
     }
     writeFileSync(join(OUT, "pages", `${slug}.json`), `${JSON.stringify({ route, widths: record }, null, 2)}\n`);
   });

@@ -1,0 +1,7 @@
+# Named http-locked-*, not http-ai-*: nginx includes http-*.conf in name order, and http-apps.conf's
+# map_hash_bucket_size must come before the first map (else "directive is duplicate").
+# The app's own origin may read the locked AI routes' 404 (and their preflight); any other origin gets no CORS header.
+map $http_origin $ai_locked_cors_origin {
+  default "";
+  "${PUBLIC_ORIGIN}:8443" $http_origin;
+}

@@ -19,7 +19,7 @@ setup() {
 }
 
 stub_docker_security() {
-  printf '#!/bin/sh\necho "%s"\n' "$1" > "$STUB/docker"
+  printf '#!/bin/sh\necho "%s"\n' "$1" >"$STUB/docker"
   chmod +x "$STUB/docker"
 }
 
@@ -83,7 +83,7 @@ git_quiet() { git -c user.email=t@example.test -c user.name=t -c init.defaultBra
 
 @test "tools.sh forwards TOOLS_PASS_ENV by name; the value never reaches argv" {
   t="$(fake_tools_tree)"
-  cat > "$STUB/docker" <<'EOF'
+  cat >"$STUB/docker" <<'EOF'
 #!/bin/sh
 [ "$1" = image ] && exit 0
 [ "$1" = info ] && exit 0
@@ -143,7 +143,7 @@ fake_tools_tree() {
   first="$output"
   run bash "$ROOT/scripts/tools.sh" --tag
   [ "$output" = "$first" ]
-  echo '# bump' >> "$t/infrastructure/docker/tools/Dockerfile"
+  echo '# bump' >>"$t/infrastructure/docker/tools/Dockerfile"
   run bash "$t/scripts/tools.sh" --tag
   [ "$status" -eq 0 ]
   [ "$output" != "$first" ]
