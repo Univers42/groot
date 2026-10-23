@@ -37,6 +37,7 @@ on:
       - "apps/opposite-osiris"
       - ".gitmodules"
       - "apps/graph_render"
+      - "apps/osionos/app"
   # PRs run only the bats job below (seconds, no secrets); clone-and-make-all is main-only.
   pull_request:
     paths:
