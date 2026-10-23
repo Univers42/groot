@@ -1,0 +1,35 @@
+{
+  "route": "/newsletter/unsubscribe",
+  "widths": {
+    "390": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/baseline/screenshots/newsletter-unsubscribe-390.jpg",
+      "reducedScreenshot": "test-results/site-audit/baseline/screenshots/newsletter-unsubscribe-390-reduced.jpg",
+      "truncated": false,
+      "pageHeight": 900,
+      "overflowPx": 268,
+      "consoleErrors": [],
+      "axe": []
+    },
+    "768": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/baseline/screenshots/newsletter-unsubscribe-768.jpg",
+      "reducedScreenshot": "test-results/site-audit/baseline/screenshots/newsletter-unsubscribe-768-reduced.jpg",
+      "truncated": false,
+      "pageHeight": 900,
+      "overflowPx": 110,
+      "consoleErrors": [],
+      "axe": []
+    },
+    "1440": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/baseline/screenshots/newsletter-unsubscribe-1440.jpg",
+      "reducedScreenshot": "test-results/site-audit/baseline/screenshots/newsletter-unsubscribe-1440-reduced.jpg",
+      "truncated": false,
+      "pageHeight": 900,
+      "overflowPx": 455,
+      "consoleErrors": [],
+      "axe": []
+    }
+  }
+}
