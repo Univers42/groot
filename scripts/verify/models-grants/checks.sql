@@ -445,3 +445,63 @@ SELECT 'lifecycle_fn_settings', count(*), coalesce(string_agg(name, ' ' ORDER BY
         OR NOT EXISTS (SELECT 1 FROM unnest(coalesce(p.proconfig, ARRAY[]::text[])) c WHERE c LIKE 'search_path=%')
         OR NOT EXISTS (SELECT 1 FROM unnest(coalesce(p.proconfig, ARRAY[]::text[])) c WHERE c LIKE 'lock_timeout=%')
   ) AS violations;
+
+-- lifecycle_*: the behaviour of osionos_workspace_mark_delete and _transfer_ownership, which the
+-- bridge tests only stub. One row per check, 0 = holds; the detail names what came back. Fixture
+-- inside BEGIN..ROLLBACK. Two live workspaces for the owner (W1, W2), one foreign (W3).
+BEGIN;
+INSERT INTO public.osionos_workspaces (id, owner_id, name, slug) VALUES
+  ('e1e1e1e1-0000-4000-8000-000000000001', 'e1e1e1e1-0000-4000-8000-0000000000a1', 'lc1', 'lc-1'),
+  ('e1e1e1e1-0000-4000-8000-000000000002', 'e1e1e1e1-0000-4000-8000-0000000000a1', 'lc2', 'lc-2'),
+  ('e1e1e1e1-0000-4000-8000-000000000003', 'e1e1e1e1-0000-4000-8000-0000000000b2', 'lc3', 'lc-3');
+INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role) VALUES
+  ('e1e1e1e1-0000-4000-8000-000000000001', 'e1e1e1e1-0000-4000-8000-0000000000a1', 'owner'),
+  ('e1e1e1e1-0000-4000-8000-000000000001', 'e1e1e1e1-0000-4000-8000-0000000000c3', 'editor'),
+  ('e1e1e1e1-0000-4000-8000-000000000002', 'e1e1e1e1-0000-4000-8000-0000000000a1', 'owner');
+
+SELECT 'lifecycle_mark_first', (r IS DISTINCT FROM 'marked')::int, 'first mark returned ' || coalesce(r, 'NULL')
+  FROM (SELECT public.osionos_workspace_mark_delete('e1e1e1e1-0000-4000-8000-000000000001',
+          'e1e1e1e1-0000-4000-8000-0000000000a1', '2030-01-01', '2030-01-15') AS r) s;
+SELECT 'lifecycle_mark_last_workspace', (r IS DISTINCT FROM 'last_workspace')::int,
+       'marking the only live workspace returned ' || coalesce(r, 'NULL')
+  FROM (SELECT public.osionos_workspace_mark_delete('e1e1e1e1-0000-4000-8000-000000000002',
+          'e1e1e1e1-0000-4000-8000-0000000000a1', '2030-01-02', '2030-01-16') AS r) s;
+SELECT 'lifecycle_mark_not_owner', (r IS DISTINCT FROM 'not_owner')::int,
+       'a non-owner mark returned ' || coalesce(r, 'NULL')
+  FROM (SELECT public.osionos_workspace_mark_delete('e1e1e1e1-0000-4000-8000-000000000002',
+          'e1e1e1e1-0000-4000-8000-0000000000b2', '2030-01-02', '2030-01-16') AS r) s;
+SELECT 'lifecycle_mark_already_pending', (r IS DISTINCT FROM 'already_pending')::int,
+       'a second mark inside the grace returned ' || coalesce(r, 'NULL')
+  FROM (SELECT public.osionos_workspace_mark_delete('e1e1e1e1-0000-4000-8000-000000000001',
+          'e1e1e1e1-0000-4000-8000-0000000000a1', '2030-01-05', '2030-01-19') AS r) s;
+-- C10: once delete_after has passed with no sweep, the mark is taken again with fresh stamps.
+-- A fourth workspace for the owner keeps the "not the last live one" premise true.
+INSERT INTO public.osionos_workspaces (id, owner_id, name, slug)
+  VALUES ('e1e1e1e1-0000-4000-8000-000000000004', 'e1e1e1e1-0000-4000-8000-0000000000a1', 'lc4', 'lc-4');
+SELECT 'lifecycle_mark_restamp', (r IS DISTINCT FROM 'marked'
+         OR (SELECT pending_delete_at <> '2030-02-01' OR delete_after <> '2030-02-15'
+               FROM public.osionos_workspaces WHERE id = 'e1e1e1e1-0000-4000-8000-000000000001'))::int,
+       'a mark after delete_after returned ' || coalesce(r, 'NULL') || ' (stamps must be the new ones)'
+  FROM (SELECT public.osionos_workspace_mark_delete('e1e1e1e1-0000-4000-8000-000000000001',
+          'e1e1e1e1-0000-4000-8000-0000000000a1', '2030-02-01', '2030-02-15') AS r) s;
+-- C14: W1 is pending, so ownership cannot move; W2 is live and can.
+SELECT 'lifecycle_transfer_refused_pending', (r IS DISTINCT FROM false)::int,
+       'transfer on a pending-delete workspace returned ' || coalesce(r::text, 'NULL')
+  FROM (SELECT public.osionos_workspace_transfer_ownership('e1e1e1e1-0000-4000-8000-000000000001',
+          'e1e1e1e1-0000-4000-8000-0000000000a1', 'e1e1e1e1-0000-4000-8000-0000000000c3') AS r) s;
+INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role)
+  VALUES ('e1e1e1e1-0000-4000-8000-000000000002', 'e1e1e1e1-0000-4000-8000-0000000000c3', 'editor');
+SELECT 'lifecycle_transfer_ok', (r IS DISTINCT FROM true)::int,
+       'transfer to a member returned ' || coalesce(r::text, 'NULL')
+  FROM (SELECT public.osionos_workspace_transfer_ownership('e1e1e1e1-0000-4000-8000-000000000002',
+          'e1e1e1e1-0000-4000-8000-0000000000a1', 'e1e1e1e1-0000-4000-8000-0000000000c3') AS r) s;
+SELECT 'lifecycle_transfer_one_owner',
+       ((SELECT count(*) FROM public.osionos_workspace_members
+          WHERE workspace_id = 'e1e1e1e1-0000-4000-8000-000000000002' AND role = 'owner') <> 1
+        OR (SELECT owner_id FROM public.osionos_workspaces WHERE id = 'e1e1e1e1-0000-4000-8000-000000000002')
+             IS DISTINCT FROM 'e1e1e1e1-0000-4000-8000-0000000000c3'
+        OR (SELECT role FROM public.osionos_workspace_members
+             WHERE workspace_id = 'e1e1e1e1-0000-4000-8000-000000000002'
+               AND user_id = 'e1e1e1e1-0000-4000-8000-0000000000a1') IS DISTINCT FROM 'admin')::int,
+       'after a transfer: exactly one owner row, owner_id = the new owner, the old owner is admin';
+ROLLBACK;
