@@ -88,6 +88,12 @@
 #   exactly search_path=pg_catalog, public and lock_timeout=3s,
 #   p2s_taken_by_profile a name another user's profile holds is refused with
 #   23505 and nothing of the caller moves ·
+#   p23 the follow and presence plane (models/osionos-social-follow-presence-migration.sql):
+#   p23_social_grants the grants and RLS on both tables and the counts RPC,
+#   p23_presence_state the default and the CHECKs, p23_status_columns the status
+#   limits and the owner write, p23_block_trigger a block in either direction
+#   refuses a follow, p23_counts_rpc one row with the right numbers,
+#   p23_counts_plan the counts use index scans on 100K edges ·
 #   p2_4 the profession column (P2-4-d1, models/osionos-account-profession-migration.sql):
 #   p2_4_profession_check the CHECK named osionos_profiles_profession_check is
 #   on the profession column and names all eight ids ·
@@ -607,6 +613,12 @@ run_checks() {
 	check_count "$1" p2s_function_config p2s_function_config
 	check_count "$1" p2s_taken_by_profile p2s_taken_by_profile
 	check_count "$1" p2_4_profession_check p2_4_profession_check
+	check_count "$1" p23_social_grants p23_social_grants
+	check_count "$1" p23_presence_state p23_presence_state
+	check_count "$1" p23_status_columns p23_status_columns
+	check_count "$1" p23_block_trigger p23_block_trigger
+	check_count "$1" p23_counts_rpc p23_counts_rpc
+	check_count "$1" p23_counts_plan p23_counts_plan
 	probe "$1" K1 authenticated "SELECT count(*) FROM public.osionos_sessions"
 	probe "$1" K2 osionos_account_user "SELECT refresh_hash FROM public.osionos_sessions"
 	probe "$1" K3 osionos_account_user "UPDATE public.osionos_sessions SET revoked_at = now()"
