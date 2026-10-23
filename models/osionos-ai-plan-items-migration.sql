@@ -75,10 +75,13 @@ BEGIN
 		  AND indexname = 'ai_approvals_one_live_per_call'
 		  AND indexdef LIKE '%''partial''%'
 	) THEN
-		DROP INDEX IF EXISTS public.ai_approvals_one_live_per_call;
-		CREATE UNIQUE INDEX ai_approvals_one_live_per_call
-			ON public.ai_approvals (run_id, tool, args_sha256)
-			WHERE status IN ('pending', 'executing', 'executed', 'partial');
+		-- This file is executed by the migration runner's transaction-wrapped
+		-- convergence pass. CREATE INDEX CONCURRENTLY is forbidden inside a
+		-- transaction, and ordinary CREATE INDEX blocks approval writes for the
+		-- whole build. Do not silently take that blocking path on a populated
+		-- table: require the operator's concurrent index migration first.
+		RAISE EXCEPTION
+			'ai_approvals_one_live_per_call requires a separate CREATE INDEX CONCURRENTLY migration before this migration';
 	END IF;
 END
 $$;
