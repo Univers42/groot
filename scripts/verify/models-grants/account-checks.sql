@@ -2258,7 +2258,7 @@ DECLARE
   a constant uuid := 'a5a5a5a5-0000-4000-8000-00000000000a';
   b constant uuid := 'b5b5b5b5-0000-4000-8000-00000000000b';
 BEGIN
-  DELETE FROM p5_seeded;
+  TRUNCATE p5_seeded;
   PERFORM set_config('session_replication_role', 'replica', true);
   INSERT INTO auth.users (id) VALUES (a), (b);
   INSERT INTO public.users (id, email, name, username, password_hash) VALUES
