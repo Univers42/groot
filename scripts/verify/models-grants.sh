@@ -88,6 +88,12 @@
 #   exactly search_path=pg_catalog, public and lock_timeout=3s,
 #   p2s_taken_by_profile a name another user's profile holds is refused with
 #   23505 and nothing of the caller moves ·
+#   p23 the follow and presence plane (models/osionos-social-follow-presence-migration.sql):
+#   p23_social_grants the grants and RLS on both tables and the counts RPC,
+#   p23_presence_state the default and the CHECKs, p23_status_columns the status
+#   limits and the owner write, p23_block_trigger a block in either direction
+#   refuses a follow, p23_counts_rpc one row with the right numbers,
+#   p23_counts_plan the counts use index scans on 100K edges ·
 #   p2_4 the profession column (P2-4-d1, models/osionos-account-profession-migration.sql):
 #   p2_4_profession_check the CHECK named osionos_profiles_profession_check is
 #   on the profession column and names all eight ids ·
@@ -335,6 +341,7 @@ check_standalone() {
 	file="${MODELS_DIR}/osionos-account-foundation-migration.sql"
 	profiles="${MODELS_DIR}/osionos-account-profiles-migration.sql"
 	pat="${MODELS_DIR}/osionos-personal-access-tokens-migration.sql"
+	social="${MODELS_DIR}/osionos-social-follow-presence-migration.sql"
 	if [ ! -f "${file}" ]; then
 		fail "$1" "standalone" "no ${file}"
 		return 0
@@ -345,6 +352,10 @@ check_standalone() {
 	fi
 	if [ ! -f "${pat}" ]; then
 		fail "$1" "standalone" "no ${pat}"
+		return 0
+	fi
+	if [ ! -f "${social}" ]; then
+		fail "$1" "standalone" "no ${social}"
 		return 0
 	fi
 	if ! printf '%s\n' \
@@ -375,7 +386,9 @@ check_standalone() {
 		'DROP TABLE IF EXISTS public.osionos_user_settings;' \
 		'DROP TABLE IF EXISTS public.osionos_username_history;' \
 		'DROP TABLE IF EXISTS public.osionos_account_deletion_requests;' \
-		'DROP TABLE IF EXISTS public.osionos_personal_access_tokens;' |
+		'DROP TABLE IF EXISTS public.osionos_personal_access_tokens;' \
+		'DROP TABLE IF EXISTS public.osionos_follows;' \
+		'DROP TABLE IF EXISTS public.osionos_presence;' |
 		psql_stdin >"${WORK}/standalone-$1.log" 2>&1; then
 		fail "$1" "standalone" "could not drop the profile tables"
 		return 0
@@ -410,6 +423,14 @@ check_standalone() {
 		sed 's/^/  | /' "${WORK}/standalone-$1.log" >&2
 		return 0
 	fi
+	# The follow and presence file is applied alone too: it creates two more
+	# tables for the hook to arm, and the service-role-only pass that hides a
+	# stray anon grant does not run after it here.
+	if ! psql_stdin <"${social}" >"${WORK}/standalone-$1.log" 2>&1; then
+		fail "$1" "standalone" "the follow and presence file did not apply after the tokens file"
+		sed 's/^/  | /' "${WORK}/standalone-$1.log" >&2
+		return 0
+	fi
 	# The NOTIFY must come AFTER the COMMIT: the view is dropped and recreated,
 	# and PostgREST has to reload the schema only once the new view exists.
 	commit_line="$(grep -n '^COMMIT$' "${WORK}/standalone-$1.tags" | tail -1 | cut -d: -f1)"
@@ -441,7 +462,7 @@ SELECT 'sessions_column_acl', coalesce(string_agg(a.attname, ',' ORDER BY a.attn
 SELECT r.rel || '_realtime_triggers', count(t.tgrelid)::text, ''
   FROM unnest(ARRAY['osionos_profiles','osionos_user_settings','osionos_username_history',
                     'osionos_account_deletion_requests','osionos_people_directory',
-                    'osionos_personal_access_tokens']) AS r(rel)
+                    'osionos_personal_access_tokens','osionos_follows','osionos_presence']) AS r(rel)
   LEFT JOIN pg_class c ON c.relname = r.rel AND c.relnamespace = 'public'::regnamespace
   LEFT JOIN pg_trigger t ON t.tgrelid = c.oid AND NOT t.tgisinternal
                          AND t.tgfoid = to_regproc('public.realtime_notify')
@@ -456,7 +477,7 @@ SELECT r.rel || '_anon_auth_privs',
        ''
   FROM unnest(ARRAY['osionos_profiles','osionos_user_settings','osionos_username_history',
                     'osionos_account_deletion_requests','osionos_people_directory',
-                    'osionos_personal_access_tokens']) AS r(rel)
+                    'osionos_personal_access_tokens','osionos_follows','osionos_presence']) AS r(rel)
  ORDER BY r.rel;
 SQL
 	then
@@ -471,7 +492,7 @@ SQL
 		'id,created_at,expires_at,last_seen_at,auth_method,ip_prefix,user_agent,revoked_at,revoked_reason'
 	for rel in osionos_profiles osionos_user_settings osionos_username_history \
 	           osionos_account_deletion_requests osionos_people_directory \
-	           osionos_personal_access_tokens; do
+	           osionos_personal_access_tokens osionos_follows osionos_presence; do
 		assert_standalone "$1" "${rel}_realtime_triggers" 0
 		assert_standalone "$1" "${rel}_anon_auth_privs" 0
 	done
@@ -607,6 +628,12 @@ run_checks() {
 	check_count "$1" p2s_function_config p2s_function_config
 	check_count "$1" p2s_taken_by_profile p2s_taken_by_profile
 	check_count "$1" p2_4_profession_check p2_4_profession_check
+	check_count "$1" p23_social_grants p23_social_grants
+	check_count "$1" p23_presence_state p23_presence_state
+	check_count "$1" p23_status_columns p23_status_columns
+	check_count "$1" p23_block_trigger p23_block_trigger
+	check_count "$1" p23_counts_rpc p23_counts_rpc
+	check_count "$1" p23_counts_plan p23_counts_plan
 	probe "$1" K1 authenticated "SELECT count(*) FROM public.osionos_sessions"
 	probe "$1" K2 osionos_account_user "SELECT refresh_hash FROM public.osionos_sessions"
 	probe "$1" K3 osionos_account_user "UPDATE public.osionos_sessions SET revoked_at = now()"
