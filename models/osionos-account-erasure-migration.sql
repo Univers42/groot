@@ -283,6 +283,12 @@ INSERT INTO osionos_account_data_map_seed VALUES
 ('osionos_workspace_invites', 'invited_user_id', 'member', 'delete', NULL, NULL, NULL, NULL, NULL),
 ('osionos_workspace_invites', 'invited_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
 ('osionos_workspace_invites', 'accepted_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
+-- a team outlives the person who created it (created_by is tombstoned); a team membership goes
+-- with the person (the workspace-member foreign key already cascades it, the row is registered
+-- so the erase names it); added_by is tombstoned.
+('osionos_teams', 'created_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
+('osionos_team_members', 'user_id', 'member', 'delete', NULL, NULL, NULL, NULL, NULL),
+('osionos_team_members', 'added_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
 ('osionos_pages', 'owner_id', 'owner', 'transfer', '{id,workspace_id,title,visibility,content,properties,created_at,updated_at}', NULL, NULL, 'workspace_id', NULL),
 ('osionos_pages', 'collaborators', 'peer', 'scrub_jsonb', NULL, NULL, NULL, 'workspace_id', NULL),
 ('osionos_page_comments', 'author_id', 'author', 'anonymise', '{id,page_id,content,created_at}', NULL, NULL, NULL, NULL),
