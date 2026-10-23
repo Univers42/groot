@@ -36,6 +36,20 @@
 --   scripts/apply-models-migrations.sh lists it in ORDERED_LAST after the MFA
 --   file and before the service-role-only pass, which must find the new tables.
 --
+-- STORAGE OBJECTS (accepted residual risk)
+--   The erase records the keys the SQL can know (a message attachment's
+--   object_key, the account exports) in osionos_account_erasure_objects. Avatar,
+--   banner and collab-upload objects are stored under the owner's prefix with
+--   no database row, so no key exists to record. They are deleted by the
+--   bridge's runner in sub-package c, by owner prefix. Until that runner ships
+--   they are orphaned after an erase: accepted residual risk, recorded here and
+--   in the commit body.
+--
+-- ATTEMPTS
+--   osionos_account_deletion_requests.attempts has one writer:
+--   osionos_account_deletion_claim, which adds one per claim (a reclaim after the
+--   30-minute lease is another attempt). last_error is the executor's to write.
+--
 -- Idempotent: a second run changes no grant, policy, index or registry row.
 --
 -- DOWN (manual, IRREVERSIBLE once an erase has run): DROP FUNCTION the eight
@@ -70,7 +84,7 @@ CREATE TABLE IF NOT EXISTS public.osionos_account_data_map (
   CONSTRAINT osionos_account_data_map_role_check
     CHECK (role IN ('owner', 'author', 'member', 'peer')),
   CONSTRAINT osionos_account_data_map_erase_check
-    CHECK (erase IN ('delete', 'anonymise', 'transfer', 'scrub_jsonb', 'keep')),
+    CHECK (erase IN ('delete', 'anonymise', 'nullify', 'transfer', 'scrub_jsonb', 'keep')),
   -- A column that survives the erase must say why, in words a reviewer can judge.
   CONSTRAINT osionos_account_data_map_keep_reason_check
     CHECK (erase <> 'keep' OR length(btrim(coalesce(reason, ''))) > 0),
@@ -162,6 +176,22 @@ CREATE TRIGGER osionos_account_deletion_requests_guard
 -- Caveat: the column list was found by a name pattern plus the unmatched-table
 -- scan on the throwaway DB; a uuid inside a column nobody named is found only by
 -- the canary, and only if the canary seeds it.
+-- A reporter's erase must not lift a sanction: the report row carries the
+-- moderation decision on somebody else, so it stays and its reporter_id is nulled.
+ALTER TABLE IF EXISTS public.osionos_user_reports ALTER COLUMN reporter_id DROP NOT NULL;
+-- The registry table may predate 'nullify': widen its CHECK once.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conrelid = 'public.osionos_account_data_map'::regclass
+                    AND conname = 'osionos_account_data_map_erase_check'
+                    AND pg_get_constraintdef(oid) LIKE '%nullify%') THEN
+    ALTER TABLE public.osionos_account_data_map DROP CONSTRAINT IF EXISTS osionos_account_data_map_erase_check;
+    ALTER TABLE public.osionos_account_data_map ADD CONSTRAINT osionos_account_data_map_erase_check
+      CHECK (erase IN ('delete', 'anonymise', 'nullify', 'transfer', 'scrub_jsonb', 'keep'));
+  END IF;
+END $$;
+
 CREATE TEMP TABLE osionos_account_data_map_seed (
   t TEXT, c TEXT, r TEXT, e TEXT, x TEXT, b TEXT, k TEXT, w TEXT, why TEXT
 ) ON COMMIT DROP;
@@ -210,7 +240,7 @@ INSERT INTO osionos_account_data_map_seed VALUES
 ('osionos_bridge_identities', 'subject', 'owner', 'delete', NULL, NULL, NULL, NULL, NULL),
 ('osionos_bridge_identities', 'user_id', 'owner', 'delete', NULL, NULL, NULL, NULL, NULL),
 ('users', 'id', 'owner', 'keep', '{id,email,name,username,created_at}', NULL, NULL, NULL,
-  'the identity anchor: email, name and username are replaced and password_hash is nulled by osionos_account_erase_run; the row goes with the GoTrue delete'),
+  'the identity anchor: email is replaced by a hash-derived value and every other nullable column but id, created_at and updated_at is nulled by osionos_account_erase_run; the row goes with the GoTrue delete'),
 ('user_profiles', 'user_id', 'owner', 'delete', '{user_id,display_name,bio,avatar_url,created_at}', NULL, NULL, NULL, NULL),
 ('posts', 'user_id', 'author', 'delete', '{id,title,content,created_at}', NULL, NULL, NULL, NULL),
 -- channels and messages
@@ -239,7 +269,9 @@ INSERT INTO osionos_account_data_map_seed VALUES
 ('osionos_join_requests', 'decided_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
 ('osionos_user_blocks', 'blocker_id', 'peer', 'delete', '{blocker_id,blocked_id,created_at}', NULL, NULL, NULL, NULL),
 ('osionos_user_blocks', 'blocked_id', 'peer', 'delete', NULL, NULL, NULL, NULL, NULL),
-('osionos_user_reports', 'reporter_id', 'author', 'delete', NULL, NULL, NULL, NULL, NULL),
+-- the report row carries the moderation decision on somebody else: it outlives its
+-- reporter, whose id is nulled (NULLs are distinct in the unique index, a tombstone is not)
+('osionos_user_reports', 'reporter_id', 'author', 'nullify', NULL, NULL, NULL, NULL, NULL),
 ('osionos_user_reports', 'subject_user_id', 'peer', 'delete', NULL, NULL, NULL, NULL, NULL),
 ('osionos_user_reports', 'subject_id', 'peer', 'delete', NULL, NULL, NULL, NULL, NULL),
 ('osionos_user_reports', 'decision_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
@@ -369,7 +401,7 @@ AS $$
        FOR UPDATE SKIP LOCKED
   )
   UPDATE public.osionos_account_deletion_requests r
-     SET claimed_at = now()
+     SET claimed_at = now(), attempts = r.attempts + 1
     FROM picked
    WHERE r.user_id = picked.user_id
   RETURNING r.user_id, r.scheduled_for, r.attempts, r.erased_at, r.successor_user_id
@@ -415,11 +447,11 @@ DECLARE
   v_found boolean;
 BEGIN
   IF EXISTS (SELECT 1 FROM public.osionos_messages x JOIN public.osionos_channels ch ON ch.id = x.channel_id
-              WHERE ch.workspace_id = p_ws AND x.author_id NOT IN (p_user, v_tomb)) THEN
+              WHERE ch.workspace_id = p_ws AND x.author_id IS DISTINCT FROM p_user AND x.author_id IS DISTINCT FROM v_tomb) THEN
     RETURN true;
   END IF;
   IF EXISTS (SELECT 1 FROM public.osionos_page_comments x JOIN public.osionos_pages pg ON pg.id = x.page_id
-              WHERE pg.workspace_id = p_ws AND x.author_id NOT IN (p_user, v_tomb)) THEN
+              WHERE pg.workspace_id = p_ws AND x.author_id IS DISTINCT FROM p_user AND x.author_id IS DISTINCT FROM v_tomb) THEN
     RETURN true;
   END IF;
   FOR m IN SELECT d.table_name, d.column_name, d.workspace_column
@@ -440,8 +472,8 @@ BEGIN
         m.table_name, m.column_name, m.column_name, m.workspace_column) INTO v_found USING p_ws, p_user;
     ELSE
       EXECUTE format(
-        'SELECT EXISTS (SELECT 1 FROM public.%I t WHERE t.%I = $1 AND t.%I IS NOT NULL AND t.%I::text NOT IN ($2::text, $3::text))',
-        m.table_name, m.column_name, m.workspace_column, m.column_name) INTO v_found USING p_ws, p_user, v_tomb;
+        'SELECT EXISTS (SELECT 1 FROM public.%I t WHERE t.%I = $1 AND t.%I::text IS DISTINCT FROM $2::text AND t.%I::text IS DISTINCT FROM $3::text)',
+        m.table_name, m.workspace_column, m.column_name, m.column_name) INTO v_found USING p_ws, p_user, v_tomb;
     END IF;
     IF v_found THEN
       RETURN true;
@@ -496,6 +528,7 @@ DECLARE
   v_has_fk boolean;
   v_pred text;
   v_new text;
+  v_set text;
 BEGIN
   IF p_user IS NULL THEN
     RAISE EXCEPTION 'user_required' USING ERRCODE = 'P0001';
@@ -621,7 +654,7 @@ BEGIN
   -- 4c. The registry. `transfer` rows were handled above; `keep` rows are left.
   FOR d IN SELECT m.table_name, m.column_name, m.erase
              FROM public.osionos_account_data_map m
-            WHERE m.erase IN ('delete', 'anonymise', 'scrub_jsonb')
+            WHERE m.erase IN ('delete', 'anonymise', 'nullify', 'scrub_jsonb')
             ORDER BY m.table_name, m.column_name
   LOOP
     v_reg := to_regclass(format('public.%I', d.table_name));
@@ -644,6 +677,12 @@ BEGIN
 
     IF d.erase = 'delete' THEN
       EXECUTE format('DELETE FROM public.%I WHERE %s', d.table_name, v_pred) USING p_user;
+    ELSIF d.erase = 'nullify' THEN
+      IF v_notnull THEN
+        RAISE EXCEPTION 'registry_error: %.% is NOT NULL, it cannot be nullified',
+          d.table_name, d.column_name USING ERRCODE = 'P0001';
+      END IF;
+      EXECUTE format('UPDATE public.%I SET %I = NULL WHERE %s', d.table_name, d.column_name, v_pred) USING p_user;
     ELSIF d.erase = 'anonymise' THEN
       -- The tombstone where the column may hold it; NULL where a foreign key
       -- would refuse it and the column allows NULL; anything else is a registry
@@ -691,12 +730,18 @@ BEGIN
   -- and loses everything that names the person. email is unique, so it is
   -- replaced by a value derived from the id's hash, not from the id.
   IF to_regclass('public.users') IS NOT NULL THEN
-    UPDATE public.users
-       SET email = 'erased-' || md5(id::text) || '@erased.invalid',
-           name = NULL, username = NULL, password_hash = NULL
-     WHERE id = p_user
-       AND (password_hash IS NOT NULL OR name IS NOT NULL OR username IS NOT NULL
-            OR email <> 'erased-' || md5(id::text) || '@erased.invalid');
+    -- Every nullable column but the id and the two timestamps is nulled, so a
+    -- personal column a later migration adds to users is scrubbed without an edit
+    -- here. A NOT NULL column other than id and email survives (listed in no
+    -- result): p5_users_scrubbed fails on it.
+    SELECT string_agg(format('%I = NULL', c.column_name), ', ') INTO v_set
+      FROM information_schema.columns c
+     WHERE c.table_schema = 'public' AND c.table_name = 'users' AND c.is_nullable = 'YES'
+       AND c.column_name NOT IN ('id', 'email', 'created_at', 'updated_at');
+    EXECUTE format(
+      'UPDATE public.users SET email = $2%s WHERE id = $1 AND email IS DISTINCT FROM $2',
+      CASE WHEN v_set IS NULL THEN '' ELSE ', ' || v_set END)
+      USING p_user, 'erased-' || md5(p_user::text) || '@erased.invalid';
     GET DIAGNOSTICS v_n = ROW_COUNT;
     v_counts := v_counts || jsonb_build_object('users.identity', v_n);
   END IF;
