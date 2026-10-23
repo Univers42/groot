@@ -29,6 +29,7 @@ VITE_BAAS_REALTIME_TOKEN=rt-tenant-token
 OSIONOS_BRIDGE_EMAIL_HASH_SALT=salt-keep
 DEMO_LOGIN_PASSWORD=demo-keep
 OSIONOS_IDE_TOKEN_SECRET=ide-secret-keep
+AUTH_LINK_SIGNING_KEY=link-key-keep
 VITE_BAAS_URL=https://localhost:3001
 OSIONOS_ALLOWED_ORIGIN=https://localhost:3001
 OSIONOS_APP_URL=https://localhost:3001
@@ -257,6 +258,30 @@ stale_kong() { sed -i 's/^SB_KONG_KEY=.*/SB_KONG_KEY=anon-OLD/' "$OUT"; }
 # --- media keys (UNSPLASH_ACCESS_KEY, PIXABAY_API) copied from apps/osionos/app/.env ---
 
 media_source() { printf 'UNSPLASH_ACCESS_KEY=unsplash-SRC-9f3\nPIXABAY_API=pixabay-SRC-7c1\n' > "$MEDIA_ENV"; }
+
+@test "--sync: a missing AUTH_LINK_SIGNING_KEY gets a generated key without printing it" {
+  sed -i '/^AUTH_LINK_SIGNING_KEY=/d' "$OUT"
+  run bash "$SCRIPT" --sync
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"minted AUTH_LINK_SIGNING_KEY"* ]]
+  [[ "$output" != *"link-key-keep"* ]]
+  minted="$(val "$OUT" AUTH_LINK_SIGNING_KEY)"
+  [[ "$minted" =~ ^[A-Za-z0-9]{48}$ ]]
+}
+
+@test "--sync: an existing AUTH_LINK_SIGNING_KEY is never re-minted" {
+  run bash "$SCRIPT" --sync
+  [ "$status" -eq 0 ]
+  [ "$(val "$OUT" AUTH_LINK_SIGNING_KEY)" = "link-key-keep" ]
+  [[ "$output" != *"minted AUTH_LINK_SIGNING_KEY"* ]]
+}
+
+@test "--check: a missing AUTH_LINK_SIGNING_KEY exits 1 and names it" {
+  sed -i '/^AUTH_LINK_SIGNING_KEY=/d' "$OUT"
+  run bash "$SCRIPT" --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"missing AUTH_LINK_SIGNING_KEY"* ]]
+}
 
 @test "media --sync: keys absent from .env.local are copied" {
   media_source
