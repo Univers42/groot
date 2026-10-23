@@ -241,6 +241,8 @@ COMMENT ON FUNCTION public.osionos_object_databases_project_rows() IS
     'changes; deletes the rows absent from the new state (C152, C153). Early '
     'exits on one jsonpath probe when nothing is projected (C150). An error is '
     'a WARNING and never fails the save (C151).';
+-- Fired only as a trigger; no client role may call the definer directly.
+REVOKE ALL ON FUNCTION public.osionos_object_databases_project_rows() FROM PUBLIC, anon, authenticated;
 
 -- -----------------------------------------------------------------------------
 -- 5. Enqueue a score only for an opted-in workspace, only when the projection
