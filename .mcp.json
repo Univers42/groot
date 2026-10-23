@@ -9,7 +9,8 @@
 			],
 			"env": {
 				"OSIONOS_MCP_BRIDGE_URL": "https://localhost:4000",
-				"OSIONOS_MCP_API_URL": "https://localhost:4000"
+				"OSIONOS_MCP_API_URL": "https://localhost:4000",
+				"OSIONOS_MCP_TOKEN": "${OSIONOS_MCP_TOKEN}"
 			}
 		},
 		"chrome-devtools": {
