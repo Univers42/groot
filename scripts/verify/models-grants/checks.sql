@@ -478,12 +478,14 @@ SELECT 'lifecycle_mark_already_pending', (r IS DISTINCT FROM 'already_pending'):
 -- A fourth workspace for the owner keeps the "not the last live one" premise true.
 INSERT INTO public.osionos_workspaces (id, owner_id, name, slug)
   VALUES ('e1e1e1e1-0000-4000-8000-000000000004', 'e1e1e1e1-0000-4000-8000-0000000000a1', 'lc4', 'lc-4');
-SELECT 'lifecycle_mark_restamp', (r IS DISTINCT FROM 'marked'
-         OR (SELECT pending_delete_at <> '2030-02-01' OR delete_after <> '2030-02-15'
-               FROM public.osionos_workspaces WHERE id = 'e1e1e1e1-0000-4000-8000-000000000001'))::int,
-       'a mark after delete_after returned ' || coalesce(r, 'NULL') || ' (stamps must be the new ones)'
+SELECT 'lifecycle_mark_restamp', (r IS DISTINCT FROM 'marked')::int,
+       'a mark after delete_after returned ' || coalesce(r, 'NULL')
   FROM (SELECT public.osionos_workspace_mark_delete('e1e1e1e1-0000-4000-8000-000000000001',
           'e1e1e1e1-0000-4000-8000-0000000000a1', '2030-02-01', '2030-02-15') AS r) s;
+-- A separate statement: the function's UPDATE is not visible to the snapshot of the one above.
+SELECT 'lifecycle_mark_restamp_stamps', (pending_delete_at <> '2030-02-01' OR delete_after <> '2030-02-15')::int,
+       'the re-stamp kept the old pending_delete_at/delete_after'
+  FROM public.osionos_workspaces WHERE id = 'e1e1e1e1-0000-4000-8000-000000000001';
 -- C14: W1 is pending, so ownership cannot move; W2 is live and can.
 SELECT 'lifecycle_transfer_refused_pending', (r IS DISTINCT FROM false)::int,
        'transfer on a pending-delete workspace returned ' || coalesce(r::text, 'NULL')
