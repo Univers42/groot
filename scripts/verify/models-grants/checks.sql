@@ -328,7 +328,8 @@ SELECT 'colleague_edges_trigger',
                     AND tgname = 'osionos_workspace_members_colleague_edges_trg'),
                 'the colleague-edges trigger is missing');
 
--- feed_counts_exec_grants: the two functions this package creates are
+-- feed_counts_exec_grants: the functions this package creates (feed counts, colleague edges,
+-- ownership transfer) are
 -- service_role's alone. The bridge calls them with the service key; anon,
 -- authenticated and the account role must not execute them. A function that
 -- does not exist is a violation too — the row must not pass on a missing
@@ -337,7 +338,8 @@ SELECT 'colleague_edges_trigger',
 -- entry. REVOKE … FROM PUBLIC is what removes it.
 WITH fns(name, sig) AS (
   VALUES ('osionos_feed_page_counts', 'public.osionos_feed_page_counts(uuid, uuid)'),
-         ('osionos_colleague_edges_on_join', 'public.osionos_colleague_edges_on_join()')
+         ('osionos_colleague_edges_on_join', 'public.osionos_colleague_edges_on_join()'),
+         ('osionos_workspace_transfer_ownership', 'public.osionos_workspace_transfer_ownership(uuid, uuid, uuid)')
 ), fn AS (
   SELECT f.name, to_regprocedure(f.sig) AS oid FROM fns f
 )
