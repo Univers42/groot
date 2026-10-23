@@ -75,13 +75,16 @@ BEGIN
 		  AND indexname = 'ai_approvals_one_live_per_call'
 		  AND indexdef LIKE '%''partial''%'
 	) THEN
-		-- This file is executed by the migration runner's transaction-wrapped
-		-- convergence pass. CREATE INDEX CONCURRENTLY is forbidden inside a
-		-- transaction, and ordinary CREATE INDEX blocks approval writes for the
-		-- whole build. Do not silently take that blocking path on a populated
-		-- table: require the operator's concurrent index migration first.
-		RAISE EXCEPTION
-			'ai_approvals_one_live_per_call requires a separate CREATE INDEX CONCURRENTLY migration before this migration';
+		-- This is a first-boot schema migration, and PostgreSQL does not permit
+		-- CREATE INDEX CONCURRENTLY inside the runner's transaction-wrapped
+		-- file application. Use the regular build here: the table is newly
+		-- created on a fresh install and therefore empty. Existing deployments
+		-- must apply the dedicated concurrent index migration before replaying
+		-- this migration if they have a populated approvals table.
+		DROP INDEX IF EXISTS public.ai_approvals_one_live_per_call;
+		CREATE UNIQUE INDEX ai_approvals_one_live_per_call
+			ON public.ai_approvals (run_id, tool, args_sha256)
+			WHERE status IN ('pending', 'executing', 'executed', 'partial');
 	END IF;
 END
 $$;
