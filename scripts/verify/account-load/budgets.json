@@ -98,5 +98,27 @@
       "osionos_feed_shares"
     ],
     "why": "Target: three bitmap index scans on page_id (osionos_feed_likes_page_idx, osionos_feed_comments_page_idx, osionos_feed_shares_page_idx) and one index scan for the viewer's own like, in ONE call — the three reads the bridge made per post card (bridge-feed.mjs:145-153 likes, :174-180 comments, :307-309 shares) become one round trip. A feed table must not be read sequentially: an empty table is cheaper to read sequentially, so the query that seeds them (colleague_join_200) also ANALYZEs them before this one runs."
+  },
+  "activity_own_200": {
+    "p95_ms": 60,
+    "no_seq_scan": [
+      "osionos_activity_events"
+    ],
+    "require_plan_nodes": [
+      "Merge Append",
+      "Index Scan"
+    ],
+    "why": "Target: Index Scans on osionos_activity_events_user_ts_idx in every monthly child, merged in ts DESC order, stopping at 200 rows. Without the index every child is scanned sequentially and sorted. Caveat: no_seq_scan matches the relation name exactly and a partition scan reports the child's name (osionos_activity_events_yYYYYMM, which moves with the date), so the parent entry cannot see a child scan; require_plan_nodes (a Merge Append of Index Scans only exists when the index is used) is the check that bites."
+  },
+  "activity_admin_range": {
+    "p95_ms": 150,
+    "no_seq_scan": [
+      "osionos_activity_daily"
+    ],
+    "why": "Target: a range scan on the (day, event, surface) primary key for the last 30 of about 392 seeded days (under 8% of the table, so the planner has no reason to read it all). The rollup is read by an admin screen, not per request, so the budget is loose."
+  },
+  "activity_rollup_day": {
+    "p95_ms": 400,
+    "why": "The aggregate behind one day's rollup: partition pruning to a single monthly child (about 1,700 of 650,000 events) and a hash aggregate. A sequential scan of that one child is the honest plan here (there is no index on ts alone, deliberately: it would double the write cost of the hot insert path), so there is no no_seq_scan entry. It runs once a day from a scheduler, so 400 ms is a ceiling that catches a lost pruning (all 16 children scanned, several seconds), not a latency target."
   }
 }

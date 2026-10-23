@@ -244,4 +244,55 @@ SELECT
     '2024-01-01 00:00:00+00'::timestamptz + (s || ' seconds')::interval
 FROM generate_series(1, 50000) AS s;
 
+-- ============================================================
+-- 6. ACTIVITY EVENTS (650,000 events, 13 months) + DAILY ROLLUP
+-- ============================================================
+-- The migration's maintain() built the current month and the next two; the
+-- thirteen months behind them are built here so every event lands in a real
+-- child and DEFAULT stays empty (a row in DEFAULT would hide a missing month).
+-- Events end yesterday and reach 392 days back: cur-13 starts at least 393 days
+-- before today, so no event falls before the oldest child.
+-- Caveat: users and cells are uniform (65 events per user, every event x surface
+-- pair on every day), so skew in real traffic is not modelled.
+
+DO $$
+DECLARE
+    v_cur date := date_trunc('month', now() AT TIME ZONE 'UTC')::date;
+    v_k int;
+    v_name text;
+BEGIN
+    FOR v_k IN 1..13 LOOP
+        v_name := 'osionos_activity_events_y' || to_char(v_cur - v_k * interval '1 month', 'YYYYMM');
+        IF to_regclass('public.' || v_name) IS NULL THEN
+            EXECUTE format('CREATE TABLE public.%I PARTITION OF public.osionos_activity_events FOR VALUES FROM (%L) TO (%L)',
+                v_name,
+                (v_cur - v_k * interval '1 month')::timestamp AT TIME ZONE 'UTC',
+                (v_cur - (v_k - 1) * interval '1 month')::timestamp AT TIME ZONE 'UTC');
+            EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', v_name);
+            EXECUTE format('REVOKE ALL ON public.%I FROM PUBLIC, anon, authenticated', v_name);
+            EXECUTE format('GRANT SELECT, INSERT, DELETE ON public.%I TO service_role', v_name);
+        END IF;
+    END LOOP;
+END $$;
+
+INSERT INTO public.osionos_activity_events (ts, user_id, workspace_id, event, surface)
+SELECT
+    (date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
+        - ((1 + (n % 392)) || ' days')::interval + ((n * 7) % 86400 || ' seconds')::interval,
+    md5(('user-' || ((n % 10000) + 1)::text))::uuid,
+    CASE WHEN n % 3 = 0 THEN md5(('workspace-' || ((n % 500) + 1)::text))::uuid ELSE NULL END,
+    (ARRAY['page_open','page_create','page_edit','search','share','export','login','database_view'])[(n % 8) + 1],
+    (ARRAY['editor','database','canvas','chat','search','settings','admin'])[((n / 8) % 7) + 1]
+FROM generate_series(1, 650000) AS n;
+
+INSERT INTO public.osionos_activity_daily (day, event, surface, events, distinct_users)
+SELECT
+    ((now() AT TIME ZONE 'UTC')::date - 1 - d),
+    e, s,
+    50 + ((d * 7 + length(e) * 3 + length(s)) % 400),
+    5 + ((d * 11 + length(e) + length(s)) % 60)
+FROM generate_series(0, 391) AS d
+CROSS JOIN unnest(ARRAY['page_open','page_create','page_edit','search','share','export','login','database_view']) AS e
+CROSS JOIN unnest(ARRAY['editor','database','canvas','chat','search','settings','admin']) AS s;
+
 COMMIT;
