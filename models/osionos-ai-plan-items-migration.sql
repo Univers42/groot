@@ -20,7 +20,7 @@
 -- NAMED to sort after osionos-ai-migration.sql, which creates ai_approvals: the
 -- models runner applies osionos-ai-*.sql in its alphabetical pass
 -- (scripts/apply-models-migrations.sh). "builders" would sort first and fail on
--- a fresh database. scripts/verify/ai-builders.sh check f holds the order.
+-- a fresh database. scripts/verify/ai-builders.sh check f holds the order; the concurrent upgrade sorts before the plan-items migration.
 
 SET lock_timeout = '5s';
 
@@ -44,6 +44,19 @@ COMMENT ON TABLE public.ai_plan_items IS
 	'State of each item of a build_plan approval (P6 C155). position is the parents-first order; created_id is what the bridge confirmed. service_role only.';
 
 -- -----------------------------------------------------------------------------
+-- 3. service_role only (C43).
+-- -----------------------------------------------------------------------------
+ALTER TABLE public.ai_plan_items ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS ai_plan_items_service_role_all ON public.ai_plan_items;
+CREATE POLICY ai_plan_items_service_role_all ON public.ai_plan_items
+	FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.ai_plan_items TO service_role;
+REVOKE ALL ON public.ai_plan_items FROM PUBLIC, anon, authenticated;
+
+
+-- -----------------------------------------------------------------------------
 -- 2. The `partial` status, additively. The CHECK was created unnamed in
 --    osionos-ai-migration.sql, so postgres named it ai_approvals_status_check.
 --
@@ -56,52 +69,56 @@ COMMENT ON TABLE public.ai_plan_items IS
 --    the CHECK or the index. The first apply holds ACCESS EXCLUSIVE on
 --    ai_approvals for one scan of the table, under the lock_timeout above.
 -- -----------------------------------------------------------------------------
-DO $$
+-- Add the wider constraint without scanning the table under ACCESS EXCLUSIVE.
+-- Validation is a separate top-level statement after this block commits.
+DO $partial_status_check$
+DECLARE existing_def TEXT;
 BEGIN
-	IF NOT EXISTS (
-		SELECT 1 FROM pg_constraint
-		WHERE conrelid = 'public.ai_approvals'::regclass
-		  AND conname = 'ai_approvals_status_check'
-		  AND pg_get_constraintdef(oid) LIKE '%''partial''%'
-	) THEN
-		ALTER TABLE public.ai_approvals DROP CONSTRAINT IF EXISTS ai_approvals_status_check;
-		ALTER TABLE public.ai_approvals ADD CONSTRAINT ai_approvals_status_check
-			CHECK (status IN ('pending', 'executing', 'executed', 'failed', 'declined', 'expired', 'unknown', 'partial'));
-	END IF;
-
-	IF NOT EXISTS (
-		SELECT 1 FROM pg_indexes
-		WHERE schemaname = 'public'
-		  AND indexname = 'ai_approvals_one_live_per_call'
-		  AND indexdef LIKE '%''partial''%'
-	) THEN
-		-- The base migration creates the old index without 'partial'. A clean
-		-- install has no approval rows, so replacing it with a blocking build is
-		-- safe. On a populated deployment, preserve the old index and require a
-		-- separate CREATE INDEX CONCURRENTLY upgrade before converging this file.
-		IF EXISTS (SELECT 1 FROM public.ai_approvals LIMIT 1) THEN
-			RAISE EXCEPTION
-				'ai_approvals_one_live_per_call requires the concurrent index upgrade migration for populated ai_approvals';
-		END IF;
-		DROP INDEX IF EXISTS public.ai_approvals_one_live_per_call;
-		CREATE UNIQUE INDEX ai_approvals_one_live_per_call
-			ON public.ai_approvals (run_id, tool, args_sha256)
-			WHERE status IN ('pending', 'executing', 'executed', 'partial');
-	END IF;
+    SELECT pg_get_constraintdef(oid) INTO existing_def
+      FROM pg_constraint
+     WHERE conrelid = 'public.ai_approvals'::regclass
+       AND conname = 'ai_approvals_status_check'
+       AND contype = 'c';
+    IF existing_def IS NULL OR existing_def NOT LIKE '%''partial''%' THEN
+        ALTER TABLE public.ai_approvals DROP CONSTRAINT IF EXISTS ai_approvals_status_check;
+        ALTER TABLE public.ai_approvals
+          ADD CONSTRAINT ai_approvals_status_check
+          CHECK (status IN ('pending', 'executing', 'executed', 'failed', 'declined', 'expired', 'unknown', 'partial'))
+          NOT VALID;
+    END IF;
 END
-$$;
+$partial_status_check$;
 
--- -----------------------------------------------------------------------------
--- 3. service_role only (C43).
--- -----------------------------------------------------------------------------
-ALTER TABLE public.ai_plan_items ENABLE ROW LEVEL SECURITY;
+DO $validate_partial_status_check$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conrelid = 'public.ai_approvals'::regclass
+           AND conname = 'ai_approvals_status_check'
+           AND contype = 'c'
+           AND NOT convalidated
+           AND pg_get_constraintdef(oid) LIKE '%''partial''%'
+    ) THEN
+        ALTER TABLE public.ai_approvals VALIDATE CONSTRAINT ai_approvals_status_check;
+    END IF;
+END
+$validate_partial_status_check$;
 
-DROP POLICY IF EXISTS ai_plan_items_service_role_all ON public.ai_plan_items;
-CREATE POLICY ai_plan_items_service_role_all ON public.ai_plan_items
-	FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+-- Prefer the online index migration. Preserve the fail-closed guard if it has not run.
+DO $check_online_live_index$
+BEGIN
+    IF to_regclass('public.ai_approvals_one_live_per_call_partial_idx') IS NULL THEN
+        IF EXISTS (SELECT 1 FROM public.ai_approvals LIMIT 1) THEN
+            RAISE EXCEPTION 'ai_approvals_one_live_per_call requires the concurrent index upgrade migration for populated ai_approvals';
+        END IF;
+        DROP INDEX IF EXISTS public.ai_approvals_one_live_per_call;
+        CREATE UNIQUE INDEX ai_approvals_one_live_per_call
+          ON public.ai_approvals (run_id, tool, args_sha256)
+          WHERE status IN ('pending', 'executing', 'executed', 'partial');
+    END IF;
+END
+$check_online_live_index$;
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.ai_plan_items TO service_role;
-REVOKE ALL ON public.ai_plan_items FROM PUBLIC, anon, authenticated;
 
 RESET lock_timeout;
 

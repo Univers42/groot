@@ -368,6 +368,33 @@ CREATE TRIGGER ai_sentiment_forget_database_rows_delete
     FOR EACH ROW
     EXECUTE FUNCTION public.ai_sentiment_forget_database_rows();
 
+-- Workspace moves clear stale sentiment scores and queued jobs.
+CREATE OR REPLACE FUNCTION public.ai_sentiment_forget_moved_database_rows()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $move_workspace$
+BEGIN
+    IF OLD.workspace_id IS DISTINCT FROM NEW.workspace_id THEN
+        DELETE FROM public.ai_sentiment
+         WHERE subject_kind = 'database_row' AND subject_id = NEW.id::text;
+        DELETE FROM public.ai_jobs
+         WHERE kind = 'sentiment' AND subject_kind = 'database_row'
+           AND subject_id = NEW.id::text;
+    END IF;
+    RETURN NEW;
+END
+$move_workspace$;
+
+DROP TRIGGER IF EXISTS ai_sentiment_forget_moved_database_rows_update ON public.osionos_object_database_rows;
+CREATE TRIGGER ai_sentiment_forget_moved_database_rows_update
+    AFTER UPDATE OF workspace_id ON public.osionos_object_database_rows
+    FOR EACH ROW
+    EXECUTE FUNCTION public.ai_sentiment_forget_moved_database_rows();
+
+REVOKE ALL ON FUNCTION public.ai_sentiment_forget_moved_database_rows() FROM PUBLIC, anon, authenticated;
+
 -- A deleted database does not rely on the cascade's transition tables: the
 -- BEFORE DELETE trigger removes every score and job of its projection rows.
 CREATE OR REPLACE FUNCTION public.ai_sentiment_forget_database()
