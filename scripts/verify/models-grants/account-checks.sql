@@ -2300,6 +2300,7 @@ CREATE FUNCTION pg_temp.p5_unregistered() RETURNS SETOF text LANGUAGE sql AS $f$
     WITH allow(t, c, why) AS (VALUES
       ('auth_audit_events', 'email', 'the row goes by user_id; a failed-login row with no user_id is not reached'),
       ('auth_audit_events', 'user_agent', 'the row goes by user_id'),
+      ('auth_audit_events_legacy_int', 'email', 'legacy rows from before the uuid retype (auth-audit-events-migration.sql:40-43), service_role only; reached by neither id nor address, a residual of the erase'),
       ('ai_jobs', 'subject_kind', 'label'), ('ai_moderation_events', 'subject_kind', 'label'), ('ai_sentiment', 'subject_kind', 'label'),
       ('calendar_accounts', 'account_email', 'mailbox address, not a user id'), ('calendar_sources', 'account_id', 'calendar account id'),
       ('mail_accounts', 'account_email', 'mailbox address, not a user id'), ('mail_messages', 'account_id', 'mail account id'),
