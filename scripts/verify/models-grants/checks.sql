@@ -420,3 +420,9 @@ SELECT 'moderation_columns',
         WHERE has_table_privilege(x.rolname, 'public.osionos_user_reports', p.priv)
            OR (p.col_level AND has_any_column_privilege(x.rolname, 'public.osionos_user_reports', p.priv))),
        '';
+
+-- audit_viewer_index: the audit viewer's keyset page (provider, created_at DESC, id DESC) has
+-- its index. Counts 1 when it is missing.
+SELECT 'audit_viewer_index',
+       (to_regclass('public.osionos_bridge_audit_events_provider_created_idx') IS NULL)::int,
+       '';
