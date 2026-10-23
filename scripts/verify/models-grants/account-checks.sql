@@ -252,8 +252,8 @@ SELECT 'account_session_columns', count(*), coalesce(string_agg(v, ' ' ORDER BY 
 -- information_schema.column_privileges as a column privilege on EVERY column,
 -- so it shows up here as an extra row and not as a missing one.
 WITH expected(tbl, col, priv) AS (
-            SELECT 'osionos_profiles', c, 'SELECT' FROM unnest(ARRAY['user_id','display_name','username','pronouns','headline','bio','location','company','website','links','timezone','orcid','patreon','avatar_url','banner_url','directory_opt_out','version','created_at','updated_at','search_doc','profession','status_emoji','status_text','status_expires_at','status_busy']) c
-  UNION ALL SELECT 'osionos_profiles', c, 'UPDATE' FROM unnest(ARRAY['display_name','pronouns','headline','bio','location','company','website','links','timezone','orcid','patreon','directory_opt_out','profession','status_emoji','status_text','status_expires_at','status_busy']) c
+            SELECT 'osionos_profiles', c, 'SELECT' FROM unnest(ARRAY['user_id','display_name','username','pronouns','headline','bio','location','company','website','links','timezone','orcid','patreon','avatar_url','banner_url','directory_opt_out','version','created_at','updated_at','search_doc','profession','status_emoji','status_text','status_expires_at','status_busy','readme_page_id']) c
+  UNION ALL SELECT 'osionos_profiles', c, 'UPDATE' FROM unnest(ARRAY['display_name','pronouns','headline','bio','location','company','website','links','timezone','orcid','patreon','directory_opt_out','profession','status_emoji','status_text','status_expires_at','status_busy','readme_page_id']) c
   UNION ALL SELECT 'osionos_user_settings', c, 'SELECT' FROM unnest(ARRAY['user_id','section','value','version','updated_at']) c
   UNION ALL SELECT 'osionos_user_settings', c, 'INSERT' FROM unnest(ARRAY['user_id','section','value']) c
   UNION ALL SELECT 'osionos_user_settings', c, 'UPDATE' FROM unnest(ARRAY['user_id','section','value','version','updated_at']) c
@@ -1635,6 +1635,29 @@ SELECT 'p2_4_profession_check', count(*), coalesce(string_agg(v, ' ' ORDER BY v)
       FROM ids i
      WHERE EXISTS (SELECT 1 FROM c)
        AND NOT EXISTS (SELECT 1 FROM c WHERE c.def LIKE '%''' || i.id || '''%')
+  ) AS violations;
+
+-- p2_1_readme_fk: the README pointer (P2-1-a,
+-- models/osionos-account-readme-migration.sql). Two facts: readme_page_id is a
+-- UUID column, and a foreign key on exactly that column references
+-- public.osionos_pages(id) with ON DELETE SET NULL (confdeltype 'n').
+-- A missing column or constraint is a violation, not a zero.
+SELECT 'p2_1_readme_fk', count(*), coalesce(string_agg(v, ' ' ORDER BY v), '')
+  FROM (
+    SELECT 'not_uuid_column' AS v
+      WHERE NOT EXISTS (SELECT 1 FROM pg_attribute a
+                         WHERE a.attrelid = to_regclass('public.osionos_profiles')
+                           AND a.attname = 'readme_page_id' AND NOT a.attisdropped
+                           AND a.atttypid = 'uuid'::regtype)
+    UNION ALL
+    SELECT 'no_set_null_fk_to_pages'
+      WHERE NOT EXISTS (SELECT 1 FROM pg_constraint c, pg_attribute a
+                         WHERE c.conrelid = to_regclass('public.osionos_profiles')
+                           AND c.contype = 'f'
+                           AND c.confrelid = to_regclass('public.osionos_pages')
+                           AND c.confdeltype = 'n'
+                           AND a.attrelid = c.conrelid AND a.attname = 'readme_page_id'
+                           AND c.conkey = ARRAY[a.attnum])
   ) AS violations;
 
 -- p23_social_grants (P2-3-root, models/osionos-social-follow-presence-migration.sql):
