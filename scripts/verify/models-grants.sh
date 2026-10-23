@@ -32,7 +32,7 @@
 #   u anon cannot SELECT public.users.email or password_hash, authenticated cannot SELECT password_hash ·
 #   colleague_edges_trigger the P0-5a colleague-edges trigger exists on
 #   public.osionos_workspace_members under its own name (the migration's backfill
-#   guard tests that same pair) · feed_counts_exec_grants
+#   guard tests that same pair) · feed_counts_exec_grants · lifecycle_fn_settings
 #   public.osionos_feed_page_counts is executable by service_role and by no
 #   other role
 #   sd the two self-data indexes the sys: sources read through — (owner_id, updated_at DESC) on
@@ -614,6 +614,17 @@ run_checks() {
 	# P0-5a: the colleague-edges trigger and the feed counts function.
 	check_count "$1" colleague_edges_trigger colleague_edges_trigger
 	check_count "$1" feed_counts_exec_grants feed_counts_exec_grants
+	check_count "$1" lifecycle_fn_settings lifecycle_fn_settings
+	check_count "$1" lifecycle_mark_first lifecycle_mark_first
+	check_count "$1" lifecycle_mark_last_workspace lifecycle_mark_last_workspace
+	check_count "$1" lifecycle_mark_not_owner lifecycle_mark_not_owner
+	check_count "$1" lifecycle_mark_already_pending lifecycle_mark_already_pending
+	check_count "$1" lifecycle_mark_restamp lifecycle_mark_restamp
+	check_count "$1" lifecycle_mark_restamp_stamps lifecycle_mark_restamp_stamps
+	check_count "$1" lifecycle_transfer_refused_pending lifecycle_transfer_refused_pending
+	check_count "$1" lifecycle_transfer_ok lifecycle_transfer_ok
+	check_count "$1" lifecycle_transfer_one_owner lifecycle_transfer_one_owner
+	lifecycle_race "$1"
 	check_count "$1" sd1 self_data_indexes_missing
 	check_count "$1" k1 account_role_reach
 	check_count "$1" k2 account_plane_rls
@@ -843,6 +854,60 @@ run_races() {
 	fi
 	printf '%s\n' "${race_clean}" | psql_rows >"${WORK}/race-clean-$1.out" 2>&1 || true
 	run_lock_races "$1"
+}
+
+# lifecycle_race <scenario> — two parallel mark_delete calls for an owner's only two live
+# workspaces: exactly one 'marked' and one 'last_workspace'. Ordered by a held lock and a flag
+# file, never a sleep: session one marks W1 and keeps its locks, uncommitted, until the flag file
+# appears; session two marks W2 and must queue on the owner's row locks; the flag is written only
+# once pg_stat_activity shows session two waiting on a lock. Session two then wakes to a W1 that
+# is pending and must answer last_workspace. Without the FOR UPDATE it never queues (and would
+# read W1 as live), without the pending filter it counts W1 as a survivor.
+# Caveat: the wait is a bounded poll (about 20 s); on a host too loaded to get there the case
+# fails (a missing pass, never a false pass). Rows use fixed ids and are deleted on every exit.
+lifecycle_race() {
+	lc_o='e1e1e1e1-0000-4000-8000-0000000000d4'
+	lc_1='e1e1e1e1-0000-4000-8000-0000000000d1'
+	lc_2='e1e1e1e1-0000-4000-8000-0000000000d2'
+	lc_flag="/tmp/lifecycle-race-$$.flag"
+	lc_clean="DELETE FROM public.osionos_workspaces WHERE id IN ('${lc_1}','${lc_2}');"
+	printf '%s\n' "${lc_clean}" | psql_rows >/dev/null 2>&1 || true
+	docker exec "${CTN}" rm -f "${lc_flag}"
+	if ! printf '%s\n' "INSERT INTO public.osionos_workspaces (id, owner_id, name, slug) VALUES ('${lc_1}', '${lc_o}', 'lr1', 'lr-1'), ('${lc_2}', '${lc_o}', 'lr2', 'lr-2');" |
+		psql_rows >"${WORK}/lc-seed-$1.out" 2>"${WORK}/lc-seed-$1.err"; then
+		fail "$1" "lifecycle_race" "could not seed the race: $(head -1 "${WORK}/lc-seed-$1.err")"
+		return 0
+	fi
+	printf '%s\n' 'BEGIN;' \
+		"SELECT public.osionos_workspace_mark_delete('${lc_1}', '${lc_o}', now(), now() + interval '14 days');" \
+		"\\! i=0; while [ ! -e ${lc_flag} ] && [ \$i -lt 400 ]; do sleep 0.05; i=\$((i+1)); done" 'COMMIT;' |
+		psql_rows >"${WORK}/lc-one-$1.out" 2>"${WORK}/lc-one-$1.err" &
+	lc_one=$!
+	lc_i=0
+	until [ "$(printf "SELECT xmax::text FROM public.osionos_workspaces WHERE id = '%s';\n" "${lc_1}" | psql_rows)" != 0 ] || [ "${lc_i}" -ge 200 ]; do
+		sleep 0.1
+		lc_i=$((lc_i + 1))
+	done
+	printf '%s\n' "SELECT public.osionos_workspace_mark_delete('${lc_2}', '${lc_o}', now(), now() + interval '14 days');" |
+		psql_rows >"${WORK}/lc-two-$1.out" 2>"${WORK}/lc-two-$1.err" &
+	lc_two=$!
+	lc_i=0
+	until [ "$(printf "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND pid <> pg_backend_pid() AND query LIKE '%%mark_delete(%%%s%%';\n" "${lc_2}" | psql_rows)" -ge 1 ] || [ "${lc_i}" -ge 200 ]; do
+		sleep 0.1
+		lc_i=$((lc_i + 1))
+	done
+	lc_blocked=$((lc_i < 200))
+	docker exec "${CTN}" touch "${lc_flag}"
+	wait "${lc_one}" || true
+	wait "${lc_two}" || true
+	docker exec "${CTN}" rm -f "${lc_flag}"
+	lc_got="$(cat "${WORK}/lc-one-$1.out" "${WORK}/lc-two-$1.out" | grep -E '^(marked|last_workspace)$' | sort | tr '\n' ' ')"
+	printf '%s\n' "${lc_clean}" | psql_rows >/dev/null 2>&1 || true
+	if [ "${lc_blocked}" = 1 ] && [ "${lc_got}" = "last_workspace marked " ]; then
+		pass "$1" "lifecycle_race" "the second delete queued behind the first and was refused as the last workspace"
+	else
+		fail "$1" "lifecycle_race" "queued=${lc_blocked} results=[${lc_got}] (want one marked, one last_workspace); $(head -1 "${WORK}/lc-two-$1.err")"
+	fi
 }
 
 run_scenario() {
