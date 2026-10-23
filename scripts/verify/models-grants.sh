@@ -97,6 +97,9 @@
 #   p2_4 the profession column (P2-4-d1, models/osionos-account-profession-migration.sql):
 #   p2_4_profession_check the CHECK named osionos_profiles_profession_check is
 #   on the profession column and names all eight ids ·
+#   p2_1 the README pointer (P2-1-a, models/osionos-account-readme-migration.sql):
+#   p2_1_readme_fk readme_page_id is a UUID with a foreign key to osionos_pages
+#   that sets NULL on delete ·
 #   standalone the account foundation file applied alone leaves no realtime
 #   trigger on the sessions table or on the audit table, no anon/authenticated
 #   privilege and exactly the nine column grants — what the ledger runner
@@ -628,6 +631,7 @@ run_checks() {
 	check_count "$1" p2s_function_config p2s_function_config
 	check_count "$1" p2s_taken_by_profile p2s_taken_by_profile
 	check_count "$1" p2_4_profession_check p2_4_profession_check
+	check_count "$1" p2_1_readme_fk p2_1_readme_fk
 	check_count "$1" p23_social_grants p23_social_grants
 	check_count "$1" p23_presence_state p23_presence_state
 	check_count "$1" p23_status_columns p23_status_columns
