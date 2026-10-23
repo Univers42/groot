@@ -1,0 +1,62 @@
+{
+  "route": "/404",
+  "widths": {
+    "390": {
+      "status": 404,
+      "screenshot": "test-results/site-audit/baseline/screenshots/404-390.jpg",
+      "reducedScreenshot": "test-results/site-audit/baseline/screenshots/404-390-reduced.jpg",
+      "truncated": false,
+      "pageHeight": 900,
+      "overflowPx": 0,
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      ],
+      "axe": [
+        {
+          "id": "html-has-lang",
+          "impact": "serious",
+          "nodes": 1,
+          "help": "<html> element must have a lang attribute"
+        }
+      ]
+    },
+    "768": {
+      "status": 404,
+      "screenshot": "test-results/site-audit/baseline/screenshots/404-768.jpg",
+      "reducedScreenshot": "test-results/site-audit/baseline/screenshots/404-768-reduced.jpg",
+      "truncated": false,
+      "pageHeight": 900,
+      "overflowPx": 0,
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      ],
+      "axe": [
+        {
+          "id": "html-has-lang",
+          "impact": "serious",
+          "nodes": 1,
+          "help": "<html> element must have a lang attribute"
+        }
+      ]
+    },
+    "1440": {
+      "status": 404,
+      "screenshot": "test-results/site-audit/baseline/screenshots/404-1440.jpg",
+      "reducedScreenshot": "test-results/site-audit/baseline/screenshots/404-1440-reduced.jpg",
+      "truncated": false,
+      "pageHeight": 900,
+      "overflowPx": 0,
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      ],
+      "axe": [
+        {
+          "id": "html-has-lang",
+          "impact": "serious",
+          "nodes": 1,
+          "help": "<html> element must have a lang attribute"
+        }
+      ]
+    }
+  }
+}

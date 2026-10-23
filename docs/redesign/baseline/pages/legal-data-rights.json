@@ -1,0 +1,56 @@
+{
+  "route": "/legal/data-rights",
+  "widths": {
+    "390": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/baseline/screenshots/legal-data-rights-390.jpg",
+      "reducedScreenshot": "test-results/site-audit/baseline/screenshots/legal-data-rights-390-reduced.jpg",
+      "truncated": false,
+      "pageHeight": 1196,
+      "overflowPx": 0,
+      "consoleErrors": [],
+      "axe": [
+        {
+          "id": "link-in-text-block",
+          "impact": "serious",
+          "nodes": 1,
+          "help": "Links must be distinguishable without relying on color"
+        }
+      ]
+    },
+    "768": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/baseline/screenshots/legal-data-rights-768.jpg",
+      "reducedScreenshot": "test-results/site-audit/baseline/screenshots/legal-data-rights-768-reduced.jpg",
+      "truncated": false,
+      "pageHeight": 1101,
+      "overflowPx": 0,
+      "consoleErrors": [],
+      "axe": [
+        {
+          "id": "link-in-text-block",
+          "impact": "serious",
+          "nodes": 1,
+          "help": "Links must be distinguishable without relying on color"
+        }
+      ]
+    },
+    "1440": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/baseline/screenshots/legal-data-rights-1440.jpg",
+      "reducedScreenshot": "test-results/site-audit/baseline/screenshots/legal-data-rights-1440-reduced.jpg",
+      "truncated": false,
+      "pageHeight": 1281,
+      "overflowPx": 0,
+      "consoleErrors": [],
+      "axe": [
+        {
+          "id": "link-in-text-block",
+          "impact": "serious",
+          "nodes": 1,
+          "help": "Links must be distinguishable without relying on color"
+        }
+      ]
+    }
+  }
+}
