@@ -4,14 +4,15 @@
 \set ON_ERROR_STOP on
 
 -- The service_role-only set: every osionos_% and ai_% relation, plus public.auth_session_cutoffs
--- (models/auth-session-cutoffs.sql), which carries no osionos_ prefix. ai_% includes the hash
--- partitions of ai_chunks and ai_page_vectors: a partition is a table of its own, readable
--- directly, and it does not inherit its parent's grants or RLS flag.
+-- (models/auth-session-cutoffs.sql) and public.auth_audit_events (models/auth-audit-events-migration.sql),
+-- which carry no osionos_ prefix. ai_% includes the hash partitions of ai_chunks and ai_page_vectors:
+-- a partition is a table of its own, readable directly, and it does not inherit its parent's grants
+-- or RLS flag.
 
 -- privileged: every such relation anon/authenticated can touch (column grants included)
 SELECT 'privileged', count(*), coalesce(string_agg(c.relname, ' ' ORDER BY c.relname), '')
   FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
- WHERE ns.nspname = 'public' AND (c.relname LIKE 'osionos\_%' OR c.relname LIKE 'ai\_%' OR c.relname = 'auth_session_cutoffs') AND c.relkind IN ('r','p','v','m','f')
+ WHERE ns.nspname = 'public' AND (c.relname LIKE 'osionos\_%' OR c.relname LIKE 'ai\_%' OR c.relname IN ('auth_session_cutoffs','auth_audit_events','auth_audit_events_legacy_int')) AND c.relkind IN ('r','p','v','m','f')
    AND (has_any_column_privilege('anon', c.oid, 'SELECT') OR has_any_column_privilege('anon', c.oid, 'INSERT')
      OR has_any_column_privilege('anon', c.oid, 'UPDATE') OR has_table_privilege('anon', c.oid, 'DELETE')
      OR has_any_column_privilege('authenticated', c.oid, 'SELECT') OR has_any_column_privilege('authenticated', c.oid, 'INSERT')
@@ -20,13 +21,13 @@ SELECT 'privileged', count(*), coalesce(string_agg(c.relname, ' ' ORDER BY c.rel
 -- member_policies: policies on the set for PUBLIC (oid 0), anon or authenticated
 SELECT 'member_policies', count(*), coalesce(string_agg(c.relname || ':' || p.polname, ' ' ORDER BY 1), '')
   FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid JOIN pg_namespace ns ON ns.oid = c.relnamespace
- WHERE ns.nspname = 'public' AND (c.relname LIKE 'osionos\_%' OR c.relname LIKE 'ai\_%' OR c.relname = 'auth_session_cutoffs')
+ WHERE ns.nspname = 'public' AND (c.relname LIKE 'osionos\_%' OR c.relname LIKE 'ai\_%' OR c.relname IN ('auth_session_cutoffs','auth_audit_events','auth_audit_events_legacy_int'))
    AND (0::oid = ANY (p.polroles) OR p.polroles && ARRAY(SELECT oid FROM pg_roles WHERE rolname IN ('anon','authenticated')));
 
 -- service_role_gaps: tables in the set service_role cannot fully CRUD
 SELECT 'service_role_gaps', count(*), coalesce(string_agg(c.relname, ' ' ORDER BY c.relname), '')
   FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
- WHERE ns.nspname = 'public' AND (c.relname LIKE 'osionos\_%' OR c.relname LIKE 'ai\_%' OR c.relname = 'auth_session_cutoffs') AND c.relkind IN ('r','p')
+ WHERE ns.nspname = 'public' AND (c.relname LIKE 'osionos\_%' OR c.relname LIKE 'ai\_%' OR c.relname IN ('auth_session_cutoffs','auth_audit_events','auth_audit_events_legacy_int')) AND c.relkind IN ('r','p')
    AND NOT (has_table_privilege('service_role', c.oid, 'SELECT') AND has_table_privilege('service_role', c.oid, 'INSERT')
         AND has_table_privilege('service_role', c.oid, 'UPDATE') AND has_table_privilege('service_role', c.oid, 'DELETE'));
 
@@ -65,10 +66,19 @@ INSERT INTO public.auth_session_cutoffs (user_id, sessions_valid_after) VALUES (
 SELECT 'svc_cutoff_monotonic', count(*) FROM public.auth_session_cutoffs
  WHERE user_id = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee' AND sessions_valid_after = '2026-10-19 10:00:00+00';
 ROLLBACK;
--- secdef_exec: SECURITY DEFINER osionos_% functions anon/authenticated may execute
+
+-- svc_audit: the auth-gateway's RPC as service_role, with an event only the new list carries.
+-- Rolled back. The row count must be exactly the one the call wrote.
+BEGIN;
+SET LOCAL ROLE service_role;
+SELECT public.auth_record_audit_event('login_otp_verified', 'nobody@example.test', '{}'::jsonb);
+SELECT 'svc_audit', count(*) FROM public.auth_audit_events WHERE event_type = 'login_otp_verified' AND email = 'nobody@example.test';
+ROLLBACK;
+
+-- secdef_exec: SECURITY DEFINER osionos_% functions, and auth_record_audit_event, that anon/authenticated may execute
 SELECT 'secdef_exec', count(*), coalesce(string_agg(p.oid::regprocedure::text, ' '), '')
   FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
- WHERE n.nspname = 'public' AND p.prosecdef AND p.proname LIKE 'osionos\_%'
+ WHERE n.nspname = 'public' AND p.prosecdef AND (p.proname LIKE 'osionos\_%' OR p.proname = 'auth_record_audit_event')
    AND (has_function_privilege('anon', p.oid, 'EXECUTE') OR has_function_privilege('authenticated', p.oid, 'EXECUTE'));
 -- ai_write_fn_exec: VOLATILE, non-trigger ai_% functions anon/authenticated may execute (the
 -- writers of the AI tables), plus 1 per named writer that is missing, so a rename cannot pass.

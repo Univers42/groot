@@ -427,5 +427,4 @@ media_source() { printf 'UNSPLASH_ACCESS_KEY=unsplash-SRC-9f3\nPIXABAY_API=pixab
   [ "$(val "$OUT" SERVICE_ROLE_KEY)" = "$before_svc" ]
   [[ "$output" == *"VITE_BAAS_URL"* ]]
   [[ "$output" == *"PUBLIC_OSIONOS_APP_URL"* ]]
->>>>>>> develop
 }
