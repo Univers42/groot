@@ -75,16 +75,16 @@ BEGIN
 		  AND indexname = 'ai_approvals_one_live_per_call'
 		  AND indexdef LIKE '%''partial''%'
 	) THEN
-		-- The replacement index must include 'partial'. Avoid silently building
-		-- it with a blocking CREATE INDEX on a populated table. The runner applies
-		-- each file in its own transaction, so the online index change belongs in
-		-- a separate, non-transactional migration step. On a fresh empty install
-		-- the regular build is safe.
+		-- The partial predicate must include 'partial'. Do not drop a valid old
+		-- index first: on a populated deployment, create a temporary replacement
+		-- concurrently in a separate migration (not inside this transaction-
+		-- wrapped file), then swap names in a short DDL transaction.
+		-- Fresh installations have an empty approvals table, so a regular build
+		-- is safe here.
 		IF EXISTS (SELECT 1 FROM public.ai_approvals LIMIT 1) THEN
 			RAISE EXCEPTION
-				'ai_approvals_one_live_per_call needs an online concurrent index migration before upgrading a populated ai_approvals table';
+				'ai_approvals_one_live_per_call requires the concurrent index upgrade migration for populated ai_approvals';
 		END IF;
-		DROP INDEX IF EXISTS public.ai_approvals_one_live_per_call;
 		CREATE UNIQUE INDEX ai_approvals_one_live_per_call
 			ON public.ai_approvals (run_id, tool, args_sha256)
 			WHERE status IN ('pending', 'executing', 'executed', 'partial');
