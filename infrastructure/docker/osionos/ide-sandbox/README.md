@@ -39,6 +39,13 @@ is the acceptance record: architecture, the 16 conditions, operator steps.
   at connect time and dials that literal IP — hostnames resolving to `169.254.169.254`
   or a backend IP are refused (**conditions 3, 5, 6**). The `internal` sandbox net
   makes it the sole route off-box.
+  Allowed names are exact (plus dotted children), 19 in `BASE_ALLOW`. The user-space toolchain
+  hosts are `static.rust-lang.org` (rustup-init and toolchains), `nodejs.org` (node tarballs),
+  `astral.sh`, `conda.anaconda.org` and `micro.mamba.pm` (micromamba), `registry.yarnpkg.com`.
+  Not allowed, so some installer entry points fail: `sh.rustup.rs` (fetch `rustup-init` from
+  `static.rust-lang.org` instead), `releases.astral.sh` (where `astral.sh/uv/install.sh` redirects;
+  use `pip install uv`) and `api.anaconda.org` (uploads; where `micro.mamba.pm/api/...` redirects;
+  use `micro.mamba.pm/install.sh`, which pulls from GitHub).
 - **PAT** is injected per git op via `docker exec -e GIT_PAT` (P6); the credential
   helper emits it **only** when `GIT_PAT` is in the git process env (condition 13).
   Core dumps are disabled (condition 14).
@@ -109,6 +116,10 @@ compose; the ide-server runs from the bridge image with a different entrypoint.
 | 15 | Block quota, separate fs | separate loopback data-root caps host blast; per-sandbox `StorageOpt.size` is xfs+pquota-only, opt-in via `OSIONOS_IDE_STORAGE_QUOTA` | ✅ host-bounded; per-sandbox = xfs upgrade |
 | 16 | Idle/lifetime reap + CPU budget | `reapExpiredSandboxes`: past 4 h an idle box is stopped, past 12 h any box; `NanoCpus` cap. A stopped box is re-provisioned by the terminal, the session POST, or the LSP/fs-sync sockets — but a box stopped at the 12 h cap comes back only on an explicit action (terminal / session POST), so an open tab cannot keep one alive | `ide-ensure-sandbox.test.mjs` (hard-cap refusal, single-flight, 409 adoption) |
 
+| 17 | Socket proxy forwards what it vetted (K12) | `proxy.selfcheck.mjs` runs the real proxy against a fake daemon: a repeated key (`HostConfig`, `Privileged`, `Image`; escaped or re-cased spellings too) is 400 and never reaches the daemon; every vetted body goes out as `JSON.stringify(vetted)` with a recomputed `Content-Length` and no `Transfer-Encoding`. Reverting either half fails the selfcheck | ✅ offline-verified |
+| 18 | The plane asserts its runtime (K11) | `OSIONOS_IDE_REQUIRE_RUNTIME` (unset = as before; e.g. `runsc`): the proxy writes `HostConfig.Runtime` into every create (the key is accepted only with that value) and inspects a container before its start, refusing a different runtime or an inspect that fails. `verify.sh` runs `check-runtime.sh`: FAIL when the daemon default or the probe box differs, SKIP when unset. Names only: a `runsc` entry that points at runc passes | ✅ offline-verified; live probe needs gVisor on the VM |
+| 19 | Audit, kill switch, removal (S6: A9, A10, A11) | The proxy prints one JSON line per create/start/stop/remove (`ts, op, kind, box, uid, reason, status`) to stdout, so `docker logs osionos-ide-socket-proxy` carries it; retention is the docker log config, set `max-size`/`max-file` for 30 days. `scripts/ide-plane.sh off` and `remove-user <uid\|digest> --yes`, see below | ✅ offline-verified (bats, docker fake); live run is user-run |
+
 Offline-verified (no live daemon): **2, 4, 5, 6, 8, 9, 10-auth, 11, 13, 14** via
 `node --test tests/bridge/ide-sandbox-*.test.mjs` and the proxy `--selfcheck`s; the rest
 need the live daemon + `verify.sh`.
@@ -136,8 +147,11 @@ uid) + `--iptables=false`. Host-prep:
 3. **Egress NAT** (scoped to docker-ide's 10.202.0.0/16 pool only):
    ```
    sudo sh infrastructure/docker/osionos/ide-sandbox/install-egress-nat.sh
-   # (a root-owned copy + a drop-in, so the rules survive reboots; a one-off
-   #  `sudo sh …/ide-egress-nat.sh up` is lost at the next boot)
+   # (a root-owned copy + a drop-in: `up` runs as ExecStartPre, so docker-ide does not
+   #  start if the rules fail to load; a one-off `sudo sh …/ide-egress-nat.sh up` is lost
+   #  at the next boot. `down` is manual now (uninstall only): nothing runs it on stop, so
+   #  the rules stay loaded while the daemon is stopped. `sh …/install-egress-nat.sh print`
+   #  shows the drop-in without root)
    ```
 
 ## Rootful, not rootless — what that does and does not protect
@@ -225,13 +239,21 @@ COMPOSE_PROFILES=ide docker compose up -d osionos-ide-socket-proxy
 #    ~2.8 GB copy is removed) — to keep it: `OSIONOS_IDE_KEEP_MAIN_COPY=1`
 sudo sh infrastructure/docker/osionos/ide-sandbox/bootstrap.sh
 
-# 4. Run the hostile corpus (must be green before enabling). verify.sh pins EXPECTED=42 and every
+# 4. Run the hostile corpus (must be green before enabling). verify.sh pins EXPECTED=57 and every
 #    probe prints exactly one PASS/FAIL/SKIP line. The "Control plane reachability" section adds two
 #    probes: a box must not open TCP to osionos-ide-server:4100 nor osionos-ide-socket-proxy:2375, on
 #    EVERY address each container has, every target first shown to accept connections from the host;
 #    both SKIP where the plane is not deployed. The code-runner probe SKIPs where no runner image is
-#    present. On the VM (2026-10-14): `RESULT: 41 passed, 0 failed, 1 skipped (expected 42)` — the skip
-#    is the runner probe. The checks do not map 1:1 onto the 16 conditions.
+#    present. The "Persistent home" section adds four probes (home owned by the box uid, mode 700, and writable, box B
+#    cannot read box A's home, a file survives box remove and recreate, `touch /etc/x` denied). The
+#    "Box identity" section adds three more (`whoami` is coder and HOME is /home/coder right after start,
+#    a hostile passwd file changes neither uid nor HOME, a 100 KB passwd line breaks every exec and a
+#    box restart cures it). The "Per-user uid" section adds four (another uid cannot list box A's home
+#    while its owner can, the two boxes run as different host uids, `volume-nocopy` leaves a fresh volume
+#    root alone, the init with its three capabilities gives a 0700 tree another uid left to the new uid).
+#    Expected green line once ADR 0011 is deployed: `RESULT: 55 passed, 0 failed, 2 skipped (expected
+#    57)`, the skips being the runner probe and the runtime assertion (unset by default; not yet run: it needs the VM, A3.8 and A3.9, 2026-10-17). The
+#    last measured line on the VM (2026-10-14) was `41 passed, 0 failed, 1 skipped (expected 42)`. The checks do not map 1:1 onto the 16 conditions.
 sudo sh infrastructure/docker/osionos/ide-sandbox/verify.sh
 
 # 5. Seed docker-ide, then deploy the plane to the VM (the VM never builds) and prove it read-only:
@@ -256,6 +278,238 @@ sudo sh infrastructure/docker/osionos/ide-sandbox/verify.sh
 #    change (its IDE gates are pinned empty in compose — see Placement).
 # 6. On the client machine: `make link` (ssh mode), then `make link-verify` — see Placement.
 ```
+
+## Access and capacity
+
+**Access mode** `OSIONOS_IDE_ACCESS` (host bridge and plane read the same value):
+
+| Value | Who gets a token and a PTY |
+|---|---|
+| `allowlist` (default, also for an empty or unset value) | ids in `OSIONOS_IDE_ALLOWED_SUBJECTS`; no database read |
+| `approved` | a row in `public.osionos_ide_access` with `approved_at` set and `disabled_at` null |
+| `verified` | **BLOCKED**: a confirmed e-mail (`email_confirmed_at`) and `disabled_at` null. Do not turn on in public until B1.L1 to B1.L7 of the devil verdict hold (sign-up posture, B2-B4 live, disk accounting, isolation boundary decision, plane-side token gate, go-public checks, bounded lookup) |
+| `off` | nobody: the kill switch |
+
+An unknown value behaves as `allowlist` with an empty list and logs one line. The host decides at token
+mint (`reason: not-allowed`); the plane re-checks per connection with no database: `off` and the
+denylist `OSIONOS_IDE_DENIED_SUBJECTS` apply there at once, and the host's approval (and
+`disabled_at`) takes effect within one token lifetime (15 minutes). Both reads are bounded
+(1.5 s) and fail closed. The table is created by `models/osionos-ide-access-migration.sql` (RLS on,
+no policies, `service_role` only).
+
+**One running box per user.** Opening a workspace stops (never removes) the user's other running
+boxes, inside the serialized start section; the terminal prints that processes in the other workspace
+were stopped. A language-server or fs-sync socket never does this: it is refused with 409.
+**A full plane** answers HTTP 429, `Retry-After: 60`, code `SANDBOX_BUSY` ("All sandboxes are busy,
+retry in a minute"). Caveat: 60 s is not a forecast; a slot frees when a user stops a box or the idle
+reaper does (up to about 25 minutes). Box creates are limited to 6 per hour per user and 30 per hour
+for the plane (`OSIONOS_IDE_CREATES_PER_USER_HOUR`, `OSIONOS_IDE_CREATES_GLOBAL_HOUR`; in memory, a
+bridge restart refills them); over the limit is 429 `CREATE_RATE` with `Retry-After`.
+
+**Idle stop.** A box with no terminal, language-server or fs-sync socket for 20 minutes is stopped,
+next to the 4 h / 12 h age caps. The activity window went from 30 to 20 minutes and the sweep from
+15 to 5 minutes (worst case about 25 minutes from the last close to the stop); shell output no longer
+counts as activity. Background processes run until 20 minutes after the last terminal closes. After a
+bridge restart every box gets one 20-minute grace, because the activity registry is in memory.
+
+The egress proxy logs one line per allowed connection, `[ide-egress] ALLOW <host> -> <address>` (a denial writes no
+line): no user, workspace or
+token, and nothing in phase B adds one.
+
+## Persistent home and login shell
+
+A user's dotfiles, `~/.local` installs and shell choice live in one named volume,
+`osio-ide-home-<sha256(userId)[0:32]>`, mounted at the constant `/home/coder` in every box of that
+user. `/workspace` stays per user and workspace. The username never enters a path or a volume name.
+The socket proxy admits exactly two mounts, `[workspace, home]` in that order, and recomputes the home
+name from the `osio.ide.owner` label (`create-shape.mjs`, pinned to the bridge by
+`scripts/tests/ide-proxy-parity.mjs`). The old 64 MB `/home/coder` tmpfs is gone; `/tmp` stays one.
+
+- **Size bounds, off by default.** With `OSIONOS_IDE_VOLUME_QUOTA=on` the bridge creates new volumes
+  with `DriverOpts {"size":"2G"}` (`osio-ide-home-*`) and `{"size":"5G"}` (`osio-ide-vol-*`), and the
+  socket proxy admits `DriverOpts` only when absent or exactly that literal for the prefix (any other
+  key or value, such as `size:"3G"`, `type`/`o`/`device`, `size` plus `o`, or the home literal on a
+  workspace name, is refused: `proxy.mjs --selfcheck`). **The flag stays off until the user has run B3.2
+  on docker-ide** (a 64 MB probe volume refuses a 100 MB write with `Disk quota exceeded`, plus the
+  inode probe), because the local driver ignores `size` on a filesystem without xfs+pquota.
+  Residuals, named so the bound is not read as more than it is:
+  - volumes that already exist stay unbounded until they are recreated;
+  - the inode bound is whatever B3.2 records, not a number from this repo;
+  - total disk across users is a separate limit (the docker-ide data-root and the 80 % `ide_crypt`
+    alarm), not something per-volume sizes add up to;
+  - the verify.sh write-past-quota probe (B3.6) is not written: it needs a live quota, so it comes with
+    the B3.2 result.
+  A second subject joining `OSIONOS_IDE_ALLOWED_SUBJECTS` is unblocked only by B3.2 + B3.3 + B3.6.
+- **Shared by design (N4).** One home serves all of a user's workspaces and at most one running box (see Access and capacity).
+  An rc file written in one box runs in the others.
+- **Login shell.** The PTY starts `/usr/local/bin/osio-login`. It reads the first line (at most 4096
+  bytes) of `~/.config/osio/login-shell` as a path, never evaluates it, and starts it with `-l` only if
+  it is absolute, free of `..` and control characters, a regular executable file, not the launcher
+  itself, and either under `$HOME` or listed in `/etc/shells`. Anything else prints one stderr line with
+  a fixed reason and starts `/bin/bash -l`. `chsh -s <path>` (a POSIX sh shim at `/usr/local/bin/chsh`;
+  the setuid `/usr/bin/chsh` is removed from the image) applies the same checks and writes the file
+  atomically; `chsh` alone prints the current shell. It never touches `/etc`. Tests:
+  `scripts/tests/ide-login-shell.bats`.
+- **Safe terminal.** The IDE's "Safe terminal" button attaches with `safe=1`: `bash --noprofile --norc`,
+  a fixed argv that skips the launcher, `~/.bashrc` and `~/.profile`. A saved shell that passes the checks
+  but crashes at once, or an rc with `exit 1`, ends every normal terminal; the safe terminal is the way
+  back in. `chsh -s /bin/bash` undoes the choice.
+
+### User-space defaults (login shells only)
+
+`/etc/profile.d/10-user-space.sh` (source: `user-space.profile.sh`) points every toolchain at `$HOME`,
+so installers work with a read-only rootfs and no sudo: `~/.local/bin`, `~/.cargo/bin` and `~/go/bin`
+lead `PATH`; `NPM_CONFIG_PREFIX` and `PYTHONUSERBASE` are `~/.local` (with `PIP_BREAK_SYSTEM_PACKAGES=1`
+so `pip install` lands in the user site despite PEP 668); `GOPATH=~/go`, `CARGO_HOME=~/.cargo`,
+`RUSTUP_HOME=~/.rustup`, `MAMBA_ROOT_PREFIX=~/micromamba`; `LANG` and `LC_ALL` are `C.UTF-8`.
+`/etc/conda/.condarc` makes conda-forge micromamba's only default channel, never Anaconda `defaults`.
+`tmux`, `less` and `man` (with man pages) are in the image. The safe terminal skips all of it by
+design. A value the user already exports wins. `TZ` is not set here: the bridge's exec builders pass the
+browser's zone on each exec. Tests: `scripts/tests/ide-user-space.bats` (its header says how to run the
+image checks).
+
+### Every user runs as their own uid (ADR 0011)
+
+A box runs as `<uid>:10001`, with `uid` in 20000-59999 and the gid fixed so `/etc/group` stays static.
+docker-ide remaps uids by 165536, so two users' processes are different host uids and the kernel keeps
+their files apart. The socket proxy owns the owner-to-uid ledger (`/ledger/uid-ledger.jsonl` on the
+`osionos-ide-ledger` volume), hands a uid out at `POST /osio/v1/uid`, and refuses a box or init create
+whose `User`, `osio.ide.uid` label and owner disagree with it. The uid never rides the token and there is
+no database column (verdict A1.4 is moot).
+
+**Invariants.**
+
+- No create admits `User` 10001:10001, a uid outside the range, or a gid other than 10001; no exec body
+  may carry a `User` (an exec with none inherits the box's).
+- Both box mounts carry `VolumeOptions: {NoCopy: true}`, and the box never creates a volume's root: the
+  ownership init (`ideinit-<digest>`, the sandbox image with entrypoint `osio-volume-init`) runs first at
+  the real targets `/workspace` and `/home/coder`, with CHOWN, FOWNER and DAC_READ_SEARCH only, no
+  network, a read-only root, 16 pids, 128 MiB, and a 120 s bound. A failed init means no box ("home
+  repair failed"). `ideinit-*` containers are hidden from the box count and the reaper.
+- `osio-volume-init` chowns the contents first and the root last, so a root already at `<uid>:10001 700`
+  means a finished run; it never follows a symlink.
+- `box-init` and `osio-login` give the coder line of `/etc/passwd.base` the box's own uid at run time;
+  the build still asserts that line as `coder:x:10001:10001:` because both match it.
+
+**Caveats.** Losing the ledger volume forgets the bindings and the next create for each owner learns one
+by trust on first use, possibly a uid that owns another user's files already on docker-ide. The ledger
+guards against a buggy bridge or database, not a compromised ide-server (which can ask for any uid);
+the network is the only gate on `POST /osio/v1/uid`. A running box without the uid label (made before
+this rollout) is replaced on its next use; the home it shares with another running box of the same owner
+changes owner under that box until it is recreated.
+
+**Rollback.** Redeploy the previous images. Files now owned by 20000+ stay that way; the old boxes run as
+10001 and cannot read them until `osio-volume-init`-style chown gives them back
+(`docker run --rm --user 0:0 --cap-add CHOWN --cap-add DAC_READ_SEARCH --cap-add FOWNER
+--entrypoint chown <image> -R -h -P 10001:10001 /h`, the volume mounted at `/h`). Keep the
+`osionos-ide-ledger` volume across a rollback and a redeploy.
+
+### Account name and HOME (ADR 0009)
+
+`/etc/passwd` in the image is a symlink to `/tmp/.osio/passwd`; the real file is
+`/etc/passwd.base`. `box-init` copies the base to the tmpfs before the Cmd starts, so the account is
+`coder`. `osio-login` re-validates `OSIO_USER` (the PTY exec Env entry the bridge sets from the token's
+`un` claim) and rewrites the file with only the `coder` line renamed, so `whoami` and the prompt show
+the user's osionos username. Names in `/etc/passwd.base` are refused, and so is anything outside
+`^[a-z_][a-z0-9_-]{0,31}$`; a refusal keeps `coder`. uid, gid, groups and HOME never come from the
+file: runc takes the first three from the numeric `User` and HOME from the create Env, where
+`HOME=/home/coder` is the 8th entry. The socket proxy requires that entry and refuses any other
+`HOME=` in an exec Env.
+
+**Invariant (P8).** This is safe only while no-new-privileges, `CapDrop: ["ALL"]`, the read-only
+rootfs and the numeric `User` pins hold. Without any one of them, a user-written passwd plus a setuid
+binary gives root in the box. A change to `create-shape.mjs` on those fields, or a setuid binary added
+to the image (the build fails above `SETUID_BASELINE`, 8), re-opens ADR 0009.
+
+**/tmp is exec, nosuid and nodev (ADR 0010).** The create spec's `size=64m,mode=1777,exec` mounts as
+`rw,nosuid,nodev`: docker prepends `noexec,nosuid,nodev` and the last flag wins. Under noexec, `go run`,
+dlopen of a library in /tmp and installers failed (measured 2026-10-17). The boundary does not rest on
+noexec: every process of a user runs as that user's uid (ADR 0011), and anyone who can write /tmp can
+already run code from /workspace and the home. The socket proxy admits only this exact string, since `,suid` or `,dev` would drop
+nosuid or nodev. Boxes created before the rollout keep noexec until stopped (Restart box).
+
+Caveat: /tmp is still 64 MB, so a build whose temp tree passes that fails with ENOSPC (a large
+`go run`, a pip build with heavy build dependencies); use `TMPDIR=/workspace/.local/tmp` for those.
+A full /tmp also keeps the terminal name `coder`, because `osio-login` cannot write the account file;
+execs keep working.
+
+**Symptom and recovery (P7).** The box user can break their own box: a FIFO, a directory or a line of
+more than 64 KB at `/tmp/.osio/passwd` makes every `docker exec` hang or fail, the safe terminal
+included (`unable to setup user`, or a terminal that never opens). The workbench's "Restart box" button
+calls `DELETE /api/ide/session`, which disposes the sessions and stops the box; the next terminal
+recreates it with a fresh `/tmp`. Nothing else in the box is reachable first, so no VM root is needed.
+
+**Acceptance on docker-ide (P11, user-run on the VM, before the host bridge goes live).** Any line that
+differs from its comment is a stop: report it and do not run R8.
+
+```sh
+D='sudo docker -H unix:///run/docker-ide.sock'; IMG=<sandbox image id pinned by ship-images.sh>
+runc --version; $D version --format '{{.Server.Version}}'
+$D run -d --name osio-p3-probe --network none --user 20000:10001 -e HOME=/home/coder \
+  --read-only --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 512 \
+  --tmpfs /tmp:size=64m,mode=1777,exec --tmpfs /home/coder:uid=20000 "$IMG" sleep infinity
+$D exec osio-p3-probe sh -c 'grep " /tmp " /proc/mounts'               # rw,nosuid,nodev,... and no noexec (X6)
+$D exec osio-p3-probe sh -c 'whoami; echo HOME=$HOME'                 # coder, HOME=/home/coder
+$D exec -it -e OSIO_USER=dylan -e TERM=xterm-256color osio-p3-probe /usr/local/bin/osio-login
+#   in that shell: whoami; id; echo $HOME; exit                        # dylan, uid=20000(dylan) groups=10001(coder), /home/coder
+$D exec osio-p3-probe sh -c 'printf "root:x:20000:0::/root:/bin/sh\n" > /tmp/.osio/passwd'
+$D exec osio-p3-probe sh -c 'echo HOME=$HOME; id'                     # HOME=/home/coder, uid=20000(root) groups=10001(coder)
+$D exec osio-p3-probe sh -c 'head -c 70000 /dev/zero | tr "\0" a > /tmp/.osio/passwd'
+$D exec osio-p3-probe true; echo "exit=$?"                            # exit=126 or 128, "unable to setup user"
+$D restart -t 1 osio-p3-probe && $D exec osio-p3-probe whoami          # coder
+$D exec osio-p3-probe sh -c 'find / -xdev -perm -4000 2>/dev/null | wc -l; touch /etc/x'  # P1 count; Read-only file system
+$D rm -f osio-p3-probe
+```
+
+Browser acceptance (P7, user-run): in a terminal, `mkfifo /tmp/x && mv -f /tmp/x /tmp/.osio/passwd`,
+open another terminal (it hangs), press "Restart box", open a terminal (it works).
+
+### Recovery when no terminal opens (user-run on the VM)
+
+Moves the rc files aside and clears the saved shell, volume kept. `<h>` is the 32 hex characters of the
+home volume (`docker -H unix:///run/docker-ide.sock volume ls | grep osio-ide-home`); stop the user's box
+first so no shell holds the files. The home belongs to its owner's uid (mode 700), so the helper runs
+as that uid: `<uid>` is the number on the owner's line of the socket proxy's ledger
+(`docker exec osionos-ide-socket-proxy cat /ledger/uid-ledger.jsonl`, one `{"owner","uid"}` per line).
+
+```sh
+docker -H unix:///run/docker-ide.sock run --rm --user <uid>:10001 -v osio-ide-home-<h>:/h \
+  osionos-ide-sandbox:latest sh -c \
+  'cd /h && for f in .bashrc .profile .bash_profile .config/osio/login-shell; do [ -e "$f" ] && mv "$f" "$f.aside"; done; ls -A'
+```
+
+### Removing a user's data (user-run, GDPR)
+
+Stop and remove the user's `ide-*` containers (without `-v`; the containers carry the
+`osio.ide.owner` label), then remove their volumes. Volumes carry only `osio.ide.managed=1`, so they are
+found by name: `osio-ide-home-<h>` is `sha256(userId)[0:32]`, and each `osio-ide-vol-<h>` is the digest
+`deriveNames` gives for that user and workspace (the `Source` of the container's mounts, visible with
+`docker inspect` before the container is removed). The owner's line in the socket proxy's ledger
+(`/ledger/uid-ledger.jsonl`) stays: it keeps that uid from ever being reissued to someone else, which
+would hand the next user whatever files of the first still sit on docker-ide. Delete the line only after
+both volumes are gone, and only if it is the last one (allocation is highest + 1).
+
+One command does the whole of it (the volumes first, the ledger line last, and not at all without `--yes`):
+
+```sh
+DOCKER_HOST=unix:///run/docker-ide.sock bash scripts/ide-plane.sh remove-user <uid|home-digest> --yes
+```
+
+It edits the ledger inside `osionos-ide-socket-proxy` on the main daemon and restarts that container, so
+its in-memory copy cannot write the line back. Caveat: a box whose container is already gone leaves its
+workspace volume behind (found only through the container's mounts); list `osio-ide-vol-*` by hand.
+
+### Kill switch (user-run)
+
+Order matters: set `OSIONOS_IDE_ACCESS=off` for the bridge and the ide-server and recreate them, then
+stop the boxes, otherwise a terminal reconnect starts its box again:
+
+```sh
+DOCKER_HOST=unix:///run/docker-ide.sock bash scripts/ide-plane.sh off      # prints "stopped <n>"
+```
+
+Boxes are stopped, not removed; the Funnel for the IDE node is switched off separately. The audit trail:
+`docker logs osionos-ide-socket-proxy | grep '^{'`.
 
 ## P3–P7 routes (server halves — built + verified offline)
 

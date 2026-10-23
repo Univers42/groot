@@ -1,6 +1,6 @@
 # Repo-level Semgrep ignores. Anything matched here is excluded from
 # `semgrep scan` runs. Used by the security orchestrator
-# (`make baas-security-scan`).
+# (`apps/grobase/scripts/security/run-security-scans.sh`).
 #
 # Rule of thumb: only ignore THIRD-PARTY paths or generated artifacts that we
 # do not own. Never ignore project source code — fix the issue or annotate

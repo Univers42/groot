@@ -813,7 +813,7 @@ DROP POLICY IF EXISTS gdpr_requests_own_read ON gdpr_requests;
 CREATE POLICY gdpr_requests_own_read ON gdpr_requests FOR SELECT TO authenticated USING (user_id = gdpr_current_user_id());
 
 REVOKE ALL ON users FROM anon, authenticated;
-GRANT SELECT (id, username, email, avatar_url, bio, theme, notifications_enabled, is_email_verified, created_at, updated_at) ON users TO anon;
+GRANT SELECT (id, username, is_email_verified) ON users TO anon;
 GRANT SELECT (id, username, email, avatar_url, bio, theme, notifications_enabled, is_email_verified, created_at, updated_at, deletion_requested_at, deleted_at) ON users TO authenticated;
 GRANT UPDATE (username, avatar_url, bio, theme, notifications_enabled, deletion_requested_at, updated_at) ON users TO authenticated;
 

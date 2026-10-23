@@ -30,6 +30,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // earlier files and older boots granted, closing /rest/v1 and /graphql/v1 for
 // osionos_* to anon and authenticated.
 const SERVICE_ROLE_ONLY = "osionos-service-role-only-migration.sql";
+const AUTH_SESSION_CUTOFFS = "auth-session-cutoffs.sql";
+const ACCOUNT_FOUNDATION = "osionos-account-foundation-migration.sql";
 const MIGRATIONS = [
   "user.sql",
   "gdpr-migration.sql",
@@ -41,6 +43,7 @@ const MIGRATIONS = [
   "osionos-object-databases-migration.sql",
   "osionos-page-cover-position-migration.sql",
   "osionos-page-search-migration.sql",
+  "osionos-page-version-migration.sql",
   "osionos-app-connections-migration.sql",
   "osionos-code-surface-migration.sql",
   SERVICE_ROLE_ONLY,
@@ -100,6 +103,22 @@ export async function firstRun(cfg) {
     }
     await client.query(`ALTER ROLE authenticator LOGIN PASSWORD '${secrets.authenticatorPassword}'`);
     return { secrets, bootstrapped };
+  } finally {
+    await client.end();
+  }
+}
+
+// Applied on every boot, AFTER gotrue: both files reference auth.users, which only
+// gotrue's own migrations create, so they cannot sit in MIGRATIONS. The bridge enforces
+// session cutoffs and loads public.osionos_sessions whenever it has a service key and BaaS
+// URL, and answers 503 until it can read both, so a desktop install without them would
+// serve nothing. Both files are idempotent.
+export async function applyPostGoTrueMigrations(cfg) {
+  const client = await connectWithRetry(cfg);
+  try {
+    for (const file of [AUTH_SESSION_CUTOFFS, ACCOUNT_FOUNDATION]) {
+      await client.query(readFileSync(join(cfg.migrationsDir, file), "utf8"));
+    }
   } finally {
     await client.end();
   }
