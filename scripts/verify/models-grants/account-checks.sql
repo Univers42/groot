@@ -1870,8 +1870,8 @@ INSERT INTO auth.users (id) SELECT id FROM p23_users;
 INSERT INTO public.osionos_follows (follower_id, followee_id)
   SELECT f.id, t.id
     FROM p23_users f
-    JOIN p23_users t ON t.n = (f.n % 10000) + g
     CROSS JOIN generate_series(1, 10) AS g
+    JOIN p23_users t ON t.n = ((f.n + g - 1) % 10000) + 1
    WHERE f.n <> t.n
   ON CONFLICT DO NOTHING;
 INSERT INTO public.osionos_follows (follower_id, followee_id)
