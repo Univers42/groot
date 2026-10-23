@@ -14,6 +14,8 @@
 #   g  ai_erase_user removes the author's rows, keeps the other author's (C143)
 #   h  anon and authenticated cannot read ai_sentiment (C145)
 #   i  a comment on an archived page is not queued
+#   j  moving a database-row projection to a workspace with sentiment disabled
+#      deletes the old score and queued job
 #
 # Caveat: check a0 reads the runner's order from its source with sed, so a
 # runner that changes the ORDERED_FIRST/ORDERED_LAST variable names makes a0
@@ -27,6 +29,7 @@ MODELS="${REPO}/models"
 FIX="${REPO}/scripts/verify/models-grants"
 RUNNER="${REPO}/scripts/apply-models-migrations.sh"
 MIGRATION="osionos-ugc-sentiment-migration.sql"
+ROW_MIGRATION="osionos-ugc-sentiment-rows-migration.sql"
 CTN="ai-sentiment-pg"
 PG_IMAGE="${PG_IMAGE:-pgvector/pgvector:0.8.0-pg16}"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/ai-sentiment.XXXXXX")"
@@ -42,6 +45,8 @@ P_ARCH=33333333-3333-3333-3333-333333333333
 U1=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
 U2=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
 SHA64=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+DB_KEY_MOVE="ai-sentiment-move-db"
+R_MOVE=99999999-9999-9999-9999-999999999901
 
 note() { printf '[ai-sentiment] %s\n' "$*" >&2; }
 pass() { printf 'PASS %s\n' "$1"; }
@@ -93,12 +98,14 @@ apply_fixture() {
 	for base in osionos-bridge-migration.sql osionos-chat-migration.sql \
 		osionos-social-migration.sql osionos-engagement-migration.sql \
 		osionos-comments-migration.sql osionos-favorites-migration.sql \
-		osionos-feed-engagement-migration.sql osionos-ai-jobs-migration.sql \
-		osionos-user-events-migration.sql "${MIGRATION}"; do
+		osionos-feed-engagement-migration.sql osionos-object-databases-migration.sql \
+		osionos-ai-jobs-migration.sql "${MIGRATION}" "${ROW_MIGRATION}" \
+		osionos-user-events-migration.sql; do
 		apply_file "${MODELS}/${base}" || return 1
 	done
-	# Twice: idempotence.
+	# Twice: idempotence for the base store and database-row projection.
 	apply_file "${MODELS}/${MIGRATION}" || return 1
+	apply_file "${MODELS}/${ROW_MIGRATION}" || return 1
 	run_sql "INSERT INTO public.osionos_workspaces (id, owner_id, name, slug) VALUES
   ('${WS_ON}', '${U1}', 'ws-on', 'ws-on'), ('${WS_OFF}', '${U1}', 'ws-off', 'ws-off');
 INSERT INTO public.osionos_pages (id, workspace_id, owner_id, title) VALUES
@@ -131,13 +138,24 @@ check_a0() {
 		case " ${first} ${last} " in *" ${b} "*) continue ;; esac
 		printf '%s\n' "${b}"
 	done)"
-	mine="$(printf '%s\n' "${order}" | grep -n "^${MIGRATION}\$" | cut -d: -f1 || true)"
-	[ -n "${mine}" ] || return 1
+	mine="$(printf '%s\n' "${order}" | grep -n -F "${MIGRATION}" | cut -d: -f1 || true)"
+	mine_rows="$(printf '%s\n' "${order}" | grep -n -F "${ROW_MIGRATION}" | cut -d: -f1 || true)"
+	[ -n "${mine}" ] && [ -n "${mine_rows}" ] || return 1
 	for need in osionos-ai-jobs-migration.sql osionos-comments-migration.sql; do
-		at="$(printf '%s\n' "${order}" | grep -n "^${need}\$" | cut -d: -f1 || true)"
+		at="$(printf '%s\n' "${order}" | grep -n -F "${need}" | cut -d: -f1 || true)"
 		[ -z "${at}" ] && at=0
 		[ "${at}" -lt "${mine}" ] || { DETAIL="${need} sorts after ${MIGRATION}"; return 1; }
 	done
+	for need in osionos-object-databases-migration.sql "${MIGRATION}"; do
+		at="$(printf '%s\n' "${order}" | grep -n -F "${need}" | cut -d: -f1 || true)"
+		[ -n "${at}" ] && [ "${at}" -lt "${mine_rows}" ] || {
+			DETAIL="${need} must sort before ${ROW_MIGRATION}"; return 1;
+	}
+	done
+	at="$(printf '%s\n' "${order}" | grep -n -F osionos-user-events-migration.sql | cut -d: -f1 || true)"
+	[ -n "${at}" ] && [ "${at}" -gt "${mine_rows}" ] || {
+		DETAIL="user-events must sort after ${ROW_MIGRATION}"; return 1;
+	}
 }
 
 check_a() {
@@ -217,11 +235,38 @@ INSERT INTO public.osionos_page_comments (id, page_id, author_id, content) VALUE
 	[ -z "$(job_sha "${C5}")" ] || { DETAIL="archived-page comment queued"; return 1; }
 }
 
+row_jobs() {
+	q "SELECT count(*) FROM public.ai_jobs WHERE kind = 'sentiment' AND subject_kind = 'database_row' AND subject_id = '$1';"
+}
+
+row_scores() {
+	q "SELECT count(*) FROM public.ai_sentiment WHERE subject_kind = 'database_row' AND subject_id = '$1';"
+}
+
+check_j() {
+	# WS_ON is opted in; WS_OFF has no settings row (therefore sentiment is off).
+	run_sql "INSERT INTO public.osionos_object_databases (owner_id, workspace_id, db_key, title, state)
+VALUES ('${U1}', '${WS_ON}', '${DB_KEY_MOVE}', 'move-test', '{}'::jsonb);
+INSERT INTO public.osionos_object_database_rows (id, owner_id, db_key, workspace_id, row_id, property_id, scored_text, content_sha256)
+VALUES ('${R_MOVE}', '${U1}', '${DB_KEY_MOVE}', '${WS_ON}', 'row-1', 'property-1', 'text to score', '${SHA64}');" || {
+		DETAIL="could not create a projected database row: $(head -1 "${WORK}/err")"; return 1;
+	}
+	[ "$(row_jobs "${R_MOVE}")" = "1" ] || { DETAIL="enabled source workspace did not queue row"; return 1; }
+	run_sql "INSERT INTO public.ai_sentiment (subject_kind, subject_id, workspace_id, label, confidence, model, content_sha256)
+VALUES ('database_row', '${R_MOVE}', '${WS_ON}', 'neutral', 0.5, 'm', '${SHA64}');" || return 1
+	[ "$(row_scores "${R_MOVE}")" = "1" ] || { DETAIL="source score was not stored"; return 1; }
+	run_sql "UPDATE public.osionos_object_database_rows SET workspace_id = '${WS_OFF}' WHERE id = '${R_MOVE}';" || {
+		DETAIL="workspace move failed: $(head -1 "${WORK}/err")"; return 1;
+	}
+	[ "$(row_scores "${R_MOVE}")" = "0" ] || { DETAIL="old workspace score survived move to opted-out workspace"; return 1; }
+	[ "$(row_jobs "${R_MOVE}")" = "0" ] || { DETAIL="old workspace job survived move to opted-out workspace"; return 1; }
+}
+
 main() {
 	DETAIL=""
 	start_pg
 	apply_fixture || { note "the fixture failed"; exit 1; }
-	for n in a0 a b c d e f g h i; do
+	for n in a0 a b c d e f g h i j; do
 		DETAIL=""
 		if "check_${n}"; then pass "${n}"; else fail "${n}" "${DETAIL}"; fi
 	done
