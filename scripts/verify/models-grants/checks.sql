@@ -337,7 +337,8 @@ SELECT 'colleague_edges_trigger',
                     AND tgname = 'osionos_workspace_members_colleague_edges_trg'),
                 'the colleague-edges trigger is missing');
 
--- feed_counts_exec_grants: the two functions this package creates are
+-- feed_counts_exec_grants: the functions this package creates (feed counts, colleague edges,
+-- ownership transfer) are
 -- service_role's alone. The bridge calls them with the service key; anon,
 -- authenticated and the account role must not execute them. A function that
 -- does not exist is a violation too — the row must not pass on a missing
@@ -346,7 +347,9 @@ SELECT 'colleague_edges_trigger',
 -- entry. REVOKE … FROM PUBLIC is what removes it.
 WITH fns(name, sig) AS (
   VALUES ('osionos_feed_page_counts', 'public.osionos_feed_page_counts(uuid, uuid)'),
-         ('osionos_colleague_edges_on_join', 'public.osionos_colleague_edges_on_join()')
+         ('osionos_colleague_edges_on_join', 'public.osionos_colleague_edges_on_join()'),
+         ('osionos_workspace_transfer_ownership', 'public.osionos_workspace_transfer_ownership(uuid, uuid, uuid)'),
+         ('osionos_workspace_mark_delete', 'public.osionos_workspace_mark_delete(uuid, uuid, timestamptz, timestamptz)')
 ), fn AS (
   SELECT f.name, to_regprocedure(f.sig) AS oid FROM fns f
 )
@@ -435,3 +438,298 @@ SELECT 'moderation_columns',
 SELECT 'audit_viewer_index',
        (to_regclass('public.osionos_bridge_audit_events_provider_created_idx') IS NULL)::int,
        '';
+
+-- p5_keys_column_acl: the account role's exact reach on the user keys table
+-- (P5-3-a). It reads the eight published columns of its OWN rows and writes
+-- nothing; the bridge writes through the service role. Fixture: two users and
+-- one key each, inserted and rolled back here. The catalog half compares the
+-- column ACL in both directions, so a missing and an extra privilege both fail.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+                               ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+DO $$
+DECLARE
+  v_missing boolean := false;
+BEGIN
+  BEGIN
+    INSERT INTO public.osionos_user_keys (user_id, kind, title, public_key, fingerprint) VALUES
+      ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'ssh', 'A key', 'ssh-ed25519 AAAA', 'SHA256:a'),
+      ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'ssh', 'B key', 'ssh-ed25519 BBBB', 'SHA256:b');
+  EXCEPTION WHEN others THEN
+    v_missing := true;
+  END;
+  PERFORM set_config('osionos.check.k_fixture', CASE WHEN v_missing THEN 'no_table' ELSE 'ok' END, true);
+END $$;
+DO $$
+DECLARE
+  v_own bigint := -1;
+  v_other bigint := -1;
+  v_state text := '';
+BEGIN
+  SET LOCAL ROLE osionos_account_user;
+  PERFORM set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","aud":"osionos-account","role":"osionos_account_user"}', true);
+  BEGIN
+    SELECT count(*) INTO v_own FROM public.osionos_user_keys WHERE id IS NOT NULL;
+    SELECT count(*) INTO v_other FROM public.osionos_user_keys
+     WHERE user_id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+  EXCEPTION WHEN others THEN
+    v_own := -1;
+    v_other := -1;
+  END;
+  PERFORM set_config('osionos.check.k_own', v_own::text, true);
+  PERFORM set_config('osionos.check.k_other', v_other::text, true);
+  v_state := '';
+  SET LOCAL ROLE osionos_account_user;
+  BEGIN
+    INSERT INTO public.osionos_user_keys (user_id, kind, title, public_key, fingerprint)
+    VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'ssh', 'x', 'k', 'SHA256:c');
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_insert', v_state, true);
+  v_state := '';
+  SET LOCAL ROLE osionos_account_user;
+  BEGIN
+    UPDATE public.osionos_user_keys SET title = 'x';
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_update', v_state, true);
+  v_state := '';
+  SET LOCAL ROLE osionos_account_user;
+  BEGIN
+    DELETE FROM public.osionos_user_keys;
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_delete', v_state, true);
+END $$;
+RESET ROLE;
+WITH granted(col) AS (
+  SELECT unnest(ARRAY['id','user_id','kind','title','public_key','fingerprint','key_type','created_at'])
+),
+t AS (SELECT to_regclass('public.osionos_user_keys') AS oid),
+violations AS (
+  SELECT 'selects:' || a.attname AS v
+    FROM t, pg_attribute a
+   WHERE t.oid IS NOT NULL AND a.attrelid = t.oid AND a.attnum > 0 AND NOT a.attisdropped
+     AND has_column_privilege('osionos_account_user', a.attrelid, a.attname, 'SELECT')
+     AND a.attname NOT IN (SELECT col FROM granted)
+  UNION ALL
+  SELECT 'missing:' || g.col
+    FROM t, granted g
+   WHERE t.oid IS NOT NULL
+     AND NOT has_column_privilege('osionos_account_user', t.oid, g.col, 'SELECT')
+  UNION ALL
+  SELECT 'table_privilege:' || p.priv
+    FROM t, unnest(ARRAY['INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) AS p(priv)
+   WHERE t.oid IS NOT NULL AND has_table_privilege('osionos_account_user', t.oid, p.priv)
+  UNION ALL
+  SELECT 'column_privilege:' || p.priv
+    FROM t, unnest(ARRAY['INSERT','UPDATE','REFERENCES']) AS p(priv)
+   WHERE t.oid IS NOT NULL AND has_any_column_privilege('osionos_account_user', t.oid, p.priv)
+)
+SELECT 'p5_keys_column_acl',
+       (CASE WHEN current_setting('osionos.check.k_own', true) = '1' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_other', true) = '0' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_insert', true) = '42501' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_update', true) = '42501' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_delete', true) = '42501' THEN 0 ELSE 1 END)
+     + (SELECT count(*) FROM violations),
+       'fixture=' || coalesce(current_setting('osionos.check.k_fixture', true), 'unset')
+     || ' own=' || coalesce(current_setting('osionos.check.k_own', true), 'unset')
+     || ' other=' || coalesce(current_setting('osionos.check.k_other', true), 'unset')
+     || ' insert=' || coalesce(current_setting('osionos.check.k_insert', true), 'unset')
+     || ' update=' || coalesce(current_setting('osionos.check.k_update', true), 'unset')
+     || ' delete=' || coalesce(current_setting('osionos.check.k_delete', true), 'unset')
+     || ' acl=' || coalesce((SELECT string_agg(v, ' ' ORDER BY v) FROM violations), 'exact');
+ROLLBACK;
+
+-- p5_keys_row_rules: the table's own row rules, probed as the service role (the
+-- only writer). Five rows must be refused with the named state: a kind outside
+-- ssh/gpg, an empty title, an 81-character title, an oversized key (23514) and a
+-- second row with the same (user, kind, fingerprint) (23505); and the 51st row
+-- of one user must be refused by the trigger with P0001 on insert or reassignment.
+-- An unchanged owner at the cap and moves below the cap must still succeed.
+-- The count is the number of those nine that did NOT end in the expected state.
+BEGIN;
+INSERT INTO auth.users (id) VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaab');
+SET LOCAL ROLE service_role;
+DO $$
+DECLARE
+  v_state text;
+  v_user constant uuid := 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  v_other constant uuid := 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaab';
+BEGIN
+  v_state := '';
+  BEGIN
+    INSERT INTO public.osionos_user_keys (user_id, kind, title, public_key, fingerprint)
+    VALUES (v_user, 'pgp', 't', 'k', 'f1');
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_kind', v_state, true);
+  v_state := '';
+  BEGIN
+    INSERT INTO public.osionos_user_keys (user_id, kind, title, public_key, fingerprint)
+    VALUES (v_user, 'ssh', '', 'k', 'f2');
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_title0', v_state, true);
+  v_state := '';
+  BEGIN
+    INSERT INTO public.osionos_user_keys (user_id, kind, title, public_key, fingerprint)
+    VALUES (v_user, 'ssh', repeat('t', 81), 'k', 'f3');
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_title81', v_state, true);
+  v_state := '';
+  BEGIN
+    INSERT INTO public.osionos_user_keys (user_id, kind, title, public_key, fingerprint)
+    VALUES (v_user, 'ssh', 't', repeat('k', 16385), 'f4');
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_size', v_state, true);
+  INSERT INTO public.osionos_user_keys (user_id, kind, title, public_key, fingerprint)
+  VALUES (v_user, 'ssh', 't', 'k', 'dup');
+  v_state := '';
+  BEGIN
+    INSERT INTO public.osionos_user_keys (user_id, kind, title, public_key, fingerprint)
+    VALUES (v_user, 'ssh', 't', 'k', 'dup');
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_dup', v_state, true);
+  INSERT INTO public.osionos_user_keys (user_id, kind, title, public_key, fingerprint)
+  SELECT v_user, 'ssh', 't', 'k', 'fill' || n FROM generate_series(1, 49) AS n;
+  v_state := '';
+  BEGIN
+    INSERT INTO public.osionos_user_keys (user_id, kind, title, public_key, fingerprint)
+    VALUES (v_user, 'ssh', 't', 'k', 'one-too-many');
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_limit', v_state, true);
+  INSERT INTO public.osionos_user_keys (user_id, kind, title, public_key, fingerprint)
+  VALUES (v_other, 'ssh', 't', 'k', 'move');
+  v_state := '';
+  BEGIN
+    UPDATE public.osionos_user_keys SET user_id = v_user WHERE user_id = v_other AND fingerprint = 'move';
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_move_limit', v_state, true);
+  v_state := '';
+  BEGIN
+    UPDATE public.osionos_user_keys SET user_id = v_user, title = 'renamed' WHERE user_id = v_user AND fingerprint = 'dup';
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_same_owner',
+    (v_state = '' AND EXISTS (SELECT 1 FROM public.osionos_user_keys WHERE user_id = v_user AND fingerprint = 'dup' AND title = 'renamed'))::text, true);
+  v_state := '';
+  BEGIN
+    UPDATE public.osionos_user_keys SET user_id = v_other WHERE user_id = v_user AND fingerprint = 'dup';
+    UPDATE public.osionos_user_keys SET user_id = v_user WHERE user_id = v_other AND fingerprint = 'move';
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_move_allowed',
+    (v_state = '' AND (SELECT count(*) FROM public.osionos_user_keys WHERE user_id = v_user) = 50
+                   AND (SELECT count(*) FROM public.osionos_user_keys WHERE user_id = v_other) = 1
+                   AND EXISTS (SELECT 1 FROM public.osionos_user_keys WHERE user_id = v_user AND fingerprint = 'move'))::text, true);
+END $$;
+RESET ROLE;
+SELECT 'p5_keys_row_rules',
+       (CASE WHEN current_setting('osionos.check.k_kind', true) = '23514' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_title0', true) = '23514' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_title81', true) = '23514' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_size', true) = '23514' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_dup', true) = '23505' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_limit', true) = 'P0001' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_move_limit', true) = 'P0001' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_same_owner', true) = 'true' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_move_allowed', true) = 'true' THEN 0 ELSE 1 END),
+       'kind=' || coalesce(current_setting('osionos.check.k_kind', true), 'unset')
+     || ' title0=' || coalesce(current_setting('osionos.check.k_title0', true), 'unset')
+     || ' title81=' || coalesce(current_setting('osionos.check.k_title81', true), 'unset')
+     || ' size=' || coalesce(current_setting('osionos.check.k_size', true), 'unset')
+     || ' dup=' || coalesce(current_setting('osionos.check.k_dup', true), 'unset')
+     || ' limit=' || coalesce(current_setting('osionos.check.k_limit', true), 'unset')
+     || ' move_limit=' || coalesce(current_setting('osionos.check.k_move_limit', true), 'unset')
+     || ' same_owner=' || coalesce(current_setting('osionos.check.k_same_owner', true), 'unset')
+     || ' move_allowed=' || coalesce(current_setting('osionos.check.k_move_allowed', true), 'unset');
+ROLLBACK;
+
+-- lifecycle_fn_settings: the two workspace-lifecycle functions run as the caller (not
+-- SECURITY DEFINER) and pin search_path and lock_timeout. Counts every function that is missing,
+-- is prosecdef, or lacks either setting.
+SELECT 'lifecycle_fn_settings', count(*), coalesce(string_agg(name, ' ' ORDER BY name), '')
+  FROM (
+    SELECT f.name
+      FROM (VALUES ('osionos_workspace_transfer_ownership', 'public.osionos_workspace_transfer_ownership(uuid, uuid, uuid)'),
+                   ('osionos_workspace_mark_delete', 'public.osionos_workspace_mark_delete(uuid, uuid, timestamptz, timestamptz)'))
+           AS f(name, sig)
+      LEFT JOIN pg_proc p ON p.oid = to_regprocedure(f.sig)
+     WHERE p.oid IS NULL
+        OR p.prosecdef
+        OR NOT EXISTS (SELECT 1 FROM unnest(coalesce(p.proconfig, ARRAY[]::text[])) c WHERE c LIKE 'search_path=%')
+        OR NOT EXISTS (SELECT 1 FROM unnest(coalesce(p.proconfig, ARRAY[]::text[])) c WHERE c LIKE 'lock_timeout=%')
+  ) AS violations;
+
+-- lifecycle_*: the behaviour of osionos_workspace_mark_delete and _transfer_ownership, which the
+-- bridge tests only stub. One row per check, 0 = holds; the detail names what came back. Fixture
+-- inside BEGIN..ROLLBACK. Two live workspaces for the owner (W1, W2), one foreign (W3).
+BEGIN;
+INSERT INTO public.osionos_workspaces (id, owner_id, name, slug) VALUES
+  ('e1e1e1e1-0000-4000-8000-000000000001', 'e1e1e1e1-0000-4000-8000-0000000000a1', 'lc1', 'lc-1'),
+  ('e1e1e1e1-0000-4000-8000-000000000002', 'e1e1e1e1-0000-4000-8000-0000000000a1', 'lc2', 'lc-2'),
+  ('e1e1e1e1-0000-4000-8000-000000000003', 'e1e1e1e1-0000-4000-8000-0000000000b2', 'lc3', 'lc-3');
+INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role) VALUES
+  ('e1e1e1e1-0000-4000-8000-000000000001', 'e1e1e1e1-0000-4000-8000-0000000000a1', 'owner'),
+  ('e1e1e1e1-0000-4000-8000-000000000001', 'e1e1e1e1-0000-4000-8000-0000000000c3', 'editor'),
+  ('e1e1e1e1-0000-4000-8000-000000000002', 'e1e1e1e1-0000-4000-8000-0000000000a1', 'owner');
+
+SELECT 'lifecycle_mark_first', (r IS DISTINCT FROM 'marked')::int, 'first mark returned ' || coalesce(r, 'NULL')
+  FROM (SELECT public.osionos_workspace_mark_delete('e1e1e1e1-0000-4000-8000-000000000001',
+          'e1e1e1e1-0000-4000-8000-0000000000a1', '2030-01-01', '2030-01-15') AS r) s;
+SELECT 'lifecycle_mark_last_workspace', (r IS DISTINCT FROM 'last_workspace')::int,
+       'marking the only live workspace returned ' || coalesce(r, 'NULL')
+  FROM (SELECT public.osionos_workspace_mark_delete('e1e1e1e1-0000-4000-8000-000000000002',
+          'e1e1e1e1-0000-4000-8000-0000000000a1', '2030-01-02', '2030-01-16') AS r) s;
+SELECT 'lifecycle_mark_not_owner', (r IS DISTINCT FROM 'not_owner')::int,
+       'a non-owner mark returned ' || coalesce(r, 'NULL')
+  FROM (SELECT public.osionos_workspace_mark_delete('e1e1e1e1-0000-4000-8000-000000000002',
+          'e1e1e1e1-0000-4000-8000-0000000000b2', '2030-01-02', '2030-01-16') AS r) s;
+SELECT 'lifecycle_mark_already_pending', (r IS DISTINCT FROM 'already_pending')::int,
+       'a second mark inside the grace returned ' || coalesce(r, 'NULL')
+  FROM (SELECT public.osionos_workspace_mark_delete('e1e1e1e1-0000-4000-8000-000000000001',
+          'e1e1e1e1-0000-4000-8000-0000000000a1', '2030-01-05', '2030-01-19') AS r) s;
+-- C10: once delete_after has passed with no sweep, the mark is taken again with fresh stamps.
+-- A fourth workspace for the owner keeps the "not the last live one" premise true.
+INSERT INTO public.osionos_workspaces (id, owner_id, name, slug)
+  VALUES ('e1e1e1e1-0000-4000-8000-000000000004', 'e1e1e1e1-0000-4000-8000-0000000000a1', 'lc4', 'lc-4');
+SELECT 'lifecycle_mark_restamp', (r IS DISTINCT FROM 'marked')::int,
+       'a mark after delete_after returned ' || coalesce(r, 'NULL')
+  FROM (SELECT public.osionos_workspace_mark_delete('e1e1e1e1-0000-4000-8000-000000000001',
+          'e1e1e1e1-0000-4000-8000-0000000000a1', '2030-02-01', '2030-02-15') AS r) s;
+-- A separate statement: the function's UPDATE is not visible to the snapshot of the one above.
+SELECT 'lifecycle_mark_restamp_stamps', (pending_delete_at <> '2030-02-01' OR delete_after <> '2030-02-15')::int,
+       'the re-stamp kept the old pending_delete_at/delete_after'
+  FROM public.osionos_workspaces WHERE id = 'e1e1e1e1-0000-4000-8000-000000000001';
+-- C14: W1 is pending, so ownership cannot move; W2 is live and can.
+SELECT 'lifecycle_transfer_refused_pending', (r IS DISTINCT FROM false)::int,
+       'transfer on a pending-delete workspace returned ' || coalesce(r::text, 'NULL')
+  FROM (SELECT public.osionos_workspace_transfer_ownership('e1e1e1e1-0000-4000-8000-000000000001',
+          'e1e1e1e1-0000-4000-8000-0000000000a1', 'e1e1e1e1-0000-4000-8000-0000000000c3') AS r) s;
+INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role)
+  VALUES ('e1e1e1e1-0000-4000-8000-000000000002', 'e1e1e1e1-0000-4000-8000-0000000000c3', 'editor');
+SELECT 'lifecycle_transfer_ok', (r IS DISTINCT FROM true)::int,
+       'transfer to a member returned ' || coalesce(r::text, 'NULL')
+  FROM (SELECT public.osionos_workspace_transfer_ownership('e1e1e1e1-0000-4000-8000-000000000002',
+          'e1e1e1e1-0000-4000-8000-0000000000a1', 'e1e1e1e1-0000-4000-8000-0000000000c3') AS r) s;
+SELECT 'lifecycle_transfer_one_owner',
+       ((SELECT count(*) FROM public.osionos_workspace_members
+          WHERE workspace_id = 'e1e1e1e1-0000-4000-8000-000000000002' AND role = 'owner') <> 1
+        OR (SELECT owner_id FROM public.osionos_workspaces WHERE id = 'e1e1e1e1-0000-4000-8000-000000000002')
+             IS DISTINCT FROM 'e1e1e1e1-0000-4000-8000-0000000000c3'
+        OR (SELECT role FROM public.osionos_workspace_members
+             WHERE workspace_id = 'e1e1e1e1-0000-4000-8000-000000000002'
+               AND user_id = 'e1e1e1e1-0000-4000-8000-0000000000a1') IS DISTINCT FROM 'admin')::int,
+       'after a transfer: exactly one owner row, owner_id = the new owner, the old owner is admin';
+ROLLBACK;
