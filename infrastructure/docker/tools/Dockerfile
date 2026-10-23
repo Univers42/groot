@@ -21,6 +21,7 @@ RUN short="$(printf %.7s "$GROBASE_CLI_REF")" \
 FROM ${ALPINE_IMAGE}
 # chromium + nss-tools: Lighthouse, both browser MCPs, and the CA import the entrypoint does.
 # ffmpeg, vips (+heif for AVIF), imagemagick: video and image conversion. Fonts so a headless
+
 # capture renders text instead of tofu. bind-tools: dig, for the SPF/DKIM/DMARC check of the
 # sending domain (docs/redesign/PLAN.md §7.4). fonttools + brotli: pyftsubset, for the site's web
 # font subsets (scripts/media/subset-fonts.sh). openssl: the throwaway TLS certificate of
@@ -32,6 +33,7 @@ ARG SVGO_VERSION=4.1.0
 ARG LHCI_VERSION=0.15.1
 ARG CHROME_DEVTOOLS_MCP_VERSION=1.10.1
 ARG PLAYWRIGHT_MCP_VERSION=0.0.83
+
 # pnpm at the version apps/opposite-osiris/package.json pins in packageManager (smoke.bats fails on drift).
 ARG PNPM_VERSION=11.5.1
 RUN npm install -g --no-audit --no-fund --no-update-notifier \

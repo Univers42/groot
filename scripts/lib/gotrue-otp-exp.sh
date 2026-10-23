@@ -26,6 +26,7 @@ GOTRUE_OTP_EXP_FLOOR=86400
 # _otp_judge VALUE SOURCE — the reason line when VALUE is not a whole number of seconds at
 # or above the floor; nothing for an empty VALUE (unset = GoTrue's default).
 _otp_judge() {
+
   [ -n "$1" ] || return 1
   case "$1" in
   *[!0-9]*)
@@ -41,6 +42,7 @@ _otp_judge() {
 
 # _otp_env_values FILE KEY — every value of KEY in a KEY=VALUE file, quotes stripped.
 _otp_env_values() {
+
   [ -f "$1" ] || return 0
   sed -n "s/^[[:space:]]*$2[[:space:]]*=[[:space:]]*//p" "$1" |
     sed -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/"
@@ -49,6 +51,7 @@ _otp_env_values() {
 # _otp_compose_values GROBASE_DIR — "file<TAB>raw value" per compose definition, in both the
 # map form (KEY: value, KEY: with no value = passthrough) and the list form (- KEY=value).
 _otp_compose_values() {
+
   {
     find "$1/orchestrators" -name '*.yml' -type f 2>/dev/null
     for _otp_top in "$1"/docker-compose*.yml; do [ -f "$_otp_top" ] && printf '%s\n' "$_otp_top"; done
@@ -63,6 +66,7 @@ _otp_compose_values() {
 
 # _otp_resolve RAW ENVFILE — the value(s) compose would substitute, one per line.
 _otp_resolve() {
+
   case "$1" in
   '') _otp_env_values "$2" GOTRUE_MAILER_OTP_EXP ;;
   "\${"*"}")

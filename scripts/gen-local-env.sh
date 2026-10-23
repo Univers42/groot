@@ -121,8 +121,8 @@ minted_missing() {
 }
 
 # mint_missing: write a fresh value for each MINTED key that is absent or empty, by name.
-# DEMO_LOGIN_PASSWORD gets a 24-char typeable password; OSIONOS_IDE_TOKEN_SECRET gets
-# 48 alphanumerics (ide-token.mjs requires >=32 bytes and refuses the app secret).
+# DEMO_LOGIN_PASSWORD gets a 24-char typeable password; OSIONOS_IDE_TOKEN_SECRET and
+# AUTH_LINK_SIGNING_KEY get 48 alphanumerics (each refuses fewer than 32 characters).
 mint_missing() {
   for key in $(minted_missing); do
     command -v openssl >/dev/null 2>&1 || { note "openssl required to mint $key"; exit 1; }
@@ -309,7 +309,8 @@ OSIONOS_APP_SESSION_SECRET=$(gen)
 OSIONOS_IDE_TOKEN_SECRET=$(gen)
 OSIONOS_BRIDGE_EMAIL_HASH_SALT=$(gen)
 OSIONOS_BRIDGE_SHARED_SECRET=$(gen)
-# Signs confirmation and reset links created by the auth-gateway; never reuse a BaaS key.
+# AUTH_LINK_SIGNING_KEY: signs the confirm and reset links the auth-gateway mails. Its own
+# key, never another secret: the gateway answers 503 on those links without it.
 AUTH_LINK_SIGNING_KEY=$(gen)
 OSIONOS_APP_SESSION_TTL_SECONDS=2592000
 # Local demo account (dev.pro.photo@gmail.com) password — applied by make all, shown by make demo-login.

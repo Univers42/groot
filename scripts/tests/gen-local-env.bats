@@ -254,12 +254,11 @@ stale_kong() { sed -i 's/^SB_KONG_KEY=.*/SB_KONG_KEY=anon-OLD/' "$OUT"; }
   [ "$status" -eq 0 ]
   [ "$(val "$OUT" VITE_BAAS_KONG_KEY)" = "anon-A" ]
 }
-
 # --- media keys (UNSPLASH_ACCESS_KEY, PIXABAY_API) copied from apps/osionos/app/.env ---
 
 media_source() { printf 'UNSPLASH_ACCESS_KEY=unsplash-SRC-9f3\nPIXABAY_API=pixabay-SRC-7c1\n' > "$MEDIA_ENV"; }
 
-@test "--sync: a missing AUTH_LINK_SIGNING_KEY gets a generated key without printing it" {
+@test "--sync: an .env.local without AUTH_LINK_SIGNING_KEY gets one minted, named, never printed" {
   sed -i '/^AUTH_LINK_SIGNING_KEY=/d' "$OUT"
   run bash "$SCRIPT" --sync
   [ "$status" -eq 0 ]
@@ -268,6 +267,8 @@ media_source() { printf 'UNSPLASH_ACCESS_KEY=unsplash-SRC-9f3\nPIXABAY_API=pixab
   [[ "$output" != *"link-key-keep"* ]]
   minted="$(val "$OUT" AUTH_LINK_SIGNING_KEY)"
   [[ "$minted" =~ ^[A-Za-z0-9]{48}$ ]]
+  [[ "$output" != *"$minted"* ]]
+  [ "$(val "$OUT" OSIONOS_IDE_TOKEN_SECRET)" = "ide-secret-keep" ]
 }
 
 @test "--sync: an existing AUTH_LINK_SIGNING_KEY is never re-minted" {
@@ -282,6 +283,14 @@ media_source() { printf 'UNSPLASH_ACCESS_KEY=unsplash-SRC-9f3\nPIXABAY_API=pixab
   run bash "$SCRIPT" --check
   [ "$status" -eq 1 ]
   [[ "$output" == *"missing AUTH_LINK_SIGNING_KEY"* ]]
+}
+
+@test "generate: a fresh .env.local carries a 48-char AUTH_LINK_SIGNING_KEY" {
+  rm -f "$OUT"
+  printf 'JWT_SECRET=jwt-A\nANON_KEY=anon-A\nSERVICE_ROLE_KEY=svc-A\n' > "$GRO_ENV"
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$(val "$OUT" AUTH_LINK_SIGNING_KEY)" =~ ^[A-Za-z0-9]{48}$ ]]
 }
 
 @test "media --sync: keys absent from .env.local are copied" {
@@ -418,4 +427,5 @@ media_source() { printf 'UNSPLASH_ACCESS_KEY=unsplash-SRC-9f3\nPIXABAY_API=pixab
   [ "$(val "$OUT" SERVICE_ROLE_KEY)" = "$before_svc" ]
   [[ "$output" == *"VITE_BAAS_URL"* ]]
   [[ "$output" == *"PUBLIC_OSIONOS_APP_URL"* ]]
+>>>>>>> develop
 }
