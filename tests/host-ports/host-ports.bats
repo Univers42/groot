@@ -329,3 +329,17 @@ DOCKER
   # .gitignore should ignore *.conf in host-ports.d
   grep -q 'infrastructure/tls/host-ports.d/\*.conf' "$REPO/.gitignore"
 }
+
+@test "make preserves an environment-pinned host port over the saved .env.ports value" {
+  printf 'OSIONOS_APP_HOST_PORT=3001\n' >"$ROOT/.env.ports"
+  mkdir -p "$ROOT/scripts"
+  ln -s "$REPO/scripts/host-ports.sh" "$ROOT/scripts/host-ports.sh"
+  cat >"$ROOT/Makefile" <<MAKEFILE
+include $REPO/utils/mk/common.mk
+show-host-port:
+	@printf '%s\\n' "\$(OSIONOS_APP_HOST_PORT)"
+MAKEFILE
+  run bash -c 'cd "$1" && OSIONOS_APP_HOST_PORT=4324 make -s TRACK_BINOCLE_BIND_ADDR=127.0.0.1 -f Makefile show-host-port' _ "$ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "4324" ]
+}

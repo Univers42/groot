@@ -71,7 +71,16 @@ BOOL ?= false
 # environment precedence over --env-file — the exported values reach every compose call
 # without touching one. The resolver never rewrites the file when its content would not
 # change: a touched mtime would restart the whole run for nothing.
+# Capture explicit environment overrides BEFORE including .env.ports. GNU Make normally
+# lets makefile assignments replace environment variables, so the included file would otherwise
+# silently discard e.g. OSIONOS_APP_HOST_PORT=4324 make link. Values written by the resolver
+# are still used when the caller did not supply an environment override. Command-line Make
+# variables already have higher precedence and need no special handling.
+HOST_PORT_NAMES_BEFORE_INCLUDE := $(if $(wildcard .env.ports),$(shell sed -n 's/^\([A-Z][A-Z0-9_]*\)=.*/\1/p' .env.ports))
+HOST_PORT_ENV_NAMES := $(foreach name,$(HOST_PORT_NAMES_BEFORE_INCLUDE),$(if $(filter environment,$(origin $(name))),$(name)))
+$(foreach name,$(HOST_PORT_ENV_NAMES),$(eval HOST_PORT_ENV_VALUE_$(name) := $($(name))))
 -include .env.ports
+$(foreach name,$(HOST_PORT_ENV_NAMES),$(eval $(name) := $(HOST_PORT_ENV_VALUE_$(name))))
 # Every NAME it defines, exported so the recipes (and their compose calls) see them.
 HOST_PORT_NAMES := $(if $(wildcard .env.ports),$(shell sed -n 's/^\([A-Z][A-Z0-9_]*\)=.*/\1/p' .env.ports))
 ifneq ($(strip $(HOST_PORT_NAMES)),)
