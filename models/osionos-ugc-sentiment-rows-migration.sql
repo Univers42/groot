@@ -114,7 +114,13 @@ DECLARE
     v_property_ids TEXT[] := ARRAY[]::TEXT[];
 BEGIN
     BEGIN
+        -- With the jobs off nothing new is projected, but C143 still holds: a
+        -- page gone from the state takes its row, and its score, with it.
         IF coalesce(current_setting('osionos.ai_jobs', true), '') = 'off' THEN
+            DELETE FROM public.osionos_object_database_rows r
+             WHERE r.owner_id = NEW.owner_id
+               AND r.db_key = NEW.db_key
+               AND NOT (coalesce(NEW.state -> 'pages', '{}'::jsonb) ? r.row_id);
             RETURN NEW;
         END IF;
 
