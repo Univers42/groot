@@ -106,6 +106,14 @@
 #   (scripts/apply-models.sh) relies on, and what the later passes hide; the
 #   account profiles file applied after it leaves the same for the four new
 #   tables and the directory view, and its NOTIFY comes after the COMMIT
+#   p5 the account data map and the erase (P5-6-a, models/osionos-account-erasure-migration.sql):
+#   p5_erasure_complete every user-keyed column is in the registry · p5_erase_canary a
+#   user's seeded row in every registry table is gone or tombstoned after the erase ·
+#   p5_erase_transfer/_idempotent/_isolated/_sequence/_objects_recorded/_refuses_live/
+#   _refuses_early/p5_plan_matches_erase/p5_dry_run_no_stamp/p5_audit_scrubbed/
+#   p5_no_fk_to_tombstone the erase's contract · p5_export_acl/_single_flight/
+#   _no_secrets/_reachable the export job table · p5_no_exec_grants the functions are
+#   service_role only · p5_race_claim/p5_race_cancel two-session races (run_races)
 #
 # ISOLATION
 #   Throwaway containers only (--rm --network none, no port, no volume); the live
@@ -642,6 +650,26 @@ run_checks() {
 	check_count "$1" p23_counts_plan p23_counts_plan
 	check_count "$1" p32_mfa_secrets p32_mfa_secrets
 	check_count "$1" p32_mfa_secrets_read p32_mfa_secrets_read
+	check_count "$1" p5_erasure_complete p5_erasure_complete
+	check_count "$1" p5_erase_canary p5_erase_canary
+	check_count "$1" p5_erase_transfer p5_erase_transfer
+	check_count "$1" p5_erase_idempotent p5_erase_idempotent
+	check_count "$1" p5_erase_isolated p5_erase_isolated
+	check_count "$1" p5_plan_matches_erase p5_plan_matches_erase
+	check_count "$1" p5_erase_refuses_live p5_erase_refuses_live
+	check_count "$1" p5_erase_refuses_early p5_erase_refuses_early
+	check_count "$1" p5_dry_run_no_stamp p5_dry_run_no_stamp
+	check_count "$1" p5_no_fk_to_tombstone p5_no_fk_to_tombstone
+	check_count "$1" p5_erase_objects_recorded p5_erase_objects_recorded
+	check_count "$1" p5_audit_scrubbed p5_audit_scrubbed
+	check_count "$1" p5_erase_sequence p5_erase_sequence
+	check_count "$1" p5_export_acl p5_export_acl
+	check_count "$1" p5_export_single_flight p5_export_single_flight
+	check_count "$1" p5_export_no_secrets p5_export_no_secrets
+	check_count "$1" p5_export_reachable p5_export_reachable
+	check_count "$1" p5_no_exec_grants p5_no_exec_grants
+	# Before check_standalone: it drops the account tables, which the races need.
+	run_races "$1"
 	probe "$1" K1 authenticated "SELECT count(*) FROM public.osionos_sessions"
 	probe "$1" K2 osionos_account_user "SELECT refresh_hash FROM public.osionos_sessions"
 	probe "$1" K3 osionos_account_user "UPDATE public.osionos_sessions SET revoked_at = now()"
@@ -652,6 +680,67 @@ run_checks() {
 	check_count "$1" k6 account_isolation_forged
 	check_idempotent "$1"
 	check_standalone "$1"
+}
+
+# run_races <scenario> — the two interleavings a single-session check cannot
+# make. Two sessions, committed rows, a sleep to hold the first one open:
+#  p5_race_claim   a second claimer must skip the row the first holds, and return
+#                  the next one, inside 2 s (lock_timeout turns a wait into an error)
+#  p5_race_cancel  a cancel that arrives while the erase holds the request is
+#                  refused with deletion_in_progress once the erase commits
+# Caveat: ordering is by sleep (session two starts 1.5 s after session one has taken
+# its lock), so a loaded host can invert it; the claim race then reads as a FAIL
+# (under-reporting a pass, never over-reporting one). Rows use fixed ids and are
+# deleted on every exit path of the function.
+run_races() {
+	race_a='c5c5c5c5-0000-4000-8000-0000000000a1'
+	race_b='c5c5c5c5-0000-4000-8000-0000000000b2'
+	race_c='c5c5c5c5-0000-4000-8000-0000000000c3'
+	race_clean="SET session_replication_role = replica; DELETE FROM public.osionos_account_deletion_requests WHERE user_id IN ('${race_a}','${race_b}','${race_c}'); DELETE FROM public.osionos_account_erasure_objects WHERE user_id IN ('${race_a}','${race_b}','${race_c}');"
+	printf '%s\n' "${race_clean}" |
+		psql_rows >"${WORK}/race-clean0-$1.out" 2>&1 || true
+	if ! printf '%s\n' "SET session_replication_role = replica;" \
+		"INSERT INTO public.osionos_account_deletion_requests (user_id, requested_at, scheduled_for)" \
+		"VALUES ('${race_a}', now() - interval '30 days', now() - interval '3 days')," \
+		"       ('${race_b}', now() - interval '30 days', now() - interval '2 days')," \
+		"       ('${race_c}', now() - interval '30 days', now() - interval '1 day');" |
+		psql_rows >"${WORK}/race-seed-$1.out" 2>"${WORK}/race-seed-$1.err"; then
+		fail "$1" "p5_race_claim" "could not seed the due requests: $(head -1 "${WORK}/race-seed-$1.err")"
+		fail "$1" "p5_race_cancel" "could not seed the due requests"
+		return 0
+	fi
+	# Race 1: session one claims 1 (A) and holds; session two asks for 5 and must get B and C.
+	printf '%s\n' 'BEGIN;' "SELECT user_id FROM public.osionos_account_deletion_claim(1);" 'SELECT pg_sleep(4);' 'COMMIT;' |
+		psql_rows >"${WORK}/race1-a-$1.out" 2>"${WORK}/race1-a-$1.err" &
+	race_pid=$!
+	sleep 1.5
+	printf '%s\n' 'BEGIN;' "SET LOCAL lock_timeout = '2s';" "SELECT user_id FROM public.osionos_account_deletion_claim(5) ORDER BY 1;" 'COMMIT;' |
+		psql_rows >"${WORK}/race1-b-$1.out" 2>"${WORK}/race1-b-$1.err" || true
+	wait "${race_pid}" || true
+	got_a="$(grep -E '^[0-9a-f-]{36}$' "${WORK}/race1-a-$1.out" | tr '\n' ' ')"
+	got_b="$(tr '\n' ' ' <"${WORK}/race1-b-$1.out")"
+	if [ "${got_a}" = "${race_a} " ] && [ "${got_b}" = "${race_b} ${race_c} " ]; then
+		pass "$1" "p5_race_claim" "the second claimer skipped the held row and took the next two"
+	else
+		fail "$1" "p5_race_claim" "expected one claimer on ${race_a} and the other on ${race_b} ${race_c}; got [${got_a}] and [${got_b}] $(head -1 "${WORK}/race1-b-$1.err")"
+	fi
+	# Race 2: the erase of C holds the request open; the account role's cancel must lose.
+	printf '%s\n' 'BEGIN;' "SELECT public.osionos_account_erase('${race_c}') IS NOT NULL;" 'SELECT pg_sleep(4);' 'COMMIT;' |
+		psql_rows >"${WORK}/race2-a-$1.out" 2>"${WORK}/race2-a-$1.err" &
+	race_pid=$!
+	sleep 1.5
+	printf '%s\n' '\set VERBOSITY verbose' 'BEGIN;' "SET LOCAL lock_timeout = '10s';" 'SET LOCAL ROLE osionos_account_user;' \
+		"SELECT set_config('request.jwt.claims','{\"sub\":\"${race_c}\",\"aud\":\"osionos-account\",\"role\":\"osionos_account_user\"}', true);" \
+		"DELETE FROM public.osionos_account_deletion_requests WHERE user_id = '${race_c}';" 'COMMIT;' |
+		psql_rows >"${WORK}/race2-b-$1.out" 2>"${WORK}/race2-b-$1.err" || true
+	wait "${race_pid}" || true
+	left="$(printf "SELECT count(*) FROM public.osionos_account_deletion_requests WHERE user_id = '%s' AND erased_at IS NOT NULL;\n" "${race_c}" | psql_rows)"
+	if grep -q 'deletion_in_progress' "${WORK}/race2-b-$1.err" && [ "${left}" = "1" ]; then
+		pass "$1" "p5_race_cancel" "a cancel racing the erase was refused and the stamped request stayed"
+	else
+		fail "$1" "p5_race_cancel" "cancel racing the erase: stamped rows left ${left}; $(head -2 "${WORK}/race2-b-$1.err" | tr '\n' ' ')"
+	fi
+	printf '%s\n' "${race_clean}" | psql_rows >"${WORK}/race-clean-$1.out" 2>&1 || true
 }
 
 run_scenario() {

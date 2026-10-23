@@ -196,7 +196,7 @@ trap 'rm -f "${ERR_FILE}"' EXIT
 # alphabetical pass reaches its dependent. Space-separated: no filename here
 # contains a space or glob character.
 ORDERED_FIRST="auth-gateway-users-reconcile-migration.sql osionos-bridge-migration.sql osionos-chat-migration.sql osionos-social-migration.sql osionos-engagement-migration.sql osionos-page-search-migration.sql osionos-page-links-migration.sql"
-ORDERED_LAST="osionos-account-foundation-migration.sql osionos-session-refresh-migration.sql osionos-account-profiles-migration.sql osionos-account-username-migration.sql osionos-account-profession-migration.sql osionos-account-readme-migration.sql osionos-publish-account-migration.sql osionos-personal-access-tokens-migration.sql osionos-self-data-indexes-migration.sql osionos-social-follow-presence-migration.sql osionos-mfa-migration.sql osionos-service-role-only-migration.sql realtime-cdc-off-migration.sql users-pii-grants-migration.sql"
+ORDERED_LAST="osionos-account-foundation-migration.sql osionos-session-refresh-migration.sql osionos-account-profiles-migration.sql osionos-account-username-migration.sql osionos-account-profession-migration.sql osionos-account-readme-migration.sql osionos-publish-account-migration.sql osionos-personal-access-tokens-migration.sql osionos-self-data-indexes-migration.sql osionos-social-follow-presence-migration.sql osionos-mfa-migration.sql osionos-account-erasure-migration.sql osionos-service-role-only-migration.sql realtime-cdc-off-migration.sql users-pii-grants-migration.sql"
 
 note() { printf '[models] %s\n' "$*" >&2; }
 
