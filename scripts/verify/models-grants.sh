@@ -342,6 +342,7 @@ check_standalone() {
 	profiles="${MODELS_DIR}/osionos-account-profiles-migration.sql"
 	pat="${MODELS_DIR}/osionos-personal-access-tokens-migration.sql"
 	social="${MODELS_DIR}/osionos-social-follow-presence-migration.sql"
+	keys="${MODELS_DIR}/osionos-user-keys-migration.sql"
 	if [ ! -f "${file}" ]; then
 		fail "$1" "standalone" "no ${file}"
 		return 0
@@ -356,6 +357,10 @@ check_standalone() {
 	fi
 	if [ ! -f "${social}" ]; then
 		fail "$1" "standalone" "no ${social}"
+		return 0
+	fi
+	if [ ! -f "${keys}" ]; then
+		fail "$1" "standalone" "no ${keys}"
 		return 0
 	fi
 	if ! printf '%s\n' \
@@ -431,6 +436,11 @@ check_standalone() {
 		sed 's/^/  | /' "${WORK}/standalone-$1.log" >&2
 		return 0
 	fi
+	if ! psql_stdin <"${keys}" >"${WORK}/standalone-$1.log" 2>&1; then
+		fail "$1" "standalone" "the user keys file did not apply after the follow and presence file"
+		sed 's/^/  | /' "${WORK}/standalone-$1.log" >&2
+		return 0
+	fi
 	# The NOTIFY must come AFTER the COMMIT: the view is dropped and recreated,
 	# and PostgREST has to reload the schema only once the new view exists.
 	commit_line="$(grep -n '^COMMIT$' "${WORK}/standalone-$1.tags" | tail -1 | cut -d: -f1)"
@@ -462,7 +472,7 @@ SELECT 'sessions_column_acl', coalesce(string_agg(a.attname, ',' ORDER BY a.attn
 SELECT r.rel || '_realtime_triggers', count(t.tgrelid)::text, ''
   FROM unnest(ARRAY['osionos_profiles','osionos_user_settings','osionos_username_history',
                     'osionos_account_deletion_requests','osionos_people_directory',
-                    'osionos_personal_access_tokens','osionos_follows','osionos_presence']) AS r(rel)
+                    'osionos_personal_access_tokens','osionos_follows','osionos_presence','osionos_user_keys']) AS r(rel)
   LEFT JOIN pg_class c ON c.relname = r.rel AND c.relnamespace = 'public'::regnamespace
   LEFT JOIN pg_trigger t ON t.tgrelid = c.oid AND NOT t.tgisinternal
                          AND t.tgfoid = to_regproc('public.realtime_notify')
@@ -477,7 +487,7 @@ SELECT r.rel || '_anon_auth_privs',
        ''
   FROM unnest(ARRAY['osionos_profiles','osionos_user_settings','osionos_username_history',
                     'osionos_account_deletion_requests','osionos_people_directory',
-                    'osionos_personal_access_tokens','osionos_follows','osionos_presence']) AS r(rel)
+                    'osionos_personal_access_tokens','osionos_follows','osionos_presence','osionos_user_keys']) AS r(rel)
  ORDER BY r.rel;
 SQL
 	then
@@ -492,7 +502,7 @@ SQL
 		'id,created_at,expires_at,last_seen_at,auth_method,ip_prefix,user_agent,revoked_at,revoked_reason'
 	for rel in osionos_profiles osionos_user_settings osionos_username_history \
 	           osionos_account_deletion_requests osionos_people_directory \
-	           osionos_personal_access_tokens osionos_follows osionos_presence; do
+	           osionos_personal_access_tokens osionos_follows osionos_presence osionos_user_keys; do
 		assert_standalone "$1" "${rel}_realtime_triggers" 0
 		assert_standalone "$1" "${rel}_anon_auth_privs" 0
 	done
@@ -611,6 +621,8 @@ run_checks() {
 	check_count "$1" p5_published_read p5_published_read
 	check_count "$1" p5_pat_column_acl p5_pat_column_acl
 	check_count "$1" p5_pat_row_rules p5_pat_row_rules
+	check_count "$1" p5_keys_column_acl p5_keys_column_acl
+	check_count "$1" p5_keys_row_rules p5_keys_row_rules
 	check_count "$1" h2 account_secdef_exec
 	check_count "$1" p2s_change p2s_change
 	check_count "$1" p2s_history_once p2s_history_once
