@@ -27,10 +27,14 @@ FROM debian:bookworm-slim
 # Base tools + compile toolchains for a real multi-language dev shell:
 #   gcc/g++/clang/make → C/C++    rustc/cargo → Rust    default-jdk → Java
 #   clangd → the C/C++ language server (P5).  Go + its LSP land below (tarball).
+# openssh-client is there for `ssh-keygen -Y verify` against ~/.ssh/allowed_signers (P5-3-c). Its
+# setuid ssh-keysign and setgid ssh-agent are stripped: the box uses neither, and the setuid count
+# asserted at the end stays the one measured without them.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       bash ca-certificates curl git python3 python3-pip python3-venv \
-      procps iproute2 ripgrep nodejs npm \
+      procps iproute2 ripgrep nodejs npm openssh-client \
       gcc g++ clang clangd make rustc cargo default-jdk-headless \
+    && chmod a-s /usr/lib/openssh/ssh-keysign /usr/bin/ssh-agent \
     && rm -rf /var/lib/apt/lists/*
 
 # Language servers (P5) — matches bridge-ide-exec.mjs LSP_SERVERS:
