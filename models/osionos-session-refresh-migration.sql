@@ -39,6 +39,9 @@
 
 BEGIN;
 
+-- Bound lock waits so a busy sessions table fails promptly and the next migration run retries.
+SET LOCAL lock_timeout = '5s';
+
 CREATE INDEX IF NOT EXISTS osionos_sessions_family_live_idx ON public.osionos_sessions (family_id) WHERE revoked_at IS NULL;
 CREATE INDEX IF NOT EXISTS osionos_sessions_refresh_hash_idx ON public.osionos_sessions (refresh_hash) WHERE refresh_hash IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS osionos_sessions_parent_uniq ON public.osionos_sessions (parent_id) WHERE parent_id IS NOT NULL;
