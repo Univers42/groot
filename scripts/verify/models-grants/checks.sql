@@ -762,3 +762,89 @@ SELECT 'workspace_invites_behaviour',
      || ' after_revoke=' || coalesce(current_setting('osionos.check.wi_again', true), 'unset')
      || ' owner_role=' || coalesce(current_setting('osionos.check.wi_owner', true), 'unset');
 ROLLBACK;
+
+-- teams_shape: the team tables (models/osionos-teams-migration.sql). Asserts both tables FORCE
+-- row level security and the workspace read index exists, then behaviour in Postgres itself:
+-- a team member who is NOT a workspace member is refused with 23503, a workspace member is
+-- accepted, a duplicate team name in one workspace is refused with 23505, an out-of-range role
+-- with 23514, and removing the workspace member removes their team membership (cascade).
+-- Caveat: fixtures roll back; the index is matched by name and columns, not by access method.
+SELECT 'teams_tables',
+       (CASE WHEN to_regclass('public.osionos_teams') IS NULL THEN 1
+             WHEN NOT (SELECT relrowsecurity AND relforcerowsecurity FROM pg_class
+                        WHERE oid = 'public.osionos_teams'::regclass) THEN 1 ELSE 0 END)
+     + (CASE WHEN to_regclass('public.osionos_team_members') IS NULL THEN 1
+             WHEN NOT (SELECT relrowsecurity AND relforcerowsecurity FROM pg_class
+                        WHERE oid = 'public.osionos_team_members'::regclass) THEN 1 ELSE 0 END),
+       'osionos_teams or osionos_team_members is missing or does not FORCE row level security';
+SELECT 'teams_workspace_index',
+       CASE WHEN NOT EXISTS (
+              SELECT 1 FROM pg_indexes
+               WHERE schemaname = 'public' AND tablename = 'osionos_team_members'
+                 AND indexname = 'osionos_team_members_workspace_idx'
+                 AND indexdef LIKE '%(workspace_id, team_id)%') THEN 1 ELSE 0 END,
+       'osionos_team_members(workspace_id, team_id) has no index';
+BEGIN;
+INSERT INTO public.osionos_workspaces (id, owner_id, name, slug)
+  VALUES ('e3e3e3e3-0000-4000-8000-000000000001', 'e3e3e3e3-0000-4000-8000-0000000000a1', 'tm1', 'tm-1');
+INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role)
+  VALUES ('e3e3e3e3-0000-4000-8000-000000000001', 'e3e3e3e3-0000-4000-8000-0000000000a1', 'owner'),
+         ('e3e3e3e3-0000-4000-8000-000000000001', 'e3e3e3e3-0000-4000-8000-0000000000a2', 'editor')
+  ON CONFLICT DO NOTHING;
+INSERT INTO public.osionos_teams (id, workspace_id, name, created_by)
+  VALUES ('e3e3e3e3-0000-4000-8000-0000000000b1', 'e3e3e3e3-0000-4000-8000-000000000001', 'design',
+          'e3e3e3e3-0000-4000-8000-0000000000a1');
+DO $$
+DECLARE
+  v_stranger text := 'none';
+  v_member   text := 'none';
+  v_dup_name text := 'none';
+  v_bad_role text := 'none';
+  v_left     bigint;
+BEGIN
+  BEGIN
+    INSERT INTO public.osionos_team_members (workspace_id, team_id, user_id, added_by)
+    VALUES ('e3e3e3e3-0000-4000-8000-000000000001', 'e3e3e3e3-0000-4000-8000-0000000000b1',
+            'e3e3e3e3-0000-4000-8000-0000000000c9', 'e3e3e3e3-0000-4000-8000-0000000000a1');
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_stranger = RETURNED_SQLSTATE;
+  END;
+  BEGIN
+    INSERT INTO public.osionos_team_members (workspace_id, team_id, user_id, added_by)
+    VALUES ('e3e3e3e3-0000-4000-8000-000000000001', 'e3e3e3e3-0000-4000-8000-0000000000b1',
+            'e3e3e3e3-0000-4000-8000-0000000000a2', 'e3e3e3e3-0000-4000-8000-0000000000a1');
+    v_member := 'ok';
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_member = RETURNED_SQLSTATE;
+  END;
+  BEGIN
+    INSERT INTO public.osionos_teams (workspace_id, name, created_by)
+    VALUES ('e3e3e3e3-0000-4000-8000-000000000001', 'design', 'e3e3e3e3-0000-4000-8000-0000000000a1');
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_dup_name = RETURNED_SQLSTATE;
+  END;
+  BEGIN
+    UPDATE public.osionos_team_members SET role = 'owner'
+     WHERE team_id = 'e3e3e3e3-0000-4000-8000-0000000000b1';
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_bad_role = RETURNED_SQLSTATE;
+  END;
+  DELETE FROM public.osionos_workspace_members
+   WHERE workspace_id = 'e3e3e3e3-0000-4000-8000-000000000001'
+     AND user_id = 'e3e3e3e3-0000-4000-8000-0000000000a2';
+  SELECT count(*) INTO v_left FROM public.osionos_team_members
+   WHERE team_id = 'e3e3e3e3-0000-4000-8000-0000000000b1';
+  PERFORM set_config('osionos.check.tm_stranger', v_stranger, true);
+  PERFORM set_config('osionos.check.tm_member', v_member, true);
+  PERFORM set_config('osionos.check.tm_dup_name', v_dup_name, true);
+  PERFORM set_config('osionos.check.tm_bad_role', v_bad_role, true);
+  PERFORM set_config('osionos.check.tm_left', v_left::text, true);
+END $$;
+SELECT 'teams_behaviour',
+       (CASE WHEN current_setting('osionos.check.tm_stranger', true) = '23503' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.tm_member', true) = 'ok' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.tm_dup_name', true) = '23505' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.tm_bad_role', true) = '23514' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.tm_left', true) = '0' THEN 0 ELSE 1 END),
+       'non_member=' || coalesce(current_setting('osionos.check.tm_stranger', true), 'unset')
+     || ' member=' || coalesce(current_setting('osionos.check.tm_member', true), 'unset')
+     || ' dup_name=' || coalesce(current_setting('osionos.check.tm_dup_name', true), 'unset')
+     || ' bad_role=' || coalesce(current_setting('osionos.check.tm_bad_role', true), 'unset')
+     || ' rows_after_leave=' || coalesce(current_setting('osionos.check.tm_left', true), 'unset');
+ROLLBACK;

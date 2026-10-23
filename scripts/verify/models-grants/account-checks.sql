@@ -2147,6 +2147,24 @@ BEGIN
 END
 $$;
 
+-- A team member is a composite foreign key twice over: (workspace_id, team_id) to its team and
+-- (workspace_id, user_id) to a workspace member. Make the team and the membership first; the erase
+-- UPDATEs (added_by) would re-check a dangling key for a row created in the same transaction.
+CREATE OR REPLACE FUNCTION pg_temp.p5_insert_team_member(p_col text, p_val text) RETURNS void
+LANGUAGE plpgsql AS $$
+DECLARE
+  w text := quote_literal(gen_random_uuid()::text) || '::uuid';
+  t text := quote_literal(gen_random_uuid()::text) || '::uuid';
+  u uuid;
+BEGIN
+  PERFORM pg_temp.p5_insert('osionos_teams', 'id', t, 1, 'workspace_id', w);
+  PERFORM pg_temp.p5_insert('osionos_team_members', 'workspace_id', w, 1, 'team_id', t);
+  EXECUTE format('UPDATE public.osionos_team_members SET %I = %s WHERE team_id = %s', p_col, p_val, t);
+  EXECUTE format('SELECT user_id FROM public.osionos_team_members WHERE team_id = %s', t) INTO u;
+  PERFORM pg_temp.p5_insert('osionos_workspace_members', 'workspace_id', w, 1, 'user_id', quote_literal(u::text) || '::uuid');
+END
+$$;
+
 -- Seeds one row per registry column of every registry table, holding p_user in that column only.
 CREATE OR REPLACE FUNCTION pg_temp.p5_seed_user(p_user uuid) RETURNS void
 LANGUAGE plpgsql AS $$
@@ -2167,6 +2185,7 @@ BEGIN
                     WHEN v_typ = 'uuid[]' THEN format('ARRAY[%L::uuid]', p_user::text)
                     ELSE quote_literal(p_user::text) END;
       IF rc.table_name = 'osionos_object_database_rows' THEN PERFORM pg_temp.p5_insert_db_row(rc.column_name, v_val);
+      ELSIF rc.table_name = 'osionos_team_members' THEN PERFORM pg_temp.p5_insert_team_member(rc.column_name, v_val);
       ELSE PERFORM pg_temp.p5_insert(rc.table_name, rc.column_name, v_val); END IF;
       INSERT INTO p5_seeded VALUES (p_user, rc.table_name, true, NULL);
     EXCEPTION WHEN others THEN
