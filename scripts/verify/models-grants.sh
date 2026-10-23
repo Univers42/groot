@@ -634,6 +634,8 @@ run_checks() {
 	check_count "$1" p23_block_trigger p23_block_trigger
 	check_count "$1" p23_counts_rpc p23_counts_rpc
 	check_count "$1" p23_counts_plan p23_counts_plan
+	check_count "$1" p32_mfa_secrets p32_mfa_secrets
+	check_count "$1" p32_mfa_secrets_read p32_mfa_secrets_read
 	probe "$1" K1 authenticated "SELECT count(*) FROM public.osionos_sessions"
 	probe "$1" K2 osionos_account_user "SELECT refresh_hash FROM public.osionos_sessions"
 	probe "$1" K3 osionos_account_user "UPDATE public.osionos_sessions SET revoked_at = now()"
