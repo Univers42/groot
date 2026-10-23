@@ -11,6 +11,7 @@
 import http from "node:http";
 
 export const START_PATH_RE = /^\/(?:v[\d.]+\/)?containers\/(ide(?:init)?-[0-9a-f]{32})\/start$/;
+const MANAGED_CONTAINER_NAME_RE = /^(?:ide|ideinit)-[0-9a-f]{32}$/;
 const INSPECT_TIMEOUT_MS = 3000;
 
 // gVisor's sentry threads count against the container's pids cgroup: `true` needs a limit of 32 and
@@ -29,8 +30,12 @@ export function pinRuntime(body, runtime) {
 
 /** HostConfig.Runtime of the named container as the daemon reports it, or null when unknown. */
 export function inspectRuntime(socketPath, name) {
+  // Validate before interpolating into a URL path; encoding is defense in depth,
+  // while the allowlist excludes separators and dot segments entirely.
+  if (typeof name !== "string" || !MANAGED_CONTAINER_NAME_RE.test(name)) return Promise.resolve(null);
+  const safeName = encodeURIComponent(name);
   return new Promise((resolve) => {
-    const req = http.get({ socketPath, path: `/containers/${name}/json`, timeout: INSPECT_TIMEOUT_MS, headers: { host: "docker" } }, (res) => {
+    const req = http.get({ socketPath, path: `/containers/${safeName}/json`, timeout: INSPECT_TIMEOUT_MS, headers: { host: "docker" } }, (res) => {
       const chunks = [];
       res.on("data", (chunk) => chunks.push(chunk));
       res.on("close", () => resolve(null));
