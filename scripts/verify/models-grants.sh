@@ -590,6 +590,7 @@ run_checks() {
 	check_count "$1" rt realtime_event_trigger
 	check_count "$1" u users_pii
 	check_count "$1" m1 moderation_columns
+	check_count "$1" audit_viewer_index audit_viewer_index
 	# P0-5a: the colleague-edges trigger and the feed counts function.
 	check_count "$1" colleague_edges_trigger colleague_edges_trigger
 	check_count "$1" feed_counts_exec_grants feed_counts_exec_grants
