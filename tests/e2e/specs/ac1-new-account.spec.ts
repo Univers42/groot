@@ -1,7 +1,7 @@
-import type { Page } from "@playwright/test";
-import { OSIONOS_URL, PRISMATICA_URL } from "../lib/env";
+import { OSIONOS_URL } from "../lib/env";
 import { expect, test } from "../lib/fixtures";
 import { bridge, bridgeStatus, osionosSession } from "../lib/osionos-api";
+import { openPortal } from "../lib/portal";
 import { loginOrRegister, openOsionos } from "../lib/session";
 
 // AC1 — a brand-new account, the way a visitor makes one: the landing's portal creates it,
@@ -11,15 +11,6 @@ import { loginOrRegister, openOsionos } from "../lib/session";
 // e2e-signup-<ms>@example.com) and nothing else: the page is deleted.
 
 const PASSWORD = "E2e-Signup-Pass-2026!";
-
-/** Landing → portal in the given mode ("Create account" or "Sign in"). */
-async function openPortal(page: Page, mode: "Create account" | "Sign in") {
-  await page.goto(PRISMATICA_URL);
-  await page.getByRole("banner").getByRole("button", { name: "Sign in", exact: true }).click();
-  const portal = page.getByRole("dialog", { name: "Prismatica workspace portal" });
-  await portal.getByRole("group", { name: "Authentication mode" }).getByRole("button", { name: mode, exact: true }).click();
-  return portal;
-}
 
 test("AC1 a new account signs up on the landing, lands in its own osionos workspace, and its data persists", async ({ browser, consoleGuard }) => {
   test.setTimeout(180_000);

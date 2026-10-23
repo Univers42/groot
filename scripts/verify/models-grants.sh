@@ -3,7 +3,7 @@
 #                                                                              #
 #    models-grants.sh                                                          #
 #                                                                              #
-#    Prove every public.osionos_* relation and auth_session_cutoffs is        #
+#    Prove public.osionos_*, auth_session_cutoffs and auth_audit_events are    #
 #    reachable by service_role and by nothing else, on two throwaway DBs.      #
 #                                                                              #
 # **************************************************************************** #
@@ -17,12 +17,14 @@
 #
 # WHAT IT RUNS  (both scenarios drive the REAL runner, never a re-typed file list)
 #   fresh   roles -> grobase 001_initial_schema + 012 realtime hook -> shim -> runner -> checks
-#   legacy  roles -> the pre-1e407614 default privileges -> 001 -> shim -> runner
+#   legacy  roles -> the pre-1e407614 default privileges -> 001 -> shim -> an old integer-keyed audit table with rows and a blanket grant -> runner
 #           -> an old-bootstrap boot (blanket GRANT, DEFAULT revoked) -> runner -> checks
 #   Checks: c no anon/authenticated privilege on an osionos_% or ai_% relation (partitions
-#   included) or on auth_session_cutoffs · d no policy for PUBLIC/anon/authenticated · e1/e2 service_role
+#   included) or on auth_session_cutoffs, auth_audit_events or auth_audit_events_legacy_int · d no policy for PUBLIC/anon/authenticated · e1/e2 service_role
 #   has full CRUD and round-trips a row · e3 it upserts a session cut-off as the
-#   auth-gateway does · e4 a late, older upsert leaves the newer cut-off in place · f six probes, and S1-S3 on auth_session_cutoffs, refused with 42501 · h no SECURITY DEFINER osionos_% function
+#   auth-gateway does · e4 service_role calls auth_record_audit_event with a new-list event ·
+#   e5 a late, older upsert leaves the newer cut-off in place · f six probes (eight in legacy), S1-S3 on auth_session_cutoffs and A1-A3 on auth_audit_events and its RPC (A4-A5, legacy only: the renamed auth_audit_events_legacy_int), refused with 42501 ·
+#   h no SECURITY DEFINER osionos_% function or auth_record_audit_event
 #   they may execute · h-ai no ai_% writer function they may execute · P1 a direct read of an
 #   ai_chunks partition refused with 42501 · g a second runner pass changes no ACL, policy or RLS flag ·
 #   n the final notifications type CHECK admits every type the models files declare ·
@@ -547,7 +549,8 @@ run_checks() {
 	check_count "$1" e1 service_role_gaps
 	check_svc "$1" e2 svc_rows
 	check_svc "$1" e3 svc_cutoff
-	check_svc "$1" e4 svc_cutoff_monotonic
+	check_svc "$1" e4 svc_audit
+	check_svc "$1" e5 svc_cutoff_monotonic
 	probe "$1" T1 authenticated "SELECT count(*) FROM public.osionos_pages"
 	probe "$1" T2 authenticated "DELETE FROM public.osionos_pages"
 	probe "$1" T3 authenticated "UPDATE public.osionos_pages SET owner_id='cccccccc-cccc-cccc-cccc-cccccccccccc', visibility='public'"
@@ -557,6 +560,14 @@ run_checks() {
 	probe "$1" S1 authenticated "SELECT user_id, sessions_valid_after FROM public.auth_session_cutoffs"
 	probe "$1" S2 anon "INSERT INTO public.auth_session_cutoffs (user_id) VALUES ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb')"
 	probe "$1" S3 authenticated "UPDATE public.auth_session_cutoffs SET sessions_valid_after = 'epoch'"
+	probe "$1" A1 authenticated "SELECT event_type FROM public.auth_audit_events"
+	probe "$1" A2 anon "SELECT public.auth_record_audit_event('logout')"
+	probe "$1" A3 authenticated "INSERT INTO public.auth_audit_events (event_type) VALUES ('logout')"
+	# Only the legacy scenario plants the old-shape table the migration renames.
+	if [ "$1" = "legacy" ]; then
+		probe "$1" A4 authenticated "SELECT event_type FROM public.auth_audit_events_legacy_int"
+		probe "$1" A5 anon "SELECT event_type FROM public.auth_audit_events_legacy_int"
+	fi
 	check_count "$1" h secdef_exec
 	check_count "$1" h-ai ai_write_fn_exec
 	probe "$1" P1 anon "SELECT count(*) FROM public.ai_chunks_p00"
@@ -637,6 +648,9 @@ run_scenario() {
 		die "scenario" "setup/$1" "could not read ${GROBASE_REALTIME}"
 	apply "${WORK}/012.sql" || die "scenario" "setup/$1" "012_realtime_triggers_all_tables.sql"
 	apply "${FIX}/shim.sql" || die "scenario" "setup/$1" "shim.sql"
+	if [ "$1" = "legacy" ]; then
+		apply "${FIX}/legacy-audit.sql" || die "scenario" "setup/$1" "legacy-audit.sql"
+	fi
 	run_runner "$1" first
 	if [ "$1" = "legacy" ]; then
 		apply "${FIX}/legacy-reboot.sql" || die "scenario" "setup/$1" "legacy-reboot.sql"

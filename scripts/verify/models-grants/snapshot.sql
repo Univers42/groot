@@ -1,4 +1,4 @@
--- One line per osionos_% relation and public.auth_session_cutoffs, one per osionos_% public function, then the realtime
+-- One line per osionos_% relation and public.auth_session_cutoffs and public.auth_audit_events, one per osionos_% public function and auth_record_audit_event, then the realtime
 -- broadcast state. Diffed against itself around a second runner pass (check g): any GRANT,
 -- policy, RLS flag, function ACL or realtime trigger that a replay moves must show up here
 -- as a changed line.
@@ -10,12 +10,12 @@ SELECT c.relname, c.relkind, c.relacl::text, c.relrowsecurity, c.relforcerowsecu
        coalesce((SELECT string_agg(p.polname || ':' || p.polcmd::text || ':' || p.polroles::text, ' ' ORDER BY p.polname)
                    FROM pg_policy p WHERE p.polrelid = c.oid), '')
   FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
- WHERE ns.nspname = 'public' AND (c.relname LIKE 'osionos\_%' OR c.relname LIKE 'ai\_%' OR c.relname = 'auth_session_cutoffs') AND c.relkind IN ('r','p','v','m','f')
+ WHERE ns.nspname = 'public' AND (c.relname LIKE 'osionos\_%' OR c.relname LIKE 'ai\_%' OR c.relname IN ('auth_session_cutoffs','auth_audit_events','auth_audit_events_legacy_int')) AND c.relkind IN ('r','p','v','m','f')
  ORDER BY c.relname;
 
 SELECT p.proname || '(' || pg_get_function_arguments(p.oid) || ')', p.proacl::text
   FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
- WHERE n.nspname = 'public' AND (p.proname LIKE 'osionos\_%' OR p.proname LIKE 'ai\_%')
+ WHERE n.nspname = 'public' AND (p.proname LIKE 'osionos\_%' OR p.proname LIKE 'ai\_%' OR p.proname = 'auth_record_audit_event')
  ORDER BY 1;
 
 -- The realtime broadcast state: a replay that re-arms a table or re-enables the hook shows here.

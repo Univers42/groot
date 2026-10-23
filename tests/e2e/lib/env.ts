@@ -21,3 +21,11 @@ export const TOKEN_FILE = "test-results/.e2e-access-token";
 export const E2E_DEMO_EMAIL = process.env.E2E_DEMO_EMAIL ?? "";
 export const E2E_DEMO_PASSWORD = process.env.E2E_DEMO_PASSWORD ?? "";
 export const DEMO_SKIP_REASON = "E2E_DEMO_PASSWORD unset: run.sh reads DEMO_LOGIN_PASSWORD from ./.env.local (make link-frontends-up or make all mint it)";
+// Mailpit's API as grobase publishes it (auth-api.yml: 127.0.0.1:${MAILPIT_UI_PORT:-8026}).
+export const MAILPIT_URL = process.env.E2E_MAILPIT_URL ?? "http://127.0.0.1:8026";
+// Kong through the edge (:8444), for the GoTrue calls the gateway does not proxy (TOTP enrolment).
+export const KONG_URL = process.env.E2E_KONG_URL ?? "https://localhost:8444";
+// The public anon key Kong asks of every call; run.sh reads it from ./.env.local. Empty = the TOTP variant skips.
+export const KONG_ANON_KEY = process.env.E2E_KONG_ANON_KEY ?? "";
+// Set (to the seconds) only on a stack started with that AUTH_RESET_TOKEN_TTL_SEC; empty = the expired-link case skips.
+export const SHORT_RESET_TTL_SEC = Number(process.env.E2E_SHORT_RESET_TTL_SEC ?? 0);

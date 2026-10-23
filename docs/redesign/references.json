@@ -1,0 +1,440 @@
+[
+  {
+    "url": "https://linear.app",
+    "measuredAt": "2026-10-15",
+    "widths": {
+      "390": {
+        "h1": "The product development system for teams and agentsThe product developmentsystem for teams and agentsThe product development system for teams and agents",
+        "h1Count": 1,
+        "media": [],
+        "ctas": [
+          "Skip to content →",
+          "Sign up",
+          "",
+          "Faster app launch",
+          "",
+          "",
+          ""
+        ],
+        "fonts": [
+          "Inter Variable",
+          "Berkeley Mono"
+        ],
+        "animations": 78,
+        "scrolledAnimations": 78,
+        "kb": {
+          "stylesheet": 208,
+          "font": 158,
+          "document": 176,
+          "script": 1609,
+          "image": 590,
+          "other": 10,
+          "fetch": 857
+        },
+        "height": 5876,
+        "reducedAnimations": 76,
+        "reducedScrolledAnimations": 76
+      },
+      "1440": {
+        "h1": "The product development system for teams and agentsThe product developmentsystem for teams and agentsThe product development system for teams and agents",
+        "h1Count": 1,
+        "media": [
+          {
+            "tag": "img",
+            "share": 45,
+            "alt": ""
+          }
+        ],
+        "ctas": [
+          "Skip to content →",
+          "Sign up",
+          "",
+          "Faster app launch",
+          "",
+          "",
+          ""
+        ],
+        "fonts": [
+          "Inter Variable",
+          "Berkeley Mono"
+        ],
+        "animations": 82,
+        "scrolledAnimations": 522,
+        "kb": {
+          "document": 174,
+          "stylesheet": 261,
+          "script": 1537,
+          "image": 1317,
+          "font": 541,
+          "other": 11,
+          "fetch": 961
+        },
+        "height": 9960,
+        "reducedAnimations": 76,
+        "reducedScrolledAnimations": 101
+      }
+    }
+  },
+  {
+    "url": "https://stripe.com",
+    "measuredAt": "2026-10-15",
+    "widths": {
+      "390": {
+        "h1": "Financial infrastructure to grow your revenue. Accept payments, offer financial services and implement custom revenue models – from your first transaction to your billionth.",
+        "h1Count": 2,
+        "media": [
+          {
+            "tag": "picture",
+            "share": 90,
+            "alt": ""
+          },
+          {
+            "tag": "img",
+            "share": 90,
+            "alt": ""
+          }
+        ],
+        "ctas": [
+          "",
+          "Get started",
+          "Sign up with Google",
+          "Accept all",
+          "Reject all"
+        ],
+        "fonts": [
+          "sohne-var"
+        ],
+        "animations": 3,
+        "scrolledAnimations": 98,
+        "kb": {
+          "stylesheet": 73,
+          "image": 709,
+          "font": 70,
+          "document": 200,
+          "script": 1338,
+          "other": 15,
+          "fetch": 12
+        },
+        "height": 20336,
+        "reducedAnimations": 3,
+        "reducedScrolledAnimations": 1
+      },
+      "1440": {
+        "h1": "Financial infrastructure to grow your revenue. Accept payments, offer financial services and implement custom revenue models – from your first transaction to your billionth.",
+        "h1Count": 2,
+        "media": [
+          {
+            "tag": "picture",
+            "share": 74,
+            "alt": ""
+          },
+          {
+            "tag": "img",
+            "share": 74,
+            "alt": ""
+          }
+        ],
+        "ctas": [
+          "Contact sales",
+          "Get started",
+          "Sign up with Google",
+          "Accept all",
+          "Reject all"
+        ],
+        "fonts": [
+          "sohne-var"
+        ],
+        "animations": 1,
+        "scrolledAnimations": 90,
+        "kb": {
+          "image": 1776,
+          "stylesheet": 73,
+          "font": 70,
+          "document": 200,
+          "script": 1342,
+          "fetch": 12,
+          "other": 15
+        },
+        "height": 14613,
+        "reducedAnimations": 3,
+        "reducedScrolledAnimations": 1
+      }
+    }
+  },
+  {
+    "url": "https://www.raycast.com",
+    "measuredAt": "2026-10-15",
+    "widths": {
+      "390": {
+        "h1": "Your shortcut to everything.",
+        "h1Count": 1,
+        "media": [],
+        "ctas": [
+          "The Raycast Keyboard"
+        ],
+        "fonts": [
+          "Inter",
+          "GeistMono",
+          "jetBrainsMono"
+        ],
+        "animations": 25,
+        "scrolledAnimations": 48,
+        "kb": {
+          "image": 7528,
+          "stylesheet": 141,
+          "font": 335,
+          "script": 1327,
+          "document": 50,
+          "other": 19,
+          "fetch": 185
+        },
+        "height": 15922,
+        "reducedAnimations": 25,
+        "reducedScrolledAnimations": 48
+      },
+      "1440": {
+        "h1": "Your shortcut to everything.",
+        "h1Count": 1,
+        "media": [],
+        "ctas": [
+          "Download",
+          "Download for Mac"
+        ],
+        "fonts": [
+          "Inter",
+          "GeistMono",
+          "jetBrainsMono"
+        ],
+        "animations": 44,
+        "scrolledAnimations": 55,
+        "kb": {
+          "image": 1802,
+          "script": 1321,
+          "stylesheet": 127,
+          "font": 336,
+          "document": 50,
+          "fetch": 136,
+          "other": 19
+        },
+        "height": 15983,
+        "reducedAnimations": 29,
+        "reducedScrolledAnimations": 55
+      }
+    }
+  },
+  {
+    "url": "https://culturedcode.com/things/",
+    "measuredAt": "2026-10-15",
+    "widths": {
+      "390": {
+        "h1": "Things",
+        "h1Count": 1,
+        "media": [
+          {
+            "tag": "img",
+            "share": 21,
+            "alt": "Things"
+          },
+          {
+            "tag": "video",
+            "share": 17,
+            "alt": ""
+          },
+          {
+            "tag": "img",
+            "share": 17,
+            "alt": "Meet Things"
+          }
+        ],
+        "ctas": [],
+        "fonts": [],
+        "animations": 0,
+        "scrolledAnimations": 0,
+        "kb": {
+          "document": 7,
+          "stylesheet": 16,
+          "image": 505,
+          "script": 63,
+          "other": 11,
+          "xhr": 9,
+          "ping": 0
+        },
+        "height": 11562,
+        "reducedAnimations": 0,
+        "reducedScrolledAnimations": 0
+      },
+      "1440": {
+        "h1": "Things",
+        "h1Count": 1,
+        "media": [
+          {
+            "tag": "video",
+            "share": 20,
+            "alt": ""
+          },
+          {
+            "tag": "img",
+            "share": 13,
+            "alt": "Meet Things"
+          },
+          {
+            "tag": "img",
+            "share": 6,
+            "alt": "Things"
+          }
+        ],
+        "ctas": [],
+        "fonts": [],
+        "animations": 0,
+        "scrolledAnimations": 0,
+        "kb": {
+          "document": 7,
+          "stylesheet": 16,
+          "image": 505,
+          "other": 11,
+          "script": 63,
+          "xhr": 9,
+          "ping": 0
+        },
+        "height": 8198,
+        "reducedAnimations": 0,
+        "reducedScrolledAnimations": 0
+      }
+    }
+  },
+  {
+    "url": "https://obsidian.md",
+    "measuredAt": "2026-10-15",
+    "widths": {
+      "390": {
+        "h1": "Sharpen your thinking.",
+        "h1Count": 1,
+        "media": [],
+        "ctas": [
+          "Get Obsidian for Linux (AppImage) (funct"
+        ],
+        "fonts": [
+          "Inter"
+        ],
+        "animations": 0,
+        "scrolledAnimations": 0,
+        "kb": {
+          "document": 21,
+          "image": 298,
+          "stylesheet": 34,
+          "script": 169,
+          "other": 1,
+          "font": 97
+        },
+        "height": 9339,
+        "reducedAnimations": 0,
+        "reducedScrolledAnimations": 0
+      },
+      "1440": {
+        "h1": "Sharpen your thinking.",
+        "h1Count": 1,
+        "media": [
+          {
+            "tag": "svg",
+            "share": 6,
+            "alt": ""
+          }
+        ],
+        "ctas": [
+          "Get Obsidian for Linux (AppImage) (funct"
+        ],
+        "fonts": [
+          "Inter"
+        ],
+        "animations": 0,
+        "scrolledAnimations": 0,
+        "kb": {
+          "document": 21,
+          "stylesheet": 34,
+          "image": 298,
+          "script": 169,
+          "other": 1,
+          "font": 97
+        },
+        "height": 6740,
+        "reducedAnimations": 0,
+        "reducedScrolledAnimations": 0
+      }
+    }
+  },
+  {
+    "url": "https://attio.com",
+    "measuredAt": "2026-10-15",
+    "widths": {
+      "390": {
+        "h1": "Welcome to agentic revenue.",
+        "h1Count": 2,
+        "media": [],
+        "ctas": [
+          "Send me a demo",
+          "Continue",
+          "Reject"
+        ],
+        "fonts": [
+          "JetBrains Mono",
+          "inter",
+          "interDisplay",
+          "tiemposText"
+        ],
+        "animations": 19,
+        "scrolledAnimations": 24,
+        "kb": {
+          "document": 140,
+          "stylesheet": 80,
+          "font": 318,
+          "image": 180,
+          "script": 3505,
+          "other": 1,
+          "fetch": 1330,
+          "preflight": 0,
+          "ping": 2,
+          "xhr": 4
+        },
+        "height": 16189,
+        "reducedAnimations": 5,
+        "reducedScrolledAnimations": 3
+      },
+      "1440": {
+        "h1": "Welcome to agentic revenue.",
+        "h1Count": 2,
+        "media": [],
+        "ctas": [
+          "Sign in",
+          "Start for free",
+          "Talk to sales",
+          "Start for free",
+          "Continue",
+          "Reject"
+        ],
+        "fonts": [
+          "JetBrains Mono",
+          "inter",
+          "interDisplay",
+          "tiemposText"
+        ],
+        "animations": 17,
+        "scrolledAnimations": 24,
+        "kb": {
+          "document": 140,
+          "stylesheet": 80,
+          "font": 318,
+          "script": 3509,
+          "image": 202,
+          "other": 1,
+          "fetch": 1446,
+          "ping": 2,
+          "preflight": 0,
+          "xhr": 5
+        },
+        "height": 17599,
+        "reducedAnimations": 3,
+        "reducedScrolledAnimations": 1
+      }
+    }
+  }
+]
