@@ -36,7 +36,7 @@ ARG PLAYWRIGHT_MCP_VERSION=0.0.83
 
 # pnpm at the version apps/opposite-osiris/package.json pins in packageManager (smoke.bats fails on drift).
 ARG PNPM_VERSION=11.5.1
-RUN npm install -g --no-audit --no-fund --no-update-notifier \
+RUN npm install -g --ignore-scripts --no-audit --no-fund --no-update-notifier \
       "svgo@${SVGO_VERSION}" "@lhci/cli@${LHCI_VERSION}" \
       "chrome-devtools-mcp@${CHROME_DEVTOOLS_MCP_VERSION}" "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" "pnpm@${PNPM_VERSION}" \
  && npm cache clean --force
@@ -49,7 +49,7 @@ ARG OSIONOS_ZOD_VERSION=4.4.3
 # Installed beside / then moved: npm run with / as its prefix fails ("Tracker idealTree already
 # exists", npm 11, reproduced in this build).
 RUN mkdir /tmp/mcp-deps && cd /tmp/mcp-deps \
- && npm install --no-audit --no-fund --no-save --no-package-lock \
+ && npm install --ignore-scripts --no-audit --no-fund --no-save --no-package-lock \
       "@modelcontextprotocol/sdk@${OSIONOS_MCP_SDK_VERSION}" "zod@${OSIONOS_ZOD_VERSION}" \
  && mv node_modules /node_modules && cd / && rm -rf /tmp/mcp-deps && npm cache clean --force
 COPY --from=grobase-cli /out/grobase /usr/local/bin/grobase
@@ -59,5 +59,8 @@ ENV CHROME_PATH=/usr/bin/chromium-browser \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
     CA_REQUIRED=0 \
     NPM_CONFIG_UPDATE_NOTIFIER=false
+RUN addgroup -S tools && adduser -S -G tools -h /home/tools tools
+ENV HOME=/home/tools
+USER tools
 ENTRYPOINT ["ca-trust-entrypoint"]
 CMD ["sh"]

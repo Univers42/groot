@@ -64,9 +64,9 @@ export function mergeState(manifest, stateText) {
 }
 
 function save(file, manifest) {
-	mkdirSync(dirname(file), { recursive: true });
-	writeFileSync(`${file}.tmp`, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
-	renameSync(`${file}.tmp`, file);
+	mkdirSync(dirname(file), { recursive: true }); // NOSONAR: Creates the parent of the operator-selected local manifest.
+	writeFileSync(`${file}.tmp`, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 }); // NOSONAR: Writes the operator-selected local manifest with private file permissions.
+	renameSync(`${file}.tmp`, file); // NOSONAR: Atomically replaces the same operator-selected local manifest.
 }
 
 function main() {
@@ -74,19 +74,19 @@ function main() {
 	const { values: a } = parseArgs({ args: rest, options: { file: { type: 'string' }, target: { type: 'string' }, tenant: { type: 'string' }, out: { type: 'string' }, only: { type: 'string' }, state: { type: 'string' } } });
 	if (command === 'init') {
 		if (existsSync(a.file)) {
-			const manifest = JSON.parse(readFileSync(a.file, 'utf8'));
+			const manifest = JSON.parse(readFileSync(a.file, 'utf8')); // NOSONAR: Operator-selected --file is the documented local manifest.
 			if (manifest.target !== a.target || manifest.tenant !== a.tenant) throw new Error(`${a.file} is for ${manifest.target}/${manifest.tenant}, not ${a.target}/${a.tenant}`);
-			return console.error(`[manifest] resuming uid8 ${manifest.uid8}`);
+			return console.error(`[manifest] resuming uid8 ${manifest.uid8}`); // NOSONAR: uid8 is a public database-name suffix, never a credential or token.
 		}
 		const manifest = newManifest({ target: a.target, tenant: a.tenant, uid8: randomBytes(4).toString('hex'), anchor: new Date().toISOString().slice(0, 10) });
 		save(a.file, manifest);
 		return console.error(`[manifest] new uid8 ${manifest.uid8}, anchor ${manifest.anchor}`);
 	}
-	const manifest = JSON.parse(readFileSync(a.file, 'utf8'));
+	const manifest = JSON.parse(readFileSync(a.file, 'utf8')); // NOSONAR: Operator-selected --file is the documented local manifest.
 	if (command === 'params') {
-		return process.stdout.write(paramsEnv(manifest, { schema: readFileSync(`${a.out}/crm.schema.sql`, 'utf8'), names: readdirSync(a.out) }, a.only));
+		return process.stdout.write(paramsEnv(manifest, { schema: readFileSync(`${a.out}/crm.schema.sql`, 'utf8'), names: readdirSync(a.out) }, a.only)); // NOSONAR: Operator-selected --out is the documented local bundle directory.
 	}
-	if (command === 'merge-state') return save(a.file, mergeState(manifest, readFileSync(a.state, 'utf8')));
+	if (command === 'merge-state') return save(a.file, mergeState(manifest, readFileSync(a.state, 'utf8'))); // NOSONAR: Operator-selected --state is the documented local VM state input.
 	throw new Error(`unknown command ${command}`);
 }
 

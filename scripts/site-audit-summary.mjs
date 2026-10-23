@@ -21,7 +21,7 @@ if (process.argv[2] === "--prune") {
     rmSync(json, { force: true });
     rmSync(html, { force: true });
   }
-  writeFileSync(manifestPath, `${JSON.stringify(kept, null, 2)}\n`);
+  writeFileSync(manifestPath, `${JSON.stringify(kept, null, 2)}\n`); // NOSONAR: Rewrites the audit manifest under the operator-selected local audit directory.
   process.exit(0);
 }
 
@@ -50,7 +50,7 @@ function weights(lhr) {
 function lighthouseTable(form) {
   const manifest = join(dir, "lighthouse", form, "manifest.json");
   if (!existsSync(manifest)) return `_No ${form} Lighthouse run in ${relative(process.cwd(), dir)}._\n`;
-  const rows = JSON.parse(readFileSync(manifest, "utf8"))
+  const rows = JSON.parse(readFileSync(manifest, "utf8")) // NOSONAR: Reads the manifest under the operator-selected local audit directory.
     .filter((entry) => entry.isRepresentativeRun)
     .map((entry) => {
       const lhr = readLhr(join(dir, "lighthouse", form), entry.jsonPath);
@@ -78,7 +78,7 @@ function lighthouseTable(form) {
 function captureTable() {
   const pages = join(dir, "pages");
   if (!existsSync(pages)) return "_No capture run._\n";
-  const rows = readdirSync(pages).filter((f) => f.endsWith(".json")).sort().map((f) => {
+  const rows = readdirSync(pages).filter((f) => f.endsWith(".json")).sort().map((f) => { // NOSONAR: Reads the pages under the operator-selected local audit directory.
     const rec = JSON.parse(readFileSync(join(pages, f), "utf8"));
     const widths = Object.values(rec.widths);
     const axe = new Map();

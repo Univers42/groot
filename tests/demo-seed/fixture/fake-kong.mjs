@@ -12,7 +12,7 @@ const PUBLIC = process.env.KONG_PUBLIC_API_KEY;
 function sql(text, vars = {}) {
 	const args = ['-X', '-q', '-At', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres'];
 	for (const [k, v] of Object.entries(vars)) args.push('-v', `${k}=${v}`);
-	return execFileSync('psql', args, { input: text, encoding: 'utf8' }).trim();
+	return execFileSync('/usr/local/bin/psql', args, { input: text, encoding: 'utf8' }).trim();
 }
 
 function send(res, code, body) {
