@@ -9,12 +9,17 @@
 -- Closed to the public roles (C43): RLS on, one service_role policy, REVOKE from
 -- PUBLIC/anon/authenticated. The rows cascade with their approval.
 --
--- Lock-safe: one new table; the constraint swap below is NOT VALID then
--- VALIDATE, and the whole file runs under a lock_timeout so a long transaction
--- makes it give up rather than queue and stall every approval.
+-- Lock-safe: one new table; the status swap below runs once, and the whole
+-- file runs under a lock_timeout so a long transaction makes it give up rather
+-- than queue and stall every approval.
 --
--- Idempotent: IF NOT EXISTS / DROP ... IF EXISTS, replayed on every boot. Never
--- deletes or rewrites a row.
+-- Idempotent: IF NOT EXISTS, and the status swap runs only while 'partial' is
+-- missing; replayed on every boot. Never deletes or rewrites a row.
+--
+-- NAMED to sort after osionos-ai-migration.sql, which creates ai_approvals: the
+-- models runner applies osionos-ai-*.sql in its alphabetical pass
+-- (scripts/apply-models-migrations.sh). "builders" would sort first and fail on
+-- a fresh database. scripts/verify/ai-builders.sh check f holds the order.
 
 SET lock_timeout = '5s';
 
@@ -40,27 +45,42 @@ COMMENT ON TABLE public.ai_plan_items IS
 -- -----------------------------------------------------------------------------
 -- 2. The `partial` status, additively. The CHECK was created unnamed in
 --    osionos-ai-migration.sql, so postgres named it ai_approvals_status_check.
---    NOT VALID + VALIDATE: ADD ... NOT VALID takes its strong lock without
---    scanning the table, and VALIDATE scans under a weaker lock that lets
---    reads and writes through. One transaction: no moment without the CHECK.
 --
 --    The live-call unique index gains 'partial': a half-built plan is live and
---    must not be asked a second time. Dropped and recreated in the same
---    transaction, so no duplicate slips in between.
+--    must not be asked a second time.
+--
+--    Each swap runs only while the live definition lacks 'partial', so the
+--    file replays on every boot without rebuilding the index or rescanning
+--    the table. The DO block is one transaction: there is no moment without
+--    the CHECK or the index. The first apply holds ACCESS EXCLUSIVE on
+--    ai_approvals for one scan of the table, under the lock_timeout above.
 -- -----------------------------------------------------------------------------
-BEGIN;
+DO $$
+BEGIN
+	IF NOT EXISTS (
+		SELECT 1 FROM pg_constraint
+		WHERE conrelid = 'public.ai_approvals'::regclass
+		  AND conname = 'ai_approvals_status_check'
+		  AND pg_get_constraintdef(oid) LIKE '%''partial''%'
+	) THEN
+		ALTER TABLE public.ai_approvals DROP CONSTRAINT IF EXISTS ai_approvals_status_check;
+		ALTER TABLE public.ai_approvals ADD CONSTRAINT ai_approvals_status_check
+			CHECK (status IN ('pending', 'executing', 'executed', 'failed', 'declined', 'expired', 'unknown', 'partial'));
+	END IF;
 
-ALTER TABLE public.ai_approvals DROP CONSTRAINT IF EXISTS ai_approvals_status_check;
-ALTER TABLE public.ai_approvals ADD CONSTRAINT ai_approvals_status_check
-	CHECK (status IN ('pending', 'executing', 'executed', 'failed', 'declined', 'expired', 'unknown', 'partial')) NOT VALID;
-ALTER TABLE public.ai_approvals VALIDATE CONSTRAINT ai_approvals_status_check;
-
-DROP INDEX IF EXISTS public.ai_approvals_one_live_per_call;
-CREATE UNIQUE INDEX IF NOT EXISTS ai_approvals_one_live_per_call
-	ON public.ai_approvals (run_id, tool, args_sha256)
-	WHERE status IN ('pending', 'executing', 'executed', 'partial');
-
-COMMIT;
+	IF NOT EXISTS (
+		SELECT 1 FROM pg_indexes
+		WHERE schemaname = 'public'
+		  AND indexname = 'ai_approvals_one_live_per_call'
+		  AND indexdef LIKE '%''partial''%'
+	) THEN
+		DROP INDEX IF EXISTS public.ai_approvals_one_live_per_call;
+		CREATE UNIQUE INDEX ai_approvals_one_live_per_call
+			ON public.ai_approvals (run_id, tool, args_sha256)
+			WHERE status IN ('pending', 'executing', 'executed', 'partial');
+	END IF;
+END
+$$;
 
 -- -----------------------------------------------------------------------------
 -- 3. service_role only (C43).

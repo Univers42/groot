@@ -8,13 +8,17 @@
 #                                                                              #
 # **************************************************************************** #
 #
-# WHAT IT PROVES  (models/osionos-ai-builders-migration.sql)
+# WHAT IT PROVES  (models/osionos-ai-plan-items-migration.sql)
 #   a  the migration applies twice without error (idempotent)
 #   b  anon and authenticated cannot read ai_plan_items (C43)
 #   c  an ai_approvals row can be set to 'partial'
 #   d  deleting the approval deletes its items
 #   e  a second live approval with the same (run_id, tool, args_sha256) is
 #      refused while one is 'partial'
+#   f  the file sorts after osionos-ai-migration.sql, which creates the
+#      ai_approvals it references: the models runner applies osionos-ai-*.sql in
+#      its alphabetical pass, so a name that sorts first fails on a fresh database
+#   g  a replay rebuilds nothing: the index and the CHECK keep their oids
 #
 # ISOLATION
 #   One throwaway container: ai-builders-pg, --network none, no port, no volume.
@@ -30,7 +34,7 @@ set -eu
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 MODELS="${REPO}/models"
 STANDIN="${REPO}/infrastructure/docker/osionos/ai-db-init/00-standin.sql"
-MIG="${BUILDERS_MIGRATION:-${MODELS}/osionos-ai-builders-migration.sql}"
+MIG="${BUILDERS_MIGRATION:-${MODELS}/osionos-ai-plan-items-migration.sql}"
 CTN="ai-builders-pg"
 PG_IMAGE="${PG_IMAGE:-pgvector/pgvector:0.8.0-pg16}"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/ai-builders.XXXXXX")"
@@ -158,6 +162,27 @@ check_e() {
 	return 0
 }
 
+check_f() {
+	base="$(basename "${MIG}")"
+	last="$(printf '%s\n' osionos-ai-migration.sql "${base}" | LC_ALL=C sort | tail -1)"
+	[ "${last}" = "${base}" ] && [ "${base}" != osionos-ai-migration.sql ] && return 0
+	DETAIL="${base} sorts before osionos-ai-migration.sql"
+	return 1
+}
+
+oids() {
+	q "SELECT (SELECT oid FROM pg_class WHERE relname = 'ai_approvals_one_live_per_call') || ':' || (SELECT oid FROM pg_constraint WHERE conname = 'ai_approvals_status_check');"
+}
+
+check_g() {
+	before="$(oids)"
+	apply_file "${MIG}" || return 1
+	after="$(oids)"
+	[ -n "${before}" ] && [ "${before}" = "${after}" ] && return 0
+	DETAIL="oids ${before} -> ${after}: the replay rebuilt the index or the CHECK"
+	return 1
+}
+
 main() {
 	start_pg
 	note "postgres up in ${CTN}; migration ${MIG}"
@@ -169,7 +194,7 @@ INSERT INTO public.ai_runs (id, conversation_id, owner_id, status, model) VALUES
 		note "fixture failed: $(head -1 "${WORK}/sql.err")"
 		exit 1
 	}
-	for fn in check_a check_b check_c check_d check_e; do
+	for fn in check_a check_b check_c check_d check_e check_f check_g; do
 		DETAIL=""
 		if "${fn}"; then
 			pass "${fn}" "ok"
