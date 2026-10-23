@@ -207,11 +207,11 @@ SELECT 'account_role_shape', count(*), coalesce(string_agg(v, ' ' ORDER BY v), '
   ) AS violations;
 
 -- account_session_columns: the account role's exact reach on the sessions table.
--- The nine columns and nothing else: a table-level grant would hand over ip_hash,
+-- The ten columns and nothing else: a table-level grant would hand over ip_hash,
 -- refresh_hash and the user_id of every row, and TRUNCATE ignores RLS entirely.
 WITH granted(col) AS (
   SELECT unnest(ARRAY['id','created_at','expires_at','last_seen_at','auth_method',
-                       'ip_prefix','user_agent','revoked_at','revoked_reason'])
+                       'ip_prefix','user_agent','revoked_at','revoked_reason','family_id'])
 ),
 t AS (SELECT to_regclass('public.osionos_sessions') AS oid)
 SELECT 'account_session_columns', count(*), coalesce(string_agg(v, ' ' ORDER BY v), '')
