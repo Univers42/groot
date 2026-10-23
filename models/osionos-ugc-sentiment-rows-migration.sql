@@ -222,7 +222,8 @@ BEGIN
                        scored_text    = EXCLUDED.scored_text,
                        content_sha256 = EXCLUDED.content_sha256,
                        updated_at     = now()
-                 WHERE r.content_sha256 IS DISTINCT FROM EXCLUDED.content_sha256;
+                 WHERE r.content_sha256 IS DISTINCT FROM EXCLUDED.content_sha256
+                    OR r.workspace_id IS DISTINCT FROM EXCLUDED.workspace_id;
 
                 v_row_ids := v_row_ids || v_page.row_id;
                 v_property_ids := v_property_ids || v_property.property_id;
@@ -249,7 +250,7 @@ END $$;
 
 DROP TRIGGER IF EXISTS osionos_object_databases_project_rows ON public.osionos_object_databases;
 CREATE TRIGGER osionos_object_databases_project_rows
-    AFTER INSERT OR UPDATE OF state ON public.osionos_object_databases
+    AFTER INSERT OR UPDATE OF state, workspace_id ON public.osionos_object_databases
     FOR EACH ROW
     EXECUTE FUNCTION public.osionos_object_databases_project_rows();
 
@@ -290,9 +291,11 @@ BEGIN
               JOIN public.ai_sentiment_settings s
                 ON s.workspace_id = n.workspace_id AND s.enabled
              WHERE o.content_sha256 IS DISTINCT FROM n.content_sha256
+                OR o.workspace_id IS DISTINCT FROM n.workspace_id
             ON CONFLICT (kind, subject_kind, subject_id) DO UPDATE
-               SET content_sha256 = EXCLUDED.content_sha256,
-                   run_after      = now(),
+               SET workspace_id    = EXCLUDED.workspace_id,
+                   content_sha256  = EXCLUDED.content_sha256,
+                   run_after       = now(),
                    attempts       = 0,
                    last_error     = NULL,
                    enqueued_at    = now();
