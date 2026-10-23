@@ -32,7 +32,7 @@
 #   u anon cannot SELECT public.users.email or password_hash, authenticated cannot SELECT password_hash ·
 #   colleague_edges_trigger the P0-5a colleague-edges trigger exists on
 #   public.osionos_workspace_members under its own name (the migration's backfill
-#   guard tests that same pair) · feed_counts_exec_grants
+#   guard tests that same pair) · feed_counts_exec_grants · lifecycle_fn_settings
 #   public.osionos_feed_page_counts is executable by service_role and by no
 #   other role
 #   sd the two self-data indexes the sys: sources read through — (owner_id, updated_at DESC) on
@@ -594,6 +594,7 @@ run_checks() {
 	# P0-5a: the colleague-edges trigger and the feed counts function.
 	check_count "$1" colleague_edges_trigger colleague_edges_trigger
 	check_count "$1" feed_counts_exec_grants feed_counts_exec_grants
+	check_count "$1" lifecycle_fn_settings lifecycle_fn_settings
 	check_count "$1" sd1 self_data_indexes_missing
 	check_count "$1" k1 account_role_reach
 	check_count "$1" k2 account_plane_rls
