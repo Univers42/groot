@@ -37,7 +37,7 @@ async function startFakeDaemon(sock, state) {
     req.on("end", () => {
       seen.push({ method: req.method, url: req.url, headers: req.headers, body: Buffer.concat(chunks).toString("utf8") });
       const inspect = /\/json$/.test(req.url);
-      res.writeHead(inspect ? state.inspectStatus : /\\/create/.test(req.url) ? 201 : 204, {
+      res.writeHead(inspect ? state.inspectStatus : /\/create/.test(req.url) ? 201 : 204, {
         "content-type": "application/json",
         ...(state.responseHeaders ?? {}),
       });
