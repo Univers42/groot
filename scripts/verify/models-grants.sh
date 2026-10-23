@@ -600,6 +600,7 @@ run_checks() {
 	check_count "$1" lifecycle_mark_not_owner lifecycle_mark_not_owner
 	check_count "$1" lifecycle_mark_already_pending lifecycle_mark_already_pending
 	check_count "$1" lifecycle_mark_restamp lifecycle_mark_restamp
+	check_count "$1" lifecycle_mark_restamp_stamps lifecycle_mark_restamp_stamps
 	check_count "$1" lifecycle_transfer_refused_pending lifecycle_transfer_refused_pending
 	check_count "$1" lifecycle_transfer_ok lifecycle_transfer_ok
 	check_count "$1" lifecycle_transfer_one_owner lifecycle_transfer_one_owner
