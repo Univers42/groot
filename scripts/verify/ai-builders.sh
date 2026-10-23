@@ -15,10 +15,8 @@
 #   d  deleting the approval deletes its items
 #   e  a second live approval with the same (run_id, tool, args_sha256) is
 #      refused while one is 'partial'
-#   f  the file sorts after osionos-ai-migration.sql, which creates the
-#      ai_approvals it references: the models runner applies osionos-ai-*.sql in
-#      its alphabetical pass, so a name that sorts first fails on a fresh database
-#   g  a replay rebuilds nothing: the index and the CHECK keep their oids
+#   f  base AI, plan-items CHECK and online index upgrade sort in the right order
+#   g  replay preserves index/CHECK OIDs and does not recreate the legacy index
 #
 # ISOLATION
 #   One throwaway container: ai-builders-pg, --network none, no port, no volume.
@@ -35,6 +33,7 @@ REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 MODELS="${REPO}/models"
 STANDIN="${REPO}/infrastructure/docker/osionos/ai-db-init/00-standin.sql"
 MIG="${BUILDERS_MIGRATION:-${MODELS}/osionos-ai-plan-items-migration.sql}"
+INDEX_MIG="${APPROVAL_INDEX_MIGRATION:-${MODELS}/osionos-ai-mzz-approval-live-index-migration.sql}"
 CTN="ai-builders-pg"
 PG_IMAGE="${PG_IMAGE:-pgvector/pgvector:0.8.0-pg16}"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/ai-builders.XXXXXX")"
@@ -164,22 +163,29 @@ check_e() {
 
 check_f() {
 	base="$(basename "${MIG}")"
-	last="$(printf '%s\n' osionos-ai-migration.sql "${base}" | LC_ALL=C sort | tail -1)"
-	[ "${last}" = "${base}" ] && [ "${base}" != osionos-ai-migration.sql ] && return 0
-	DETAIL="${base} sorts before osionos-ai-migration.sql"
-	return 1
+	idx="$(basename "${INDEX_MIG}")"
+	ordered="$(printf '%s\n' osionos-ai-migration.sql "${idx}" "${base}")"
+	sorted="$(printf '%s\n' "${ordered}" | LC_ALL=C sort)"
+	[ "${ordered}" = "${sorted}" ] || {
+		DETAIL="migration order must be base AI, online index upgrade, then plan-items"
+		return 1
+	}
+	return 0
 }
 
 oids() {
-	q "SELECT (SELECT oid FROM pg_class WHERE relname = 'ai_approvals_one_live_per_call') || ':' || (SELECT oid FROM pg_constraint WHERE conname = 'ai_approvals_status_check');"
+	q "SELECT (SELECT oid FROM pg_class WHERE relname = 'ai_approvals_one_live_per_call_partial_idx') || ':' || (SELECT oid FROM pg_constraint WHERE conname = 'ai_approvals_status_check');"
 }
 
 check_g() {
 	before="$(oids)"
+	apply_file "${MODELS}/osionos-ai-migration.sql" || return 1
+	apply_file "${INDEX_MIG}" || return 1
 	apply_file "${MIG}" || return 1
 	after="$(oids)"
-	[ -n "${before}" ] && [ "${before}" = "${after}" ] && return 0
-	DETAIL="oids ${before} -> ${after}: the replay rebuilt the index or the CHECK"
+	legacy="$(q "SELECT count(*) FROM pg_class WHERE relname = 'ai_approvals_one_live_per_call';")"
+	[ -n "${before}" ] && [ "${before}" = "${after}" ] && [ "${legacy}" = "0" ] && return 0
+	DETAIL="oids ${before} -> ${after}; legacy index=${legacy}: replay changed an index or CHECK"
 	return 1
 }
 
@@ -188,6 +194,7 @@ main() {
 	note "postgres up in ${CTN}; migration ${MIG}"
 	apply_file "${STANDIN}" || exit 1
 	apply_file "${MODELS}/osionos-ai-migration.sql" || exit 1
+	apply_file "${INDEX_MIG}" || exit 1
 	apply_file "${MIG}" || exit 1
 	run_sql "INSERT INTO public.ai_conversations (id, owner_id, workspace_id) VALUES ('${CONV}', '${USR}', '${WS}');
 INSERT INTO public.ai_runs (id, conversation_id, owner_id, status, model) VALUES ('${RUN}', '${CONV}', '${USR}', 'succeeded', 'm');" || {
