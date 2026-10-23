@@ -549,15 +549,18 @@ ROLLBACK;
 -- only writer). Five rows must be refused with the named state: a kind outside
 -- ssh/gpg, an empty title, an 81-character title, an oversized key (23514) and a
 -- second row with the same (user, kind, fingerprint) (23505); and the 51st row
--- of one user must be refused by the trigger with P0001. The count is the
--- number of those six that did NOT end in the expected state.
+-- of one user must be refused by the trigger with P0001 on insert or reassignment.
+-- An unchanged owner at the cap and moves below the cap must still succeed.
+-- The count is the number of those nine that did NOT end in the expected state.
 BEGIN;
-INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+INSERT INTO auth.users (id) VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaab');
 SET LOCAL ROLE service_role;
 DO $$
 DECLARE
   v_state text;
   v_user constant uuid := 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  v_other constant uuid := 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaab';
 BEGIN
   v_state := '';
   BEGIN
@@ -605,6 +608,31 @@ BEGIN
   EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
   END;
   PERFORM set_config('osionos.check.k_limit', v_state, true);
+  INSERT INTO public.osionos_user_keys (user_id, kind, title, public_key, fingerprint)
+  VALUES (v_other, 'ssh', 't', 'k', 'move');
+  v_state := '';
+  BEGIN
+    UPDATE public.osionos_user_keys SET user_id = v_user WHERE user_id = v_other AND fingerprint = 'move';
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_move_limit', v_state, true);
+  v_state := '';
+  BEGIN
+    UPDATE public.osionos_user_keys SET user_id = v_user, title = 'renamed' WHERE user_id = v_user AND fingerprint = 'dup';
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_same_owner',
+    (v_state = '' AND EXISTS (SELECT 1 FROM public.osionos_user_keys WHERE user_id = v_user AND fingerprint = 'dup' AND title = 'renamed'))::text, true);
+  v_state := '';
+  BEGIN
+    UPDATE public.osionos_user_keys SET user_id = v_other WHERE user_id = v_user AND fingerprint = 'dup';
+    UPDATE public.osionos_user_keys SET user_id = v_user WHERE user_id = v_other AND fingerprint = 'move';
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_move_allowed',
+    (v_state = '' AND (SELECT count(*) FROM public.osionos_user_keys WHERE user_id = v_user) = 50
+                   AND (SELECT count(*) FROM public.osionos_user_keys WHERE user_id = v_other) = 1
+                   AND EXISTS (SELECT 1 FROM public.osionos_user_keys WHERE user_id = v_user AND fingerprint = 'move'))::text, true);
 END $$;
 RESET ROLE;
 SELECT 'p5_keys_row_rules',
@@ -613,13 +641,20 @@ SELECT 'p5_keys_row_rules',
      + (CASE WHEN current_setting('osionos.check.k_title81', true) = '23514' THEN 0 ELSE 1 END)
      + (CASE WHEN current_setting('osionos.check.k_size', true) = '23514' THEN 0 ELSE 1 END)
      + (CASE WHEN current_setting('osionos.check.k_dup', true) = '23505' THEN 0 ELSE 1 END)
-     + (CASE WHEN current_setting('osionos.check.k_limit', true) = 'P0001' THEN 0 ELSE 1 END),
+     + (CASE WHEN current_setting('osionos.check.k_limit', true) = 'P0001' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_move_limit', true) = 'P0001' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_same_owner', true) = 'true' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_move_allowed', true) = 'true' THEN 0 ELSE 1 END),
        'kind=' || coalesce(current_setting('osionos.check.k_kind', true), 'unset')
      || ' title0=' || coalesce(current_setting('osionos.check.k_title0', true), 'unset')
      || ' title81=' || coalesce(current_setting('osionos.check.k_title81', true), 'unset')
      || ' size=' || coalesce(current_setting('osionos.check.k_size', true), 'unset')
      || ' dup=' || coalesce(current_setting('osionos.check.k_dup', true), 'unset')
-     || ' limit=' || coalesce(current_setting('osionos.check.k_limit', true), 'unset');
+     || ' limit=' || coalesce(current_setting('osionos.check.k_limit', true), 'unset')
+     || ' move_limit=' || coalesce(current_setting('osionos.check.k_move_limit', true), 'unset')
+     || ' same_owner=' || coalesce(current_setting('osionos.check.k_same_owner', true), 'unset')
+     || ' move_allowed=' || coalesce(current_setting('osionos.check.k_move_allowed', true), 'unset');
+ROLLBACK;
 
 -- lifecycle_fn_settings: the two workspace-lifecycle functions run as the caller (not
 -- SECURITY DEFINER) and pin search_path and lock_timeout. Counts every function that is missing,

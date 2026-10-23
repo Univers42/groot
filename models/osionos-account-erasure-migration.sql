@@ -555,7 +555,7 @@ BEGIN
 
   -- 3. Record every storage key before any row that names it goes.
   INSERT INTO public.osionos_account_erasure_objects (user_id, bucket, key)
-  SELECT e.user_id, 'account-exports', e.id::text || '.' || e.format
+  SELECT e.user_id, 'account-exports', e.user_id::text || '/' || e.id::text || '.' || e.format
     FROM public.osionos_account_exports e WHERE e.user_id = p_user
   ON CONFLICT DO NOTHING;
   GET DIAGNOSTICS v_n = ROW_COUNT;
@@ -614,7 +614,8 @@ BEGIN
 
     IF v_disp IN ('transferred', 'promoted') THEN
       UPDATE public.osionos_workspaces SET owner_id = v_owner WHERE id = w.id;
-      UPDATE public.osionos_workspace_members SET role = 'owner', updated_at = now()
+      UPDATE public.osionos_workspace_members
+         SET role = 'owner', permissions = ARRAY['create','read','update','delete','admin'], updated_at = now()
        WHERE workspace_id = w.id AND user_id = v_owner;
       IF v_disp = 'promoted' THEN
         -- The text names a workspace id and nobody else: no user id, no user name.

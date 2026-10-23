@@ -54,6 +54,9 @@ CREATE TABLE IF NOT EXISTS public.osionos_user_keys (
 CREATE OR REPLACE FUNCTION public.osionos_user_keys_limit() RETURNS trigger
   LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
 BEGIN
+  IF TG_OP = 'UPDATE' AND NEW.user_id IS NOT DISTINCT FROM OLD.user_id THEN
+    RETURN NEW;
+  END IF;
   PERFORM pg_advisory_xact_lock(hashtext(NEW.user_id::text));
   IF (SELECT count(*) FROM public.osionos_user_keys WHERE user_id = NEW.user_id) >= 50 THEN
     RAISE EXCEPTION 'key_limit' USING ERRCODE = 'P0001';
@@ -63,7 +66,7 @@ END $$;
 REVOKE ALL ON FUNCTION public.osionos_user_keys_limit() FROM PUBLIC;
 
 DROP TRIGGER IF EXISTS osionos_user_keys_limit_trigger ON public.osionos_user_keys;
-CREATE TRIGGER osionos_user_keys_limit_trigger BEFORE INSERT ON public.osionos_user_keys
+CREATE TRIGGER osionos_user_keys_limit_trigger BEFORE INSERT OR UPDATE OF user_id ON public.osionos_user_keys
   FOR EACH ROW EXECUTE FUNCTION public.osionos_user_keys_limit();
 
 CREATE INDEX IF NOT EXISTS osionos_user_keys_user_idx
