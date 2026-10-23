@@ -128,11 +128,12 @@ CREATE TRIGGER ai_pack_docs_drop_chunks
 -- column) must still converge.
 --
 -- The second run does NOTHING: the definition already carries 'pack', so no
--- table lock is taken. The first run takes an ACCESS EXCLUSIVE lock for the
--- DROP/ADD, and VALIDATE then scans every partition once under a lock that does
--- not block reads (SHARE UPDATE EXCLUSIVE). The NOT VALID form is attempted
--- first so the ADD itself does not scan; a Postgres that refuses it on this
--- partitioned table falls back to the plain ADD below.
+-- table lock is taken. On the first run, DROP/ADD takes ACCESS EXCLUSIVE and
+-- this DO block holds that lock until the block commits. VALIDATE therefore
+-- scans every partition while reads and writes remain blocked by that lock.
+-- NOT VALID avoids scanning during ADD, but it does not make the validation
+-- safe for online use in this transaction-wrapped migration. Apply this first
+-- run in a maintenance window on a large ai_chunks table.
 DO $$
 DECLARE
     old_name   TEXT;
