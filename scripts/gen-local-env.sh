@@ -309,6 +309,8 @@ OSIONOS_APP_SESSION_SECRET=$(gen)
 OSIONOS_IDE_TOKEN_SECRET=$(gen)
 OSIONOS_BRIDGE_EMAIL_HASH_SALT=$(gen)
 OSIONOS_BRIDGE_SHARED_SECRET=$(gen)
+# Signs confirmation and reset links created by the auth-gateway; never reuse a BaaS key.
+AUTH_LINK_SIGNING_KEY=$(gen)
 OSIONOS_APP_SESSION_TTL_SECONDS=2592000
 # Local demo account (dev.pro.photo@gmail.com) password — applied by make all, shown by make demo-login.
 DEMO_LOGIN_PASSWORD=$(gen_password)
