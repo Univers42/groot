@@ -16,7 +16,7 @@ REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO"
 
 json=$(
-	OSIONOS_AI_IMAGES=on OSIONOS_AI_PAT=on OSIONOS_AI_STT_URL=https://x OSIONOS_AI_VLM_URL=http://vlm.invalid \
+	OSIONOS_AI_IMAGES=on OSIONOS_AI_PAT=on OSIONOS_AI_STT_URL=https://x OSIONOS_AI_VLM_URL=https://vlm.invalid \
 	OSIONOS_MODERATION_ACTIONS=hold \
 	PUBLIC_ORIGIN=https://verify.invalid \
 	AUTH_LINK_SIGNING_KEY=verify-only \
