@@ -1,0 +1,56 @@
+{
+  "route": "/docs/",
+  "widths": {
+    "390": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/baseline/screenshots/docs-390.jpg",
+      "reducedScreenshot": "test-results/site-audit/baseline/screenshots/docs-390-reduced.jpg",
+      "truncated": false,
+      "pageHeight": 2384,
+      "overflowPx": 0,
+      "consoleErrors": [],
+      "axe": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "nodes": 3,
+          "help": "Elements must meet minimum color contrast ratio thresholds"
+        }
+      ]
+    },
+    "768": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/baseline/screenshots/docs-768.jpg",
+      "reducedScreenshot": "test-results/site-audit/baseline/screenshots/docs-768-reduced.jpg",
+      "truncated": false,
+      "pageHeight": 2009,
+      "overflowPx": 0,
+      "consoleErrors": [],
+      "axe": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "nodes": 3,
+          "help": "Elements must meet minimum color contrast ratio thresholds"
+        }
+      ]
+    },
+    "1440": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/baseline/screenshots/docs-1440.jpg",
+      "reducedScreenshot": "test-results/site-audit/baseline/screenshots/docs-1440-reduced.jpg",
+      "truncated": false,
+      "pageHeight": 2011,
+      "overflowPx": 0,
+      "consoleErrors": [],
+      "axe": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "nodes": 10,
+          "help": "Elements must meet minimum color contrast ratio thresholds"
+        }
+      ]
+    }
+  }
+}

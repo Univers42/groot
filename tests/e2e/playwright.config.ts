@@ -4,6 +4,9 @@ import { defineConfig, devices } from "@playwright/test";
 // flake this suite exists to catch.
 export default defineConfig({
   testDir: "./specs",
+  // run.sh sets E2E_SKIP_MAIL_SPECS (to the reason) when the specs that send real mail may not
+  // run on this machine (scripts/lib/e2e-mail-guard.sh, gotrue-otp-exp.sh).
+  testIgnore: process.env.E2E_SKIP_MAIL_SPECS ? [/\/(pr|dm)\d[^/]*\.spec\.ts$/] : [],
   globalSetup: "./lib/global-setup.ts",
   fullyParallel: false,
   workers: 1,

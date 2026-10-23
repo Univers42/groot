@@ -113,9 +113,10 @@ set('AUTH_VERIFY_TOKEN_TTL_SEC', '86400');
 set('AUTH_RESET_TOKEN_TTL_SEC', '3600');
 set('SMTP_HOST', 'mailpit');
 set('SMTP_PORT', '1025');
-set('SMTP_ENCRYPTION', 'none');
-set('SMTP_FROM_ADDRESS', 'noreply@mini-baas.local');
-set('SMTP_FROM_NAME', 'Prismatica');
+set('SMTP_SECURE', '');
+set('EMAIL_FROM', 'Prismatica <noreply@mini-baas.local>');
+// Signs the confirm and reset links; its own key, never another secret's value.
+set('AUTH_LINK_SIGNING_KEY', osionosSecret());
 
 // --- public site / browser-exposed --------------------------------------
 set('PUBLIC_SITE_URL', 'https://localhost:4322');

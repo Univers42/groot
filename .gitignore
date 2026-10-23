@@ -95,5 +95,14 @@ apps/baas.bak/
 /track-binocle-local-ca.pem
 secrets
 
+<<<<<<< HEAD
+# Arlet demo seed (scripts/demo/seed-baas.sh): generated bundles and the per-target manifest of ids
+scripts/demo/out/
+scripts/demo/manifests/
+
+# scripts/demo/tests/pg-roundtrip.sh temp output (removed on exit; this covers a killed run)
+scripts/demo/tests/.roundtrip.*/
+=======
 # host-ports resolver override files (generated, not tracked)
 infrastructure/tls/host-ports.d/*.conf
+>>>>>>> origin/develop

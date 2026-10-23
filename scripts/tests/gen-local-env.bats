@@ -264,6 +264,7 @@ media_source() { printf 'UNSPLASH_ACCESS_KEY=unsplash-SRC-9f3\nPIXABAY_API=pixab
   run bash "$SCRIPT" --sync
   [ "$status" -eq 0 ]
   [[ "$output" == *"minted AUTH_LINK_SIGNING_KEY"* ]]
+  [[ "$output" == *"restart auth-gateway"* ]]
   [[ "$output" != *"link-key-keep"* ]]
   minted="$(val "$OUT" AUTH_LINK_SIGNING_KEY)"
   [[ "$minted" =~ ^[A-Za-z0-9]{48}$ ]]
