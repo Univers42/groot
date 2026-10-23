@@ -67,3 +67,6 @@ END $$;
 CREATE INDEX IF NOT EXISTS osionos_user_reports_subject_decision_idx
   ON public.osionos_user_reports (subject_user_id, decision_at DESC)
   WHERE decision IS NOT NULL;
+
+-- The audit viewer pages one provider's events newest first; this is the index that serves it.
+CREATE INDEX IF NOT EXISTS osionos_bridge_audit_events_provider_created_idx ON public.osionos_bridge_audit_events (provider, created_at DESC, id DESC);
