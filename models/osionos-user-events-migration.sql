@@ -622,7 +622,7 @@ BEGIN
         EXECUTE 'SELECT public.ai_access_tokens_erase_user($1)' INTO f USING p_user;
     END IF;
     -- The user's AI memories and their audit go too (P5d-1), when that file is
-    -- applied (models/osionos-ai-memory-migration.sql). Same DYNAMIC and
+    -- applied (models/osionos-ai-user-memory-migration.sql). Same DYNAMIC and
     -- GUARDED call; its count is discarded.
     IF to_regprocedure('public.ai_memory_erase_user(uuid)') IS NOT NULL THEN
         EXECUTE 'SELECT public.ai_memory_erase_user($1)' INTO f USING p_user;

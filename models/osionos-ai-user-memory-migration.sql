@@ -36,6 +36,12 @@
 -- on every boot. Never deletes or rewrites a row. ai_erase_user() calls
 -- ai_memory_erase_user() DYNAMICALLY (osionos-user-events-migration.sql), so
 -- the two files work in either order.
+--
+-- NAMED to sort after osionos-ai-migration.sql, which creates ai_runs (the
+-- memory_pins column below): the models runner applies osionos-ai-*.sql in its
+-- alphabetical pass (scripts/apply-models-migrations.sh), and "memory" sorts
+-- before "migration", so that name failed on a fresh database.
+-- scripts/verify/ai-memory.sh check f holds the order.
 
 SET lock_timeout = '5s';
 
