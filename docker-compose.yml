@@ -412,6 +412,9 @@ services:
       OSIONOS_AI_PROMPT_GUARD_MODEL: guard
       # The models of the output check (C73): the dir of the two classifiers.
       OSIONOS_AI_IMAGE_CHECK_DIR: /image-check
+      # Describe image (M7): the local VLM, INTERNAL. Unset = the route is a 404.
+      # The public overlay forces it empty until the user decides.
+      OSIONOS_AI_VLM_URL: http://osionos-ai-vlm:8080
     expose:
       - "4300"
     # The two classifiers of the output check, read-only: the service loads
@@ -428,6 +431,8 @@ services:
       - osionos-ai-sd-net
       # The guard of the image prompt, the same way.
       - osionos-ai-guard-net
+      # The VLM of "Describe image", the same way.
+      - osionos-ai-vlm-net
     depends_on:
       osionos-ai-db:
         condition: service_healthy
@@ -621,6 +626,98 @@ services:
     mem_limit: 6g
     cpus: 5
 
+  # osionos-ai-tox — the toxicity classifier of the moderation worker (M4):
+  # textdetox/xlmr-large-toxicity-classifier-v2 on the same TEI image as the
+  # embedders (pinned by digest too), CPU, `/predict`.
+  #
+  # INTERNAL: it joins `osionos-ai-classify-net` (internal: true, NO egress)
+  # and nothing else. NO published port: only osionos-ai-jobs reaches it. The
+  # `ai` profile only; the public overlay moves it to `ai-classify`, which
+  # the public stack never passes (C85: public moderation stays at L0 + log).
+  #
+  # The model is pinned: revision 38ab1b77bd3ff7779777cfa5cda203d9912b14b9,
+  # model.safetensors sha256 fa9c7ecbf7df7008f04051c22445b39e01513bcc81edca857a6e9d33a8e8542c
+  # (spikes/a1/models.lock, tox-xlmr-large). It is PRE-FETCHED into the named
+  # volume below, the only step of this service with egress. It runs OUTSIDE
+  # the service: the service itself is offline and on an internal network.
+  # Caveat: written from the huggingface_hub cache layout, not yet run end to
+  # end here; check the sha256 of the weight file after it.
+  #
+  #   docker run --rm -v osionos_ai_models_tox:/data python:3.12-slim sh -c \
+  #     "pip install -q huggingface_hub==0.36.0 && python -c \"from huggingface_hub import snapshot_download; \
+  #       snapshot_download('textdetox/xlmr-large-toxicity-classifier-v2', revision='38ab1b77bd3ff7779777cfa5cda203d9912b14b9', cache_dir='/data')\""
+  #
+  osionos-ai-tox:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d
+    profiles: ["ai"]
+    command: ["--model-id", "textdetox/xlmr-large-toxicity-classifier-v2", "--revision", "38ab1b77bd3ff7779777cfa5cda203d9912b14b9", "--port", "80"]
+    environment:
+      # The model is already in the volume: the server never reaches the net.
+      HF_HUB_OFFLINE: "1"
+    volumes:
+      - osionos_ai_models_tox:/data:ro
+    expose:
+      - "80"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:80/health"]
+      interval: 30s
+      start_interval: 10s
+      timeout: 5s
+      start_period: 120s
+      retries: 12
+    networks:
+      - osionos-ai-classify-net
+    restart: unless-stopped
+    # RSS 3.38 GiB after the A1 encoder run (spikes/a1/results/encoders/RESULTS.md:35),
+    # but 6.4 GiB was seen during a long spike run: the limit covers that peak.
+    # Caveat: both are A1 batch shapes; a heavier batch can still pass 7g, and
+    # the restart policy then brings it back. Raise it if `docker stats` says so.
+    mem_limit: 7g
+    cpus: 3
+
+  # osionos-ai-sentiment — the sentiment classifier of the jobs worker (M6):
+  # cardiffnlp/twitter-xlm-roberta-base-sentiment-multilingual on the same TEI
+  # image, CPU, `/predict`. Same isolation as osionos-ai-tox: internal network,
+  # no port, `ai` profile only. The model card declares NO licence: the public
+  # overlay keeps it off until that check is done (devil C147, C149).
+  #
+  # The model is pinned: revision 82107f4ccba672c9ab1eee538e727e462cad21de,
+  # pytorch_model.bin sha256 15fcf039e96406ea60c56206664e597346338f5ac8988048d5ded2e69b4d2684
+  # (spikes/a1/models.lock, sent-xlmr-cardiff). PRE-FETCHED into the named
+  # volume below, the only step of this service with egress.
+  # Caveat: written from the huggingface_hub cache layout, not yet run end to
+  # end here; check the sha256 of the weight file after it.
+  #
+  #   docker run --rm -v osionos_ai_models_sentiment:/data python:3.12-slim sh -c \
+  #     "pip install -q huggingface_hub==0.36.0 && python -c \"from huggingface_hub import snapshot_download; \
+  #       snapshot_download('cardiffnlp/twitter-xlm-roberta-base-sentiment-multilingual', revision='82107f4ccba672c9ab1eee538e727e462cad21de', cache_dir='/data')\""
+  #
+  osionos-ai-sentiment:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d
+    profiles: ["ai"]
+    command: ["--model-id", "cardiffnlp/twitter-xlm-roberta-base-sentiment-multilingual", "--revision", "82107f4ccba672c9ab1eee538e727e462cad21de", "--port", "80"]
+    environment:
+      # The model is already in the volume: the server never reaches the net.
+      HF_HUB_OFFLINE: "1"
+    volumes:
+      - osionos_ai_models_sentiment:/data:ro
+    expose:
+      - "80"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:80/health"]
+      interval: 30s
+      start_interval: 10s
+      timeout: 5s
+      start_period: 120s
+      retries: 12
+    networks:
+      - osionos-ai-classify-net
+    restart: unless-stopped
+    # RSS 2.32 GiB (spikes/a1/results/encoders/RESULTS.md:68, osionos PR #96)
+    # + 30 % = 3.0 GiB.
+    mem_limit: 3g
+    cpus: 2
+
   # osionos-ai-stt — the speech-to-text server of the dictation: speaches
   # (MIT), serving Systran/faster-whisper-small on the CPU.
   #
@@ -804,6 +901,47 @@ services:
     mem_limit: 1536m
     cpus: 4
 
+  # osionos-ai-vlm — the local vision model of "Describe image" (M7): Qwen2.5-VL-3B
+  # Q4_K_M on llama.cpp, CPU. The image is the one spikes/a1 measured
+  # (images.lock `llama-cpp-cpu`, the same digest as the guard), the flags are
+  # spikes/a1/vlm-server.sh's. Measured there: see results/vlm/RESULTS.md.
+  # The files are in the external volume below, read-only: the server never
+  # writes to them. NO published port and NO egress: it is reached by
+  # osionos-ai over osionos-ai-vlm-net, which is internal.
+  # One slot (-np 1): the service lets one describe through per replica.
+  osionos-ai-vlm:
+    image: ghcr.io/ggml-org/llama.cpp@sha256:ba384e66b3f3b6474dc0285ed44466b6f025c7106865d915f1fe5ae2a2da7411
+    profiles: ["ai"]
+    command:
+      [
+        "--jinja",
+        "-c", "4096",
+        "-np", "1",
+        "-t", "6",
+        "--mmproj", "/mnt/storage/vlm/mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf",
+        "-m", "/mnt/storage/vlm/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf",
+        "--alias", "qwen2.5-vl-3b-instruct-q4_k_m",
+        "--host", "0.0.0.0",
+        "--port", "8080",
+      ]
+    volumes:
+      - osionos_ai_a1_data:/mnt/storage:ro
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      start_interval: 10s
+      timeout: 5s
+      # Two GGUF files (1.9 GB + 0.8 GB) to map.
+      start_period: 90s
+      retries: 12
+    networks:
+      - osionos-ai-vlm-net
+    restart: unless-stopped
+    mem_limit: 6g
+    cpus: 6
+
   # osionos-ai-indexer — the index worker: the SAME image as the service (the
   # one the `osionos-ai` service above builds), but its entrypoint is the
   # indexer. It embeds the pages into ai_chunks and drains ai_index_queue.
@@ -839,6 +977,39 @@ services:
       disable: true
     restart: unless-stopped
     mem_limit: 512m
+
+  # osionos-ai-jobs — the jobs worker: the SAME image as the service, its
+  # entrypoint is src/jobs/main.ts. It drains ai_jobs: kind `moderate` goes to
+  # osionos-ai-tox, kind `sentiment` to osionos-ai-sentiment. `ai` profile
+  # only; the public overlay moves it to `ai-classify` (C147, C85).
+  # OSIONOS_MODERATION_ACTIONS stays `log` and OSIONOS_MODERATION_CALIBRATED_POLICY
+  # is unset: an uncalibrated policy runs in log, which is what dev wants.
+  osionos-ai-jobs:
+    image: ${OSIONOS_AI_IMAGE:-track-binocle/osionos-ai:local}
+    profiles: ["ai"]
+    entrypoint: ["node", "--experimental-strip-types", "src/jobs/main.ts"]
+    environment:
+      OSIONOS_AI_DATABASE_URL: '${OSIONOS_AI_DATABASE_URL:-postgres://postgres@osionos-ai-db:5432/osionos_ai}'
+      PGPASSWORD: ${OSIONOS_AI_DB_PASSWORD:-osionos-ai-dev}
+      OSIONOS_MODERATION_ACTIONS: log
+      OSIONOS_MODERATION_L1_URL: http://osionos-ai-tox:80
+      OSIONOS_SENTIMENT_URL: http://osionos-ai-sentiment:80
+    depends_on:
+      osionos-ai-db:
+        condition: service_healthy
+      osionos-ai-tox:
+        condition: service_healthy
+      osionos-ai-sentiment:
+        condition: service_healthy
+    networks:
+      - default
+      - osionos-ai-classify-net
+    # NO healthcheck on purpose: it serves nothing (same as the indexer).
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 1
 
   # The recommender's nightly training (M3, services/osionos-ml): the event log in,
   # a candidate model out, promoted only when it is not worse than the champion.
@@ -1610,6 +1781,12 @@ volumes:
   # pre-fetched by the one-shot command of the osionos-ai-stt block.
   osionos_ai_models_stt:
     name: osionos_ai_models_stt
+  # The classifiers' models, pre-fetched by the one-shot commands of the
+  # osionos-ai-tox and osionos-ai-sentiment blocks.
+  osionos_ai_models_tox:
+    name: osionos_ai_models_tox
+  osionos_ai_models_sentiment:
+    name: osionos_ai_models_sentiment
   # The image engine's diffusion model and VAE, pre-fetched by the one-shot
   # command of the osionos-ai-sd block.
   osionos_sd_models:
@@ -1623,6 +1800,13 @@ volumes:
   # checks every byte against the lock of the spike (`spikes/a1/models.lock`).
   osionos_ai_image_check:
     name: osionos_ai_image_check
+  # The VLM of "Describe image" (M7): the GGUF files under /vlm. They are
+  # fetched and sha256-checked by `spikes/a1/fetch.py --only vlm` (osionos
+  # services/osionos-ai), never by compose: the volume is external and mounted
+  # read-only.
+  osionos_ai_a1_data:
+    name: osionos_ai_a1_data
+    external: true
 
 networks:
   # The grobase backend stack's network (docker project `mini-baas`), declared
@@ -1648,6 +1832,14 @@ networks:
   # osionos-ai-guard and osionos-ai join it — the model is pre-fetched into
   # its volume, and the guard answers on this network and on no other.
   osionos-ai-guard-net:
+    internal: true
+  # The VLM of "Describe image": `internal: true` = NO egress. ONLY
+  # osionos-ai-vlm and osionos-ai join it.
+  osionos-ai-vlm-net:
+    internal: true
+  # The classifiers of the jobs worker: `internal: true` = NO egress. ONLY
+  # osionos-ai-tox, osionos-ai-sentiment and osionos-ai-jobs join it.
+  osionos-ai-classify-net:
     internal: true
   # Internal-only network for the IDE code runner: `internal: true` = NO egress
   # (the Docker daemon enforces it without needing unprivileged user namespaces),
