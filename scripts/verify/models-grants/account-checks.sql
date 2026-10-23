@@ -2296,11 +2296,10 @@ $$;
 -- matches nothing and has no foreign key is found only by p5_erase_canary, and
 -- only if the seed puts the uuid in it.
 BEGIN;
-DO $$
-DECLARE r record;
-BEGIN
-  FOR r IN
+CREATE FUNCTION pg_temp.p5_unregistered() RETURNS SETOF text LANGUAGE sql AS $f$
     WITH allow(t, c, why) AS (VALUES
+      ('auth_audit_events', 'email', 'the row goes by user_id; a failed-login row with no user_id is not reached'),
+      ('auth_audit_events', 'user_agent', 'the row goes by user_id'),
       ('ai_jobs', 'subject_kind', 'label'), ('ai_moderation_events', 'subject_kind', 'label'), ('ai_sentiment', 'subject_kind', 'label'),
       ('calendar_accounts', 'account_email', 'mailbox address, not a user id'), ('calendar_sources', 'account_id', 'calendar account id'),
       ('mail_accounts', 'account_email', 'mailbox address, not a user id'), ('mail_messages', 'account_id', 'mail account id'),
@@ -2313,16 +2312,23 @@ BEGIN
       ('osionos_user_reports', 'decision', 'label'), ('osionos_user_reports', 'decision_note', 'moderator free text'),
       ('osionos_user_reports', 'subject_kind', 'label'), ('osionos_username_history', 'username', 'the held name, released at released_at'),
       ('users', 'email', 'replaced by the erase'), ('users', 'username', 'replaced by the erase'))
-    SELECT c.relname || '.' || a.attname AS col
+    SELECT (c.relname || '.' || a.attname)::text
       FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
      WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'p') AND NOT c.relispartition
        AND a.attnum > 0 AND NOT a.attisdropped
-       AND format_type(a.atttypid, a.atttypmod) IN ('uuid', 'text', 'character varying', 'jsonb', 'uuid[]', 'text[]')
+       AND (format_type(a.atttypid, a.atttypmod) LIKE 'uuid%' OR format_type(a.atttypid, a.atttypmod) LIKE 'character varying%'
+            OR format_type(a.atttypid, a.atttypmod) IN ('text', 'citext') OR format_type(a.atttypid, a.atttypmod) LIKE 'json%'
+            OR format_type(a.atttypid, a.atttypmod) LIKE '%[]')
        AND (a.attname ~ '(user|owner|author|actor|subject|creator|requester|addressee|follower|followee|blocker|blocked|reporter|principal|(^|_)by$|collaborator|member|sender|recipient|assignee|invitee|inviter|decision|decided|target|account|email|participant|holder|grantee|identity|profile)'
             OR EXISTS (SELECT 1 FROM pg_constraint k WHERE k.conrelid = c.oid AND k.contype = 'f' AND k.conkey = ARRAY[a.attnum]
                           AND k.confrelid IN ('auth.users'::regclass, 'public.users'::regclass)))
        AND NOT EXISTS (SELECT 1 FROM public.osionos_account_data_map m WHERE m.table_name = c.relname AND m.column_name = a.attname)
        AND NOT EXISTS (SELECT 1 FROM allow WHERE allow.t = c.relname AND allow.c = a.attname)
+$f$;
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN SELECT x AS col FROM pg_temp.p5_unregistered() x
   LOOP
     PERFORM pg_temp.p5_ok('unregistered ' || r.col, false);
   END LOOP;
@@ -2339,11 +2345,22 @@ BEGIN
   PERFORM pg_temp.p5_ok('scan sees at least 85 candidate columns', (
     SELECT count(*) FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
      WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'p') AND NOT c.relispartition
-       AND a.attnum > 0 AND NOT a.attisdropped AND format_type(a.atttypid, a.atttypmod) IN ('uuid', 'text', 'character varying', 'jsonb', 'uuid[]', 'text[]')
+       AND a.attnum > 0 AND NOT a.attisdropped AND (format_type(a.atttypid, a.atttypmod) LIKE 'uuid%' OR format_type(a.atttypid, a.atttypmod) LIKE 'character varying%'
+            OR format_type(a.atttypid, a.atttypmod) IN ('text', 'citext') OR format_type(a.atttypid, a.atttypmod) LIKE 'json%'
+            OR format_type(a.atttypid, a.atttypmod) LIKE '%[]')
        AND a.attname ~ '(user|owner|author|actor|subject|creator|requester|addressee|follower|followee|blocker|blocked|reporter|principal)') >= 85);
 END
 $$;
-SELECT * FROM pg_temp.p5_row('p5_erasure_complete', 3);
+-- a varchar(36) author column is still a user key: the old exact-IN filter skipped it
+ALTER TABLE public.osionos_follows ADD COLUMN author_ref varchar(36);
+ALTER TABLE public.osionos_follows ADD COLUMN actor_blob json;
+DO $$ BEGIN
+  PERFORM pg_temp.p5_ok('scratch varchar(36) author_ref is reported unregistered',
+    EXISTS (SELECT 1 FROM pg_temp.p5_unregistered() x WHERE x = 'osionos_follows.author_ref'));
+  PERFORM pg_temp.p5_ok('scratch json actor_blob is reported unregistered',
+    EXISTS (SELECT 1 FROM pg_temp.p5_unregistered() x WHERE x = 'osionos_follows.actor_blob'));
+END $$;
+SELECT * FROM pg_temp.p5_row('p5_erasure_complete', 5);
 ROLLBACK;
 
 -- p5_erase_canary: the end-to-end completeness gate. Seed a row in every
@@ -2715,6 +2732,9 @@ ROLLBACK;
 -- p5_erase_objects_recorded: every storage key the user's rows name, and the export
 -- artifacts, is in the retry list after the erase; B has none; a second erase adds
 -- none and the keys survive the erase (the bridge deletes them after the objects).
+-- Avatar, banner and collab-upload objects have no key in any column the SQL can
+-- read: the bridge's runner (sub-package c) deletes them by owner prefix, and
+-- until then they are accepted residual risk (see the migration header).
 -- Caveat: a key is recorded from the registry's object columns; an object whose
 -- key sits in a column the registry does not name is not recorded.
 BEGIN;
@@ -2738,12 +2758,15 @@ BEGIN
     WHERE user_id = a AND bucket = 'account-exports' AND key = v_exp_key));
   PERFORM pg_temp.p5_ok('the attachment key is recorded: ' || coalesce(v_att_key, '-'), EXISTS (SELECT 1 FROM public.osionos_account_erasure_objects
     WHERE user_id = a AND bucket = 'chat' AND key = v_att_key));
+  PERFORM pg_temp.p5_ok('every bucket the registry names has a recorded key for A',
+    NOT EXISTS (SELECT 1 FROM public.osionos_account_data_map m WHERE m.object_bucket IS NOT NULL AND m.erase <> 'keep'
+                  AND NOT EXISTS (SELECT 1 FROM public.osionos_account_erasure_objects o WHERE o.user_id = a AND o.bucket = m.object_bucket)));
   PERFORM pg_temp.p5_ok('B''s recorded keys are unchanged by A''s erase', (SELECT count(*) FROM public.osionos_account_erasure_objects WHERE user_id = b) = v_b0);
   PERFORM pg_temp.p5_as_svc('SELECT public.osionos_account_erase(''' || a || ''')::text');
   SELECT count(*) INTO v_n2 FROM public.osionos_account_erasure_objects WHERE user_id = a;
   PERFORM pg_temp.p5_ok('a second erase adds none: ' || v_n1 || ' then ' || v_n2, v_n1 = v_n2);
 END $$;
-SELECT * FROM pg_temp.p5_row('p5_erase_objects_recorded', 6);
+SELECT * FROM pg_temp.p5_row('p5_erase_objects_recorded', 7);
 ROLLBACK;
 
 -- p5_audit_scrubbed: the audit rows stay (actor and subject kept, for
@@ -2911,24 +2934,40 @@ ROLLBACK;
 -- p5_export_no_secrets: no registry export_columns entry names a secret. The
 -- failing message lists the offending table.column entries. Floor: at least 25
 -- registry rows carry export_columns, so an emptied registry does not pass.
+-- The five auth-plane secrets are also listed by table.column, so a rename of the
+-- pattern cannot let one through, and a failing row names the offender.
 -- Caveat: a name match; a secret in a column called something innocent is not
 -- seen, and a harmless column called "keyword" is a false alarm.
 BEGIN;
 DO $$
 DECLARE r record;
 BEGIN
+  -- by name: the secret columns of the auth planes (sessions P3-2, PATs P3-3, MFA P5-1)
   FOR r IN SELECT m.table_name || '.' || c AS col
              FROM public.osionos_account_data_map m, unnest(m.export_columns) c
-            WHERE c ~ '(hash|secret|token|password|recovery|totp|key|salt|ip_prefix)'
+            WHERE c ~ '(hash|secret|token|password|recovery|totp|key|salt|ip_prefix|hmac|_enc$)'
+               OR (m.table_name, c) IN (('osionos_sessions', 'refresh_hash'), ('osionos_sessions', 'ip_hash'),
+                                        ('osionos_personal_access_tokens', 'token_hash'),
+                                        ('osionos_mfa_totp', 'secret_enc'), ('osionos_mfa_recovery_codes', 'code_hmac'))
   LOOP
     PERFORM pg_temp.p5_ok('secret-named export column ' || r.col, false);
   END LOOP;
+  -- the named list must still point at real columns, or a rename would empty it silently
+  PERFORM pg_temp.p5_ok('the five named secret columns still exist (' || (
+    SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public'
+       AND (table_name, column_name) IN (('osionos_sessions', 'refresh_hash'), ('osionos_sessions', 'ip_hash'),
+            ('osionos_personal_access_tokens', 'token_hash'), ('osionos_mfa_totp', 'secret_enc'),
+            ('osionos_mfa_recovery_codes', 'code_hmac'))) || ' of 5)',
+    (SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public'
+       AND (table_name, column_name) IN (('osionos_sessions', 'refresh_hash'), ('osionos_sessions', 'ip_hash'),
+            ('osionos_personal_access_tokens', 'token_hash'), ('osionos_mfa_totp', 'secret_enc'),
+            ('osionos_mfa_recovery_codes', 'code_hmac'))) = 5);
   PERFORM pg_temp.p5_ok('at least 25 registry rows carry export_columns',
     (SELECT count(*) FROM public.osionos_account_data_map WHERE export_columns IS NOT NULL) >= 25);
   PERFORM pg_temp.p5_ok('at least 100 export columns are named',
     (SELECT count(*) FROM public.osionos_account_data_map m, unnest(m.export_columns) c) >= 100);
 END $$;
-SELECT * FROM pg_temp.p5_row('p5_export_no_secrets', 2);
+SELECT * FROM pg_temp.p5_row('p5_export_no_secrets', 3);
 ROLLBACK;
 
 -- p5_export_reachable: every registry row with export_columns names a table and
@@ -2975,6 +3014,109 @@ BEGIN
   PERFORM pg_temp.p5_ok('at least 9 erasure-plane functions exist, found ' || v_n, v_n >= 9);
 END $$;
 SELECT * FROM pg_temp.p5_row('p5_no_exec_grants', 1);
+ROLLBACK;
+-- p5_report_survives_reporter: erasing a reporter must not lift a sanction.
+-- A reported C and the report carries a ban; B reported C too. Erasing A
+-- anonymises the reporter (NULL) and leaves the row, and the decision, in place.
+-- Caveat: asserted for a ban on a user subject; other decision kinds share the
+-- columns but are not seeded separately.
+BEGIN;
+DO $$
+DECLARE
+  a constant uuid := 'a5a5a5a5-0000-4000-8000-00000000000a';
+  b constant uuid := 'b5b5b5b5-0000-4000-8000-00000000000b';
+  c constant uuid := 'c5c5c5c5-0000-4000-8000-0000000000cc';
+  m constant uuid := 'c5c5c5c5-0000-4000-8000-0000000000dd';
+  ra constant uuid := 'c5c5c5c5-0000-4000-8000-0000000000e1';
+  rb constant uuid := 'c5c5c5c5-0000-4000-8000-0000000000e2';
+  v_before text; v_b_before text; v_b_after text; v_after text;
+BEGIN
+  PERFORM pg_temp.p5_world();
+  PERFORM pg_temp.p5_user(c, 'Carl Accused'); PERFORM pg_temp.p5_user(m, 'Mod Erator');
+  INSERT INTO public.osionos_user_reports (id, reporter_id, subject_user_id, subject_kind, category, status, decision, decision_until, decision_by, decision_at, decision_note)
+  VALUES (ra, a, c, 'user', 'abuse', 'resolved', 'ban', now() + interval '30 days', m, now(), 'repeat offender'),
+         (rb, b, c, 'user', 'abuse', 'open', NULL, NULL, NULL, NULL, NULL);
+  SELECT md5(concat_ws('|', decision, decision_until, decision_by, decision_at, decision_note, subject_user_id, status)) INTO v_before
+    FROM public.osionos_user_reports WHERE id = ra;
+  SELECT md5(r::text) INTO v_b_before FROM public.osionos_user_reports r WHERE id = rb;
+  PERFORM pg_temp.p5_ok('erase A ' || pg_temp.p5_as_svc('SELECT public.osionos_account_erase(''' || a || ''')::text'), true);
+  PERFORM pg_temp.p5_ok('the ban report still exists', EXISTS (SELECT 1 FROM public.osionos_user_reports WHERE id = ra));
+  PERFORM pg_temp.p5_ok('its reporter is NULL', (SELECT reporter_id IS NULL FROM public.osionos_user_reports WHERE id = ra));
+  SELECT md5(concat_ws('|', decision, decision_until, decision_by, decision_at, decision_note, subject_user_id, status)) INTO v_after
+    FROM public.osionos_user_reports WHERE id = ra;
+  PERFORM pg_temp.p5_ok('the decision, its moderator, expiry and the accused are unchanged', v_before = v_after);
+  PERFORM pg_temp.p5_ok('the decision is still a ban', (SELECT decision FROM public.osionos_user_reports WHERE id = ra) = 'ban');
+  SELECT md5(r::text) INTO v_b_after FROM public.osionos_user_reports r WHERE id = rb;
+  PERFORM pg_temp.p5_ok('B''s report about C is untouched', v_b_before = v_b_after);
+  PERFORM pg_temp.p5_ok('no report names A as reporter any more', NOT EXISTS (SELECT 1 FROM public.osionos_user_reports WHERE reporter_id = a));
+  PERFORM pg_temp.p5_ok('the registry says nullify for the reporter',
+    (SELECT erase FROM public.osionos_account_data_map WHERE table_name = 'osionos_user_reports' AND column_name = 'reporter_id') = 'nullify');
+END $$;
+SELECT * FROM pg_temp.p5_row('p5_report_survives_reporter', 8);
+ROLLBACK;
+
+-- p5_users_scrubbed: after the erase the users row holds nothing of A. Every
+-- column but id, email, created_at and updated_at is NULL, the email is the
+-- erased placeholder, and the row rendered as JSON (id removed) names none of
+-- A's email, name, username or uuid. Non-default values are set first so a
+-- column left at its default cannot hide a missed scrub.
+-- Caveat: the JSON search is a text match; a value stored encoded would pass.
+BEGIN;
+DO $$
+DECLARE
+  a constant uuid := 'a5a5a5a5-0000-4000-8000-00000000000a';
+  b constant uuid := 'b5b5b5b5-0000-4000-8000-00000000000b';
+  v_left text; v_b_before text; v_json text;
+BEGIN
+  PERFORM pg_temp.p5_world();
+  UPDATE public.users SET theme = 'dark-p5', notifications_enabled = false, is_email_verified = true WHERE id = a;
+  SELECT md5(u::text) INTO v_b_before FROM public.users u WHERE id = b;
+  PERFORM pg_temp.p5_ok('erase A ' || pg_temp.p5_as_svc('SELECT public.osionos_account_erase(''' || a || ''')::text'), true);
+  SELECT string_agg(k, ',') INTO v_left FROM public.users u, jsonb_each(to_jsonb(u)) e(k, v)
+   WHERE u.id = a AND k NOT IN ('id', 'email', 'created_at', 'updated_at') AND v <> 'null'::jsonb;
+  PERFORM pg_temp.p5_ok('every other column is NULL, left: ' || coalesce(v_left, '-'), v_left IS NULL);
+  PERFORM pg_temp.p5_ok('the email is the erased placeholder', (SELECT email FROM public.users WHERE id = a) ~ '^erased-[0-9a-f]{32}@erased\.invalid$');
+  SELECT (to_jsonb(u) - 'id')::text INTO v_json FROM public.users u WHERE id = a;
+  PERFORM pg_temp.p5_ok('no email of A in the row', v_json NOT ILIKE '%alice-p5%');
+  PERFORM pg_temp.p5_ok('no name of A in the row', v_json NOT ILIKE '%Alice%' AND v_json NOT ILIKE '%P5Canary%');
+  PERFORM pg_temp.p5_ok('no username of A in the row', v_json NOT ILIKE '%alicep5%');
+  PERFORM pg_temp.p5_ok('no uuid of A outside the id column', v_json NOT LIKE '%' || a::text || '%');
+  PERFORM pg_temp.p5_ok('no password hash of A in the row', v_json NOT LIKE '%hash-a%');
+  PERFORM pg_temp.p5_ok('B''s users row is untouched', (SELECT md5(u::text) FROM public.users u WHERE id = b) = v_b_before);
+END $$;
+SELECT * FROM pg_temp.p5_row('p5_users_scrubbed', 9);
+ROLLBACK;
+
+-- p5_foreign_content_null: a workspace holding a row nobody owns is not empty.
+-- O is the sole member and owner of W; W has a page whose owner_id is NULL (the
+-- column is nullable) and a message by a stranger. NOT IN over a NULL is NULL,
+-- which counted as "no foreign content" and deleted the workspace; IS DISTINCT
+-- FROM keeps it, owned by the tombstone. A message author is NOT NULL in the
+-- schema, so only the page can carry the NULL.
+-- Caveat: asserted for the page owner_id NULL; any other nullable author-like
+-- column in the registry takes the same generic branch but is not seeded here.
+BEGIN;
+DO $$
+DECLARE
+  o constant uuid := 'c6000000-0000-4000-8000-000000000001';
+  w constant uuid := 'c6000000-0000-4000-8000-0000000000a1';
+  w2 constant uuid := 'c6000000-0000-4000-8000-0000000000a2';
+  v_pg uuid; v_pg2 uuid;
+BEGIN
+  PERFORM pg_temp.p5_user(o, 'Orphan Owner', true);
+  PERFORM pg_temp.p5_ws(w, o); PERFORM pg_temp.p5_ws(w2, o);
+  v_pg := pg_temp.p5_page(w, o, 'private');
+  UPDATE public.osionos_pages SET owner_id = NULL WHERE id = v_pg;
+  PERFORM pg_temp.p5_ok('seeded page has a NULL owner', (SELECT owner_id IS NULL FROM public.osionos_pages WHERE id = v_pg));
+  PERFORM pg_temp.p5_ok('erase O ' || pg_temp.p5_as_svc('SELECT public.osionos_account_erase(''' || o || ''')::text', 'osionos.check.p5_n'), true);
+  PERFORM pg_temp.p5_ok('W (NULL-owner page) is kept', EXISTS (SELECT 1 FROM public.osionos_workspaces WHERE id = w));
+  PERFORM pg_temp.p5_ok('W is owned by the tombstone', (SELECT owner_id FROM public.osionos_workspaces WHERE id = w) = public.osionos_account_tombstone());
+  PERFORM pg_temp.p5_ok('the NULL-owner page is intact', EXISTS (SELECT 1 FROM public.osionos_pages WHERE id = v_pg AND owner_id IS NULL));
+  PERFORM pg_temp.p5_ok('the empty W2 is deleted', NOT EXISTS (SELECT 1 FROM public.osionos_workspaces WHERE id = w2));
+  PERFORM pg_temp.p5_ok('result says kept_orphaned 1: ' || current_setting('osionos.check.p5_n'),
+    current_setting('osionos.check.p5_n') LIKE '%"kept_orphaned": 1%');
+END $$;
+SELECT * FROM pg_temp.p5_row('p5_foreign_content_null', 7);
 ROLLBACK;
 
 -- The two isolation rows are LAST: a regressed regex in the uid helper raises

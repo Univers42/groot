@@ -107,13 +107,15 @@
 #   account profiles file applied after it leaves the same for the four new
 #   tables and the directory view, and its NOTIFY comes after the COMMIT
 #   p5 the account data map and the erase (P5-6-a, models/osionos-account-erasure-migration.sql):
-#   p5_erasure_complete every user-keyed column is in the registry · p5_erase_canary a
+#   p5_erasure_complete every user-keyed column (any uuid/varchar/text/json type) is in the registry · p5_erase_canary a
 #   user's seeded row in every registry table is gone or tombstoned after the erase ·
 #   p5_erase_transfer/_idempotent/_isolated/_sequence/_objects_recorded/_refuses_live/
 #   _refuses_early/p5_plan_matches_erase/p5_dry_run_no_stamp/p5_audit_scrubbed/
-#   p5_no_fk_to_tombstone the erase's contract · p5_export_acl/_single_flight/
+#   p5_no_fk_to_tombstone/p5_report_survives_reporter/p5_users_scrubbed/
+#   p5_foreign_content_null the erase's contract · p5_export_acl/_single_flight/
 #   _no_secrets/_reachable the export job table · p5_no_exec_grants the functions are
-#   service_role only · p5_race_claim/p5_race_cancel two-session races (run_races)
+#   service_role only · p5_race_claim/p5_race_cancel two-session races (run_races) ·
+#   p5_race_cancel_first/p5_race_cancel_after_claim lock-ordered races (run_lock_races)
 #
 # ISOLATION
 #   Throwaway containers only (--rm --network none, no port, no volume); the live
@@ -668,6 +670,9 @@ run_checks() {
 	check_count "$1" p5_export_no_secrets p5_export_no_secrets
 	check_count "$1" p5_export_reachable p5_export_reachable
 	check_count "$1" p5_no_exec_grants p5_no_exec_grants
+	check_count "$1" p5_report_survives_reporter p5_report_survives_reporter
+	check_count "$1" p5_users_scrubbed p5_users_scrubbed
+	check_count "$1" p5_foreign_content_null p5_foreign_content_null
 	# Before check_standalone: it drops the account tables, which the races need.
 	run_races "$1"
 	probe "$1" K1 authenticated "SELECT count(*) FROM public.osionos_sessions"
@@ -682,12 +687,95 @@ run_checks() {
 	check_standalone "$1"
 }
 
+# lock_race <scenario> <label> <user> <claimed> — the cancel wins, ordered by a held
+# row lock and a flag file, never by a sleep. Session one cancels (DELETE as the
+# account role) and keeps the request row locked, uncommitted, until the flag
+# file appears; session two runs the erase, which must queue behind that lock;
+# the flag is written only once pg_stat_activity shows the erase waiting on a
+# lock. When the cancel then commits, the erase wakes to no row and must raise
+# no_deletion_request with the person's users row unchanged and no object key
+# recorded. <claimed> = 1 claims the request first, so the cancel lands after the
+# claim and before erased_at.
+# Caveat: every wait is a bounded poll (about 20 s); on a host too loaded to get
+# there the case fails (a missing pass, never a false pass).
+lock_race() {
+	lr_flag="/tmp/lock-race-${2}-$$.flag"
+	lr_u="$3"
+	lr_label="p5_race_${2}"
+	docker exec "${CTN}" rm -f "${lr_flag}"
+	lr_before="$(printf "SELECT md5(to_jsonb(u)::text) FROM public.users u WHERE id = '%s';\n" "${lr_u}" | psql_rows)"
+	if [ "$4" = 1 ]; then
+		printf '%s\n' "SELECT count(*) FROM public.osionos_account_deletion_claim(20);" | psql_rows >/dev/null 2>&1 || true
+		if [ "$(printf "SELECT count(*) FROM public.osionos_account_deletion_requests WHERE user_id = '%s' AND claimed_at IS NOT NULL AND erased_at IS NULL;\n" "${lr_u}" | psql_rows)" != 1 ]; then
+			fail "$1" "${lr_label}" "the request was not claimed before the cancel"
+			return 0
+		fi
+	fi
+	printf '%s\n' 'BEGIN;' 'SET LOCAL ROLE osionos_account_user;' \
+		"SELECT set_config('request.jwt.claims','{\"sub\":\"${lr_u}\",\"aud\":\"osionos-account\",\"role\":\"osionos_account_user\"}', true);" \
+		"DELETE FROM public.osionos_account_deletion_requests WHERE user_id = '${lr_u}';" \
+		"\\! i=0; while [ ! -e ${lr_flag} ] && [ \$i -lt 400 ]; do sleep 0.05; i=\$((i+1)); done" 'COMMIT;' |
+		psql_rows >"${WORK}/${lr_label}-cancel-$1.out" 2>"${WORK}/${lr_label}-cancel-$1.err" &
+	lr_cancel=$!
+	lr_i=0
+	until [ "$(printf "SELECT xmax::text FROM public.osionos_account_deletion_requests WHERE user_id = '%s';\n" "${lr_u}" | psql_rows)" != 0 ] || [ "${lr_i}" -ge 200 ]; do
+		sleep 0.1
+		lr_i=$((lr_i + 1))
+	done
+	printf '%s\n' "SELECT public.osionos_account_erase('${lr_u}') IS NOT NULL;" |
+		psql_rows >"${WORK}/${lr_label}-erase-$1.out" 2>"${WORK}/${lr_label}-erase-$1.err" &
+	lr_erase=$!
+	lr_i=0
+	until [ "$(printf "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND pid <> pg_backend_pid() AND query LIKE '%%osionos_account_erase(%%%s%%';\n" "${lr_u}" | psql_rows)" -ge 1 ] || [ "${lr_i}" -ge 200 ]; do
+		sleep 0.1
+		lr_i=$((lr_i + 1))
+	done
+	lr_blocked=$((lr_i < 200))
+	docker exec "${CTN}" touch "${lr_flag}"
+	wait "${lr_cancel}" || true
+	wait "${lr_erase}" || true
+	docker exec "${CTN}" rm -f "${lr_flag}"
+	lr_after="$(printf "SELECT md5(to_jsonb(u)::text) FROM public.users u WHERE id = '%s';\n" "${lr_u}" | psql_rows)"
+	lr_reqs="$(printf "SELECT count(*) FROM public.osionos_account_deletion_requests WHERE user_id = '%s';\n" "${lr_u}" | psql_rows)"
+	lr_objs="$(printf "SELECT count(*) FROM public.osionos_account_erasure_objects WHERE user_id = '%s';\n" "${lr_u}" | psql_rows)"
+	if [ "${lr_blocked}" = 1 ] && grep -q 'no_deletion_request' "${WORK}/${lr_label}-erase-$1.err" &&
+		[ "${lr_reqs}" = 0 ] && [ "${lr_objs}" = 0 ] && [ -n "${lr_before}" ] && [ "${lr_before}" = "${lr_after}" ]; then
+		pass "$1" "${lr_label}" "the erase queued behind the cancel, raised no_deletion_request and changed nothing"
+	else
+		fail "$1" "${lr_label}" "queued=${lr_blocked} requests=${lr_reqs} objects=${lr_objs} users-row-same=$([ "${lr_before}" = "${lr_after}" ] && echo yes || echo no); $(head -2 "${WORK}/${lr_label}-erase-$1.err" | tr '\n' ' ')"
+	fi
+}
+
+run_lock_races() {
+	lr_d='c5c5c5c5-0000-4000-8000-0000000000d4'
+	lr_e='c5c5c5c5-0000-4000-8000-0000000000e5'
+	lr_clean="SET session_replication_role = replica; DELETE FROM public.osionos_account_deletion_requests WHERE user_id IN ('${lr_d}','${lr_e}'); DELETE FROM public.users WHERE id IN ('${lr_d}','${lr_e}'); DELETE FROM auth.users WHERE id IN ('${lr_d}','${lr_e}');"
+	printf '%s\n' "${lr_clean}" | psql_rows >/dev/null 2>&1 || true
+	if ! printf '%s\n' "SET session_replication_role = replica;" \
+		"INSERT INTO auth.users (id) VALUES ('${lr_d}'), ('${lr_e}');" \
+		"INSERT INTO public.users (id, email, name, username) VALUES ('${lr_d}', 'd@lock.test', 'Dee Lock', 'deelock'), ('${lr_e}', 'e@lock.test', 'Eve Lock', 'evelock');" \
+		"INSERT INTO public.osionos_account_deletion_requests (user_id, requested_at, scheduled_for)" \
+		"VALUES ('${lr_d}', now() - interval '30 days', now() - interval '1 day'), ('${lr_e}', now() - interval '30 days', now() - interval '1 day');" |
+		psql_rows >"${WORK}/lock-seed-$1.out" 2>"${WORK}/lock-seed-$1.err"; then
+		fail "$1" "p5_race_cancel_first" "could not seed the lock races: $(head -1 "${WORK}/lock-seed-$1.err")"
+		fail "$1" "p5_race_cancel_after_claim" "could not seed the lock races"
+		return 0
+	fi
+	lock_race "$1" cancel_first "${lr_d}" 0
+	lock_race "$1" cancel_after_claim "${lr_e}" 1
+	printf '%s\n' "${lr_clean}" | psql_rows >/dev/null 2>&1 || true
+}
+
 # run_races <scenario> — the two interleavings a single-session check cannot
 # make. Two sessions, committed rows, a sleep to hold the first one open:
 #  p5_race_claim   a second claimer must skip the row the first holds, and return
 #                  the next one, inside 2 s (lock_timeout turns a wait into an error)
 #  p5_race_cancel  a cancel that arrives while the erase holds the request is
 #                  refused with deletion_in_progress once the erase commits
+# run_lock_races then covers the other order, by a held lock and not a sleep:
+#  p5_race_cancel_first        the cancel holds the request row, the erase queues
+#                              behind it, the cancel commits: no_deletion_request
+#  p5_race_cancel_after_claim  the same after the runner claimed the request
 # Caveat: ordering is by sleep (session two starts 1.5 s after session one has taken
 # its lock), so a loaded host can invert it; the claim race then reads as a FAIL
 # (under-reporting a pass, never over-reporting one). Rows use fixed ids and are
@@ -741,6 +829,7 @@ run_races() {
 		fail "$1" "p5_race_cancel" "cancel racing the erase: stamped rows left ${left}; $(head -2 "${WORK}/race2-b-$1.err" | tr '\n' ' ')"
 	fi
 	printf '%s\n' "${race_clean}" | psql_rows >"${WORK}/race-clean-$1.out" 2>&1 || true
+	run_lock_races "$1"
 }
 
 run_scenario() {
