@@ -31,6 +31,9 @@ services:
     build:
       args:
         VITE_API_URL: ${PUBLIC_ORIGIN:?set PUBLIC_ORIGIN in .env.public}:10000
+        # The assistant's only switch (src/features/ai/api/aiClient.ts). The proxy behind :10000
+        # sends /api/ai/ to osionos-ai; left empty, release R5 shipped the service with no UI.
+        VITE_AI_URL: ${PUBLIC_ORIGIN}:10000
         VITE_PRISMATICA_URL: ${PUBLIC_SITE_ORIGIN:-${PUBLIC_ORIGIN}}
         VITE_BAAS_URL: ${PUBLIC_ORIGIN}:8443
         VITE_BAAS_API_KEY: ""
@@ -76,6 +79,9 @@ services:
       AUTH_TRUSTED_PROXY_HOPS: ${AUTH_TRUSTED_PROXY_HOPS:?set AUTH_TRUSTED_PROXY_HOPS in .env.public (measure it)}
 
   osionos-bridge:
+    # The :public tags keep the public images apart from the ai-dev stack's :local ones
+    # (a public build must never overwrite them); until now only the release overlay set them.
+    image: track-binocle/osionos-bridge:public
     environment:
       OSIONOS_APP_URL: ${PUBLIC_ORIGIN}:8443
       OSIONOS_ALLOWED_ORIGIN: ${PUBLIC_ORIGIN}:8443
@@ -102,6 +108,7 @@ services:
   # profile move to a profile public never enables, so `--profile ai` starts
   # only the five. scripts/verify/ai-public-flags-off.sh proves it.
   osionos-ai:
+    image: track-binocle/osionos-ai:public
     ports: !reset []
     # The live (grobase) database, role osionos_ai: never the dev osionos-ai-db
     # with its default password (R-C5). The grobase link relays Kong only, so the
@@ -114,6 +121,8 @@ services:
       OSIONOS_AI_IMAGES: ""
       OSIONOS_AI_PAT: ""
       OSIONOS_AI_STT_URL: ""
+      # Describe image (M7) stays off in public until the user decides.
+      OSIONOS_AI_VLM_URL: ""
       # The platform connection on public: OpenRouter's free models only (R-C10), the key and
       # the list from .env.public, never .env.local, so the dev stack keeps its local model.
       OSIONOS_AI_UPSTREAM_BASE_URL: https://openrouter.ai/api/v1
@@ -130,6 +139,7 @@ services:
     mem_limit: 512m
 
   osionos-ai-indexer:
+    image: track-binocle/osionos-ai:public
     environment:
       OSIONOS_AI_DATABASE_URL: ${OSIONOS_AI_PUBLIC_DATABASE_URL:?set OSIONOS_AI_PUBLIC_DATABASE_URL in .env.public (the live grobase DB, role osionos_ai)}
     networks: !override
@@ -142,6 +152,15 @@ services:
 
   osionos-ai-redis:
     mem_limit: 128m
+
+  # The nightly recommender training, on the live database as role osml_job.
+  osionos-ml-job:
+    image: track-binocle/osionos-ml:public
+    environment:
+      DATABASE_URL: ${OSML_PUBLIC_DATABASE_URL:?set OSML_PUBLIC_DATABASE_URL in .env.public (the live grobase DB, role osml_job)}
+      PGPASSWORD: ""
+    depends_on: !reset {}
+    mem_limit: 1g
 
   # Caveat: the caps are sized for the host's headroom, not measured under load
   # (R-C6 asks for docker stats after startup). The bulk embedder gets fewer CPUs
@@ -160,6 +179,16 @@ services:
     profiles: !override ["ai-dev-only"]
   osionos-ai-stt:
     profiles: !override ["ai-dev-only"]
+  # Started only by --profile ai-vlm, which the public stack never passes.
+  osionos-ai-vlm:
+    profiles: !override ["ai-vlm"]
+  # Not started on public: moderation stays at the bridge's L0 + log, sentiment is off until its licence check (devil C147, C149).
+  osionos-ai-tox:
+    profiles: !override ["ai-classify"]
+  osionos-ai-sentiment:
+    profiles: !override ["ai-classify"]
+  osionos-ai-jobs:
+    profiles: !override ["ai-classify"]
 
   # Static previews for the apps node (second Funnel node). Prod target = nginx serving dist/, built
   # with every bridge/BaaS URL empty so the apps make no request outside their own origin. They
@@ -205,6 +234,7 @@ services:
       - ./infrastructure/tls/public.d/http-limits.conf:/etc/nginx/track-binocle.d/http-limits.conf:ro
       - ./infrastructure/tls/public.d/ai-public.conf:/etc/nginx/track-binocle.d/ai-public.conf:ro
       - ./infrastructure/tls/public.d/apps.conf.template:/etc/nginx/templates/http-apps.conf.template:ro
+      - ./infrastructure/tls/public.d/http-locked-ai-cors.conf.template:/etc/nginx/templates/http-locked-ai-cors.conf.template:ro
 
 networks:
   apps-static-net:
