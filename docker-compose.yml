@@ -1257,6 +1257,9 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-noreply@mini-baas.local}
       SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Prismatica}
+      # Signed confirmation/reset-link lifetime. AUTH_LINK_SIGNING_KEY is supplied by .env.local above.
+      AUTH_VERIFY_TOKEN_TTL_SEC: ${AUTH_VERIFY_TOKEN_TTL_SEC:-86400}
+      AUTH_RESET_TOKEN_TTL_SEC: ${AUTH_RESET_TOKEN_TTL_SEC:-3600}
       MAILPIT_API_URL: http://mailpit:8025
       MAILPIT_VERIFY_DELIVERY: ${MAILPIT_VERIFY_DELIVERY:-true}
       # --- security hardening (prismatica auth-gateway) ---
