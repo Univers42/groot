@@ -25,6 +25,7 @@
 E2E_MAILPIT_HOSTS="${E2E_MAILPIT_HOSTS:-mailpit mini-baas-mailpit}"
 
 e2e_names_mail_specs() {
+
   for _em_arg in "$@"; do
     case "$_em_arg" in -*) continue ;; esac
     case "${_em_arg##*/}" in pr[0-9]* | dm[0-9]*) return 0 ;; esac
@@ -34,6 +35,7 @@ e2e_names_mail_specs() {
 
 # _em_is_mailpit HOST — exact match against the Mailpit names.
 _em_is_mailpit() {
+
   for _em_name in $E2E_MAILPIT_HOSTS; do
     [ "$1" = "$_em_name" ] && return 0
   done
@@ -43,6 +45,7 @@ _em_is_mailpit() {
 # _em_container_var CONTAINER KEY — KEY's value in the container's environment (last wins,
 # as for a duplicated -e); empty when unset.
 _em_container_var() {
+
   docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$1" 2>/dev/null |
     sed -n "s/^$2=//p" | tail -1
 }

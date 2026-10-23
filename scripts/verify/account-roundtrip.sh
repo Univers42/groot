@@ -122,34 +122,12 @@ step_edge() {
   edge_port 4000 OSIONOS_BRIDGE_HOST_PORT BRIDGE_PORT
   SITE="https://localhost:$SITE_PORT"
   BRIDGE="https://localhost:$BRIDGE_PORT"
-  url="$SITE/api/auth/health"
-  code=$(request GET "$url")
-  if [ "$code" = 404 ]; then
-    url="$SITE/api/auth/availability"
+  for url in "$SITE/api/auth/health" "$BRIDGE/api/auth/bridge/health"; do
     code=$(request GET "$url")
-  fi
-  [ "$code" = 200 ] || fail edge "$url answers HTTP $code ($(said)): is the stack up? make link-frontends-up"
-  url="$BRIDGE/api/auth/bridge/health"
-  code=$(request GET "$url")
-  [ "$code" = 200 ] || fail edge "$url answers HTTP $code ($(said)): is the stack up? make link-frontends-up"
+    [ "$code" = 200 ] || fail edge "$url answers HTTP $code ($(said)): is the stack up? make link-frontends-up"
+  done
   report ok edge "$SITE (site + auth gateway) and $BRIDGE (osionos bridge) over TLS, CA ${LINK_CA#"$REPO"/}"
 }
-
-# Availability is a GET with query parameters on gateways that serve it (auth-gateway.mjs:1137);
-# prismatica main dropped the route and checks email/username inside register, so a 404 is a SKIP.
-step_availability() {
-  local code
-  code=$(request GET "$SITE/api/auth/availability?email=${EMAIL/@/%40}&username=$HANDLE")
-  if [ "$code" = 404 ]; then
-    report SKIP availability "this gateway has no /api/auth/availability (prismatica main checks it inside register)"
-    return 0
-  fi
-  if ! { [ "$code" = 200 ] && jq -e '.email.available and .username.available' "$TMP/resp" >/dev/null; }; then
-    fail availability "HTTP $code $(said)"
-  fi
-  report ok availability "HTTP 200, email and username $HANDLE are free"
-}
-
 # The local Turnstile bypass accepts only this token (auth-gateway.mjs:236), not any string.
 step_register() {
   local code
@@ -286,7 +264,7 @@ main() {
   TITLE="roundtrip $epoch-$$"
   MARKER="written by account-roundtrip.sh for $EMAIL"
   printf 'account-roundtrip: %s (the rows are kept as evidence)\n' "$EMAIL"
-  for step in edge availability register login session consume workspaces page_write page_read db; do
+  for step in edge register login session consume workspaces page_write page_read db; do
     "step_$step"
   done
   exit "$FAILED"

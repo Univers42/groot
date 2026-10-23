@@ -65,7 +65,6 @@ INSERT INTO public.auth_session_cutoffs (user_id, sessions_valid_after) VALUES (
 SELECT 'svc_cutoff_monotonic', count(*) FROM public.auth_session_cutoffs
  WHERE user_id = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee' AND sessions_valid_after = '2026-10-19 10:00:00+00';
 ROLLBACK;
-
 -- secdef_exec: SECURITY DEFINER osionos_% functions anon/authenticated may execute
 SELECT 'secdef_exec', count(*), coalesce(string_agg(p.oid::regprocedure::text, ' '), '')
   FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
