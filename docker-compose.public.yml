@@ -120,6 +120,8 @@ services:
       OSIONOS_ALLOWED_ORIGIN: ${PUBLIC_ORIGIN}:8443
       OSIONOS_AI_IMAGES: ""
       OSIONOS_AI_PAT: ""
+      # Builder tool (P6 C163) stays off in public until P6a-3 and P6b merge.
+      OSIONOS_AI_BUILDERS: ""
       OSIONOS_AI_STT_URL: ""
       # Describe image (M7) stays off in public until the user decides.
       OSIONOS_AI_VLM_URL: ""
