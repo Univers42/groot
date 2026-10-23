@@ -1670,13 +1670,15 @@ SELECT 'p23_social_grants', count(*), coalesce(string_agg(v, ' ' ORDER BY v), ''
       FROM unnest(ARRAY['INSERT','UPDATE','DELETE']) AS p
      WHERE to_regclass('public.osionos_follows') IS NOT NULL
        AND (has_table_privilege('osionos_account_user', 'public.osionos_follows'::regclass, p)
-         OR has_any_column_privilege('osionos_account_user', 'public.osionos_follows'::regclass, p))
+         OR CASE WHEN p = 'DELETE' THEN false
+                 ELSE has_any_column_privilege('osionos_account_user', 'public.osionos_follows'::regclass, p) END)
     UNION ALL
     SELECT 'osionos_presence:account role holds ' || p
       FROM unnest(ARRAY['INSERT','DELETE']) AS p
      WHERE to_regclass('public.osionos_presence') IS NOT NULL
        AND (has_table_privilege('osionos_account_user', 'public.osionos_presence'::regclass, p)
-         OR has_any_column_privilege('osionos_account_user', 'public.osionos_presence'::regclass, p))
+         OR CASE WHEN p = 'DELETE' THEN false
+                 ELSE has_any_column_privilege('osionos_account_user', 'public.osionos_presence'::regclass, p) END)
     UNION ALL
     SELECT 'osionos_follow_counts:' || r || ' may execute'
       FROM unnest(ARRAY['anon','authenticated','osionos_account_user']) AS r
