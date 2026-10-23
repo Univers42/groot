@@ -3,7 +3,8 @@
 --
 -- A plan is ONE ai_approvals row (tool build_plan). Its items live here, one row
 -- per page or database, so an execution that ran out of its time budget can be
--- resumed on the pending items only (C157) and undone on the `done` ones (C159).
+-- resumed on the pending items only (C157) and undone on the `done` ones (C159),
+-- which then read `undone`.
 -- `created_id` is the page uuid or the dbKey the bridge confirmed.
 --
 -- Closed to the public roles (C43): RLS on, one service_role policy, REVOKE from
@@ -32,7 +33,7 @@ CREATE TABLE IF NOT EXISTS public.ai_plan_items (
 	kind        text        NOT NULL CHECK (kind IN ('page', 'database')),
 	parent_key  text,
 	position    integer     NOT NULL,
-	status      text        NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'done', 'failed', 'skipped')),
+	status      text        NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'done', 'failed', 'skipped', 'undone')),
 	created_id  text,
 	error       text,
 	updated_at  timestamptz NOT NULL DEFAULT now(),
