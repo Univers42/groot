@@ -75,12 +75,15 @@ BEGIN
 		  AND indexname = 'ai_approvals_one_live_per_call'
 		  AND indexdef LIKE '%''partial''%'
 	) THEN
-		-- This is a first-boot schema migration, and PostgreSQL does not permit
-		-- CREATE INDEX CONCURRENTLY inside the runner's transaction-wrapped
-		-- file application. Use the regular build here: the table is newly
-		-- created on a fresh install and therefore empty. Existing deployments
-		-- must apply the dedicated concurrent index migration before replaying
-		-- this migration if they have a populated approvals table.
+		-- The replacement index must include 'partial'. Avoid silently building
+		-- it with a blocking CREATE INDEX on a populated table. The runner applies
+		-- each file in its own transaction, so the online index change belongs in
+		-- a separate, non-transactional migration step. On a fresh empty install
+		-- the regular build is safe.
+		IF EXISTS (SELECT 1 FROM public.ai_approvals LIMIT 1) THEN
+			RAISE EXCEPTION
+				'ai_approvals_one_live_per_call needs an online concurrent index migration before upgrading a populated ai_approvals table';
+		END IF;
 		DROP INDEX IF EXISTS public.ai_approvals_one_live_per_call;
 		CREATE UNIQUE INDEX ai_approvals_one_live_per_call
 			ON public.ai_approvals (run_id, tool, args_sha256)
