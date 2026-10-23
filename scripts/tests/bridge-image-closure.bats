@@ -6,9 +6,10 @@
 # Dockerfile's COPY sources minus its .dockerignore. Every fixture test that expects a report
 # has a twin that differs only in the module name, so a check that reports everything fails.
 #
-# Caveat: .dockerignore lines are matched with shell `case` patterns, where `*` also crosses `/`
-#   and `!` re-includes are not honoured, so a module can be reported missing that Docker would
-#   copy (noisy, never silent). The COPY globs themselves expand exactly as Docker's do.
+# Caveat: .dockerignore lines are matched with shell `case` patterns, where `*` also crosses `/`,
+#   so a module can be reported missing that Docker would copy (noisy, never silent). `!`
+#   re-includes are honoured, the last matching line deciding, as Docker's do. The COPY globs
+#   themselves expand exactly as Docker's do.
 #
 # Run: docker run --rm -v "$PWD:/code" -w /code --entrypoint sh bats/bats:1.11.1 \
 #        -c 'bats scripts/tests/bridge-image-closure.bats'
@@ -42,18 +43,22 @@ ignore_patterns() {
   grep -vE '^[[:space:]]*(#|$)' "$file" | sed 's#^/##'
 }
 
-# Exit 0 when PATH, or a directory above it, matches an ignore pattern on stdin.
+# Exit 0 when PATH, or a directory above it, is ignored by the patterns on stdin: the last
+# pattern that matches decides, and a `!pattern` re-includes (ai.Dockerfile.dockerignore ignores
+# scripts/* and re-includes its closure one module at a time).
 is_ignored() {
-  local prefix pattern
+  local prefix pattern verdict=1 reinclude
   while IFS= read -r pattern; do
+    reinclude=0
+    case $pattern in '!'*) reinclude=1 pattern=${pattern#!} ;; esac
     prefix=$1
     while :; do
       # shellcheck disable=SC2254 # the pattern is meant to glob
-      case $prefix in $pattern) return 0 ;; esac
+      case $prefix in $pattern) verdict=$reinclude && break ;; esac
       case $prefix in */*) prefix=${prefix%/*} ;; *) break ;; esac
     done
   done
-  return 1
+  return "$verdict"
 }
 
 # The module names APP's image would hold under scripts/, one per line.
@@ -74,6 +79,25 @@ missing_from_image() {
   local app="$1" dockerfile="$2"
   LC_ALL=C comm -23 <(mjs_closure "$app/scripts" "$(entry_point "$dockerfile")") \
     <(image_scripts "$app" "$dockerfile" | LC_ALL=C sort -u)
+}
+
+# The directories a reached module reads beside itself, `new URL('./DIR/…', import.meta.url)`.
+# Caveat: only that literal shape is seen; a path built another way (path.join, a variable) is
+# not, so a missing directory read that way still passes here and crashes the container.
+data_dirs() {
+  local app="$1" dockerfile="$2" module
+  while IFS= read -r module; do
+    [ -f "$app/scripts/$module" ] || continue
+    grep -oE "new URL\([\`'\"]\./[A-Za-z0-9_-]+/" "$app/scripts/$module" | sed -E 's#.*\./##; s#/$##'
+  done < <(mjs_closure "$app/scripts" "$(entry_point "$dockerfile")") | LC_ALL=C sort -u
+}
+
+# The data directories the entry point reads that no COPY line carries; empty when it boots.
+missing_data_dirs() {
+  local app="$1" dockerfile="$2" dir
+  for dir in $(data_dirs "$app" "$dockerfile"); do
+    grep -qE "^COPY[[:space:]].*scripts/$dir/?[[:space:]]" "$dockerfile" || printf '%s\n' "$dir"
+  done
 }
 
 # A fixture build context: scripts/NAME=CONTENT pairs, plus a Dockerfile whose COPY line lists $COPY.
@@ -160,4 +184,62 @@ fixture() {
   run missing_from_image "$APP_DIR" "$FIXTURE_DOCKERFILE"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+@test "the real bridge.Dockerfile copies every directory a loaded module reads beside itself" {
+  APP=$REPO/apps/osionos/app
+  [ -f "$APP/scripts/bridge-api.mjs" ] || skip "apps/osionos/app is not checked out"
+  run missing_data_dirs "$APP" "$BRIDGE_DOCKERFILE"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ] || {
+    echo "the bridge image would lack the data directories: $output" >&2
+    false
+  }
+}
+
+@test "negative control: a word list read beside a module, not copied, is named" {
+  COPY="scripts/bridge-*.mjs" fixture "bridge-api.mjs=import './bridge-mod.mjs';" \
+    "bridge-mod.mjs=readFileSync(new URL(\`./word-lists/en.txt\`, import.meta.url));"
+  run missing_data_dirs "$APP_DIR" "$FIXTURE_DOCKERFILE"
+  [ "$output" = word-lists ]
+}
+
+@test "twin: the same word list with its own COPY line is not named" {
+  COPY="scripts/bridge-*.mjs" fixture "bridge-api.mjs=import './bridge-mod.mjs';" \
+    "bridge-mod.mjs=readFileSync(new URL(\`./word-lists/en.txt\`, import.meta.url));"
+  printf 'COPY scripts/word-lists/ ./scripts/word-lists/\n' >>"$FIXTURE_DOCKERFILE"
+  run missing_data_dirs "$APP_DIR" "$FIXTURE_DOCKERFILE"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+# The osionos-ai image runs TypeScript (src/server.ts), so its CMD names no bridge module: its
+# entries are the scripts/*.mjs the service's sources import, and the image must hold their
+# closure. Release of the account platform (2026-10-23): P0-4 made bridge-session-token.mjs import
+# bridge-session-revocations.mjs, ai.Dockerfile's hand-kept list lacked it, and the public
+# osionos-ai crash-looped on ERR_MODULE_NOT_FOUND until it was rolled back.
+ai_entries() {
+  grep -rhoE "/scripts/[A-Za-z0-9_.-]+\.mjs" "$1/services/osionos-ai/src" | sed 's#^/scripts/##' | LC_ALL=C sort -u
+}
+
+@test "the real ai.Dockerfile copies every bridge module the AI service loads" {
+  APP=$REPO/apps/osionos/app
+  AI_DOCKERFILE="$REPO/infrastructure/docker/osionos/ai.Dockerfile"
+  [ -d "$APP/services/osionos-ai/src" ] || skip "apps/osionos/app is not checked out"
+  entries=$(ai_entries "$APP")
+  [ -n "$entries" ]
+  run comm -23 <(for entry in $entries; do mjs_closure "$APP/scripts" "$entry"; done | LC_ALL=C sort -u) \
+    <(image_scripts "$APP" "$AI_DOCKERFILE" | LC_ALL=C sort -u)
+  [ "$status" -eq 0 ]
+  [ -z "$output" ] || { echo "missing from ai.Dockerfile: $output"; false; }
+}
+
+@test "a !pattern re-includes what an earlier line ignored" {
+  run is_ignored scripts/kept.mjs <<<$'scripts/*\n!scripts/kept.mjs'
+  [ "$status" -eq 1 ]
+}
+
+@test "twin: a module no !pattern names stays ignored" {
+  run is_ignored scripts/dropped.mjs <<<$'scripts/*\n!scripts/kept.mjs'
+  [ "$status" -eq 0 ]
 }

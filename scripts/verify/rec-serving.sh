@@ -51,7 +51,7 @@
 # Usage:  sh scripts/verify/rec-serving.sh [--keep]
 # Exit:   0 every check passed · 1 a check, the fixture or the image failed
 #
-# shellcheck disable=SC2317
+# shellcheck disable=SC2317,SC2329
 # The check_* functions are called through the loop in main(), so shellcheck
 # cannot see that they are reached (the house's own check files disable it the
 # same way).
@@ -739,6 +739,67 @@ check_4() {
 	return 0
 }
 
+# 6 — the popular order (C48): distinct users, positive events only, the
+#     window, the k floor, the limit clamp, the grants.
+check_6() {
+	PA=00000000-0000-4000-8000-0000000000a1
+	PB=00000000-0000-4000-8000-0000000000a2
+	PC=00000000-0000-4000-8000-0000000000a3
+	PD=00000000-0000-4000-8000-0000000000a4
+	PE=00000000-0000-4000-8000-0000000000a5
+	PF=00000000-0000-4000-8000-0000000000a6
+	PG=00000000-0000-4000-8000-0000000000a7
+	u1=aaaaaaaa-0000-4000-8000-000000000001
+	u2=aaaaaaaa-0000-4000-8000-000000000002
+	u3=aaaaaaaa-0000-4000-8000-000000000003
+	# Check 1's events are not part of this ranking.
+	run_sql "TRUNCATE public.ai_events;
+INSERT INTO public.ai_events (ts, user_id, item_kind, item_id, event, is_synthetic) VALUES
+  (now(), '${u1}', 'page', '${PA}', 'like', false), (now(), '${u2}', 'page', '${PA}', 'react', false), (now(), '${u3}', 'page', '${PA}', 'favorite', false),
+  (now(), '${u1}', 'page', '${PB}', 'like', false), (now(), '${u2}', 'page', '${PB}', 'share', false),
+  (now(), '${u1}', 'page', '${PC}', 'comment', false),
+  (now(), '${u1}', 'page', '${PE}', 'like', false), (now(), '${u2}', 'page', '${PE}', 'like', false), (now(), '${u3}', 'page', '${PE}', 'like', false),
+  (now(), '${u1}', 'page', '${PF}', 'view', false), (now(), '${u2}', 'page', '${PF}', 'impression', false), (now(), '${u3}', 'page', '${PF}', 'not_interested', false),
+  (now(), '${u1}', 'page', '${PG}', 'like', true), (now(), '${u2}', 'page', '${PG}', 'like', true), (now(), '${u3}', 'page', '${PG}', 'like', true);
+UPDATE public.ai_events SET ts = now() - interval '40 days' WHERE item_id = '${PE}';
+INSERT INTO public.ai_events (ts, user_id, item_kind, item_id, event, is_synthetic)
+SELECT now() - (d || ' hours')::interval, '${u1}', 'page', '${PD}', 'like', false FROM generate_series(1, 50) d;" || {
+		DETAIL="the popular fixture failed: $(head -1 "${WORK}/sql.err")"
+		return 1
+	}
+	pop() { q "SELECT string_agg(rpad(right(item_id::text, 2), 2) || ':' || users, ',' ORDER BY users DESC, item_id) FROM public.ai_rec_popular($1);"; }
+	got="$(pop "100, '30 days', 3")"
+	[ "${got}" = "a1:3" ] || { DETAIL="min 3 gave '${got}', expected a1:3"; return 1; }
+	got="$(pop "100, '30 days', 2")"
+	[ "${got}" = "a1:3,a2:2" ] || { DETAIL="min 2 gave '${got}', expected a1:3,a2:2"; return 1; }
+	# One user liking D 50 times is one user (C50): D is below min 2, and at
+	# min 1 it counts 1, not 50.
+	got="$(pop "100, '30 days', 1")"
+	[ "${got}" = "a1:3,a2:2,a3:1,a4:1" ] || { DETAIL="min 1 gave '${got}', expected a1:3,a2:2,a3:1,a4:1"; return 1; }
+	# The event 40 days old is outside the default window and inside 60 days;
+	# views, impressions, not_interested and synthetic rows never count.
+	got="$(pop "100, '60 days', 3")"
+	[ "${got}" = "a1:3,a5:3" ] || { DETAIL="a 60-day window gave '${got}', expected a1:3,a5:3"; return 1; }
+	got="$(q "SELECT count(*) FROM public.ai_rec_popular(0, '30 days', 1);")"
+	[ "${got}" = "1" ] || { DETAIL="p_limit 0 gave ${got} rows, expected 1 (clamped)"; return 1; }
+	for role in anon authenticated; do
+		if run_sql "SET ROLE ${role}; SELECT * FROM public.ai_rec_popular();"; then
+			DETAIL="${role} could call ai_rec_popular"
+			return 1
+		fi
+		grep -q 'permission denied' "${WORK}/sql.err" || {
+			DETAIL="${role} on ai_rec_popular: $(head -1 "${WORK}/sql.err")"
+			return 1
+		}
+	done
+	run_sql "SET ROLE service_role; SELECT * FROM public.ai_rec_popular();" || {
+		DETAIL="service_role could not call ai_rec_popular: $(head -1 "${WORK}/sql.err")"
+		return 1
+	}
+	DESCR="popular ranks by distinct users (50 likes of one user = 1), k floor 3/2/1, 40-day event windowed out, views/impressions/not_interested/synthetic ignored, limit clamped, anon/authenticated refused"
+	return 0
+}
+
 # 5 — the rollback: the two functions are gone, the factors file's objects are
 #     untouched.
 check_5() {
@@ -755,7 +816,8 @@ check_5() {
 	}
 	for call in "public.ai_rec_user_context(uuid,integer)" \
 		"public.ai_rec_nearest(bigint,real[],integer,text)" \
-		"public.ai_rec_nearest_rows(bigint,vector,integer,text,smallint)"; do
+		"public.ai_rec_nearest_rows(bigint,vector,integer,text,smallint)" \
+		"public.ai_rec_popular(integer,interval,integer)"; do
 		left="$(q "SELECT to_regprocedure('${call}') IS NOT NULL;")"
 		[ "${left}" = "f" ] || {
 			DETAIL="${call} survived the rollback"
@@ -817,7 +879,7 @@ main() {
 	}
 	note "fixture applied (the migration twice)"
 
-	for fn in check_0 check_1 check_2 check_3 check_4 check_5; do
+	for fn in check_0 check_1 check_2 check_3 check_4 check_6 check_5; do
 		DETAIL=""
 		DESCR=""
 		if "${fn}"; then

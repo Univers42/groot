@@ -13,16 +13,21 @@
 # sources live in /app/services/osionos-ai/src and reach the bridge modules
 # they import through /app/scripts (../../../scripts/bridge-session-token.mjs
 # from services/osionos-ai/src/auth.ts, ../../../../scripts/bridge-page-read.mjs
-# from services/osionos-ai/src/runs/prompt.ts). Six of those modules are the
+# from services/osionos-ai/src/runs/prompt.ts). Nine of those modules are the
 # IMPORT CLOSURE of services/osionos-ai/src into scripts/ — bridge-session-token
-# imports bridge-session-cutoff, which imports bridge-baas-body:
+# imports bridge-session-cutoff (which imports bridge-baas-body), and since the
+# account platform's P0-4 also bridge-session-revocations and bridge-roles; both
+# revocations and cutoff import bridge-session-tracker:
 #   services/osionos-ai/src/auth.ts        -> scripts/bridge-session-token.mjs
 #                                           -> scripts/bridge-session-cutoff.mjs
 #                                           -> scripts/bridge-baas-body.mjs
+#                                           -> scripts/bridge-session-revocations.mjs
+#                                           -> scripts/bridge-session-tracker.mjs
+#                                           -> scripts/bridge-roles.mjs
 #   services/osionos-ai/src/runs/prompt.ts -> scripts/bridge-page-read.mjs
 #   services/osionos-ai/src/retrieval/acl.ts -> scripts/bridge-live-workspaces.mjs
 #   services/osionos-ai/src/retrieval/related.ts -> scripts/bridge-graph-edges.mjs -> scripts/bridge-page-read.mjs
-# The seventh is the L0 gate of the image prompt (devil C72): the module reads
+# The tenth is the L0 gate of the image prompt (devil C72): the module reads
 # its lists next to itself, so they travel with it:
 #   scripts/bridge-moderation.mjs          -> scripts/moderation-lists/{en,fr,es}.txt
 # They are named one by one below, so a new import that is not copied fails at
@@ -55,9 +60,10 @@ COPY --from=deps /app/services/osionos-ai/node_modules ./services/osionos-ai/nod
 # The service itself: its manifest, its sources. No tests, no dev deps.
 COPY services/osionos-ai/package.json services/osionos-ai/tsconfig.json ./services/osionos-ai/
 COPY services/osionos-ai/src ./services/osionos-ai/src
-# The seven bridge modules (see the header): the six of the import closure and
-# the gate of the image prompt.
-COPY scripts/bridge-session-token.mjs scripts/bridge-session-cutoff.mjs scripts/bridge-baas-body.mjs scripts/bridge-page-read.mjs scripts/bridge-live-workspaces.mjs scripts/bridge-graph-edges.mjs scripts/bridge-moderation.mjs ./scripts/
+# The ten bridge modules (see the header): the nine of the import closure and
+# the gate of the image prompt. scripts/tests/bridge-image-closure.bats checks
+# this list against the closure, so a new import fails CI, not the container.
+COPY scripts/bridge-session-token.mjs scripts/bridge-session-cutoff.mjs scripts/bridge-baas-body.mjs scripts/bridge-session-revocations.mjs scripts/bridge-session-tracker.mjs scripts/bridge-roles.mjs scripts/bridge-page-read.mjs scripts/bridge-live-workspaces.mjs scripts/bridge-graph-edges.mjs scripts/bridge-moderation.mjs ./scripts/
 # The lists of the L0 gate: the module reads them next to itself, at import.
 COPY scripts/moderation-lists ./scripts/moderation-lists
 
