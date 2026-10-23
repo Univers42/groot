@@ -33,7 +33,7 @@ export function buildExpenses({ seed, anchor }, idx, start) {
     });
   };
   for (let month = 0; month < 18; month += 1) {
-    const first = addMonths(start, month);
+    const first = addMonths(`${start.slice(0, 7)}-01`, month);
     for (const [category, [payee, department, perMonth, [min, max], description]] of Object.entries(SCHEDULE)) {
       for (let n = 0; n < perMonth; n += 1) {
         const day = addDays(first, n === 0 && perMonth === 1 ? 4 : rng.int(0, 27));

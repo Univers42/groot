@@ -4,8 +4,10 @@ import { type Answer, ACCOUNT_MAIL_ACCEPTED, confirmedAccount, login, median, re
 // PR3 (PLAN §8.1, C5): /recover, /resend-verification and /login give a known and an unknown
 // address the same status and body, and their median times differ by under 50 ms over 20
 // tries each. 429s are waited out and not counted (gateway() in lib/account-mail.ts). /login
-// spreads its tries over three addresses on each side, because the gateway locks an address
+// spreads its tries over five addresses on each side (8 attempts each across both runs), because the gateway locks an address
 // after 10 failures (AUTH_LOGIN_LOCKOUT_THRESHOLD) and a lockout answers 429 for both alike.
+// Each mail phase has TRIES fresh addresses per side: registration plus one sample in each
+// of at most two runs fits the shared /recover + /resend-verification cap of 3 per hour.
 // Caveat: a timing test on a shared machine can false-fail under load. A surface that fails
 // the timing bound is measured once more, and the message reports both medians of both runs.
 
@@ -40,14 +42,25 @@ async function sameAnswerSameTime(name: string, probe: Probe, known: readonly st
 
 test("PR3 known and unknown addresses are indistinguishable at /recover, /resend-verification and /login", async () => {
   test.setTimeout(30 * 60_000);
-  const known = [await confirmedAccount("pr3"), await confirmedAccount("pr3"), await confirmedAccount("pr3")];
-  const unknown = [reservedAddress("pr3-none"), reservedAddress("pr3-none"), reservedAddress("pr3-none")];
+  const known: string[] = [];
+  const unknown: string[] = [];
+  for (let n = 0; n < 5; n += 1) {
+    known.push(await confirmedAccount("pr3"));
+    unknown.push(reservedAddress("pr3-none"));
+  }
 
   const first = await recover(known[0]!);
   expect(first.status).toBe(202);
   expect(first.body.message).toBe(ACCOUNT_MAIL_ACCEPTED);
 
-  await sameAnswerSameTime("/recover", recover, known, unknown);
-  await sameAnswerSameTime("/resend-verification", resend, known, unknown);
+  for (const [name, probe] of [["/recover", recover], ["/resend-verification", resend]] as const) {
+    const mailKnown: string[] = [];
+    const mailUnknown: string[] = [];
+    for (let n = 0; n < TRIES; n += 1) {
+      mailKnown.push(await confirmedAccount("pr3"));
+      mailUnknown.push(reservedAddress("pr3-none"));
+    }
+    await sameAnswerSameTime(name, probe, mailKnown, mailUnknown);
+  }
   await sameAnswerSameTime("/login", (email) => login(email, KNOWN_PASSWORD_GUESS), known, unknown);
 });

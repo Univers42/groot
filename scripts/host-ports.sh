@@ -262,6 +262,13 @@ cmd_resolve() {
   for name in "${names[@]}"; do
     default="${defaults[$name]}"
     env_value="${!name-}"
+    if [ -n "$env_value" ]; then
+      if ! [[ "$env_value" =~ ^[0-9]{1,5}$ ]] || (( 10#$env_value < 1 || 10#$env_value > 65535 )); then
+        printf 'host-ports: %s must be an integer port from 1 through 65535\n' "$name" >&2
+        exit 2
+      fi
+      env_value=$((10#$env_value))
+    fi
     file_value="${previous[$name]:-}"
     if [ -n "$env_value" ] && [ "$env_value" != "$file_value" ]; then
       chosen[$name]="$env_value"

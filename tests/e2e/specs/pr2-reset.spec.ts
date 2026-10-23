@@ -100,13 +100,12 @@ test("PR2 a TOTP user resets after stepping up to aal2 (C4)", async () => {
 
   const [link] = await resetLinks(email, 1);
   let answer = await gateway("/api/auth/reset-password", { ...link!, password: NEW_PASSWORD });
-  if (answer.status === 401) {
-    expect(answer.body.error).toBe("mfa_required");
-    expect(typeof answer.body.reset_ticket).toBe("string");
-    const wrong = await gateway("/api/auth/reset-password", { reset_ticket: answer.body.reset_ticket, password: NEW_PASSWORD, code: "000000" });
-    expect(wrong.body.error, "a wrong code keeps the ticket").toBe("mfa_invalid");
-    answer = await gateway("/api/auth/reset-password", { reset_ticket: wrong.body.reset_ticket, password: NEW_PASSWORD, code: totp(secret) });
-  }
+  expect(answer.status).toBe(401);
+  expect(answer.body.error).toBe("mfa_required");
+  expect(typeof answer.body.reset_ticket).toBe("string");
+  const wrong = await gateway("/api/auth/reset-password", { reset_ticket: answer.body.reset_ticket, password: NEW_PASSWORD, code: "000000" });
+  expect(wrong.body.error, "a wrong code keeps the ticket").toBe("mfa_invalid");
+  answer = await gateway("/api/auth/reset-password", { reset_ticket: wrong.body.reset_ticket, password: NEW_PASSWORD, code: totp(secret) });
   expect(answer.status, `the reset completes: ${String(answer.body.message)}`).toBe(200);
   expect((await login(email, NEW_PASSWORD)).status).toBe(200);
 });

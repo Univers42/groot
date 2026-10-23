@@ -23,7 +23,7 @@ for (const route of routes) {
         const page = await context.newPage();
         const errors: string[] = [];
         page.on("console", (m) => {
-          if (m.type() === "error" && !(route === "/404" && OWN_404.test(m.text()))) errors.push(m.text());
+          if (m.type() === "error" && !(route === "/404" && OWN_404.test(m.text()) && m.location().url === new URL(route, baseURL).href)) errors.push(m.text());
         });
         page.on("pageerror", (e) => errors.push(e.message));
         await page.goto(new URL(route, baseURL).href, { waitUntil: "load" });

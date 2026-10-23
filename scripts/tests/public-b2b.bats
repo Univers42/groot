@@ -23,7 +23,7 @@ setup() {
 # Renders the compose file with throwaway inputs, from a cwd outside the repo and with an
 # explicit --env-file, so neither the user's ./.env nor a real secret can be read.
 render() { # compose-file -> JSON on stdout
-  mkdir -p "$W/render" && printf 'SENTINEL_FROM_ENV_FILE=1\n' > "$W/render/secrets.env"
+  mkdir -p "$W/render" && printf 'SENTINEL_FROM_ENV_FILE=1\nAUTH_MAIL_DAILY_CAP=37\n' > "$W/render/secrets.env"
   printf 'PUBLIC_SITE_IMAGE=prismatica-public/site:test0000000a\nPUBLIC_GATEWAY_IMAGE=prismatica-public/auth-gateway:test0000000a\nPUBLIC_ENV_FILE=%s\n' \
     "$W/render/secrets.env" > "$W/render/images.env"
   (cd "$W/render" && docker compose --env-file images.env -f "$1" -p prismatica-public config --format json)
@@ -147,8 +147,13 @@ P_REDIS_UNREACHABLE_FROM_PROD='.services["public-redis"].networks | keys == ["de
 
 @test "the new gateway switches are wired" {
   good_json
-  prop "$W/good.json" '.services["public-auth-gateway"].environment | (.AUTH_LOGIN_EMAIL_OTP == "true" and .AUTH_LOGIN_APPROVE_LINK == "true" and .AUTH_MAIL_DAILY_CAP == "200")'
+  prop "$W/good.json" '.services["public-auth-gateway"].environment | (.AUTH_LOGIN_EMAIL_OTP == "true" and .AUTH_LOGIN_APPROVE_LINK == "true")'
   prop "$W/good.json" '.services["public-auth-gateway"].environment.SENTINEL_FROM_ENV_FILE == "1"'
+}
+
+@test "the gateway mail cap comes from its configured env file" {
+  AUTH_MAIL_DAILY_CAP=200 good_json
+  prop "$W/good.json" '.services["public-auth-gateway"].environment.AUTH_MAIL_DAILY_CAP == "37"'
 }
 
 @test "a missing secrets file stops compose instead of starting a gateway without keys" {

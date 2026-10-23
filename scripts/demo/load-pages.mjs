@@ -50,7 +50,11 @@ async function call(method, path, { token, body } = {}) {
 		});
 		if (response.status !== 429) {
 			const text = await response.text();
-			return { status: response.status, data: text ? JSON.parse(text) : null };
+			let data = text || null;
+			if (text) {
+				try { data = JSON.parse(text); } catch { /* Keep non-JSON error bodies for the caller. */ }
+			}
+			return { status: response.status, data };
 		}
 		const wait = Number(response.headers.get('retry-after')) || 30;
 		say(`429 on ${method} ${path}; waiting ${wait}s`);

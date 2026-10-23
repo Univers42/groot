@@ -151,6 +151,29 @@ COMPOSE
   [ -n "$output" ]
 }
 
+@test "invalid environment ports fail before either generated file changes" {
+  run bash "$REPO/scripts/host-ports.sh" resolve
+  [ "$status" -eq 0 ]
+  cp "$ROOT/.env.ports" "$BATS_TEST_TMPDIR/ports.before"
+  cp "$ROOT/infrastructure/tls/host-ports.d/osionos-origin.conf" "$BATS_TEST_TMPDIR/origin.before"
+  for value in 0 65536 -1 1.5 abc '3001;bad' $'3001\nINJECTED=1' 999999999999999999999; do
+    OSIONOS_APP_HOST_PORT="$value" run bash "$REPO/scripts/host-ports.sh" resolve
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"OSIONOS_APP_HOST_PORT must be an integer port from 1 through 65535"* ]]
+    cmp -s "$ROOT/.env.ports" "$BATS_TEST_TMPDIR/ports.before"
+    cmp -s "$ROOT/infrastructure/tls/host-ports.d/osionos-origin.conf" "$BATS_TEST_TMPDIR/origin.before"
+  done
+}
+
+@test "port range endpoints and decimal ports with leading zeros are accepted" {
+  for value in 1 65535 03001; do
+    OSIONOS_APP_HOST_PORT="$value" run bash "$REPO/scripts/host-ports.sh" resolve
+    [ "$status" -eq 0 ]
+    [ "$(port OSIONOS_APP_HOST_PORT)" -eq "$((10#$value))" ]
+    [ "$(override_port OSIONOS_APP_HOST_PORT)" -eq "$((10#$value))" ]
+  done
+}
+
 @test "no free port in the window: the NAME is named and the run fails" {
   {
     printf '#!/bin/sh\n'
