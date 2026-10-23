@@ -123,6 +123,12 @@
 #   _no_secrets/_reachable the export job table · p5_no_exec_grants the functions are
 #   service_role only · p5_race_claim/p5_race_cancel two-session races (run_races) ·
 #   p5_race_cancel_first/p5_race_cancel_after_claim lock-ordered races (run_lock_races)
+#  p4_activity_* the activity events table, its monthly partitions and the daily rollup:
+#   _rollup_key/_rollup/_rollup_dropped_day/_no_user_column_in_rollup/_erase_rollup the
+#   (day, event, surface) rollup with its 5-person floor · _default_empty/_default_drain/
+#   _maintain/_maintain_failure partition upkeep · _children_closed/_grants RLS and ACLs on
+#   every child · _canary_seedable/_canary_mutation the erase canary covers the table ·
+#   _maintain_concurrent/_maintain_lock_timeout/_registry_reapply shell-driven sessions
 #
 # ISOLATION
 #   Throwaway containers only (--rm --network none, no port, no volume); the live
@@ -150,7 +156,8 @@ RUNNER="${REPO}/scripts/apply-models-migrations.sh"
 GROBASE_INIT="${REPO}/apps/grobase/scripts/migrations/postgresql/001_initial_schema.sql"
 # 012 installs the CREATE TABLE hook that gives every new public table a realtime trigger, as live.
 GROBASE_REALTIME="${REPO}/apps/grobase/scripts/migrations/postgresql/012_realtime_triggers_all_tables.sql"
-IMAGE="${GROBASE_PG_IMAGE:-ghcr.io/univers42/grobase-postgres:latest}"
+# Pinned by digest (2026-10-05 build): :latest floats, and a moving image moves the p95 baselines.
+IMAGE="${GROBASE_PG_IMAGE:-ghcr.io/univers42/grobase-postgres@sha256:161ec9bec8055862168fcef1e2ab2ea18ebd02e2ddb4ae2e0bcf6f02d454fc7e}"
 MODELS_DIR="${MODELS_DIR:-${REPO}/models}"
 READY_TIMEOUT=60
 PG_USER=postgres
@@ -709,6 +716,22 @@ run_checks() {
 	check_count "$1" p5_report_survives_reporter p5_report_survives_reporter
 	check_count "$1" p5_users_scrubbed p5_users_scrubbed
 	check_count "$1" p5_foreign_content_null p5_foreign_content_null
+	check_count "$1" p4_activity_rollup_key p4_activity_rollup_key
+	check_count "$1" p4_activity_default_empty p4_activity_default_empty
+	check_count "$1" p4_activity_default_drain p4_activity_default_drain
+	check_count "$1" p4_activity_maintain p4_activity_maintain
+	check_count "$1" p4_activity_maintain_failure p4_activity_maintain_failure
+	check_count "$1" p4_activity_children_closed p4_activity_children_closed
+	check_count "$1" p4_activity_grants p4_activity_grants
+	check_count "$1" p4_activity_rollup p4_activity_rollup
+	check_count "$1" p4_activity_rollup_dropped_day p4_activity_rollup_dropped_day
+	check_count "$1" p4_activity_no_user_column_in_rollup p4_activity_no_user_column_in_rollup
+	check_count "$1" p4_activity_erase_rollup p4_activity_erase_rollup
+	check_count "$1" p4_activity_canary_seedable p4_activity_canary_seedable
+	check_count "$1" p4_activity_canary_mutation p4_activity_canary_mutation
+	p4_activity_maintain_concurrent "$1"
+	p4_activity_maintain_lock_timeout "$1"
+	p4_activity_registry_reapply "$1"
 	# Before check_standalone: it drops the account tables, which the races need.
 	run_races "$1"
 	probe "$1" K1 authenticated "SELECT count(*) FROM public.osionos_sessions"
@@ -920,6 +943,76 @@ lifecycle_race() {
 		pass "$1" "lifecycle_race" "the second delete queued behind the first and was refused as the last workspace"
 	else
 		fail "$1" "lifecycle_race" "queued=${lc_blocked} results=[${lc_got}] (want one marked, one last_workspace); $(head -1 "${WORK}/lc-two-$1.err")"
+	fi
+}
+
+# p4_activity_maintain_concurrent <scenario> — maintain() while another maintain() holds its
+# advisory lock inside an open transaction. Setup drops the next month's child so the holder has
+# real work; the second caller must come back at once with ok and zero created instead of
+# queueing or building the same partition twice. Without the advisory lock it blocks behind the
+# holder's DDL and either waits out lock_timeout (ok = f) or duplicates the work.
+# Caveat: ordering is by sleep (the second session starts 1.5 s into the holder's 4 s hold), so a
+# loaded host can invert it; that reads as a FAIL (a missing pass, never a false pass).
+p4_activity_maintain_concurrent() {
+	ac_child="osionos_activity_events_y$(printf "SELECT to_char(date_trunc('month', now() AT TIME ZONE 'UTC') + interval '2 months', 'YYYYMM');\n" | psql_rows)"
+	printf 'DROP TABLE IF EXISTS public.%s;\n' "${ac_child}" | psql_rows >/dev/null 2>&1 || true
+	printf '%s\n' 'BEGIN;' 'SELECT ok, created FROM public.osionos_activity_maintain();' 'SELECT pg_sleep(4);' 'COMMIT;' |
+		psql_rows >"${WORK}/ac-one-$1.out" 2>"${WORK}/ac-one-$1.err" &
+	ac_pid=$!
+	sleep 1.5
+	printf '%s\n' "SELECT ok, created FROM public.osionos_activity_maintain();" |
+		psql_rows >"${WORK}/ac-two-$1.out" 2>"${WORK}/ac-two-$1.err" || true
+	wait "${ac_pid}" || true
+	ac_one="$(head -1 "${WORK}/ac-one-$1.out")"
+	ac_two="$(head -1 "${WORK}/ac-two-$1.out")"
+	ac_n="$(printf "SELECT count(*) FROM pg_class WHERE relname = '%s';\n" "${ac_child}" | psql_rows)"
+	if [ "${ac_one}" = "t|1" ] && [ "${ac_two}" = "t|0" ] && [ "${ac_n}" = 1 ]; then
+		pass "$1" "p4_activity_maintain_concurrent" "the second maintain skipped while the first held the lock; one child built"
+	else
+		fail "$1" "p4_activity_maintain_concurrent" "holder=[${ac_one}] second=[${ac_two}] children=${ac_n} (want t|1, t|0, 1); $(head -1 "${WORK}/ac-two-$1.err")"
+	fi
+}
+
+# p4_activity_maintain_lock_timeout <scenario> — a session holds ACCESS EXCLUSIVE on the events
+# table; maintain() needs that lock to build a missing month. It must give up on its own
+# lock_timeout (2 s) with ok = f, not queue behind the holder (and every writer behind it).
+# Caveat: bounded by wall clock (under 5 s against a 6 s hold); a host stalled for seconds can
+# fail it (a missing pass, never a false pass).
+p4_activity_maintain_lock_timeout() {
+	ac_child="osionos_activity_events_y$(printf "SELECT to_char(date_trunc('month', now() AT TIME ZONE 'UTC') + interval '2 months', 'YYYYMM');\n" | psql_rows)"
+	printf 'DROP TABLE IF EXISTS public.%s;\n' "${ac_child}" | psql_rows >/dev/null 2>&1 || true
+	printf '%s\n' 'BEGIN;' 'LOCK TABLE public.osionos_activity_events IN ACCESS EXCLUSIVE MODE;' 'SELECT pg_sleep(6);' 'COMMIT;' |
+		psql_rows >"${WORK}/ac-hold-$1.out" 2>"${WORK}/ac-hold-$1.err" &
+	ac_pid=$!
+	sleep 1.5
+	ac_t0="$(date +%s)"
+	printf '%s\n' "SELECT ok FROM public.osionos_activity_maintain();" |
+		psql_rows >"${WORK}/ac-lt-$1.out" 2>"${WORK}/ac-lt-$1.err" || true
+	ac_dt=$(($(date +%s) - ac_t0))
+	wait "${ac_pid}" || true
+	ac_got="$(head -1 "${WORK}/ac-lt-$1.out")"
+	printf '%s\n' "SELECT ok FROM public.osionos_activity_maintain();" | psql_rows >/dev/null 2>&1 || true
+	if [ "${ac_got}" = "f" ] && [ "${ac_dt}" -lt 5 ]; then
+		pass "$1" "p4_activity_maintain_lock_timeout" "gave up after ${ac_dt}s with ok = f while the table was locked"
+	else
+		fail "$1" "p4_activity_maintain_lock_timeout" "result=[${ac_got}] after ${ac_dt}s (want f in under 5s); $(head -1 "${WORK}/ac-lt-$1.err")"
+	fi
+}
+
+# p4_activity_registry_reapply <scenario> — the erasure migration replays cleanly and keeps the
+# activity row exactly once, and the runner applies the analytics file before the erasure file.
+# Caveat: the order check is textual (position of each name in the ORDERED_LAST line), not a run.
+p4_activity_registry_reapply() {
+	ac_bad=0
+	for ac_i in 1 2; do
+		apply "${MODELS_DIR}/osionos-account-erasure-migration.sql" || ac_bad=1
+	done
+	ac_rows="$(printf "SELECT count(*) FROM public.osionos_account_data_map WHERE table_name = 'osionos_activity_events' AND column_name = 'user_id' AND erase = 'delete';\n" | psql_rows)"
+	ac_order="$(awk '/^ORDERED_LAST=/ { a = index($0, "osionos-activity-analytics-migration.sql"); e = index($0, "osionos-account-erasure-migration.sql"); r = (a > 0 && e > a) ? "ok" : "bad" } END { print r }' "${RUNNER}")"
+	if [ "${ac_bad}" = 0 ] && [ "${ac_rows}" = 1 ] && [ "${ac_order}" = ok ]; then
+		pass "$1" "p4_activity_registry_reapply" "two replays left one registry row; analytics file precedes erasure in the runner"
+	else
+		fail "$1" "p4_activity_registry_reapply" "replay_failed=${ac_bad} rows=${ac_rows} order=${ac_order}"
 	fi
 }
 
