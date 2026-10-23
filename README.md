@@ -553,8 +553,8 @@ live scores zero, so the confidence column is honest about where each one stands
 - **B** — backend exists; needs a feature flag and a migration, no new code
 - **C** — backend exists; needs a user-facing screen to be demonstrable
 
-Only the **A** rows plus the two modules of choice — **10 points** — are demonstrable in the
-default stack today, which is below the 14 required.
+Only the **A** rows — **13 points**, the two modules of choice and two AI modules included — are
+demonstrable in the default stack today, which is one point below the 14 required.
 
 | # | Module | Category | Type | Pts | Conf | How it is implemented |
 |---|---|---|---|--:|:--:|---|
@@ -572,6 +572,13 @@ default stack today, which is below the 14 required.
 | 12 | File upload and management | Web | Minor | 1 | C | Storage plane on MinIO, `STORAGE_BUCKET_SCOPE_ENABLED` |
 | 13 | **Module of choice:** contract-driven application factory | Free choice | Major | 2 | A | See justification below |
 | 14 | **Module of choice:** SSRF guard on the HTTP engine | Free choice | Minor | 1 | A | See justification below |
+| 15 | Complete LLM system interface (text + images) | Artificial Intelligence | Major | 2 | B | Text streams with resume, cancel and rate limits; image generation needs `OSIONOS_AI_IMAGES=on`, `--profile ai --profile ai-gpu-vulkan` and the prompt guard (C72), without which the service refuses to start; off on the public stack. [M1 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m1-images.md) |
+| 16 | Complete RAG on a large dataset | Artificial Intelligence | Major | 2 | A | `--profile ai`: permission-aware hybrid search with citations; the reranker is off by default, and the 110k-chunk corpus is a separate eval stack. [M2 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m2-rag.md) |
+| 17 | ML recommendation system | Artificial Intelligence | Major | 2 | B | iALS + logistic ranker; needs `OSIONOS_RECS_FOR_YOU=1`, the beacon is opt-in, and the nightly job skips under 20 users. [M3 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m3-recs.md) |
+| 18 | Content moderation AI | Artificial Intelligence | Minor | 1 | B | L0 rules + L1 classifier; needs `OSIONOS_MODERATION_ACTIONS=hold` and `OSIONOS_MODERATION_STATE=1`; L1 is log-only (no auto-removal); the public stack runs `log`. [M4 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m4-moderation.md) |
+| 19 | Voice / speech | Artificial Intelligence | Minor | 1 | A | `--profile ai` with the speech model in its volume: dictation and read-aloud; off on the public stack (`503 voice_unavailable`). [M5 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m5-voice.md) |
+| 20 | Sentiment analysis | Artificial Intelligence | Minor | 1 | C | Opt-in per workspace (owner/admin, Settings › AI) with `OSIONOS_SENTIMENT_URL`; off on the public stack; the model licence is undeclared. [M6 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m6-sentiment.md) |
+| 21 | Image recognition and tagging | Artificial Intelligence | Minor | 1 | C | `--profile ai --profile ai-vlm` with the VLM in its volume; the browser flow and in-app search are not verified end to end; off on the public stack. [M7 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m7-images-tags.md) |
 
 **Point calculation**
 
@@ -579,9 +586,12 @@ default stack today, which is below the 14 required.
 |---|--:|
 | Catalogue modules listed (rows 1–12) | 18 |
 | Modules of choice (rows 13–14) | 3 |
-| **Total listed** | **21** |
-| Demonstrable today (confidence A: rows 1–4, 13–14) | **10** |
+| Artificial Intelligence modules (rows 15–21: 2 + 2 + 2 + 1 + 1 + 1 + 1) | 10 |
+| **Total listed** | **31** |
+| Demonstrable today (confidence A: rows 1–4 = 7, rows 13–14 = 3, rows 16 + 19 = 3) | **13** |
 | Required | 14 |
+
+The **AI opponent** module is not claimed: osionos has no game.
 
 The **Multiple languages** module is not claimed: osionos lists four languages in its settings,
 but switching only records a stub action (`i18n_change_stub` in osionos
