@@ -341,6 +341,7 @@ check_standalone() {
 	file="${MODELS_DIR}/osionos-account-foundation-migration.sql"
 	profiles="${MODELS_DIR}/osionos-account-profiles-migration.sql"
 	pat="${MODELS_DIR}/osionos-personal-access-tokens-migration.sql"
+	social="${MODELS_DIR}/osionos-social-follow-presence-migration.sql"
 	if [ ! -f "${file}" ]; then
 		fail "$1" "standalone" "no ${file}"
 		return 0
@@ -351,6 +352,10 @@ check_standalone() {
 	fi
 	if [ ! -f "${pat}" ]; then
 		fail "$1" "standalone" "no ${pat}"
+		return 0
+	fi
+	if [ ! -f "${social}" ]; then
+		fail "$1" "standalone" "no ${social}"
 		return 0
 	fi
 	if ! printf '%s\n' \
@@ -381,7 +386,9 @@ check_standalone() {
 		'DROP TABLE IF EXISTS public.osionos_user_settings;' \
 		'DROP TABLE IF EXISTS public.osionos_username_history;' \
 		'DROP TABLE IF EXISTS public.osionos_account_deletion_requests;' \
-		'DROP TABLE IF EXISTS public.osionos_personal_access_tokens;' |
+		'DROP TABLE IF EXISTS public.osionos_personal_access_tokens;' \
+		'DROP TABLE IF EXISTS public.osionos_follows;' \
+		'DROP TABLE IF EXISTS public.osionos_presence;' |
 		psql_stdin >"${WORK}/standalone-$1.log" 2>&1; then
 		fail "$1" "standalone" "could not drop the profile tables"
 		return 0
@@ -416,6 +423,14 @@ check_standalone() {
 		sed 's/^/  | /' "${WORK}/standalone-$1.log" >&2
 		return 0
 	fi
+	# The follow and presence file is applied alone too: it creates two more
+	# tables for the hook to arm, and the service-role-only pass that hides a
+	# stray anon grant does not run after it here.
+	if ! psql_stdin <"${social}" >"${WORK}/standalone-$1.log" 2>&1; then
+		fail "$1" "standalone" "the follow and presence file did not apply after the tokens file"
+		sed 's/^/  | /' "${WORK}/standalone-$1.log" >&2
+		return 0
+	fi
 	# The NOTIFY must come AFTER the COMMIT: the view is dropped and recreated,
 	# and PostgREST has to reload the schema only once the new view exists.
 	commit_line="$(grep -n '^COMMIT$' "${WORK}/standalone-$1.tags" | tail -1 | cut -d: -f1)"
@@ -447,7 +462,7 @@ SELECT 'sessions_column_acl', coalesce(string_agg(a.attname, ',' ORDER BY a.attn
 SELECT r.rel || '_realtime_triggers', count(t.tgrelid)::text, ''
   FROM unnest(ARRAY['osionos_profiles','osionos_user_settings','osionos_username_history',
                     'osionos_account_deletion_requests','osionos_people_directory',
-                    'osionos_personal_access_tokens']) AS r(rel)
+                    'osionos_personal_access_tokens','osionos_follows','osionos_presence']) AS r(rel)
   LEFT JOIN pg_class c ON c.relname = r.rel AND c.relnamespace = 'public'::regnamespace
   LEFT JOIN pg_trigger t ON t.tgrelid = c.oid AND NOT t.tgisinternal
                          AND t.tgfoid = to_regproc('public.realtime_notify')
@@ -462,7 +477,7 @@ SELECT r.rel || '_anon_auth_privs',
        ''
   FROM unnest(ARRAY['osionos_profiles','osionos_user_settings','osionos_username_history',
                     'osionos_account_deletion_requests','osionos_people_directory',
-                    'osionos_personal_access_tokens']) AS r(rel)
+                    'osionos_personal_access_tokens','osionos_follows','osionos_presence']) AS r(rel)
  ORDER BY r.rel;
 SQL
 	then
@@ -477,7 +492,7 @@ SQL
 		'id,created_at,expires_at,last_seen_at,auth_method,ip_prefix,user_agent,revoked_at,revoked_reason'
 	for rel in osionos_profiles osionos_user_settings osionos_username_history \
 	           osionos_account_deletion_requests osionos_people_directory \
-	           osionos_personal_access_tokens; do
+	           osionos_personal_access_tokens osionos_follows osionos_presence; do
 		assert_standalone "$1" "${rel}_realtime_triggers" 0
 		assert_standalone "$1" "${rel}_anon_auth_privs" 0
 	done
