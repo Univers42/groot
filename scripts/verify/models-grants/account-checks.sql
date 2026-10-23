@@ -1904,6 +1904,120 @@ SELECT 'p23_counts_plan', current_setting('osionos.check.p23_plan')::bigint,
        'no sequential scan of osionos_follows, an index scan for each of the three statements';
 ROLLBACK;
 
+-- p32_mfa_secrets (P3-2 root, models/osionos-mfa-migration.sql): the TOTP seed and
+-- the recovery-code HMACs reach service_role and nobody else. Whoever reads either
+-- passes the second factor. Every violation is one string, so a failure names it.
+-- Caveat: the privilege rows read the catalog; the p32_mfa_secrets_read row below
+-- actually runs a SELECT under each role, which is the proof that matters.
+SELECT 'p32_mfa_secrets', count(*), coalesce(string_agg(v, ' ' ORDER BY v), '')
+  FROM (
+    SELECT t || ':missing' AS v
+      FROM unnest(ARRAY['osionos_mfa_totp','osionos_mfa_recovery_codes']) AS t
+     WHERE to_regclass('public.' || t) IS NULL
+    UNION ALL
+    SELECT t || ':no_rls'
+      FROM unnest(ARRAY['osionos_mfa_totp','osionos_mfa_recovery_codes']) AS t
+     WHERE to_regclass('public.' || t) IS NOT NULL
+       AND NOT (SELECT relrowsecurity FROM pg_class WHERE oid = to_regclass('public.' || t))
+    UNION ALL
+    SELECT t || ':' || r || ' holds ' || p
+      FROM unnest(ARRAY['osionos_mfa_totp','osionos_mfa_recovery_codes']) AS t,
+           unnest(ARRAY['anon','authenticated','osionos_account_user']) AS r,
+           unnest(ARRAY['SELECT','INSERT','UPDATE','REFERENCES']) AS p
+     WHERE to_regclass('public.' || t) IS NOT NULL
+       AND (has_table_privilege(r, to_regclass('public.' || t), p)
+         OR has_any_column_privilege(r, to_regclass('public.' || t), p))
+    UNION ALL
+    SELECT t || ':' || r || ' holds ' || p
+      FROM unnest(ARRAY['osionos_mfa_totp','osionos_mfa_recovery_codes']) AS t,
+           unnest(ARRAY['anon','authenticated','osionos_account_user']) AS r,
+           unnest(ARRAY['DELETE','TRUNCATE','TRIGGER']) AS p
+     WHERE to_regclass('public.' || t) IS NOT NULL
+       AND has_table_privilege(r, to_regclass('public.' || t), p)
+    UNION ALL
+    SELECT t || ':service_role lacks ' || p
+      FROM unnest(ARRAY['osionos_mfa_totp','osionos_mfa_recovery_codes']) AS t,
+           unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE']) AS p
+     WHERE to_regclass('public.' || t) IS NOT NULL
+       AND NOT has_table_privilege('service_role', to_regclass('public.' || t), p)
+    UNION ALL
+    SELECT c.relname || ':policy ' || pol.polname || ' names a role besides service_role'
+      FROM pg_policy pol JOIN pg_class c ON c.oid = pol.polrelid
+     WHERE c.relnamespace = 'public'::regnamespace
+       AND c.relname IN ('osionos_mfa_totp','osionos_mfa_recovery_codes')
+       AND (pol.polroles = '{0}'::oid[]
+            OR EXISTS (SELECT 1 FROM unnest(pol.polroles) AS x(oid)
+                        WHERE x.oid <> (SELECT oid FROM pg_roles WHERE rolname = 'service_role')))
+    UNION ALL
+    SELECT t || ':carries the account-plane comment'
+      FROM unnest(ARRAY['osionos_mfa_totp','osionos_mfa_recovery_codes']) AS t
+     WHERE to_regclass('public.' || t) IS NOT NULL
+       AND coalesce(obj_description(to_regclass('public.' || t), 'pg_class'), '') = 'osionos:account-plane'
+    UNION ALL
+    SELECT c.relname || ':realtime trigger armed'
+      FROM pg_trigger tg JOIN pg_class c ON c.oid = tg.tgrelid
+     WHERE c.relnamespace = 'public'::regnamespace
+       AND c.relname IN ('osionos_mfa_totp','osionos_mfa_recovery_codes')
+       AND NOT tg.tgisinternal AND tg.tgfoid = to_regproc('public.realtime_notify')
+    UNION ALL
+    SELECT 'osionos_mfa_recovery_codes:column ' || col || ' missing'
+      FROM unnest(ARRAY['code_hmac','generation','used_at']) AS col
+     WHERE to_regclass('public.osionos_mfa_recovery_codes') IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM pg_attribute a
+                        WHERE a.attrelid = 'public.osionos_mfa_recovery_codes'::regclass
+                          AND a.attname = col AND NOT a.attisdropped)
+    UNION ALL
+    SELECT 'osionos_mfa_recovery_codes:no unique (user_id, code_hmac)'
+     WHERE to_regclass('public.osionos_mfa_recovery_codes') IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM pg_index i
+                        WHERE i.indrelid = 'public.osionos_mfa_recovery_codes'::regclass
+                          AND i.indisunique AND i.indnatts = 2
+                          AND (SELECT string_agg(a.attname, ',' ORDER BY a.attname)
+                                 FROM pg_attribute a
+                                WHERE a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey)) = 'code_hmac,user_id')
+    UNION ALL
+    SELECT 'osionos_mfa_recovery_codes:no index (user_id, used_at)'
+     WHERE to_regclass('public.osionos_mfa_recovery_codes') IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM pg_indexes
+                        WHERE schemaname = 'public' AND tablename = 'osionos_mfa_recovery_codes'
+                          AND indexdef LIKE '%(user_id, used_at)%')
+  ) AS violations;
+
+-- p32_mfa_secrets_read: a real SELECT of each secret column under each role that
+-- must not read it. Counts the reads that SUCCEEDED (must be 0); a role switch
+-- cannot happen inside one SELECT, so the DO block switches per attempt. No
+-- coalesce on the GUC: an unset one is a missing measurement and must FAIL.
+BEGIN;
+DO $$
+DECLARE
+  r text;
+  stmt text;
+  leaked bigint := 0;
+BEGIN
+  FOREACH r IN ARRAY ARRAY['anon','authenticated','osionos_account_user'] LOOP
+    FOREACH stmt IN ARRAY ARRAY[
+      'SELECT secret_enc FROM public.osionos_mfa_totp',
+      'SELECT count(*) FROM public.osionos_mfa_totp',
+      'SELECT code_hmac FROM public.osionos_mfa_recovery_codes',
+      'SELECT count(*) FROM public.osionos_mfa_recovery_codes'
+    ] LOOP
+      BEGIN
+        EXECUTE format('SET LOCAL ROLE %I', r);
+        EXECUTE stmt;
+        leaked := leaked + 1;
+      EXCEPTION WHEN insufficient_privilege THEN
+        NULL;
+      END;
+      RESET ROLE;
+    END LOOP;
+  END LOOP;
+  PERFORM set_config('osionos.check.p32_read', leaked::text, true);
+END
+$$;
+SELECT 'p32_mfa_secrets_read', current_setting('osionos.check.p32_read')::bigint,
+       'statements that read a secret table under anon, authenticated or the account role';
+ROLLBACK;
+
 -- The two isolation rows are LAST: a regressed regex in the uid helper raises
 -- 22P02 and blanks every row after it.
 BEGIN;
