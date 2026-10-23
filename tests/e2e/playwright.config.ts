@@ -4,6 +4,8 @@ import { defineConfig, devices } from "@playwright/test";
 // flake this suite exists to catch.
 export default defineConfig({
   testDir: "./specs",
+  // run.sh sets E2E_SKIP_MAIL_SPECS when the live stack is unsafe for real-mail tests.
+  testIgnore: process.env.E2E_SKIP_MAIL_SPECS ? [/\\/(pr|dm)\\d[^/]*\\.spec\\.ts$/] : [],
   globalSetup: "./lib/global-setup.ts",
   fullyParallel: false,
   workers: 1,
