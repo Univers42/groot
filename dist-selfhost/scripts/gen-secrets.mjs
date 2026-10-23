@@ -110,6 +110,8 @@ set('TURNSTILE_SECRET_KEY', '');
 set('AUTH_REQUIRE_EMAIL_VERIFICATION', 'false');
 set('AUTH_EMAIL_DOMAIN_ALLOWLIST', 'example.test,mini-baas.local,localhost');
 set('AUTH_LOGIN_EMAIL_OTP', 'false');
+set('AUTH_VERIFY_TOKEN_TTL_SEC', '86400');
+set('AUTH_RESET_TOKEN_TTL_SEC', '3600');
 // Signs the confirm and reset links; its own key, never another secret's value.
 set('AUTH_LINK_SIGNING_KEY', osionosSecret());
 

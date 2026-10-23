@@ -46,12 +46,32 @@ jobs:
         run: |
           git config --global url."https://github.com/".insteadOf "git@github.com:"
           git submodule update --init --recursive apps/osionos/app
+      - name: base images from mirror.gcr.io under their public.ecr.aws names
+        # The ECR cap outlasts minutes of retry on one runner IP (job 3d19b714: 3 attempts, all 429).
+        # mirror.gcr.io serves the same Docker Official Images; tagged locally under the ECR name,
+        # the docker-driver build uses them and never asks ECR. Caveat: the two registries move a
+        # tag independently, so right after an upstream release the mirror can lag a digest behind.
+        run: |
+          for img in node:22-alpine nginx:1.27-alpine; do
+            docker pull -q "mirror.gcr.io/library/$img"
+            docker tag "mirror.gcr.io/library/$img" "public.ecr.aws/docker/library/$img"
+          done
       - name: build osionos-app as make does
+        # Retries only a registry refusal: public.ecr.aws caps anonymous data per runner IP
+        # ("429 Data limit exceeded", job 117478667141). Caveat: "registry-shaped" is a grep
+        # of the log; a real build error is never retried, an oddly worded limit is not either.
+        shell: bash
         run: |
           GRAPH_RENDER_SHA="$(git ls-tree HEAD apps/graph_render | awk '$2 == "commit" { print $3 }')"
           export GRAPH_RENDER_SHA
           echo "GRAPH_RENDER_SHA=$GRAPH_RENDER_SHA"
-          docker compose --profile dev --progress plain build osionos-app
+          for i in 1 2 3; do
+            docker compose --profile dev --progress plain build osionos-app 2>&1 | tee "$RUNNER_TEMP/build.log" && exit 0
+            grep -qiE 'toomanyrequests|429 Too Many Requests|unexpected status code [^:]*: 5[0-9][0-9]' "$RUNNER_TEMP/build.log" || exit 1
+            echo "::warning::registry refused the base image pull (attempt $i/3), retrying in $((i * 60))s"
+            sleep $((i * 60))
+          done
+          exit 1
       - name: image size and the layers the pack adds
         run: |
           img=track-binocle/osionos-web:local

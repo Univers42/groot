@@ -1,0 +1,186 @@
+// Inès's executive certificate in operations management: 6 subjects × 4 courses × 5 sessions.
+// Each course names the Arlet decision its notes informed; each topic is [title, key idea].
+export const CERTIFICATE = 'Executive certificate in operations management';
+
+export const SUBJECTS = [
+  { name: 'Supply chain strategy', icon: '🔗', courses: [
+    { name: 'Sourcing and supplier risk', decision: 'supplier-switch', topics: [
+      ['Single-source dependency', 'A single supplier is a hidden loan: you pay the interest in late deliveries.'],
+      ['Mapping supplier risk', 'Score each supplier on lead-time variance, not on its average lead time.'],
+      ['The cost of a second source', 'A second source costs a few points of price and buys back negotiating power.'],
+      ['Splitting volume', 'A 60/40 split keeps both suppliers interested; 90/10 keeps neither honest.'],
+      ['Exit clauses', 'Agree how to leave a supplier before you need to.'],
+    ] },
+    { name: 'Supplier relationship management', decision: 'supplier-switch', topics: [
+      ['Scorecards that suppliers accept', 'Share the scorecard monthly; a supplier cannot fix what it never sees.'],
+      ['Escalation ladders', 'Escalate on the third miss, in writing, with the dates.'],
+      ['Joint forecasts', 'An eight-week forecast sent every Monday shortens lead times more than any penalty.'],
+      ['Trial orders', 'A trial order is a test with a pass mark agreed in advance.'],
+      ['Keeping the incumbent', 'Adding a second source works best when the first one hears it from you.'],
+    ] },
+    { name: 'Network and logistics design', decision: 'freight-carrier-consolidation', topics: [
+      ['Milk runs', 'One loop a day beats five urgent trips.'],
+      ['Carrier consolidation', 'Fewer carriers means better rates and one tracking portal.'],
+      ['Delivery windows', 'Kitchens accept deliveries before service; plan routes backwards from 7:30.'],
+      ['Cross-docking', 'Goods that never rest on a shelf never need counting.'],
+      ['Freight cost per order', 'Track freight as a share of order value, by client segment.'],
+    ] },
+    { name: 'Make, buy or partner', decision: 'showroom-demo-kitchen', topics: [
+      ['Core and context', 'Keep in-house what clients choose you for; buy the rest.'],
+      ['Outsourcing installation', 'An installer partner scales; a missed install costs the client relationship.'],
+      ['Showroom economics', 'A demo that closes one hotel deal pays for a year of showroom rent.'],
+      ['Partnership contracts', 'Write service levels into partner contracts, not into emails.'],
+      ['Reversibility', 'Prefer the option you can undo in a quarter.'],
+    ] },
+  ] },
+  { name: 'Inventory management', icon: '📦', courses: [
+    { name: 'Demand forecasting', decision: 'weekly-sop-meeting', topics: [
+      ['Seasonality in food service', 'Terraces open in April and canteens close in August: the calendar is the forecast.'],
+      ['Forecast error', 'Measure the error by product family; the total hides the misses.'],
+      ['Moving averages', 'A 12-week moving average is wrong in a known way, which makes it useful.'],
+      ['Sales input', 'Ask sales for the three biggest deals of the month, not for a number.'],
+      ['Forecast to plan', 'A forecast becomes a plan only when someone owns the gap.'],
+    ] },
+    { name: 'Reorder policies', decision: 'stock-reorder-rule', topics: [
+      ['Fixed reorder points', 'A flat reorder point ignores lead time, so it fails first on slow suppliers.'],
+      ['Reorder point formula', 'Reorder point = demand per day × lead time × a safety factor.'],
+      ['Reorder quantity', 'Order about six weeks of demand: fewer orders, still little cash on the shelf.'],
+      ['Review periods', 'Review fast movers daily and slow movers weekly.'],
+      ['Expedited orders as a signal', 'Every expedited receipt is a reorder point that was too low.'],
+    ] },
+    { name: 'Safety stock and lead time', decision: 'stock-reorder-rule', topics: [
+      ['Lead time is a distribution', 'Plan on the 90th-percentile lead time, not the promised one.'],
+      ['Service level targets', 'Pick the service level per category; spare parts deserve the highest.'],
+      ['Safety stock cost', 'Safety stock is cash; size it where a stock-out stops a kitchen.'],
+      ['Lead-time variance by supplier', 'Two suppliers with the same average can need very different buffers.'],
+      ['Recalculating buffers', 'Recompute the buffers each quarter from the real receipts.'],
+    ] },
+    { name: 'Counting and accuracy', decision: 'cycle-counting', topics: [
+      ['Cycle counting', 'Count a few locations every day instead of everything once a year.'],
+      ['ABC classes', 'Count A items monthly, B quarterly, C twice a year.'],
+      ['Adjustment reasons', 'An adjustment without a reason code is a lost lesson.'],
+      ['Record accuracy', 'If the system is wrong, every reorder point built on it is wrong too.'],
+      ['Counting during service hours', 'Count before the trucks leave, never after.'],
+    ] },
+  ] },
+  { name: 'Operations finance', icon: '💶', courses: [
+    { name: 'Working capital', decision: 'caterer-payment-terms', topics: [
+      ['The cash conversion cycle', 'Days of stock plus days to collect, minus days to pay.'],
+      ['Payment terms by segment', 'Caterers pay with the event; terms should follow the event calendar.'],
+      ['Stock as cash', 'Every euro on the shelf is a euro not in the bank.'],
+      ['Supplier terms', 'A longer supplier term is cheaper credit than the overdraft.'],
+      ['Thirteen-week cash forecast', 'Forecast cash weekly for a quarter; monthly hides the trough.'],
+    ] },
+    { name: 'Costing and margins', decision: 'quarterly-price-review', topics: [
+      ['Margin by category', 'Equipment brings revenue; spare parts and service bring margin.'],
+      ['Landed cost', 'Freight and handling belong in the product cost, not in overheads.'],
+      ['Discount discipline', 'A discount without a reason code becomes the new price.'],
+      ['Price reviews', 'Review prices quarterly against supplier lists and the market.'],
+      ['Cost to serve', 'Small frequent orders can lose money on a profitable product.'],
+    ] },
+    { name: 'Credit and collections', decision: 'credit-check-threshold', topics: [
+      ['Credit limits', 'Set the limit from payment history, not from the size of the kitchen.'],
+      ['Checking before large orders', 'A check above a threshold costs minutes and can save a whole order.'],
+      ['Dunning sequence', 'Remind on day one past due, call on day ten, stop shipping on day thirty.'],
+      ['Public-sector payers', 'Canteens pay late but pay; plan the cash for it.'],
+      ['Disputed invoices', 'Most late payments are disputes; fix the delivery note first.'],
+    ] },
+    { name: 'Budgeting for operations', decision: 'showroom-demo-kitchen', topics: [
+      ['Zero-based lines', 'Rebuild the three largest budget lines from zero every year.'],
+      ['Capex cases', 'A capex case names the metric it will move and by when.'],
+      ['Variance reviews', 'Explain a variance by volume, price and mix.'],
+      ['Budget owners', 'Each line has one owner who can say no.'],
+      ['Rolling budgets', 'A rolling quarter beats a stale annual plan.'],
+    ] },
+  ] },
+  { name: 'Lean operations and quality', icon: '⚙️', courses: [
+    { name: 'Value stream mapping', decision: 'web-portal-repeat-orders', topics: [
+      ['Order-to-delivery map', 'Map one order from phone call to signed delivery note.'],
+      ['Waiting time', 'Most lead time is waiting, not work.'],
+      ['Rekeying', 'Every rekeyed order line is a chance to get it wrong.'],
+      ['Self-service for repeat orders', 'Let regulars reorder online; keep the phone for the hard cases.'],
+      ['Takt for a distributor', 'Size the picking team to the morning order wave.'],
+    ] },
+    { name: 'Warehouse flow', decision: 'warehouse-slotting', topics: [
+      ['Slotting by velocity', 'Fast movers by the dock, slow movers up high.'],
+      ['Pick paths', 'One-way aisles halve the walking.'],
+      ['5S in the warehouse', 'A labelled empty space shows what is missing.'],
+      ['Receiving discipline', 'Check quantity and damage at the dock, not on the shelf.'],
+      ['Returns area', 'Returns need their own zone and a 48-hour rule.'],
+    ] },
+    { name: 'Root cause analysis', decision: 'supplier-switch', topics: [
+      ['Five whys on a late delivery', 'Asking why five times ended at a single factory, not at the carrier.'],
+      ['Fishbone diagrams', 'Draw causes by family before arguing about the fix.'],
+      ['Data before opinions', 'A delivery log settles in minutes what meetings argue for weeks.'],
+      ['Countermeasures', 'Prefer a countermeasure that removes the cause over one that adds a check.'],
+      ['Checking the fix', 'Measure the same metric three months after the fix.'],
+    ] },
+    { name: 'Quality in the cold chain', decision: 'preventive-maintenance-offer', topics: [
+      ['Temperature logging', 'An unlogged fridge is a failed inspection waiting to happen.'],
+      ['Preventive maintenance', 'Cleaning a condenser twice a year prevents most summer breakdowns.'],
+      ['Refrigerant rules', 'Only certified technicians may open a refrigeration circuit.'],
+      ['First-time fix rate', 'The right part in the van is the cheapest quality programme.'],
+      ['Failure modes', 'Gaskets, fans and thermostats cause most service calls.'],
+    ] },
+  ] },
+  { name: 'Service operations', icon: '🛠️', courses: [
+    { name: 'Field service planning', decision: 'technician-on-call-rota', topics: [
+      ['Breakdown priorities', 'A cold room down at a hotel outranks a slow dishwasher at a café.'],
+      ['On-call rotas', 'A published rota is fairer and faster than goodwill.'],
+      ['Route density', 'Group visits by district; Lyon traffic decides the day.'],
+      ['Response-time promises', 'Promise what the rota can keep on its worst week.'],
+      ['Technician utilisation', 'Count driving time as cost, not as work.'],
+    ] },
+    { name: 'Service contracts and SLAs', decision: 'preventive-maintenance-offer', topics: [
+      ['Pricing a contract', 'Price on the expected visits plus a margin for the bad year.'],
+      ['SLA design', 'Measure the time to restore service, not the time to arrive.'],
+      ['Renewal timing', 'Renew three months early, with last year’s numbers in hand.'],
+      ['Bundling parts', 'Include wear parts in the contract; exclude damage.'],
+      ['Contract margin', 'Track margin per contract, not per technician.'],
+    ] },
+    { name: 'Spare-parts logistics', decision: 'service-van-kits', topics: [
+      ['Van stock', 'A standard van kit covers most first visits.'],
+      ['Kitting', 'Kit parts by job type, not by part number.'],
+      ['Replenishing vans', 'Refill vans weekly from consumption, not from requests.'],
+      ['Obsolete parts', 'Write off parts for models no client still runs.'],
+      ['Parts lead time', 'Same-day parts come from a local wholesaler, not the manufacturer.'],
+    ] },
+    { name: 'Key accounts', decision: 'varenne-framework-contract', topics: [
+      ['Account plans', 'One page per key account: people, spend, risks, next deal.'],
+      ['Customer lifetime value', 'Value a client on years of service, not on one refit.'],
+      ['Framework contracts', 'A framework contract fixes prices and service levels, not volumes.'],
+      ['Mapping the buying centre', 'The chef chooses, the buyer signs, the general manager can veto.'],
+      ['Quarterly business reviews', 'Bring the client’s own numbers to the review.'],
+    ] },
+  ] },
+  { name: 'Leadership and change', icon: '🧭', courses: [
+    { name: 'Decisions under uncertainty', decision: 'supplier-switch', topics: [
+      ['Reversible and irreversible decisions', 'Decide reversible things fast and irreversible things slowly.'],
+      ['Pre-mortems', 'Imagine the decision failed a year from now, and list why.'],
+      ['Decision logs', 'Write the decision, the options and the reason on the day.'],
+      ['Base rates', 'Start from how often this kind of change works elsewhere.'],
+      ['Reviewing decisions', 'Judge a decision by what was known when it was made.'],
+    ] },
+    { name: 'Negotiation', decision: 'varenne-framework-contract', topics: [
+      ['Walk-away point', 'Know your walk-away point before the first offer.'],
+      ['Trading variables', 'Trade terms, volume and service levels; price is one variable among many.'],
+      ['Anchoring', 'The first credible number shapes the range.'],
+      ['Negotiating with a large client', 'A large client needs you too; bring the data that shows it.'],
+      ['Writing it down', 'End every negotiation with a written summary sent the same day.'],
+    ] },
+    { name: 'Leading cross-functional teams', decision: 'weekly-sop-meeting', topics: [
+      ['One meeting, four departments', 'Sales, warehouse, finance and service at one table, thirty minutes, weekly.'],
+      ['Shared numbers', 'One dashboard ends the argument about whose spreadsheet is right.'],
+      ['Ownership', 'Every action leaves the meeting with one name and one date.'],
+      ['Conflict between departments', 'Sales wants stock, finance wants cash: make the trade-off explicit.'],
+      ['Running short meetings', 'Stand-up, fixed agenda, decisions only.'],
+    ] },
+    { name: 'Change management', decision: 'stock-reorder-rule', topics: [
+      ['Explaining the why', 'People follow a new rule when they saw the stock-outs it fixes.'],
+      ['Pilots', 'Pilot a new rule on one category before rolling it out.'],
+      ['Resistance', 'Resistance is information about what the plan missed.'],
+      ['Training the warehouse', 'Teach the rule on the shelf, not in a meeting room.'],
+      ['Sustaining the change', 'Check the rule is still used ninety days later.'],
+    ] },
+  ] },
+];

@@ -58,7 +58,7 @@ tools() { bash "$ROOT/scripts/tools.sh" "$@"; }
 }
 
 @test "svgo optimises an SVG" {
-  printf '<svg xmlns="http://www.w3.org/2000/svg"><!-- c --><rect width="1" height="1"/></svg>' > "$WORK/a.svg"
+  printf '<svg xmlns="http://www.w3.org/2000/svg"><!-- c --><rect width="1" height="1"/></svg>' >"$WORK/a.svg"
   run tools svgo "$WORK/a.svg" -o "$WORK/b.svg"
   [ "$status" -eq 0 ]
   run grep -c 'c -->' "$WORK/b.svg"
@@ -75,6 +75,30 @@ tools() { bash "$ROOT/scripts/tools.sh" "$@"; }
   run tools npm ls -g --depth 0 @playwright/mcp
   [ "$status" -eq 0 ]
   [[ "$output" == *@playwright/mcp@0.0.83* ]]
+}
+
+@test "pnpm is the version the site's packageManager pins" {
+  want="$(sed -n 's/^ARG PNPM_VERSION=//p' "$ROOT/infrastructure/docker/tools/Dockerfile")"
+  [ -n "$want" ]
+  run grep -c "\"packageManager\": \"pnpm@$want\"" "$ROOT/apps/opposite-osiris/package.json"
+  [ "$output" = "1" ]
+  run tools pnpm --version
+  [ "$status" -eq 0 ]
+  [ "$output" = "$want" ]
+}
+
+@test "dig is on PATH for the mail DNS checks" {
+  run tools dig -v
+  [ "$status" -eq 0 ]
+  [[ "$output" == *DiG* ]]
+}
+
+@test "openssl writes a self-signed certificate for the local site server" {
+  run tools openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost \
+    -keyout "$WORK/key.pem" -out "$WORK/cert.pem"
+  [ "$status" -eq 0 ]
+  run tools openssl x509 -in "$WORK/cert.pem" -noout -subject
+  [[ "$output" == *CN*localhost* ]]
 }
 
 @test "Chromium renders a page headless" {

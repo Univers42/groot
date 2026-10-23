@@ -87,6 +87,7 @@ install_units() {
   # goes back to creating (and re-creating on restart) the socket itself.
   install -o root -g root -m 0644 "$srcdir/docker-ide.socket" "$UNIT_DIR/docker-ide.socket"
   install -o root -g root -m 0644 "$srcdir/osionos-ide.slice" "$UNIT_DIR/osionos-ide.slice"
+  install -o root -g root -m 0755 "$srcdir/restore-docker0.sh" /usr/local/sbin/osionos-ide-restore-docker0
   install -d -m 0755 "$CONF_DIR"
   install -o root -g root -m 0644 "$srcdir/docker-ide.daemon.json" "$CONF_DIR/daemon.json"
 }

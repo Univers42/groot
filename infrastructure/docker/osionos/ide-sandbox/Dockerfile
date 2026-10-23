@@ -122,6 +122,19 @@ RUN echo "debugpy==1.8.22 --hash=sha256:192b73e8d53bbd60225220c0943627bf249ac93d
 COPY debugpy-adapter.sh /usr/local/bin/debugpy-adapter
 RUN chmod 755 /usr/local/bin/debugpy-adapter
 
+# A terminal that feels like a computer: tmux to survive a dropped tab, less as the pager, man
+# for the manual. Debian's slim dpkg config drops /usr/share/man, so man-db alone would find no
+# page; the drop-in re-admits man pages for this layer, and the base tools' pages (excluded when
+# they were first installed) are reinstalled. The drop-in is removed so later installs keep the
+# slim behaviour. Needs egress: it must stay above the HTTP_PROXY ENV block.
+RUN echo 'path-include=/usr/share/man/*' > /etc/dpkg/dpkg.cfg.d/zz-man \
+    && apt-get update && apt-get install -y --no-install-recommends \
+      tmux less man-db manpages manpages-dev \
+    && apt-get install -y --no-install-recommends --reinstall \
+      bash coreutils findutils grep sed tar gzip diffutils \
+    && rm -f /etc/dpkg/dpkg.cfg.d/zz-man \
+    && rm -rf /var/lib/apt/lists/*
+
 # PAT broker (devil condition 13): the credential helper only emits a secret
 # when GIT_PAT is present in the GIT PROCESS env — which happens ONLY when the
 # provisioner runs `docker exec -e GIT_PAT=… git …` per operation. The long-lived
@@ -145,8 +158,31 @@ ENV HTTP_PROXY=http://ide-egress:8080 \
 RUN printf 'ulimit -c 0\n' > /etc/profile.d/00-nocore.sh \
     && chmod 0644 /etc/profile.d/00-nocore.sh
 
+# User-space toolchain defaults for login shells (comments in the file). Root-owned and 0644: /etc
+# stays unwritable for the box user. conda-forge is micromamba's only default channel.
+COPY user-space.profile.sh /etc/profile.d/10-user-space.sh
+COPY conda.condarc /etc/conda/.condarc
+RUN chmod 0644 /etc/profile.d/10-user-space.sh /etc/conda/.condarc
+
 RUN useradd --uid 10001 --create-home --shell /bin/bash coder \
     && mkdir -p /workspace && chown coder:coder /workspace
+
+# Login shell choice without /etc: `chsh -s` saves a path under ~/.config/osio and osio-login (the
+# PTY Cmd) starts it, else bash. The setuid /usr/bin/chsh cannot work here (read-only /etc,
+# no-new-privileges), so it is removed and the shim shadows nothing. The persistent home volume
+# at /home/coder is what makes the choice outlive a box.
+COPY osio-shell.sh /usr/local/lib/osio-shell.sh
+COPY osio-login.sh /usr/local/bin/osio-login
+COPY osio-chsh.sh /usr/local/bin/chsh
+RUN rm -f /usr/bin/chsh \
+    && chmod 0644 /usr/local/lib/osio-shell.sh \
+    && chmod 0755 /usr/local/bin/osio-login /usr/local/bin/chsh \
+    && ! find / -xdev -name chsh -perm /6000 -print | grep -q .
+
+# The ownership init (ADR 0011): the ide-server runs this image with this entrypoint before every
+# box create, to give a user's two volumes to that user's uid. Never the box's own entrypoint.
+COPY osio-volume-init.sh /usr/local/sbin/osio-volume-init
+RUN chmod 0755 /usr/local/sbin/osio-volume-init
 
 # The in-sandbox filesystem agent (P4): watches /workspace and streams
 # create/modify/delete events for the gateway, applying the ignore set so a
@@ -172,8 +208,38 @@ RUN if find / -xdev \( -uid +65535 -o -gid +65535 \) -print -quit | grep -q .; t
       find / -xdev \( -uid +65535 -o -gid +65535 \) | head -5 >&2; exit 1; \
     fi
 
+# Opt-in (--build-arg STRIP_SETUID=1): a box for anyone but the operator needs zero setuid/setgid
+# entries (devil R8, ADR 0022 stage 1); the operator image keeps its measured baseline of 7. Setgid
+# directories (/usr/local/*, /var/mail) count too, so the strip covers every type. Default 0 changes
+# no file in the image.
+ARG STRIP_SETUID=0
+RUN if [ "$STRIP_SETUID" = 1 ]; then \
+      find / -xdev -perm /6000 -exec chmod a-s {} + \
+      && test -z "$(find / -xdev -perm /6000)"; \
+    fi
+
+# The box's account file lives on the box's /tmp tmpfs so the terminal can show the user's own
+# name (ADR 0009). The link is the LAST step: from here on, root lookups in a build RUN fail.
+# It is safe only because the box runs with no-new-privileges, CapDrop ALL, a read-only rootfs
+# and a numeric User; with any of them gone, a user-written passwd plus a setuid binary gives
+# root in the box. The build asserts what it can: the link, one 10001 account, no new setuid.
+# box-init and osio-login copy passwd.base at run time, swapping the coder line's 10001 uid for the
+# box's own, so that line is the template they match: keep it exactly as asserted here.
+# SETUID_BASELINE is the count measured on 2026-10-17 (7) plus one of headroom.
+ARG SETUID_BASELINE=8
+RUN cp /etc/passwd /etc/passwd.base \
+    && test "$(grep -c ':10001:' /etc/passwd.base)" = 1 \
+    && grep -q '^coder:x:10001:10001:' /etc/passwd.base \
+    && ln -sf /tmp/.osio/passwd /etc/passwd \
+    && test "$(readlink /etc/passwd)" = /tmp/.osio/passwd \
+    && test "$(find / -xdev -perm -4000 -type f | wc -l)" -le "${SETUID_BASELINE}"
+
 WORKDIR /workspace
-USER coder
+# Numeric: dockerd resolves a user name against the image's own passwd, which now points at a
+# file that does not exist before the box starts. This is only the image's default: every box is
+# created with its owner's "<uid>:10001" (20000-59999, ADR 0011) and the socket proxy refuses any
+# other User, 10001:10001 included, so no box runs as the account baked in above.
+USER 10001:10001
 # PID 1 is box-init: it reaps every orphan (with `sleep infinity` as PID 1, hellish's `make -j8`
 # left 469 zombies and every fork failed, 2026-10-14) and, unlike tini, cannot be stopped from
 # inside the box (tini exits when its child dies: `pkill -x sleep` stopped the box). The Cmd

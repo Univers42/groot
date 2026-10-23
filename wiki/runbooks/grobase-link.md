@@ -10,7 +10,7 @@ the frontends and without a hardcoded address. One target, resolved at `make lin
 
 | Mode | Picked when | What is opened | Source |
 |---|---|---|---|
-| `local` | `mini-baas-kong` runs on this daemon | Nothing. Docker DNS already resolves the names; a running relay is removed | `scripts/grobase-link.sh:155-169` (`cmd_up`), `infrastructure/makes/grobase-link.mk:30-32` |
+| `local` | `mini-baas-kong` runs on this daemon | Nothing. Docker DNS already resolves the names; a running relay is removed | `scripts/grobase-link.sh:155-169` (`cmd_up`), `utils/mk/grobase-link.mk`, target `link` |
 | `ssh` | The target is `ssh://…`, an ssh alias, `user@host`, or a bare host whose `docker ps` over ssh shows `mini-baas-kong` | One ssh ControlMaster; one unix-socket forward per grobase port into `LINK_DIR`; the `grobase-link` relay container that serves the names | `scripts/grobase-link.sh:97-140`, `docker-compose.grobase-link.yml` |
 | `direct` | The target is `http(s)://host[:port]`, or a bare host that answers on `:8000` or `:443` from a container | The relay with one route to Kong: `GROBASE_CA_FILE`'s PEM goes to `LINK_DIR/ca.pem` and to the relay as `cafile=` (empty = the relay image's system store), the URL's name is resolved here (`getent ahostsv4`) and the relay connects to that IPv4 while verifying the certificate against the name. Redis and Mailpit are local stand-ins; realtime publishes reach the edge through the data center's service_role key | `scripts/grobase-link.sh` (`up_direct`), `scripts/lib/grobase-link-target.sh` (`resolve_ipv4`, `kong_addr`, `direct_routes`) |
 
@@ -24,7 +24,7 @@ is tried as ssh, then `http://host:8000`, then `https://host` (`resolve_host`, `
 
 The scheme of `GROBASE_TARGET` is the kind: `local`, `ssh://…`, `http(s)://…`, or `auto` /
 a bare host to let the script find out. It is read in this order, first hit wins
-(`scripts/grobase-link.sh:20-31`, `setting`; `infrastructure/makes/grobase-link.mk:6-15`):
+(`scripts/grobase-link.sh:20-31`, `setting`; `utils/mk/grobase-link.mk`, variables `GROBASE_TARGET`, `GROBASE_LINK_DIR`):
 
 1. The environment, which is also where `make link GROBASE_TARGET=…` puts it — one run.
 2. `./.env.grobase-link` at the repo root — this machine's standing choice. Git-ignored
@@ -38,7 +38,7 @@ same three steps apply to `GROBASE_LINK_HOST_PORT` and `GROBASE_REMOTE_DIR`; `GR
 
 The direction does not matter: whichever machine runs the frontends runs `make link` pointing at
 the machine that runs grobase. Exposing the frontends themselves to other machines is a separate
-knob, `TRACK_BINOCLE_BIND_ADDR` (`infrastructure/makes/grobase.mk:127`,
+knob, `TRACK_BINOCLE_BIND_ADDR` (`utils/mk/common.mk`,
 `infrastructure/scripts/detect-bind-addr.sh`).
 
 
@@ -226,6 +226,45 @@ it is off). In local mode the heal does nothing. `make link-autostart-off` remov
 the link as it is. A unit that differs from the rendered one is backed up as `<unit>.bak-<time>`
 before it is replaced.
 
+## A host port is taken
+
+The compose files publish their ports as `${NAME_HOST_PORT:-N}` and nothing used to choose
+them: when another process already held a default, the container that published it failed
+(measured 2026-10-21 — a QEMU VM forward took `127.0.0.1:8444` and `local-https-proxy`
+exited 255; a standalone dev server held 4322 and the same proxy could not start). The port
+numbers were also copied as literals into make variables and scripts, so even a manual
+override left the health checks and the printed URLs pointing at the old port.
+
+`scripts/host-ports.sh resolve` (run by `make link`, `make link-frontends-start`,
+`make link-frontends-up`, `make frontends-up`, `make all` and the other targets that start
+containers) now picks a free port per NAME and records the choice in **`./.env.ports`** at the
+repo root (git-ignored). `make` includes that file, so the chosen ports are in the environment
+of every recipe of the run and reach every `docker compose` call (compose gives the shell
+environment precedence over `--env-file`).
+
+When `OSIONOS_APP_HOST_PORT` moves, the resolver also writes the override file
+**`infrastructure/tls/host-ports.d/osionos-origin.conf`** (generated, git-ignored) with the
+chosen port. The tracked `infrastructure/tls/nginx.conf` includes this directory via
+`include /etc/nginx/host-ports.d/*.conf;`, so the drawnosaurus server picks up the moved
+osionos origin for framing and CORS without rewriting any tracked file.
+
+| Question | Answer |
+|---|---|
+| What moves | Every `${NAME_HOST_PORT:-N}` of the `docker-compose*.yml` files: the port in the URL `make healthcheck` probes, in `make update_web`'s message, in the showcase recap — and the osionos origin nginx allows the whiteboard to be framed from |
+| Where the choice is recorded | `./.env.ports` — one `NAME=port` per line, the file `make` includes and `scripts/check-health-apps.sh`, `scripts/showcase.sh` and `scripts/gen-local-env.sh` read |
+| Where the osionos origin override lives | `infrastructure/tls/host-ports.d/osionos-origin.conf` — generated by `scripts/host-ports.sh resolve`, git-ignored, included by the tracked `nginx.conf` |
+| How to pin one | `OSIONOS_APP_HOST_PORT=4324 make link` — the environment wins over the default and the value is never moved (the resolver says so on stderr when it is busy) |
+| How to read it | `bash scripts/host-ports.sh list` (the defaults scraped from the compose files) and `cat .env.ports` (the choice) |
+
+A port that had to move STAYS on its new value while its default is taken, so the bundles and
+the bookmarks keep working; it goes back to the default once the default is free again.
+
+**What does NOT follow automatically:** grobase's allowed origins live in the DATA CENTER, not
+here — `REALTIME_ALLOWED_ORIGINS` in born2root's `profiles/server.toml`, applied with
+born2root's `make grobase_cors`. A moved `OSIONOS_APP_HOST_PORT` must be added there too, or
+the osionos app is refused by the realtime gateway. The resolver says exactly that on stderr
+when it moves that port.
+
 ## Commands
 
 | Command | Does | Source |
@@ -320,8 +359,8 @@ without touching the frontends' compose files.
 
 | Guard | Why | Source |
 |---|---|---|
-| `make backend-up` refuses while the relay runs | Two containers must not answer to `mini-baas-kong`; `make link-down` first | `infrastructure/makes/grobase.mk:63-66` |
-| `certs-trust-user`, not the system store, in `link-frontends-up` | The system store needs sudo; the browser stores do not. The old `TRACK_BINOCLE_CERT_TRUST=skip` there was dead and is dropped | `infrastructure/makes/grobase-link.mk`, `scripts/certs-trust-user.sh` |
+| `make backend-up` refuses while the relay runs | Two containers must not answer to `mini-baas-kong`; `make link-down` first | `utils/mk/grobase.mk`, target `backend-up` |
+| `certs-trust-user`, not the system store, in `link-frontends-up` | The system store needs sudo; the browser stores do not. The old `TRACK_BINOCLE_CERT_TRUST=skip` there was dead and is dropped | `utils/mk/grobase-link.mk`, `scripts/certs-trust-user.sh` |
 | `MINI_BAAS_WAF_TLS_GID=none` in the link targets | The grobase WAF (gid 101) is the only reader that needs the TLS key group-readable, and it runs where grobase runs. On NFS without sudo the grant cannot be done, and `chgrp` to the user's primary group would hand the key to the whole promo | `apps/grobase/scripts/certs/generate-localhost-cert.sh:30-39`, `grobase-link.mk:15-18` |
 
 ## Verified — 2026-10-08, host rootless Docker 28.1.1, target `b2b` (born2root VM over ssh)
@@ -575,7 +614,7 @@ graph.
 | `frontends-up` fails to bind `127.0.0.1:4322`, `3001`, `4000`, `8787`, `3002`, `4100`, `3003`, `4200` | A QEMU `hostfwd` of a born2root VM holds the port. The `baas` profile (`vendor/born2root/profiles/server.toml`, `[network] forwards`) stopped forwarding those, `8000`, `8001` and `8025` on 2026-10-08: the link needs only the ssh forward, and a hostfwd never reaches a guest-loopback service anyway | `cat <vm dir>/ports.env` shows what the running VM forwards; edit the profile's `forwards` and `make qemu_restart B2B_CONFIG=profiles/server.toml`. Kong's host copy stays on `28000` so a grobase on this daemon can keep `8000` |
 | `make certs`: `not readable by the WAF gid 101 (tried chgrp, setfacl, docker)` | NFS refuses `setfacl` and `chgrp` to a group the user is not in; rootless Docker maps gid 101 to the user's subgid range | `MINI_BAAS_WAF_TLS_GID=none make certs` — the link targets already set it |
 | `[backend] the grobase-link relay is running` | By design | `make link-down`, then `make backend-up` |
-| `drawnosaurus-wasm`: `cannot setuid to unmapped uid <uid> in user namespace` | A rootless daemon has no mapping for the host uid that `--user` asked for; the flag only exists to keep `engine/pkg` user-owned on a rootful daemon, where container root would write it as root | Fixed 2026-10-08: `DRAWNOSAURUS_RUN_USER` (`infrastructure/makes/drawnosaurus.mk`) drops `--user` when `docker info` reports `rootless`. Container root already is the invoking user there |
+| `drawnosaurus-wasm`: `cannot setuid to unmapped uid <uid> in user namespace` | A rootless daemon has no mapping for the host uid that `--user` asked for; the flag only exists to keep `engine/pkg` user-owned on a rootful daemon, where container root would write it as root | Fixed 2026-10-08: `DRAWNOSAURUS_RUN_USER` (`utils/mk/drawnosaurus.mk`) drops `--user` when `docker info` reports `rootless`. Container root already is the invoking user there |
 | `make link GROBASE_TARGET=local`: `no mini-baas-kong on this daemon` | The monolithic kind is taken as given but still checked: without grobase here the frontends would start against a name that resolves to nothing | `make backend-up` first, or set the target to the machine that runs grobase |
 | After this machine reboots: `track-binocle-grobase-link-1` restarting, the frontends get no answer from grobase | The ssh master and `LINK_DIR` (in `XDG_RUNTIME_DIR`) do not survive a reboot; dockerd re-creates the relay's bind source as root when it restarts the relay, and `make link` replaces that empty directory with this user's (`own_link_dir`) | `make link`; `make link-autostart` once makes it heal on its own |
 | `link-status`: `master to … is gone` | The remote rebooted or the network dropped; `ControlPersist` does not reconnect | `make link` again (the heal timer does it within two minutes when `link-autostart` is installed) |
