@@ -2772,7 +2772,8 @@ BEGIN
   PERFORM pg_temp.p5_world();
   v_expect := (SELECT count(*) FROM public.osionos_account_data_map WHERE object_bucket IS NOT NULL AND erase <> 'keep');
   PERFORM pg_temp.p5_ok('registry names object columns (' || v_expect || ')', v_expect >= 1);
-  SELECT e.user_id::text || '/' || e.id::text || '.' || e.format INTO v_exp_key FROM public.osionos_account_exports e WHERE e.user_id = a;
+  -- Caller-relative, as the bridge stores it; the storage router adds the owner prefix (see the erase function).
+  SELECT e.id::text || '.' || e.format INTO v_exp_key FROM public.osionos_account_exports e WHERE e.user_id = a;
   UPDATE public.osionos_message_attachments SET object_key = 'p5-attachment-key' WHERE owner_id = a;
   SELECT object_key INTO v_att_key FROM public.osionos_message_attachments WHERE owner_id = a;
   PERFORM pg_temp.p5_ok('A has an export and an attachment to record', v_exp_key IS NOT NULL AND v_att_key IS NOT NULL);
