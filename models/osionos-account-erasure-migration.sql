@@ -565,8 +565,13 @@ BEGIN
    WHERE user_id = p_user AND erased_at IS NULL;
 
   -- 3. Record every storage key before any row that names it goes.
+  -- The key is the CALLER-RELATIVE one, `<id>.<format>`, exactly what the bridge stored
+  -- (EXPORT_KEY_FOR, osionos app scripts/bridge-account-export-runner.mjs:34). The storage router
+  -- prefixes `<user_id>/` itself on put AND delete (grobase storage.service.ts ownedKey), so a key
+  -- recorded with the prefix would be deleted as `<user_id>/<user_id>/...`, a no-op that S3 answers
+  -- 204, and the archive would outlive the erase.
   INSERT INTO public.osionos_account_erasure_objects (user_id, bucket, key)
-  SELECT e.user_id, 'account-exports', e.user_id::text || '/' || e.id::text || '.' || e.format
+  SELECT e.user_id, 'account-exports', e.id::text || '.' || e.format
     FROM public.osionos_account_exports e WHERE e.user_id = p_user
   ON CONFLICT DO NOTHING;
   GET DIAGNOSTICS v_n = ROW_COUNT;
