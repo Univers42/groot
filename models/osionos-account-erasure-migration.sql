@@ -311,6 +311,7 @@ INSERT INTO osionos_account_data_map_seed VALUES
 ('osionos_ide_access', 'user_id', 'owner', 'delete', NULL, NULL, NULL, NULL, NULL),
 ('osionos_mfa_recovery_codes', 'user_id', 'owner', 'delete', NULL, NULL, NULL, NULL, NULL),
 ('osionos_mfa_totp', 'user_id', 'owner', 'delete', NULL, NULL, NULL, NULL, NULL),
+('osionos_user_emails','user_id','owner','delete',NULL,NULL,NULL,NULL,'addresses are ciphertext; an export would need the key'),
 ('osionos_personal_access_tokens', 'user_id', 'owner', 'delete', NULL, NULL, NULL, NULL, NULL),
 ('osionos_user_keys', 'user_id', 'owner', 'delete', '{id,kind,title,fingerprint,created_at}', NULL, NULL, NULL, 'public_key and key_type are not exported: the export guard refuses any column named like a key; the fingerprint identifies each key'),
 ('osionos_presence', 'user_id', 'owner', 'delete', '{state,custom_text,updated_at}', NULL, NULL, NULL, NULL),
