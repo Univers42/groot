@@ -41,8 +41,8 @@
 -- Caveat: the seal key rotates through OSIONOS_EMAIL_SEAL_KEY_PREVIOUS but there is NO re-seal path, so _PREVIOUS must stay set until a re-seal job exists. The lookup key (OSIONOS_EMAIL_LOOKUP_KEY) has NO rotation: changing it orphans every email_hmac, the verified-unique index silently stops matching and every address looks free; rotating it is unsupported without a backfill that re-HMACs every row from the opened address.
 -- Caveat: aliases (a+1@x, dotted gmail) are distinct strings and bypass uniqueness by design.
 --
--- Idempotent: a second run moves no grant, policy or index (check g of
--- scripts/verify/models-grants.sh).
+-- Idempotent: a second run moves no grant or policy (check g of
+-- scripts/verify/models-grants.sh); the indexes are IF NOT EXISTS, which check g does not snapshot.
 --
 -- DOWN (manual, IRREVERSIBLE for rows): DROP TABLE public.osionos_user_emails;
 

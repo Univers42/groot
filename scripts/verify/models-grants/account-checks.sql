@@ -3595,7 +3595,7 @@ ROLLBACK;
 --   (c) a verified row beside an unverified one for that email_hmac is accepted;
 --   (d) the same user twice with one email_hmac is refused, 23505;
 --   (e) a mixed-case or short email_hmac is refused, 23514.
--- Only (a) fails if the partial index loses its WHERE or its uniqueness.
+-- Dropping the partial index's WHERE fails (b) and (c); losing its uniqueness fails (a).
 BEGIN;
 INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
                                ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'),
