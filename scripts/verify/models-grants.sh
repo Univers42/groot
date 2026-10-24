@@ -39,6 +39,13 @@
 #   other role
 #   sd the two self-data indexes the sys: sources read through — (owner_id, updated_at DESC) on
 #   osionos_pages and on osionos_tasks — exist with that shape
+#   wi1/wi2/wi3 the pending-invite table (osionos-workspace-invites-migration.sql): it exists with
+#   forced RLS, its partial unique index has the exact live predicate, a second live invite is
+#   refused (23505), one is allowed after a revoke, and role 'owner' is refused (23514)
+#   tm1/tm2/tm3 the team tables (osionos-teams-migration.sql): both exist with forced RLS, the
+#   (workspace_id, team_id) read index exists, a team member who is not a workspace member is
+#   refused (23503), a duplicate name (23505) and a bad role (23514) too, and removing the
+#   workspace member removes the team membership
 #
 #   The account plane (models/osionos-account-foundation-migration.sql, ADR 0028),
 #   in scripts/verify/models-grants/account-checks.sql, piped after checks.sql into
@@ -637,6 +644,12 @@ run_checks() {
 	check_count "$1" lifecycle_transfer_one_owner lifecycle_transfer_one_owner
 	lifecycle_race "$1"
 	check_count "$1" sd1 self_data_indexes_missing
+	check_count "$1" wi1 workspace_invites_table
+	check_count "$1" wi2 workspace_invites_live_index
+	check_count "$1" wi3 workspace_invites_behaviour
+	check_count "$1" tm1 teams_tables
+	check_count "$1" tm2 teams_workspace_index
+	check_count "$1" tm3 teams_behaviour
 	check_count "$1" k1 account_role_reach
 	check_count "$1" k2 account_plane_rls
 	check_count "$1" k3 account_plane_expected
