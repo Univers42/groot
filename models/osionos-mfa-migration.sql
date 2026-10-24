@@ -64,10 +64,31 @@ CREATE INDEX IF NOT EXISTS osionos_mfa_recovery_codes_user_used_idx
 
 -- grobase's CREATE TABLE hook (012) broadcasts every row of every new public
 -- table, and the realtime socket has no grant check: a broadcast of these rows
--- is a broadcast of the secrets. Dropped here, not only by realtime-cdc-off,
--- because this file may run without that pass.
+-- is a broadcast of the secrets. Drop every trigger backed by the broadcaster,
+-- regardless of trigger name, before the migration can proceed.
 DROP TRIGGER IF EXISTS osionos_mfa_totp_realtime_trigger ON public.osionos_mfa_totp;
 DROP TRIGGER IF EXISTS osionos_mfa_recovery_codes_realtime_trigger ON public.osionos_mfa_recovery_codes;
+DO $$
+DECLARE
+  table_name text;
+  trigger_name text;
+BEGIN
+  FOREACH table_name IN ARRAY ARRAY['osionos_mfa_totp', 'osionos_mfa_recovery_codes'] LOOP
+    FOR trigger_name IN
+      SELECT tg.tgname
+        FROM pg_trigger tg
+        JOIN pg_class c ON c.oid = tg.tgrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = 'public'
+         AND c.relname = table_name
+         AND NOT tg.tgisinternal
+         AND tg.tgfoid = to_regprocedure('public.realtime_notify()')
+    LOOP
+      EXECUTE format('DROP TRIGGER %I ON public.%I', trigger_name, table_name);
+    END LOOP;
+  END LOOP;
+END
+$$;
 
 ALTER TABLE public.osionos_mfa_totp ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.osionos_mfa_recovery_codes ENABLE ROW LEVEL SECURITY;

@@ -20,10 +20,11 @@ WORKDIR /app
 # (groot main, CI run 39089475219). scripts/tests/bridge-image-closure.bats walks the import
 # closure of bridge-api.mjs and fails on any module these globs (minus the .dockerignore) miss.
 COPY scripts/bridge-*.mjs scripts/ide-*.mjs ./scripts/
-# Data a module reads beside itself at import time: bridge-moderation.mjs loads the L0 word lists
-# from ./moderation-lists/, and without them the bridge crash-looped on ENOENT (release R5,
-# 2026-10-22). The closure test also checks these `new URL('./dir/…')` reads.
-COPY scripts/moderation-lists/ ./scripts/moderation-lists/
+# When the osionos pin includes bridge-moderation.mjs it also includes
+# scripts/moderation-lists/ (the module reads them at import via new URL).
+# The current pin (redesign/bridge-auth) has neither; COPY of a missing path
+# fails the Fresh-Machine Migration job. Re-add the line when the pin advances:
+#   COPY scripts/moderation-lists/ ./scripts/moderation-lists/
 
 USER node
 EXPOSE 4000

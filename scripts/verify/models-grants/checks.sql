@@ -4,14 +4,15 @@
 \set ON_ERROR_STOP on
 
 -- The service_role-only set: every osionos_% and ai_% relation, plus public.auth_session_cutoffs
--- (models/auth-session-cutoffs.sql), which carries no osionos_ prefix. ai_% includes the hash
--- partitions of ai_chunks and ai_page_vectors: a partition is a table of its own, readable
--- directly, and it does not inherit its parent's grants or RLS flag.
+-- (models/auth-session-cutoffs.sql) and public.auth_audit_events (models/auth-audit-events-migration.sql),
+-- which carry no osionos_ prefix. ai_% includes the hash partitions of ai_chunks and ai_page_vectors:
+-- a partition is a table of its own, readable directly, and it does not inherit its parent's grants
+-- or RLS flag.
 
 -- privileged: every such relation anon/authenticated can touch (column grants included)
 SELECT 'privileged', count(*), coalesce(string_agg(c.relname, ' ' ORDER BY c.relname), '')
   FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
- WHERE ns.nspname = 'public' AND (c.relname LIKE 'osionos\_%' OR c.relname LIKE 'ai\_%' OR c.relname = 'auth_session_cutoffs') AND c.relkind IN ('r','p','v','m','f')
+ WHERE ns.nspname = 'public' AND (c.relname LIKE 'osionos\_%' OR c.relname LIKE 'ai\_%' OR c.relname IN ('auth_session_cutoffs','auth_audit_events','auth_audit_events_legacy_int')) AND c.relkind IN ('r','p','v','m','f')
    AND (has_any_column_privilege('anon', c.oid, 'SELECT') OR has_any_column_privilege('anon', c.oid, 'INSERT')
      OR has_any_column_privilege('anon', c.oid, 'UPDATE') OR has_table_privilege('anon', c.oid, 'DELETE')
      OR has_any_column_privilege('authenticated', c.oid, 'SELECT') OR has_any_column_privilege('authenticated', c.oid, 'INSERT')
@@ -20,13 +21,13 @@ SELECT 'privileged', count(*), coalesce(string_agg(c.relname, ' ' ORDER BY c.rel
 -- member_policies: policies on the set for PUBLIC (oid 0), anon or authenticated
 SELECT 'member_policies', count(*), coalesce(string_agg(c.relname || ':' || p.polname, ' ' ORDER BY 1), '')
   FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid JOIN pg_namespace ns ON ns.oid = c.relnamespace
- WHERE ns.nspname = 'public' AND (c.relname LIKE 'osionos\_%' OR c.relname LIKE 'ai\_%' OR c.relname = 'auth_session_cutoffs')
+ WHERE ns.nspname = 'public' AND (c.relname LIKE 'osionos\_%' OR c.relname LIKE 'ai\_%' OR c.relname IN ('auth_session_cutoffs','auth_audit_events','auth_audit_events_legacy_int'))
    AND (0::oid = ANY (p.polroles) OR p.polroles && ARRAY(SELECT oid FROM pg_roles WHERE rolname IN ('anon','authenticated')));
 
 -- service_role_gaps: tables in the set service_role cannot fully CRUD
 SELECT 'service_role_gaps', count(*), coalesce(string_agg(c.relname, ' ' ORDER BY c.relname), '')
   FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
- WHERE ns.nspname = 'public' AND (c.relname LIKE 'osionos\_%' OR c.relname LIKE 'ai\_%' OR c.relname = 'auth_session_cutoffs') AND c.relkind IN ('r','p')
+ WHERE ns.nspname = 'public' AND (c.relname LIKE 'osionos\_%' OR c.relname LIKE 'ai\_%' OR c.relname IN ('auth_session_cutoffs','auth_audit_events','auth_audit_events_legacy_int')) AND c.relkind IN ('r','p')
    AND NOT (has_table_privilege('service_role', c.oid, 'SELECT') AND has_table_privilege('service_role', c.oid, 'INSERT')
         AND has_table_privilege('service_role', c.oid, 'UPDATE') AND has_table_privilege('service_role', c.oid, 'DELETE'));
 
@@ -66,10 +67,18 @@ SELECT 'svc_cutoff_monotonic', count(*) FROM public.auth_session_cutoffs
  WHERE user_id = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee' AND sessions_valid_after = '2026-10-19 10:00:00+00';
 ROLLBACK;
 
--- secdef_exec: SECURITY DEFINER osionos_% functions anon/authenticated may execute
+-- svc_audit: the auth-gateway's RPC as service_role, with an event only the new list carries.
+-- Rolled back. The row count must be exactly the one the call wrote.
+BEGIN;
+SET LOCAL ROLE service_role;
+SELECT public.auth_record_audit_event('login_otp_verified', 'nobody@example.test', '{}'::jsonb);
+SELECT 'svc_audit', count(*) FROM public.auth_audit_events WHERE event_type = 'login_otp_verified' AND email = 'nobody@example.test';
+ROLLBACK;
+
+-- secdef_exec: SECURITY DEFINER osionos_% functions, and auth_record_audit_event, that anon/authenticated may execute
 SELECT 'secdef_exec', count(*), coalesce(string_agg(p.oid::regprocedure::text, ' '), '')
   FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
- WHERE n.nspname = 'public' AND p.prosecdef AND p.proname LIKE 'osionos\_%'
+ WHERE n.nspname = 'public' AND p.prosecdef AND (p.proname LIKE 'osionos\_%' OR p.proname = 'auth_record_audit_event')
    AND (has_function_privilege('anon', p.oid, 'EXECUTE') OR has_function_privilege('authenticated', p.oid, 'EXECUTE'));
 -- ai_write_fn_exec: VOLATILE, non-trigger ai_% functions anon/authenticated may execute (the
 -- writers of the AI tables), plus 1 per named writer that is missing, so a rename cannot pass.
@@ -540,15 +549,18 @@ ROLLBACK;
 -- only writer). Five rows must be refused with the named state: a kind outside
 -- ssh/gpg, an empty title, an 81-character title, an oversized key (23514) and a
 -- second row with the same (user, kind, fingerprint) (23505); and the 51st row
--- of one user must be refused by the trigger with P0001. The count is the
--- number of those six that did NOT end in the expected state.
+-- of one user must be refused by the trigger with P0001 on insert or reassignment.
+-- An unchanged owner at the cap and moves below the cap must still succeed.
+-- The count is the number of those nine that did NOT end in the expected state.
 BEGIN;
-INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+INSERT INTO auth.users (id) VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaab');
 SET LOCAL ROLE service_role;
 DO $$
 DECLARE
   v_state text;
   v_user constant uuid := 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  v_other constant uuid := 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaab';
 BEGIN
   v_state := '';
   BEGIN
@@ -596,6 +608,31 @@ BEGIN
   EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
   END;
   PERFORM set_config('osionos.check.k_limit', v_state, true);
+  INSERT INTO public.osionos_user_keys (user_id, kind, title, public_key, fingerprint)
+  VALUES (v_other, 'ssh', 't', 'k', 'move');
+  v_state := '';
+  BEGIN
+    UPDATE public.osionos_user_keys SET user_id = v_user WHERE user_id = v_other AND fingerprint = 'move';
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_move_limit', v_state, true);
+  v_state := '';
+  BEGIN
+    UPDATE public.osionos_user_keys SET user_id = v_user, title = 'renamed' WHERE user_id = v_user AND fingerprint = 'dup';
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_same_owner',
+    (v_state = '' AND EXISTS (SELECT 1 FROM public.osionos_user_keys WHERE user_id = v_user AND fingerprint = 'dup' AND title = 'renamed'))::text, true);
+  v_state := '';
+  BEGIN
+    UPDATE public.osionos_user_keys SET user_id = v_other WHERE user_id = v_user AND fingerprint = 'dup';
+    UPDATE public.osionos_user_keys SET user_id = v_user WHERE user_id = v_other AND fingerprint = 'move';
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  PERFORM set_config('osionos.check.k_move_allowed',
+    (v_state = '' AND (SELECT count(*) FROM public.osionos_user_keys WHERE user_id = v_user) = 50
+                   AND (SELECT count(*) FROM public.osionos_user_keys WHERE user_id = v_other) = 1
+                   AND EXISTS (SELECT 1 FROM public.osionos_user_keys WHERE user_id = v_user AND fingerprint = 'move'))::text, true);
 END $$;
 RESET ROLE;
 SELECT 'p5_keys_row_rules',
@@ -604,13 +641,20 @@ SELECT 'p5_keys_row_rules',
      + (CASE WHEN current_setting('osionos.check.k_title81', true) = '23514' THEN 0 ELSE 1 END)
      + (CASE WHEN current_setting('osionos.check.k_size', true) = '23514' THEN 0 ELSE 1 END)
      + (CASE WHEN current_setting('osionos.check.k_dup', true) = '23505' THEN 0 ELSE 1 END)
-     + (CASE WHEN current_setting('osionos.check.k_limit', true) = 'P0001' THEN 0 ELSE 1 END),
+     + (CASE WHEN current_setting('osionos.check.k_limit', true) = 'P0001' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_move_limit', true) = 'P0001' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_same_owner', true) = 'true' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.k_move_allowed', true) = 'true' THEN 0 ELSE 1 END),
        'kind=' || coalesce(current_setting('osionos.check.k_kind', true), 'unset')
      || ' title0=' || coalesce(current_setting('osionos.check.k_title0', true), 'unset')
      || ' title81=' || coalesce(current_setting('osionos.check.k_title81', true), 'unset')
      || ' size=' || coalesce(current_setting('osionos.check.k_size', true), 'unset')
      || ' dup=' || coalesce(current_setting('osionos.check.k_dup', true), 'unset')
-     || ' limit=' || coalesce(current_setting('osionos.check.k_limit', true), 'unset');
+     || ' limit=' || coalesce(current_setting('osionos.check.k_limit', true), 'unset')
+     || ' move_limit=' || coalesce(current_setting('osionos.check.k_move_limit', true), 'unset')
+     || ' same_owner=' || coalesce(current_setting('osionos.check.k_same_owner', true), 'unset')
+     || ' move_allowed=' || coalesce(current_setting('osionos.check.k_move_allowed', true), 'unset');
+ROLLBACK;
 
 -- lifecycle_fn_settings: the two workspace-lifecycle functions run as the caller (not
 -- SECURITY DEFINER) and pin search_path and lock_timeout. Counts every function that is missing,

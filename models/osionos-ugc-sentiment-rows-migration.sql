@@ -84,11 +84,31 @@ REVOKE ALL ON public.osionos_object_database_rows FROM PUBLIC, anon, authenticat
 -- -----------------------------------------------------------------------------
 -- 3. The subject kind. ai_sentiment still has NO author column (C140).
 -- -----------------------------------------------------------------------------
-ALTER TABLE public.ai_sentiment
-    DROP CONSTRAINT IF EXISTS ai_sentiment_subject_kind_check;
-ALTER TABLE public.ai_sentiment
-    ADD CONSTRAINT ai_sentiment_subject_kind_check
-    CHECK (subject_kind IN ('page_comment', 'database_row'));
+-- The base sentiment migration creates a page_comment-only CHECK. Widen it
+-- once when database_row first ships, then leave the validated constraint alone
+-- on every convergence pass (re-adding it scans ai_sentiment under an
+-- ACCESS EXCLUSIVE lock).
+DO $$
+DECLARE
+    existing_def TEXT;
+BEGIN
+    SELECT pg_get_constraintdef(c.oid)
+      INTO existing_def
+      FROM pg_constraint c
+     WHERE c.conrelid = 'public.ai_sentiment'::regclass
+       AND c.conname = 'ai_sentiment_subject_kind_check'
+       AND c.contype = 'c';
+
+    IF existing_def IS NULL
+       OR existing_def NOT LIKE '%page_comment%'
+       OR existing_def NOT LIKE '%database_row%' THEN
+        ALTER TABLE public.ai_sentiment
+            DROP CONSTRAINT IF EXISTS ai_sentiment_subject_kind_check;
+        ALTER TABLE public.ai_sentiment
+            ADD CONSTRAINT ai_sentiment_subject_kind_check
+            CHECK (subject_kind IN ('page_comment', 'database_row'));
+    END IF;
+END $$;
 
 -- -----------------------------------------------------------------------------
 -- 4. The projection trigger, on the state table. It replaces the bridge RPC
@@ -202,7 +222,8 @@ BEGIN
                        scored_text    = EXCLUDED.scored_text,
                        content_sha256 = EXCLUDED.content_sha256,
                        updated_at     = now()
-                 WHERE r.content_sha256 IS DISTINCT FROM EXCLUDED.content_sha256;
+                 WHERE r.content_sha256 IS DISTINCT FROM EXCLUDED.content_sha256
+                    OR r.workspace_id IS DISTINCT FROM EXCLUDED.workspace_id;
 
                 v_row_ids := v_row_ids || v_page.row_id;
                 v_property_ids := v_property_ids || v_property.property_id;
@@ -229,7 +250,7 @@ END $$;
 
 DROP TRIGGER IF EXISTS osionos_object_databases_project_rows ON public.osionos_object_databases;
 CREATE TRIGGER osionos_object_databases_project_rows
-    AFTER INSERT OR UPDATE OF state ON public.osionos_object_databases
+    AFTER INSERT OR UPDATE OF state, workspace_id ON public.osionos_object_databases
     FOR EACH ROW
     EXECUTE FUNCTION public.osionos_object_databases_project_rows();
 
@@ -270,9 +291,11 @@ BEGIN
               JOIN public.ai_sentiment_settings s
                 ON s.workspace_id = n.workspace_id AND s.enabled
              WHERE o.content_sha256 IS DISTINCT FROM n.content_sha256
+                OR o.workspace_id IS DISTINCT FROM n.workspace_id
             ON CONFLICT (kind, subject_kind, subject_id) DO UPDATE
-               SET content_sha256 = EXCLUDED.content_sha256,
-                   run_after      = now(),
+               SET workspace_id    = EXCLUDED.workspace_id,
+                   content_sha256  = EXCLUDED.content_sha256,
+                   run_after       = now(),
                    attempts       = 0,
                    last_error     = NULL,
                    enqueued_at    = now();
@@ -344,6 +367,33 @@ CREATE TRIGGER ai_sentiment_forget_database_rows_delete
     AFTER DELETE ON public.osionos_object_database_rows
     FOR EACH ROW
     EXECUTE FUNCTION public.ai_sentiment_forget_database_rows();
+
+-- Workspace moves clear stale sentiment scores and queued jobs.
+CREATE OR REPLACE FUNCTION public.ai_sentiment_forget_moved_database_rows()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $move_workspace$
+BEGIN
+    IF OLD.workspace_id IS DISTINCT FROM NEW.workspace_id THEN
+        DELETE FROM public.ai_sentiment
+         WHERE subject_kind = 'database_row' AND subject_id = NEW.id::text;
+        DELETE FROM public.ai_jobs
+         WHERE kind = 'sentiment' AND subject_kind = 'database_row'
+           AND subject_id = NEW.id::text;
+    END IF;
+    RETURN NEW;
+END
+$move_workspace$;
+
+DROP TRIGGER IF EXISTS ai_sentiment_forget_moved_database_rows_update ON public.osionos_object_database_rows;
+CREATE TRIGGER ai_sentiment_forget_moved_database_rows_update
+    AFTER UPDATE OF workspace_id ON public.osionos_object_database_rows
+    FOR EACH ROW
+    EXECUTE FUNCTION public.ai_sentiment_forget_moved_database_rows();
+
+REVOKE ALL ON FUNCTION public.ai_sentiment_forget_moved_database_rows() FROM PUBLIC, anon, authenticated;
 
 -- A deleted database does not rely on the cascade's transition tables: the
 -- BEFORE DELETE trigger removes every score and job of its projection rows.
@@ -455,12 +505,27 @@ BEGIN
        AND c.author_id = p_user;
     GET DIAGNOSTICS n = ROW_COUNT;
 
+    -- Remove queued work first: otherwise a worker can recreate a score
+    -- after the score itself has been erased (Codex review, PR #134).
+    DELETE FROM public.ai_jobs j
+     USING public.osionos_object_database_rows r
+     WHERE j.kind = 'sentiment'
+       AND j.subject_kind = 'database_row'
+       AND j.subject_id = r.id::text
+       AND r.owner_id = p_user;
+
     DELETE FROM public.ai_sentiment s
      USING public.osionos_object_database_rows r
      WHERE s.subject_kind = 'database_row'
        AND s.subject_id = r.id::text
        AND r.owner_id = p_user;
     GET DIAGNOSTICS m = ROW_COUNT;
+
+    -- The projection holds a copy of the source text. Erase it with the
+    -- derived score; its delete trigger is also a final idempotent cleanup of
+    -- any matching score/job rows.
+    DELETE FROM public.osionos_object_database_rows r
+     WHERE r.owner_id = p_user;
 
     RETURN n + m;
 END $$;

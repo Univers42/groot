@@ -28,11 +28,9 @@
 #   1. Files whose DDL references the auth-gateway's INTEGER users.id — they
 #      target the auth gateway's own database, and applying them here fails on
 #      a uuid/integer foreign-key clash (measured, not assumed):
-#        gdpr-migration.sql  user.sql
-#      auth-security-migration.sql WAS on this list and does NOT belong to it
-#      any more: it reads the type of public.users.id from the catalog, so it
-#      applies to this database's uuid users as well as to the integer users of
-#      the databases that run user.sql. See ORDERING below.
+#        gdpr-migration.sql  user.sql  auth-security-migration.sql
+#      The audit surface that last one declared lives, uuid-native and applied, in
+#      auth-audit-events-migration.sql (plain alphabetical order, no dependency).
 #      auth-gateway-users-reconcile-migration.sql was on this list and does NOT
 #      belong to it: it is additive uuid-native DDL (five ADD COLUMN IF NOT
 #      EXISTS on public.users, two unique indexes, one trigger) and applies with
@@ -81,12 +79,10 @@
 #     osionos-page-links-migration.sql  creates osionos_page_links (needed by
 #         osionos-ai-graph-migration.sql, whose edge read RETURNS SETOF it and
 #         sorts before it)
-#   The auth-security-migration.sql file is deliberately NOT one of those seven: it runs
-#   in the plain alphabetical pass, after ORDERED_FIRST has reconciled public.users, and needs two things this database already has when the runner starts: public.users
-#   (its auth_audit_events.user_id column takes whatever type public.users.id has, read
-#   from the catalog) and the three roles anon, authenticated and service_role (its
-#   grants). It creates its own table and function, so no other file in models/ depends
-#   on it.
+#   The auth-security-migration.sql file is deliberately NOT in ORDERED_FIRST either: it is
+#   skipped with the integer-users family above, and the audit surface it declared lives,
+#   uuid-native and applied, in auth-audit-events-migration.sql (plain alphabetical order,
+#   no dependency: public.users comes from grobase 001_initial_schema.sql).
 #   Ponytail: `pending()` below only detects a file's OWN missing CREATE TABLE
 #   targets, never what it references — it cannot see this bug class, so a
 #   regression here will NOT show as a `--check` gap on a converged database.
@@ -202,7 +198,7 @@ note() { printf '[models] %s\n' "$*" >&2; }
 
 skipped() {
 	case "$1" in
-	gdpr-migration.sql | user.sql)
+	gdpr-migration.sql | user.sql | auth-security-migration.sql)
 		return 0
 		;;
 	rls-hardening-migration.sql | seeds.sql)

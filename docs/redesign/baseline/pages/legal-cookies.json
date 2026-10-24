@@ -1,0 +1,35 @@
+{
+  "route": "/legal/cookies",
+  "widths": {
+    "390": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/baseline/screenshots/legal-cookies-390.jpg",
+      "reducedScreenshot": "test-results/site-audit/baseline/screenshots/legal-cookies-390-reduced.jpg",
+      "truncated": false,
+      "pageHeight": 2004,
+      "overflowPx": 295,
+      "consoleErrors": [],
+      "axe": []
+    },
+    "768": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/baseline/screenshots/legal-cookies-768.jpg",
+      "reducedScreenshot": "test-results/site-audit/baseline/screenshots/legal-cookies-768-reduced.jpg",
+      "truncated": false,
+      "pageHeight": 1936,
+      "overflowPx": 0,
+      "consoleErrors": [],
+      "axe": []
+    },
+    "1440": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/baseline/screenshots/legal-cookies-1440.jpg",
+      "reducedScreenshot": "test-results/site-audit/baseline/screenshots/legal-cookies-1440-reduced.jpg",
+      "truncated": false,
+      "pageHeight": 1676,
+      "overflowPx": 0,
+      "consoleErrors": [],
+      "axe": []
+    }
+  }
+}

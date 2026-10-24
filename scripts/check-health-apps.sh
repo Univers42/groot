@@ -6,6 +6,11 @@
 #
 # Production URLs are overridable via env (PROD_WEBSITE_URL / PROD_OSIONOS_URL /
 # PROD_GROBASE_URL / PROD_AUTH_URL); HEALTH_TIMEOUT (default 6s) bounds each probe.
+#
+# The localhost rows follow the host ports scripts/host-ports.sh chose: the NAME variables
+# come from the environment (make exports them) or from .env.ports, and the literal is only
+# the fallback for a stack that never resolved them. Kong's own 127.0.0.1:8000 is fixed by
+# grobase, not by us, so it stays a literal.
 set -u
 
 TIMEOUT="${HEALTH_TIMEOUT:-6}"
@@ -13,6 +18,24 @@ PROD_WEBSITE="${PROD_WEBSITE_URL:-https://prismatica-eta.vercel.app}"
 PROD_OSIONOS="${PROD_OSIONOS_URL:-https://osionos.vercel.app}"
 PROD_GROBASE="${PROD_GROBASE_URL:-https://grobase-stack.fly.dev}"
 PROD_AUTH="${PROD_AUTH_URL:-https://prismatica-auth-gateway.fly.dev}"
+
+# The chosen host ports, when this shell was not started by make. The environment wins: a
+# port pinned for one run stays pinned.
+PORTS_FILE="${HOST_PORTS_FILE:-$(cd "$(dirname "$0")/.." && pwd)/.env.ports}"
+if [ -f "$PORTS_FILE" ]; then
+  while IFS='=' read -r pk pv; do
+    case "$pk" in
+    '' | '#'*) continue ;;
+    esac
+    printf '%s' "$pk" | grep -qE '^[A-Z_][A-Z0-9_]*_HOST_PORT$' || continue
+    case "$pv" in
+    '' | *[!0-9]*) continue ;;
+    esac
+    eval "pv=\${$pk:-}"
+    [ -n "$pv" ] && continue
+    eval "$pk=\$pv"
+  done <"$PORTS_FILE"
+fi
 
 # probe URL -> HTTP status code (000 = unreachable). -k accepts the local self-signed cert.
 probe() {
@@ -65,14 +88,14 @@ while IFS='|' read -r name ldisp lprobe pdisp pprobe; do
 		up_code "$pc" && PUP=$((PUP + 1))
 	fi
 done <<EOF
-opposite-osiris|https://localhost:4322|https://localhost:4322|$PROD_WEBSITE|$PROD_WEBSITE
-osionos|https://localhost:3001|https://localhost:3001|$PROD_OSIONOS|$PROD_OSIONOS
-osionos-bridge|https://localhost:4000|https://localhost:4000/api/auth/bridge/health|$PROD_GROBASE|$PROD_GROBASE/api/auth/bridge/health
-auth-gateway|https://localhost:8787|https://localhost:8787/api/auth/health|$PROD_AUTH|$PROD_AUTH/api/auth/health
+opposite-osiris|https://localhost:${OPPOSITE_OSIRIS_HOST_PORT:-4322}|https://localhost:${OPPOSITE_OSIRIS_HOST_PORT:-4322}|$PROD_WEBSITE|$PROD_WEBSITE
+osionos|https://localhost:${OSIONOS_APP_HOST_PORT:-3001}|https://localhost:${OSIONOS_APP_HOST_PORT:-3001}|$PROD_OSIONOS|$PROD_OSIONOS
+osionos-bridge|https://localhost:${OSIONOS_BRIDGE_HOST_PORT:-4000}|https://localhost:${OSIONOS_BRIDGE_HOST_PORT:-4000}/api/auth/bridge/health|$PROD_GROBASE|$PROD_GROBASE/api/auth/bridge/health
+auth-gateway|https://localhost:${AUTH_GATEWAY_HOST_PORT:-8787}|https://localhost:${AUTH_GATEWAY_HOST_PORT:-8787}/api/auth/health|$PROD_AUTH|$PROD_AUTH/api/auth/health
 grobase (Kong)|http://127.0.0.1:8000|http://127.0.0.1:8000/auth/v1/health|$PROD_GROBASE|$PROD_GROBASE/auth/v1/health
-grobase (TLS)|https://localhost:8444|https://localhost:8444/auth/v1/health||
-mail|https://localhost:3002|https://localhost:3002||
-calendar|https://localhost:3003|https://localhost:3003||
+grobase (TLS)|https://localhost:${GROBASE_TLS_HOST_PORT:-8444}|https://localhost:${GROBASE_TLS_HOST_PORT:-8444}/auth/v1/health||
+mail|https://localhost:${MAIL_HOST_PORT:-3002}|https://localhost:${MAIL_HOST_PORT:-3002}||
+calendar|https://localhost:${CALENDAR_HOST_PORT:-3003}|https://localhost:${CALENDAR_HOST_PORT:-3003}||
 EOF
 
 printf '\n  \033[2msummary:\033[0m  localhost \033[1m%s/%s\033[0m up    •    production \033[1m%s/%s\033[0m up\n' "$LUP" "$LT" "$PUP" "$PT"

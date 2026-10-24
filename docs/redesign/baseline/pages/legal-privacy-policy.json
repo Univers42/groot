@@ -1,0 +1,56 @@
+{
+  "route": "/legal/privacy-policy",
+  "widths": {
+    "390": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/baseline/screenshots/legal-privacy-policy-390.jpg",
+      "reducedScreenshot": "test-results/site-audit/baseline/screenshots/legal-privacy-policy-390-reduced.jpg",
+      "truncated": false,
+      "pageHeight": 4100,
+      "overflowPx": 0,
+      "consoleErrors": [],
+      "axe": [
+        {
+          "id": "link-in-text-block",
+          "impact": "serious",
+          "nodes": 4,
+          "help": "Links must be distinguishable without relying on color"
+        }
+      ]
+    },
+    "768": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/baseline/screenshots/legal-privacy-policy-768.jpg",
+      "reducedScreenshot": "test-results/site-audit/baseline/screenshots/legal-privacy-policy-768-reduced.jpg",
+      "truncated": false,
+      "pageHeight": 2514,
+      "overflowPx": 0,
+      "consoleErrors": [],
+      "axe": [
+        {
+          "id": "link-in-text-block",
+          "impact": "serious",
+          "nodes": 4,
+          "help": "Links must be distinguishable without relying on color"
+        }
+      ]
+    },
+    "1440": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/baseline/screenshots/legal-privacy-policy-1440.jpg",
+      "reducedScreenshot": "test-results/site-audit/baseline/screenshots/legal-privacy-policy-1440-reduced.jpg",
+      "truncated": false,
+      "pageHeight": 2813,
+      "overflowPx": 0,
+      "consoleErrors": [],
+      "axe": [
+        {
+          "id": "link-in-text-block",
+          "impact": "serious",
+          "nodes": 4,
+          "help": "Links must be distinguishable without relying on color"
+        }
+      ]
+    }
+  }
+}

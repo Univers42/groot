@@ -1,0 +1,56 @@
+{
+  "route": "/",
+  "widths": {
+    "390": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/baseline/screenshots/home-390.jpg",
+      "reducedScreenshot": "test-results/site-audit/baseline/screenshots/home-390-reduced.jpg",
+      "truncated": false,
+      "pageHeight": 9162,
+      "overflowPx": 39,
+      "consoleErrors": [],
+      "axe": [
+        {
+          "id": "nested-interactive",
+          "impact": "serious",
+          "nodes": 1,
+          "help": "Interactive controls must not be nested"
+        }
+      ]
+    },
+    "768": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/baseline/screenshots/home-768.jpg",
+      "reducedScreenshot": "test-results/site-audit/baseline/screenshots/home-768-reduced.jpg",
+      "truncated": false,
+      "pageHeight": 7888,
+      "overflowPx": 0,
+      "consoleErrors": [],
+      "axe": [
+        {
+          "id": "nested-interactive",
+          "impact": "serious",
+          "nodes": 1,
+          "help": "Interactive controls must not be nested"
+        }
+      ]
+    },
+    "1440": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/baseline/screenshots/home-1440.jpg",
+      "reducedScreenshot": "test-results/site-audit/baseline/screenshots/home-1440-reduced.jpg",
+      "truncated": false,
+      "pageHeight": 8584,
+      "overflowPx": 0,
+      "consoleErrors": [],
+      "axe": [
+        {
+          "id": "nested-interactive",
+          "impact": "serious",
+          "nodes": 1,
+          "help": "Interactive controls must not be nested"
+        }
+      ]
+    }
+  }
+}

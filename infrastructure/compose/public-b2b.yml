@@ -1,0 +1,132 @@
+# Public Prismatica site on the b2b VM, behind Tailscale Funnel :10000 (ADR 0013, devil PUB-1..16).
+# Always run as its own project, never merged with the grobase or root compose:
+#   docker compose -p prismatica-public --env-file /opt/prismatica-public/images.env \
+#     -f /opt/prismatica-public/public-b2b.yml up -d
+# scripts/public-b2b/deploy.sh does this; it writes images.env (tags + port, no secret).
+#
+# Three services only: the site (nginx + static build), the auth gateway, and a redis of
+# their own. No osionos-bridge exists here, so OSIONOS_BRIDGE_SHARED_SECRET is empty and the
+# gateway's hand-off answers 503.
+#
+# Service names carry a `public-` prefix because the site and the gateway join the prod
+# network mini-baas_mini-baas: a bare `auth-gateway` or `site` would become a DNS alias there.
+#
+# Images are loaded by explicit tag (scripts/public-b2b/build-images.sh builds them off the VM,
+# which has no docker0 bridge). Nothing here builds, and no tag is the floating one (PUB-6).
+#
+# Caveat: this file states intent, it does not prove the live network. The proofs are the
+# post-checks in deploy.sh (serve diff, WAF Id, ps digest) and the PUB-12 phone run.
+
+name: prismatica-public
+
+services:
+  # State for rate limits, lockouts, mail caps and single-use link claims. Own container, never
+  # mini-baas-redis (no password, shared with prod, evicting) (PUB-4). Reachable only on this
+  # project's default network, no published port. Append-only file kept in a small volume so a
+  # restart does not reopen a spent link or reset a lockout; the 64mb cap bounds it.
+  public-redis:
+    image: ${PUBLIC_REDIS_IMAGE:-redis:7-alpine}
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory
+      - 64mb
+      - --maxmemory-policy
+      - volatile-lru
+    volumes:
+      - public-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      start_period: 5s
+      retries: 5
+    restart: unless-stopped
+    mem_limit: 96m
+
+  # No published port: only the site reaches it. Secrets come from env_file at run time;
+  # `environment:` below overrides env_file, so no secret is repeated here.
+  public-auth-gateway:
+    image: ${PUBLIC_GATEWAY_IMAGE:?set PUBLIC_GATEWAY_IMAGE to prismatica-public/auth-gateway:<oo-sha>}
+    env_file:
+      - path: ${PUBLIC_ENV_FILE:-/opt/prismatica-public/.env}
+        required: true
+    environment:
+      AUTH_GATEWAY_PORT: 8787
+      # Mail and OTP calls stay on Kong with the service key, inside the VM (PUB-11).
+      PUBLIC_BAAS_URL: http://mini-baas-kong:8000
+      PUBLIC_SITE_URL: https://baas.tail10f2ea.ts.net:10000
+      PUBLIC_OSIONOS_APP_URL: https://baas.tail10f2ea.ts.net:10000
+      # tailscaled serve, then the site nginx: two appending proxies. 1 would key every visitor
+      # to the docker bridge address (PUB-1).
+      AUTH_TRUSTED_PROXY_HOPS: 2
+      TURNSTILE_BYPASS_LOCAL: "false"
+      AUTH_REQUIRE_EMAIL_VERIFICATION: "true"
+      PUBLIC_AUTH_REQUIRE_EMAIL_VERIFICATION: "true"
+      AUTH_LOGIN_EMAIL_OTP: "true"
+      AUTH_LOGIN_APPROVE_LINK: "true"
+      REDIS_URL: redis://public-redis:6379
+      OSIONOS_BRIDGE_SHARED_SECRET: ""
+      AUTH_VERIFY_TOKEN_TTL_SEC: 86400
+      AUTH_RESET_TOKEN_TTL_SEC: 3600
+    expose:
+      - "8787"
+    networks:
+      - default
+      - mini-baas
+    depends_on:
+      public-redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "fetch(''http://127.0.0.1:8787/api/auth/health'').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"',
+        ]
+      interval: 30s
+      start_interval: 2s
+      timeout: 3s
+      start_period: 20s
+      retries: 12
+    restart: unless-stopped
+    mem_limit: 256m
+
+  # The only published port, on loopback: tailscale funnel proxies to it. /api/ goes to the
+  # WAF's http listener, never straight to Kong (PUB-2).
+  public-site:
+    image: ${PUBLIC_SITE_IMAGE:?set PUBLIC_SITE_IMAGE to prismatica-public/site:<oo-sha>}
+    environment:
+      OO_AUTH_UPSTREAM: http://public-auth-gateway:8787
+      OO_BAAS_UPSTREAM: http://mini-baas-waf:80
+      OO_RESOLVER: 127.0.0.11
+    ports:
+      - "127.0.0.1:${PRISMATICA_PUBLIC_PORT:-10080}:8080"
+    networks:
+      - default
+      - mini-baas
+    depends_on:
+      public-auth-gateway:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1 || exit 1",
+        ]
+      interval: 10s
+      timeout: 3s
+      start_period: 5s
+      retries: 5
+    restart: unless-stopped
+    mem_limit: 128m
+
+volumes:
+  public-redis-data:
+
+networks:
+  mini-baas:
+    external: true
+    name: mini-baas_mini-baas

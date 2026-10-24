@@ -1,53 +1,48 @@
 {
-	"mcpServers": {
-		"osionos": {
-			"type": "stdio",
-			"command": "bash",
-			"args": [
-				"-c",
-				"cd apps/osionos/app && NODE_EXTRA_CA_CERTS=../../grobase/certs/track-binocle-local-ca.pem exec node scripts/osionos-mcp-server.mjs"
-			],
-			"env": {
-				"OSIONOS_MCP_BRIDGE_URL": "https://localhost:4000",
-				"OSIONOS_MCP_API_URL": "https://localhost:4000",
-				"OSIONOS_MCP_TOKEN": "${OSIONOS_MCP_TOKEN}"
-			}
-		},
-		"chrome-devtools": {
-			"type": "stdio",
-			"command": "npx",
-			"args": [
-				"-y",
-				"chrome-devtools-mcp@1.10.1",
-				"--userDataDir",
-				"/goinfre/dlesieur/.cache/chrome-devtools-mcp/profile",
-				"--viewport",
-				"1440x900"
-			],
-			"env": {
-				"npm_config_cache": "/goinfre/dlesieur/.cache/npm",
-				"npm_config_logs_dir": "/goinfre/dlesieur/.cache/npm/_logs",
-				"npm_config_update_notifier": "false"
-			}
-		},
-		"playwright": {
-			"type": "stdio",
-			"command": "npx",
-			"args": [
-				"-y",
-				"@playwright/mcp@0.0.83",
-				"--browser",
-				"chrome",
-				"--isolated",
-				"--headless",
-				"--output-dir",
-				"/goinfre/dlesieur/.cache/playwright-mcp/output"
-			],
-			"env": {
-				"npm_config_cache": "/goinfre/dlesieur/.cache/npm",
-				"npm_config_logs_dir": "/goinfre/dlesieur/.cache/npm/_logs",
-				"npm_config_update_notifier": "false"
-			}
-		}
-	}
+  "mcpServers": {
+    "playwright": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "scripts/tools.sh",
+        "playwright-mcp",
+        "--headless",
+        "--isolated",
+        "--no-sandbox",
+        "--browser",
+        "chromium",
+        "--executable-path",
+        "/usr/bin/chromium-browser"
+      ]
+    },
+    "chrome-devtools": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "scripts/tools.sh",
+        "chrome-devtools-mcp",
+        "--headless",
+        "--isolated",
+        "--executablePath",
+        "/usr/bin/chromium-browser",
+        "--chromeArg=--no-sandbox"
+      ]
+    },
+    "osionos": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "scripts/tools.sh",
+        "node",
+        "apps/osionos/app/scripts/osionos-mcp-server.mjs"
+      ],
+      "env": {
+        "TOOLS_PASS_ENV": "OSIONOS_MCP_BRIDGE_URL OSIONOS_MCP_API_URL OSIONOS_MCP_TOKEN NODE_EXTRA_CA_CERTS",
+        "OSIONOS_MCP_BRIDGE_URL": "https://localhost:4000",
+        "OSIONOS_MCP_API_URL": "https://localhost:4000",
+        "OSIONOS_MCP_TOKEN": "${OSIONOS_MCP_TOKEN}",
+        "NODE_EXTRA_CA_CERTS": "apps/grobase/certs/track-binocle-local-ca.pem"
+      }
+    }
+  }
 }

@@ -43,7 +43,6 @@ END $$;
 DROP TRIGGER IF EXISTS auth_session_cutoffs_monotonic ON public.auth_session_cutoffs;
 CREATE TRIGGER auth_session_cutoffs_monotonic BEFORE UPDATE ON public.auth_session_cutoffs
   FOR EACH ROW EXECUTE FUNCTION public.auth_session_cutoffs_monotonic();
-
 COMMIT;
 
 NOTIFY pgrst, 'reload schema';

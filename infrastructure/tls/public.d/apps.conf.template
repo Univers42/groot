@@ -53,6 +53,6 @@ server {
   location ~ /\. { return 404; }
   location / {
     limit_except GET HEAD { deny all; }
-    proxy_pass http://$apps_upstream; # nosemgrep: generic.nginx.security.dynamic-proxy-host.dynamic-proxy-host
+    proxy_pass http://$apps_upstream;
   }
 }

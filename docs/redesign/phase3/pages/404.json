@@ -1,0 +1,47 @@
+{
+  "route": "/404",
+  "widths": {
+    "390": {
+      "status": 404,
+      "screenshot": "test-results/site-audit/phase3/screenshots/404-390.jpg",
+      "reducedScreenshot": "test-results/site-audit/phase3/screenshots/404-390-reduced.jpg",
+      "darkScreenshot": "test-results/site-audit/phase3/screenshots/404-390-dark.jpg",
+      "truncated": false,
+      "pageHeight": 1714,
+      "overflowPx": 0,
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      ],
+      "axe": [],
+      "axeDark": []
+    },
+    "768": {
+      "status": 404,
+      "screenshot": "test-results/site-audit/phase3/screenshots/404-768.jpg",
+      "reducedScreenshot": "test-results/site-audit/phase3/screenshots/404-768-reduced.jpg",
+      "darkScreenshot": "test-results/site-audit/phase3/screenshots/404-768-dark.jpg",
+      "truncated": false,
+      "pageHeight": 1301,
+      "overflowPx": 0,
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      ],
+      "axe": [],
+      "axeDark": []
+    },
+    "1440": {
+      "status": 404,
+      "screenshot": "test-results/site-audit/phase3/screenshots/404-1440.jpg",
+      "reducedScreenshot": "test-results/site-audit/phase3/screenshots/404-1440-reduced.jpg",
+      "darkScreenshot": "test-results/site-audit/phase3/screenshots/404-1440-dark.jpg",
+      "truncated": false,
+      "pageHeight": 1081,
+      "overflowPx": 0,
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      ],
+      "axe": [],
+      "axeDark": []
+    }
+  }
+}
