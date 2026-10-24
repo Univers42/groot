@@ -20,11 +20,12 @@ WORKDIR /app
 # (groot main, CI run 39089475219). scripts/tests/bridge-image-closure.bats walks the import
 # closure of bridge-api.mjs and fails on any module these globs (minus the .dockerignore) miss.
 COPY scripts/bridge-*.mjs scripts/ide-*.mjs ./scripts/
-# When the osionos pin includes bridge-moderation.mjs it also includes
-# scripts/moderation-lists/ (the module reads them at import via new URL).
-# The current pin (redesign/bridge-auth) has neither; COPY of a missing path
-# fails the Fresh-Machine Migration job. Re-add the line when the pin advances:
-#   COPY scripts/moderation-lists/ ./scripts/moderation-lists/
+# The word lists bridge-moderation.mjs reads at import (new URL). The one-character class makes
+# the source a wildcard, which BuildKit skips when nothing matches, so a pin without the module
+# still builds (Fresh-Machine Migration) and one with it always ships them: with this line
+# commented out, the account-release bridge (app main 49e654522) crash-looped on ENOENT
+# (2026-10-24 04:21) and was rolled back.
+COPY scripts/moderation-list[s]/ ./scripts/moderation-lists/
 
 USER node
 EXPOSE 4000
