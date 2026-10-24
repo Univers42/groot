@@ -3145,6 +3145,393 @@ END $$;
 SELECT * FROM pg_temp.p5_row('p5_foreign_content_null', 7);
 ROLLBACK;
 
+-- ===== P4-5-root: activity events, monthly partitions, daily rollup =====
+-- Helpers. p4a_day() is yesterday (UTC) with its month's partition made if
+-- missing: on the 1st of a month the previous month has no partition, and a row
+-- written there would land in DEFAULT and make the day look "partition_gone".
+-- p4a_ev() writes p_users distinct users x p_each events at one instant; the same
+-- p_tag gives the same user ids, so one user can sit in two cells.
+-- Caveat: users are md5-derived uuids with no auth.users row (the table has no FK),
+-- so these checks do not exercise a cascade.
+CREATE OR REPLACE FUNCTION pg_temp.p4a_day() RETURNS date LANGUAGE plpgsql AS $$
+DECLARE
+  d date := (now() AT TIME ZONE 'UTC')::date - 1;
+  m date := date_trunc('month', (now() AT TIME ZONE 'UTC')::date - 1)::date;
+  n text := 'osionos_activity_events_y' || to_char((now() AT TIME ZONE 'UTC')::date - 1, 'YYYYMM');
+BEGIN
+  IF to_regclass('public.' || n) IS NULL THEN
+    EXECUTE format('CREATE TABLE public.%I PARTITION OF public.osionos_activity_events FOR VALUES FROM (%L) TO (%L)',
+                   n, m::timestamp AT TIME ZONE 'UTC', (m + interval '1 month')::timestamp AT TIME ZONE 'UTC');
+  END IF;
+  RETURN d;
+END $$;
+
+CREATE OR REPLACE FUNCTION pg_temp.p4a_ev(p_at timestamptz, p_event text, p_surface text, p_users int,
+                                          p_each int DEFAULT 1, p_tag text DEFAULT 'a', p_ws uuid DEFAULT NULL) RETURNS void
+LANGUAGE sql AS $$
+  INSERT INTO public.osionos_activity_events (ts, user_id, workspace_id, event, surface)
+  SELECT p_at + (j * interval '1 millisecond'), md5('p4a-' || p_tag || '-' || u)::uuid, p_ws, p_event, p_surface
+    FROM generate_series(1, p_users) u, generate_series(1, p_each) j
+$$;
+
+CREATE OR REPLACE FUNCTION pg_temp.p4a_utc(p_d date) RETURNS timestamptz LANGUAGE sql IMMUTABLE AS $$
+  SELECT p_d::timestamp AT TIME ZONE 'UTC' $$;
+
+-- p4_activity_rollup_key: the key is exactly (day, event, surface), all NOT NULL,
+-- no workspace and no scope column, a duplicate is refused, and a cell under 5
+-- people is refused by the CHECK even if the function's HAVING were wrong.
+BEGIN;
+DO $$
+DECLARE d date := pg_temp.p4a_day();
+BEGIN
+  PERFORM pg_temp.p5_ok('primary key is (day, event, surface)', (
+    SELECT array_agg(a.attname::text ORDER BY a.attname) FROM pg_index i
+      JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey)
+     WHERE i.indrelid = 'public.osionos_activity_daily'::regclass AND i.indisprimary) = ARRAY['day', 'event', 'surface']);
+  PERFORM pg_temp.p5_ok('every key column is NOT NULL', (
+    SELECT count(*) FROM pg_attribute a WHERE a.attrelid = 'public.osionos_activity_daily'::regclass
+       AND a.attname IN ('day', 'event', 'surface') AND a.attnotnull) = 3);
+  PERFORM pg_temp.p5_ok('no scope or workspace_id column', NOT EXISTS (
+    SELECT 1 FROM pg_attribute a WHERE a.attrelid = 'public.osionos_activity_daily'::regclass AND NOT a.attisdropped
+       AND a.attname IN ('scope', 'workspace_id')));
+  INSERT INTO public.osionos_activity_daily VALUES (d, 'search', 'search', 10, 5);
+  PERFORM pg_temp.p5_ok('a cell of 5 is accepted', true);
+  BEGIN
+    INSERT INTO public.osionos_activity_daily VALUES (d, 'search', 'search', 11, 6);
+    PERFORM pg_temp.p5_ok('a duplicate key is refused', false);
+  EXCEPTION WHEN unique_violation THEN PERFORM pg_temp.p5_ok('a duplicate key is refused', true);
+  END;
+  BEGIN
+    INSERT INTO public.osionos_activity_daily VALUES (d, 'search', 'chat', 3, 4);
+    PERFORM pg_temp.p5_ok('distinct_users = 4 is refused by the CHECK', false);
+  EXCEPTION WHEN check_violation THEN PERFORM pg_temp.p5_ok('distinct_users = 4 is refused by the CHECK', true);
+  END;
+  BEGIN
+    INSERT INTO public.osionos_activity_daily VALUES (d, NULL, 'chat', 3, 5);
+    PERFORM pg_temp.p5_ok('a NULL key column is refused', false);
+  EXCEPTION WHEN not_null_violation THEN PERFORM pg_temp.p5_ok('a NULL key column is refused', true);
+  END;
+END $$;
+SELECT * FROM pg_temp.p5_row('p4_activity_rollup_key', 7);
+ROLLBACK;
+
+-- p4_activity_default_empty: nothing sits in DEFAULT after the runner. A row there
+-- means a month had no partition when it was written.
+BEGIN;
+DO $$ BEGIN
+  PERFORM pg_temp.p5_ok('the DEFAULT partition exists', to_regclass('public.osionos_activity_events_default') IS NOT NULL);
+  PERFORM pg_temp.p5_ok('the DEFAULT partition is empty', (SELECT count(*) FROM public.osionos_activity_events_default) = 0);
+  PERFORM pg_temp.p5_ok('the current month and the next two have a partition', (
+    SELECT count(*) FROM generate_series(0, 2) i
+     WHERE to_regclass('public.osionos_activity_events_y' ||
+           to_char(date_trunc('month', now() AT TIME ZONE 'UTC') + i * interval '1 month', 'YYYYMM')) IS NOT NULL) = 3);
+END $$;
+SELECT * FROM pg_temp.p5_row('p4_activity_default_empty', 3);
+ROLLBACK;
+
+-- p4_activity_default_drain: a row whose month has no partition lands in DEFAULT;
+-- maintain() moves it into the new child instead of failing on the overlap.
+BEGIN;
+DO $$
+DECLARE
+  v_m date := date_trunc('month', now() AT TIME ZONE 'UTC')::date + 2 * interval '1 month';
+  v_child text := 'osionos_activity_events_y' || to_char(date_trunc('month', now() AT TIME ZONE 'UTC') + interval '2 months', 'YYYYMM');
+  v_user uuid := md5('p4a-drain')::uuid;
+  v_id bigint; v_ok boolean; v_created int; v_def bigint; v_where text;
+BEGIN
+  EXECUTE format('DROP TABLE public.%I', v_child);
+  INSERT INTO public.osionos_activity_events (ts, user_id, event, surface)
+    VALUES (v_m::timestamp AT TIME ZONE 'UTC' + interval '5 days', v_user, 'login', 'settings') RETURNING id INTO v_id;
+  PERFORM pg_temp.p5_ok('the row landed in DEFAULT', (SELECT count(*) FROM public.osionos_activity_events_default) = 1);
+  SELECT m.ok, m.created, m.default_rows INTO v_ok, v_created, v_def FROM public.osionos_activity_maintain() m;
+  PERFORM pg_temp.p5_ok('maintain ok and created the one missing month', v_ok AND v_created = 1);
+  PERFORM pg_temp.p5_ok('the child exists again', to_regclass('public.' || v_child) IS NOT NULL);
+  PERFORM pg_temp.p5_ok('DEFAULT is empty after the drain', (SELECT count(*) FROM public.osionos_activity_events_default) = 0 AND v_def = 0);
+  SELECT tableoid::regclass::text INTO v_where FROM public.osionos_activity_events WHERE id = v_id AND user_id = v_user;
+  PERFORM pg_temp.p5_ok('the row survived, with its id, in the new child: ' || coalesce(v_where, 'gone'), v_where = 'osionos_activity_events_y' || to_char(v_m, 'YYYYMM'));
+END $$;
+SELECT * FROM pg_temp.p5_row('p4_activity_default_drain', 5);
+ROLLBACK;
+
+-- p4_activity_maintain: creates the month and the next two, is a no-op the second
+-- time, drops a child past 13 months and keeps the boundary one, prunes the rollup
+-- past 25 months, refuses silly arguments.
+BEGIN;
+DO $$
+DECLARE
+  v_cur date := date_trunc('month', now() AT TIME ZONE 'UTC')::date;
+  r record; v_n int;
+BEGIN
+  FOR r IN SELECT c.relname FROM pg_inherits h JOIN pg_class c ON c.oid = h.inhrelid
+            WHERE h.inhparent = 'public.osionos_activity_events'::regclass AND c.relname ~ '_y[0-9]{6}$' LOOP
+    EXECUTE format('DROP TABLE public.%I', r.relname);
+  END LOOP;
+  -- months -14 (droppable), -13 (kept: upper bound is exactly the cutoff), -12
+  FOR v_n IN 12..14 LOOP
+    EXECUTE format('CREATE TABLE public.%I PARTITION OF public.osionos_activity_events FOR VALUES FROM (%L) TO (%L)',
+      'osionos_activity_events_y' || to_char(v_cur - v_n * interval '1 month', 'YYYYMM'),
+      (v_cur - v_n * interval '1 month')::timestamp AT TIME ZONE 'UTC', (v_cur - (v_n - 1) * interval '1 month')::timestamp AT TIME ZONE 'UTC');
+  END LOOP;
+  INSERT INTO public.osionos_activity_daily VALUES
+    ((v_cur - interval '26 months')::date, 'search', 'search', 9, 6),
+    ((v_cur - interval '24 months')::date, 'search', 'search', 9, 6);
+  SELECT * INTO r FROM public.osionos_activity_maintain();
+  PERFORM pg_temp.p5_ok('ok', r.ok);
+  PERFORM pg_temp.p5_ok('created the current month plus 2: ' || r.created, r.created = 3);
+  PERFORM pg_temp.p5_ok('dropped exactly the 14-month child: ' || r.dropped, r.dropped = 1);
+  PERFORM pg_temp.p5_ok('pruned exactly the 26-month rollup row: ' || r.rollup_pruned, r.rollup_pruned = 1);
+  PERFORM pg_temp.p5_ok('DEFAULT reported empty', r.default_rows = 0);
+  PERFORM pg_temp.p5_ok('the 14-month child is gone', to_regclass('public.osionos_activity_events_y' || to_char(v_cur - interval '14 months', 'YYYYMM')) IS NULL);
+  PERFORM pg_temp.p5_ok('the 13-month child stays (whole-partition retention)', to_regclass('public.osionos_activity_events_y' || to_char(v_cur - interval '13 months', 'YYYYMM')) IS NOT NULL);
+  PERFORM pg_temp.p5_ok('the 12-month child stays', to_regclass('public.osionos_activity_events_y' || to_char(v_cur - interval '12 months', 'YYYYMM')) IS NOT NULL);
+  PERFORM pg_temp.p5_ok('the 24-month rollup row stays', (SELECT count(*) FROM public.osionos_activity_daily) = 1);
+  SELECT * INTO r FROM public.osionos_activity_maintain();
+  PERFORM pg_temp.p5_ok('a second call creates, drops and prunes nothing', r.ok AND r.created = 0 AND r.dropped = 0 AND r.rollup_pruned = 0);
+END $$;
+SELECT * FROM pg_temp.p5_row('p4_activity_maintain', 10);
+ROLLBACK;
+
+-- p4_activity_maintain_failure: a failure is reported as ok=false, never swallowed
+-- into ok=true, and it changes nothing.
+BEGIN;
+DO $$
+DECLARE r record; v_before int; v_after int;
+BEGIN
+  SELECT count(*) INTO v_before FROM pg_inherits WHERE inhparent = 'public.osionos_activity_events'::regclass;
+  SELECT * INTO r FROM public.osionos_activity_maintain(1, 25);
+  PERFORM pg_temp.p5_ok('raw_months = 1 is refused with ok = false', NOT r.ok);
+  SELECT * INTO r FROM public.osionos_activity_maintain(13, 12);
+  PERFORM pg_temp.p5_ok('rollup_months < raw_months is refused with ok = false', NOT r.ok);
+  SELECT count(*) INTO v_after FROM pg_inherits WHERE inhparent = 'public.osionos_activity_events'::regclass;
+  PERFORM pg_temp.p5_ok('a refused call dropped nothing', v_before = v_after);
+END $$;
+SELECT * FROM pg_temp.p5_row('p4_activity_maintain_failure', 3);
+ROLLBACK;
+
+-- p4_activity_children_closed: a child maintain() has just created, and every other
+-- one, has RLS on and no privilege for PUBLIC, anon, authenticated or the account role.
+BEGIN;
+DO $$
+DECLARE v_child text := 'osionos_activity_events_y' || to_char(date_trunc('month', now() AT TIME ZONE 'UTC') + interval '2 months', 'YYYYMM');
+        r record; v_n int := 0;
+BEGIN
+  EXECUTE format('DROP TABLE public.%I', v_child);
+  PERFORM public.osionos_activity_maintain();
+  FOR r IN SELECT c.oid, c.relname, c.relrowsecurity FROM pg_inherits h JOIN pg_class c ON c.oid = h.inhrelid
+            WHERE h.inhparent = 'public.osionos_activity_events'::regclass LOOP
+    v_n := v_n + 1;
+    PERFORM pg_temp.p5_ok(r.relname || ' has RLS enabled', r.relrowsecurity);
+    PERFORM pg_temp.p5_ok(r.relname || ' is closed to PUBLIC, anon, authenticated, the account role', NOT EXISTS (
+      SELECT 1 FROM pg_roles ro WHERE ro.rolname IN ('anon', 'authenticated', 'osionos_account_user')
+         AND (has_any_column_privilege(ro.rolname, r.oid, 'SELECT') OR has_any_column_privilege(ro.rolname, r.oid, 'INSERT')
+           OR has_any_column_privilege(ro.rolname, r.oid, 'UPDATE') OR has_table_privilege(ro.rolname, r.oid, 'DELETE')))
+      AND NOT EXISTS (SELECT 1 FROM pg_class k, aclexplode(coalesce(k.relacl, acldefault('r', k.relowner))) a WHERE k.oid = r.oid AND a.grantee = 0));
+    PERFORM pg_temp.p5_ok(r.relname || ' is open to service_role', has_table_privilege('service_role', r.oid, 'SELECT')
+      AND has_table_privilege('service_role', r.oid, 'INSERT') AND has_table_privilege('service_role', r.oid, 'DELETE'));
+  END LOOP;
+  PERFORM pg_temp.p5_ok('DEFAULT and 3 months were checked: ' || v_n, v_n = 4);
+END $$;
+SELECT * FROM pg_temp.p5_row('p4_activity_children_closed', 13);
+ROLLBACK;
+
+-- p4_activity_grants: service_role only, on the tables, every child and both functions.
+BEGIN;
+DO $$
+DECLARE t text; r record; f text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['osionos_activity_events', 'osionos_activity_daily'] LOOP
+    PERFORM pg_temp.p5_ok('service_role has S/I/U/D on ' || t, has_table_privilege('service_role', 'public.' || t, 'SELECT')
+      AND has_table_privilege('service_role', 'public.' || t, 'INSERT') AND has_table_privilege('service_role', 'public.' || t, 'UPDATE')
+      AND has_table_privilege('service_role', 'public.' || t, 'DELETE'));
+    PERFORM pg_temp.p5_ok('RLS is on for ' || t, (SELECT relrowsecurity FROM pg_class WHERE oid = ('public.' || t)::regclass));
+  END LOOP;
+  FOR r IN SELECT c.oid, c.relname FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace
+              AND c.relname ~ '^osionos_activity_(events|daily)' AND c.relkind IN ('r', 'p') LOOP
+    PERFORM pg_temp.p5_ok(r.relname || ' is closed to PUBLIC, anon, authenticated', NOT EXISTS (
+      SELECT 1 FROM pg_roles ro WHERE ro.rolname IN ('anon', 'authenticated')
+         AND (has_any_column_privilege(ro.rolname, r.oid, 'SELECT') OR has_any_column_privilege(ro.rolname, r.oid, 'INSERT')
+           OR has_any_column_privilege(ro.rolname, r.oid, 'UPDATE') OR has_table_privilege(ro.rolname, r.oid, 'DELETE')))
+      AND NOT EXISTS (SELECT 1 FROM pg_class k, aclexplode(coalesce(k.relacl, acldefault('r', k.relowner))) a WHERE k.oid = r.oid AND a.grantee = 0));
+  END LOOP;
+  FOREACH f IN ARRAY ARRAY['public.osionos_activity_maintain(integer,integer)', 'public.osionos_activity_rollup(date)'] LOOP
+    PERFORM pg_temp.p5_ok('service_role executes ' || f, has_function_privilege('service_role', f, 'EXECUTE'));
+    PERFORM pg_temp.p5_ok('anon, authenticated and PUBLIC do not execute ' || f, NOT has_function_privilege('anon', f, 'EXECUTE')
+      AND NOT has_function_privilege('authenticated', f, 'EXECUTE')
+      AND NOT EXISTS (SELECT 1 FROM pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a WHERE p.oid = f::regprocedure AND a.grantee = 0));
+    PERFORM pg_temp.p5_ok(f || ' is SECURITY DEFINER with a fixed search_path', (
+      SELECT p.prosecdef AND p.proconfig::text LIKE '%search_path=public, pg_temp%' FROM pg_proc p WHERE p.oid = f::regprocedure));
+  END LOOP;
+  PERFORM pg_temp.p5_ok('service_role can call both through the role switch',
+    pg_temp.p5_as_svc('SELECT (SELECT ok FROM public.osionos_activity_maintain())::text') = 'ok'
+    AND pg_temp.p5_as_svc('SELECT status FROM public.osionos_activity_rollup(current_date - 1)') = 'ok');
+END $$;
+SELECT * FROM pg_temp.p5_row('p4_activity_grants', 17);
+ROLLBACK;
+
+-- p4_activity_rollup: one closed UTC day, cells of 1, 4, 5 and 6 distinct people.
+-- 1 and 4 must be absent, 5 and 6 present; a person in two workspaces counts once;
+-- the day's edges are [00:00, next 00:00); a replay changes nothing; today is refused.
+BEGIN;
+DO $$
+DECLARE
+  d date := pg_temp.p4a_day();
+  t date := (now() AT TIME ZONE 'UTC')::date;
+  w1 constant uuid := 'c4000000-0000-4000-8000-0000000000a1';
+  w2 constant uuid := 'c4000000-0000-4000-8000-0000000000a2';
+  v_fp1 text; v_fp2 text; r record; v_err text;
+BEGIN
+  PERFORM pg_temp.p4a_ev(pg_temp.p4a_utc(d) + interval '12 hours', 'page_open', 'editor', 6, 2, 'six');
+  PERFORM pg_temp.p4a_ev(pg_temp.p4a_utc(d) + interval '12 hours', 'search', 'search', 4, 1, 'five', w1);
+  PERFORM pg_temp.p4a_ev(pg_temp.p4a_utc(d) + interval '13 hours', 'search', 'search', 1, 1, 'five', w2);   -- user 1 of tag 'five' again, now in workspace 2
+  PERFORM pg_temp.p4a_ev(pg_temp.p4a_utc(d) + interval '13 hours', 'search', 'search', 5, 1, 'five-b', w2);
+  PERFORM pg_temp.p4a_ev(pg_temp.p4a_utc(d) + interval '12 hours', 'export', 'admin', 4, 3, 'four');
+  PERFORM pg_temp.p4a_ev(pg_temp.p4a_utc(d) + interval '12 hours', 'login', 'settings', 1, 9, 'one');
+  PERFORM pg_temp.p4a_ev(pg_temp.p4a_utc(d), 'page_create', 'editor', 5, 1, 'edge-in');
+  PERFORM pg_temp.p4a_ev(pg_temp.p4a_utc(d + 1), 'page_edit', 'editor', 5, 1, 'edge-out');
+  PERFORM pg_temp.p4a_ev(pg_temp.p4a_utc(t) + interval '1 second', 'database_view', 'database', 7, 1, 'today');
+  SELECT * INTO r FROM public.osionos_activity_rollup(d);
+  PERFORM pg_temp.p5_ok('status ok: ' || r.status, r.status = 'ok');
+  PERFORM pg_temp.p5_ok('three cells: ' || r.cells, r.cells = 3);
+  PERFORM pg_temp.p5_ok('6 people, 12 events', EXISTS (SELECT 1 FROM public.osionos_activity_daily WHERE day = d AND event = 'page_open' AND surface = 'editor' AND events = 12 AND distinct_users = 6));
+  PERFORM pg_temp.p5_ok('a person in two workspaces counts once (10 events, distinct counted from the raw rows)',
+    EXISTS (SELECT 1 FROM public.osionos_activity_daily WHERE day = d AND event = 'search' AND surface = 'search' AND events = 10
+              AND distinct_users = (SELECT count(DISTINCT user_id) FROM public.osionos_activity_events WHERE event = 'search' AND ts >= pg_temp.p4a_utc(d) AND ts < pg_temp.p4a_utc(d + 1))));
+  PERFORM pg_temp.p5_ok('exactly 5 people is published', EXISTS (SELECT 1 FROM public.osionos_activity_daily WHERE day = d AND event = 'page_create' AND events = 5 AND distinct_users = 5));
+  PERFORM pg_temp.p5_ok('4 people is absent', NOT EXISTS (SELECT 1 FROM public.osionos_activity_daily WHERE event = 'export'));
+  PERFORM pg_temp.p5_ok('1 person is absent', NOT EXISTS (SELECT 1 FROM public.osionos_activity_daily WHERE event = 'login'));
+  PERFORM pg_temp.p5_ok('the next day''s midnight is outside the day', NOT EXISTS (SELECT 1 FROM public.osionos_activity_daily WHERE event = 'page_edit'));
+  PERFORM pg_temp.p5_ok('today''s events are not rolled up', NOT EXISTS (SELECT 1 FROM public.osionos_activity_daily WHERE event = 'database_view'));
+  SELECT md5(string_agg(x::text, '|' ORDER BY x::text)) INTO v_fp1 FROM public.osionos_activity_daily x;
+  SELECT * INTO r FROM public.osionos_activity_rollup(d);
+  SELECT md5(string_agg(x::text, '|' ORDER BY x::text)) INTO v_fp2 FROM public.osionos_activity_daily x;
+  PERFORM pg_temp.p5_ok('a replay changes no row and reports the same cells', v_fp1 = v_fp2 AND r.cells = 3);
+  BEGIN
+    PERFORM public.osionos_activity_rollup(t);
+    PERFORM pg_temp.p5_ok('today is refused', false);
+  EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT; PERFORM pg_temp.p5_ok('today is refused with day_not_closed: ' || v_err, v_err = 'day_not_closed');
+  END;
+  BEGIN
+    PERFORM public.osionos_activity_rollup(t + 1);
+    PERFORM pg_temp.p5_ok('tomorrow is refused', false);
+  EXCEPTION WHEN OTHERS THEN PERFORM pg_temp.p5_ok('tomorrow is refused', true);
+  END;
+  PERFORM pg_temp.p5_ok('a refused day left the rollup alone', (SELECT md5(string_agg(x::text, '|' ORDER BY x::text)) FROM public.osionos_activity_daily x) = v_fp1);
+END $$;
+SELECT * FROM pg_temp.p5_row('p4_activity_rollup', 13);
+ROLLBACK;
+
+-- p4_activity_rollup_dropped_day: once maintain() has dropped a day's partition,
+-- a rebuild of that day must not zero the cells already stored.
+BEGIN;
+DO $$
+DECLARE
+  d date := pg_temp.p4a_day();
+  v_fp1 text; v_fp2 text; r record;
+  v_old date := (date_trunc('month', now() AT TIME ZONE 'UTC') - interval '13 months')::date + 3;
+BEGIN
+  PERFORM pg_temp.p4a_ev(pg_temp.p4a_utc(d) + interval '12 hours', 'search', 'search', 5, 1, 'gone');
+  SELECT * INTO r FROM public.osionos_activity_rollup(d);
+  PERFORM pg_temp.p5_ok('built one cell', r.status = 'ok' AND r.cells = 1);
+  SELECT md5(string_agg(x::text, '|' ORDER BY x::text)) INTO v_fp1 FROM public.osionos_activity_daily x;
+  EXECUTE format('DROP TABLE public.%I', 'osionos_activity_events_y' || to_char(d, 'YYYYMM'));
+  SELECT * INTO r FROM public.osionos_activity_rollup(d);
+  PERFORM pg_temp.p5_ok('partition_gone, no cells: ' || r.status, r.status = 'partition_gone' AND r.cells = 0);
+  SELECT md5(string_agg(x::text, '|' ORDER BY x::text)) INTO v_fp2 FROM public.osionos_activity_daily x;
+  PERFORM pg_temp.p5_ok('the stored cell is untouched', v_fp1 = v_fp2);
+  SELECT * INTO r FROM public.osionos_activity_rollup(v_old);
+  PERFORM pg_temp.p5_ok('a day in the last month before the drop is too_old: ' || r.status, r.status = 'too_old' AND r.cells = 0);
+END $$;
+SELECT * FROM pg_temp.p5_row('p4_activity_rollup_dropped_day', 4);
+ROLLBACK;
+
+-- p4_activity_no_user_column_in_rollup: the rollup can name nobody. Same type
+-- filter as p5_erasure_complete (uuid, varchar, text, citext, json) plus the
+-- exact column set, so a new column has to be argued for here.
+-- Caveat: it reads types and names, not values; a user id written into 'event'
+-- is stopped only by the CHECK-free text type being unused for that.
+BEGIN;
+DO $$ BEGIN
+  PERFORM pg_temp.p5_ok('columns are exactly day, event, surface, events, distinct_users', (
+    SELECT array_agg(a.attname::text ORDER BY a.attname) FROM pg_attribute a
+     WHERE a.attrelid = 'public.osionos_activity_daily'::regclass AND a.attnum > 0 AND NOT a.attisdropped)
+    = ARRAY['day', 'distinct_users', 'event', 'events', 'surface']);
+  PERFORM pg_temp.p5_ok('no uuid column', NOT EXISTS (
+    SELECT 1 FROM pg_attribute a WHERE a.attrelid = 'public.osionos_activity_daily'::regclass AND a.attnum > 0 AND NOT a.attisdropped
+       AND format_type(a.atttypid, a.atttypmod) LIKE 'uuid%'));
+  PERFORM pg_temp.p5_ok('the only text-like columns are event and surface', NOT EXISTS (
+    SELECT 1 FROM pg_attribute a WHERE a.attrelid = 'public.osionos_activity_daily'::regclass AND a.attnum > 0 AND NOT a.attisdropped
+       AND a.attname NOT IN ('event', 'surface')
+       AND (format_type(a.atttypid, a.atttypmod) LIKE 'character varying%' OR format_type(a.atttypid, a.atttypmod) IN ('text', 'citext')
+            OR format_type(a.atttypid, a.atttypmod) LIKE 'json%' OR format_type(a.atttypid, a.atttypmod) LIKE '%[]')));
+  PERFORM pg_temp.p5_ok('no user-keyed column name', NOT EXISTS (
+    SELECT 1 FROM pg_attribute a WHERE a.attrelid = 'public.osionos_activity_daily'::regclass AND a.attnum > 0 AND NOT a.attisdropped
+       AND a.attname ~ '(user_id|owner|author|actor|subject|creator|member|workspace|account|email)'));
+END $$;
+SELECT * FROM pg_temp.p5_row('p4_activity_no_user_column_in_rollup', 4);
+ROLLBACK;
+
+-- p4_activity_erase_rollup: erasing one of five people. The raw rows go with the
+-- erase; the stored cell keeps counting that person until the day is rebuilt (D3);
+-- the rebuild finds 4 and the cell disappears. A one-person cell never appears.
+BEGIN;
+DO $$
+DECLARE
+  d date := pg_temp.p4a_day();
+  u constant uuid := 'c4000000-0000-4000-8000-0000000000e1';
+  v_r text;
+BEGIN
+  PERFORM pg_temp.p5_user(u, 'Activity Eraser', true);
+  PERFORM pg_temp.p4a_ev(pg_temp.p4a_utc(d) + interval '12 hours', 'search', 'search', 4, 1, 'erase4');
+  INSERT INTO public.osionos_activity_events (ts, user_id, event, surface) VALUES (pg_temp.p4a_utc(d) + interval '12 hours', u, 'search', 'search');
+  PERFORM pg_temp.p4a_ev(pg_temp.p4a_utc(d) + interval '12 hours', 'login', 'settings', 1, 3, 'solo');
+  PERFORM public.osionos_activity_rollup(d);
+  PERFORM pg_temp.p5_ok('the 5-person cell is stored', EXISTS (SELECT 1 FROM public.osionos_activity_daily WHERE day = d AND event = 'search' AND distinct_users = 5));
+  PERFORM pg_temp.p5_ok('the 1-person cell is not', NOT EXISTS (SELECT 1 FROM public.osionos_activity_daily WHERE event = 'login'));
+  v_r := pg_temp.p5_as_svc('SELECT public.osionos_account_erase(''' || u || ''')::text');
+  PERFORM pg_temp.p5_ok('erase ok: ' || v_r, v_r = 'ok');
+  PERFORM pg_temp.p5_ok('the erased person has no raw event left', NOT EXISTS (SELECT 1 FROM public.osionos_activity_events WHERE user_id = u));
+  PERFORM pg_temp.p5_ok('the other four keep theirs', (SELECT count(*) FROM public.osionos_activity_events WHERE event = 'search') = 4);
+  PERFORM pg_temp.p5_ok('the stored cell is untouched until a rebuild (D3)', EXISTS (SELECT 1 FROM public.osionos_activity_daily WHERE day = d AND event = 'search' AND distinct_users = 5));
+  PERFORM public.osionos_activity_rollup(d);
+  PERFORM pg_temp.p5_ok('after the rebuild the cell (now 4 people) is gone', NOT EXISTS (SELECT 1 FROM public.osionos_activity_daily WHERE day = d AND event = 'search'));
+END $$;
+SELECT * FROM pg_temp.p5_row('p4_activity_erase_rollup', 7);
+ROLLBACK;
+
+-- p4_activity_canary_seedable: the canary can seed the table (its CHECK lists give
+-- p5_literal a first value) and the erase leaves no trace of the seeded user.
+BEGIN;
+DO $$
+DECLARE a constant uuid := 'a5a5a5a5-0000-4000-8000-00000000000a';
+BEGIN
+  PERFORM pg_temp.p5_world();
+  PERFORM pg_temp.p5_ok('the registry names the table', EXISTS (SELECT 1 FROM public.osionos_account_data_map m
+    WHERE m.table_name = 'osionos_activity_events' AND m.column_name = 'user_id' AND m.erase = 'delete'));
+  PERFORM pg_temp.p5_ok('the seed reached the table', EXISTS (SELECT 1 FROM p5_seeded WHERE user_id = a AND table_name = 'osionos_activity_events' AND ok));
+  PERFORM pg_temp.p5_ok('the seeded row is there', EXISTS (SELECT 1 FROM public.osionos_activity_events WHERE user_id = a));
+  PERFORM pg_temp.p5_ok('the canary sees the user before the erase', pg_temp.p5_hits(a) LIKE '%osionos_activity_events%');
+  PERFORM pg_temp.p5_ok('erase ok', pg_temp.p5_as_svc('SELECT public.osionos_account_erase(''' || a || ''')::text') = 'ok');
+  PERFORM pg_temp.p5_ok('no event of the user remains', NOT EXISTS (SELECT 1 FROM public.osionos_activity_events WHERE user_id = a));
+  PERFORM pg_temp.p5_ok('the canary no longer sees the table', pg_temp.p5_hits(a) NOT LIKE '%osionos_activity_events%');
+END $$;
+SELECT * FROM pg_temp.p5_row('p4_activity_canary_seedable', 7);
+ROLLBACK;
+
+-- p4_activity_canary_mutation: with the registry row gone the canary would FAIL:
+-- the erase leaves the user's event behind and p5_hits names the table.
+BEGIN;
+DO $$
+DECLARE a constant uuid := 'a5a5a5a5-0000-4000-8000-00000000000a';
+BEGIN
+  PERFORM pg_temp.p5_world();
+  DELETE FROM public.osionos_account_data_map WHERE table_name = 'osionos_activity_events';
+  PERFORM pg_temp.p5_ok('erase ok', pg_temp.p5_as_svc('SELECT public.osionos_account_erase(''' || a || ''')::text') = 'ok');
+  PERFORM pg_temp.p5_ok('without the row the user''s event survives the erase', EXISTS (SELECT 1 FROM public.osionos_activity_events WHERE user_id = a));
+  PERFORM pg_temp.p5_ok('and the canary names the table', pg_temp.p5_hits(a) LIKE '%osionos_activity_events%');
+END $$;
+SELECT * FROM pg_temp.p5_row('p4_activity_canary_mutation', 3);
+ROLLBACK;
+
 -- The two isolation rows are LAST: a regressed regex in the uid helper raises
 -- 22P02 and blanks every row after it.
 BEGIN;
