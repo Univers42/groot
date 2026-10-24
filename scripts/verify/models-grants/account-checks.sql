@@ -2332,6 +2332,7 @@ CREATE FUNCTION pg_temp.p5_unregistered() RETURNS SETOF text LANGUAGE sql AS $f$
       ('osionos_workspace_invites', 'email', 'display copy of the invitee address; the row goes by invited_user_id'),
       ('osionos_user_reports', 'decision', 'label'), ('osionos_user_reports', 'decision_note', 'moderator free text'),
       ('osionos_user_reports', 'subject_kind', 'label'), ('osionos_username_history', 'username', 'the held name, released at released_at'),
+      ('osionos_user_emails', 'email_enc', 'sealed address; the row goes by user_id'), ('osionos_user_emails', 'email_hmac', 'keyed hash of the address; the row goes by user_id'),
       ('users', 'email', 'replaced by the erase'), ('users', 'username', 'replaced by the erase'))
     SELECT (c.relname || '.' || a.attname)::text
       FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
@@ -3584,4 +3585,55 @@ SELECT 'account_isolation_forged',
        current_setting('osionos.check.k6_forged', true)::bigint
      + current_setting('osionos.check.k6_svc', true)::bigint,
        'forged claims see no rows';
+ROLLBACK;
+
+-- f3b_user_emails_unique (F-3broot, models/osionos-user-emails-migration.sql): the
+-- database, not the bridge, keeps one VERIFIED address with one user. Five facts,
+-- each reduced to the SQLSTATE of its insert ('' = accepted):
+--   (a) a second VERIFIED row with the same email_hmac is refused, 23505;
+--   (b) a second UNVERIFIED row with that email_hmac (other user) is accepted;
+--   (c) a verified row beside an unverified one for that email_hmac is accepted;
+--   (d) the same user twice with one email_hmac is refused, 23505;
+--   (e) a mixed-case or short email_hmac is refused, 23514.
+-- Dropping the partial index's WHERE fails (b) and (c); losing its uniqueness fails (a).
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+                               ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'),
+                               ('cccccccc-cccc-cccc-cccc-cccccccccccc');
+CREATE OR REPLACE FUNCTION pg_temp.f3b_ins(p_user text, p_hmac text, p_verified boolean) RETURNS text
+LANGUAGE plpgsql AS $$
+DECLARE v_state text := '';
+BEGIN
+  BEGIN
+    INSERT INTO public.osionos_user_emails (user_id, email_enc, email_hmac, verified_at)
+    VALUES (p_user::uuid, 'v1.sealed', p_hmac, CASE WHEN p_verified THEN now() END);
+  EXCEPTION WHEN others THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+  END;
+  RETURN v_state;
+END $$;
+DO $$
+DECLARE
+  h1 text := repeat('1', 64);
+  h2 text := repeat('2', 64);
+  h3 text := repeat('3', 64);
+  h4 text := repeat('4', 64);
+  a text := 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  b text := 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+  c text := 'cccccccc-cccc-cccc-cccc-cccccccccccc';
+  s_first text; s_a text; s_b text; s_c1 text; s_c2 text; s_d text; s_e text;
+BEGIN
+  s_first := pg_temp.f3b_ins(a, h1, true);
+  s_a := pg_temp.f3b_ins(b, h1, true);
+  s_b := pg_temp.f3b_ins(b, h2, false);
+  s_b := s_b || pg_temp.f3b_ins(c, h2, false);
+  s_c1 := pg_temp.f3b_ins(a, h3, false);
+  s_c2 := pg_temp.f3b_ins(b, h3, true);
+  s_d := pg_temp.f3b_ins(a, h4, false) || pg_temp.f3b_ins(a, h4, false);
+  s_e := pg_temp.f3b_ins(a, upper(repeat('f', 64)), false) || pg_temp.f3b_ins(a, 'abc', false);
+  PERFORM set_config('osionos.check.f3b', concat_ws('|', s_first, s_a, s_b, s_c1, s_c2, s_d, s_e), true);
+END $$;
+SELECT 'f3b_user_emails_unique',
+       (CASE WHEN current_setting('osionos.check.f3b') = '|23505||||23505|2351423514' THEN 0 ELSE 1 END),
+       'verified twice 23505; unverified twice, and verified beside unverified, accepted; same user twice 23505; bad hmac 23514 (got ' || current_setting('osionos.check.f3b') || ')';
 ROLLBACK;
