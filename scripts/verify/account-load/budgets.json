@@ -36,7 +36,7 @@
     "no_seq_scan": [
       "osionos_connections"
     ],
-    "why": "Target: BitmapOr of two Index Scans (requester_idx on requester_id, addressee_idx on addressee_id) combined via BitmapOr. Today: same \u2014 indexes exist. Budget 60ms covers bitmap heap scan on ~20K rows."
+    "why": "Target: BitmapOr of two Index Scans (requester_idx on requester_id, addressee_idx on addressee_id) combined via BitmapOr. Today: same — indexes exist. Budget 60ms covers bitmap heap scan on ~20K rows."
   },
   "workspace_members_of_large_workspace": {
     "p95_ms": 60,
@@ -44,7 +44,7 @@
       "osionos_workspace_members",
       "osionos_workspaces"
     ],
-    "why": "Target: coMemberPath shape \u2014 anchor on user_id (osionos_workspace_members_user_idx) joining workspaces (PK) and their other members (PK on workspace_id, user_id). Today: same \u2014 indexes exist. Budget 60ms for co-member read on the caller workspaces."
+    "why": "Target: coMemberPath shape — anchor on user_id (osionos_workspace_members_user_idx) joining workspaces (PK) and their other members (PK on workspace_id, user_id). Today: same — indexes exist. Budget 60ms for co-member read on the caller workspaces."
   },
   "pages_of_workspace": {
     "p95_ms": 60,
@@ -53,14 +53,14 @@
       "osionos_workspaces",
       "osionos_workspace_members"
     ],
-    "why": "Target: PK Index Scan on osionos_pages.id + PK on osionos_workspaces.id + PK on osionos_workspace_members(workspace_id, user_id) for the embed. Today: same \u2014 all PK indexes exist. Budget 60ms for single-row fetch with embed."
+    "why": "Target: PK Index Scan on osionos_pages.id + PK on osionos_workspaces.id + PK on osionos_workspace_members(workspace_id, user_id) for the embed. Today: same — all PK indexes exist. Budget 60ms for single-row fetch with embed."
   },
   "p1_directory_search_common": {
     "p95_ms": 150,
     "no_seq_scan": [
       "osionos_profiles"
     ],
-    "why": "Target: Index Scan on osionos_profiles_display_name_user_idx (display_name, user_id), walking it in order and stopping at LIMIT 200, with a nested loop to user_profiles and osionos_bridge_identities by user_id. P1-1 rebuilds the directory over osionos_profiles, whose own columns are the ones the view selects \u2014 no COALESCE, so the index applies. The term matches every seeded user, so the ordered walk is the cheap plan."
+    "why": "Target: Index Scan on osionos_profiles_display_name_user_idx (display_name, user_id), walking it in order and stopping at LIMIT 200, with a nested loop to user_profiles and osionos_bridge_identities by user_id. P1-1 rebuilds the directory over osionos_profiles, whose own columns are the ones the view selects — no COALESCE, so the index applies. The term matches every seeded user, so the ordered walk is the cheap plan."
   },
   "p1_directory_search_rare": {
     "p95_ms": 150,
@@ -105,10 +105,9 @@
       "osionos_activity_events"
     ],
     "require_plan_nodes": [
-      "Merge Append",
       "Index Scan"
     ],
-    "why": "Target: Index Scans on osionos_activity_events_user_ts_idx in every monthly child, merged in ts DESC order, stopping at 200 rows. Without the index every child is scanned sequentially and sorted. Caveat: no_seq_scan matches the relation name exactly and a partition scan reports the child's name (osionos_activity_events_yYYYYMM, which moves with the date), so the parent entry cannot see a child scan; require_plan_nodes (a Merge Append of Index Scans only exists when the index is used) is the check that bites."
+    "why": "Target: the user's rows come from osionos_activity_events_user_ts_idx in every monthly child that holds data, then a top-N sort to 200. At about 65 events per seeded user the planner fetches them all by index and sorts, so there is no Merge Append (the first draft required one; the 2026-10-24 run showed it is not the plan). Caveat: no_seq_scan matches the relation name exactly and a partition scan reports the child's name (osionos_activity_events_yYYYYMM, which moves with the date), so the parent entry cannot see a child scan; the empty children (DEFAULT and the pre-created future months) are scanned sequentially at zero cost. require_plan_nodes Index Scan is the check that bites: without the index every child holding data is read sequentially. A user with thousands of events would get a different plan; the seed does not model one."
   },
   "activity_admin_range": {
     "p95_ms": 150,
