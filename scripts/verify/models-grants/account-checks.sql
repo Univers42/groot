@@ -1692,21 +1692,21 @@ SELECT 'p23_social_grants', count(*), coalesce(string_agg(v, ' ' ORDER BY v), ''
     SELECT 'osionos_follows:account role holds ' || p
       FROM unnest(ARRAY['INSERT','UPDATE','DELETE']) AS p
      WHERE to_regclass('public.osionos_follows') IS NOT NULL
-       AND (has_table_privilege('osionos_account_user', 'public.osionos_follows'::regclass, p)
+       AND (has_table_privilege('osionos_account_user', to_regclass('public.osionos_follows'), p)
          OR CASE WHEN p = 'DELETE' THEN false
-                 ELSE has_any_column_privilege('osionos_account_user', 'public.osionos_follows'::regclass, p) END)
+                 ELSE has_any_column_privilege('osionos_account_user', to_regclass('public.osionos_follows'), p) END)
     UNION ALL
     SELECT 'osionos_presence:account role holds ' || p
       FROM unnest(ARRAY['INSERT','DELETE']) AS p
      WHERE to_regclass('public.osionos_presence') IS NOT NULL
-       AND (has_table_privilege('osionos_account_user', 'public.osionos_presence'::regclass, p)
+       AND (has_table_privilege('osionos_account_user', to_regclass('public.osionos_presence'), p)
          OR CASE WHEN p = 'DELETE' THEN false
-                 ELSE has_any_column_privilege('osionos_account_user', 'public.osionos_presence'::regclass, p) END)
+                 ELSE has_any_column_privilege('osionos_account_user', to_regclass('public.osionos_presence'), p) END)
     UNION ALL
     SELECT 'osionos_follow_counts:' || r || ' may execute'
       FROM unnest(ARRAY['anon','authenticated','osionos_account_user']) AS r
      WHERE to_regprocedure('public.osionos_follow_counts(uuid,uuid)') IS NOT NULL
-       AND has_function_privilege(r, 'public.osionos_follow_counts(uuid,uuid)'::regprocedure, 'EXECUTE')
+       AND has_function_privilege(r, to_regprocedure('public.osionos_follow_counts(uuid,uuid)'), 'EXECUTE')
     UNION ALL
     SELECT 'osionos_follow_counts:' || CASE WHEN p.oid IS NULL THEN 'missing'
                                             WHEN NOT has_function_privilege('service_role', p.oid, 'EXECUTE') THEN 'service_role cannot execute'
@@ -1987,13 +1987,13 @@ SELECT 'p32_mfa_secrets', count(*), coalesce(string_agg(v, ' ' ORDER BY v), '')
       FROM unnest(ARRAY['code_hmac','generation','used_at']) AS col
      WHERE to_regclass('public.osionos_mfa_recovery_codes') IS NOT NULL
        AND NOT EXISTS (SELECT 1 FROM pg_attribute a
-                        WHERE a.attrelid = 'public.osionos_mfa_recovery_codes'::regclass
+                        WHERE a.attrelid = to_regclass('public.osionos_mfa_recovery_codes')
                           AND a.attname = col AND NOT a.attisdropped)
     UNION ALL
     SELECT 'osionos_mfa_recovery_codes:no unique (user_id, code_hmac)'
      WHERE to_regclass('public.osionos_mfa_recovery_codes') IS NOT NULL
        AND NOT EXISTS (SELECT 1 FROM pg_index i
-                        WHERE i.indrelid = 'public.osionos_mfa_recovery_codes'::regclass
+                        WHERE i.indrelid = to_regclass('public.osionos_mfa_recovery_codes')
                           AND i.indisunique AND i.indnatts = 2
                           AND (SELECT string_agg(a.attname, ',' ORDER BY a.attname)
                                  FROM pg_attribute a
@@ -2521,10 +2521,14 @@ BEGIN
   PERFORM pg_temp.p5_ok('erase O1 ' || pg_temp.p5_as_svc('SELECT public.osionos_account_erase(''' || o1 || ''')::text'), true);
   PERFORM pg_temp.p5_ok('W1 owner is the accepted successor', (SELECT owner_id FROM public.osionos_workspaces WHERE id = w1) = s1);
   PERFORM pg_temp.p5_ok('W1 successor row is owner', (SELECT role FROM public.osionos_workspace_members WHERE workspace_id = w1 AND user_id = s1) = 'owner');
+  PERFORM pg_temp.p5_ok('W1 successor has full owner permissions', (SELECT permissions FROM public.osionos_workspace_members
+    WHERE workspace_id = w1 AND user_id = s1) = ARRAY['create','read','update','delete','admin']);
   PERFORM pg_temp.p5_ok('W3 (successor not a member) promotes the admin', (SELECT owner_id FROM public.osionos_workspaces WHERE id = w3) = m1);
 
   PERFORM pg_temp.p5_ok('erase O2 ' || pg_temp.p5_as_svc('SELECT public.osionos_account_erase(''' || o2 || ''')::text'), true);
   PERFORM pg_temp.p5_ok('W2 (successor not accepted) goes to the earliest admin', (SELECT owner_id FROM public.osionos_workspaces WHERE id = w2) = x2);
+  PERFORM pg_temp.p5_ok('W2 promoted member has full owner permissions', (SELECT permissions FROM public.osionos_workspace_members
+    WHERE workspace_id = w2 AND user_id = x2) = ARRAY['create','read','update','delete','admin']);
   PERFORM pg_temp.p5_ok('W2 viewer is not promoted over the admin', (SELECT role FROM public.osionos_workspace_members WHERE workspace_id = w2 AND user_id = v2) = 'viewer');
   PERFORM pg_temp.p5_ok('private page deleted', NOT EXISTS (SELECT 1 FROM public.osionos_pages WHERE id = v_priv));
   PERFORM pg_temp.p5_ok('shared page passed to the new owner', (SELECT owner_id FROM public.osionos_pages WHERE id = v_shared) = x2);
@@ -2544,7 +2548,7 @@ BEGIN
   PERFORM pg_temp.p5_ok('result says kept_orphaned and deleted', current_setting('osionos.check.p5_j') LIKE '%"kept_orphaned": 1%'
                                                              AND current_setting('osionos.check.p5_j') LIKE '%"deleted": 1%');
 END $$;
-SELECT * FROM pg_temp.p5_row('p5_erase_transfer', 16);
+SELECT * FROM pg_temp.p5_row('p5_erase_transfer', 18);
 ROLLBACK;
 -- p5_erase_idempotent: a second erase of the same user changes nothing. Every
 -- table's rows are fingerprinted after the first run and after the second, and
@@ -2768,7 +2772,7 @@ BEGIN
   PERFORM pg_temp.p5_world();
   v_expect := (SELECT count(*) FROM public.osionos_account_data_map WHERE object_bucket IS NOT NULL AND erase <> 'keep');
   PERFORM pg_temp.p5_ok('registry names object columns (' || v_expect || ')', v_expect >= 1);
-  SELECT e.id::text || '.' || e.format INTO v_exp_key FROM public.osionos_account_exports e WHERE e.user_id = a;
+  SELECT e.user_id::text || '/' || e.id::text || '.' || e.format INTO v_exp_key FROM public.osionos_account_exports e WHERE e.user_id = a;
   UPDATE public.osionos_message_attachments SET object_key = 'p5-attachment-key' WHERE owner_id = a;
   SELECT object_key INTO v_att_key FROM public.osionos_message_attachments WHERE owner_id = a;
   PERFORM pg_temp.p5_ok('A has an export and an attachment to record', v_exp_key IS NOT NULL AND v_att_key IS NOT NULL);

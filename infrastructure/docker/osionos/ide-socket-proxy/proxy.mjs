@@ -51,6 +51,45 @@ const LIMITS = shapeLimits(process.env);
 const audit = createAudit();
 const ledger = createLedger({ file: process.env.IDE_UID_LEDGER || "/ledger/uid-ledger.jsonl" });
 
+// Only forward Docker API headers that the provisioner actually uses. This avoids
+// copying attacker-controlled header dictionaries and prevents daemon redirects from
+// becoming redirects emitted by this proxy.
+const REQUEST_HEADER_ALLOWLIST = new Set([
+  "accept", "accept-encoding", "api-version", "content-length", "content-type",
+  "docker-experimental", "if-match", "if-modified-since", "if-none-match",
+  "if-unmodified-since", "range", "user-agent", "x-registry-auth",
+]);
+const RESPONSE_HEADER_ALLOWLIST = new Set([
+  "accept-ranges", "api-version", "content-encoding", "content-length",
+  "content-range", "content-type", "docker-experimental", "etag", "last-modified",
+  "ostype", "warning", "x-docker-container-path-stat", "x-docker-image-id", "x-docker-size",
+]);
+
+function pickAllowedHeaders(headers, allowlist) {
+  const safe = Object.create(null);
+  for (const name of allowlist) {
+    if (!Object.hasOwn(headers ?? {}, name)) continue;
+    const value = headers[name];
+    if (typeof value === "string" ||
+        (Array.isArray(value) && value.every((part) => typeof part === "string"))) {
+      safe[name] = value;
+    }
+  }
+  return safe;
+}
+
+function safeRequestHeaders(headers) {
+  const safe = pickAllowedHeaders(headers, REQUEST_HEADER_ALLOWLIST);
+  safe.host = "docker";
+  return safe;
+}
+
+function safeResponseHeaders(headers) {
+  // Location, Refresh, and arbitrary names are omitted to prevent redirects and
+  // prototype-sensitive header keys from crossing this trust boundary.
+  return pickAllowedHeaders(headers, RESPONSE_HEADER_ALLOWLIST);
+}
+
 // Allowed (METHOD, path-regex). Anything not listed is denied.
 const ALLOW = [
   ["GET", /^\/_ping$/],
@@ -117,7 +156,7 @@ function deny(res, code, message) {
 // A vetted body goes out as `payload` with its own framing: the client's Content-Length,
 // Transfer-Encoding and Content-Encoding described bytes the daemon will no longer receive.
 function forward(clientReq, clientRes, payload, body) {
-  const headers = { ...clientReq.headers, host: "docker" };
+  const headers = safeRequestHeaders(clientReq.headers);
   if (payload) {
     delete headers["transfer-encoding"];
     delete headers["content-encoding"];
@@ -127,7 +166,7 @@ function forward(clientReq, clientRes, payload, body) {
     { socketPath: DOCKER_SOCK, method: clientReq.method, path: clientReq.url, headers },
     (upRes) => {
       audit.record(clientReq.method, clientReq.url, { status: upRes.statusCode, headers: clientReq.headers, body });
-      clientRes.writeHead(upRes.statusCode ?? 502, upRes.headers);
+      clientRes.writeHead(upRes.statusCode ?? 502, safeResponseHeaders(upRes.headers));
       upRes.pipe(clientRes);
     },
   );

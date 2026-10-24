@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CANON_PATH, DIGEST, OWNER, host, mk } from "./create-shape.selfcheck.mjs";
-import { pinRuntime } from "./runtime-pin.mjs";
+import { inspectRuntime, pinRuntime } from "./runtime-pin.mjs";
 
 const PROXY = fileURLToPath(new URL("./proxy.mjs", import.meta.url));
 
@@ -37,7 +37,10 @@ async function startFakeDaemon(sock, state) {
     req.on("end", () => {
       seen.push({ method: req.method, url: req.url, headers: req.headers, body: Buffer.concat(chunks).toString("utf8") });
       const inspect = /\/json$/.test(req.url);
-      res.writeHead(inspect ? state.inspectStatus : /\/create/.test(req.url) ? 201 : 204, { "content-type": "application/json" });
+      res.writeHead(inspect ? state.inspectStatus : /\/create/.test(req.url) ? 201 : 204, {
+        "content-type": "application/json",
+        ...(state.responseHeaders ?? {}),
+      });
       res.end(inspect ? JSON.stringify({ HostConfig: { Runtime: state.runtime } }) : "{}");
     });
   });
@@ -65,7 +68,7 @@ function send(port, method, urlPath, bodyText, headers = {}) {
     const req = http.request({ host: "127.0.0.1", port, method, path: urlPath, headers }, (res) => {
       const chunks = [];
       res.on("data", (chunk) => chunks.push(chunk));
-      res.on("end", () => resolve({ status: res.statusCode, text: Buffer.concat(chunks).toString("utf8") }));
+      res.on("end", () => resolve({ status: res.statusCode, text: Buffer.concat(chunks).toString("utf8"), headers: res.headers }));
     });
     req.on("error", reject);
     if (bodyText !== undefined) req.write(bodyText);
@@ -82,13 +85,41 @@ const withinHostConfig = (prefix) => JSON.stringify(mk()).replace('"HostConfig":
 
 async function bytesForwardedAreVetted(proxy, daemon, chk) {
   const pretty = JSON.stringify(mk(), null, 2);
-  const res = await send(proxy.port, "POST", CANON_PATH, pretty);
+  const res = await send(proxy.port, "POST", CANON_PATH, pretty, {
+    "content-type": "application/json",
+    "x-untrusted-header": "must-not-reach-daemon",
+  });
   await settle();
   const got = daemon.seen.at(-1);
   chk("canonical pretty-printed create answered 201", res.status, 201);
   chk("forwarded bytes == JSON.stringify(vetted)", got?.body, JSON.stringify(mk()));
   chk("content-length recomputed", got?.headers["content-length"], String(Buffer.byteLength(JSON.stringify(mk()))));
   chk("no transfer-encoding upstream", got?.headers["transfer-encoding"], undefined);
+  chk("required content-type retained", got?.headers["content-type"], "application/json");
+  chk("untrusted request header dropped", got?.headers["x-untrusted-header"], undefined);
+}
+
+async function daemonRedirectHeadersAreDropped(proxy, state, chk) {
+  Object.assign(state, {
+    responseHeaders: {
+      location: "https://attacker.example/redirect",
+      refresh: "0;url=https://attacker.example/",
+      "x-docker-size": "1024",
+    },
+  });
+  const response = await send(proxy.port, "GET", `${BOX}/json`);
+  chk("daemon Location header is not proxied", response.headers.location, undefined);
+  chk("daemon Refresh header is not proxied", response.headers.refresh, undefined);
+  chk("documented Docker response header retained", response.headers["x-docker-size"], "1024");
+  state.responseHeaders = {};
+}
+
+async function traversalNamesNeverReachDaemon(sock, daemon, chk) {
+  const before = daemon.seen.length;
+  const got = await inspectRuntime(sock, `../${DIGEST}/../../../etc/passwd`);
+  await settle();
+  chk("runtime inspect refuses a traversal name", got, null);
+  chk("runtime traversal never reaches daemon", daemon.seen.length, before);
 }
 
 async function repeatedKeysAreRefused(proxy, daemon, chk) {
@@ -181,7 +212,9 @@ export async function proxyFailures() {
   const plain = await startProxy(dir, sock, {});
   const pinned = await startProxy(dir, sock, { OSIONOS_IDE_REQUIRE_RUNTIME: "runsc" });
   try {
+    await traversalNamesNeverReachDaemon(sock, daemon, chk);
     await bytesForwardedAreVetted(plain, daemon, chk);
+    await daemonRedirectHeadersAreDropped(plain, state, chk);
     await repeatedKeysAreRefused(plain, daemon, chk);
     await unsetPlaneKeepsToday(plain, daemon, chk);
     await pinnedPlaneAssertsRuntime(pinned, daemon, state, chk);

@@ -1,6 +1,6 @@
 import { expect, test as base, type ConsoleMessage, type Page } from "@playwright/test";
 
-type Guard = { watch(page: Page, label: string): () => void };
+type Guard = { watch(page: Page, label: string, expected?: RegExp): () => void };
 
 // Playwright's own injected scripts are refused by a sandboxed frame without allow-scripts,
 // and Chromium logs that as the page's error (microsoft/playwright#33343). Measured
@@ -12,13 +12,16 @@ const HARNESS_NOISE = /^Blocked script execution in 'about:(srcdoc|blank)' becau
 // uncaught exceptions (frames included) are checked when the test ends. watch returns the
 // call that stops watching, for a spec whose cleanup (not under test) deletes what the page
 // still shows: the page refetching it logs a 404 that only remote-backend latency lets land.
+// `expected` matches one error the test itself causes, as "<text> @ <url>": Chromium logs every
+// 4xx answer to fetch as an error, so a spec that mocks a refusal names that one answer.
 export const test = base.extend<{ consoleGuard: Guard }>({
   consoleGuard: async ({}, use) => {
     const errors: string[] = [];
     await use({
-      watch(page, label) {
+      watch(page, label, expected) {
         const onConsole = (m: ConsoleMessage) => {
-          if (m.type() === "error" && !HARNESS_NOISE.test(m.text())) errors.push(`${label} console: ${m.text()} @ ${m.location().url}`);
+          const seen = `${m.text()} @ ${m.location().url}`;
+          if (m.type() === "error" && !HARNESS_NOISE.test(m.text()) && !expected?.test(seen)) errors.push(`${label} console: ${seen}`);
         };
         const onPageError = (e: Error) => errors.push(`${label} pageerror: ${e.message}`);
         page.on("console", onConsole);

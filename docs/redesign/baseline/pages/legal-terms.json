@@ -1,0 +1,35 @@
+{
+  "route": "/legal/terms",
+  "widths": {
+    "390": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/baseline/screenshots/legal-terms-390.jpg",
+      "reducedScreenshot": "test-results/site-audit/baseline/screenshots/legal-terms-390-reduced.jpg",
+      "truncated": false,
+      "pageHeight": 2041,
+      "overflowPx": 0,
+      "consoleErrors": [],
+      "axe": []
+    },
+    "768": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/baseline/screenshots/legal-terms-768.jpg",
+      "reducedScreenshot": "test-results/site-audit/baseline/screenshots/legal-terms-768-reduced.jpg",
+      "truncated": false,
+      "pageHeight": 1603,
+      "overflowPx": 0,
+      "consoleErrors": [],
+      "axe": []
+    },
+    "1440": {
+      "status": 200,
+      "screenshot": "test-results/site-audit/baseline/screenshots/legal-terms-1440.jpg",
+      "reducedScreenshot": "test-results/site-audit/baseline/screenshots/legal-terms-1440-reduced.jpg",
+      "truncated": false,
+      "pageHeight": 2048,
+      "overflowPx": 0,
+      "consoleErrors": [],
+      "axe": []
+    }
+  }
+}
