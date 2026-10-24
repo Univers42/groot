@@ -706,6 +706,7 @@ run_checks() {
 	check_count "$1" p32_mfa_secrets p32_mfa_secrets
 	check_count "$1" p32_mfa_secrets_read p32_mfa_secrets_read
 	check_count "$1" p5_erasure_complete p5_erasure_complete
+	check_count "$1" f3b_user_emails_unique f3b_user_emails_unique
 	check_count "$1" p5_erase_canary p5_erase_canary
 	check_count "$1" p5_erase_transfer p5_erase_transfer
 	check_count "$1" p5_erase_idempotent p5_erase_idempotent
