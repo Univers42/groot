@@ -93,10 +93,12 @@ data_dirs() {
 }
 
 # The data directories the entry point reads that no COPY line carries; empty when it boots.
+# A one-character class (`lists[s]/`, the COPY that stays optional) reads as its literal.
 missing_data_dirs() {
   local app="$1" dockerfile="$2" dir
   for dir in $(data_dirs "$app" "$dockerfile"); do
-    grep -qE "^COPY[[:space:]].*scripts/$dir/?[[:space:]]" "$dockerfile" || printf '%s\n' "$dir"
+    sed -E 's/\[([^]])\]/\1/g' "$dockerfile" |
+      grep -qE "^COPY[[:space:]].*scripts/$dir/?[[:space:]]" || printf '%s\n' "$dir"
   done
 }
 
@@ -211,6 +213,19 @@ fixture() {
   run missing_data_dirs "$APP_DIR" "$FIXTURE_DOCKERFILE"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+@test "twin: the same word list behind an optional one-character-class COPY is not named" {
+  COPY="scripts/bridge-*.mjs" fixture "bridge-api.mjs=import './bridge-mod.mjs';" \
+    "bridge-mod.mjs=readFileSync(new URL(\`./word-lists/en.txt\`, import.meta.url));"
+  printf 'COPY scripts/word-list[s]/ ./scripts/word-lists/\n' >>"$FIXTURE_DOCKERFILE"
+  run missing_data_dirs "$APP_DIR" "$FIXTURE_DOCKERFILE"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "the real bridge.Dockerfile carries the moderation word lists whatever the pin" {
+  grep -qE '^COPY[[:space:]]+scripts/moderation-list\[s\]/[[:space:]]' "$BRIDGE_DOCKERFILE"
 }
 
 # The osionos-ai image runs TypeScript (src/server.ts), so its CMD names no bridge module: its
