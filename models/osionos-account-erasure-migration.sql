@@ -278,6 +278,17 @@ INSERT INTO osionos_account_data_map_seed VALUES
 -- workspaces, pages, databases
 ('osionos_workspaces', 'owner_id', 'owner', 'transfer', '{id,name,slug,created_at}', NULL, NULL, NULL, NULL),
 ('osionos_workspace_members', 'user_id', 'member', 'delete', '{workspace_id,user_id,role,created_at}', NULL, NULL, NULL, NULL),
+-- a pending invite is addressed to the invitee (the row goes with them); the people who sent or
+-- accepted it are tombstoned. `email` is a display copy of the invitee's, removed with the row.
+('osionos_workspace_invites', 'invited_user_id', 'member', 'delete', NULL, NULL, NULL, NULL, NULL),
+('osionos_workspace_invites', 'invited_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
+('osionos_workspace_invites', 'accepted_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
+-- a team outlives the person who created it (created_by is tombstoned); a team membership goes
+-- with the person (the workspace-member foreign key already cascades it, the row is registered
+-- so the erase names it); added_by is tombstoned.
+('osionos_teams', 'created_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
+('osionos_team_members', 'user_id', 'member', 'delete', NULL, NULL, NULL, NULL, NULL),
+('osionos_team_members', 'added_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
 ('osionos_pages', 'owner_id', 'owner', 'transfer', '{id,workspace_id,title,visibility,content,properties,created_at,updated_at}', NULL, NULL, 'workspace_id', NULL),
 ('osionos_pages', 'collaborators', 'peer', 'scrub_jsonb', NULL, NULL, NULL, 'workspace_id', NULL),
 ('osionos_page_comments', 'author_id', 'author', 'anonymise', '{id,page_id,content,created_at}', NULL, NULL, NULL, NULL),
@@ -554,8 +565,13 @@ BEGIN
    WHERE user_id = p_user AND erased_at IS NULL;
 
   -- 3. Record every storage key before any row that names it goes.
+  -- The key is the CALLER-RELATIVE one, `<id>.<format>`, exactly what the bridge stored
+  -- (EXPORT_KEY_FOR, osionos app scripts/bridge-account-export-runner.mjs:34). The storage router
+  -- prefixes `<user_id>/` itself on put AND delete (grobase storage.service.ts ownedKey), so a key
+  -- recorded with the prefix would be deleted as `<user_id>/<user_id>/...`, a no-op that S3 answers
+  -- 204, and the archive would outlive the erase.
   INSERT INTO public.osionos_account_erasure_objects (user_id, bucket, key)
-  SELECT e.user_id, 'account-exports', e.user_id::text || '/' || e.id::text || '.' || e.format
+  SELECT e.user_id, 'account-exports', e.id::text || '.' || e.format
     FROM public.osionos_account_exports e WHERE e.user_id = p_user
   ON CONFLICT DO NOTHING;
   GET DIAGNOSTICS v_n = ROW_COUNT;

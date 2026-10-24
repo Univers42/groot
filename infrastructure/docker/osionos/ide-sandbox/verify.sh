@@ -40,10 +40,10 @@ NAT_CHECK=/usr/local/sbin/osionos-ide-egress-nat
 PLANE_PROJECT=osionos-ide-plane
 pass=0; fail=0; skipped=0
 # 44 + 4 persistent-home probes (a)-(d) + 3 identity probes (e)-(g) + 1 /tmp probe + 4 per-user-uid
-# probes (ADR 0011) + 1 runtime assertion (K11); the green line is
-# `RESULT: 55 passed, 0 failed, 2 skipped (expected 57)` where the skips are the runner image,
+# probes (ADR 0011) + 1 runtime assertion (K11) + 1 ssh-keygen probe (P5-3-c); the green line is
+# `RESULT: 56 passed, 0 failed, 2 skipped (expected 58)` where the skips are the runner image,
 # absent on a VM without the code runner, and the runtime assertion while OSIONOS_IDE_REQUIRE_RUNTIME is unset.
-EXPECTED=57
+EXPECTED=58
 # The VM's default gateway (user-mode QEMU: 10.0.2.2 is the physical host's loopback, where 4242
 # is the VM's own forwarded ssh). Elsewhere set a port that listens on that gateway.
 GATEWAY_PORT="${OSIONOS_IDE_VERIFY_GATEWAY_PORT:-4242}"
@@ -308,6 +308,8 @@ deny "test -S /var/run/docker.sock" "no docker socket in sandbox"
 deny "command -v docker"            "no docker binary in sandbox"
 deny "unshare -Ur id"               "unprivileged userns blocked (seccomp)"
 deny "cat /proc/1/root/etc/shadow"  "no host fs escape"
+# P5-3-c writes ~/.ssh/allowed_signers; without ssh-keygen in the image git cannot verify a signature against it.
+if sx "command -v ssh-keygen" >/dev/null 2>&1; then ok "ssh-keygen present (git SSH signature verify)"; else bad "ssh-keygen present (git SSH signature verify)"; fi
 
 echo "== Persistent home (devil verdict ide-user-shell, H8) =="
 # The home is a named volume per user at the constant /home/coder; /etc stays read-only.
