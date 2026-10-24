@@ -44,7 +44,8 @@ FIX="${REPO}/scripts/verify/account-load"
 RUNNER="${REPO}/scripts/apply-models-migrations.sh"
 GROBASE_INIT="${REPO}/apps/grobase/scripts/migrations/postgresql/001_initial_schema.sql"
 GROBASE_REALTIME="${REPO}/apps/grobase/scripts/migrations/postgresql/012_realtime_triggers_all_tables.sql"
-IMAGE="${GROBASE_PG_IMAGE:-ghcr.io/univers42/grobase-postgres:latest}"
+# Pinned by digest (2026-10-05 build): :latest floats, and a moving image moves the p95 baselines.
+IMAGE="${GROBASE_PG_IMAGE:-ghcr.io/univers42/grobase-postgres@sha256:161ec9bec8055862168fcef1e2ab2ea18ebd02e2ddb4ae2e0bcf6f02d454fc7e}"
 MODELS_DIR="${MODELS_DIR:-${REPO}/models}"
 READY_TIMEOUT=60
 PG_USER=postgres

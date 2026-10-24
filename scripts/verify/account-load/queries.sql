@@ -382,3 +382,38 @@ WHERE user_id IN (
     '69b52f6d-91b6-5e17-ef2b-de0cff585473',
     '06ab5541-ed17-898c-1c83-b3dc1fb68271'
 );
+
+-- ============================================================
+-- activity_own_200
+-- The newest 200 events of one user across all monthly partitions. The
+-- (user_id, ts DESC) index lets each child return its newest rows already
+-- ordered, so the parent merges them instead of sorting 65 events x 16 children.
+-- QUERY: activity_own_200
+SELECT ts, event, surface, workspace_id
+FROM public.osionos_activity_events
+WHERE user_id = 'd6d77053-92bc-7af6-3332-8bea8c4c6904'
+ORDER BY ts DESC
+LIMIT 200;
+
+-- ============================================================
+-- activity_admin_range
+-- The admin dashboard: the last 30 closed days of the rollup, read from its
+-- (day, event, surface) primary key.
+-- QUERY: activity_admin_range
+SELECT day, event, surface, events, distinct_users
+FROM public.osionos_activity_daily
+WHERE day >= (now() AT TIME ZONE 'UTC')::date - 30
+  AND day < (now() AT TIME ZONE 'UTC')::date
+ORDER BY day DESC, event, surface;
+
+-- ============================================================
+-- activity_rollup_day
+-- The aggregate osionos_activity_rollup(yesterday) runs, as a plain SELECT so
+-- EXPLAIN ANALYZE does not write: it must prune to one monthly partition.
+-- QUERY: activity_rollup_day
+SELECT event, surface, count(*) AS events, count(DISTINCT user_id) AS distinct_users
+FROM public.osionos_activity_events
+WHERE ts >= (((now() AT TIME ZONE 'UTC')::date - 1)::timestamp AT TIME ZONE 'UTC')
+  AND ts <  (((now() AT TIME ZONE 'UTC')::date)::timestamp AT TIME ZONE 'UTC')
+GROUP BY event, surface
+HAVING count(DISTINCT user_id) >= 5;
