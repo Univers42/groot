@@ -4,7 +4,7 @@
 --
 -- The bridge (service_role) is the only reader and writer: it stamps reporter_id from
 -- the verified app-session token, shows a reporter only their own rows, and shows
--- every row to platform moderators and admins. A report holds no page content: a
+-- every row to platform admins (the live is_admin flag). A report holds no page content: a
 -- title, the reporter's own text, the KIND of screen it came from, and an optional
 -- screenshot the reporter picked and saw before sending (a capability path of the
 -- existing page-media upload).
