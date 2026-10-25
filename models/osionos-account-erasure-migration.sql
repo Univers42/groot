@@ -276,6 +276,7 @@ INSERT INTO osionos_account_data_map_seed VALUES
 ('osionos_user_reports', 'subject_user_id', 'peer', 'delete', NULL, NULL, NULL, NULL, NULL),
 ('osionos_user_reports', 'subject_id', 'peer', 'delete', NULL, NULL, NULL, NULL, NULL),
 ('osionos_user_reports', 'decision_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
+('osionos_issue_reports', 'reporter_id', 'owner', 'delete', '{id,title,body,route_kind,status,github_url,created_at}', NULL, NULL, NULL, NULL),
 -- workspaces, pages, databases
 ('osionos_workspaces', 'owner_id', 'owner', 'transfer', '{id,name,slug,created_at}', NULL, NULL, NULL, NULL),
 ('osionos_workspace_members', 'user_id', 'member', 'delete', '{workspace_id,user_id,role,created_at}', NULL, NULL, NULL, NULL),
