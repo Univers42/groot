@@ -202,9 +202,8 @@ INSERT INTO osionos_account_data_map_seed VALUES
 ('ai_agents', 'owner_id', 'owner', 'delete', NULL, NULL, NULL, NULL, NULL),
 ('ai_agents', 'created_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
 ('ai_agents', 'updated_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
--- Caveat: this row only holds when ai_erase_user() ran first (it calls
--- ai_agents_erase_user, which lifts the append-only trigger and scrubs the
--- audit); alone, the trigger refuses the UPDATE. Never `keep` (C338).
+-- The erase runs ai_agents_erase_user first (step 4b'), which scrubs the
+-- append-only audit; this row then matches nothing. Never `keep` (C338).
 ('ai_agents_audit', 'actor_id', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
 ('ai_workspace_agent_settings', 'updated_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
 ('ai_approvals', 'owner_id', 'owner', 'delete', NULL, NULL, NULL, NULL, NULL),
@@ -680,6 +679,15 @@ BEGIN
     FROM public.osionos_workspaces ws
    WHERE p.owner_id = p_user AND p.workspace_id = ws.id AND p.visibility IN ('shared', 'public');
   GET DIAGNOSTICS v_pages_passed = ROW_COUNT;
+
+  -- 4b'. Custom agents (osionos-ai-runs-agents-migration.sql). Their audit is
+  -- append-only, so the registry's plain UPDATE below would be refused and the
+  -- whole erase rolled back. ai_agents_erase_user lifts the trigger for its own
+  -- call and tombstones or deletes every agent row of the user; the registry
+  -- rows of those tables then match nothing. Guarded: that file may be absent.
+  IF to_regprocedure('public.ai_agents_erase_user(uuid)') IS NOT NULL THEN
+    EXECUTE 'SELECT public.ai_agents_erase_user($1)' USING p_user;
+  END IF;
 
   -- 4c. The registry. `transfer` rows were handled above; `keep` rows are left.
   FOR d IN SELECT m.table_name, m.column_name, m.erase
