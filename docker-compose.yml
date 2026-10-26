@@ -428,6 +428,10 @@ services:
       # Rolling summary of the turns a long conversation drops: off unless set
       # to exactly `on`; the public overlay forces it empty.
       OSIONOS_AI_SUMMARY: ${OSIONOS_AI_SUMMARY:-}
+      # Research mode (a longer cited web loop): off unless set to exactly `on`, and
+      # inert without OSIONOS_AI_WEB; the public overlay forces it empty.
+      OSIONOS_AI_RESEARCH: ${OSIONOS_AI_RESEARCH:-}
+      OSIONOS_AI_RESEARCH_PLATFORM_DAILY: ${OSIONOS_AI_RESEARCH_PLATFORM_DAILY:-}
     expose:
       - "4300"
     # The two classifiers of the output check, read-only: the service loads
