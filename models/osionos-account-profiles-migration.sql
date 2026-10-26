@@ -106,12 +106,31 @@ $$;
 -- a CHECK may not contain a subquery, and the reserved list has to grow
 -- without a table rewrite.
 -- The reserved names are the ones a caller would mistake for a route
--- (/admin, /login, /settings) or for the product itself.
+-- (/admin, /login, /settings), for the product itself, or for the chat's AI bot
+-- (ai, ai-bot, assistant: osionos-ai-thread-answers-migration.sql).
+-- A name reserved after people chose usernames must be free: a profile holding
+-- it would fail its own CHECK on its next write, and a chat mention of it would
+-- reach a person. So the apply stops until someone renames the holder.
+DO $$
+DECLARE
+  v_held boolean;
+BEGIN
+  -- Nested, not AND: a statement naming a missing table fails when planned,
+  -- and on a first boot the profiles table comes later in this file.
+  v_held := EXISTS (SELECT 1 FROM public.osionos_bridge_identities WHERE lower(username) IN ('ai', 'ai-bot', 'assistant'));
+  IF NOT v_held AND to_regclass('public.osionos_profiles') IS NOT NULL THEN
+    v_held := EXISTS (SELECT 1 FROM public.osionos_profiles WHERE lower(username) IN ('ai', 'ai-bot', 'assistant'));
+  END IF;
+  IF v_held THEN
+    RAISE EXCEPTION 'a user holds a newly reserved username (ai, ai-bot, assistant): rename them before this apply';
+  END IF;
+END
+$$;
 CREATE OR REPLACE FUNCTION public.osionos_username_reserved(p_name text) RETURNS boolean
   LANGUAGE sql IMMUTABLE SET search_path = pg_catalog, public AS $$
   SELECT p_name IS NOT NULL
-     AND lower(p_name) = ANY (ARRAY['admin','administrator','api','app','auth','help',
-                                    'login','logout','me','new','osionos','p','root',
+     AND lower(p_name) = ANY (ARRAY['admin','administrator','ai','ai-bot','api','app','assistant',
+                                    'auth','help','login','logout','me','new','osionos','p','root',
                                     'settings','signup','support','system','u','www'])
 $$;
 REVOKE ALL ON FUNCTION public.osionos_username_reserved(text) FROM PUBLIC;

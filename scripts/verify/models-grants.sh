@@ -46,6 +46,13 @@
 #   (workspace_id, team_id) read index exists, a team member who is not a workspace member is
 #   refused (23503), a duplicate name (23505) and a bad role (23514) too, and removing the
 #   workspace member removes the team membership
+#   ta1/ta2/ta3 the AI thread answers (osionos-ai-thread-answers-migration.sql): a run is
+#   posted once (23505), a bot row needs its run and asker and a person's row has neither,
+#   a run's surface is a text run's channel and message (23514), ai, ai-bot and assistant are
+#   reserved; osionos_ai_channel_context labels the authors and windows the channel or the
+#   thread up to the trigger; and it returns zero rows to an outsider, a non-member of a
+#   private channel, in a dm or voice channel, or for someone else's or a deleted trigger,
+#   while anon and authenticated may not execute it (42501)
 #
 #   The account plane (models/osionos-account-foundation-migration.sql, ADR 0028),
 #   in scripts/verify/models-grants/account-checks.sql, piped after checks.sql into
@@ -124,6 +131,8 @@
 #   ai_workspace_agent_settings mentions the erased user, in either scope; the other user's agent is byte-identical)/
 #   p5_web_switch (web C374: through osionos_account_erase and through ai_erase_user no row of the
 #   workspace web switch or its audit mentions the erased user; the workspace keeps its setting)/
+#   p5_thread_answers (C446: an AI answer the erased user asked for in a channel is blanked, soft-deleted
+#   and asked by the tombstone; the other user's answer is byte-identical)/
 #   p5_summary (context C376/C390: a conversation summary is capped at 4000 chars, exported with the
 #   conversation, and gone with it on erase; the other user's summary stays)/
 #   p5_no_fk_to_tombstone/p5_report_survives_reporter/p5_users_scrubbed/
@@ -662,6 +671,9 @@ run_checks() {
 	check_count "$1" tm1 teams_tables
 	check_count "$1" tm2 teams_workspace_index
 	check_count "$1" tm3 teams_behaviour
+	check_count "$1" ta1 thread_answers_schema
+	check_count "$1" ta2 thread_answers_context
+	check_count "$1" ta3 thread_answers_acl
 	check_count "$1" k1 account_role_reach
 	check_count "$1" k2 account_plane_rls
 	check_count "$1" k3 account_plane_expected
@@ -726,6 +738,7 @@ run_checks() {
 	check_count "$1" p5_audit_scrubbed p5_audit_scrubbed
 	check_count "$1" p5_agents_two_scope p5_agents_two_scope
 	check_count "$1" p5_web_switch p5_web_switch
+	check_count "$1" p5_thread_answers p5_thread_answers
 	check_count "$1" p5_summary p5_summary
 	check_count "$1" p5_erase_sequence p5_erase_sequence
 	check_count "$1" p5_export_acl p5_export_acl
