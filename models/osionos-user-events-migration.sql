@@ -639,6 +639,13 @@ BEGIN
     IF to_regprocedure('public.ai_mcp_erase_user(uuid)') IS NOT NULL THEN
         EXECUTE 'SELECT public.ai_mcp_erase_user($1)' INTO f USING p_user;
     END IF;
+    -- The user's custom agents go (user scope) or are tombstoned (workspace
+    -- scope, settings, audit) too (C338), when that file is applied
+    -- (models/osionos-ai-runs-agents-migration.sql). Same DYNAMIC and GUARDED
+    -- call; its count is discarded.
+    IF to_regprocedure('public.ai_agents_erase_user(uuid)') IS NOT NULL THEN
+        EXECUTE 'SELECT public.ai_agents_erase_user($1)' INTO f USING p_user;
+    END IF;
     -- The count is the number of ai_events rows erased: the erasures are
     -- separate tables with separate counts, and this function answers for its own. The
     -- moderation count (m) and the factor and token counts (f) are deliberately
