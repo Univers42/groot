@@ -633,6 +633,12 @@ BEGIN
     IF to_regprocedure('public.ai_sentiment_erase_user(uuid)') IS NOT NULL THEN
         EXECUTE 'SELECT public.ai_sentiment_erase_user($1)' INTO f USING p_user;
     END IF;
+    -- The user's remote MCP servers and their tool snapshots go too (C285),
+    -- when that file is applied (models/osionos-ai-mcp-client-migration.sql).
+    -- Same DYNAMIC and GUARDED call; its count is discarded.
+    IF to_regprocedure('public.ai_mcp_erase_user(uuid)') IS NOT NULL THEN
+        EXECUTE 'SELECT public.ai_mcp_erase_user($1)' INTO f USING p_user;
+    END IF;
     -- The count is the number of ai_events rows erased: the erasures are
     -- separate tables with separate counts, and this function answers for its own. The
     -- moderation count (m) and the factor and token counts (f) are deliberately
