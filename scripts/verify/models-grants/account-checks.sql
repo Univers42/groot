@@ -2081,6 +2081,11 @@ BEGIN
       WHEN 'ai_approvals.origin' THEN '''run'''
       WHEN 'ai_approvals.run_id' THEN 'gen_random_uuid()'
       WHEN 'ai_approvals.conversation_id' THEN 'gen_random_uuid()'
+      -- osionos_messages_ai_answer_check: a row holding the user as its asker is
+      -- the bot's, with a run; any other row is a person's, with neither.
+      WHEN 'osionos_messages.ai_run_id' THEN CASE WHEN p_col = 'ai_requested_by' THEN 'gen_random_uuid()' ELSE 'NULL' END
+      WHEN 'osionos_messages.ai_requested_by' THEN 'NULL'
+      WHEN 'osionos_messages.author_id' THEN CASE WHEN p_col = 'ai_requested_by' THEN 'public.osionos_ai_bot_author()' END
       ELSE NULL END;
     CONTINUE WHEN v_force IS NULL AND NOT v_iscol AND a.attname <> p_col AND a.attname IS DISTINCT FROM p_col2 AND (a.atthasdef OR NOT a.attnotnull);
     v_typ := a.typ;
@@ -2938,6 +2943,48 @@ BEGIN
   PERFORM pg_temp.p5_ok('ai_erase_user leaves no web row mentioning B: ' || v_leaks, v_leaks = 0);
 END $$;
 SELECT * FROM pg_temp.p5_row('p5_web_switch', 9);
+ROLLBACK;
+
+-- p5_thread_answers (C446): an AI answer the erased user asked for in a
+-- channel holds their question and their name, so through osionos_account_erase
+-- it is blanked and soft-deleted and its asker becomes the tombstone; the answer
+-- B asked for is byte-identical. The registry holds the column and it is not keep.
+-- Caveat: the seed is hand-built rows, not rows the bridge posted.
+BEGIN;
+DO $$
+DECLARE
+  a constant uuid := 'a5a5a5a5-0000-4000-8000-00000000000a';
+  b constant uuid := 'b5b5b5b5-0000-4000-8000-00000000000b';
+  t constant uuid := '00000000-0000-4000-8000-000000000000';
+  w constant uuid := 'a9a9a9a9-0000-4000-8000-0000000000c0';
+  ch constant uuid := 'a9a9a9a9-0000-4000-8000-0000000000c1';
+  a_ans constant uuid := 'a9a9a9a9-0000-4000-8000-0000000000c2';
+  b_ans constant uuid := 'a9a9a9a9-0000-4000-8000-0000000000c3';
+  v_b0 text;
+BEGIN
+  PERFORM pg_temp.p5_world();
+  PERFORM pg_temp.p5_ok('registry row osionos_messages.ai_requested_by exists and is not keep',
+    EXISTS (SELECT 1 FROM public.osionos_account_data_map d
+             WHERE d.table_name = 'osionos_messages' AND d.column_name = 'ai_requested_by' AND d.erase <> 'keep'));
+  INSERT INTO public.osionos_workspaces (id, owner_id, name, slug) VALUES (w, b, 'ta', 'p5-ta');
+  INSERT INTO public.osionos_channels (id, workspace_id, kind, name) VALUES (ch, w, 'text', 'general');
+  INSERT INTO public.osionos_messages (id, channel_id, author_id, content, ai_requested_by, ai_run_id) VALUES
+    (a_ans, ch, public.osionos_ai_bot_author(), 'Alice P5Canary asked about the roadmap', a, gen_random_uuid()),
+    (b_ans, ch, public.osionos_ai_bot_author(), 'Bob asked about the budget', b, gen_random_uuid());
+  SELECT md5(row_to_json(x)::text) INTO v_b0 FROM public.osionos_messages x WHERE x.id = b_ans;
+  PERFORM set_config('osionos.check.p5_r', pg_temp.p5_as_svc(
+    $q$SELECT public.osionos_account_erase('a5a5a5a5-0000-4000-8000-00000000000a')::text$q$, 'osionos.check.p5_e'), true);
+  PERFORM pg_temp.p5_ok('erase returned ok: ' || current_setting('osionos.check.p5_r'), current_setting('osionos.check.p5_r') = 'ok');
+  PERFORM pg_temp.p5_ok('no message names A as its asker',
+    NOT EXISTS (SELECT 1 FROM public.osionos_messages WHERE ai_requested_by = a));
+  PERFORM pg_temp.p5_ok('A''s answer is blanked, deleted and asked by the tombstone',
+    (SELECT content = '' AND deleted_at IS NOT NULL AND ai_requested_by = t FROM public.osionos_messages WHERE id = a_ans));
+  PERFORM pg_temp.p5_ok('no answer text keeps A''s name',
+    NOT EXISTS (SELECT 1 FROM public.osionos_messages WHERE content LIKE '%P5Canary%'));
+  PERFORM pg_temp.p5_ok('B''s answer is byte-identical',
+    (SELECT md5(row_to_json(x)::text) FROM public.osionos_messages x WHERE x.id = b_ans) = v_b0);
+END $$;
+SELECT * FROM pg_temp.p5_row('p5_thread_answers', 6);
 ROLLBACK;
 
 -- p5_summary (context C376, C390): the summary of a conversation is capped by
