@@ -2892,6 +2892,54 @@ END $$;
 SELECT * FROM pg_temp.p5_row('p5_agents_two_scope', 14);
 ROLLBACK;
 
+-- p5_web_switch (web C374): through osionos_account_erase, and through
+-- ai_erase_user, no row of the workspace web switch or its audit names the
+-- erased user; the workspace keeps its setting and B's flips are untouched.
+-- The registry holds both columns and neither is `keep`.
+-- Caveat: the uuid scan is text, and the seed is hand-built rows, not rows the
+-- service wrote.
+BEGIN;
+DO $$
+DECLARE
+  a constant uuid := 'a5a5a5a5-0000-4000-8000-00000000000a';
+  b constant uuid := 'b5b5b5b5-0000-4000-8000-00000000000b';
+  w constant uuid := 'a9a9a9a9-0000-4000-8000-0000000000b0';
+  w2 constant uuid := 'a9a9a9a9-0000-4000-8000-0000000000b1';
+  t constant uuid := '00000000-0000-4000-8000-000000000000';
+  v_leaks bigint;
+BEGIN
+  PERFORM pg_temp.p5_world();
+  PERFORM pg_temp.p5_ok('registry row ' || m.t || '.' || m.c || ' exists and is not keep',
+    EXISTS (SELECT 1 FROM public.osionos_account_data_map d WHERE d.table_name = m.t AND d.column_name = m.c AND d.erase <> 'keep'))
+    FROM (VALUES ('ai_workspace_web_settings', 'updated_by'), ('ai_web_switch_audit', 'actor_id')) AS m(t, c);
+  INSERT INTO public.ai_workspace_web_settings (workspace_id, web_enabled, updated_by) VALUES (w, true, a), (w2, true, b);
+  INSERT INTO public.ai_web_switch_audit (workspace_id, actor_id, web_enabled) VALUES (w, a, true), (w, b, false), (w, a, true), (w2, b, true);
+  PERFORM set_config('osionos.check.p5_r', pg_temp.p5_as_svc(
+    $q$SELECT public.osionos_account_erase('a5a5a5a5-0000-4000-8000-00000000000a')::text$q$, 'osionos.check.p5_e'), true);
+  PERFORM pg_temp.p5_ok('erase returned ok: ' || current_setting('osionos.check.p5_r'), current_setting('osionos.check.p5_r') = 'ok');
+  v_leaks := (SELECT count(*) FROM public.ai_workspace_web_settings x WHERE row_to_json(x)::text LIKE '%' || a || '%')
+           + (SELECT count(*) FROM public.ai_web_switch_audit x WHERE row_to_json(x)::text LIKE '%' || a || '%');
+  PERFORM pg_temp.p5_ok('no row of the web switch or its audit mentions A: ' || v_leaks, v_leaks = 0);
+  PERFORM pg_temp.p5_ok('W keeps its switch, on, with the tombstone',
+    (SELECT web_enabled AND updated_by = t FROM public.ai_workspace_web_settings WHERE workspace_id = w));
+  PERFORM pg_temp.p5_ok('the four flips stay, A''s two as the tombstone',
+    (SELECT count(*) FROM public.ai_web_switch_audit WHERE workspace_id IN (w, w2)) = 4
+    AND (SELECT count(*) FROM public.ai_web_switch_audit WHERE actor_id = t AND workspace_id = w) = 2);
+  PERFORM pg_temp.p5_ok('B''s switch is untouched: ' || coalesce((SELECT updated_by::text FROM public.ai_workspace_web_settings WHERE workspace_id = w2), 'no row'),
+    (SELECT updated_by = b FROM public.ai_workspace_web_settings WHERE workspace_id = w2));
+  -- p5_world seeds one row of B in every registry table: count only W and W2.
+  PERFORM pg_temp.p5_ok('B''s two flips are untouched: ' || (SELECT count(*) FROM public.ai_web_switch_audit WHERE actor_id = b AND workspace_id IN (w, w2)),
+    (SELECT count(*) FROM public.ai_web_switch_audit WHERE actor_id = b AND workspace_id IN (w, w2)) = 2);
+  -- The other door: ai_erase_user dispatches to ai_web_erase_user.
+  UPDATE public.ai_workspace_web_settings SET updated_by = b WHERE workspace_id = w;
+  PERFORM public.ai_erase_user(b);
+  v_leaks := (SELECT count(*) FROM public.ai_workspace_web_settings x WHERE row_to_json(x)::text LIKE '%' || b || '%')
+           + (SELECT count(*) FROM public.ai_web_switch_audit x WHERE row_to_json(x)::text LIKE '%' || b || '%');
+  PERFORM pg_temp.p5_ok('ai_erase_user leaves no web row mentioning B: ' || v_leaks, v_leaks = 0);
+END $$;
+SELECT * FROM pg_temp.p5_row('p5_web_switch', 9);
+ROLLBACK;
+
 -- p5_erase_sequence: the executor's order against a real database: claim -> erase
 -- -> erase again -> delete the erasure-object rows -> delete auth.users, which
 -- cascades the request row away. Also pins the queue contract: a claim never
