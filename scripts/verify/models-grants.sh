@@ -124,6 +124,8 @@
 #   ai_workspace_agent_settings mentions the erased user, in either scope; the other user's agent is byte-identical)/
 #   p5_web_switch (web C374: through osionos_account_erase and through ai_erase_user no row of the
 #   workspace web switch or its audit mentions the erased user; the workspace keeps its setting)/
+#   p5_summary (context C376/C390: a conversation summary is capped at 4000 chars, exported with the
+#   conversation, and gone with it on erase; the other user's summary stays)/
 #   p5_no_fk_to_tombstone/p5_report_survives_reporter/p5_users_scrubbed/
 #   p5_foreign_content_null the erase's contract · p5_export_acl/_single_flight/
 #   _no_secrets/_reachable the export job table · p5_no_exec_grants the functions are
@@ -724,6 +726,7 @@ run_checks() {
 	check_count "$1" p5_audit_scrubbed p5_audit_scrubbed
 	check_count "$1" p5_agents_two_scope p5_agents_two_scope
 	check_count "$1" p5_web_switch p5_web_switch
+	check_count "$1" p5_summary p5_summary
 	check_count "$1" p5_erase_sequence p5_erase_sequence
 	check_count "$1" p5_export_acl p5_export_acl
 	check_count "$1" p5_export_single_flight p5_export_single_flight
