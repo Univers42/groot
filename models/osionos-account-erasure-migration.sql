@@ -63,6 +63,29 @@ BEGIN;
 -- of waiting; the next run retries it. 5 s is a budget, not a promise.
 SET LOCAL lock_timeout = '5s';
 
+-- Strongest lock first, in the erase executor's order. A replay ends in an
+-- AccessExclusiveLock on these tables (ALTER, ENABLE ROW LEVEL SECURITY, the
+-- policies) but its earlier lines take weaker ones: the index lines a ShareLock
+-- on the exports, the registry sync a RowExclusiveLock on the map. A worker that
+-- locked the table in between then waits for the replay while the replay waits
+-- for it: 40P01, seen live 2026-10-26 against osionos_account_export_claim() and
+-- 20 of 20 rounds in scripts/verify/account-export-lock-race.sh. Taken here, the
+-- replay waits once, under the 5 s budget, and holds what it needs. The order is
+-- osionos_account_erase_run's (request, objects, exports, map), so the two never
+-- hold each other's next table. A table not created yet is created below, inside
+-- this transaction, where no one else can lock it.
+DO $$
+DECLARE
+  t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['osionos_account_deletion_requests', 'osionos_account_erasure_objects',
+                           'osionos_account_exports', 'osionos_account_data_map'] LOOP
+    IF to_regclass('public.' || t) IS NOT NULL THEN
+      EXECUTE format('LOCK TABLE public.%I IN ACCESS EXCLUSIVE MODE', t);
+    END IF;
+  END LOOP;
+END $$;
+
 -- One constant, one home. No table may reference it with a foreign key: it is
 -- not a user, and a FK would either reject it or pin it (p5_no_fk_to_tombstone).
 CREATE OR REPLACE FUNCTION public.osionos_account_tombstone() RETURNS uuid

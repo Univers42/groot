@@ -11,6 +11,7 @@ on:
       - "scripts/apply-models-migrations.sh"
       - "scripts/verify/models-grants*"
       - "scripts/verify/models-grants/**"
+      - "scripts/verify/account-export-lock-race.sh"
       - "utils/mk/baas.mk"
       - ".github/workflows/models-grants.yml"
   push:
@@ -20,6 +21,7 @@ on:
       - "scripts/apply-models-migrations.sh"
       - "scripts/verify/models-grants*"
       - "scripts/verify/models-grants/**"
+      - "scripts/verify/account-export-lock-race.sh"
       - "utils/mk/baas.mk"
       - ".github/workflows/models-grants.yml"
   workflow_dispatch:
@@ -45,3 +47,5 @@ jobs:
           git submodule update --init apps/grobase
       - name: Verify grants, policies and the service_role round trip
         run: make models-grants-verify
+      - name: Race the erasure replay against the export worker (no 40P01)
+        run: sh scripts/verify/account-export-lock-race.sh
