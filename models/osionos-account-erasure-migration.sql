@@ -286,6 +286,8 @@ INSERT INTO osionos_account_data_map_seed VALUES
 ('osionos_message_reactions', 'user_id', 'author', 'delete', NULL, NULL, NULL, NULL, NULL),
 ('osionos_message_receipts', 'user_id', 'member', 'delete', NULL, NULL, NULL, NULL, NULL),
 ('osionos_messages', 'author_id', 'author', 'anonymise', '{id,channel_id,content,created_at,edited_at}', NULL, NULL, NULL, NULL),
+-- the AI answers the user asked for: blanked and soft-deleted first (step 4b'')
+('osionos_messages', 'ai_requested_by', 'author', 'anonymise', '{id,channel_id,content,created_at}', NULL, NULL, NULL, NULL),
 ('osionos_notifications', 'user_id', 'owner', 'delete', '{id,type,preview,read_at,created_at}', NULL, NULL, NULL, NULL),
 ('osionos_notifications', 'actor_id', 'peer', 'delete', NULL, NULL, NULL, NULL, NULL),
 -- communities, feed, social graph
@@ -712,6 +714,14 @@ BEGIN
   -- rows of those tables then match nothing. Guarded: that file may be absent.
   IF to_regprocedure('public.ai_agents_erase_user(uuid)') IS NOT NULL THEN
     EXECUTE 'SELECT public.ai_agents_erase_user($1)' USING p_user;
+  END IF;
+
+  -- 4b''. AI answers the user asked for in a channel
+  -- (osionos-ai-thread-answers-migration.sql) hold their question: blanked and
+  -- soft-deleted here, while ai_requested_by still finds them; the registry
+  -- below then tombstones that column. Guarded: that file may be absent.
+  IF to_regprocedure('public.osionos_ai_thread_answers_erase_user(uuid)') IS NOT NULL THEN
+    EXECUTE 'SELECT public.osionos_ai_thread_answers_erase_user($1)' USING p_user;
   END IF;
 
   -- 4c. The registry. `transfer` rows were handled above; `keep` rows are left.
