@@ -134,6 +134,9 @@ services:
       # Conversation summaries stay off in public until the provider-routing
       # e2e and the quality eval are shown (context C392, C393).
       OSIONOS_AI_SUMMARY: ""
+      # Research stays off in public: it needs web on, and the eval of 12 steps
+      # against 5 has not been shown (research C416, C417).
+      OSIONOS_AI_RESEARCH: ""
       # The platform connection on public: OpenRouter's free models only (R-C10), the key and
       # the list from .env.public, never .env.local, so the dev stack keeps its local model.
       OSIONOS_AI_UPSTREAM_BASE_URL: https://openrouter.ai/api/v1
