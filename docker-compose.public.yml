@@ -128,6 +128,9 @@ services:
       # Remote MCP servers (E1) stay off in public until the run integration
       # and its approvals are merged and proven (devil C288).
       OSIONOS_AI_MCP_CLIENT: ""
+      # Web tools stay off in public until a network-isolated fetcher and an SSRF
+      # canary e2e exist.
+      OSIONOS_AI_WEB: ""
       # The platform connection on public: OpenRouter's free models only (R-C10), the key and
       # the list from .env.public, never .env.local, so the dev stack keeps its local model.
       OSIONOS_AI_UPSTREAM_BASE_URL: https://openrouter.ai/api/v1
@@ -183,6 +186,9 @@ services:
   osionos-ai-llm:
     profiles: !override ["ai-dev-only"]
   osionos-ai-stt:
+    profiles: !override ["ai-dev-only"]
+  # Not started on public: the web tools are forced off above.
+  osionos-ai-searxng:
     profiles: !override ["ai-dev-only"]
   # Started only by --profile ai-vlm, which the public stack never passes.
   osionos-ai-vlm:
