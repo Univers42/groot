@@ -229,6 +229,8 @@ INSERT INTO osionos_account_data_map_seed VALUES
 -- append-only audit; this row then matches nothing. Never `keep` (C338).
 ('ai_agents_audit', 'actor_id', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
 ('ai_workspace_agent_settings', 'updated_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
+('ai_workspace_web_settings', 'updated_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
+('ai_web_switch_audit', 'actor_id', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
 ('ai_approvals', 'owner_id', 'owner', 'delete', NULL, NULL, NULL, NULL, NULL),
 ('ai_chunks', 'owner_id', 'owner', 'delete', NULL, NULL, NULL, NULL, NULL),
 ('ai_chunks', 'collaborator_ids', 'peer', 'scrub_jsonb', NULL, NULL, NULL, NULL, NULL),
