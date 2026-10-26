@@ -12,6 +12,14 @@
 #   caps  an mcp_ tool in tools is refused
 #   C338  ai_agents_erase_user: user agent gone, workspace agent kept with the
 #         author tombstoned, audit scrubbed not deleted, pinned version parses
+#   C314  the data map holds ai_agents (owner_id, created_by, updated_by),
+#   -C316 ai_agents_audit (actor_id) and ai_workspace_agent_settings
+#         (updated_by), none of them `keep`; and the PUBLIC ai_erase_user path
+#         (osionos-user-events-migration.sql) leaves no uuid of the erased user
+#         in any column or jsonb (before and after included) of the three
+#         tables, in either scope, while the kept user's agent is byte-identical
+#         (check_6; the account-erasure path is p5_agents_two_scope in
+#         models-grants.sh)
 #
 # ISOLATION
 #   One throwaway container: ai-agents-pg, --network none, no port, no volume.
@@ -41,6 +49,13 @@ TOMB=00000000-0000-4000-8000-000000000000
 A_USER=44444444-4444-4444-4444-444444444441
 A_WS=44444444-4444-4444-4444-444444444442
 RUN=66666666-6666-6666-6666-666666666666
+U6=88888888-8888-4888-8888-888888888881
+V6=88888888-8888-4888-8888-888888888882
+W6=88888888-8888-4888-8888-888888888883
+U6_AG=88888888-8888-4888-8888-888888888884
+W6_A=88888888-8888-4888-8888-888888888885
+W6_B=88888888-8888-4888-8888-888888888886
+V6_AG=88888888-8888-4888-8888-888888888887
 
 note() { printf '[ai-agents] %s\n' "$*" >&2; }
 pass() { passed=$((passed + 1)); printf 'PASS: %s %s\n' "$1" "$2"; }
@@ -191,13 +206,83 @@ check_5() {
 	return 1
 }
 
+# check_6 — C314-C316 through the public path, ai_erase_user. U6 is erased, V6
+# kept, one workspace W6. Rows: U6's user agent (create+update audit); a
+# workspace agent created by U6 and updated by V6; one created by V6 and
+# updated by U6; settings of W6 by U6; V6's own user agent.
+# Caveat: ai_erase_user is applied from its own text extracted out of the
+# migration over a one-column ai_events stand-in; a change to how that file
+# lays the function out (a second `END $$;` inside it) breaks the extraction,
+# which fails loudly rather than passing.
+# Caveat: the data-map rows are grepped as text from the account-erasure
+# migration, whose seed this script does not apply (it needs the account
+# plane); a row moved into another statement would still count.
+check_6() {
+	# The whole file needs the seven feed/page/connection tables its capture
+	# triggers sit on; only the function is under test, so its own text is
+	# extracted (first CREATE of ai_erase_user to the next `END $$;`) over a
+	# one-column ai_events.
+	{
+		printf 'CREATE TABLE IF NOT EXISTS public.ai_events (user_id uuid);\n'
+		sed -n '/^CREATE OR REPLACE FUNCTION public.ai_erase_user/,/^END \$\$;/p' "${MODELS}/osionos-user-events-migration.sql"
+	} >"${WORK}/erase-fn.sql"
+	grep -q 'ai_agents_erase_user' "${WORK}/erase-fn.sql" || {
+		DETAIL="ai_erase_user does not dispatch ai_agents_erase_user"
+		return 1
+	}
+	apply_file "${WORK}/erase-fn.sql" || return 1
+	map="${MODELS}/osionos-account-erasure-migration.sql"
+	for row in "ai_agents', 'owner_id" "ai_agents', 'created_by" "ai_agents', 'updated_by" \
+		"ai_agents_audit', 'actor_id" "ai_workspace_agent_settings', 'updated_by"; do
+		grep -E "^\('${row}'," "${map}" | grep -v "'keep'" | grep -q . || {
+			DETAIL="C314: no non-keep data-map row for ${row}"
+			return 1
+		}
+	done
+	run_sql "
+INSERT INTO public.ai_agents (id, scope, owner_id, workspace_id, name, instructions, version, created_by, updated_by) VALUES
+ ('${U6_AG}', 'user', '${U6}', NULL, 'n', 'i', 2, '${U6}', '${U6}'),
+ ('${W6_A}', 'workspace', NULL, '${W6}', 'n', 'i', 2, '${U6}', '${V6}'),
+ ('${W6_B}', 'workspace', NULL, '${W6}', 'n', 'i', 2, '${V6}', '${U6}'),
+ ('${V6_AG}', 'user', '${V6}', NULL, 'n', 'i', 1, '${V6}', '${V6}');
+INSERT INTO public.ai_workspace_agent_settings (workspace_id, updated_by) VALUES ('${W6}', '${U6}');
+INSERT INTO public.ai_agents_audit (agent_id, version, action, actor_id, before, after)
+SELECT a.id, 1, 'create', a.created_by, NULL, to_jsonb(a) - 'updated_at' FROM public.ai_agents a WHERE a.id IN ('${U6_AG}','${W6_A}','${W6_B}','${V6_AG}');
+INSERT INTO public.ai_agents_audit (agent_id, version, action, actor_id, before, after)
+SELECT a.id, 2, 'update', a.updated_by, to_jsonb(a) - 'updated_at', to_jsonb(a) FROM public.ai_agents a WHERE a.id IN ('${U6_AG}','${W6_A}','${W6_B}');" || {
+		DETAIL="seed failed: $(head -1 "${WORK}/sql.err")"
+		return 1
+	}
+	pre="$(q "SELECT count(*) FROM public.ai_agents_audit WHERE before::text LIKE '%${U6}%' AND after::text LIKE '%${U6}%';")"
+	[ "${pre:-0}" -ge 3 ] || {
+		DETAIL="seed holds ${pre} audit rows with the user in before and after, expected >= 3"
+		return 1
+	}
+	v_before="$(q "SELECT md5(row_to_json(a)::text) FROM public.ai_agents a WHERE id = '${V6_AG}';")"
+	run_sql "SELECT public.ai_erase_user('${U6}');" || {
+		DETAIL="ai_erase_user failed: $(head -1 "${WORK}/sql.err")"
+		return 1
+	}
+	leaks="$(q "SELECT (SELECT count(*) FROM public.ai_agents t WHERE row_to_json(t)::text LIKE '%${U6}%') + (SELECT count(*) FROM public.ai_agents_audit t WHERE row_to_json(t)::text LIKE '%${U6}%') + (SELECT count(*) FROM public.ai_workspace_agent_settings t WHERE row_to_json(t)::text LIKE '%${U6}%');")"
+	gone="$(q "SELECT (SELECT count(*) FROM public.ai_agents WHERE id = '${U6_AG}') + (SELECT count(*) FROM public.ai_agents_audit WHERE agent_id = '${U6_AG}');")"
+	kept="$(q "SELECT (SELECT count(*) FROM public.ai_agents WHERE id IN ('${W6_A}','${W6_B}')) || '/' || (SELECT count(*) FROM public.ai_agents_audit WHERE agent_id IN ('${W6_A}','${W6_B}'));")"
+	tomb="$(q "SELECT (SELECT created_by FROM public.ai_agents WHERE id = '${W6_A}') = '${TOMB}' AND (SELECT updated_by FROM public.ai_agents WHERE id = '${W6_A}') = '${V6}' AND (SELECT updated_by FROM public.ai_agents WHERE id = '${W6_B}') = '${TOMB}' AND (SELECT created_by FROM public.ai_agents WHERE id = '${W6_B}') = '${V6}' AND (SELECT updated_by FROM public.ai_workspace_agent_settings WHERE workspace_id = '${W6}') = '${TOMB}';")"
+	vkept="$(q "SELECT md5(row_to_json(a)::text) FROM public.ai_agents a WHERE id = '${V6_AG}';")"
+	vaud="$(q "SELECT count(*) FROM public.ai_agents_audit WHERE agent_id = '${V6_AG}' AND actor_id = '${V6}';")"
+	vref="$(q "SELECT count(*) FROM public.ai_agents_audit WHERE after::text LIKE '%${V6}%' AND agent_id IN ('${W6_A}','${W6_B}');")"
+	[ "${leaks}" = "0" ] && [ "${gone}" = "0" ] && [ "${kept}" = "2/4" ] && [ "${tomb}" = "t" ] \
+		&& [ -n "${v_before}" ] && [ "${vkept}" = "${v_before}" ] && [ "${vaud}" = "1" ] && [ "${vref}" = "4" ] && return 0
+	DETAIL="uuidLeft=${leaks} userAgentRows=${gone} wsAgents/audit=${kept} tombstoned=${tomb} vAgentSame=$([ "${vkept}" = "${v_before}" ] && echo y || echo n) vAudit=${vaud} vInWsAudit=${vref}"
+	return 1
+}
+
 main() {
 	start_pg
 	note "postgres up in ${CTN}; migration ${AGENTS}"
 	apply_file "${STANDIN}" || exit 1
 	apply_file "${MODELS}/osionos-ai-migration.sql" || exit 1
 	apply_file "${AGENTS}" || exit 1
-	for fn in check_1 check_2 check_3 check_4 check_5; do
+	for fn in check_1 check_2 check_3 check_4 check_5 check_6; do
 		DETAIL=""
 		if "${fn}"; then
 			pass "${fn}" "ok"

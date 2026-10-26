@@ -120,6 +120,8 @@
 #   user's seeded row in every registry table is gone or tombstoned after the erase ·
 #   p5_erase_transfer/_idempotent/_isolated/_sequence/_objects_recorded/_refuses_live/
 #   _refuses_early/p5_plan_matches_erase/p5_dry_run_no_stamp/p5_audit_scrubbed/
+#   p5_agents_two_scope (C314-C316: through osionos_account_erase no row of ai_agents, its audit or
+#   ai_workspace_agent_settings mentions the erased user, in either scope; the other user's agent is byte-identical)/
 #   p5_no_fk_to_tombstone/p5_report_survives_reporter/p5_users_scrubbed/
 #   p5_foreign_content_null the erase's contract · p5_export_acl/_single_flight/
 #   _no_secrets/_reachable the export job table · p5_no_exec_grants the functions are
@@ -718,6 +720,7 @@ run_checks() {
 	check_count "$1" p5_no_fk_to_tombstone p5_no_fk_to_tombstone
 	check_count "$1" p5_erase_objects_recorded p5_erase_objects_recorded
 	check_count "$1" p5_audit_scrubbed p5_audit_scrubbed
+	check_count "$1" p5_agents_two_scope p5_agents_two_scope
 	check_count "$1" p5_erase_sequence p5_erase_sequence
 	check_count "$1" p5_export_acl p5_export_acl
 	check_count "$1" p5_export_single_flight p5_export_single_flight
