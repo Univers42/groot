@@ -199,6 +199,14 @@ CREATE TEMP TABLE osionos_account_data_map_seed (
 INSERT INTO osionos_account_data_map_seed VALUES
 -- AI plane
 ('ai_access_tokens', 'user_id', 'owner', 'delete', NULL, NULL, NULL, NULL, NULL),
+('ai_agents', 'owner_id', 'owner', 'delete', NULL, NULL, NULL, NULL, NULL),
+('ai_agents', 'created_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
+('ai_agents', 'updated_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
+-- Caveat: this row only holds when ai_erase_user() ran first (it calls
+-- ai_agents_erase_user, which lifts the append-only trigger and scrubs the
+-- audit); alone, the trigger refuses the UPDATE. Never `keep` (C338).
+('ai_agents_audit', 'actor_id', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
+('ai_workspace_agent_settings', 'updated_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
 ('ai_approvals', 'owner_id', 'owner', 'delete', NULL, NULL, NULL, NULL, NULL),
 ('ai_chunks', 'owner_id', 'owner', 'delete', NULL, NULL, NULL, NULL, NULL),
 ('ai_chunks', 'collaborator_ids', 'peer', 'scrub_jsonb', NULL, NULL, NULL, NULL, NULL),
