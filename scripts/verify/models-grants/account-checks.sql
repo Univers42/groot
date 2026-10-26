@@ -2821,6 +2821,77 @@ END $$;
 SELECT * FROM pg_temp.p5_row('p5_audit_scrubbed', 4);
 ROLLBACK;
 
+-- p5_agents_two_scope (C314-C316): custom agents through the account erase.
+-- A is erased, B kept, one workspace W. Rows: A's user agent (audit create +
+-- update, so before and after hold A); a workspace agent created by A and
+-- updated by B; one created by B and updated by A; W's settings by A; B's own
+-- user agent. After the erase NO row of the three tables mentions A anywhere
+-- (row_to_json text: every column, before and after included); A's user agent
+-- and its audit are gone; the workspace agents and their audit stay with A as
+-- the tombstone; B's agent is byte-identical. The registry holds the rows and
+-- none is `keep`.
+-- Caveat: the uuid scan is text, so an id stored encoded is invisible to it,
+-- and the seed is hand-built rows, not rows the service wrote.
+BEGIN;
+DO $$
+DECLARE
+  a constant uuid := 'a5a5a5a5-0000-4000-8000-00000000000a';
+  b constant uuid := 'b5b5b5b5-0000-4000-8000-00000000000b';
+  w constant uuid := 'a9a9a9a9-0000-4000-8000-0000000000a0';
+  t constant uuid := '00000000-0000-4000-8000-000000000000';
+  a_user constant uuid := 'a9a9a9a9-0000-4000-8000-0000000000a1';
+  a_wsa constant uuid := 'a9a9a9a9-0000-4000-8000-0000000000a2';
+  a_wsb constant uuid := 'a9a9a9a9-0000-4000-8000-0000000000a3';
+  b_user constant uuid := 'a9a9a9a9-0000-4000-8000-0000000000a4';
+  v_b0 text;
+  v_leaks bigint;
+BEGIN
+  PERFORM pg_temp.p5_world();
+  PERFORM pg_temp.p5_ok('registry row ' || m.t || '.' || m.c || ' exists and is not keep',
+    EXISTS (SELECT 1 FROM public.osionos_account_data_map d WHERE d.table_name = m.t AND d.column_name = m.c AND d.erase <> 'keep'))
+    FROM (VALUES ('ai_agents', 'owner_id'), ('ai_agents', 'created_by'), ('ai_agents', 'updated_by'),
+                 ('ai_agents_audit', 'actor_id'), ('ai_workspace_agent_settings', 'updated_by')) AS m(t, c);
+  INSERT INTO public.ai_agents (id, scope, owner_id, workspace_id, name, instructions, version, created_by, updated_by) VALUES
+    (a_user, 'user', a, NULL, 'n', 'i', 2, a, a),
+    (a_wsa, 'workspace', NULL, w, 'n', 'i', 2, a, b),
+    (a_wsb, 'workspace', NULL, w, 'n', 'i', 2, b, a),
+    (b_user, 'user', b, NULL, 'n', 'i', 1, b, b);
+  INSERT INTO public.ai_workspace_agent_settings (workspace_id, updated_by) VALUES (w, a);
+  INSERT INTO public.ai_agents_audit (agent_id, version, action, actor_id, before, after)
+    SELECT x.id, 1, 'create', x.created_by, NULL, to_jsonb(x) - 'updated_at' FROM public.ai_agents x WHERE x.id IN (a_user, a_wsa, a_wsb, b_user);
+  INSERT INTO public.ai_agents_audit (agent_id, version, action, actor_id, before, after)
+    SELECT x.id, 2, 'update', x.updated_by, to_jsonb(x) - 'updated_at', to_jsonb(x) FROM public.ai_agents x WHERE x.id IN (a_user, a_wsa, a_wsb);
+  PERFORM pg_temp.p5_ok('the seed puts A in before and after of at least three audit rows',
+    (SELECT count(*) FROM public.ai_agents_audit WHERE before::text LIKE '%' || a || '%' AND after::text LIKE '%' || a || '%') >= 3);
+  SELECT md5(row_to_json(x)::text) INTO v_b0 FROM public.ai_agents x WHERE x.id = b_user;
+  PERFORM set_config('osionos.check.p5_r', pg_temp.p5_as_svc(
+    $q$SELECT public.osionos_account_erase('a5a5a5a5-0000-4000-8000-00000000000a')::text$q$, 'osionos.check.p5_e'), true);
+  PERFORM pg_temp.p5_ok('erase returned ok: ' || current_setting('osionos.check.p5_r'), current_setting('osionos.check.p5_r') = 'ok');
+  v_leaks := (SELECT count(*) FROM public.ai_agents x WHERE row_to_json(x)::text LIKE '%' || a || '%')
+           + (SELECT count(*) FROM public.ai_agents_audit x WHERE row_to_json(x)::text LIKE '%' || a || '%')
+           + (SELECT count(*) FROM public.ai_workspace_agent_settings x WHERE row_to_json(x)::text LIKE '%' || a || '%');
+  PERFORM pg_temp.p5_ok('no row of the three agent tables mentions A: ' || v_leaks, v_leaks = 0);
+  PERFORM pg_temp.p5_ok('A''s user agent and its audit are gone',
+    NOT EXISTS (SELECT 1 FROM public.ai_agents WHERE id = a_user) AND NOT EXISTS (SELECT 1 FROM public.ai_agents_audit WHERE agent_id = a_user));
+  PERFORM pg_temp.p5_ok('both workspace agents and their four audit rows stay',
+    (SELECT count(*) FROM public.ai_agents WHERE id IN (a_wsa, a_wsb)) = 2
+    AND (SELECT count(*) FROM public.ai_agents_audit WHERE agent_id IN (a_wsa, a_wsb)) = 4);
+  PERFORM pg_temp.p5_ok('A is the tombstone where A authored, B stays where B did',
+    (SELECT created_by = t AND updated_by = b FROM public.ai_agents WHERE id = a_wsa)
+    AND (SELECT created_by = b AND updated_by = t FROM public.ai_agents WHERE id = a_wsb));
+  PERFORM pg_temp.p5_ok('the settings row of W keeps its row with the tombstone',
+    (SELECT updated_by = t FROM public.ai_workspace_agent_settings WHERE workspace_id = w));
+  PERFORM pg_temp.p5_ok('the workspace audit holds the tombstone in before and after',
+    EXISTS (SELECT 1 FROM public.ai_agents_audit WHERE agent_id = a_wsa AND version = 2 AND before::text LIKE '%' || t || '%' AND after::text LIKE '%' || t || '%'));
+  PERFORM pg_temp.p5_ok('B''s uuid is still in the workspace audit',
+    (SELECT count(*) FROM public.ai_agents_audit WHERE agent_id IN (a_wsa, a_wsb) AND after::text LIKE '%' || b || '%') = 4);
+  PERFORM pg_temp.p5_ok('B''s own agent is byte-identical and keeps its audit row',
+    (SELECT md5(row_to_json(x)::text) FROM public.ai_agents x WHERE x.id = b_user) = v_b0
+    AND (SELECT count(*) FROM public.ai_agents_audit WHERE agent_id = b_user AND actor_id = b) = 1);
+END $$;
+SELECT * FROM pg_temp.p5_row('p5_agents_two_scope', 14);
+ROLLBACK;
+
 -- p5_erase_sequence: the executor's order against a real database: claim -> erase
 -- -> erase again -> delete the erasure-object rows -> delete auth.users, which
 -- cascades the request row away. Also pins the queue contract: a claim never
