@@ -141,6 +141,23 @@ the embedder gets. A large first index therefore takes a while — scale the emb
 replicas (each with its own `cpus` share) before backfilling a big workspace, not the
 indexer.
 
+## Web search (SearXNG)
+
+`osionos-ai-searxng` (profile `ai`) is the metasearch behind the assistant's web tools. The service
+reads URLs and snippets from it; SearXNG fetches no page body and proxies no image.
+
+- Two networks, one per direction. `osionos-ai-search-net` (`internal: true`, no egress) carries
+  osionos-ai to SearXNG; only those two join it. `osionos-ai-search-egress` (plain bridge) is
+  SearXNG's route to the engines; only SearXNG joins it. No published port, no other network.
+- Engines: `infrastructure/searxng/settings.yml`, an allowlist (duckduckgo, wikipedia, brave, bing,
+  github, stackoverflow), safe search 1, `json` format, image proxy and limiter off.
+- Env: `OSIONOS_AI_WEB` (web tools; off unless exactly `on`), `OSIONOS_AI_SEARXNG_URL` (set by
+  compose), `OSIONOS_AI_SEARXNG_SECRET` (optional; a dev default applies).
+- Public: `OSIONOS_AI_WEB` is forced empty and SearXNG moves to `ai-dev-only`, until a
+  network-isolated fetcher and an SSRF canary e2e exist.
+- Gate: `sh scripts/verify/ai-searxng.sh` (rendered config and settings);
+  `--live` queries a throwaway project and reports SKIP when no engine answers.
+
 ## Public mode
 
 `docker-compose.public.yml` mounts `infrastructure/tls/public.d/ai-public.conf` into the

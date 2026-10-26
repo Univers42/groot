@@ -1,0 +1,34 @@
+# SearXNG for the assistant's web tools (osionos-ai-searxng). Mounted read-only.
+# Pinned image: see the service block in docker-compose.yml.
+#
+# Caveat: the allowlist is by engine NAME in the pinned image's defaults; a
+# renamed or removed upstream engine silently drops out of the results after an
+# image bump (scripts/verify/ai-searxng.sh --live shows how many answered).
+use_default_settings:
+  engines:
+    keep_only:
+      - duckduckgo
+      - wikipedia
+      - brave
+      - bing
+      - github
+      - stackoverflow
+
+search:
+  safe_search: 1
+  # json is the only format the service reads; html stays for a manual check.
+  formats:
+    - html
+    - json
+
+server:
+  # Placeholder, never used: SEARXNG_SECRET from the environment overrides it.
+  # Not the upstream default, which makes SearXNG refuse to start.
+  secret_key: "overridden-by-SEARXNG_SECRET"
+  # No result proxying: the service gets URLs and snippets, never fetched bodies.
+  image_proxy: false
+  public_instance: false
+  # Internal service on a network only osionos-ai joins: the limiter (bot
+  # detection keyed on client headers/IP) would see one client, the service, and
+  # needs a Valkey it does not have here.
+  limiter: false

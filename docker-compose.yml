@@ -421,6 +421,10 @@ services:
       # Describe image (M7): the local VLM, INTERNAL. Unset = the route is a 404.
       # The public overlay forces it empty until the user decides.
       OSIONOS_AI_VLM_URL: http://osionos-ai-vlm:8080
+      # The web tools: off unless set to exactly `on`. SearXNG is on its own
+      # internal network; the public overlay forces the flag empty.
+      OSIONOS_AI_SEARXNG_URL: http://osionos-ai-searxng:8080
+      OSIONOS_AI_WEB: ${OSIONOS_AI_WEB:-}
     expose:
       - "4300"
     # The two classifiers of the output check, read-only: the service loads
@@ -439,6 +443,8 @@ services:
       - osionos-ai-guard-net
       # The VLM of "Describe image", the same way.
       - osionos-ai-vlm-net
+      # SearXNG of the web tools, the same way.
+      - osionos-ai-search-net
     depends_on:
       osionos-ai-db:
         condition: service_healthy
@@ -783,6 +789,64 @@ services:
     # Caveat: provisional — the A1 spike sets the final values.
     mem_limit: 2g
     cpus: 4
+
+  # osionos-ai-searxng — the metasearch of the assistant's web tools (W5):
+  # SearXNG, queried by osionos-ai for URLs and snippets only.
+  #
+  # Two networks, one per direction:
+  #  - `osionos-ai-search-net` (internal: true): osionos-ai -> searxng. Nothing
+  #    else joins it, so the service reaches SearXNG and no other container,
+  #    the host or the bridge does.
+  #  - `osionos-ai-search-egress` (plain bridge): searxng -> the engines. ONLY
+  #    searxng joins it; no other service shares that route.
+  # SearXNG joins no other network: not mini-baas, not the AI db/redis nets.
+  # NO published port.
+  #
+  # Image: searxng/searxng 2026.10.11-ad46ebd7d (rolling release, built
+  # 2026-10-11, 15 days before pinning), by digest:
+  #   sha256:ddd642cae6eac75412938fd846ddbf440a2df029cfeae8a562b8b205f4e35e25
+  # Runs as uid 977 with a read-only root and no capabilities (verified by
+  # running it; as root the entrypoint would run update-ca-certificates, which
+  # needs a writable /etc/ssl). The settings are the engine allowlist in
+  # infrastructure/searxng/settings.yml. scripts/verify/ai-searxng.sh.
+  #
+  # The secret defaults to a dev value like the other dev-stack secrets here:
+  # `:?` would break `docker compose config` for everyone who does not use the
+  # `ai` profile. The service is unreachable from outside (internal network),
+  # and the public overlay does not start it.
+  # Caveat: bing, duckduckgo and brave rate-limit or CAPTCHA a datacentre or
+  # busy home IP; results thin out without an error (measured 2026-10-26:
+  # brave "too many requests", duckduckgo CAPTCHA on a first query).
+  osionos-ai-searxng:
+    image: searxng/searxng:2026.10.11-ad46ebd7d@sha256:ddd642cae6eac75412938fd846ddbf440a2df029cfeae8a562b8b205f4e35e25
+    profiles: ["ai"]
+    user: "977:977"
+    environment:
+      SEARXNG_SECRET: ${OSIONOS_AI_SEARXNG_SECRET:-osionos-ai-searxng-dev-secret}
+    volumes:
+      - ./infrastructure/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/searxng:uid=977,gid=977
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      start_interval: 2s
+      timeout: 5s
+      start_period: 20s
+      retries: 6
+    networks:
+      - osionos-ai-search-net
+      - osionos-ai-search-egress
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 1
 
   # osionos-ai-sd — the image engine of the assistant (M1): stable-diffusion.cpp's
   # sd-server on the GPU through Vulkan, built from a pinned release
@@ -1834,6 +1898,13 @@ networks:
   # reach the internet either (the model is pre-fetched into its volume).
   osionos-ai-stt-net:
     internal: true
+  # SearXNG of the web tools: `internal: true` = NO egress. ONLY osionos-ai and
+  # osionos-ai-searxng join it (the service -> SearXNG direction).
+  osionos-ai-search-net:
+    internal: true
+  # SearXNG's route to the search engines (SearXNG -> internet). ONLY
+  # osionos-ai-searxng joins it.
+  osionos-ai-search-egress:
   # The image engine: `internal: true` = NO egress. ONLY osionos-ai-sd and
   # osionos-ai join it — the engine also serves /v1/images/edits, which the
   # service never calls (C72) and nothing else can reach.
