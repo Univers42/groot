@@ -406,6 +406,9 @@ services:
       # gates exist (devil C70/C72/C73; scripts/verify/ai-images-public-off.sh).
       OSIONOS_AI_IMAGES: ${OSIONOS_AI_IMAGES:-}
       OSIONOS_AI_IMAGE_URL: http://osionos-ai-sd:1234/v1
+      # Remote MCP servers of a user (E1): OFF unless exactly "on". The public
+      # overlay forces it empty (devil C288; scripts/verify/ai-public-flags-off.sh).
+      OSIONOS_AI_MCP_CLIENT: ${OSIONOS_AI_MCP_CLIENT:-}
       # The price of one image on the ledger (C74): the local engine costs no
       # money, but an image that books 0 never reaches the cap of a day.
       OSIONOS_AI_IMAGE_MICROUSD: ${OSIONOS_AI_IMAGE_MICROUSD:-2000}
