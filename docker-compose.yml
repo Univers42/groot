@@ -425,6 +425,9 @@ services:
       # internal network; the public overlay forces the flag empty.
       OSIONOS_AI_SEARXNG_URL: http://osionos-ai-searxng:8080
       OSIONOS_AI_WEB: ${OSIONOS_AI_WEB:-}
+      # Rolling summary of the turns a long conversation drops: off unless set
+      # to exactly `on`; the public overlay forces it empty.
+      OSIONOS_AI_SUMMARY: ${OSIONOS_AI_SUMMARY:-}
     expose:
       - "4300"
     # The two classifiers of the output check, read-only: the service loads
