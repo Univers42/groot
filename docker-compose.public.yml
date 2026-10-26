@@ -125,6 +125,9 @@ services:
       OSIONOS_AI_STT_URL: ""
       # Describe image (M7) stays off in public until the user decides.
       OSIONOS_AI_VLM_URL: ""
+      # Remote MCP servers (E1) stay off in public until the run integration
+      # and its approvals are merged and proven (devil C288).
+      OSIONOS_AI_MCP_CLIENT: ""
       # The platform connection on public: OpenRouter's free models only (R-C10), the key and
       # the list from .env.public, never .env.local, so the dev stack keeps its local model.
       OSIONOS_AI_UPSTREAM_BASE_URL: https://openrouter.ai/api/v1
