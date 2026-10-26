@@ -2940,6 +2940,47 @@ END $$;
 SELECT * FROM pg_temp.p5_row('p5_web_switch', 9);
 ROLLBACK;
 
+-- p5_summary (context C376, C390): the summary of a conversation is capped by
+-- CHECK, is listed in the conversation's export columns, and goes with the
+-- conversation when its owner is erased; the other user's summary stays.
+-- Caveat: the seed is hand-built rows, not rows the service wrote.
+BEGIN;
+DO $$
+DECLARE
+  a constant uuid := 'a5a5a5a5-0000-4000-8000-00000000000a';
+  b constant uuid := 'b5b5b5b5-0000-4000-8000-00000000000b';
+  ca constant uuid := 'c5c5c5c5-0000-4000-8000-0000000000a1';
+  cb constant uuid := 'c5c5c5c5-0000-4000-8000-0000000000b1';
+  v_refused boolean := false;
+  v_rows bigint;
+BEGIN
+  PERFORM pg_temp.p5_world();
+  PERFORM pg_temp.p5_ok('the conversation export lists summary and summary_through',
+    (SELECT export_columns @> ARRAY['summary', 'summary_through'] FROM public.osionos_account_data_map
+      WHERE table_name = 'ai_conversations' AND column_name = 'owner_id'));
+  INSERT INTO public.ai_conversations (id, owner_id, workspace_id, title, summary, summary_through)
+    VALUES (ca, a, gen_random_uuid(), 'a', 'A-SUMMARY-CANARY', now()), (cb, b, gen_random_uuid(), 'b', 'B-SUMMARY-KEEP', now());
+  BEGIN
+    UPDATE public.ai_conversations SET summary = repeat('x', 4001) WHERE id = cb;
+  EXCEPTION WHEN check_violation THEN
+    v_refused := true;
+  END;
+  PERFORM pg_temp.p5_ok('a summary over 4000 characters is refused', v_refused);
+  UPDATE public.ai_conversations SET summary = repeat('y', 4000) WHERE id = ca;
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  PERFORM pg_temp.p5_ok('a summary of 4000 characters fits', v_rows = 1);
+  UPDATE public.ai_conversations SET summary = 'A-SUMMARY-CANARY' WHERE id = ca;
+  PERFORM set_config('osionos.check.p5_r', pg_temp.p5_as_svc(
+    $q$SELECT public.osionos_account_erase('a5a5a5a5-0000-4000-8000-00000000000a')::text$q$, 'osionos.check.p5_e'), true);
+  PERFORM pg_temp.p5_ok('erase returned ok: ' || current_setting('osionos.check.p5_r'), current_setting('osionos.check.p5_r') = 'ok');
+  PERFORM pg_temp.p5_ok('no summary of A survives the erase',
+    NOT EXISTS (SELECT 1 FROM public.ai_conversations WHERE summary LIKE '%A-SUMMARY-CANARY%'));
+  PERFORM pg_temp.p5_ok('B''s summary is untouched',
+    (SELECT summary = 'B-SUMMARY-KEEP' FROM public.ai_conversations WHERE id = cb));
+END $$;
+SELECT * FROM pg_temp.p5_row('p5_summary', 6);
+ROLLBACK;
+
 -- p5_erase_sequence: the executor's order against a real database: claim -> erase
 -- -> erase again -> delete the erasure-object rows -> delete auth.users, which
 -- cascades the request row away. Also pins the queue contract: a claim never
