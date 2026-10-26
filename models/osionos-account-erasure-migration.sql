@@ -235,7 +235,7 @@ INSERT INTO osionos_account_data_map_seed VALUES
 ('ai_chunks', 'owner_id', 'owner', 'delete', NULL, NULL, NULL, NULL, NULL),
 ('ai_chunks', 'collaborator_ids', 'peer', 'scrub_jsonb', NULL, NULL, NULL, NULL, NULL),
 ('ai_connections', 'owner_user_id', 'owner', 'delete', NULL, NULL, NULL, NULL, NULL),
-('ai_conversations', 'owner_id', 'owner', 'delete', '{id,workspace_id,title,created_at}', NULL, NULL, NULL, NULL),
+('ai_conversations', 'owner_id', 'owner', 'delete', '{id,workspace_id,title,created_at,summary,summary_through}', NULL, NULL, NULL, NULL),
 ('ai_events', 'user_id', 'owner', 'delete', NULL, NULL, NULL, NULL, NULL),
 ('osionos_activity_events', 'user_id', 'owner', 'delete', '{ts,event,surface,workspace_id}', NULL, NULL, NULL, NULL),
 ('ai_jobs', 'subject_id', 'owner', 'delete', NULL, NULL, NULL, NULL, NULL),

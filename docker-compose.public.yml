@@ -131,6 +131,9 @@ services:
       # Web tools stay off in public until a network-isolated fetcher and an SSRF
       # canary e2e exist.
       OSIONOS_AI_WEB: ""
+      # Conversation summaries stay off in public until the provider-routing
+      # e2e and the quality eval are shown (context C392, C393).
+      OSIONOS_AI_SUMMARY: ""
       # The platform connection on public: OpenRouter's free models only (R-C10), the key and
       # the list from .env.public, never .env.local, so the dev stack keeps its local model.
       OSIONOS_AI_UPSTREAM_BASE_URL: https://openrouter.ai/api/v1
