@@ -23,7 +23,7 @@
 #   included) or on auth_session_cutoffs, auth_audit_events or auth_audit_events_legacy_int · d no policy for PUBLIC/anon/authenticated · e1/e2 service_role
 #   has full CRUD and round-trips a row · e3 it upserts a session cut-off as the
 #   auth-gateway does · e4 service_role calls auth_record_audit_event with a new-list event ·
-#   e5 a late, older upsert leaves the newer cut-off in place · f six probes (eight in legacy), S1-S3 on auth_session_cutoffs and A1-A3 on auth_audit_events and its RPC (A4-A5, legacy only: the renamed auth_audit_events_legacy_int), refused with 42501 ·
+#   e5 a late, older upsert leaves the newer cut-off in place · f six probes (eight in legacy), S1-S3 on auth_session_cutoffs and A1-A3 on auth_audit_events and its RPC (A4-A5, legacy only: the renamed auth_audit_events_legacy_int), N1-N4 on newsletter_optins and its three RPCs, refused with 42501 ·
 #   h no SECURITY DEFINER osionos_% function or auth_record_audit_event
 #   they may execute · h-ai no ai_% writer function they may execute · P1 a direct read of an
 #   ai_chunks partition refused with 42501 · g a second runner pass changes no ACL, policy or RLS flag ·
@@ -635,6 +635,12 @@ run_checks() {
 	probe "$1" A1 authenticated "SELECT event_type FROM public.auth_audit_events"
 	probe "$1" A2 anon "SELECT public.auth_record_audit_event('logout')"
 	probe "$1" A3 authenticated "INSERT INTO public.auth_audit_events (event_type) VALUES ('logout')"
+	# The newsletter RPCs are service_role-only: an anon caller choosing the token could request
+	# and confirm an opt-in for someone else's address.
+	probe "$1" N1 anon "SELECT public.gdpr_request_newsletter_optin('victim@example.com', repeat('a', 64))"
+	probe "$1" N2 anon "SELECT public.gdpr_confirm_newsletter_optin(repeat('a', 64))"
+	probe "$1" N3 authenticated "SELECT public.gdpr_withdraw_consent('newsletter', repeat('a', 64))"
+	probe "$1" N4 anon "SELECT email FROM public.newsletter_optins"
 	# Only the legacy scenario plants the old-shape table the migration renames.
 	if [ "$1" = "legacy" ]; then
 		probe "$1" A4 authenticated "SELECT event_type FROM public.auth_audit_events_legacy_int"
