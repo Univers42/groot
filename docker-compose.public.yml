@@ -51,6 +51,9 @@ services:
         # realtime gateway it talks to (baas) denies unscoped namespaces: born2root's
         # profiles/server.toml sets REALTIME_NAMESPACE_FALLBACK=deny.
         VITE_OSIO_COLLAB_SHARED: "1"
+        # Keystrokes reach peers in one throttled put per block (33 ms) instead of after the
+        # 250 ms draft commit.
+        VITE_OSIO_COLLAB_FASTSEND: "1"
 
   opposite-osiris-web:
     image: track-binocle/opposite-osiris-web:public
