@@ -35,6 +35,9 @@
 #      belong to it: it is additive uuid-native DDL (five ADD COLUMN IF NOT
 #      EXISTS on public.users, two unique indexes, one trigger) and applies with
 #      exit 0 on a from-scratch database. See ORDERING below.
+#      The newsletter double opt-in gdpr-migration.sql would have provided lives,
+#      uuid-native and applied, in newsletter-optin-migration.sql; it skips itself
+#      with a NOTICE where gdpr-migration.sql owns those names.
 #   2. Files expecting a users table shaped with username/avatar_url columns
 #      this database's public.users does not have (same foreign-DB family):
 #        rls-hardening-migration.sql  seeds.sql
