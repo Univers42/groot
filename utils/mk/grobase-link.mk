@@ -107,6 +107,7 @@ publish-socket: ## Forward this host's socket to the VM's Kong for the bridge's 
 ## p50) at 0.43 ms p50. HOST_KEY_FILE holds the host key line the operator obtained over a
 ## trusted step (never ssh-keyscan, never accept-new); install prints the socket dir, the
 ## value OSIONOS_PUBLISH_SOCKET_DIR takes. Undo: make publish-socket-off.
+## Run OSIONOS_PUBLISH_SOCKET=1 OSIONOS_PUBLISH_SOCKET_DIR=<dir> make public-up next so the bridge picks the socket up.
 	@HOST_KEY_FILE='$(HOST_KEY_FILE)' bash scripts/osionos-publish-socket.sh install
 
 publish-socket-off: ## Remove the publish-socket unit (the pinned host key stays)
