@@ -98,6 +98,9 @@ services:
       # Moderation logs, never holds or removes, until the per-language precision floor (devil C83);
       # the bridge reads it in scripts/bridge-moderation.mjs moderationMode().
       OSIONOS_MODERATION_ACTIONS: "log"
+      # Page events (blocks, caret, presence) go to collabpage:<pageId>; the deployed client
+      # drops them on collab:<ws>, so off here means no live co-editing (0/12 edits, 2026-10-27).
+      COLLAB_PAGE_TOPICS: "1"
 
   # Image generation stays off in public until the prompt gate and the output
   # gate exist (devil C70/C72/C73): environment: beats .env.local, so a stray
