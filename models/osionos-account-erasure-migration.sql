@@ -259,6 +259,9 @@ INSERT INTO osionos_account_data_map_seed VALUES
 ('auth_audit_events', 'user_id', 'owner', 'delete', NULL, NULL, NULL, NULL, NULL),
 ('auth_session_cutoffs', 'user_id', 'owner', 'keep', NULL, NULL, NULL, NULL,
   'must outlive the erase so a token issued before it stays refused; it cascades away when GoTrue deletes the user'),
+-- the opt-in row is the newsletter consent evidence; an opt-in made before the account existed
+-- has no user_id and is not reached (a residual, like a failed-login audit row)
+('newsletter_optins', 'user_id', 'owner', 'delete', '{email,status,version,requested_at,confirmed_at,unsubscribed_at}', NULL, NULL, NULL, NULL),
 ('mail_messages', 'subject', 'peer', 'keep', NULL, NULL, NULL, NULL,
   'the column is an email subject line (free text), matched by name only; it holds no account id'),
 ('osionos_account_deletion_requests', 'user_id', 'owner', 'keep', NULL, NULL, NULL, NULL,
