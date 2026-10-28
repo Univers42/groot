@@ -27,6 +27,8 @@ on:
       - "utils/**"
       - "scripts/**"
       - "tests/host-ports/**"
+      - "tests/osionos-publish-socket/**"
+      - "docker-compose.publish-socket.yml"
       - "Makefile"
       - "docker-compose.yml"
       # a .dockerignore / bake change can break `make all`'s image builds outright
@@ -46,6 +48,8 @@ on:
       - "utils/**"
       - "scripts/**"
       - "tests/host-ports/**"
+      - "tests/osionos-publish-socket/**"
+      - "docker-compose.publish-socket.yml"
       - "Makefile"
       - "docker-compose.yml"
       # its build args are checked against the Dockerfiles that build them (build-args.bats)
@@ -93,11 +97,12 @@ jobs:
           git config --global --add url."https://github.com/".insteadOf "git@github.com:"
           git submodule update --init --depth 1 apps/grobase apps/opposite-osiris apps/osionos/app vendor/scripts
       # findutils: the vault42 CLI's scan mirror needs GNU find; busybox find fails its push path.
+      # openssh-keygen: the publish-socket install validates the pinned host key with ssh-keygen -l.
       - name: bats scripts/tests
         run: |
           docker run --rm -e CI -v "$PWD:/code" -w /code --entrypoint sh \
             bats/bats:1.11.1@sha256:e56e7c49087cb766b1ba9c5732b8f5402d289252d52f64e1eefb88269f74125c \
-            -c 'apk add -q --no-cache make coreutils git jq findutils && bats scripts/tests tests/host-ports'
+            -c 'apk add -q --no-cache make coreutils git jq findutils openssh-keygen && bats scripts/tests tests/host-ports tests/osionos-publish-socket'
 
   clone-and-make-all:
     name: clone --recursive + make all
