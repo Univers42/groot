@@ -329,6 +329,10 @@ INSERT INTO osionos_account_data_map_seed VALUES
 ('osionos_teams', 'created_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
 ('osionos_team_members', 'user_id', 'member', 'delete', NULL, NULL, NULL, NULL, NULL),
 ('osionos_team_members', 'added_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
+-- member attributes go with the membership like team rows (the members FK cascades them);
+-- set_by is the admin who tagged someone else and is tombstoned.
+('osionos_member_attributes', 'user_id', 'member', 'delete', NULL, NULL, NULL, NULL, NULL),
+('osionos_member_attributes', 'set_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
 ('osionos_pages', 'owner_id', 'owner', 'transfer', '{id,workspace_id,title,visibility,content,properties,created_at,updated_at}', NULL, NULL, 'workspace_id', NULL),
 ('osionos_pages', 'collaborators', 'peer', 'scrub_jsonb', NULL, NULL, NULL, 'workspace_id', NULL),
 ('osionos_page_comments', 'author_id', 'author', 'anonymise', '{id,page_id,content,created_at}', NULL, NULL, NULL, NULL),
