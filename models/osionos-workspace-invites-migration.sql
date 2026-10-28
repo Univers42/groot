@@ -43,6 +43,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS osionos_workspace_invites_live_idx
 CREATE UNIQUE INDEX IF NOT EXISTS osionos_workspace_invites_token_hash_idx
   ON public.osionos_workspace_invites (token_hash);
 
+-- A decline sets declined_at together with revoked_at, so "live" stays the one predicate above:
+-- accept and decline both PATCH that predicate and exactly one of them wins. declined_at only
+-- tells the inviter which way the invite ended; the CHECK keeps a declined row from being live.
+ALTER TABLE public.osionos_workspace_invites ADD COLUMN IF NOT EXISTS declined_at TIMESTAMPTZ;
+ALTER TABLE public.osionos_workspace_invites DROP CONSTRAINT IF EXISTS osionos_workspace_invites_declined_revoked;
+ALTER TABLE public.osionos_workspace_invites ADD CONSTRAINT osionos_workspace_invites_declined_revoked
+  CHECK (declined_at IS NULL OR revoked_at IS NOT NULL);
+
+-- The invitee's own inbox (/api/invites/mine) reads the live invites of one account.
+CREATE INDEX IF NOT EXISTS osionos_workspace_invites_invitee_live_idx
+  ON public.osionos_workspace_invites (invited_user_id)
+  WHERE accepted_at IS NULL AND revoked_at IS NULL;
+
 REVOKE ALL ON public.osionos_workspace_invites FROM PUBLIC, anon, authenticated;
 GRANT ALL ON public.osionos_workspace_invites TO service_role;
 
