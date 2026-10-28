@@ -40,7 +40,8 @@ CREATE TABLE IF NOT EXISTS public.osionos_member_attributes (
   user_id      UUID        NOT NULL,
   key          TEXT        NOT NULL CHECK (key ~ '^[a-z][a-z0-9_]{0,31}$'),
   value        TEXT        NOT NULL
-               CHECK (char_length(value) BETWEEN 1 AND 64 AND value !~ ':' AND value = btrim(value)),
+               CHECK (char_length(value) BETWEEN 1 AND 64 AND value !~ ':'
+                      AND value !~ '^\s|\s$' AND value !~ '[[:cntrl:]]'),
   set_by       UUID        NOT NULL,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -72,15 +73,22 @@ CREATE POLICY osionos_member_attributes_service_role_all ON public.osionos_membe
 -- Nothing consumes attribute changes, and a broadcast is one more path out of the table.
 DROP TRIGGER IF EXISTS osionos_member_attributes_realtime_trigger ON public.osionos_member_attributes;
 
+-- SECURITY DEFINER: FOR SHARE needs UPDATE-level privilege on the members table, which the
+-- writer may not hold.
 CREATE OR REPLACE FUNCTION public.osionos_member_attributes_refuse_guest() RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = pg_catalog
 AS $$
+DECLARE r text;
 BEGIN
-  IF EXISTS (SELECT 1 FROM public.osionos_workspace_members m
-              WHERE m.workspace_id = NEW.workspace_id AND m.user_id = NEW.user_id
-                AND m.role = 'viewer') THEN
+  -- FOR SHARE: a concurrent demotion to viewer waits for this insert to commit, so its
+  -- drop_on_guest sees the row; without the lock both commit and the guest keeps the tag.
+  SELECT m.role INTO r FROM public.osionos_workspace_members m
+   WHERE m.workspace_id = NEW.workspace_id AND m.user_id = NEW.user_id
+     FOR SHARE;
+  -- NOT FOUND is left to the foreign key, which raises 23503 for a non-member.
+  IF FOUND AND r = 'viewer' THEN
     RAISE EXCEPTION 'a guest carries no member attributes' USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
@@ -88,7 +96,7 @@ END $$;
 
 DROP TRIGGER IF EXISTS osionos_member_attributes_refuse_guest ON public.osionos_member_attributes;
 CREATE TRIGGER osionos_member_attributes_refuse_guest
-BEFORE INSERT OR UPDATE ON public.osionos_member_attributes
+BEFORE INSERT OR UPDATE OF workspace_id, user_id ON public.osionos_member_attributes
 FOR EACH ROW EXECUTE FUNCTION public.osionos_member_attributes_refuse_guest();
 
 -- SECURITY DEFINER: whoever demotes the member may hold no grant on this table,

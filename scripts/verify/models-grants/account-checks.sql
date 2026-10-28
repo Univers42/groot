@@ -2170,6 +2170,21 @@ BEGIN
 END
 $$;
 
+-- A member attribute is a composite foreign key to a workspace member, and its key CHECK
+-- (^[a-z][a-z0-9_]{0,31}$) refuses the generic 'p5<uuid>' text: make the membership, then the row.
+CREATE OR REPLACE FUNCTION pg_temp.p5_insert_member_attribute(p_col text, p_val text) RETURNS void
+LANGUAGE plpgsql AS $$
+DECLARE
+  w text := quote_literal(gen_random_uuid()::text) || '::uuid';
+  u text := CASE WHEN p_col = 'user_id' THEN p_val ELSE quote_literal(gen_random_uuid()::text) || '::uuid' END;
+  s text := CASE WHEN p_col = 'set_by' THEN p_val ELSE quote_literal(gen_random_uuid()::text) || '::uuid' END;
+BEGIN
+  PERFORM pg_temp.p5_insert('osionos_workspace_members', 'workspace_id', w, 1, 'user_id', u);
+  EXECUTE format('INSERT INTO public.osionos_member_attributes (workspace_id, user_id, key, value, set_by) VALUES (%s, %s, %L, %L, %s)',
+                 w, u, 'p5', 'v', s);
+END
+$$;
+
 -- Seeds one row per registry column of every registry table, holding p_user in that column only.
 CREATE OR REPLACE FUNCTION pg_temp.p5_seed_user(p_user uuid) RETURNS void
 LANGUAGE plpgsql AS $$
@@ -2191,6 +2206,7 @@ BEGIN
                     ELSE quote_literal(p_user::text) END;
       IF rc.table_name = 'osionos_object_database_rows' THEN PERFORM pg_temp.p5_insert_db_row(rc.column_name, v_val);
       ELSIF rc.table_name = 'osionos_team_members' THEN PERFORM pg_temp.p5_insert_team_member(rc.column_name, v_val);
+      ELSIF rc.table_name = 'osionos_member_attributes' THEN PERFORM pg_temp.p5_insert_member_attribute(rc.column_name, v_val);
       ELSE PERFORM pg_temp.p5_insert(rc.table_name, rc.column_name, v_val); END IF;
       INSERT INTO p5_seeded VALUES (p_user, rc.table_name, true, NULL);
     EXCEPTION WHEN others THEN

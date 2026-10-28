@@ -10,19 +10,24 @@
 #
 # WHAT IT PROVES
 #   a1  an attribute row inserts for a workspace member; a user with no members
-#       row is refused with 23503 by the composite foreign key (C645: a guest
-#       has no members row, so the FK alone keeps guests attribute-free).
+#       row is refused with 23503 by the composite foreign key.
 #   a2  deleting the members row deletes that member's attributes and nobody
 #       else's (the cascade invariant, C643: rows die with the membership).
 #   a3  deleting the workspace deletes all of its attribute rows, and the other
 #       workspace's rows are untouched.
 #   a4  the key CHECK refuses 'Dept', '1x', 'a-b' and a 33-character key; the
-#       value CHECK refuses '', ' x', 'a:b' and a 65-character value (23514).
+#       value CHECK refuses '', ' x', a trailing tab, a newline, 'a:b' and a
+#       65-character value (23514); an inner space ('north east') is accepted.
 #   a5  a second value for the same (workspace, user, key) is a primary-key
 #       conflict (23505): one value per key per member, so the bridge upserts.
 #   a6  anon and authenticated hold none of the four privileges on the table,
 #       service_role holds all four.
 #   a7  re-running the migration is a no-op: the same constraints, the same rows.
+#   a8  a guest (C645: a members row with role 'viewer') is refused 23514; a
+#       promotion keeps the rows; a demotion to viewer deletes them.
+#   a9  the race: while an attribute insert is uncommitted, a demotion to
+#       viewer waits on it (55P03 under a 500 ms lock_timeout); once the insert
+#       commits, the demotion clears the row.
 #
 # ISOLATION
 #   Throwaway containers only: ai-ma-pg (pgvector/pgvector:0.8.0-pg16), started
@@ -150,7 +155,8 @@ apply_fixture() {
 }
 
 # W1 keeps two members through a2; W2 dies with its workspace in a3; G has no
-# members row anywhere (a1's non-member); GV is W1's guest (role viewer) for a8.
+# members row anywhere (a1's non-member); GV is W1's guest (role viewer) for a8;
+# W3/M4 are a9's own, seeded by a9.
 W1="11111111-1111-4111-8111-111111111111"
 W2="33333333-3333-4333-8333-333333333333"
 M1="22222222-2222-4222-8222-222222222221"
@@ -158,6 +164,8 @@ M2="22222222-2222-4222-8222-222222222222"
 M3="22222222-2222-4222-8222-222222222223"
 G="22222222-2222-4222-8222-222222222224"
 GV="22222222-2222-4222-8222-222222222225"
+W3="44444444-4444-4444-8444-444444444444"
+M4="22222222-2222-4222-8222-222222222226"
 
 seed() {
 	q "
@@ -247,7 +255,7 @@ check_a4() {
 			return 1
 		fi
 	done
-	for bad_value in "''" "' x'" "'a:b'" "'${val65}'"; do
+	for bad_value in "''" "' x'" "E'x\\t'" "E'a\\nb'" "'a:b'" "'${val65}'"; do
 		# A key M2 does not carry, so no primary-key conflict can be what refuses
 		# the row: the value CHECK is the only refuser here.
 		state="$(state_of "INSERT INTO public.osionos_member_attributes (workspace_id, user_id, key, value, set_by)
@@ -257,6 +265,14 @@ check_a4() {
 			return 1
 		fi
 	done
+	state="$(state_of "INSERT INTO public.osionos_member_attributes (workspace_id, user_id, key, value, set_by)
+	        VALUES ('${W1}', '${M2}', 'region', 'north east', '${M1}');")"
+	if [ -n "${state}" ]; then
+		printf 'FAIL a4 inner space refused with %s\n' "${state}" >&2
+		return 1
+	fi
+	# a8 counts M2's rows: leave M2 as the seed made it.
+	q "DELETE FROM public.osionos_member_attributes WHERE workspace_id = '${W1}' AND user_id = '${M2}' AND key = 'region'" >/dev/null
 	return 0
 }
 
@@ -359,6 +375,41 @@ check_a8() {
 	return 0
 }
 
+# a9: refuse_guest locks the members row FOR SHARE, so a demotion cannot slip
+# between the guest check and the insert's commit.
+# Caveat: timing-based — the 1 s head start assumes the insert has taken its
+# lock by then; a stalled runner can make the 55P03 step fail spuriously
+# (a false FAIL, never a false PASS).
+check_a9() {
+	q "INSERT INTO public.osionos_workspaces (id, owner_id, name, slug) VALUES ('${W3}', '${M4}', 'w3', 'w3-attr');
+INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role, permissions)
+VALUES ('${W3}', '${M4}', 'editor', ARRAY['read']);" >/dev/null
+	printf '%s\n' "BEGIN;
+INSERT INTO public.osionos_member_attributes (workspace_id, user_id, key, value, set_by)
+VALUES ('${W3}', '${M4}', 'team', 'red', '${M4}');
+SELECT pg_sleep(3);
+COMMIT;" | psql_q >/dev/null 2>"${WORK}/a9.err" &
+	holder=$!
+	sleep 1
+	state="$(state_of "SET lock_timeout = '500ms';
+UPDATE public.osionos_workspace_members SET role = 'viewer' WHERE workspace_id = '${W3}' AND user_id = '${M4}';")"
+	if ! wait "${holder}"; then
+		printf 'FAIL a9 holder            the held insert failed: %s\n' "$(cat "${WORK}/a9.err")" >&2
+		return 1
+	fi
+	if [ "${state}" != "55P03" ]; then
+		printf 'FAIL a9 wait              expected the demotion to wait (55P03), got %s\n' "${state:-accepted}" >&2
+		return 1
+	fi
+	q "UPDATE public.osionos_workspace_members SET role = 'viewer' WHERE workspace_id = '${W3}' AND user_id = '${M4}';" >/dev/null
+	left="$(attrs_of "${W3}" "${M4}")"
+	if [ "${left}" != "0" ]; then
+		printf 'FAIL a9 demotion          expected 0 rows after the demotion, got %s\n' "${left}" >&2
+		return 1
+	fi
+	return 0
+}
+
 # --- main --------------------------------------------------------------------
 
 main() {
@@ -376,6 +427,7 @@ main() {
 	if check_a6; then pass a6 "anon and authenticated hold nothing, service_role holds all four"; else fail a6 "privileges"; fi
 	if check_a7; then pass a7 "the replay changes no constraint and no row"; else fail a7 "idempotent apply"; fi
 	if check_a8; then pass a8 "a guest is refused 23514, a demotion to viewer clears the rows"; else fail a8 "guests carry no attributes"; fi
+	if check_a9; then pass a9 "a demotion waits on an uncommitted attribute insert, then clears it"; else fail a9 "guest check vs concurrent demotion"; fi
 
 	printf 'RESULT: %s passed, %s failed\n' "${passed}" "${failed}"
 	[ "${failed}" -eq 0 ] || exit 1
