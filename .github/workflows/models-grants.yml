@@ -11,6 +11,8 @@ on:
       - "scripts/apply-models-migrations.sh"
       - "scripts/verify/models-grants*"
       - "scripts/verify/models-grants/**"
+      - "scripts/verify/publish-cascade*"
+      - "scripts/verify/publish-cascade/**"
       - "scripts/verify/account-export-lock-race.sh"
       - "utils/mk/baas.mk"
       - ".github/workflows/models-grants.yml"
@@ -21,6 +23,8 @@ on:
       - "scripts/apply-models-migrations.sh"
       - "scripts/verify/models-grants*"
       - "scripts/verify/models-grants/**"
+      - "scripts/verify/publish-cascade*"
+      - "scripts/verify/publish-cascade/**"
       - "scripts/verify/account-export-lock-race.sh"
       - "utils/mk/baas.mk"
       - ".github/workflows/models-grants.yml"
@@ -49,3 +53,15 @@ jobs:
         run: make models-grants-verify
       - name: Race the erasure replay against the export worker (no 40P01)
         run: sh scripts/verify/account-export-lock-race.sh
+
+  publish-cascade:
+    # C633: a published snapshot must die with the hold on its page. The script
+    # needs none of the grobase submodule (public images only), so unlike the
+    # catalog job it checks out the repo only.
+    name: published snapshots die with the hold
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify the publish cascade on a throwaway database
+        run: sh scripts/verify/publish-cascade.sh
