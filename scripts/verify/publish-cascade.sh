@@ -33,8 +33,16 @@
 #   c9  the revert proof: drop the osionos_pages trigger and c1's archive
 #       FAILS (the row survives), then re-apply and the check passes again.
 #   c10 the hot path: the trigger's cost on a single-row content UPDATE is
-#       measured (median of 3 runs of 5,000 UPDATEs, with the trigger and
+#       measured (median of 7 runs of 5,000 UPDATEs, with the trigger and
 #       without) and must stay under a 1.10x ratio.
+#   c11 re-keying a members row (UPDATE of user_id or workspace_id) removes
+#       the old holder's snapshots; a bystander's stays.
+#   c12 re-applying the publish migration backfills: an archived page, an
+#       owner with no members row and an owner mismatch lose their snapshot; a
+#       marketplace page (no members row by design) and a consistent row stay.
+#   c13 staging a workspace delete (pending_delete_at) removes that
+#       workspace's snapshots only; a workspace already pending when the hold
+#       file first runs is cleaned by its backfill.
 #
 # ISOLATION
 #   Throwaway containers only, on a network this script creates and removes:
@@ -74,6 +82,8 @@ DIR="${REPO}/scripts/verify"
 MODELS="${REPO}/models"
 FIX="${DIR}/models-grants"
 PUBLISH_SQL="${MODELS}/osionos-publish-migration.sql"
+LIFECYCLE_SQL="${MODELS}/osionos-workspace-lifecycle-migration.sql"
+HOLD_SQL="${MODELS}/osionos-workspace-publish-hold-migration.sql"
 PG_IMAGE="${PG_IMAGE:-pgvector/pgvector:0.8.0-pg16}"
 NET="ai-pc-net"
 # An explicit subnet: the 172.16-172.31 default pool is full on this machine (31
@@ -187,6 +197,9 @@ apply_fixture() {
 		apply "${MODELS}/${base}" || exit 1
 	done
 	apply "${PUBLISH_SQL}" || exit 1
+	# The alphabetical pass: lifecycle adds pending_delete_at, the hold reads it.
+	apply "${LIFECYCLE_SQL}" || exit 1
+	apply "${HOLD_SQL}" || exit 1
 	# The sweep the runner runs LAST (ORDERED_LAST): nothing anon or
 	# authenticated holds after it.
 	apply "${MODELS}/osionos-service-role-only-migration.sql" || exit 1
@@ -272,6 +285,8 @@ SELECT p.id, p.owner_id, p.title, 'star', '[{\"id\":\"b\",\"type\":\"text\",\"co
 . "${DIR}/publish-cascade/checks-c789.sh"
 # shellcheck source=publish-cascade/checks-c10.sh
 . "${DIR}/publish-cascade/checks-c10.sh"
+# shellcheck source=publish-cascade/checks-c111213.sh
+. "${DIR}/publish-cascade/checks-c111213.sh"
 
 # --- main ---------------------------------------------------------------------
 
@@ -279,7 +294,7 @@ main() {
 	start_pg
 	note "postgres up (${PG_CTN}, image ${PG_IMAGE})"
 	apply_fixture
-	note "fixture applied (roles, stand-ins, bridge, chat, social, engagement, publish, service-role-only)"
+	note "fixture applied (roles, stand-ins, bridge, chat, social, engagement, publish, lifecycle, hold, service-role-only)"
 	seed
 
 	if check_c1; then
@@ -331,6 +346,21 @@ main() {
 		pass c10 "hot-path cost"
 	else
 		fail c10 "hot-path cost"
+	fi
+	if check_c11; then
+		pass c11 "members re-key removes the old holder's snapshots"
+	else
+		fail c11 "members re-key removes the old holder's snapshots"
+	fi
+	if check_c12; then
+		pass c12 "re-apply backfills stale snapshots"
+	else
+		fail c12 "re-apply backfills stale snapshots"
+	fi
+	if check_c13; then
+		pass c13 "staged workspace delete removes its snapshots"
+	else
+		fail c13 "staged workspace delete removes its snapshots"
 	fi
 
 	printf 'passed %s failed %s\n' "${passed}" "${failed}"
