@@ -6,12 +6,19 @@
 # PUBLIC_COMPOSE_EXTRA: space-separated compose files layered between the link overlay and
 # docker-compose.public.yml (the public file stays last so its :public tags and bundle args win).
 PUBLIC_COMPOSE_EXTRA ?=
+# Only the exact value 1 adds the local publish path; every other value preserves today's files.
+# Its own variable, not += on PUBLIC_COMPOSE_EXTRA: a command-line PUBLIC_COMPOSE_EXTRA= would
+# override the += and silently drop the overlay.
+# ifeq, not $(filter): filter matches one word, so "0 1" would have switched it on.
+ifeq ($(OSIONOS_PUBLISH_SOCKET),1)
+PUBLIC_PUBLISH_SOCKET_FILE = docker-compose.publish-socket.yml
+endif
 PUBLIC_PORTS ?= 443
 PUBLIC_SCRIPT = bash scripts/public-funnel.sh
 PUBLIC_SERVICES = osionos-app opposite-osiris-web auth-gateway osionos-bridge local-https-proxy mail-web calendar-web
 public-empty :=
 public-space := $(public-empty) $(public-empty)
-PUBLIC_COMPOSE_FILES = docker-compose.yml:docker-compose.grobase-link.yml$(subst $(public-space),,$(patsubst %,:%,$(PUBLIC_COMPOSE_EXTRA))):docker-compose.public.yml
+PUBLIC_COMPOSE_FILES = docker-compose.yml:docker-compose.grobase-link.yml$(subst $(public-space),,$(patsubst %,:%,$(PUBLIC_COMPOSE_EXTRA) $(PUBLIC_PUBLISH_SOCKET_FILE))):docker-compose.public.yml
 # Recursive on purpose, like LINK_COMPOSE_ENV: the link's rootless values apply, and the
 # later COMPOSE_FILE wins over the one LINK_COMPOSE_ENV sets.
 PUBLIC_COMPOSE = $(WITH_GRAPH_RENDER_SHA) $(LINK_COMPOSE_ENV) COMPOSE_FILE='$(PUBLIC_COMPOSE_FILES)' \
@@ -26,7 +33,7 @@ public-env: ## Create ./.env.public (git-ignored, mode 600) and mint its signing
 	@$(PUBLIC_SCRIPT) env
 
 public-up: ## Rebuild as :public, recreate the frontends, then open the Funnel
-## Usage: make public-up [PUBLIC_PORTS=443|all|apps] [PUBLIC_COMPOSE_EXTRA="file.yml …"]
+## Usage: make public-up [PUBLIC_PORTS=443|all|apps] [PUBLIC_COMPOSE_EXTRA="file.yml …"] [OSIONOS_PUBLISH_SOCKET=1]
 ## RECREATES osionos-app, opposite-osiris-web, auth-gateway, osionos-bridge, local-https-proxy,
 ## mail-web and calendar-web
 ## with the public configuration (the :local images are kept), then runs `public-funnel.sh up`,
