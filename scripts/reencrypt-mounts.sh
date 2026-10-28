@@ -190,7 +190,7 @@ main() {
 		code="$(connect_code "${id}")"
 		forced=""
 		case "${FORCE}" in *" ${name} "*) forced=" (forced)" ;; esac
-		if [ "${code}" = "200" ] && [ -z "${forced}" ]; then
+		if [[ "${code}" = "200" ]] && [[ -z "${forced}" ]]; then
 			continue
 		fi
 		broken=$((broken + 1))
