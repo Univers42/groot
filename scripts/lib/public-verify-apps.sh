@@ -27,12 +27,12 @@ app_origin() {
   local name=${1^^}
   penv "PUBLIC_${name}_ORIGIN" || true
 }
-apps_configured() { [ -n "$(app_origin mail)$(app_origin calendar)" ]; }
+apps_configured() { [[ -n "$(app_origin mail)$(app_origin calendar)" ]]; }
 # Loopback listener of an app: the local port paired with its public port in APPS_FUNNEL_MAP.
 app_port() {
   local want=443 pair
-  [ "$1" = calendar ] && want=8443
-  for pair in $APPS_FUNNEL_MAP; do [ "${pair%%:*}" = "$want" ] && printf '%s' "${pair##*:}"; done
+  [[ "$1" = calendar ]] && want=8443
+  for pair in $APPS_FUNNEL_MAP; do [[ "${pair%%:*}" = "$want" ]] && printf '%s' "${pair##*:}"; done
 }
 # The Host header the Funnel sends for the app: its origin without the scheme.
 app_host_header() {
@@ -44,14 +44,14 @@ app_host_header() {
 apps_host() {
   local o h
   o=$(app_origin mail)
-  [ -n "$o" ] || o=$(app_origin calendar)
+  [[ -n "$o" ]] || o=$(app_origin calendar)
   h=${o#https://}
-  if [ -z "$h" ]; then h=$(node_dns tsa || true); fi
+  if [[ -z "$h" ]]; then h=$(node_dns tsa || true); fi
   h=${h%.}
   printf '%s' "${h%%[:/]*}"
 }
 # The apps node must answer when the apps are configured or it has ever been started here.
-apps_node_expected() { apps_configured || [ -e "$(apps_node_dir)" ]; }
+apps_node_expected() { apps_configured || [[ -e "$(apps_node_dir)" ]]; }
 
 # SKIP when the apps are not deployed, FAIL when they are and $2 is missing; returns 1 either way.
 apps_absent() {
@@ -67,8 +67,8 @@ check_exposure2() {
     return
   fi
   have=$(funnel_ports tsa || true)
-  if [ -z "$have" ]; then
-    if [ "$1" = apps ] || apps_configured; then
+  if [[ -z "$have" ]]; then
+    if [[ "$1" = apps ]] || apps_configured; then
       fail exposure2 "apps node $dns has its Funnel closed"
     else skip exposure2 "apps node $dns runs with its Funnel closed and no origin is set"; fi
     return
@@ -76,9 +76,9 @@ check_exposure2() {
   targets=$(funnel_targets tsa | paste -sd, -)
   want_targets="443 / 127.0.0.1:$(app_port mail),8443 / 127.0.0.1:$(app_port calendar)"
   host=$(apps_host)
-  if [ "$have" != 443,8443 ] || [ "$targets" != "$want_targets" ]; then
+  if [[ "$have" != 443,8443 ]] || [[ "$targets" != "$want_targets" ]]; then
     fail exposure2 "apps node funnel ports '$have' -> '$targets', expected exactly 443,8443 -> $want_targets"
-  elif [ -n "$(app_origin mail)" ] && [ "$dns" != "$host." ]; then
+  elif [[ -n "$(app_origin mail)" ]] && [[ "$dns" != "$host." ]]; then
     fail exposure2 "apps node DNS name is '$dns', the origins want '$host.'"
   else pass exposure2 "apps node ${dns}: funnel $have -> $targets"; fi
 }
@@ -88,7 +88,7 @@ bridge_targets_problems() {
   local node label targets
   for node in ts tsa; do
     label=main
-    if [ "$node" = tsa ]; then
+    if [[ "$node" = tsa ]]; then
       label=apps
       apps_node_expected || continue
     fi
@@ -100,7 +100,7 @@ bridge_targets_problems() {
 check_nobridge() {
   local running problems unreadable mapped scope="no node maps 4100 or 4200"
   running=$(docker ps --filter "label=com.docker.compose.project=$PROJECT" --format '{{.Label "com.docker.compose.service"}}' 2>/dev/null || echo unreadable)
-  if [ "$running" = unreadable ]; then
+  if [[ "$running" = unreadable ]]; then
     fail nobridge "cannot list the containers of project $PROJECT"
     return
   fi
@@ -109,11 +109,11 @@ check_nobridge() {
   unreadable=$(grep '^unreadable:' <<<"$problems" | cut -d: -f2 | paste -sd, - || true)
   mapped=$(grep -v '^unreadable:' <<<"$problems" | paste -sd, - || true)
   apps_node_expected || scope="main node maps neither 4100 nor 4200 (apps node not deployed: not checked)"
-  if [ -n "$running" ]; then
+  if [[ -n "$running" ]]; then
     fail nobridge "bridge container(s) running in $PROJECT: $running"
-  elif [ -n "$unreadable" ]; then
+  elif [[ -n "$unreadable" ]]; then
     fail nobridge "cannot read the Funnel targets of: $unreadable (daemon not answering)"
-  elif [ -n "$mapped" ]; then
+  elif [[ -n "$mapped" ]]; then
     fail nobridge "a Funnel node proxies to a bridge port: $mapped"
   else pass nobridge "no mail-bridge or calendar-bridge container; $scope"; fi
 }
@@ -136,7 +136,7 @@ check_nodev() {
     for path in $APPS_DEV_PATHS; do
       code=$(app_get "$app" "$path" -o /dev/null -w '%{http_code}' || true)
       n=$((n + 1))
-      [ "$code" = 404 ] || bad+=" $app$path=${code:-none}"
+      [[ "$code" = 404 ]] || bad+=" $app$path=${code:-none}"
     done
   done
   expect nodev "$n probes (dev client, entry, package.json, token files) -> 404" "not 404:$bad" [ -z "$bad" ]
@@ -145,7 +145,7 @@ check_nodev() {
 # What is wrong with one response's headers ($1); empty when nothing is. MC4.
 apphdrs_problems() {
   local headers=$1 csp bad="" d
-  [ -n "$headers" ] || {
+  [[ -n "$headers" ]] || {
     printf 'no answer'
     return
   }
@@ -172,7 +172,7 @@ check_apphdrs() {
     for path in / /no-such-file-apphdrs; do
       headers=$(app_get "$app" "$path" -D - -o /dev/null | tr -d '\r' || true)
       problems=$(apphdrs_problems "$headers")
-      [ -z "$problems" ] || bad+=" $app$path:$problems;"
+      [[ -z "$problems" ]] || bad+=" $app$path:$problems;"
     done
   done
   expect apphdrs "mail and calendar, on / and on a 404: CSP (frame-ancestors, default, script, connect), nosniff, no-referrer, HSTS, no CORS, no X-Frame-Options" "headers wrong:$bad" [ -z "$bad" ]
@@ -184,20 +184,20 @@ bundle2_offenders() {
   local image name mode pattern hits key file value
   for image in "$APPS_MAIL_IMAGE" "$APPS_CALENDAR_IMAGE"; do
     hits=$(docker run --rm --entrypoint sh "$image" -c 'find /usr/share/nginx/html -type f | wc -l' 2>/dev/null | tr -d '[:space:]' || true)
-    if ! [[ "$hits" =~ ^[0-9]+$ ]] || [ "$hits" -eq 0 ]; then
+    if ! [[ "$hits" =~ ^[0-9]+$ ]] || [[ "$hits" -eq 0 ]]; then
       printf 'unscannable:%s ' "$image"
       continue
     fi
     while IFS='|' read -r name mode pattern; do
       hits=$(V="$pattern" bundle_hits "$image" "$mode" || true)
-      [ "$hits" = 0 ] || printf '%s:%s(%s) ' "${image##*/}" "$name" "${hits:-?}"
+      [[ "$hits" = 0 ]] || printf '%s:%s(%s) ' "${image##*/}" "$name" "${hits:-?}"
     done <<<"$APPS_BUNDLE_PATTERNS"
     for key in $BUNDLE_SECRET_KEYS; do
       for file in "$LOCAL_ENV" "$REMOTE_ENV" "$ENV_FILE"; do
         value=$(get_env "$file" "$key" || true)
-        [ -n "$value" ] || continue
+        [[ -n "$value" ]] || continue
         hits=$(V="$value" bundle_hits "$image" || true)
-        [ "$hits" = 0 ] || printf '%s:%s(%s) ' "${image##*/}" "$key" "${hits:-?}"
+        [[ "$hits" = 0 ]] || printf '%s:%s(%s) ' "${image##*/}" "$key" "${hits:-?}"
       done
     done
   done
@@ -227,7 +227,7 @@ appurls_config_problems() {
   cal=$(app_origin calendar)
   host=$(apps_host)
   main=$(origin_host)
-  if [ -z "$mail" ] || [ -z "$cal" ]; then
+  if [[ -z "$mail" ]] || [[ -z "$cal" ]]; then
     printf 'only one of PUBLIC_MAIL_ORIGIN, PUBLIC_CALENDAR_ORIGIN is set'
     return
   fi
@@ -235,11 +235,11 @@ appurls_config_problems() {
     printf 'PUBLIC_MAIL_ORIGIN is not https://host'
     return
   }
-  [ "$cal" = "$mail:8443" ] || {
+  [[ "$cal" = "$mail:8443" ]] || {
     printf 'PUBLIC_CALENDAR_ORIGIN is not PUBLIC_MAIL_ORIGIN:8443'
     return
   }
-  [ "$host" != "$main" ] || printf 'the apps origins share PUBLIC_ORIGIN host %s (MC3: a separate hostname)' "$main"
+  [[ "$host" != "$main" ]] || printf 'the apps origins share PUBLIC_ORIGIN host %s (MC3: a separate hostname)' "$main"
 }
 
 # MC8: the osionos app image links to the configured origins and to no localhost.
@@ -250,19 +250,19 @@ check_appurls() {
     return
   }
   problems=$(appurls_config_problems)
-  if [ -n "$problems" ]; then
+  if [[ -n "$problems" ]]; then
     fail appurls "$problems"
     return
   fi
   for app in mail calendar; do
     origin=$(app_origin "$app")
     hits=$(origin_hits "$APP_IMAGE" "$origin" || true)
-    [[ "$hits" =~ ^[0-9]+$ ]] && [ "$hits" -gt 0 ] || bad+=" $origin(${hits:-unscannable})"
+    [[ "$hits" =~ ^[0-9]+$ ]] && [[ "$hits" -gt 0 ]] || bad+=" $origin(${hits:-unscannable})"
   done
   links=$(bundle_links "$APP_IMAGE" | head -n1 | tr -d '[:space:]' || true)
-  if [ -n "$bad" ]; then
+  if [[ -n "$bad" ]]; then
     fail appurls "$APP_IMAGE does not contain the origin:$bad"
-  elif [ "$links" != 0 ]; then
+  elif [[ "$links" != 0 ]]; then
     fail appurls "$APP_IMAGE has ${links:-an unreadable count of} file(s) linking to localhost"
   else pass appurls "$APP_IMAGE contains $(app_origin mail) and $(app_origin calendar), no localhost"; fi
 }
@@ -272,16 +272,16 @@ check_appurls() {
 check_tls2() {
   local ports
   ports=$(funnel_ports tsa || true)
-  if [ -n "$ports" ]; then
+  if [[ -n "$ports" ]]; then
     tls_probe "$(apps_host)" "$ports" tls2
-  elif [ "$1" = apps ] || apps_configured; then
+  elif [[ "$1" = apps ]] || apps_configured; then
     fail tls2 "apps node has no open port: no certificate to check"
   else skip tls2 "apps node has no open port and no origin is set"; fi
 }
 
 # $1: pre | full   $2: the verify scope
 check_apps() {
-  if [ "$1" != pre ]; then
+  if [[ "$1" != pre ]]; then
     check_exposure2 "$2"
     check_tls2 "$2"
   fi
