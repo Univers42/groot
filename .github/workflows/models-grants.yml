@@ -13,6 +13,7 @@ on:
       - "scripts/verify/models-grants/**"
       - "scripts/verify/publish-cascade*"
       - "scripts/verify/publish-cascade/**"
+      - "scripts/verify/member-attributes.sh"
       - "scripts/verify/account-export-lock-race.sh"
       - "utils/mk/baas.mk"
       - ".github/workflows/models-grants.yml"
@@ -25,6 +26,7 @@ on:
       - "scripts/verify/models-grants/**"
       - "scripts/verify/publish-cascade*"
       - "scripts/verify/publish-cascade/**"
+      - "scripts/verify/member-attributes.sh"
       - "scripts/verify/account-export-lock-race.sh"
       - "utils/mk/baas.mk"
       - ".github/workflows/models-grants.yml"
@@ -65,3 +67,14 @@ jobs:
       - uses: actions/checkout@v7
       - name: Verify the publish cascade on a throwaway database
         run: sh scripts/verify/publish-cascade.sh
+
+  member-attributes:
+    # C643/C645: attribute rows are service_role-only, die with the membership and
+    # never sit on a guest. Public images only, like publish-cascade.
+    name: member attributes are member-scoped and service_role-only
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify the member attributes table on a throwaway database
+        run: bash scripts/verify/member-attributes.sh
