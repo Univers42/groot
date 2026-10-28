@@ -27,18 +27,18 @@ check_appenv() {
   local svc c names bad="" unread="" n=0
   for svc in mail-web calendar-web; do
     c=$(svc_container "$svc")
-    [ -n "$c" ] || {
+    [[ -n "$c" ]] || {
       apps_absent appenv "$svc is not running" || true
       return
     }
-    if ! names=$(container_env_names "$c") || [ -z "$names" ]; then
+    if ! names=$(container_env_names "$c") || [[ -z "$names" ]]; then
       unread+=" $svc"
       continue
     fi
     n=$((n + $(grep -c . <<<"$names" || true)))
     bad+=$(grep -E "$APPS_FORBIDDEN_ENV" <<<"$names" | sed "s/^/ $svc:/" | paste -sd' ' - || true)
   done
-  if [ -n "$unread" ]; then
+  if [[ -n "$unread" ]]; then
     fail appenv "environment unreadable or empty for:$unread (docker inspect)"
     return
   fi
@@ -58,10 +58,10 @@ appshape_problems() {
     return
   }
   read -r ro mem nets mounts <<<"$shape"
-  [ "$ro" = ro=true ] || bad+=" rootfs-writable"
+  [[ "$ro" = ro=true ]] || bad+=" rootfs-writable"
   mem=${mem#mem=}
-  { [[ "$mem" =~ ^[0-9]+$ ]] && [ "$mem" -ge 1 ] && [ "$mem" -le "$APPS_STATIC_MEMORY_MAX" ]; } || bad+=" memory-not-in-1..$APPS_STATIC_MEMORY_MAX"
-  [ "$nets" = "nets=$net," ] || bad+=" network-not-only-$net"
+  { [[ "$mem" =~ ^[0-9]+$ ]] && [[ "$mem" -ge 1 ]] && [[ "$mem" -le "$APPS_STATIC_MEMORY_MAX" ]]; } || bad+=" memory-not-in-1..$APPS_STATIC_MEMORY_MAX"
+  [[ "$nets" = "nets=$net," ]] || bad+=" network-not-only-$net"
   [[ "$mounts" =~ ^mounts=(tmpfs,)*$ ]] || bad+=" mounts-not-tmpfs-only"
   printf '%s' "${bad# }"
 }
@@ -72,12 +72,12 @@ check_appshape() {
   local svc c problems bad=""
   for svc in mail-web calendar-web; do
     c=$(svc_container "$svc")
-    [ -n "$c" ] || {
+    [[ -n "$c" ]] || {
       apps_absent appshape "$svc is not running" || true
       return
     }
     problems=$(appshape_problems "$c")
-    [ -z "$problems" ] || bad+=" $svc:$problems;"
+    [[ -z "$problems" ]] || bad+=" $svc:$problems;"
   done
   expect appshape "mail-web and calendar-web: read-only rootfs, memory <= 64 MiB, only ${PROJECT}_apps-static-net, tmpfs mounts only" "not the locked-down shape:$bad" [ -z "$bad" ]
 }
