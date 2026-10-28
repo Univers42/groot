@@ -96,7 +96,8 @@ SELECT 'ai_write_fn_exec',
 -- IN-list reports every type missing (a false FAIL, never a false pass).
 SELECT 'notify_types_missing', count(*), coalesce(string_agg(t, ' ' ORDER BY t), '')
   FROM unnest(ARRAY['mention','dm','reply','reaction','connection','system','feed_reaction',
-                    'feed_comment','feed_share','task_due','page_comment']) AS t
+                    'feed_comment','feed_share','task_due','page_comment',
+                    'page_access_request','page_access_decision']) AS t
  WHERE NOT EXISTS (SELECT 1 FROM pg_constraint
                     WHERE conname = 'osionos_notifications_type_check'
                       AND pg_get_constraintdef(oid) LIKE '%''' || t || '''%');
@@ -815,6 +816,94 @@ SELECT 'workspace_invites_behaviour',
      || ' after_revoke=' || coalesce(current_setting('osionos.check.wi_again', true), 'unset')
      || ' owner_role=' || coalesce(current_setting('osionos.check.wi_owner', true), 'unset')
      || ' live_decline=' || coalesce(current_setting('osionos.check.wi_decline', true), 'unset');
+ROLLBACK;
+
+-- page_access_requests_shape: the access-request table (models/osionos-page-access-requests-
+-- migration.sql, devil Plan A N13). Asserts forced RLS and the pending-only unique index, then
+-- behaviour: a second PENDING request for one (page, person) is refused with 23505, a new one is
+-- allowed once the first is declined, a 281-char note and an 'approved' row with no decided_at
+-- are refused with 23514, and deleting the page deletes its requests (a page delete is a hard
+-- delete; a request must not hold it up).
+-- Caveat: the predicate is compared as pg_get_indexdef text, so a harmless reformat by a new
+-- Postgres major reads as a violation (noisy, never silent); fixtures roll back.
+SELECT 'page_access_requests_table',
+       CASE WHEN to_regclass('public.osionos_page_access_requests') IS NULL THEN 1
+            WHEN NOT (SELECT relrowsecurity AND relforcerowsecurity FROM pg_class
+                       WHERE oid = 'public.osionos_page_access_requests'::regclass) THEN 1
+            WHEN NOT EXISTS (
+              SELECT 1 FROM pg_indexes
+               WHERE schemaname = 'public' AND tablename = 'osionos_page_access_requests'
+                 AND indexname = 'osionos_page_access_requests_pending_idx'
+                 AND indexdef LIKE 'CREATE UNIQUE INDEX%(page_id, requester_id)%'
+                 AND indexdef LIKE '%WHERE (status = ''pending''::text)') THEN 1
+            ELSE 0 END,
+       'osionos_page_access_requests is missing, does not FORCE row level security, or its pending index changed';
+BEGIN;
+INSERT INTO public.osionos_workspaces (id, owner_id, name, slug)
+  VALUES ('e3e3e3e3-0000-4000-8000-000000000001', 'e3e3e3e3-0000-4000-8000-0000000000a1', 'pa1', 'pa-1');
+INSERT INTO public.osionos_pages (id, workspace_id, owner_id, title)
+  VALUES ('e3e3e3e3-0000-4000-8000-0000000000b1', 'e3e3e3e3-0000-4000-8000-000000000001',
+          'e3e3e3e3-0000-4000-8000-0000000000a1', 'pa1');
+DO $$
+DECLARE
+  v_second text := 'none';
+  v_again  text := 'none';
+  v_note   text := 'none';
+  v_decide text := 'none';
+  v_left   int;
+BEGIN
+  INSERT INTO public.osionos_page_access_requests (workspace_id, page_id, requester_id, note)
+    VALUES ('e3e3e3e3-0000-4000-8000-000000000001', 'e3e3e3e3-0000-4000-8000-0000000000b1',
+            'e3e3e3e3-0000-4000-8000-0000000000a2', 'please');
+  BEGIN
+    INSERT INTO public.osionos_page_access_requests (workspace_id, page_id, requester_id)
+      VALUES ('e3e3e3e3-0000-4000-8000-000000000001', 'e3e3e3e3-0000-4000-8000-0000000000b1',
+              'e3e3e3e3-0000-4000-8000-0000000000a2');
+    v_second := 'ok';
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_second = RETURNED_SQLSTATE;
+  END;
+  UPDATE public.osionos_page_access_requests SET status = 'declined', decided_at = now()
+   WHERE requester_id = 'e3e3e3e3-0000-4000-8000-0000000000a2';
+  BEGIN
+    INSERT INTO public.osionos_page_access_requests (workspace_id, page_id, requester_id)
+      VALUES ('e3e3e3e3-0000-4000-8000-000000000001', 'e3e3e3e3-0000-4000-8000-0000000000b1',
+              'e3e3e3e3-0000-4000-8000-0000000000a2');
+    v_again := 'ok';
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_again = RETURNED_SQLSTATE;
+  END;
+  BEGIN
+    INSERT INTO public.osionos_page_access_requests (workspace_id, page_id, requester_id, note)
+      VALUES ('e3e3e3e3-0000-4000-8000-000000000001', 'e3e3e3e3-0000-4000-8000-0000000000b1',
+              'e3e3e3e3-0000-4000-8000-0000000000a3', repeat('x', 281));
+    v_note := 'ok';
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_note = RETURNED_SQLSTATE;
+  END;
+  BEGIN
+    UPDATE public.osionos_page_access_requests SET status = 'approved'
+     WHERE requester_id = 'e3e3e3e3-0000-4000-8000-0000000000a2' AND status = 'pending';
+    v_decide := 'ok';
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_decide = RETURNED_SQLSTATE;
+  END;
+  DELETE FROM public.osionos_pages WHERE id = 'e3e3e3e3-0000-4000-8000-0000000000b1';
+  SELECT count(*) INTO v_left FROM public.osionos_page_access_requests
+   WHERE page_id = 'e3e3e3e3-0000-4000-8000-0000000000b1';
+  PERFORM set_config('osionos.check.pa_second', v_second, true);
+  PERFORM set_config('osionos.check.pa_again', v_again, true);
+  PERFORM set_config('osionos.check.pa_note', v_note, true);
+  PERFORM set_config('osionos.check.pa_decide', v_decide, true);
+  PERFORM set_config('osionos.check.pa_left', v_left::text, true);
+END $$;
+SELECT 'page_access_requests_behaviour',
+       (CASE WHEN current_setting('osionos.check.pa_second', true) = '23505' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.pa_again', true) = 'ok' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.pa_note', true) = '23514' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.pa_decide', true) = '23514' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.pa_left', true) = '0' THEN 0 ELSE 1 END),
+       'second_pending=' || coalesce(current_setting('osionos.check.pa_second', true), 'unset')
+     || ' after_decline=' || coalesce(current_setting('osionos.check.pa_again', true), 'unset')
+     || ' long_note=' || coalesce(current_setting('osionos.check.pa_note', true), 'unset')
+     || ' undated_approve=' || coalesce(current_setting('osionos.check.pa_decide', true), 'unset')
+     || ' left_after_page_delete=' || coalesce(current_setting('osionos.check.pa_left', true), 'unset');
 ROLLBACK;
 
 -- teams_shape: the team tables (models/osionos-teams-migration.sql). Asserts both tables FORCE
