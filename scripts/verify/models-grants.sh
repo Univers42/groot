@@ -43,6 +43,10 @@
 #   forced RLS, its partial unique index has the exact live predicate, a second live invite is
 #   refused (23505), one is allowed after a revoke, role 'owner' is refused (23514), and a
 #   declined_at on a live row is refused (23514)
+#   pa1/pa2 the page access requests (osionos-page-access-requests-migration.sql): forced RLS and
+#   the pending-only unique index; a second pending request is refused (23505), one is allowed
+#   after a decline, a 281-char note and an undated approval are refused (23514), and a page
+#   delete removes its requests
 #   tm1/tm2/tm3 the team tables (osionos-teams-migration.sql): both exist with forced RLS, the
 #   (workspace_id, team_id) read index exists, a team member who is not a workspace member is
 #   refused (23503), a duplicate name (23505) and a bad role (23514) too, and removing the
@@ -675,6 +679,8 @@ run_checks() {
 	check_count "$1" wi1 workspace_invites_table
 	check_count "$1" wi2 workspace_invites_live_index
 	check_count "$1" wi3 workspace_invites_behaviour
+	check_count "$1" pa1 page_access_requests_table
+	check_count "$1" pa2 page_access_requests_behaviour
 	check_count "$1" tm1 teams_tables
 	check_count "$1" tm2 teams_workspace_index
 	check_count "$1" tm3 teams_behaviour
