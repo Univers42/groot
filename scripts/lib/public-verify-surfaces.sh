@@ -26,13 +26,13 @@ check_ide_mode() {
 check_ide_access() {
   local bridge ide
   bridge=$(svc_container osionos-bridge)
-  [ -n "$bridge" ] || {
+  [[ -n "$bridge" ]] || {
     fail ide-access "osionos-bridge is not running"
     return
   }
   check_ide_mode osionos-bridge "$bridge"
   ide=$(svc_container osionos-ide-server || true)
-  if [ -n "$ide" ]; then
+  if [[ -n "$ide" ]]; then
     check_ide_mode osionos-ide-server "$ide"
   else pass ide-access "no osionos-ide-server runs in this project"; fi
 }
@@ -51,7 +51,7 @@ check_bundle_links() {
   count=$(head -n1 <<<"$out" | tr -d '[:space:]')
   if ! [[ "$count" =~ ^[0-9]+$ ]]; then
     fail bundle-links "could not be scanned in $APP_IMAGE"
-  elif [ "$count" = 0 ]; then
+  elif [[ "$count" = 0 ]]; then
     pass bundle-links "0 files in $APP_IMAGE link to localhost"
   else
     ports=$(tail -n +2 <<<"$out" | paste -sd' ' -)
