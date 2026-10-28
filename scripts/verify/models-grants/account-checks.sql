@@ -2180,7 +2180,7 @@ DECLARE
   s text := CASE WHEN p_col = 'set_by' THEN p_val ELSE quote_literal(gen_random_uuid()::text) || '::uuid' END;
 BEGIN
   PERFORM pg_temp.p5_insert('osionos_workspace_members', 'workspace_id', w, 1, 'user_id', u);
-  EXECUTE format('INSERT INTO public.osionos_member_attributes (workspace_id, user_id, key, value, set_by) VALUES (%s, %s, %L, %L, %s)',
+  EXECUTE format('INSERT INTO public.osionos_member_attributes (workspace_id, user_id, name, value, set_by) VALUES (%s, %s, %L, %L, %s)',
                  w, u, 'p5', 'v', s);
 END
 $$;
