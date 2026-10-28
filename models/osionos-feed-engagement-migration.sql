@@ -71,7 +71,7 @@ BEGIN
     ALTER TABLE public.osionos_notifications ADD CONSTRAINT osionos_notifications_type_check
       CHECK (type IN ('mention','dm','reply','reaction','connection','system',
                       'feed_reaction','feed_comment','feed_share','task_due',
-                      'page_comment'));
+                      'page_comment','page_access_request','page_access_decision'));
   END IF;
 END $$;
 
