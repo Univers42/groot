@@ -99,6 +99,21 @@ link-autostart-off: ## Remove the link-autostart units (the link stays open)
 ## The link itself stays open until make link-down.
 	@bash scripts/grobase-link-autostart.sh remove
 
+publish-socket: ## Local socket to the VM's Kong for the bridge's realtime publishes (opt-in)
+## Usage: make publish-socket HOST_KEY_FILE=<file with the VM's ssh host public key line>
+## Installs the systemd user unit (scripts/osionos-publish-socket.sh) that forwards
+## $XDG_STATE_HOME/osionos-publish/sock/kong.sock over ssh -L to the data center VM's Kong
+## (127.0.0.1:8000), so the osionos bridge's co-edit publishes skip the tailnet hop (~10 ms
+## p50) at 0.43 ms p50. HOST_KEY_FILE holds the host key line the operator obtained over a
+## trusted step (never ssh-keyscan, never accept-new); install prints the socket dir, the
+## value OSIONOS_PUBLISH_SOCKET_DIR takes. Undo: make publish-socket-off.
+## Run OSIONOS_PUBLISH_SOCKET=1 OSIONOS_PUBLISH_SOCKET_DIR=<dir> make public-up next so the bridge picks the socket up.
+	@HOST_KEY_FILE='$(HOST_KEY_FILE)' bash scripts/osionos-publish-socket.sh install
+
+publish-socket-off: ## Remove the publish-socket unit (the pinned host key stays)
+## The bridge falls back to the tailnet route until publish-socket runs again.
+	@bash scripts/osionos-publish-socket.sh remove
+
 # What `make all` does with models-migrate, driven over the link: groot's models/*.sql land
 # in the postgres of the grobase the frontends talk to (2026-10-09: 7 osionos tables were
 # missing in the VM's grobase because nothing had ever run it there). Idempotent; slow over
