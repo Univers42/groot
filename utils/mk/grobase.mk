@@ -8,7 +8,9 @@
 # list has one definition. Its wasm artifact is a build INPUT for drawnosaurus-web, which is
 # why frontends-up takes drawnosaurus-wasm as a prerequisite below and not as a step inside
 # the recipe: `up -d --build` would otherwise build the web image against a missing pkg/.
-ROOT_FRONTENDS := osionos-bridge osionos-app auth-gateway opposite-osiris-web local-https-proxy livekit $(DRAWNOSAURUS_SERVICES)
+# hydrawn-web (the whiteboard that replaces it, hydrawn.mk) is listed literally: hydrawn.mk
+# sorts after this file, so HYDRAWN_SERVICES is not yet defined here. Same wasm rule.
+ROOT_FRONTENDS := osionos-bridge osionos-app auth-gateway opposite-osiris-web local-https-proxy livekit $(DRAWNOSAURUS_SERVICES) hydrawn-web
 
 # The ROOT_FRONTENDS images this repo builds that also have a published Docker Hub tag.
 # `frontends-up PULL_PREBUILT=1` pulls these tags instead of building; an *_IMAGE already
@@ -152,7 +154,7 @@ apply-models-baseline: ## Mark every current models/*.sql as applied WITHOUT run
 ## applied WITHOUT running it.
 	@sh scripts/apply-models.sh baseline
 
-frontends-up: submodules-pinned certs drawnosaurus-wasm ## Build and start only the root frontends against the running backend
+frontends-up: submodules-pinned certs drawnosaurus-wasm hydrawn-wasm ## Build and start only the root frontends against the running backend
 ## Usage: make frontends-up [PULL_PREBUILT=1]
 ## Build and start ONLY the root frontends against the running grobase backend. Also resurrects the
 ## IDE plane containers (runner / sandbox socket-proxy) — but ONLY when ./.env.local records them as

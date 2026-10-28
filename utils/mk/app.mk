@@ -40,6 +40,8 @@ healthcheck: certs ## Probe the backend, website, osionos app, bridge and auth g
 		echo "[healthcheck] expected drawnosaurus /v1/boards to return 200, got HTTP $$boards_status" >&2; \
 		exit 1; \
 	fi
+# hydrawn is a static page; 200 on / means nginx in hydrawn-web answers through this proxy.
+	$(CURL_HEALTH) $(HYDRAWN_URL)/ >/dev/null
 
 showcase: ## Print every local URL the running stack exposes (last step of make all)
 ## Recap every local URL the RUNNING stack exposes — click to open. Last step of `make all`. (Only

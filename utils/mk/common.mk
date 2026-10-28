@@ -104,6 +104,7 @@ OSIONOS_URL := https://localhost:$(if $(OSIONOS_APP_HOST_PORT),$(OSIONOS_APP_HOS
 BRIDGE_URL := https://localhost:$(if $(OSIONOS_BRIDGE_HOST_PORT),$(OSIONOS_BRIDGE_HOST_PORT),4000)
 AUTH_URL := https://localhost:$(if $(AUTH_GATEWAY_HOST_PORT),$(AUTH_GATEWAY_HOST_PORT),8787)/api/auth
 DRAWNOSAURUS_URL := https://localhost:$(if $(DRAWNOSAURUS_HOST_PORT),$(DRAWNOSAURUS_HOST_PORT),3007)
+HYDRAWN_URL := https://localhost:$(if $(HYDRAWN_HOST_PORT),$(HYDRAWN_HOST_PORT),3008)
 # grobase's scripts/ops/resolve-ports.sh moves Kong to the next FREE host port when 8000 is
 # already taken (an old stack still shutting down is enough), so a hardcoded 8000 fails the
 # health gate against a backend that is perfectly healthy — measured: Kong published on 8001
