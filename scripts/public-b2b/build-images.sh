@@ -27,13 +27,13 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 # shellcheck source=../lib/envfile.sh
 . "$root/scripts/lib/envfile.sh"
 
-[ $# -eq 1 ] || fail "usage: build-images.sh <opposite-osiris-worktree>"
+[[ $# -eq 1 ]] || fail "usage: build-images.sh <opposite-osiris-worktree>"
 oo=$(cd "$1" && pwd)
 build_env=${PUBLIC_BUILD_ENV_FILE:-$root/.env.public-b2b}
 
 git -C "$oo" rev-parse --verify -q HEAD >/dev/null || fail "$oo is not a git worktree"
-[ -f "$oo/docker/services/web/Dockerfile" ] || fail "$oo is not an opposite-osiris tree"
-[ -z "$(git -C "$oo" status --porcelain)" ] || fail "$oo has uncommitted changes: commit them, the tag names a commit"
+[[ -f "$oo/docker/services/web/Dockerfile" ]] || fail "$oo is not an opposite-osiris tree"
+[[ -z "$(git -C "$oo" status --porcelain)" ]] || fail "$oo has uncommitted changes: commit them, the tag names a commit"
 sha=$(git -C "$oo" rev-parse --short=12 HEAD)
 
 anon_key=$(get_env "$build_env" PUBLIC_BAAS_ANON_KEY) || fail "PUBLIC_BAAS_ANON_KEY missing in $build_env"
@@ -87,9 +87,9 @@ js_anon=$(count_in "$anon_key" '*.js')
 echo "  html files with $PUBLIC_HOST:$FUNNEL_PORT: $html_funnel (want >= 1)"
 echo "  js files with https://localhost:4322: $js_localhost (want 0); index.html with it: $index_localhost (want 0)"
 echo "  js files with the anon key: $js_anon (want >= 1)"
-[ "$html_funnel" -ge 1 ] || fail "no page contains $PUBLIC_HOST:$FUNNEL_PORT"
-if [ "$js_localhost" -ne 0 ] || [ "$index_localhost" -ne 0 ]; then fail "the bundle still contains https://localhost:4322"; fi
-[ "$js_anon" -ge 1 ] || fail "the anon key is not in the bundle"
+[[ "$html_funnel" -ge 1 ]] || fail "no page contains $PUBLIC_HOST:$FUNNEL_PORT"
+if [[ "$js_localhost" -ne 0 ]] || [[ "$index_localhost" -ne 0 ]]; then fail "the bundle still contains https://localhost:4322"; fi
+[[ "$js_anon" -ge 1 ]] || fail "the anon key is not in the bundle"
 echo "  info: js files with the literal http://localhost:4322 (portal.ts redirect allowlist, hard-coded): $(count_in "http://localhost:4322" '*.js')"
 echo "  info: files that still name localhost:4322 (robots.txt Sitemap line, docs pages): $(count_in "localhost:4322" '*')"
 
