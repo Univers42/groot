@@ -51,10 +51,6 @@ fixture_dockerfile() {
   assert_none_dropped opposite-osiris-web
 }
 
-@test "drawnosaurus-web: its Dockerfile hands every compose build arg to the build" {
-  assert_none_dropped drawnosaurus-web
-}
-
 @test "hydrawn-web: its Dockerfile hands every compose build arg to the build" {
   assert_none_dropped hydrawn-web
 }

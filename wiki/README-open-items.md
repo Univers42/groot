@@ -20,7 +20,7 @@ named in the first column, then delete the row.
 
 | README section | Item | Context |
 |---|---|---|
-| Prerequisites | Switch submodule URLs to HTTPS, or keep SSH? | `.gitmodules` uses `git@github.com:` for every submodule except `apps/drawnosaurus`. The README now states an SSH key is required; an evaluator without one fails at the clone. |
+| Prerequisites | Switch submodule URLs to HTTPS, or keep SSH? | `.gitmodules` uses `git@github.com:` for every submodule except `apps/hydrawn` and the other HTTPS ones. The README now states an SSH key is required; an evaluator without one fails at the clone. |
 | Instructions | What does a fresh local account see? | The old README said demo data is tied to the team's keys and invisible to a new account. `live-data-ensure` (`utils/mk/baas.mk`, target `live-data-ensure`) now re-stamps seeded demo rows onto the new owner, so that may no longer hold. Verify on a clean clone, then describe it (the "Local mode starts empty" limitation was removed as unproven). |
 | Access | LiveKit plain `ws://` on `0.0.0.0` inside a NAT VM | Kong `:8000` is literal loopback (grobase `orchestrators/compose/base/gateway.yml:51`). LiveKit `:7880` uses `TRACK_BINOCLE_BIND_ADDR`, which is `0.0.0.0` in a QEMU/VirtualBox NAT VM (`infrastructure/scripts/detect-bind-addr.sh`). Decide whether that counts as an external plaintext connection under the subject's HTTPS rule. |
 | Prerequisites | Disk figure from a clean build | The README's 30 GB comes from `docker system df` on the dev VM with the stack running (2026-10-01), not from a clean build. Re-measure after a clean clone if the number matters. |
@@ -49,7 +49,7 @@ named in the first column, then delete the row.
 |---|---|---|
 | Features List | **Legal pages still carry placeholders** — rejection criterion | opposite-osiris `src/data/legal.ts:17-18` (pinned `85815cd7`): data-controller name and address end in "(placeholder)". Replace with real content. |
 | Features List | "Who" for every feature | Removed from the table because no file records it. Fill from the history, not from memory. The subject requires it. |
-| Features List | Click through every feature in Chrome with the console open | None of the rows is marked verified. `make e2e` covers only the Whiteboard paths and Mail/Calendar opening. |
+| Features List | Click through every feature in Chrome with the console open | None of the rows is marked verified. `make e2e` runs the specs in `tests/e2e/specs`; none exercises the Whiteboard since drawnosaurus was retired. |
 | Modules | "Who" for every module | Same as features. |
 | Modules | Reach 14 demonstrable points | Only rows 1–4 and 13–14 (10 pts) work in the default stack. Raise the B flags, build the C screens, delete the rows the team will not defend. |
 | Modules | Candidate: HashiCorp Vault (Cybersecurity, major) | Does grobase's `VaultProvider` talk to HashiCorp Vault (migration `060`)? Our own secrets use vault42. `wiki/STATUS.md` open check #10. |

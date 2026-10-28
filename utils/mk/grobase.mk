@@ -3,14 +3,12 @@
 # Frontends the root pipeline owns. The backend (postgres/gotrue/kong/postgrest/...)
 # is the running apps/grobase stack and must NOT be re-upped from here.
 #
-# $(DRAWNOSAURUS_SERVICES) is the Whiteboard plane, default-on since T12-P1b. Referenced
-# rather than repeated — drawnosaurus.mk is included first (Makefile:45 before :49), so the
-# list has one definition. Its wasm artifact is a build INPUT for drawnosaurus-web, which is
-# why frontends-up takes drawnosaurus-wasm as a prerequisite below and not as a step inside
-# the recipe: `up -d --build` would otherwise build the web image against a missing pkg/.
-# hydrawn-web (the whiteboard that replaces it, hydrawn.mk) is listed literally: hydrawn.mk
-# sorts after this file, so HYDRAWN_SERVICES is not yet defined here. Same wasm rule.
-ROOT_FRONTENDS := osionos-bridge osionos-app auth-gateway opposite-osiris-web local-https-proxy livekit $(DRAWNOSAURUS_SERVICES) hydrawn-web
+# hydrawn-web is the Whiteboard plane. It is listed literally: hydrawn.mk sorts after this
+# file, so HYDRAWN_SERVICES is not yet defined here. Its wasm artifact is a build INPUT for
+# hydrawn-web, which is why frontends-up takes hydrawn-wasm as a prerequisite below and not
+# as a step inside the recipe: `up -d --build` would otherwise build the web image against a
+# missing pkg/.
+ROOT_FRONTENDS := osionos-bridge osionos-app auth-gateway opposite-osiris-web local-https-proxy livekit hydrawn-web
 
 # The ROOT_FRONTENDS images this repo builds that also have a published Docker Hub tag.
 # `frontends-up PULL_PREBUILT=1` pulls these tags instead of building; an *_IMAGE already
@@ -154,7 +152,7 @@ apply-models-baseline: ## Mark every current models/*.sql as applied WITHOUT run
 ## applied WITHOUT running it.
 	@sh scripts/apply-models.sh baseline
 
-frontends-up: submodules-pinned certs drawnosaurus-wasm hydrawn-wasm ## Build and start only the root frontends against the running backend
+frontends-up: submodules-pinned certs hydrawn-wasm ## Build and start only the root frontends against the running backend
 ## Usage: make frontends-up [PULL_PREBUILT=1]
 ## Build and start ONLY the root frontends against the running grobase backend. Also resurrects the
 ## IDE plane containers (runner / sandbox socket-proxy) — but ONLY when ./.env.local records them as

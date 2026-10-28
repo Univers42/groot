@@ -92,18 +92,4 @@ are the only sensor that exists, and why a vacuous pass is worse than a failure.
 
 ---
 
-## 7 · The whiteboard's CORS rule fences reads, not writes
-
-The :3007 front door (`infrastructure/tls/nginx.conf`) answers CORS for `https://localhost:3001`
-only, so no other origin can read a drawnosaurus response. It does not stop another page from
-*sending* one: a `text/plain` or form POST needs no preflight, and nginx forwards it to an API
-that has no per-user auth. Whether drawnosaurus accepts such a body is not verified. What keeps
-writes to the host is the loopback-only publish, the Host guard against DNS rebinding, the method
-allowlist (no DELETE) and the pinned empty `X-Owner-Id`. Requiring `application/json` at the edge
-would force the preflight, but drawnosaurus's own same-origin page has not been audited for the
-content types it sends, so it is not done.
-→ `tests/drawnosaurus-edge/cors.bats`
-
----
-
 See also: [02-proofs](02-proofs.md) · [DEFENSE.md](../DEFENSE.md)

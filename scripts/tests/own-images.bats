@@ -28,7 +28,7 @@ FAKE
 }
 
 frontends_up() {
-  make -s -C "$REPO" -o certs -o drawnosaurus-wasm frontends-up \
+  make -s -C "$REPO" -o certs -o hydrawn-wasm frontends-up \
     COMPOSE_HEALTHY_SERVICES= COMPOSE_RUNNING_SERVICES= COMPOSE_COMPLETED_SERVICES= "$@"
 }
 

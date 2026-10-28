@@ -48,13 +48,13 @@ CTL_CFG_DIR     ?= $(HOME)/.config/42ctl
 # because `foreach --recursive` still descends into a submodule whose command exited 0.
 PIN_SUBMODULES := $(CURDIR)/scripts/pin-submodules.sh
 # Nested submodules whose PARENT asserts the commit it records, so syncro must not follow their
-# branch: drawnosaurus-assert-engine refuses any other engine commit, and CI run 39082685726
+# branch: hydrawn-assert-engine refuses any other engine commit, and CI run 39082685726
 # failed on it after syncro moved engine from the pinned 2b8adaa to origin/main dd453b5 (which
 # contains it, so the never-rewind rule allowed the move). Every parent carrying vendor/scripts
 # records the scripts commit it was verified against; following scripts main shows the parent as
 # modified (measured 2026-10-18 on a fresh clone: osionos/app and monkey-bot `M vendor/scripts`),
 # and syncro skips a modified submodule from then on. Space separated, one per path.
-PARENT_PINNED ?= apps/drawnosaurus/engine apps/hydrawn/engine apps/grobase/vendor/scripts \
+PARENT_PINNED ?= apps/hydrawn/engine apps/grobase/vendor/scripts \
 	apps/osionos/app/vendor/scripts apps/osionos/app/src/shared/notion-database-sys/vendor/scripts \
 	vendor/monkey-bot/vendor/scripts
 SKIP_IF_PINNED = for p in $$PINNED; do case "$$displaypath/" in "$$p"/*) exit 0 ;; esac; done;

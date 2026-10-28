@@ -1,19 +1,20 @@
 # hydrawn — the osionos whiteboard (apps/hydrawn), one static service: hydrawn-web.
 #
 # Its boards are not here: hydrawn's osionos build saves through the osionos bridge into
-# grobase Mongo, so there is no API, database or relay to start. What it shares with
-# drawnosaurus is the build shape — a nested `engine` submodule (Univers42/draw-engine)
-# compiled to engine/pkg by a profile-gated wasm container, and an image that only checks
-# that pkg EXISTS. A stale engine builds clean and is silently wrong, so the SHA assert
-# runs before the wasm step, never after.
+# grobase Mongo, so there is no API, database or relay to start. The build shape is a
+# nested `engine` submodule (Univers42/draw-engine) compiled to engine/pkg by a
+# profile-gated wasm container, and an image that only checks that pkg EXISTS. A stale
+# engine builds clean and is silently wrong, so the SHA assert runs before the wasm
+# step, never after.
 
 HYDRAWN_DIR := apps/hydrawn
 HYDRAWN_SERVICES := hydrawn-web
-# Same measurement and reason as DRAWNOSAURUS_CARGO_JOBS: predictability on a many-core host.
+# Cap for predictability on a many-core host: measured cold on a 6-core / 8 GB VM
+# (2026-09-28), 3 jobs = 62s vs 60s uncapped; ~900 MB of the peak is the fixed rustc/LLVM set.
 HYDRAWN_CARGO_JOBS ?= 4
 HYDRAWN_ENGINE_SHA = $(shell git -C $(HYDRAWN_DIR) ls-tree HEAD engine | awk '{print $$3}')
 # Rootful daemon: run as the invoking user so engine/pkg is not root-owned on the bind
-# mount. Rootless: the container's root already is that user (see DRAWNOSAURUS_RUN_USER).
+# mount. Rootless: the container's root already is that user, where --user fails with "cannot setuid to unmapped uid" (DOCKER_ROOTLESS, common.mk).
 HYDRAWN_RUN_USER = $(if $(DOCKER_ROOTLESS),,--user $(shell id -u):$(shell id -g))
 
 ##@ Apps
