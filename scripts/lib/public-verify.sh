@@ -51,17 +51,17 @@ origin_host() {
   printf '%s' "${o%%[:/]*}"
 }
 
-is_int_between() { [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -ge "$2" ] && [ "$1" -le "$3" ]; }
+is_int_between() { [[ "$1" =~ ^[0-9]+$ ]] && [[ "$1" -ge "$2" ]] && [[ "$1" -le "$3" ]]; }
 
 check_node_name() {
   local host have
   host=$(origin_host)
-  [ -n "$host" ] || {
+  [[ -n "$host" ]] || {
     fail node-name "PUBLIC_ORIGIN is not an https://host origin in .env.public"
     return
   }
   have=$(node_dns ts || true)
-  if [ "$have" = "$host." ]; then
+  if [[ "$have" = "$host." ]]; then
     pass node-name "this node is $have"
   else fail node-name "node DNS name is '${have:-unreadable}', PUBLIC_ORIGIN wants '$host.'"; fi
 }
@@ -79,11 +79,11 @@ check_exposure() {
     all) want=443,8443,10000 ;;
     *) want="" ;;
   esac
-  if [ -n "$want" ]; then
+  if [[ -n "$want" ]]; then
     expect exposure "funnel ports: $have" "funnel ports '${have:-none}', expected exactly $want" [ "$have" = "$want" ]
-  elif [ -z "$have" ]; then
+  elif [[ -z "$have" ]]; then
     skip exposure "funnel closed: nothing is exposed"
-  elif [ "$have" = 443 ] || [ "$have" = 443,8443,10000 ]; then
+  elif [[ "$have" = 443 ]] || [[ "$have" = 443,8443,10000 ]]; then
     pass exposure "funnel ports: $have"
   else fail exposure "funnel ports '$have', expected 443 alone or 443,8443,10000"; fi
 }
@@ -99,13 +99,13 @@ scan_secret() {
   local key=$1 file=$2 value=$3 image hits bad=0
   for image in "$APP_IMAGE" "$WEB_IMAGE"; do
     hits=$(V="$value" bundle_hits "$image" || true)
-    if [ "$hits" = 0 ]; then continue; fi
+    if [[ "$hits" = 0 ]]; then continue; fi
     bad=1
-    if [ -n "$hits" ]; then
+    if [[ -n "$hits" ]]; then
       fail bundle-secret "$key (from ${file##*/}) found in $hits file(s) of $image"
     else fail bundle-secret "$key (from ${file##*/}) could not be scanned in $image"; fi
   done
-  [ "$bad" = 1 ] || pass bundle-secret "$key (from ${file##*/}): 0 files in $APP_IMAGE and $WEB_IMAGE"
+  [[ "$bad" = 1 ]] || pass bundle-secret "$key (from ${file##*/}): 0 files in $APP_IMAGE and $WEB_IMAGE"
 }
 
 check_bundle_secrets() {
@@ -114,13 +114,13 @@ check_bundle_secrets() {
     found=0
     for file in "$LOCAL_ENV" "$REMOTE_ENV" "$ENV_FILE"; do
       value=$(get_env "$file" "$key" || true)
-      [ -n "$value" ] || continue
+      [[ -n "$value" ]] || continue
       case "$seen" in *$'\n'"$key=$value"$'\n'*) continue ;; esac
       seen+="$key=$value"$'\n'
       found=1
       scan_secret "$key" "$file" "$value"
     done
-    [ "$found" = 1 ] || skip bundle-secret "$key is unset in every env file: nothing to look for"
+    [[ "$found" = 1 ]] || skip bundle-secret "$key is unset in every env file: nothing to look for"
   done
 }
 
@@ -129,7 +129,7 @@ container_env() { docker exec "$1" printenv "$2" 2>/dev/null || true; }
 check_bridge_env() {
   local c key have want
   c=$(svc_container osionos-bridge)
-  [ -n "$c" ] || {
+  [[ -n "$c" ]] || {
     fail bridge-env "osionos-bridge is not running"
     return
   }
@@ -138,7 +138,7 @@ check_bridge_env() {
   done
   want=$(penv OSIONOS_ADMIN_EMAILS || true)
   have=$(container_env "$c" OSIONOS_ADMIN_EMAILS)
-  if [ -n "$want" ] && [ "$have" = "$want" ]; then
+  if [[ -n "$want" ]] && [[ "$have" = "$want" ]]; then
     pass bridge-env "OSIONOS_ADMIN_EMAILS equals .env.public"
   else fail bridge-env "OSIONOS_ADMIN_EMAILS differs from .env.public (or is empty there)"; fi
   want="$(penv PUBLIC_ORIGIN || true):8443"
@@ -153,7 +153,7 @@ list_overlap() {
   local a b
   a=$(list_entries "$1")
   b=$(list_entries "$2")
-  if [ -n "$a" ] && [ -n "$b" ]; then grep -Fxf <(printf '%s\n' "$b") <<<"$a" || true; fi
+  if [[ -n "$a" ]] && [[ -n "$b" ]]; then grep -Fxf <(printf '%s\n' "$b") <<<"$a" || true; fi
 }
 
 # An address list, not a secret: printed as a value. An exempt account is never mailed, so an
@@ -168,7 +168,7 @@ check_verification_exempt() {
 check_gateway_env() {
   local c hops logs
   c=$(svc_container auth-gateway)
-  [ -n "$c" ] || {
+  [[ -n "$c" ]] || {
     fail gateway-env "auth-gateway is not running"
     return
   }
@@ -178,7 +178,7 @@ check_gateway_env() {
   check_verification_exempt "$c"
   hops=$(penv AUTH_TRUSTED_PROXY_HOPS || true)
   logs=$(docker logs "$c" 2>&1 || true)
-  if [ -z "$hops" ]; then
+  if [[ -z "$hops" ]]; then
     fail gateway-env "AUTH_TRUSTED_PROXY_HOPS is unset in .env.public"
   elif grep -qF "trusted proxy hops: $hops)" <<<"$logs"; then
     pass gateway-env "boot log: trusted proxy hops: $hops"
@@ -224,7 +224,7 @@ tls_probe() {
 
 check_env_file() {
   local mode
-  if [ ! -f "$ENV_FILE" ]; then
+  if [[ ! -f "$ENV_FILE" ]]; then
     fail env-file ".env.public is missing (make public-env)"
     return
   fi
@@ -235,10 +235,10 @@ check_env_file() {
 
 check_env_values() {
   local bad="" v
-  [ -n "$(origin_host)" ] && [[ "$(penv PUBLIC_ORIGIN)" =~ ^https://[A-Za-z0-9.-]+$ ]] || bad+=" PUBLIC_ORIGIN"
+  [[ -n "$(origin_host)" ]] && [[ "$(penv PUBLIC_ORIGIN)" =~ ^https://[A-Za-z0-9.-]+$ ]] || bad+=" PUBLIC_ORIGIN"
   v=$(penv AUTH_LINK_SIGNING_KEY || true)
-  [ "${#v}" -ge 32 ] || bad+=" AUTH_LINK_SIGNING_KEY(<32 chars)"
-  [ -n "$(penv OSIONOS_ADMIN_EMAILS || true)" ] || bad+=" OSIONOS_ADMIN_EMAILS(empty: write emails or none)"
+  [[ "${#v}" -ge 32 ]] || bad+=" AUTH_LINK_SIGNING_KEY(<32 chars)"
+  [[ -n "$(penv OSIONOS_ADMIN_EMAILS || true)" ]] || bad+=" OSIONOS_ADMIN_EMAILS(empty: write emails or none)"
   is_int_between "$(penv AUTH_MAIL_DAILY_CAP || echo 50)" 1 50 || bad+=" AUTH_MAIL_DAILY_CAP(1-50)"
   is_int_between "$(penv AUTH_REGISTER_RATE_LIMIT_PER_HOUR || echo 10)" 1 10 || bad+=" AUTH_REGISTER_RATE_LIMIT_PER_HOUR(1-10)"
   v=$(penv AUTH_TRUSTED_PROXY_HOPS || true)
@@ -252,7 +252,7 @@ run_verify() {
   check_env_file
   check_env_values
   check_node_name
-  [ "$1" = pre ] || {
+  [[ "$1" = pre ]] || {
     check_exposure "${2:-}"
     check_tls
   }
@@ -265,5 +265,5 @@ run_verify() {
   check_edge
   check_apps "$1" "${2:-}"
   printf 'verify (%s): %d pass, %d fail, %d skip\n' "$1" "$V_PASS" "$V_FAIL" "$V_SKIP"
-  [ "$V_FAIL" -eq 0 ]
+  [[ "$V_FAIL" -eq 0 ]]
 }
