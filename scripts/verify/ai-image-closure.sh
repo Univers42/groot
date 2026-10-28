@@ -15,13 +15,13 @@
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 usage() { echo "Usage: $(basename "$0") <osionos-app-dir> [dockerfile]" >&2; exit 2; }
-[ "$#" -ge 1 ] || usage
+[[ "$#" -ge 1 ]] || usage
 APPDIR="$(realpath -m "$1")"
 SRCDIR="$APPDIR/services/osionos-ai/src"
 SCRIPTSDIR="$(realpath -m "$APPDIR/scripts")"
 DOCKERFILE="${2:-$REPO/infrastructure/docker/osionos/ai.Dockerfile}"
-[ -d "$SRCDIR" ] || usage
-[ -f "$DOCKERFILE" ] || usage
+[[ -d "$SRCDIR" ]] || usage
+[[ -f "$DOCKERFILE" ]] || usage
 
 # The specifiers of one file — from '…', from "…", import '…', import "…",
 # import('…'), import("…") — the text between the quotes, relative ones only.
@@ -39,17 +39,17 @@ push_specs() {
 		resolved="$(realpath -m "$(dirname "$source")/$spec")"
 		case "$resolved" in
 		"$SCRIPTSDIR"/*)
-			if [ -f "$resolved" ]; then WORKLIST+=("$resolved"); fi
+			if [[ -f "$resolved" ]]; then WORKLIST+=("$resolved"); fi
 			;;
 		esac
 	done < <(specs_of "$source")
 }
 
 while IFS= read -r source; do push_specs "$source"; done < <(find "$SRCDIR" -type f -name '*.ts' | sort)
-while [ "${#WORKLIST[@]}" -gt 0 ]; do
+while [[ "${#WORKLIST[@]}" -gt 0 ]]; do
 	file="${WORKLIST[0]}"
 	WORKLIST=("${WORKLIST[@]:1}")
-	if [ -n "${VISITED[$file]:-}" ]; then continue; fi
+	if [[ -n "${VISITED[$file]:-}" ]]; then continue; fi
 	VISITED["$file"]=1
 	push_specs "$file"
 done
@@ -63,6 +63,6 @@ for name in "${NAMES[@]}"; do
 	else echo "MISSING $name"; missing=$((missing + 1)); fi
 done
 
-if [ "$missing" -eq 0 ]; then echo "PASS"; exit 0; fi
+if [[ "$missing" -eq 0 ]]; then echo "PASS"; exit 0; fi
 echo "FAIL: $missing script(s) imported by the AI service are not copied into its image"
 exit 1

@@ -55,10 +55,10 @@ backend_state() { tsa status --json 2>/dev/null | jq -r '.BackendState // empty'
 
 read_key() {
   local key
-  if [ -t 0 ]; then
+  if [[ -t 0 ]]; then
     read -rsp "auth key (single-use, tagged, pre-approved, not ephemeral): " key >&2 && echo >&2
   else IFS= read -r key || true; fi
-  [ -n "$key" ] || return 1
+  [[ -n "$key" ]] || return 1
   printf '%s' "$key"
 }
 
@@ -78,7 +78,7 @@ join_tailnet() {
 
 # Where the daemon's output goes: nowhere unless PUBLIC_APPS_LOG=1.
 daemon_log() {
-  if [ "${PUBLIC_APPS_LOG:-}" = 1 ]; then printf '%s/tailscaled.log' "$1"; else printf /dev/null; fi
+  if [[ "${PUBLIC_APPS_LOG:-}" = 1 ]]; then printf '%s/tailscaled.log' "$1"; else printf /dev/null; fi
 }
 
 # Waits (50 x 0.2 s) for a BackendState other than NoState/Starting/unreadable and prints it; a
@@ -143,7 +143,7 @@ cmd_start() {
 # True when $1 is a tailscaled started with this node's --socket (not, say, the main node's).
 is_our_daemon() {
   [[ "$1" =~ ^[0-9]+$ ]] || return 1
-  [ "$(cat "/proc/$1/comm" 2>/dev/null || true)" = tailscaled ] || return 1
+  [[ "$(cat "/proc/$1/comm" 2>/dev/null || true)" = tailscaled ]] || return 1
   tr '\0' '\n' <"/proc/$1/cmdline" 2>/dev/null | grep -qxF -- "--socket=$(apps_node_socket)"
 }
 
@@ -160,10 +160,10 @@ reset_funnel_before_stop() {
 stop_daemon() {
   local pidfile pid rc=0
   pidfile="$(apps_node_dir)/tailscaled.pid"
-  [ -f "$pidfile" ] || return 1
+  [[ -f "$pidfile" ]] || return 1
   pid=$(cat "$pidfile")
   if is_our_daemon "$pid"; then
-    if [ "${1:-}" = reset ]; then reset_funnel_before_stop || rc=1; fi
+    if [[ "${1:-}" = reset ]]; then reset_funnel_before_stop || rc=1; fi
     kill "$pid"
     note "stopped tailscaled $pid"
   else note "pid $pid is not a running tailscaled of ours (socket $(apps_node_socket))"; fi
@@ -172,7 +172,7 @@ stop_daemon() {
 }
 
 cmd_stop() {
-  [ -f "$(apps_node_dir)/tailscaled.pid" ] || die "no pidfile $(apps_node_dir)/tailscaled.pid: nothing of ours to stop"
+  [[ -f "$(apps_node_dir)/tailscaled.pid" ]] || die "no pidfile $(apps_node_dir)/tailscaled.pid: nothing of ours to stop"
   stop_daemon reset
 }
 
@@ -184,8 +184,8 @@ unit_dir() { printf '%s/systemd/user' "${XDG_CONFIG_HOME:-$HOME/.config}"; }
 cmd_autostart() {
   local groot
   groot=$(cd "$SELF/.." && pwd)
-  [ -x "$TAILSCALED_BIN" ] || die "no tailscaled at $TAILSCALED_BIN: set TAILSCALED_BIN"
-  [ -x "${TAILSCALE_BIN:-$HOME/.local/bin/tailscale}" ] || die "no tailscale at ${TAILSCALE_BIN:-$HOME/.local/bin/tailscale}: set TAILSCALE_BIN"
+  [[ -x "$TAILSCALED_BIN" ]] || die "no tailscaled at $TAILSCALED_BIN: set TAILSCALED_BIN"
+  [[ -x "${TAILSCALE_BIN:-$HOME/.local/bin/tailscale}" ]] || die "no tailscale at ${TAILSCALE_BIN:-$HOME/.local/bin/tailscale}: set TAILSCALE_BIN"
   install -d "$(unit_dir)"
   sed -e "s|@GROOT@|$groot|g" -e "s|@NODE@|$(apps_node_name)|g" -e "s|@STATE_DIR@|$(apps_node_dir)|g" \
     -e "s|@TAILSCALED_BIN@|$TAILSCALED_BIN|g" -e "s|@TAILSCALE_BIN@|${TAILSCALE_BIN:-$HOME/.local/bin/tailscale}|g" \
@@ -201,7 +201,7 @@ cmd_autostart() {
     fi
     systemctl --user start "$UNIT" || die "$UNIT did not start: journalctl --user -u $UNIT"
   fi
-  [ "$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null || true)" = yes ] ||
+  [[ "$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null || true)" = yes ]] ||
     note "linger is off: the node starts at login, not at boot (loginctl enable-linger $(id -un))"
   note "$UNIT installed and running"
 }

@@ -211,7 +211,7 @@ publish_env() {
   fi
   # Kept-alive pool: a workspace open after 40 s idle 488 -> 313 ms median (2026-10-18, 8
   # workspaces, interleaved); measured on the direct link only, so ssh/local never turn it on.
-  if [ "$1" = direct ] || get_env "$2" OSIONOS_BAAS_KEEPALIVE >/dev/null; then
+  if [[ "$1" = direct ]] || get_env "$2" OSIONOS_BAAS_KEEPALIVE >/dev/null; then
     put_env "$2" OSIONOS_BAAS_KEEPALIVE "$keepalive"
   fi
 }

@@ -30,7 +30,7 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 put_env() {
 	local tmp
 	tmp=$(mktemp "$DIR/.env.XXXXXX")
-	[ ! -f "$FILE" ] || cat "$FILE" >"$tmp"
+	[[ ! -f "$FILE" ]] || cat "$FILE" >"$tmp"
 	ENVFILE_KEY=$1 ENVFILE_VAL=$2 awk '
 BEGIN { k = ENVIRON["ENVFILE_KEY"]; v = ENVIRON["ENVFILE_VAL"] }
 {
@@ -45,7 +45,7 @@ END { if (!seen) print k "=" v }' "$tmp" >"$tmp.new"
 }
 
 get_env() {
-	[ -f "$FILE" ] || return 0
+	[[ -f "$FILE" ]] || return 0
 	sed -n "s/^$1=//p" "$FILE" | tail -1
 }
 
@@ -62,42 +62,42 @@ refuse_unsafe() {
 prompt() {
 	local name=$1 hidden=$2 current answer
 	current=$(get_env "$name")
-	if [ -n "$current" ]; then
+	if [[ -n "$current" ]]; then
 		printf '%s is set; Enter keeps it, or type a new value: ' "$name" >&2
 	else
 		printf '%s: ' "$name" >&2
 	fi
-	if [ "$hidden" = secret ]; then
+	if [[ "$hidden" = secret ]]; then
 		read -r -s answer <&3
 		echo >&2
 	else
 		read -r answer <&3
 	fi
 	answer=${answer:-$current}
-	[ -n "$answer" ] || fail "$name is required"
+	[[ -n "$answer" ]] || fail "$name is required"
 	refuse_unsafe "$name" "$answer"
 	put_env "$name" "$answer"
 }
 
-[ -r "$SRC" ] || fail "cannot read $SRC"
-[ -d "$DIR" ] || sudo install -d -o "$(id -un)" -g "$(id -gn)" -m 700 "$DIR"
-[ -f "$FILE" ] || install -m 600 /dev/null "$FILE"
+[[ -r "$SRC" ]] || fail "cannot read $SRC"
+[[ -d "$DIR" ]] || sudo install -d -o "$(id -un)" -g "$(id -gn)" -m 700 "$DIR"
+[[ -f "$FILE" ]] || install -m 600 /dev/null "$FILE"
 ! grep -q '^AUTH_DEMO_INSECURE=' "$FILE" || fail "AUTH_DEMO_INSECURE is in $FILE: remove it (PUB-8)"
 
 service_key=$(source_value SERVICE_ROLE_KEY)
 anon_key=$(source_value ANON_KEY)
-[ -n "$service_key" ] || fail "SERVICE_ROLE_KEY is empty in $SRC"
-[ -n "$anon_key" ] || fail "ANON_KEY is empty in $SRC"
+[[ -n "$service_key" ]] || fail "SERVICE_ROLE_KEY is empty in $SRC"
+[[ -n "$anon_key" ]] || fail "ANON_KEY is empty in $SRC"
 put_env SERVICE_ROLE_KEY "$service_key"
 put_env PUBLIC_BAAS_ANON_KEY "$anon_key"
 unset service_key anon_key
 
-[ -n "$(get_env AUTH_LINK_SIGNING_KEY)" ] || put_env AUTH_LINK_SIGNING_KEY "$(head -c 48 /dev/urandom | base64 -w0)"
+[[ -n "$(get_env AUTH_LINK_SIGNING_KEY)" ]] || put_env AUTH_LINK_SIGNING_KEY "$(head -c 48 /dev/urandom | base64 -w0)"
 prompt TURNSTILE_SECRET_KEY secret
 prompt AUTH_SIGNUP_ALLOWLIST visible
 
 echo "$FILE mode $(stat -c %a "$FILE") (want 600)"
-[ "$(stat -c %a "$FILE")" = 600 ] || fail "mode is not 600"
+[[ "$(stat -c %a "$FILE")" = 600 ]] || fail "mode is not 600"
 for name in SERVICE_ROLE_KEY PUBLIC_BAAS_ANON_KEY AUTH_LINK_SIGNING_KEY TURNSTILE_SECRET_KEY AUTH_SIGNUP_ALLOWLIST; do
-	if [ -n "$(get_env "$name")" ]; then echo "  $name set"; else echo "  $name UNSET"; fi
+	if [[ -n "$(get_env "$name")" ]]; then echo "  $name set"; else echo "  $name UNSET"; fi
 done

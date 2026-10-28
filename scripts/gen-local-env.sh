@@ -62,9 +62,9 @@ note() { printf '[gen-local-env] %s\n' "$1" >&2; }
 
 # The host port the osionos app is published on. The environment wins (make exports it);
 # .env.ports is the record scripts/host-ports.sh wrote. 3001 is the fallback.
-if [ -z "${OSIONOS_APP_HOST_PORT:-}" ]; then
+if [[ -z "${OSIONOS_APP_HOST_PORT:-}" ]]; then
   PORTS_FILE="${HOST_PORTS_FILE:-$REPO/.env.ports}"
-  if [ -f "$PORTS_FILE" ]; then
+  if [[ -f "$PORTS_FILE" ]]; then
     OSIONOS_APP_HOST_PORT="$(get_env "$PORTS_FILE" OSIONOS_APP_HOST_PORT || true)"
   fi
 fi
@@ -203,7 +203,7 @@ check_mode() {
 missing $key"; rc=1; done
   printf '%s\n' "$report" | sed 's/^/[gen-local-env]   /' >&2
   for key in $(media_differing); do note "  media $key differs from $MSRC (informational, exit status unchanged)"; done
-  if [ "$rc" -eq 0 ]; then note "in sync with $SRC (8 derived keys + 4 port-derived keys)."; else
+  if [[ "$rc" -eq 0 ]]; then note "in sync with $SRC (8 derived keys + 4 port-derived keys)."; else
     note "DRIFT — $(basename "$OUT") disagrees with $SRC. Fix: bash scripts/gen-local-env.sh --sync"
   fi
   exit "$rc"
