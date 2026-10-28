@@ -737,7 +737,8 @@ ROLLBACK;
 -- workspace_invites_shape: the pending-invite table (models/osionos-workspace-invites-migration.sql).
 -- Asserts the table, forced RLS, the partial unique index with its exact predicate, and then
 -- behaviour: a second LIVE invite for one (workspace, account) is refused with 23505, a new
--- one is allowed once the first is revoked, and the role CHECK refuses 'owner' with 23514.
+-- one is allowed once the first is revoked, the role CHECK refuses 'owner' with 23514, and a
+-- declined_at on a live row is refused with 23514 (a decline always revokes).
 -- Caveat: the predicate is compared as pg_get_indexdef text, so a harmless reformat by a new
 -- Postgres major reads as a violation (noisy, never silent); fixtures roll back.
 SELECT 'workspace_invites_table',
@@ -764,6 +765,7 @@ DECLARE
   v_second text := 'none';
   v_again  text := 'none';
   v_owner  text := 'none';
+  v_decline text := 'none';
 BEGIN
   INSERT INTO public.osionos_workspace_invites
     (id, workspace_id, email, invited_user_id, role, token_hash, expires_at, invited_by)
@@ -796,15 +798,23 @@ BEGIN
   END;
   PERFORM set_config('osionos.check.wi_second', v_second, true);
   PERFORM set_config('osionos.check.wi_again', v_again, true);
+  BEGIN
+    UPDATE public.osionos_workspace_invites SET declined_at = now()
+     WHERE token_hash = repeat('c', 64);
+  EXCEPTION WHEN others THEN GET STACKED DIAGNOSTICS v_decline = RETURNED_SQLSTATE;
+  END;
   PERFORM set_config('osionos.check.wi_owner', v_owner, true);
+  PERFORM set_config('osionos.check.wi_decline', v_decline, true);
 END $$;
 SELECT 'workspace_invites_behaviour',
        (CASE WHEN current_setting('osionos.check.wi_second', true) = '23505' THEN 0 ELSE 1 END)
      + (CASE WHEN current_setting('osionos.check.wi_again', true) = 'ok' THEN 0 ELSE 1 END)
-     + (CASE WHEN current_setting('osionos.check.wi_owner', true) = '23514' THEN 0 ELSE 1 END),
+     + (CASE WHEN current_setting('osionos.check.wi_owner', true) = '23514' THEN 0 ELSE 1 END)
+     + (CASE WHEN current_setting('osionos.check.wi_decline', true) = '23514' THEN 0 ELSE 1 END),
        'second_live=' || coalesce(current_setting('osionos.check.wi_second', true), 'unset')
      || ' after_revoke=' || coalesce(current_setting('osionos.check.wi_again', true), 'unset')
-     || ' owner_role=' || coalesce(current_setting('osionos.check.wi_owner', true), 'unset');
+     || ' owner_role=' || coalesce(current_setting('osionos.check.wi_owner', true), 'unset')
+     || ' live_decline=' || coalesce(current_setting('osionos.check.wi_decline', true), 'unset');
 ROLLBACK;
 
 -- teams_shape: the team tables (models/osionos-teams-migration.sql). Asserts both tables FORCE
