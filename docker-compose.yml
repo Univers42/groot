@@ -33,6 +33,9 @@ services:
       # auth, so it is the one vhost that must never leave the loopback. The cost is that
       # it is unreachable from another machine, which is intended in Phase 1.
       - "127.0.0.1:${DRAWNOSAURUS_HOST_PORT:-3007}:3007"
+      # hydrawn, the osionos whiteboard: a static page on an origin of its own (devil C592),
+      # so a hydrawn XSS never runs on the osionos origin. Loopback like drawnosaurus above.
+      - "127.0.0.1:${HYDRAWN_HOST_PORT:-3008}:3008"
       # TLS edge for the grobase BaaS gateway. 8444, not 8000 — mini-baas-kong already
       # publishes its own plain-HTTP listener on the host's 8000.
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${GROBASE_TLS_HOST_PORT:-8444}:8444"
@@ -83,6 +86,8 @@ services:
       OSIONOS_BRIDGE_PORT: 4000
       OSIONOS_APP_URL: ${OSIONOS_APP_URL:-https://localhost:3001}
       OSIONOS_ALLOWED_ORIGIN: ${OSIONOS_ALLOWED_ORIGIN:-https://localhost:3001}
+      # The hydrawn origin: the only one /api/whiteboard/* answers cross-origin (C598).
+      OSIONOS_WHITEBOARD_ORIGIN: ${OSIONOS_WHITEBOARD_ORIGIN:-https://localhost:3008}
       # Account administrators, comma-separated emails; empty = nobody. The bridge
       # ships without any administrator, so a deployment that wants one names it here.
       OSIONOS_ADMIN_EMAILS: ${OSIONOS_ADMIN_EMAILS:-}
@@ -291,7 +296,7 @@ services:
         # The Whiteboard (drawnosaurus). Baked at build like the two above; empty hides every
         # whiteboard entry point (osionos appUrls.ts, whiteboardAvailability.ts), and the
         # osio.whiteboard flag (default ON) is only a kill-switch: ?osio.whiteboard=0.
-        VITE_WHITEBOARD_APP_URL: https://localhost:${DRAWNOSAURUS_HOST_PORT:-3007}
+        VITE_WHITEBOARD_APP_URL: https://localhost:${HYDRAWN_HOST_PORT:-3008}
         # IDE server browser origin. Baked at build; empty = the IDE shows "not configured".
         VITE_OSIONOS_IDE_URL: ${VITE_OSIONOS_IDE_URL:-https://localhost:8446}
         VITE_REQUIRE_BRIDGE_SESSION: "true"
@@ -1840,8 +1845,40 @@ services:
       - ./apps/drawnosaurus/engine:/engine
       - drawnosaurus-cargo-home:/cargo-home
 
+  # hydrawn-web — the whiteboard osionos frames (apps/hydrawn, docker/osionos.Dockerfile).
+  # Static nginx only: no API, no database, no relay. Boards are saved by the osionos
+  # bridge (/api/whiteboard/*) into grobase Mongo, so this service holds no state and
+  # needs no isolated network. Both origins are baked: hydrawn trusts exactly that parent
+  # for its token, and the image's CSP names the same two (frame-ancestors = the osionos
+  # origin, C594/C595).
+  hydrawn-web:
+    build:
+      context: ./apps/hydrawn
+      dockerfile: docker/osionos.Dockerfile
+      args:
+        HYDRAWN_PARENT_ORIGIN: https://localhost:${OSIONOS_APP_HOST_PORT:-3001}
+        HYDRAWN_API_URL: https://localhost:${OSIONOS_BRIDGE_HOST_PORT:-4000}/api/whiteboard
+        BUILD_APP_SHA: ${HYDRAWN_APP_SHA:-unknown}
+        BUILD_ENGINE_SHA: ${HYDRAWN_ENGINE_SHA:-unknown}
+    expose:
+      - "8080"
+    restart: unless-stopped
+    mem_limit: 64m
+
+  # Build-only, like drawnosaurus-wasm and for the same reasons: produces
+  # apps/hydrawn/engine/pkg on a bind mount, reached only by `make hydrawn-wasm`.
+  hydrawn-wasm:
+    profiles: [hydrawn]
+    build:
+      context: ./apps/hydrawn
+      dockerfile: docker/wasm.Dockerfile
+    volumes:
+      - ./apps/hydrawn/engine:/engine
+      - hydrawn-cargo-home:/cargo-home
+
 volumes:
   osionos-ide-ledger:
+  hydrawn-cargo-home:
   drawnosaurus-mongo-data:
   drawnosaurus-cargo-home:
   osionos-app-node-modules:

@@ -55,6 +55,10 @@ fixture_dockerfile() {
   assert_none_dropped drawnosaurus-web
 }
 
+@test "hydrawn-web: its Dockerfile hands every compose build arg to the build" {
+  assert_none_dropped hydrawn-web
+}
+
 @test "mail-web and calendar-web: their Dockerfiles hand every public build arg to the build" {
   assert_none_dropped mail-web
   assert_none_dropped calendar-web

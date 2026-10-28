@@ -44,3 +44,7 @@
 	path = apps/graph_render
 	url = https://github.com/Univers42/graph_render.git
 	update = none
+[submodule "apps/hydrawn"]
+	path = apps/hydrawn
+	url = https://github.com/Univers42/hydrawn
+	branch = main

@@ -52,7 +52,7 @@ ARG VITE_MAIL_APP_URL=https://localhost:3002
 ARG VITE_CALENDAR_APP_URL=https://localhost:3003
 # Since osionos 2e24e1e8 a production build has no fallback whiteboard URL, and an empty one
 # hides every whiteboard entry point; the public overlay passes "" on purpose.
-ARG VITE_WHITEBOARD_APP_URL=https://localhost:3007
+ARG VITE_WHITEBOARD_APP_URL=https://localhost:3008
 ARG VITE_REQUIRE_BRIDGE_SESSION=true
 ARG VITE_ALLOW_OFFLINE_MODE=false
 ARG VITE_PAGE_ACTION_SYNC_ENABLED=true

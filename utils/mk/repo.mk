@@ -54,7 +54,7 @@ PIN_SUBMODULES := $(CURDIR)/scripts/pin-submodules.sh
 # records the scripts commit it was verified against; following scripts main shows the parent as
 # modified (measured 2026-10-18 on a fresh clone: osionos/app and monkey-bot `M vendor/scripts`),
 # and syncro skips a modified submodule from then on. Space separated, one per path.
-PARENT_PINNED ?= apps/drawnosaurus/engine apps/grobase/vendor/scripts \
+PARENT_PINNED ?= apps/drawnosaurus/engine apps/hydrawn/engine apps/grobase/vendor/scripts \
 	apps/osionos/app/vendor/scripts apps/osionos/app/src/shared/notion-database-sys/vendor/scripts \
 	vendor/monkey-bot/vendor/scripts
 SKIP_IF_PINNED = for p in $$PINNED; do case "$$displaypath/" in "$$p"/*) exit 0 ;; esac; done;
