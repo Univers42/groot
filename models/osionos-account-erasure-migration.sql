@@ -336,6 +336,9 @@ INSERT INTO osionos_account_data_map_seed VALUES
 ('osionos_pages', 'owner_id', 'owner', 'transfer', '{id,workspace_id,title,visibility,content,properties,created_at,updated_at}', NULL, NULL, 'workspace_id', NULL),
 ('osionos_pages', 'collaborators', 'peer', 'scrub_jsonb', NULL, NULL, NULL, 'workspace_id', NULL),
 ('osionos_page_comments', 'author_id', 'author', 'anonymise', '{id,page_id,content,created_at}', NULL, NULL, NULL, NULL),
+-- an access request is the requester's (it goes with them); the owner who decided it is tombstoned
+('osionos_page_access_requests', 'requester_id', 'member', 'delete', NULL, NULL, NULL, NULL, NULL),
+('osionos_page_access_requests', 'decided_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
 ('osionos_page_favorites', 'user_id', 'owner', 'delete', '{page_id,created_at}', NULL, NULL, NULL, NULL),
 ('osionos_page_links', 'owner_id', 'owner', 'delete', NULL, NULL, NULL, NULL, NULL),
 ('osionos_page_action_events', 'user_id', 'author', 'delete', NULL, NULL, NULL, NULL, NULL),
