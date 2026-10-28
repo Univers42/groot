@@ -25,8 +25,16 @@ STUB
   UNITS=$XDG_CONFIG_HOME/systemd/user
   STATE=$XDG_STATE_HOME/osionos-publish
   UNIT=osionos-publish-socket.service
-  KEY=$BATS_TEST_TMPDIR/hostkey
-  printf 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeVMHostKeyPinnedOverATrustedStep vm-test\n' >"$KEY"
+  # a real key: install validates it with ssh-keygen -l
+  ssh-keygen -q -t ed25519 -N '' -C vm-test -f "$BATS_TEST_TMPDIR/hostkey"
+  KEY=$BATS_TEST_TMPDIR/hostkey.pub
+}
+
+refuses_install() { # every argument is an env assignment; the install must exit 2 and enable nothing
+  run env "$@" bash "$REPO/scripts/osionos-publish-socket.sh" install
+  [ "$status" -eq 2 ]
+  [ ! -e "$UNITS/$UNIT" ]
+  [ ! -e "$BATS_TEST_TMPDIR/calls" ]
 }
 
 @test "install renders the unit: every pinned ssh option, Kong on 8000, nothing from ~/.ssh/config" {
@@ -44,6 +52,7 @@ STUB
     "-i $HOME/.ssh/id_ed25519"
     '-o BatchMode=yes'
     '-o IdentitiesOnly=yes'
+    '-o IdentityAgent=none'
     '-o ControlMaster=no'
     '-o ControlPath=none'
     '-o ExitOnForwardFailure=yes'
@@ -53,6 +62,7 @@ STUB
     '-o ServerAliveCountMax=3'
     '-o StrictHostKeyChecking=yes'
     "-o UserKnownHostsFile=$STATE/known_hosts"
+    '-o GlobalKnownHostsFile=/dev/null'
     '-o HostKeyAlias=b2b-publish'
     "-L $STATE/sock/kong.sock:127.0.0.1:8000"
     "$(id -un)@127.0.0.1"
@@ -110,6 +120,22 @@ STUB
   [ ! -e "$BATS_TEST_TMPDIR/calls" ]
 }
 
+@test "a HOST_KEY_FILE with two keys, or a key ssh-keygen rejects, refuses with exit 2" {
+  ssh-keygen -q -t ed25519 -N '' -C other -f "$BATS_TEST_TMPDIR/other"
+  cat "$KEY" "$BATS_TEST_TMPDIR/other.pub" >"$BATS_TEST_TMPDIR/two"
+  refuses_install HOST_KEY_FILE="$BATS_TEST_TMPDIR/two"
+  printf 'ssh-ed25519 definitely-not-base64\n' >"$BATS_TEST_TMPDIR/bad"
+  refuses_install HOST_KEY_FILE="$BATS_TEST_TMPDIR/bad"
+}
+
+@test "a path or ssh user the unit cannot carry as one word refuses with exit 2" {
+  refuses_install HOST_KEY_FILE="$KEY" XDG_STATE_HOME="$BATS_TEST_TMPDIR/state with space"
+  refuses_install HOST_KEY_FILE="$KEY" XDG_STATE_HOME="$BATS_TEST_TMPDIR/state%n&x"
+  refuses_install HOST_KEY_FILE="$KEY" XDG_STATE_HOME="$BATS_TEST_TMPDIR/$(printf 'é%.0s' $(seq 1 30))"
+  refuses_install HOST_KEY_FILE="$KEY" PUBLISH_SSH_USER="victim -oProxyCommand=id victim"
+  refuses_install HOST_KEY_FILE="$KEY" PUBLISH_SSH_USER="-oProxyCommand=id"
+}
+
 @test "a socket path longer than 100 bytes refuses with exit 1 and enables nothing" {
   long=$BATS_TEST_TMPDIR/$(printf 'x%.0s' $(seq 1 130))
   XDG_STATE_HOME=$long HOST_KEY_FILE=$KEY run bash "$REPO/scripts/osionos-publish-socket.sh" install
@@ -125,6 +151,22 @@ STUB
   grep -qx 'systemctl --user disable --now osionos-publish-socket.service' "$BATS_TEST_TMPDIR/calls"
   [ ! -e "$UNITS/$UNIT" ]
   [ -f "$STATE/known_hosts" ]
+}
+
+@test "remove that cannot disable the unit fails and never reports off" {
+  HOST_KEY_FILE=$KEY run bash "$REPO/scripts/osionos-publish-socket.sh" install
+  [ "$status" -eq 0 ]
+  printf '#!/bin/sh\n[ "$2" != disable ] || exit 1\n' >"$STUBS/systemctl"
+  run bash "$REPO/scripts/osionos-publish-socket.sh" remove
+  [ "$status" -ne 0 ]
+  [[ "$output" != *off* ]]
+  [ -f "$UNITS/$UNIT" ]
+}
+
+@test "remove with no unit installed succeeds" {
+  run bash "$REPO/scripts/osionos-publish-socket.sh" remove
+  [ "$status" -eq 0 ]
+  run ! grep -q disable "$BATS_TEST_TMPDIR/calls"
 }
 
 @test "the unit restarts forever and comes up with the user session" {

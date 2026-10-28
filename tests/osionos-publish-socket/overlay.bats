@@ -35,7 +35,7 @@ print_compose_files() {
 }
 
 @test "S13: flag values other than exactly 1 leave the compose file list unchanged" {
-  for value in 0 yes; do
+  for value in 0 yes '0 1' '1 0' 'yes 1'; do
     OSIONOS_PUBLISH_SOCKET=$value run print_compose_files
     [ "$status" -eq 0 ]
     [ "$output" = "docker-compose.yml:docker-compose.grobase-link.yml:docker-compose.public.yml" ]
