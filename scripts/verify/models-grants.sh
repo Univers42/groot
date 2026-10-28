@@ -41,7 +41,8 @@
 #   osionos_pages and on osionos_tasks — exist with that shape
 #   wi1/wi2/wi3 the pending-invite table (osionos-workspace-invites-migration.sql): it exists with
 #   forced RLS, its partial unique index has the exact live predicate, a second live invite is
-#   refused (23505), one is allowed after a revoke, and role 'owner' is refused (23514)
+#   refused (23505), one is allowed after a revoke, role 'owner' is refused (23514), and a
+#   declined_at on a live row is refused (23514)
 #   tm1/tm2/tm3 the team tables (osionos-teams-migration.sql): both exist with forced RLS, the
 #   (workspace_id, team_id) read index exists, a team member who is not a workspace member is
 #   refused (23503), a duplicate name (23505) and a bad role (23514) too, and removing the
