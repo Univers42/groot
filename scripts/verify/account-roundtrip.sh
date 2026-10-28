@@ -124,11 +124,11 @@ step_edge() {
   BRIDGE="https://localhost:$BRIDGE_PORT"
   url="$SITE/api/auth/health"
   code=$(request GET "$url")
-  if [ "$code" = 404 ]; then
+  if [[ "$code" = 404 ]]; then
     url="$SITE/api/auth/availability"
     code=$(request GET "$url")
   fi
-  [ "$code" = 200 ] || fail edge "$url answers HTTP $code ($(said)): is the stack up? make link-frontends-up"
+  [[ "$code" = 200 ]] || fail edge "$url answers HTTP $code ($(said)): is the stack up? make link-frontends-up"
   url="$BRIDGE/api/auth/bridge/health"
   code=$(request GET "$url")
   [ "$code" = 200 ] || fail edge "$url answers HTTP $code ($(said)): is the stack up? make link-frontends-up"
@@ -140,7 +140,7 @@ step_edge() {
 step_availability() {
   local code
   code=$(request GET "$SITE/api/auth/availability?email=${EMAIL/@/%40}&username=$HANDLE")
-  if [ "$code" = 404 ]; then
+  if [[ "$code" = 404 ]]; then
     report SKIP availability "this gateway has no /api/auth/availability (prismatica main checks it inside register)"
     return 0
   fi
