@@ -74,7 +74,7 @@ else
 	fail "the image copies scripts/moderation-lists"
 fi
 
-if [ "$status" -ne 0 ]; then
+if [[ "$status" -ne 0 ]]; then
 	echo "FAIL: the gates of the image generation are not wired"
 	exit 1
 fi
