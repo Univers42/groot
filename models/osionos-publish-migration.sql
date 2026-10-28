@@ -31,7 +31,7 @@ NOTIFY pgrst, 'reload schema';
 --   - the page is archived             -> the snapshot is gone;
 --   - the page's owner_id changes      -> the snapshot is gone (an ownership
 --     transfer, or the erasure's transfer of a shared page to the workspace's
---     new owner, models/osionos-account-erasure-migration.sql:706-711);
+--     new owner, models/osionos-account-erasure-migration.sql, the shared-page transfer);
 --   - the page's workspace_id changes  -> the snapshot is gone (the owner may
 --     hold no members row in the new workspace);
 --   - the owner loses their members row in the page's workspace (deleted, or
@@ -39,7 +39,7 @@ NOTIFY pgrst, 'reload schema';
 --     the page (C557 ownerHoldsPage is "the caller is the page owner AND has a
 --     members row in the page's workspace"), so the snapshot is gone.
 -- The erasure of the owner itself already deletes the owner's published rows
--- through its data map (models/osionos-account-erasure-migration.sql:340); this
+-- through its data map (its osionos_published_pages row); this
 -- block does not duplicate that path, it only makes the transfer and the
 -- members delete safe on their own. Re-publishing after unarchive is the
 -- owner's explicit act, so unarchive removes nothing. A role change
@@ -74,8 +74,19 @@ NOTIFY pgrst, 'reload schema';
 -- without one. The members triggers delete on every row they match, so for a
 -- published page in a marketplace membership they are on the strict side: one
 -- re-publish call puts the snapshot back.
+--
+-- A staged workspace delete (pending_delete_at) also ends every hold in it; that
+-- trigger lives in osionos-workspace-publish-hold-migration.sql because the
+-- column is added by osionos-workspace-lifecycle-migration.sql, which sorts
+-- after this file.
 
 BEGIN;
+
+-- The runner re-applies this file on every run, and the DROP/CREATE TRIGGER
+-- pair below takes an exclusive lock on osionos_pages and
+-- osionos_workspace_members until COMMIT: fail fast behind a long transaction
+-- rather than stall every page read and write queued behind this one.
+SET LOCAL lock_timeout = '5s';
 
 -- The unhold trigger's owner look-up: the members delete below joins
 -- osionos_published_pages by owner_id.
@@ -134,6 +145,20 @@ EXECUTE FUNCTION public.osionos_published_member_left();
 -- Trigger functions are not callable APIs.
 REVOKE ALL ON FUNCTION public.osionos_published_page_unhold() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.osionos_published_member_left() FROM PUBLIC;
+
+-- The triggers see only changes made after they exist: a snapshot whose hold
+-- ended earlier (page archived, owner changed, owner out of the workspace)
+-- would stay public. Re-run every apply; a consistent table loses nothing.
+-- The marketplace workspace is exempt from the members test (no members row
+-- is its hold, see the Caveat above): a re-apply must not undo a re-publish.
+DELETE FROM public.osionos_published_pages pp
+ USING public.osionos_pages p
+ WHERE pp.page_id = p.id
+   AND (p.archived_at IS NOT NULL
+        OR p.owner_id IS DISTINCT FROM pp.owner_id
+        OR (p.workspace_id <> '5a4b1c2d-1111-4111-8111-000000000001'::uuid
+            AND NOT EXISTS (SELECT 1 FROM public.osionos_workspace_members m
+                             WHERE m.workspace_id = p.workspace_id AND m.user_id = pp.owner_id)));
 
 COMMIT;
 
