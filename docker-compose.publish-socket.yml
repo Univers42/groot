@@ -1,0 +1,19 @@
+# osionos-publish-socket: hands the host's ssh -L forward of the data center VM's Kong to
+# osionos-bridge. Co-edit publishes normally cross Tailscale (~10 ms p50; measured 2026-10-28
+# on live, 3x80 warm samples: p50 11.8 ms, p90 14.7 ms); the local unix socket measured
+# 0.43 ms p50. `make publish-socket` opens the forward and prints the host directory; public.mk
+# layers this file between docker-compose.grobase-link.yml and docker-compose.public.yml only
+# when OSIONOS_PUBLISH_SOCKET=1 and OSIONOS_PUBLISH_SOCKET_DIR names that directory.
+# The directory, never the socket file, is mounted read-only because ssh re-creates the socket
+# on every reconnect (StreamLocalBindUnlink) as a new inode, which a file bind would not follow.
+# Rootful Docker maps the bridge's node uid 1000 to the host socket owner, so the existing 0700
+# directory and 0600 socket stay unchanged. Only the bridge receives this mount.
+# Caveat: a missing socket falls back to REALTIME_PUBLISH_URL before anything is sent, but a hung
+# forward loses the one publish that hits the 300 ms timeout (never re-sent) before the 30 s
+# breaker routes over the URL; a VM rebuild needs `make publish-socket` again with the new host key.
+services:
+  osionos-bridge:
+    environment:
+      REALTIME_PUBLISH_SOCKET: /run/osionos-publish/kong.sock
+    volumes:
+      - ${OSIONOS_PUBLISH_SOCKET_DIR:?run make publish-socket; it prints the dir}:/run/osionos-publish:ro
