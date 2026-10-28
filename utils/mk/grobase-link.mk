@@ -99,7 +99,7 @@ link-autostart-off: ## Remove the link-autostart units (the link stays open)
 ## The link itself stays open until make link-down.
 	@bash scripts/grobase-link-autostart.sh remove
 
-publish-socket: ## Forward this host's socket to the VM's Kong for the bridge's co-edit publishes (opt-in)
+publish-socket: ## Local socket to the VM's Kong for the bridge's realtime publishes (opt-in)
 ## Usage: make publish-socket HOST_KEY_FILE=<file with the VM's ssh host public key line>
 ## Installs the systemd user unit (scripts/osionos-publish-socket.sh) that forwards
 ## $XDG_STATE_HOME/osionos-publish/sock/kong.sock over ssh -L to the data center VM's Kong

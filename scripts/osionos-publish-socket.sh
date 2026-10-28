@@ -26,7 +26,7 @@ unitdir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 identity=${PUBLISH_SSH_IDENTITY:-$HOME/.ssh/id_ed25519}
 ssh_user=${PUBLISH_SSH_USER:-$(id -un)}
 
-read_host_key() { # validate HOST_KEY_FILE (exit 2: unset, unreadable, wrong first field) and print "<type> <key>"
+read_host_key() { # validate HOST_KEY_FILE (exit 2: unset, unreadable, not exactly one valid key) and print "<type> <key>"
 	local keytype='' keydata='' _
 	[ -n "${HOST_KEY_FILE:-}" ] || {
 		echo "[publish-socket] HOST_KEY_FILE is unset: the VM's ssh host public key line has to be pinned by the operator, over a trusted step" >&2
@@ -36,7 +36,11 @@ read_host_key() { # validate HOST_KEY_FILE (exit 2: unset, unreadable, wrong fir
 		echo "[publish-socket] HOST_KEY_FILE=$HOST_KEY_FILE is not a readable file" >&2
 		exit 2
 	}
-	read -r keytype keydata _ <"$HOST_KEY_FILE" || true
+	if [ "$(grep -c '[^[:space:]]' "$HOST_KEY_FILE")" -ne 1 ]; then
+		echo "[publish-socket] HOST_KEY_FILE must hold exactly one host key line" >&2
+		exit 2
+	fi
+	read -r keytype keydata _ < <(grep '[^[:space:]]' "$HOST_KEY_FILE") || true
 	case $keytype in
 	ssh-ed25519 | ecdsa-sha2-nistp256 | ssh-rsa) ;;
 	*)
@@ -48,10 +52,31 @@ read_host_key() { # validate HOST_KEY_FILE (exit 2: unset, unreadable, wrong fir
 		echo "[publish-socket] HOST_KEY_FILE has a key type but no key" >&2
 		exit 2
 	}
+	ssh-keygen -l -f "$HOST_KEY_FILE" >/dev/null 2>&1 || {
+		echo "[publish-socket] HOST_KEY_FILE is not a valid public key (ssh-keygen -l refused it)" >&2
+		exit 2
+	}
 	printf '%s %s\n' "$keytype" "$keydata"
 }
 
-render_unit() { # substitute this machine's paths into the template (| never appears in them)
+# Everything rendered into ExecStart is one unquoted word: a space would split it, `%` is a systemd
+# specifier, `&` and `|` are sed metacharacters, a leading `-` would be an ssh option. Refusing them
+# is simpler than escaping for three parsers at once.
+require_plain() { # exit 2 unless every value is a plain absolute path / user name
+	local value
+	for value in "$identity" "$known_hosts" "$sockdir"; do
+		[[ $value =~ ^/[A-Za-z0-9._/@+-]+$ ]] || {
+			echo "[publish-socket] '$value' has a character the unit cannot carry (allowed: A-Z a-z 0-9 . _ / @ + -)" >&2
+			exit 2
+		}
+	done
+	[[ $ssh_user =~ ^[A-Za-z_][A-Za-z0-9._-]*$ ]] || {
+		echo "[publish-socket] PUBLISH_SSH_USER '$ssh_user' is not a plain user name" >&2
+		exit 2
+	}
+}
+
+render_unit() { # substitute this machine's paths into the template (require_plain ran first)
 	mkdir -p "$unitdir"
 	sed -e "s|@IDENTITY@|$identity|g" \
 		-e "s|@KNOWN_HOSTS@|$known_hosts|g" \
@@ -63,7 +88,9 @@ render_unit() { # substitute this machine's paths into the template (| never app
 install_unit() {
 	local pinned
 	pinned=$(read_host_key)
-	if [ "${#sock}" -gt 100 ]; then
+	require_plain
+	# bytes, not characters: a multibyte XDG_STATE_HOME is longer than ${#sock} says
+	if [ "$(printf %s "$sock" | wc -c)" -gt 100 ]; then
 		echo "[publish-socket] $sock is longer than 100 bytes: a unix socket path has to fit 108" >&2
 		exit 1
 	fi
@@ -82,7 +109,10 @@ install_unit() {
 }
 
 remove_unit() {
-	systemctl --user disable --now "$unit" >/dev/null 2>&1 || true # "not loaded" is fine here
+	# only an absent unit is skipped: any other disable/stop failure must not report "off"
+	if [ -e "$unitdir/$unit" ]; then
+		systemctl --user disable --now "$unit" >/dev/null
+	fi
 	rm -f "$unitdir/$unit"
 	systemctl --user daemon-reload
 	rm -f "$sock"

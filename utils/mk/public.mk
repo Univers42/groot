@@ -6,10 +6,13 @@
 # PUBLIC_COMPOSE_EXTRA: space-separated compose files layered between the link overlay and
 # docker-compose.public.yml (the public file stays last so its :public tags and bundle args win).
 PUBLIC_COMPOSE_EXTRA ?=
-# Only the exact opt-in adds the local publish path; every other value preserves today's files.
+# Only the exact value 1 adds the local publish path; every other value preserves today's files.
 # Its own variable, not += on PUBLIC_COMPOSE_EXTRA: a command-line PUBLIC_COMPOSE_EXTRA= would
 # override the += and silently drop the overlay.
-PUBLIC_PUBLISH_SOCKET_FILE = $(if $(filter 1,$(OSIONOS_PUBLISH_SOCKET)),docker-compose.publish-socket.yml)
+# ifeq, not $(filter): filter matches one word, so "0 1" would have switched it on.
+ifeq ($(OSIONOS_PUBLISH_SOCKET),1)
+PUBLIC_PUBLISH_SOCKET_FILE = docker-compose.publish-socket.yml
+endif
 PUBLIC_PORTS ?= 443
 PUBLIC_SCRIPT = bash scripts/public-funnel.sh
 PUBLIC_SERVICES = osionos-app opposite-osiris-web auth-gateway osionos-bridge local-https-proxy mail-web calendar-web

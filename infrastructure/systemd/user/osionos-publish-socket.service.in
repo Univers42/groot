@@ -4,7 +4,8 @@
 # through Kong on the data center VM; over Tailscale that hop measured ~10 ms p50, through this
 # local ssh -L forward 0.43 ms p50 (2026-10-27). The risk ruling (devil, 2026-10-27) allows it
 # under its conditions: the pinned batch-only ssh of this ExecStart (S1/S2; nothing is read from
-# ~/.ssh/config: -F none), the persistent 0700 state paths it renders with (S6/S7), and nothing
+# ~/.ssh/config: -F none, no agent: IdentityAgent=none, no global known_hosts: the pin is the only
+# trust), the persistent 0700 state paths it renders with (S6/S7), and nothing
 # but this template committed, never a rendered copy (S13).
 # Caveat: the forward carries only what reaches the socket; if the VM's sshd host key changes
 # (VM rebuilt) this unit refuses to connect (StrictHostKeyChecking=yes against the pinned
@@ -18,10 +19,10 @@ StartLimitIntervalSec=0
 [Service]
 ExecStart=/usr/bin/ssh \
 -F none -N -T -p 4242 -i @IDENTITY@ \
--o BatchMode=yes -o IdentitiesOnly=yes -o ControlMaster=no -o ControlPath=none \
+-o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o ControlMaster=no -o ControlPath=none \
 -o ExitOnForwardFailure=yes -o StreamLocalBindUnlink=yes -o StreamLocalBindMask=0177 \
 -o ServerAliveInterval=5 -o ServerAliveCountMax=3 \
--o StrictHostKeyChecking=yes -o UserKnownHostsFile=@KNOWN_HOSTS@ -o HostKeyAlias=b2b-publish \
+-o StrictHostKeyChecking=yes -o UserKnownHostsFile=@KNOWN_HOSTS@ -o GlobalKnownHostsFile=/dev/null -o HostKeyAlias=b2b-publish \
 -L @SOCKET_DIR@/kong.sock:127.0.0.1:8000 \
 @SSH_USER@@127.0.0.1
 Restart=always
