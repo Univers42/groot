@@ -107,5 +107,5 @@ scripts/demo/manifests/
 # scripts/demo/tests/pg-roundtrip.sh temp output (removed on exit; this covers a killed run)
 scripts/demo/tests/.roundtrip.*/
 
-# host-ports resolver override files (generated, not tracked)
-infrastructure/tls/host-ports.d/*.conf
+# Written by scripts/host-ports.sh before 2026-10-28; existing checkouts still hold one.
+infrastructure/tls/host-ports.d/

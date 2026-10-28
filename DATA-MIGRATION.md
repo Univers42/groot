@@ -209,7 +209,7 @@ two needed loading:
 | SQLite `osionos-restaurant` | was empty (`no such table`); **regenerated**, not restored, by `seed_sqlite` of `scripts/seed/osionos-extra-engines.sh`: 1045 rows | `secrets/sqlite-data.tar.gz` holds an empty 4 KB file |
 | MariaDB, CockroachDB | no user tables | no volume |
 
-The whiteboard boards stay in the local `drawnosaurus-mongo` by design: drawnosaurus runs on this machine, not in grobase (`wiki/runbooks/grobase-link.md`).
+Whiteboard boards live in grobase Mongo (`hydrawn_boards`, `hydrawn_thumbnails`, owner-scoped through the osionos bridge). Boards of the retired drawnosaurus service were local-only and were not migrated.
 
 Until 2026-10-11 the data center's data plane did not serve DynamoDB at all. It now does: the four
 `.env` values grobase documents for it, and the `:latest-dynamodb` router image. The `.env` before

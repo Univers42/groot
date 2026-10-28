@@ -11,7 +11,7 @@ setup() {
   REPO=$(cd "$BATS_TEST_DIRNAME/../.." && pwd)
   STUBS=$BATS_TEST_TMPDIR/bin
   ROOT=$BATS_TEST_TMPDIR/root
-  mkdir -p "$STUBS" "$ROOT" "$ROOT/infrastructure/tls/host-ports.d"
+  mkdir -p "$STUBS" "$ROOT/infrastructure/tls"
   # Copy the tracked nginx.conf so tests can verify it's not rewritten
   cp "$REPO/infrastructure/tls/nginx.conf" "$ROOT/infrastructure/tls/nginx.conf"
   cat >"$ROOT/docker-compose.yml" <<'COMPOSE'
@@ -55,11 +55,6 @@ our_containers() {
 # port NAME — the value recorded for NAME in .env.ports.
 port() {
   sed -n "s/^$1=//p" "$ROOT/.env.ports"
-}
-
-# override_port NAME — the value recorded for NAME in host-ports.d/osionos-origin.conf.
-override_port() {
-  sed -n "s/.*localhost:\([0-9]*\);/\1/p" "$ROOT/infrastructure/tls/host-ports.d/osionos-origin.conf"
 }
 
 @test "list prints every scraped NAME=default, sorted and unique" {
@@ -151,17 +146,15 @@ COMPOSE
   [ -n "$output" ]
 }
 
-@test "invalid environment ports fail before either generated file changes" {
+@test "invalid environment ports fail before .env.ports changes" {
   run bash "$REPO/scripts/host-ports.sh" resolve
   [ "$status" -eq 0 ]
   cp "$ROOT/.env.ports" "$BATS_TEST_TMPDIR/ports.before"
-  cp "$ROOT/infrastructure/tls/host-ports.d/osionos-origin.conf" "$BATS_TEST_TMPDIR/origin.before"
   for value in 0 65536 -1 1.5 abc '3001;bad' $'3001\nINJECTED=1' 999999999999999999999; do
     OSIONOS_APP_HOST_PORT="$value" run bash "$REPO/scripts/host-ports.sh" resolve
     [ "$status" -eq 2 ]
     [[ "$output" == *"OSIONOS_APP_HOST_PORT must be an integer port from 1 through 65535"* ]]
     cmp -s "$ROOT/.env.ports" "$BATS_TEST_TMPDIR/ports.before"
-    cmp -s "$ROOT/infrastructure/tls/host-ports.d/osionos-origin.conf" "$BATS_TEST_TMPDIR/origin.before"
   done
 }
 
@@ -170,7 +163,6 @@ COMPOSE
     OSIONOS_APP_HOST_PORT="$value" run bash "$REPO/scripts/host-ports.sh" resolve
     [ "$status" -eq 0 ]
     [ "$(port OSIONOS_APP_HOST_PORT)" -eq "$((10#$value))" ]
-    [ "$(override_port OSIONOS_APP_HOST_PORT)" -eq "$((10#$value))" ]
   done
 }
 
@@ -215,7 +207,7 @@ COMPOSE
 
 # ── New tests for the fix ── #
 
-@test "a moved OSIONOS_APP_HOST_PORT writes the override file with that port, and nginx.conf is byte-identical before and after resolve" {
+@test "a moved OSIONOS_APP_HOST_PORT is recorded, and nginx.conf is byte-identical before and after resolve" {
   # First, copy the tracked nginx.conf to a temp location for comparison
   cp "$ROOT/infrastructure/tls/nginx.conf" "$BATS_TEST_TMPDIR/nginx.conf.before"
 
@@ -224,22 +216,9 @@ COMPOSE
   run bash "$REPO/scripts/host-ports.sh" resolve
   [ "$status" -eq 0 ]
   [ "$(port OSIONOS_APP_HOST_PORT)" = "3002" ]
-  [ "$(override_port OSIONOS_APP_HOST_PORT)" = "3002" ]
 
   # nginx.conf should be unchanged (tracked file never rewritten)
   cmp -s "$ROOT/infrastructure/tls/nginx.conf" "$BATS_TEST_TMPDIR/nginx.conf.before"
-}
-
-@test "a second resolve leaves the override file's mtime unchanged" {
-  listeners "LISTEN 0 4096 127.0.0.1:3001 0.0.0.0:* users:((\"dev-server\",pid=7,fd=3))"
-  run bash "$REPO/scripts/host-ports.sh" resolve
-  [ "$status" -eq 0 ]
-  before=$(stat -c %Y "$ROOT/infrastructure/tls/host-ports.d/osionos-origin.conf")
-  sleep 1
-  run bash "$REPO/scripts/host-ports.sh" resolve
-  [ "$status" -eq 0 ]
-  after=$(stat -c %Y "$ROOT/infrastructure/tls/host-ports.d/osionos-origin.conf")
-  [ "$before" = "$after" ]
 }
 
 @test "the ss stub and the docker stub are each invoked exactly once per resolve even when a default is busy and the walk tests many ports" {
@@ -344,13 +323,9 @@ DOCKER
   grep -n 'HOST_PORT_NAMES' "$REPO/utils/mk/common.mk" | grep -q '\$(if.*\$(wildcard .env.ports)'
 }
 
-@test "git ls-files infrastructure/tls contains no nginx.conf.template and no host-ports.d/*.conf" {
+@test "infrastructure/tls contains no nginx.conf.template" {
   # nginx.conf.template should not exist (deleted)
   [ ! -f "$REPO/infrastructure/tls/nginx.conf.template" ]
-  # host-ports.d/.gitkeep should exist (tracked in git)
-  [ -f "$REPO/infrastructure/tls/host-ports.d/.gitkeep" ]
-  # .gitignore should ignore *.conf in host-ports.d
-  grep -q 'infrastructure/tls/host-ports.d/\*.conf' "$REPO/.gitignore"
 }
 
 @test "make preserves an environment-pinned host port over the saved .env.ports value" {
