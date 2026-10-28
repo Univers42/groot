@@ -13,10 +13,7 @@ services:
   local-https-proxy:
     image: public.ecr.aws/docker/library/nginx:1.27-alpine
     volumes:
-      # The nginx config is tracked; the osionos origin override is written by
-      # scripts/host-ports.sh resolve into host-ports.d/osionos-origin.conf.
       - ./infrastructure/tls/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./infrastructure/tls/host-ports.d:/etc/nginx/host-ports.d:ro
       - ./apps/grobase/certs:/etc/track-binocle/certs:ro
     ports:
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${OPPOSITE_OSIRIS_HOST_PORT:-4322}:4322"
