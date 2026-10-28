@@ -1,6 +1,6 @@
 -- osionos member attributes: a workspace admin's tags on one member
 -- (department=legal, clearance=2), so a share rule can later target them through
--- target_key `attribute:<key>:<value>` (models/osionos-share-rules-migration.sql,
+-- target_key `attribute:<name>:<value>` (models/osionos-share-rules-migration.sql,
 -- <= 200 chars). Served ONLY through the bridge; nothing reads this table yet —
 -- the bridge writer and the AI evaluators are later units.
 --
@@ -11,7 +11,7 @@
 -- of theirs with it, and the database (not only the bridge) refuses an attribute
 -- row for a user who is not a workspace member.
 --
--- value forbids ':' so `attribute:<key>:<value>` stays unambiguous: the key is at
+-- value forbids ':' so `attribute:<name>:<value>` stays unambiguous: the name is at
 -- most 32 characters and the value at most 64, so 10 + 32 + 64 is well under the
 -- share rule's 200-char target_key (share-rules-migration.sql:26).
 --
@@ -38,15 +38,15 @@ BEGIN;
 CREATE TABLE IF NOT EXISTS public.osionos_member_attributes (
   workspace_id UUID        NOT NULL,
   user_id      UUID        NOT NULL,
-  key          TEXT        NOT NULL CHECK (key ~ '^[a-z][a-z0-9_]{0,31}$'),
+  name         TEXT        NOT NULL CHECK (name ~ '^[a-z][a-z0-9_]{0,31}$'),
   value        TEXT        NOT NULL
                CHECK (char_length(value) BETWEEN 1 AND 64 AND value !~ ':'
                       AND value !~ '^\s|\s$' AND value !~ '[[:cntrl:]]'),
   set_by       UUID        NOT NULL,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  -- one value per key per member
-  PRIMARY KEY (workspace_id, user_id, key),
+  -- one value per name per member
+  PRIMARY KEY (workspace_id, user_id, name),
   -- the target of the composite foreign key: an attribute row lives and dies with
   -- the membership it describes
   CONSTRAINT osionos_member_attributes_member_fk FOREIGN KEY (workspace_id, user_id)
@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS public.osionos_member_attributes (
 -- no prefix here is the admin's list — "who carries this attribute" — and that is
 -- what the index below serves.
 CREATE INDEX IF NOT EXISTS osionos_member_attributes_attribute_idx
-  ON public.osionos_member_attributes (workspace_id, key, value);
+  ON public.osionos_member_attributes (workspace_id, name, value);
 
 REVOKE ALL ON public.osionos_member_attributes FROM PUBLIC, anon, authenticated;
 GRANT ALL ON public.osionos_member_attributes TO service_role;

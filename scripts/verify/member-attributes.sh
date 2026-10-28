@@ -15,11 +15,11 @@
 #       else's (the cascade invariant, C643: rows die with the membership).
 #   a3  deleting the workspace deletes all of its attribute rows, and the other
 #       workspace's rows are untouched.
-#   a4  the key CHECK refuses 'Dept', '1x', 'a-b' and a 33-character key; the
+#   a4  the name CHECK refuses 'Dept', '1x', 'a-b' and a 33-character name; the
 #       value CHECK refuses '', ' x', a trailing tab, a newline, 'a:b' and a
 #       65-character value (23514); an inner space ('north east') is accepted.
-#   a5  a second value for the same (workspace, user, key) is a primary-key
-#       conflict (23505): one value per key per member, so the bridge upserts.
+#   a5  a second value for the same (workspace, user, name) is a primary-key
+#       conflict (23505): one value per name per member, so the bridge upserts.
 #   a6  anon and authenticated hold none of the four privileges on the table,
 #       service_role holds all four.
 #   a7  re-running the migration is a no-op: the same constraints, the same rows.
@@ -69,6 +69,8 @@ note() { printf '[member-attributes] %s\n' "$*" >&2; }
 pass() { passed=$((passed + 1)); printf 'PASS %s %s\n' "$1" "$2"; }
 fail() { failed=$((failed + 1)); printf 'FAIL %s %s\n' "$1" "$2"; }
 
+# Reached only through the trap below, which the linter does not follow.
+# shellcheck disable=SC2317
 teardown() {
 	[ "${KEEP}" -eq 1 ] && { note "--keep: ${PG_CTN} left up"; return 0; }
 	docker rm -f "${PG_CTN}" >/dev/null 2>&1 || true
@@ -110,7 +112,7 @@ state_of() {
 	sed -n 's/^ERROR:  \([0-9A-Z]\{5\}\).*/\1/p' "${err}" | head -1
 }
 
-# repeat <char> <n> — a key or a value long enough to be refused on length alone.
+# repeat <char> <n> — a name or a value long enough to be refused on length alone.
 repeat() {
 	i=0
 	s=""
@@ -176,7 +178,7 @@ INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role, permi
  ('${W1}', '${M1}', 'admin', ARRAY['read']),
  ('${W1}', '${M2}', 'editor', ARRAY['read']),
  ('${W2}', '${M3}', 'admin', ARRAY['read']);
-INSERT INTO public.osionos_member_attributes (workspace_id, user_id, key, value, set_by) VALUES
+INSERT INTO public.osionos_member_attributes (workspace_id, user_id, name, value, set_by) VALUES
  ('${W1}', '${M1}', 'department', 'legal', '${M1}'),
  ('${W1}', '${M2}', 'department', 'finance', '${M1}'),
  ('${W1}', '${M2}', 'clearance', '2', '${M1}'),
@@ -196,12 +198,12 @@ attrs_of() {
 
 # a1: a member's row lands; a user with no members row is refused by the FK.
 check_a1() {
-	if ! q "INSERT INTO public.osionos_member_attributes (workspace_id, user_id, key, value, set_by)
+	if ! q "INSERT INTO public.osionos_member_attributes (workspace_id, user_id, name, value, set_by)
 	        VALUES ('${W1}', '${M1}', 'clearance', '3', '${M1}');"; then
 		printf 'FAIL a1 member-insert     a member attribute row was refused\n' >&2
 		return 1
 	fi
-	state="$(state_of "INSERT INTO public.osionos_member_attributes (workspace_id, user_id, key, value, set_by)
+	state="$(state_of "INSERT INTO public.osionos_member_attributes (workspace_id, user_id, name, value, set_by)
 	        VALUES ('${W1}', '${G}', 'department', 'legal', '${M1}');")"
 	if [ "${state}" != "23503" ]; then
 		printf 'FAIL a1 non-member        expected 23503, got %s\n' "${state:-accepted}" >&2
@@ -248,38 +250,38 @@ check_a4() {
 	key33="$(repeat a 33)"
 	val65="$(repeat a 65)"
 	for bad_key in "'Dept'" "'1x'" "'a-b'" "'${key33}'"; do
-		state="$(state_of "INSERT INTO public.osionos_member_attributes (workspace_id, user_id, key, value, set_by)
+		state="$(state_of "INSERT INTO public.osionos_member_attributes (workspace_id, user_id, name, value, set_by)
 		        VALUES ('${W1}', '${M2}', ${bad_key}, 'x', '${M1}');")"
 		if [ "${state}" != "23514" ]; then
-			printf 'FAIL a4 key %s expected 23514, got %s\n' "${bad_key}" "${state:-accepted}" >&2
+			printf 'FAIL a4 name %s expected 23514, got %s\n' "${bad_key}" "${state:-accepted}" >&2
 			return 1
 		fi
 	done
 	for bad_value in "''" "' x'" "E'x\\t'" "E'a\\nb'" "'a:b'" "'${val65}'"; do
 		# A key M2 does not carry, so no primary-key conflict can be what refuses
 		# the row: the value CHECK is the only refuser here.
-		state="$(state_of "INSERT INTO public.osionos_member_attributes (workspace_id, user_id, key, value, set_by)
+		state="$(state_of "INSERT INTO public.osionos_member_attributes (workspace_id, user_id, name, value, set_by)
 		        VALUES ('${W1}', '${M2}', 'level', ${bad_value}, '${M1}');")"
 		if [ "${state}" != "23514" ]; then
 			printf 'FAIL a4 value %s expected 23514, got %s\n' "${bad_value}" "${state:-accepted}" >&2
 			return 1
 		fi
 	done
-	state="$(state_of "INSERT INTO public.osionos_member_attributes (workspace_id, user_id, key, value, set_by)
+	state="$(state_of "INSERT INTO public.osionos_member_attributes (workspace_id, user_id, name, value, set_by)
 	        VALUES ('${W1}', '${M2}', 'region', 'north east', '${M1}');")"
 	if [ -n "${state}" ]; then
 		printf 'FAIL a4 inner space refused with %s\n' "${state}" >&2
 		return 1
 	fi
 	# a8 counts M2's rows: leave M2 as the seed made it.
-	q "DELETE FROM public.osionos_member_attributes WHERE workspace_id = '${W1}' AND user_id = '${M2}' AND key = 'region'" >/dev/null
+	q "DELETE FROM public.osionos_member_attributes WHERE workspace_id = '${W1}' AND user_id = '${M2}' AND name = 'region'" >/dev/null
 	return 0
 }
 
-# a5: one value per key per member — the PK, not a unique index, is what the
+# a5: one value per name per member — the PK, not a unique index, is what the
 # bridge's upsert rides on.
 check_a5() {
-	state="$(state_of "INSERT INTO public.osionos_member_attributes (workspace_id, user_id, key, value, set_by)
+	state="$(state_of "INSERT INTO public.osionos_member_attributes (workspace_id, user_id, name, value, set_by)
 	        VALUES ('${W1}', '${M2}', 'department', 'other', '${M1}');")"
 	if [ "${state}" != "23505" ]; then
 		printf 'FAIL a5 second-value      expected 23505, got %s\n' "${state:-accepted}" >&2
@@ -315,8 +317,8 @@ constraints_of() {
 }
 
 rows_of() {
-	q "SELECT coalesce(string_agg(workspace_id || '|' || user_id || '|' || key || '|' || value || '|' || set_by,
-	                             E'\n' ORDER BY workspace_id, user_id, key), '')
+	q "SELECT coalesce(string_agg(workspace_id || '|' || user_id || '|' || name || '|' || value || '|' || set_by,
+	                             E'\n' ORDER BY workspace_id, user_id, name), '')
 	     FROM public.osionos_member_attributes"
 }
 
@@ -352,7 +354,7 @@ check_a7() {
 check_a8() {
 	q "INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role, permissions)
 	   VALUES ('${W1}', '${GV}', 'viewer', ARRAY['read']);" >/dev/null
-	state="$(state_of "INSERT INTO public.osionos_member_attributes (workspace_id, user_id, key, value, set_by)
+	state="$(state_of "INSERT INTO public.osionos_member_attributes (workspace_id, user_id, name, value, set_by)
 	        VALUES ('${W1}', '${GV}', 'department', 'legal', '${M2}');")"
 	if [ "${state}" != "23514" ]; then
 		printf 'FAIL a8 guest-insert      expected 23514, got %s\n' "${state:-accepted}" >&2
@@ -385,7 +387,7 @@ check_a9() {
 INSERT INTO public.osionos_workspace_members (workspace_id, user_id, role, permissions)
 VALUES ('${W3}', '${M4}', 'editor', ARRAY['read']);" >/dev/null
 	printf '%s\n' "BEGIN;
-INSERT INTO public.osionos_member_attributes (workspace_id, user_id, key, value, set_by)
+INSERT INTO public.osionos_member_attributes (workspace_id, user_id, name, value, set_by)
 VALUES ('${W3}', '${M4}', 'team', 'red', '${M4}');
 SELECT pg_sleep(3);
 COMMIT;" | psql_q >/dev/null 2>"${WORK}/a9.err" &
@@ -422,8 +424,8 @@ main() {
 	if check_a1; then pass a1 "a member's row lands, a non-member is refused 23503"; else fail a1 "member row / non-member refusal"; fi
 	if check_a2; then pass a2 "the members row's attributes die with it, the sibling's stay"; else fail a2 "cascade on member removal"; fi
 	if check_a3; then pass a3 "the workspace's attribute rows die with it"; else fail a3 "cascade on workspace delete"; fi
-	if check_a4; then pass a4 "key and value CHECKs refuse their bad input (23514)"; else fail a4 "key / value CHECKs"; fi
-	if check_a5; then pass a5 "a second value for the same key is a PK conflict (23505)"; else fail a5 "one value per key per member"; fi
+	if check_a4; then pass a4 "name and value CHECKs refuse their bad input (23514)"; else fail a4 "name / value CHECKs"; fi
+	if check_a5; then pass a5 "a second value for the same name is a PK conflict (23505)"; else fail a5 "one value per name per member"; fi
 	if check_a6; then pass a6 "anon and authenticated hold nothing, service_role holds all four"; else fail a6 "privileges"; fi
 	if check_a7; then pass a7 "the replay changes no constraint and no row"; else fail a7 "idempotent apply"; fi
 	if check_a8; then pass a8 "a guest is refused 23514, a demotion to viewer clears the rows"; else fail a8 "guests carry no attributes"; fi
