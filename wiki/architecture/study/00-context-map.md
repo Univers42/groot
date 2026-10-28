@@ -17,8 +17,8 @@ the trusted `mini-baas_mini-baas` network, though, the osionos bridge also calls
 **directly by container name** (east-west), skipping Kong. Inside grobase, a Go **control plane**
 decides *who you are and where your data lives*, and a Rust **data plane** executes the query. The
 data plane is the one place where **ports & adapters** is literal: a file named `ports.rs` defines
-the engine port, and each database engine is an adapter. drawnosaurus is an isolated island that
-osionos only embeds in an iframe.
+the engine port, and each database engine is an adapter. hydrawn is a static page on an origin of its
+own that osionos only embeds in an iframe.
 
 ## Patterns, named precisely
 
@@ -32,7 +32,6 @@ osionos only embeds in an iframe.
 | Transactional outbox + relay; CDC; pub/sub | outbox relay `GBS/src/control-plane/internal/orchestrator/outboxrelay/outboxrelay.go`; PG `LISTEN realtime_events`; Mongo change streams | Writing to the DB and calling the event bus in the same request (dual write) |
 | Strangler fig (TS → Rust) | Kong `/query/v1` (TS query-router) next to `/data/v1` (Rust), both live | A big-bang rewrite |
 | One-time-token handoff for cross-origin login | `bridge-api.mjs:1153-1195` (`#bridge_token` → `/api/auth/bridge/consume`) | Sharing a cookie across origins |
-| Isolated network (bulkhead) | drawnosaurus on `drawnosaurus-internal` (`internal: true`), `docker-compose.yml` | Every container on one flat network |
 
 ## Map A — the edge and the BFF tier (grobase as one box)
 
@@ -45,7 +44,7 @@ flowchart LR
   P -->|":4000"| BR["osionos-bridge BFF"]
   P -->|":3002 :4100"| ML["mail + mail-bridge"]
   P -->|":3003 :4200"| CL["calendar + calendar-bridge"]
-  P -->|":3007"| DW["drawnosaurus island"]
+  P -->|":3008"| DW["hydrawn island"]
   P -->|":3001 Kong prefixes, :8444"| G["grobase via Kong"]
   OO -->|"/api/*"| AG
   AG -->|"/auth/v1 anon key"| G
@@ -61,7 +60,7 @@ flowchart LR
 
 Read it like this: the browser only ever talks to the proxy (plus LiveKit's media ports). Every
 grey-zone secret (the service-role key, Google OAuth clients, the bridge HMAC secret) lives in a
-BFF, not in a bundle. drawnosaurus has **no** arrow to grobase.
+BFF, not in a bundle.
 
 ## Map B — inside grobase
 

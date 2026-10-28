@@ -390,7 +390,7 @@ and close the link with `make link-down`.
 |---|---|
 | opposite-osiris (start here) | `https://localhost:4322` |
 | osionos editor | `https://localhost:3001` |
-| Whiteboard (drawnosaurus) | `https://localhost:3007` |
+| Whiteboard (hydrawn) | `https://localhost:3008` |
 | osionos-bridge | `https://localhost:4000` |
 | auth-gateway | `https://localhost:8787/api/auth` |
 

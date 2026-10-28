@@ -100,7 +100,7 @@ sudo, `CERT_TRUST_MODE=user` trusts the browsers only and `skip` trusts nothing 
 
 **Ports bound on the host** (from `docker-compose.yml`, all on `127.0.0.1` except inside a
 QEMU/VirtualBox NAT VM, where `infrastructure/scripts/detect-bind-addr.sh` binds `0.0.0.0` so the
-host can reach the guest): 443, 3001, 3002, 3003, 3007 (always loopback), 4000, 4100, 4200, 4322,
+host can reach the guest): 443, 3001, 3002, 3003, 3008 (always loopback), 4000, 4100, 4200, 4322,
 4323, 7880, 7881, 8444, 8787 and UDP 50000–50060. grobase adds Kong on `127.0.0.1:8000`
 (literal loopback in its `orchestrators/compose/base/gateway.yml`).
 
@@ -192,10 +192,9 @@ are in [ADR 0016](docs/adr/0016-self-documenting-pruned-root-make.md).
 
 | Command | What it proves |
 |---|---|
-| `make healthcheck` | grobase auth, bridge, osionos, website (and HTTP→HTTPS redirect), auth gateway, drawnosaurus board list (`utils/mk/app.mk`) |
-| `make e2e` | Playwright smoke in a pinned container against the running stack: DW3 Whiteboard tab, DW8 two browsers on one board, DW9 the board inside osionos, DW10 Mail/Calendar (`tests/e2e/README.md`) |
+| `make healthcheck` | grobase auth, bridge, osionos, website (and HTTP→HTTPS redirect), auth gateway, hydrawn (`utils/mk/app.mk`) |
+| `make e2e` | Playwright smoke in a pinned container against the running stack: DW10 Mail/Calendar (`tests/e2e/README.md`) |
 | `make mail-up calendar-up` | Start the opt-in Mail and Calendar apps. Without them DW10 **skips** and prints the reason; it never passes silently. |
-| `make e2e-clean` | Soft-delete the `e2e-*` boards the smoke leaves behind |
 
 ### Access and the local CA
 
@@ -203,7 +202,7 @@ are in [ADR 0016](docs/adr/0016-self-documenting-pruned-root-make.md).
 |---|---|
 | opposite-osiris (start here) | `https://localhost:4322` |
 | osionos editor | `https://localhost:3001` |
-| Whiteboard (drawnosaurus) | `https://localhost:3007` |
+| Whiteboard (hydrawn) | `https://localhost:3008` |
 | mail (opt-in) | `https://localhost:3002` |
 | calendar (opt-in) | `https://localhost:3003` |
 | osionos-bridge | `https://localhost:4000` |
@@ -231,7 +230,7 @@ them, and adds the current file as "Track Binocle Local Development CA".
   restarts one. `vendor/born2root/setup/host/restart_browsers.sh` does it with session restore.
 
 If the CA is not trusted, the browser shows a warning on each port, and the **Whiteboard tab in
-osionos stays blank**, because the embedded `:3007` iframe is refused silently. Two causes of a
+osionos stays blank**, because the embedded `:3008` iframe is refused silently. Two causes of a
 warning while `curl --cacert` succeeds:
 
 - **The CA was regenerated.** `make certs` on a fresh tree mints a new CA, and a store still holding
@@ -263,13 +262,11 @@ certificates → Authorities → Import, or run `make certs-trust`.
    seeded demo account: `make demo-login` prints its email and password. The password is
    generated per machine and kept only in `./.env.local` (git-ignored); it is never committed.
    It applies to the local stack only, not to production.
-2. In osionos, open **View → Whiteboard**, click **+ New Board**, give it a title.
-3. Open the same board URL in a second window and draw: the strokes appear live in the other
-   window (the e2e smoke asserts within 5 s — `tests/e2e/specs/dw8-realtime.spec.ts`).
+2. In osionos, open **View → Whiteboard**: hydrawn (`https://localhost:3008`) draws and saves
+   through the osionos bridge.
 
-Honest limitations of this demo: board editing is **loopback-only** and has **no per-user
-authorization yet** — drawnosaurus is bound to `127.0.0.1:3007` for exactly that reason
-(`docker-compose.yml:27-32`). We make **no end-to-end-encryption claim**: traffic is TLS to the
+Honest limitations of this demo: the whiteboard origin is **loopback-only** — hydrawn is bound to
+`127.0.0.1:3008` (`docker-compose.yml`). We make **no end-to-end-encryption claim**: traffic is TLS to the
 local proxy, nothing more.
 
 ### Environment configuration

@@ -90,7 +90,7 @@ endif
 # read-only targets must not move a port. The rule runs EVERY time (a port can be taken
 # between two runs), but the resolver never rewrites .env.ports when its content would not
 # change: a touched mtime would restart the whole make run for nothing.
-HOST_PORT_TARGETS = all frontends-up link link-frontends-start link-frontends-up update_web public-up mail-up calendar-up drawnosaurus-up
+HOST_PORT_TARGETS = all frontends-up link link-frontends-start link-frontends-up update_web public-up mail-up calendar-up
 ##@ Host ports
 .PHONY: host-ports-check
 host-ports-check: ## Validate the chosen host ports
@@ -103,7 +103,6 @@ WEBSITE_URL := https://localhost:$(if $(OPPOSITE_OSIRIS_HOST_PORT),$(OPPOSITE_OS
 OSIONOS_URL := https://localhost:$(if $(OSIONOS_APP_HOST_PORT),$(OSIONOS_APP_HOST_PORT),3001)
 BRIDGE_URL := https://localhost:$(if $(OSIONOS_BRIDGE_HOST_PORT),$(OSIONOS_BRIDGE_HOST_PORT),4000)
 AUTH_URL := https://localhost:$(if $(AUTH_GATEWAY_HOST_PORT),$(AUTH_GATEWAY_HOST_PORT),8787)/api/auth
-DRAWNOSAURUS_URL := https://localhost:$(if $(DRAWNOSAURUS_HOST_PORT),$(DRAWNOSAURUS_HOST_PORT),3007)
 HYDRAWN_URL := https://localhost:$(if $(HYDRAWN_HOST_PORT),$(HYDRAWN_HOST_PORT),3008)
 # grobase's scripts/ops/resolve-ports.sh moves Kong to the next FREE host port when 8000 is
 # already taken (an old stack still shutting down is enough), so a hardcoded 8000 fails the

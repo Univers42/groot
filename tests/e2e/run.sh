@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs the suite in the pinned Playwright container against the live local stack.
-# --network host so https://localhost:3001/:3007 resolve to the host's proxy; --rm so no
+# --network host so https://localhost:3001/:3008 resolve to the host's proxy; --rm so no
 # container (and no Chromium) outlives the run.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

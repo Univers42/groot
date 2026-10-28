@@ -11,7 +11,7 @@ otherwise.
 | Docker Engine ≥ 25 + Compose v2 | healthchecks use `start_interval`; measured on Docker 29.8.2 | `docker-compose.yml:3`, [README prerequisites](../../README.md#prerequisites) |
 | RAM ≥ 8 GB | `make all` peaked at 6.25 GB used on an 8 GB VM; for a VM, `VM_RAM_MB=8192` | [measured runs](#measured-results) |
 | Disk ≥ 30 GB free for Docker | images 13.5 GB + build cache 9.5 GB + volumes 1.4 GB, measured 2026-10-01 | [README prerequisites](../../README.md#prerequisites) |
-| Free ports | 443, 3001–3003, 3007, 4000, 4100, 4200, 4322, 4323, 7880, 7881, 8444, 8787, UDP 50000–50060, and Kong on 8000 | `docker-compose.yml`, `apps/grobase/orchestrators/compose/base/gateway.yml` |
+| Free ports | 443, 3001–3003, 3008, 4000, 4100, 4200, 4322, 4323, 7880, 7881, 8444, 8787, UDP 50000–50060, and Kong on 8000 | `docker-compose.yml`, `apps/grobase/orchestrators/compose/base/gateway.yml` |
 | One `sudo` password | `make all` copies the local CA into the system store once (`certs-trust-local`); `fresh-bringup.sh` asks for it first, with `sudo -v` | `utils/mk/certs.mk`, targets `certs-trust`, `certs-trust-local`, `scripts/verify/fresh-bringup.sh` (`check_sudo`) |
 | A GitHub SSH key | submodules use `git@github.com:` URLs | `.gitmodules` |
 
@@ -125,14 +125,14 @@ git config --global user.email "<you@example.com>"
 
 **B6. Reach the apps from the host.** Which ports need a tunnel depends on how the proxy binds:
 
-- **3007 (Whiteboard)** is published on a literal `127.0.0.1` (`docker-compose.yml:27-32`).
-  A QEMU NAT forward reaches the guest's NIC, never its loopback, so 3007 needs an SSH tunnel.
+- **3008 (Whiteboard)** is published on a literal `127.0.0.1` (`docker-compose.yml:32`).
+  A QEMU NAT forward reaches the guest's NIC, never its loopback, so 3008 needs an SSH tunnel.
 - **3001, 4322, 8787** and the rest of the proxy's ports use `TRACK_BINOCLE_BIND_ADDR`, which is
   `0.0.0.0` inside a QEMU/VirtualBox NAT VM (`infrastructure/scripts/detect-bind-addr.sh:15-16`),
   so born2root's QEMU forwards reach them without a tunnel (`vendor/born2root/setup/host/qemu_vm.sh:171`).
   That binding is open item T14. Once T14 binds them back to `127.0.0.1`, those forwards stop
   working (`vendor/born2root/setup/host/groot_host_access.sh:8-27`) and each port needs its own
-  `-L` like 3007. `make groot` asks for every published port, but the dead forwards would still
+  `-L` like 3008. `make groot` asks for every published port, but the dead forwards would still
   hold the host ports: it releases them only when it finds the QEMU monitor socket, which the
   2026-10-05 run did not exercise (it released none).
 
@@ -165,7 +165,7 @@ Restart the browser completely afterwards: NSS is read at startup.
 *Manual route — tunnel + `certs-export`*:
 
 ```bash
-ssh -p 4242 -N -L 3007:127.0.0.1:3007 <user>@127.0.0.1      # on the host
+ssh -p 4242 -N -L 3008:127.0.0.1:3008 <user>@127.0.0.1      # on the host
 make certs-export                                            # in the VM; DEST=<path> to change it
 ```
 
@@ -185,20 +185,15 @@ that still trusts the previous one warns exactly as if nothing were imported
 1. `make demo-login` prints the local demo account's email and password
    (`utils/mk/repo.mk`, target `demo-login`). The password exists only in `./.env.local`.
 2. Window 1: `https://localhost:4322` → Sign in → continue to osionos.
-3. In osionos: **View → Whiteboard** → **+ New Board** → give it a title.
-4. Window 2 — an **incognito window or another browser profile**, not a second window of the
-   same session: sign in with the same `make demo-login` credentials, open the same board URL,
-   draw — the strokes appear in window 1. The e2e smoke asserts this within 5 s
-   (`tests/e2e/specs/dw8-realtime.spec.ts`).
-5. **Do not click Share.** Board editing has no per-user authorization yet; drawnosaurus is
-   bound to `127.0.0.1:3007` for that reason (`docker-compose.yml:27-32`).
+3. In osionos: **View → Whiteboard** — hydrawn, served on `https://localhost:3008`, saves
+   through the osionos bridge.
 
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
 | `make healthcheck` / `make e2e` gets **401** | run from a different checkout than the one running the stack: its `.env.local` keys do not match the running Kong (`scripts/gen-local-env.sh:19-24`) | run every `make` from the checkout that ran `make all` |
-| Whiteboard tab blank, or `ERR_CERT_AUTHORITY_INVALID` | the browser does not trust the **current** CA; the `:3007` iframe is refused silently | case A: `make certs-trust`; case B: re-run `make groot`, or redo `make certs-export` and compare fingerprints |
+| Whiteboard tab blank, or `ERR_CERT_AUTHORITY_INVALID` | the browser does not trust the **current** CA; the `:3008` iframe is refused silently | case A: `make certs-trust`; case B: re-run `make groot`, or redo `make certs-export` and compare fingerprints |
 | Landing looks stale after an update | browser cache. The landing registers no service worker; osionos does (`apps/osionos/app/src/widgets/notifications/model/usePushSubscription.ts`) | hard reload; DevTools → Application → Service workers → Unregister, then Clear site data |
 | `/var` full during the build | BuildKit cache | `make docker_reclaim_cache` (`docker builder prune -a -f`, `utils/mk/docker.mk`, target `docker_reclaim_cache`) |
 | Ports already in use on the **host** while a VM runs | born2root's QEMU forwards 3001–3003, 4000, 4322, 8000, 8787, … to the VM (`vendor/born2root/setup/host/qemu_vm.sh:171`) | stop the VM or the host stack — they cannot share the ports |
