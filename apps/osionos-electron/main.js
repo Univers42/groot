@@ -13,22 +13,21 @@ const { spawn } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
 const { existsSync, statSync, mkdirSync, readFileSync, writeFileSync } = require("node:fs");
 const crypto = require("node:crypto");
-const { createExternalOpenThrottle, isExternalHttpUrl, isAppPageUrl, isAllowedSubframeUrl, senderAllowed, baasResponseHeaders, inlineScriptHashes, frameOriginsFrom, rendererCsp, editionOf, cspHeaderName, webSecurityFor } = require("./desktop-guards");
+const { createExternalOpenThrottle, isExternalHttpUrl, isAppPageUrl, isAllowedSubframeUrl, senderAllowed, baasResponseHeaders, inlineScriptHashes, frameOriginsFrom, rendererCsp, editionOf, cspHeaderName, webSecurityFor, baasTargetOf, isLoopbackUrl } = require("./desktop-guards");
 
 // The local mini-baas query-router speaks plain HTTP. The renderer runs from the
 // secure `app://` origin, where a direct http://localhost:8002 fetch is upgraded
 // to https and fails (ERR_SSL_PROTOCOL_ERROR — the router has no TLS). So the
 // renderer calls it same-origin via app://osionos/__baas/* and the app:// handler
 // relays to this target in the main process, where no mixed-content/upgrade rules
-// apply. Override with OSIONOS_BAAS_URL if the router runs elsewhere.
-//
-// MUST be 127.0.0.1, not "localhost": Chromium's net.fetch resolves "localhost" to
-// IPv6 ::1 first, but the grobase Kong binds IPv4-only (127.0.0.1:8000), so an
-// ::1 attempt is refused → net.fetch throws → the proxy returns 502 (the graph /
-// database calls fail). Coerce any localhost override to IPv4 too.
-const BAAS_TARGET = (process.env.OSIONOS_BAAS_URL || "http://127.0.0.1:8000")
-  .replace(/\/+$/, "")
-  .replace(/\/\/localhost(?=[:/]|$)/, "//127.0.0.1");
+// apply. OSIONOS_BAAS_URL at launch overrides it; a build for a grobase elsewhere
+// (build.sh with OSIONOS_DESKTOP_BAAS_URL) bakes it into desktop-config.json, so the
+// app launched from the menu reaches it with no environment.
+function bakedBaasUrl() {
+  try { return JSON.parse(readFileSync(path.join(__dirname, "desktop-config.json"), "utf8")).baasUrl || ""; }
+  catch { return ""; }
+}
+const BAAS_TARGET = baasTargetOf(process.env.OSIONOS_BAAS_URL, bakedBaasUrl());
 
 // Serve the bundled renderer from a stable app:// origin (so the bridge's CORS
 // can allow it) instead of file:// (origin "null", which CORS rejects). Must be
@@ -272,9 +271,10 @@ app.whenReady().then(async () => {
     headers.set(cspHeaderName(EDITION), rendererPolicy);
     return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
   });
+  // A grobase elsewhere (the tailnet data center) leaves nothing on this machine to boot.
   if (IS_NATIVE) {
     try { await startNative(); } catch (e) { console.error("[native] backend failed to start:", e); }
-  } else {
+  } else if (isLoopbackUrl(BAAS_TARGET)) {
     bootSuite();
   }
   createWindow();

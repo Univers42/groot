@@ -6,6 +6,10 @@
 #   bash apps/osionos-electron/build.sh            # FULL edition (HTTPS, BaaS-wired)
 #   bash apps/osionos-electron/build.sh --local    # LOCAL edition (HTTP :4000, lean
 #                                                  # backend, no mini-baas) -> dist-local/
+#   OSIONOS_DESKTOP_API_URL=https://<host>.<tailnet>.ts.net:10000 \
+#   OSIONOS_DESKTOP_BAAS_URL=https://<host>.<tailnet>.ts.net OSIONOS_DESKTOP_ENV_FILE=.env.local \
+#   bash apps/osionos-electron/build.sh            # FULL edition against a data center
+#                                                  # elsewhere: starts nothing locally
 #   add --renderer-only -> stop after the renderer is extracted (smoke harness)
 #   add --win   -> also/only build a Windows .exe (NSIS) via the wine builder image
 #   add --all   -> build Linux (.deb/.AppImage) AND Windows (.exe) in one pass
@@ -53,15 +57,18 @@ if [ "$EDITION" = "local" ]; then
   echo "  ▶ LOCAL edition — HTTP http://localhost:4000, lean backend, no mini-baas."
 else
   # The FULL bundle bakes the BaaS auth + graph wiring from the local .env (.env is
-  # dockerignored, so pass it explicitly as build-args).
-  ENV_FILE="apps/osionos/app/.env"
+  # dockerignored, so pass it explicitly as build-args). For a grobase elsewhere, point
+  # OSIONOS_DESKTOP_ENV_FILE at ./.env.local: `make link` derives its keys from that grobase.
+  ENV_FILE="${OSIONOS_DESKTOP_ENV_FILE:-apps/osionos/app/.env}"
   baas_env() { [ -f "$ENV_FILE" ] && sed -n "s|^$1=||p" "$ENV_FILE" | head -1; }
   B_API_KEY="$(baas_env VITE_BAAS_API_KEY)"; B_KONG_KEY="$(baas_env VITE_BAAS_KONG_KEY)"
   B_EDGES_DB="$(baas_env VITE_BAAS_EDGES_DB_ID)"; B_EDGES_TBL="$(baas_env VITE_BAAS_EDGES_TABLE)"
   B_RESOURCES="$(baas_env VITE_BAAS_GRAPH_RESOURCES)"; B_GENERATORS="$(baas_env VITE_BAAS_GRAPH_GENERATORS)"
   B_NOTES_TBL="$(baas_env VITE_BAAS_NOTES_TABLE)"; B_OVERLAY_TBL="$(baas_env VITE_BAAS_OVERLAY_TABLE)"
   B_SBV2="$(baas_env VITE_SECOND_BRAIN_V2)"
-  API_URL="https://localhost:4000"; BAAS_URL="app://osionos/__baas"
+  # OSIONOS_DESKTOP_API_URL (the bridge) and OSIONOS_DESKTOP_BAAS_URL (grobase) aim the app at
+  # a data center elsewhere, e.g. the tailnet one; unset keeps the local stack.
+  API_URL="${OSIONOS_DESKTOP_API_URL:-https://localhost:4000}"; BAAS_URL="app://osionos/__baas"
   FE_TAG="osionos-electron-frontend:latest"; OUT_DIR="dist"; DIST_EXTRA=""
   if [ -z "$B_API_KEY" ] || [ -z "$B_KONG_KEY" ]; then
     echo "  ⚠️  BaaS keys missing in $ENV_FILE — the graph/database will show 'no nodes'."
@@ -69,6 +76,14 @@ else
     echo "  ✓ baking BaaS keys (api=${B_API_KEY:0:8}…, kong set, edges_db=${B_EDGES_DB:0:8}…)"
   fi
 fi
+
+# main.js reads the grobase URL from here at launch. Written on every build, so a local build
+# never inherits a previous remote one; the pattern keeps the value safe inside the JSON string.
+BAKED_BAAS_URL="${OSIONOS_DESKTOP_BAAS_URL:-}"
+[[ -z "$BAKED_BAAS_URL" || "$BAKED_BAAS_URL" =~ ^https?://[A-Za-z0-9.:/_-]+$ ]] ||
+  { echo "OSIONOS_DESKTOP_BAAS_URL must be a plain http(s) URL, got: $BAKED_BAAS_URL" >&2; exit 2; }
+printf '{"baasUrl":"%s"}\n' "$BAKED_BAAS_URL" >"$EL/desktop-config.json"
+[ -z "$BAKED_BAAS_URL" ] || echo "  ▶ grobase: $BAKED_BAAS_URL · bridge: $API_URL"
 
 echo "[1/4] Building standalone osionos frontend ($EDITION, base=./)…"
 docker build -f infrastructure/docker/osionos/app.Dockerfile \
