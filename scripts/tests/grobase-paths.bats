@@ -33,7 +33,24 @@ exit "${SSH_EXIT:-0}"
 SSH_STUB
   chmod +x "$BIN_DIR/ssh"
 
+  # Stub tailscale: `status --json` for a tailnet where every example host is an online peer.
+  # Env: TS_STATE (default Running), TS_OFFLINE (one host shown offline), TS_EXIT (daemon down)
+  cat >"$BIN_DIR/tailscale" <<'TS_STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TS_LOG"
+[ "${TS_EXIT:-0}" -eq 0 ] || exit "$TS_EXIT"
+peers="" n=0
+for h in grobase.example.ts.net good.example.ts.net bad.example.ts.net; do
+  n=$((n + 1)) online=true
+  [ "$h" != "${TS_OFFLINE:-}" ] || online=false
+  peers="$peers${peers:+,}\"k$n\":{\"DNSName\":\"$h.\",\"TailscaleIPs\":[\"100.64.0.$n\"],\"Online\":$online,\"LastSeen\":\"2026-10-20T09:47:40Z\"}"
+done
+printf '{"BackendState":"%s","Peer":{%s}}\n' "${TS_STATE:-Running}" "$peers"
+TS_STUB
+  chmod +x "$BIN_DIR/tailscale"
+
   export PATH="$BIN_DIR:$PATH"
+  export TS_LOG="$BATS_TEST_TMPDIR/tailscale.log"
   export CURL_LOG="$BATS_TEST_TMPDIR/curl.log"
   export SSH_LOG="$BATS_TEST_TMPDIR/ssh.log"
   export GROBASE_LINK_CONF="$BATS_TEST_TMPDIR/absent.env"
@@ -174,4 +191,46 @@ Host key verification failed."
   [ "$status" -eq 0 ]
   [[ "$output" == *"usage:"* ]]
   [[ "$output" == *"--ca"* ]]
+}
+@test "an offline tailnet peer -> FAIL tailnet with its last-seen time, and the URL is never probed" {
+  export TS_OFFLINE=grobase.example.ts.net
+  run bash "$SCRIPT" https://grobase.example.ts.net:8443
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ FAIL\ +tailnet\ +grobase\.example\.ts\.net ]]
+  [[ "$output" == *"peer offline (last seen 2026-10-20T09:47:40Z)"* ]]
+  [ ! -s "$CURL_LOG" ]
+}
+
+@test "this device logged out of the tailnet -> FAIL naming tailscale up" {
+  export TS_STATE=NeedsLogin
+  run bash "$SCRIPT" https://grobase.example.ts.net
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"logged out of the tailnet: tailscale up"* ]]
+}
+
+@test "tailscaled not answering -> FAIL saying so" {
+  export TS_EXIT=1
+  run bash "$SCRIPT" https://grobase.example.ts.net
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"tailscaled is not running here"* ]]
+}
+
+@test "a *.ts.net name the tailnet does not list -> FAIL not a peer" {
+  run bash "$SCRIPT" https://nope.example.ts.net
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not a peer of this tailnet"* ]]
+}
+
+@test "an online peer by its 100.64/10 address -> PASS tailnet, then the probe runs" {
+  export CURL_HTTP_CODE=401
+  run bash "$SCRIPT" ssh://alice@100.64.0.2:2222
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ PASS\ +tailnet\ +100\.64\.0\.2 ]]
+  [[ "$output" =~ PASS\ +ssh\ +ssh://alice@100\.64\.0\.2:2222 ]]
+}
+
+@test "a host off the tailnet never asks tailscale" {
+  run bash "$SCRIPT" https://grobase.example.com
+  [ "$status" -eq 0 ]
+  [ ! -e "$TS_LOG" ]
 }
