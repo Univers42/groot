@@ -25,12 +25,16 @@
 #   8  the commands migration (U2) refuses to run before U1, widens the kind
 #      CHECK found by its shape, replays: a user command is accepted, a
 #      workspace command and an unknown kind are refused (C1106)
+#   9  the hooks migration (U3) refuses to run before U2, replays, accepts a
+#      user hook of 1 to 32 pattern lines; refuses a workspace hook, an empty
+#      or trailing line, 33 lines and a bad pattern; erase deletes a hook
+#      (C1124, C1130, C1133)
 #
 # ISOLATION
 #   One throwaway container: ai-context-pg, --network none, no port, no volume.
 #   Removed on every exit path.
 #
-# Usage:  [CONTEXT_MIGRATION=<file>] [COMMANDS_MIGRATION=<file>] sh scripts/verify/ai-context.sh
+# Usage:  [CONTEXT_MIGRATION=<file>] [COMMANDS_MIGRATION=<file>] [HOOKS_MIGRATION=<file>] sh scripts/verify/ai-context.sh
 # Exit:   0 every check passed · 1 a check, the fixture or the image failed
 #
 # shellcheck disable=SC2317,SC2329
@@ -42,6 +46,7 @@ MODELS="${REPO}/models"
 STANDIN="${REPO}/infrastructure/docker/osionos/ai-db-init/00-standin.sql"
 CONTEXT="${CONTEXT_MIGRATION:-${MODELS}/osionos-ai-context-migration.sql}"
 COMMANDS="${COMMANDS_MIGRATION:-${MODELS}/osionos-ai-context-commands-migration.sql}"
+HOOKS="${HOOKS_MIGRATION:-${MODELS}/osionos-ai-context-hooks-migration.sql}"
 CTN="ai-context-pg"
 PG_IMAGE="${PG_IMAGE:-pgvector/pgvector:0.8.0-pg16}"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/ai-context.XXXXXX")"
@@ -233,6 +238,34 @@ check_8() {
 	return 1
 }
 
+check_9() {
+	apply_file "${HOOKS}" || return 1
+	apply_file "${HOOKS}" || return 1
+	checks="$(q "SELECT count(*) FROM pg_constraint WHERE conrelid = 'public.ai_context_items'::regclass AND pg_get_constraintdef(oid) LIKE '%''hook''%';")"
+	body_check="$(q "SELECT count(*) FROM pg_constraint WHERE conname = 'ai_context_items_hook_body';")"
+	if [ "${checks}" != "2" ] || [ "${body_check}" != "1" ]; then
+		DETAIL="${checks} CHECKs name 'hook', ${body_check} body CHECK after two applies, expected 2 and 1"
+		return 1
+	fi
+	refused "$(item_sql hook workspace NULL "'${WS}'" ws-hook "'create_page'")" || return 1
+	for body in "''" "E'create_page\\n'" "E'create_page\\n\\narchive_page'" "'create page'" "'*'" "'9tool'" "'mcp_*x'" \
+		"(SELECT string_agg('t' || n, E'\\n') FROM generate_series(1, 33) AS n)" "repeat('a', 65)"; do
+		refused "$(user_item hook bad-hook "${body}")" || return 1
+	done
+	run_sql "$(user_item hook one-line "'archive_page'")
+$(user_item hook many "E'create_page\\nmcp_ab12cd34_*\\nweb-fetch'")
+$(user_item hook max-lines "(SELECT string_agg('t' || n, E'\\n') FROM generate_series(1, 32) AS n)")
+$(user_item hook max-name "repeat('a', 64) || '*'")" || {
+		DETAIL="a valid hook was refused: $(head -1 "${WORK}/sql.err")"
+		return 1
+	}
+	q "SELECT public.ai_context_erase_user('${USR}');" >/dev/null
+	left="$(q "SELECT count(*) FROM public.ai_context_items WHERE kind = 'hook' AND owner_id = '${USR}';")"
+	[ "${left}" = "0" ] && return 0
+	DETAIL="${left} hooks left after the erase, expected 0"
+	return 1
+}
+
 main() {
 	start_pg
 	note "postgres up in ${CTN}; migration ${CONTEXT}"
@@ -245,7 +278,13 @@ main() {
 	fi
 	# First apply here, second in check_1: the replay is the idempotence proof.
 	apply_file "${CONTEXT}" || exit 1
-	for fn in check_1 check_2 check_3 check_4 check_5 check_6 check_7 check_8; do
+	# U3 before U2 must stop with its message too.
+	if apply_file "${HOOKS}" 2>/dev/null || ! grep -q 'apply osionos-ai-context-commands-migration.sql before' "${WORK}/apply.log"; then
+		fail check_0 "the hooks migration did not refuse to run before U2"
+	else
+		pass check_0 "hooks migration refuses before U2"
+	fi
+	for fn in check_1 check_2 check_3 check_4 check_5 check_6 check_7 check_8 check_9; do
 		DETAIL=""
 		if "${fn}"; then
 			pass "${fn}" "ok"
