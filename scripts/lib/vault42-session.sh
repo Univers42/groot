@@ -5,8 +5,8 @@
 #   load_credentials   fill FT_PASSPHRASE (alias VAULT42_PASSPHRASE), FT_PASSWORD,
 #                      FT_LOGIN_EMAIL (alias FT_EMAIL), FT_TENANT, FT_REGISTER_TOKEN (alias
 #                      VAULT42_REGISTER_TOKEN), FT_S3_KEY, FT_S3_SECRET from every file under
-#                      $CTL_CFG_DIR/secret*. A value already set wins. Names are printed,
-#                      never values.
+#                      $CTL_CFG_DIR/secret*. A value already in the environment, under its
+#                      name or its alias, wins. Names are printed, never values.
 #   ensure_session     `auth me` plus a contract, else sign_in (`auth login --password`).
 #   rebind_contract    after a keystore change, sign_in again once the terminal says y.
 #   ensure_unlocked    the keystore opens with FT_PASSPHRASE, else offer `keys recover`.
@@ -55,15 +55,16 @@ find_credential() {
 
 load_credentials() {
 	local pair name alias value
-	FT_PASSPHRASE="${FT_PASSPHRASE:-${VAULT42_PASSPHRASE:-}}"
 	mapfile -t CRED_FILES < <(find "$CTL_CFG_DIR" -maxdepth 2 -path "$CTL_CFG_DIR/secret*" -type f 2>/dev/null | sort)
-	if [ "${#CRED_FILES[@]}" -eq 0 ]; then
-		note "no credential file under $CTL_CFG_DIR/secret* — missing values are asked instead"
-		return 0
-	fi
+	[ "${#CRED_FILES[@]}" -gt 0 ] ||
+		note "no credential file under $CTL_CFG_DIR/secret* — the environment, then the terminal"
 	for pair in $CREDENTIALS; do
 		IFS=: read -r name alias <<<"$pair"
 		[ -z "${!name:-}" ] || continue
+		if [ -n "$alias" ] && [ -n "${!alias:-}" ]; then
+			printf -v "$name" '%s' "${!alias}"
+			continue
+		fi
 		value="$(find_credential "$name" ${alias:+"$alias"})" || continue
 		printf -v "$name" '%s' "$value"
 	done
@@ -86,8 +87,11 @@ sign_in() {
 	fi
 	[ -n "${FT_TENANT:-}" ] || note "! no FT_TENANT: the login takes a session but no contract, and team verbs need both"
 	note "signing in (a second factor emails a code here)…"
-	# Exported in this subshell only: the password never reaches argv or a later child.
+	# Exported in this subshell only: the password never reaches argv or a later child. --tenant
+	# binds the contract to the keystore, so login unlocks it: without FT_PASSPHRASE it reads
+	# /dev/tty, which has no device under make or a job runner (ENXIO, 2026-10-29).
 	(
+		[ -z "${FT_PASSPHRASE:-}" ] || export FT_PASSPHRASE
 		[ -z "${FT_PASSWORD:-}" ] || export FT_PASSWORD
 		[ -z "${FT_REGISTER_TOKEN:-}" ] || export FT_REGISTER_TOKEN
 		exec "$CTL" auth login --password --email "$FT_LOGIN_EMAIL" ${FT_TENANT:+--tenant "$FT_TENANT"}
