@@ -61,6 +61,9 @@ O3, O5, O6 BLOCKED until their grobase prerequisites land. Conditions are folded
 - [x] One grobase tenant key serves every workspace, so the bridge ACL is the only
       isolation: the same spec proves workspace B gets 403 on GET and PUT with zero
       query-router calls.
+- [x] Live 2026-10-30: bridge `mdb-350248dc` + web `index-BExK7mke.js` (osionos main
+      350248dc7). Descriptor and automations routes answer 401 unauthenticated in the
+      bridge container; rollback in groot-wt/deploy DEPLOY-NOTES.
 
 ### Phase 3 — origin, creation target, migration (needs grobase G6–G8)
 
