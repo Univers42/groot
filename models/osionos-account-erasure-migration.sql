@@ -235,6 +235,13 @@ INSERT INTO osionos_account_data_map_seed VALUES
 ('ai_chunks', 'owner_id', 'owner', 'delete', NULL, NULL, NULL, NULL, NULL),
 ('ai_chunks', 'collaborator_ids', 'peer', 'scrub_jsonb', NULL, NULL, NULL, NULL, NULL),
 ('ai_connections', 'owner_user_id', 'owner', 'delete', NULL, NULL, NULL, NULL, NULL),
+-- C1007: a user's own context items go; as the author of a workspace rule the
+-- user is tombstoned. ai_context_erase_user does the same first (step 4b''').
+('ai_context_items', 'owner_id', 'owner', 'delete', NULL, NULL, NULL, NULL, NULL),
+('ai_context_items', 'created_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
+('ai_context_items', 'updated_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
+('ai_context_item_audit', 'actor_id', 'author', 'keep', NULL, NULL, NULL, NULL,
+  'append-only audit log: a trigger refuses every UPDATE and DELETE with no bypass, so the actor uuid stays as pseudonymous accountability; a user item''s audit row holds only a body length and digest'),
 ('ai_conversations', 'owner_id', 'owner', 'delete', '{id,workspace_id,title,created_at,summary,summary_through}', NULL, NULL, NULL, NULL),
 ('ai_events', 'user_id', 'owner', 'delete', NULL, NULL, NULL, NULL, NULL),
 ('osionos_activity_events', 'user_id', 'owner', 'delete', '{ts,event,surface,workspace_id}', NULL, NULL, NULL, NULL),
@@ -732,6 +739,14 @@ BEGIN
   -- below then tombstones that column. Guarded: that file may be absent.
   IF to_regprocedure('public.osionos_ai_thread_answers_erase_user(uuid)') IS NOT NULL THEN
     EXECUTE 'SELECT public.osionos_ai_thread_answers_erase_user($1)' USING p_user;
+  END IF;
+
+  -- 4b'''. AI context items (osionos-ai-context-migration.sql): the user's own
+  -- skills and rules, and their authorship of workspace rules. The registry
+  -- below covers the same columns; this call keeps the erase whole if a
+  -- registry row is ever dropped. Guarded: that file may be absent.
+  IF to_regprocedure('public.ai_context_erase_user(uuid)') IS NOT NULL THEN
+    EXECUTE 'SELECT public.ai_context_erase_user($1)' USING p_user;
   END IF;
 
   -- 4c. The registry. `transfer` rows were handled above; `keep` rows are left.
