@@ -38,12 +38,14 @@ O3, O5, O6 BLOCKED until their grobase prerequisites land. Conditions are folded
 - [x] Database top bar shows an engine badge and the binding: host or file,
       database/schema, TLS state (icon + text), credential mode. Data from the bridge,
       which proxies grobase's credential-free mount descriptor (G4, grobase e6815228) —
-      Univers42/notion-database-sys#24, Univers42/osionos#226. Engine *version* waits for
+      Univers42/notion-database-sys#24; the bridge route ships in Univers42/osionos#227
+      (#226 merged at the O1a label, before it). Engine *version* waits for
       G4b (the data plane is the one that knows it).
 - [x] Replace "ADAPTER" in loading/error panes with the engine and mount name — O1a, Univers42/osionos#226 + Univers42/notion-database-sys#23 (draft until the screenshot). Engine comes from the host mount catalog, not `LiveSchemaResponse.engine`: the catalog has it before the first schema fetch.
 - [ ] Source settings row: full binding, read-only for members, editable for owners.
 - [x] ~~Delete `DbSourceDropdown`~~ — not dead: `dbmsMiddleware.ts` serves `/api/dbms/*` to the Vite playground and `HttpAdapter.ts` calls it. Live mounts render the badge; the playground keeps the switcher (`DataSourceIndicator`).
-- [ ] Unit: badge renders for each of the 10 engines; e2e DOM spec asserts the badge.
+- [x] Unit: badge renders for each of the 10 engines (`live-mount-descriptor.test.ts`); e2e
+      `bridge-stub/mountSourceBadge.spec.mjs` asserts network, file and failed states — #227.
 - Conditions: the full badge lands after grobase m246 is green; the bridge proxies the
   descriptor through the mount ACL and never sends a host for platform mounts;
   `DbSourceDropdown` and `/api/dbms/*` go only after rg proves no other caller.
@@ -117,7 +119,9 @@ O3, O5, O6 BLOCKED until their grobase prerequisites land. Conditions are folded
 **W2 · Live database e2e in CI**
 - [ ] Wire db1/db2/od1 specs into the live-stack job; add the badge spec (O1) and a
       cross-engine relation spec (O5).
-- [ ] osionos `databasesPanel.spec` runs against the bridge stub instead of skipping.
+- [x] osionos `databasesPanel.spec` runs against the bridge stub instead of skipping —
+      `bridge-stub/databasesPanel.spec.mjs` (list + failure); the offline spec asserts
+      "not configured" and zero registry calls — #227.
 - [ ] Specs run against a CI stack, never the live VM; a skipped spec reports SKIP;
       develop/main-only jobs get a documented local equivalent.
 
