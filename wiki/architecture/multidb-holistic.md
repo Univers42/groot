@@ -91,19 +91,23 @@ O3, O5, O6 BLOCKED until their grobase prerequisites land. Conditions are folded
 ### Test workspace and CI (continuous)
 
 **W1 · A dedicated workspace for dev.pro.photo@gmail.com**
-- [ ] Created through the supported path (`POST /api/workspaces` as that user,
-      `bridge-api.mjs:4879-4904`), named so it never mixes with existing work.
-- [ ] Parameterised all-engine seeder (`scripts/seed/multidb-workspace.sh`): workspace id
+- [x] Created through the supported path (`POST /api/workspaces` as that user,
+      `bridge-api.mjs:4879-4904`), named so it never mixes with existing work:
+      "Multi-DB Lab", `bc04a437-1da3-4043-9ede-f918ebf11b58` (2026-10-29).
+- [x] Parameterised all-engine seeder (`scripts/seed/multidb-workspace.sh`, Univers42/grobase#60): workspace id
       and owner are arguments, not constants (today's seeds hardcode WS_ACME/WS_MAIN).
       One mount per engine — postgresql, cockroachdb, mysql, mariadb, mongodb, redis,
       sqlite, mssql, http, dynamodb — static reference tables and a churn table per
       engine, plus cross-engine edges; later the same seeder declares contracts (O5).
-- [ ] Idempotent: a second run changes nothing; teardown removes only what it made
+- [ ] Idempotent: a second run changes nothing (three live applies, 24 churn rows per
+      engine each time; redis WARNs on re-insert until the 409 fix is deployed); teardown removes only what it made
       (proven by a diff). Never writes WS_ACME / WS_MAIN; credentials read from
       `secrets/` files; non-sensitive data only (mounts sit under the shared bridge
       tenant, visible across workspaces at the grobase level).
-- [ ] No contracts or cross-engine edges until G12 lifts; DynamoDB only where the image
-      has the feature; a live VM run needs a stated go.
+- [x] No contracts or cross-engine edges until G12 lifts; DynamoDB only where the image
+      has the feature; a live VM run needs a stated go (given 2026-10-29). Live: nine
+      mounts list 24 churn rows each and show in the Databases sidebar; http skipped
+      (no public `MDW_HTTP_BASE_URL`).
 
 **W2 · Live database e2e in CI**
 - [ ] Wire db1/db2/od1 specs into the live-stack job; add the badge spec (O1) and a
