@@ -25,6 +25,22 @@ function webSecurityFor(edition) {
   return HARDENED_EDITIONS.has(edition);
 }
 
+function baasTargetOf(envValue, bakedValue) {
+  // WHY: Kong binds 127.0.0.1 only and Chromium tries "localhost" as ::1 first (refused -> 502).
+  return (envValue || bakedValue || "http://127.0.0.1:8000")
+    .replace(/\/+$/, "")
+    .replace(/\/\/localhost(?=[:/]|$)/, "//127.0.0.1");
+}
+
+// Caveat: "local" is judged by name only — a local Kong addressed by this machine's LAN IP or
+// 0.0.0.0 reads as remote, so the suite is not booted; launch with OSIONOS_BAAS_URL=127.0.0.1.
+function isLoopbackUrl(url) {
+  // WHY: an unparsable target keeps the pre-remote behaviour (boot the local suite).
+  let host;
+  try { host = new URL(url).hostname; } catch { return true; }
+  return host === "localhost" || host === "[::1]" || /^127\./.test(host);
+}
+
 // WHY: the renderer frames mail/calendar/whiteboard loopback apps by default.
 const DEFAULT_FRAME_ORIGINS = [
   "http://localhost:3002",
@@ -193,4 +209,6 @@ module.exports = {
   HARDENED_EDITIONS,
   cspHeaderName,
   webSecurityFor,
+  baasTargetOf,
+  isLoopbackUrl,
 };

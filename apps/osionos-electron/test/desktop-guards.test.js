@@ -16,6 +16,8 @@ const {
   editionOf,
   cspHeaderName,
   webSecurityFor,
+  baasTargetOf,
+  isLoopbackUrl,
 } = require("../desktop-guards");
 
 function mainEvent(overrides) {
@@ -239,5 +241,24 @@ describe("edition hardening", () => {
   it("unknown edition fails closed to report-only and false", () => {
     assert.equal(cspHeaderName("beta"), "content-security-policy-report-only");
     assert.equal(webSecurityFor("beta"), false);
+  });
+});
+
+describe("baas target", () => {
+  it("baasTargetOf: launch env wins, then the baked URL, then the local Kong", () => {
+    assert.equal(baasTargetOf("https://env.example/", "https://baked.example"), "https://env.example");
+    assert.equal(baasTargetOf("", "https://baas.example.ts.net/"), "https://baas.example.ts.net");
+    assert.equal(baasTargetOf(undefined, undefined), "http://127.0.0.1:8000");
+  });
+  it("baasTargetOf: localhost is coerced to IPv4 (Kong binds 127.0.0.1 only)", () => {
+    assert.equal(baasTargetOf("http://localhost:8000", ""), "http://127.0.0.1:8000");
+  });
+  it("isLoopbackUrl: the local Kong is loopback, a tailnet grobase is not", () => {
+    assert.equal(isLoopbackUrl("http://127.0.0.1:8000"), true);
+    assert.equal(isLoopbackUrl("http://[::1]:8000"), true);
+    assert.equal(isLoopbackUrl("https://baas.example.ts.net"), false);
+  });
+  it("isLoopbackUrl: an unparsable target counts as local, so the suite still boots as before", () => {
+    assert.equal(isLoopbackUrl("not a url"), true);
   });
 });

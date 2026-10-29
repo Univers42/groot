@@ -9,3 +9,4 @@ package-lock.json
 native-runtime/
 dist-native/
 .native-cache/
+desktop-config.json
