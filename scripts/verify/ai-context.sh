@@ -22,12 +22,15 @@
 #   6  ai_context_erase_user deletes only that user's user-scope items and turns
 #      them into the tombstone as the author of a workspace rule (C1007)
 #   7  service_role can read and write an item and append to the audit
+#   8  the commands migration (U2) refuses to run before U1, widens the kind
+#      CHECK found by its shape, replays: a user command is accepted, a
+#      workspace command and an unknown kind are refused (C1106)
 #
 # ISOLATION
 #   One throwaway container: ai-context-pg, --network none, no port, no volume.
 #   Removed on every exit path.
 #
-# Usage:  [CONTEXT_MIGRATION=<file>] sh scripts/verify/ai-context.sh
+# Usage:  [CONTEXT_MIGRATION=<file>] [COMMANDS_MIGRATION=<file>] sh scripts/verify/ai-context.sh
 # Exit:   0 every check passed · 1 a check, the fixture or the image failed
 #
 # shellcheck disable=SC2317,SC2329
@@ -38,6 +41,7 @@ REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 MODELS="${REPO}/models"
 STANDIN="${REPO}/infrastructure/docker/osionos/ai-db-init/00-standin.sql"
 CONTEXT="${CONTEXT_MIGRATION:-${MODELS}/osionos-ai-context-migration.sql}"
+COMMANDS="${COMMANDS_MIGRATION:-${MODELS}/osionos-ai-context-commands-migration.sql}"
 CTN="ai-context-pg"
 PG_IMAGE="${PG_IMAGE:-pgvector/pgvector:0.8.0-pg16}"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/ai-context.XXXXXX")"
@@ -214,13 +218,34 @@ SELECT count(*) FROM public.ai_context_items;" && return 0
 	return 1
 }
 
+check_8() {
+	apply_file "${COMMANDS}" || return 1
+	apply_file "${COMMANDS}" || return 1
+	checks="$(q "SELECT count(*) FROM pg_constraint WHERE conrelid = 'public.ai_context_items'::regclass AND pg_get_constraintdef(oid) LIKE '%''command''%';")"
+	[ "${checks}" = "1" ] || {
+		DETAIL="${checks} CHECKs name 'command' after two applies, expected 1"
+		return 1
+	}
+	refused "$(item_sql command workspace NULL "'${WS}'" ws-command "'b'")" || return 1
+	refused "$(user_item hook a-hook)" || return 1
+	run_sql "$(user_item command standup "repeat('x', 6000)")" && return 0
+	DETAIL="a user command was refused: $(head -1 "${WORK}/sql.err")"
+	return 1
+}
+
 main() {
 	start_pg
 	note "postgres up in ${CTN}; migration ${CONTEXT}"
 	apply_file "${STANDIN}" || exit 1
+	# U2 before U1 must stop with its message, not pass silently.
+	if apply_file "${COMMANDS}" 2>/dev/null || ! grep -q 'apply osionos-ai-context-migration.sql before' "${WORK}/apply.log"; then
+		fail check_0 "the commands migration did not refuse to run before U1"
+	else
+		pass check_0 "commands migration refuses before U1"
+	fi
 	# First apply here, second in check_1: the replay is the idempotence proof.
 	apply_file "${CONTEXT}" || exit 1
-	for fn in check_1 check_2 check_3 check_4 check_5 check_6 check_7; do
+	for fn in check_1 check_2 check_3 check_4 check_5 check_6 check_7 check_8; do
 		DETAIL=""
 		if "${fn}"; then
 			pass "${fn}" "ok"
