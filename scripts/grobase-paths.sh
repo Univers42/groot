@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # grobase-paths.sh — which ways THIS device reaches the grobase data center: each WAF URL
-# (TLS verified, never -k) and each ssh target (grobase's Kong running there). A new device
+# (TLS verified, never -k) and each ssh target (grobase's Kong running there). A target on the
+# tailnet is first checked there (this device connected, the peer online), so a stopped
+# Tailscale or an offline machine is named as such instead of "no answer". A new device
 # runs it first; the per-path recipes are in wiki/runbooks/grobase-link.md.
 #
 # Ponytail: a PASS proves the edge answered or that ssh+docker work, NOT that a login or a
@@ -29,7 +31,7 @@ USAGE
 }
 
 conf() { bash "$REPO/scripts/grobase-link.sh" conf "$1" 2>/dev/null || true; }
-row() { printf '%-6s %-4s %-50s %s\n' "$@"; }
+row() { printf '%-6s %-7s %-50s %s\n' "$@"; }
 
 configured_targets() {
   local api target
@@ -80,6 +82,54 @@ probe_ssh() { # TARGET
   row PASS ssh "$1" ""
 }
 
+# TARGET -> the host it names: a URL, ssh://[user@]host[:port], user@host or an alias.
+target_host() {
+  local host=${1#*://}
+  host=${host##*@}
+  host=${host%%/*}
+  printf '%s\n' "${host%%:*}"
+}
+
+# Caveat: a tailnet host is a literal *.ts.net name or a 100.64.0.0/10 address; an ssh alias
+# whose HostName is on the tailnet, or a tailnet IPv6 address, skips this layer and fails
+# only as "no answer" / "ssh timed out" at the probe below.
+is_tailnet_host() {
+  local second
+  case "$1" in
+  *.ts.net) return 0 ;;
+  100.*.*.*)
+    second=${1#100.}
+    second=${second%%.*}
+    [ "$second" -ge 64 ] 2>/dev/null && [ "$second" -le 127 ]
+    ;;
+  *) return 1 ;;
+  esac
+}
+
+# HOST: this device on the tailnet, and HOST a peer it can see online. Each FAIL names the repair.
+probe_tailnet() {
+  local status state peer
+  command -v tailscale >/dev/null ||
+    { row FAIL tailnet "$1" "tailscale is not installed here: https://tailscale.com/download, then tailscale up" && return 1; }
+  status=$(tailscale status --json 2>/dev/null) ||
+    { row FAIL tailnet "$1" "tailscaled is not running here: start it, then tailscale up" && return 1; }
+  state=$(jq -r '.BackendState // "unknown"' <<<"$status")
+  case "$state" in
+  Running) ;;
+  NeedsLogin) row FAIL tailnet "$1" "this device is logged out of the tailnet: tailscale up" && return 1 ;;
+  *) row FAIL tailnet "$1" "tailscale is $state here: tailscale up" && return 1 ;;
+  esac
+  peer=$(jq -r --arg h "$1" '[.Peer // {} | .[]
+    | select((.DNSName | rtrimstr(".")) == $h or ((.TailscaleIPs // []) | index($h)))]
+    | first // empty | "\(.Online // false) \(.LastSeen // "")"' <<<"$status")
+  case "$peer" in
+  "") row FAIL tailnet "$1" "not a peer of this tailnet: a wrong name, or another tailnet (tailscale status lists them)" ;;
+  true*) row PASS tailnet "$1" "peer online" && return 0 ;;
+  *) row FAIL tailnet "$1" "peer offline (last seen ${peer#* }): start that machine, or set GROBASE_TARGET to one online" ;;
+  esac
+  return 1
+}
+
 main() {
   local ca="" targets=() t pass=0
   while [ $# -gt 0 ]; do
@@ -97,6 +147,7 @@ main() {
   [ ${#targets[@]} -gt 0 ] || die "no targets: set GROBASE_TARGET and/or GROBASE_API_URL in ./.env.grobase-link, or pass them"
   row RESULT KIND TARGET DETAIL
   for t in "${targets[@]}"; do
+    ! is_tailnet_host "$(target_host "$t")" || probe_tailnet "$(target_host "$t")" || continue
     case "$t" in http://* | https://*) probe_url "$t" "$ca" ;; *) probe_ssh "$t" ;; esac && pass=$((pass + 1))
   done
   printf '%d/%d paths work\n' "$pass" "${#targets[@]}"
