@@ -646,6 +646,13 @@ BEGIN
     IF to_regprocedure('public.ai_agents_erase_user(uuid)') IS NOT NULL THEN
         EXECUTE 'SELECT public.ai_agents_erase_user($1)' INTO f USING p_user;
     END IF;
+    -- The user's own AI context items (skills, rules) go and the user is
+    -- tombstoned as the author of workspace rules (C1007), when that file is
+    -- applied (models/osionos-ai-context-migration.sql). Same DYNAMIC and
+    -- GUARDED call; its count is discarded.
+    IF to_regprocedure('public.ai_context_erase_user(uuid)') IS NOT NULL THEN
+        EXECUTE 'SELECT public.ai_context_erase_user($1)' INTO f USING p_user;
+    END IF;
     -- The user is tombstoned in the workspace web switch and its audit too
     -- (C374), when that file is applied (models/osionos-ai-web-migration.sql).
     -- Same DYNAMIC and GUARDED call; its count is discarded.
