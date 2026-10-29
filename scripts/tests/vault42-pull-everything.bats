@@ -44,6 +44,7 @@ write_fake_git() {
 case " $* " in
 *" rev-parse --show-toplevel "*) printf '%s\n' "$FAKE_ROOT" ;;
 *" check-ignore "*) path="${*: -1}"; [ -z "${NOT_IGNORED:-}" ] || [[ "$path" != "$FAKE_ROOT/$NOT_IGNORED"* ]] ;;
+*" ls-files "*) [ -n "${FAKE_TRACKED:-}" ] && [ "${*: -1}" = "$FAKE_ROOT/$FAKE_TRACKED" ] ;;
 *) exit 1 ;;
 esac
 GIT
@@ -398,6 +399,16 @@ seeds_state() {
   grep -q '^auth login --password --email me@example.test --tenant me' "$CALLS"
   [ -f "$ROOT/secrets/redis.rdb" ]
   no_secret_leaked
+}
+
+@test "a file git tracks is kept as the checkout has it, never swapped for the vault's copy" {
+  printf 'TEMPLATE_FROM_GIT=1\n' >"$ROOT/.env"
+  pull FAKE_TRACKED=.env
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ROOT/.env")" = "TEMPLATE_FROM_GIT=1" ]
+  ! ls "$ROOT"/.env.bak-* 2>/dev/null
+  [[ "$output" == *"1 tracked by git kept as git has it"* ]]
+  [ -f "$ROOT/apps/grobase/.env" ]
 }
 
 @test "a contract left on a replaced keystore is not rebound without a 'y' at the terminal" {
