@@ -12,12 +12,12 @@ Mapped 2026-10-29 from osionos `develop` 7893bdac2 and groot `develop` fdf1f9de.
 | Need | Today | Evidence |
 |---|---|---|
 | Open database says which DBMS / server / file it is on | No — loading/error panes say "ADAPTER"; Source row shows the name only | `object_database.tsx:560`, `MainSettingsScreen.tsx:98` |
-| Legacy JSON/CSV/Mongo/Postgres switcher | Still renders, calls `/api/dbms/*` that no server serves | `TopBarActions.tsx:137-141` (`DbSourceDropdown`) |
+| Legacy JSON/CSV/Mongo/Postgres switcher | Playground only: `/api/dbms/*` is served by the Vite dev middleware; live mounts show the badge instead | `dbmsMiddleware.ts`, `MountSourceBadge.tsx` (`DataSourceIndicator`) |
 | Choose where a new database is created | No — always a JSONB blob in `osionos_object_databases` | `useDatabaseStore.ts:53-63` |
 | Register a connection / link a mount to a workspace | No route; only seed scripts with direct `psql` | `bridge-api.mjs:3322`, `bridge-api.mjs:3743-3749` |
 | Cross-engine relations | Guessed from column names, one-way, 500-row preload | `liveReferenceInfer.ts:56-121`, `liveSchemaMapper.ts:100`, `liveQueryTranslator.ts:37` |
 | Relation / index / trigger / function DDL in UI | Unsupported | `liveDdlMapper.ts:74-75` |
-| Automations on live mounts | Client calls `/query/v1/:dbId/automations` on the bridge, which has no such route | `liveAutomationsClient.ts:25-38` |
+| Automations on live mounts | Fixed by O2: the client calls the bridge's gated `/api/databases/:dbId/automations` | `liveAutomationsClient.ts`, `bridge-api.mjs` (`handleDatabaseAutomations`) |
 | Scripts in automations | No — v2 ButtonProgram AST runs only in-browser for page databases | `contract-types/src/index.ts:475-480` |
 | Live DB e2e in CI | db1/db2/od1 specs exist, no workflow runs them; `databasesPanel.spec` skips offline | `fresh-machine.yml:102,342`, `databasesPanel.spec.mjs:59,75` |
 
@@ -35,12 +35,14 @@ O3, O5, O6 BLOCKED until their grobase prerequisites land. Conditions are folded
 ### Phase 1 — say what a database is bound to (needs grobase G4)
 
 **O1 · Connection badge + Source settings** — osionos
-- [ ] Database top bar shows an engine badge (icon + engine name + version) and the
-      binding: host or file, database/schema, TLS state (icon + "TLS verified" text),
-      credential mode. Data from the bridge, which proxies grobase's mount descriptor.
+- [x] Database top bar shows an engine badge and the binding: host or file,
+      database/schema, TLS state (icon + text), credential mode. Data from the bridge,
+      which proxies grobase's credential-free mount descriptor (G4, grobase e6815228) —
+      Univers42/notion-database-sys#24, Univers42/osionos#226. Engine *version* waits for
+      G4b (the data plane is the one that knows it).
 - [x] Replace "ADAPTER" in loading/error panes with the engine and mount name — O1a, Univers42/osionos#226 + Univers42/notion-database-sys#23 (draft until the screenshot). Engine comes from the host mount catalog, not `LiveSchemaResponse.engine`: the catalog has it before the first schema fetch.
 - [ ] Source settings row: full binding, read-only for members, editable for owners.
-- [ ] Delete `DbSourceDropdown` and its `/api/dbms/*` client (dead path).
+- [x] ~~Delete `DbSourceDropdown`~~ — not dead: `dbmsMiddleware.ts` serves `/api/dbms/*` to the Vite playground and `HttpAdapter.ts` calls it. Live mounts render the badge; the playground keeps the switcher (`DataSourceIndicator`).
 - [ ] Unit: badge renders for each of the 10 engines; e2e DOM spec asserts the badge.
 - Conditions: the full badge lands after grobase m246 is green; the bridge proxies the
   descriptor through the mount ACL and never sends a host for platform mounts;
@@ -50,10 +52,13 @@ O3, O5, O6 BLOCKED until their grobase prerequisites land. Conditions are folded
   TLS claim — replaces "ADAPTER". The binding and TLS rows wait for G4.
 
 **O2 · Fix the live automations route** — osionos bridge
-- [ ] Bridge proxies `GET|PUT /api/databases/:dbId/automations` to grobase with the
-      mount ACL; client moves to it. Spec proves a rule round-trips.
-- [ ] One grobase tenant key serves every workspace, so the bridge ACL is the only
-      isolation: spec proves workspace B cannot GET or PUT workspace A's automations.
+- [x] Bridge proxies `GET|PUT /api/databases/:dbId/automations` to grobase with the
+      mount ACL (read: `canReadDatabase`; replace: `canRunDdl`); client moves to it.
+      Spec proves a rule round-trips — `tests/bridge/bridge-mount-automations.test.mjs`,
+      Univers42/osionos#227 + Univers42/notion-database-sys#25 (develop 5037c074).
+- [x] One grobase tenant key serves every workspace, so the bridge ACL is the only
+      isolation: the same spec proves workspace B gets 403 on GET and PUT with zero
+      query-router calls.
 
 ### Phase 3 — origin, creation target, migration (needs grobase G6–G8)
 
