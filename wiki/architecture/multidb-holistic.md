@@ -38,7 +38,7 @@ O3, O5, O6 BLOCKED until their grobase prerequisites land. Conditions are folded
 - [ ] Database top bar shows an engine badge (icon + engine name + version) and the
       binding: host or file, database/schema, TLS state (icon + "TLS verified" text),
       credential mode. Data from the bridge, which proxies grobase's mount descriptor.
-- [ ] Replace "ADAPTER" in loading/error panes with the engine and mount name.
+- [x] Replace "ADAPTER" in loading/error panes with the engine and mount name — O1a, Univers42/osionos#226 + Univers42/notion-database-sys#23 (draft until the screenshot). Engine comes from the host mount catalog, not `LiveSchemaResponse.engine`: the catalog has it before the first schema fetch.
 - [ ] Source settings row: full binding, read-only for members, editable for owners.
 - [ ] Delete `DbSourceDropdown` and its `/api/dbms/*` client (dead path).
 - [ ] Unit: badge renders for each of the 10 engines; e2e DOM spec asserts the badge.
