@@ -104,7 +104,12 @@ WORK_SUMS="$FAKE_STATE/sums"
 case "$1 $2" in
 "auth me") [ -f "$FAKE_STATE/session" ] ;;
 "auth status") echo "logged in — session and contract" ;;
-"auth login") echo "password=${FT_PASSWORD:+env}" >"$FAKE_STATE/login"; touch "$FAKE_STATE/session" "$FAKE_STATE/bound" ;;
+# --tenant binds the contract to the keystore, so the real CLI unlocks it: without FT_PASSPHRASE it
+# opens /dev/tty, and with no terminal that is ENXIO (42ctl 0.1.15, 2026-10-29).
+"auth login")
+  [[ " $* " != *" --tenant "* ]] || [ "${FT_PASSPHRASE:-}" = SECRETPASS ] ||
+    { echo "error: No such device or address (os error 6)" >&2; exit 1; }
+  echo "password=${FT_PASSWORD:+env}" >"$FAKE_STATE/login"; touch "$FAKE_STATE/session" "$FAKE_STATE/bound" ;;
 "auth whoami") [ "$FT_PASSPHRASE" = SECRETPASS ] || { echo "could not unlock keystore" >&2; exit 1; } ;;
 "env ls") printf 'prod\ndev\n' ;;
 "env files") manifest "$E" ;;
@@ -372,6 +377,26 @@ seeds_state() {
   [ "$status" -eq 0 ]
   [ "$(cat "$FAKE_STATE/login")" = "password=env" ]
   grep -q '^auth login --password --email me@example.test' "$CALLS"
+  no_secret_leaked
+}
+
+@test "a sign-in that takes a contract unlocks the keystore with the passphrase from the credential file, no terminal" {
+  rm "$FAKE_STATE/session"
+  printf 'FT_TENANT=me\n' >>"$CFG/secret/creds"
+  pull VAULT42_TTY=/nonexistent
+  [ "$status" -eq 0 ]
+  grep -q '^auth login --password --email me@example.test --tenant me' "$CALLS"
+  [ -f "$ROOT/secrets/redis.rdb" ]
+  no_secret_leaked
+}
+
+@test "with no credential file, values exported under their alias names sign in with no terminal" {
+  rm "$FAKE_STATE/session" "$CFG/secret/creds"
+  pull VAULT42_TTY=/nonexistent FT_PASSPHRASE=SECRETPASS FT_PASSWORD=PASSWORDVALUE \
+    FT_EMAIL=me@example.test FT_TENANT=me VAULT42_REGISTER_TOKEN=tok
+  [ "$status" -eq 0 ]
+  grep -q '^auth login --password --email me@example.test --tenant me' "$CALLS"
+  [ -f "$ROOT/secrets/redis.rdb" ]
   no_secret_leaked
 }
 
