@@ -20,7 +20,9 @@
 #   d7  S3/C14: an edit racing an accept — the applied text is the stored insert,
 #       and an accepter who saw the old text gets `changed`.
 #   d8  S5: 50 concurrent accepts of overlapping proposals → exactly one accepted,
-#       no deadlock; a reply and a reaction never wait 50 ms on a held decide.
+#       no deadlock; 10 accepts on 10 blocks of one page all land; an accept
+#       during a page edit keeps the edit; a reply and a reaction never wait
+#       50 ms on a held decide.
 #   d9  S4/C13: the delete guard, and page / workspace cascades that pass it.
 #   d10 S8: a PATCH of the insert re-queues moderation; a reply or a suggestion
 #       adds no 'comment' event.
