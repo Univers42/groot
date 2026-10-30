@@ -435,6 +435,9 @@ CREATE TRIGGER ai_events_capture_feed_comments
     FOR EACH STATEMENT
     EXECUTE FUNCTION public.ai_events_capture_feed_comments();
 
+-- Only a root comment is a 'comment' event: a reply or a suggested edit (#228,
+-- osionos-discussions-migration.sql) adds none (S8). to_jsonb(row) reads the two
+-- columns only where they exist, so this file applies on a database without them.
 CREATE OR REPLACE FUNCTION public.ai_events_capture_page_comments()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -451,6 +454,8 @@ BEGIN
           FROM new_rows n
           JOIN public.osionos_pages p ON p.id = n.page_id
          WHERE p.archived_at IS NULL
+           AND coalesce(to_jsonb(n) ->> 'kind', 'comment') = 'comment'
+           AND to_jsonb(n) ->> 'parent_id' IS NULL
            AND NOT EXISTS (
                  SELECT 1 FROM public.ai_personalization_settings s
                   WHERE s.user_id = n.author_id AND NOT s.capture_explicit);
