@@ -22,8 +22,10 @@ playwright-core 1.49.1 into the `osionos-electron-smoke-cache` volume. Screensho
 - Minimize/maximize are read from `BrowserWindow` under openbox, not on a real desktop WM.
 - `database-view` proves the Databases panel loads its catalog, not that a table opens or edits.
 - `chat-send` proves the user turn renders (stub connector), not a real assistant reply.
-- BaaS: `OSIONOS_BAAS_URL` defaults to 127.0.0.1:8000, where nothing listens on this host, so
-  `app://osionos/__baas/*` calls are offline unless you set it to a live Kong.
+- BaaS: unset `OSIONOS_BAAS_URL` means the grobase `build.sh` baked (`OSIONOS_DESKTOP_BAAS_URL`),
+  else 127.0.0.1:8000, where nothing may listen; `app://osionos/__baas/*` calls are then offline
+  unless you set it to a live Kong. Another account: `DEMO_LOGIN_EMAIL` plus `SMOKE_ENV_FILE`,
+  a file holding its `DEMO_LOGIN_PASSWORD`.
 - Local and native editions (SKIP). Windows/macOS.
 - Writes: it creates one page titled `smoke-<id>` in the demo account; nothing deletes it.
 

@@ -1,7 +1,8 @@
 #!/bin/sh
 # Usage: run-smoke.sh full|local|native
-# Ponytail: the BaaS target defaults to 127.0.0.1:8000, where nothing listens on this host, so
-# full-edition BaaS calls are offline unless OSIONOS_BAAS_URL points at a live Kong.
+# Ponytail: the BaaS target is the grobase the build baked (desktop-config.json), else
+# 127.0.0.1:8000, where nothing may listen; BaaS calls are then offline unless OSIONOS_BAAS_URL
+# points at a live Kong.
 set -eu
 EDITION="${1:-full}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -20,7 +21,9 @@ esac
 [ -f "$E_DIR/renderer/index.html" ] || bash "$E_DIR/build.sh" --renderer-only
 # shellcheck source=/dev/null
 . "$REPO/scripts/lib/demo-login.sh"
-pw="$(demo_login_password "$REPO/.env.local")"
+# SMOKE_ENV_FILE: another file holding DEMO_LOGIN_PASSWORD, for an account other than this
+# machine's demo login (a remote data center's).
+pw="$(demo_login_password "${SMOKE_ENV_FILE:-$REPO/.env.local}")"
 mkdir -p "$OUT"
 docker build -q -t "$IMG" "$HERE" >/dev/null
 
