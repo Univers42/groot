@@ -12,7 +12,7 @@ all: sync-submodules-soft secrets-ensure certs certs-trust-local backend-up env-
 ## verify → clickable recap. A clean clone + `make all` reconstitutes the whole machine — with the
 ## vault key it restores the SHARED secrets+data, without it everything is generated locally.
 
-link-all: ## Pull the secrets from vault42, check the tailnet path to grobase, then build against it
+link-all: ## Pull vault42 secrets, check the tailnet path to grobase, build against it
 ## Usage: make link-all [GROBASE_TARGET=https://<host>.<tailnet>.ts.net] [VAULT42_ENVS="prod …"]
 ## `make all` for a machine whose grobase runs elsewhere, in three steps that each stop the run:
 ## (1) pulls $(VAULT42_ORG)/$(VAULT42_PROJECT)/$(VAULT42_ENV) from vault42 without asking; the volumes
