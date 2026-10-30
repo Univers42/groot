@@ -103,9 +103,10 @@ async function login(page) {
   const email = page.getByRole("textbox", { name: "Email" });
   await email.waitFor({ timeout: SLOW });
   await email.fill(EMAIL);
-  await page.getByLabel("Password").fill(PASSWORD);
+  await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
   await page.getByLabel(/Keep me signed in/).check(); // a reload must keep the session, as a desktop user expects
-  await page.getByRole("button", { name: /^log in$/i }).last().click();
+  // "Log in" before the portal redesign, "Sign in" after: a desktop built from either pin passes.
+  await page.getByRole("button", { name: /^(log in|sign in)$/i }).last().click();
   await page.getByRole("button", { name: /New page/i }).first().or(page.locator('button[title="Add to Private"]').first())
     .waitFor({ timeout: 45_000 });
   return "workspace shell rendered";
