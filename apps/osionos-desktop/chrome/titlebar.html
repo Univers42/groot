@@ -21,6 +21,8 @@
   body{ margin:0; }
   /* spacing only when a titlebar is actually mounted (no gap in a plain browser) */
   html.osio-has-titlebar #root>*{ margin-top:var(--tb-h) !important; height:calc(100vh - var(--tb-h)) !important; }
+  /* contain that margin: collapsed through #root it pushed the page 36px past the window */
+  html.osio-has-titlebar #root{ display:flow-root; }
   #osio-titlebar{
     position:fixed; inset:0 0 auto 0; height:var(--tb-h); z-index:2147483647;
     display:flex; align-items:center; gap:10px; padding-left:11px;
