@@ -25,8 +25,16 @@ services:
           [ -n "$$port" ] && socat TCP-LISTEN:$$port,fork,reuseaddr "$$target" &
         done </link/routes
         wait
+    # create_host_path false on both link mounts: LINK_DIR is on the tmpfs XDG_RUNTIME_DIR, so after a
+    # reboot dockerd restarts these relays before the user's grobase-link.service runs, and a short-syntax
+    # bind made LINK_DIR as root; make link then refused it on every retry and the frontends had no
+    # backend for 1 h 40 (2026-10-30 14:18 boot). The relay now fails to start until make link recreates it.
     volumes:
-      - ${GROBASE_LINK_DIR:?set by make link}:/link
+      - type: bind
+        source: ${GROBASE_LINK_DIR:?set by make link}
+        target: /link
+        bind:
+          create_host_path: false
     networks:
       mini-baas:
         aliases:
@@ -108,7 +116,12 @@ services:
     # measured 2026-10-13; the ssh hop alone is 0.5 ms).
     command: ["TCP-LISTEN:4100,fork,reuseaddr,nodelay", "UNIX-CONNECT:/link-ide/ide-server-4100.sock"]
     volumes:
-      - ${GROBASE_LINK_DIR:?set by make link}/ide:/link-ide:ro
+      - type: bind
+        source: ${GROBASE_LINK_DIR:?set by make link}/ide
+        target: /link-ide
+        read_only: true
+        bind:
+          create_host_path: false
     networks:
       osionos-ide-edge-net:
         aliases:

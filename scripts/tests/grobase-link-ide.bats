@@ -130,6 +130,15 @@ helper() { run bash -c "source '$SCRIPT' && $1"; }
   jq -e '.services["grobase-link-ide"] | ((.networks["osionos-ide-edge-net"].aliases // []) == ["osionos-ide-server"])' <<<"$output" >/dev/null
 }
 
+@test "compose: no link relay creates LINK_DIR at boot (a root-owned dir blocks make link)" {
+  command -v docker >/dev/null 2>&1 || skip "docker is not on PATH inside the bats container; the host gate checks the shape"
+  command -v jq >/dev/null 2>&1 || skip "jq is not on PATH inside the bats container; the host gate checks the shape"
+  run env GROBASE_LINK_DIR=/tmp/x docker compose -f "$BATS_TEST_DIRNAME/../../docker-compose.yml" -f "$BATS_TEST_DIRNAME/../../docker-compose.grobase-link.yml" --profile link-ide --env-file /dev/null config --format json
+  [ "$status" -eq 0 ]
+  jq -e '[.services["grobase-link", "grobase-link-ide"].volumes[] | select(.source | startswith("/tmp/x"))]
+    | (length == 2) and all(.bind.create_host_path != true)' <<<"$output" >/dev/null
+}
+
 # direct_up [ENV=value...] — `up` against a direct target; docker answers the reachability probe,
 # ssh is the recorder: no master answers `-O check`, opening one fails when FAIL_MASTER=1, the
 # plane probe reports one healthy plane.
