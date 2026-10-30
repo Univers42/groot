@@ -42,7 +42,9 @@ O3, O5, O6 BLOCKED until their grobase prerequisites land. Conditions are folded
       (#226 merged at the O1a label, before it). Engine *version* waits for
       G4b (the data plane is the one that knows it).
 - [x] Replace "ADAPTER" in loading/error panes with the engine and mount name — O1a, Univers42/osionos#226 + Univers42/notion-database-sys#23 (draft until the screenshot). Engine comes from the host mount catalog, not `LiveSchemaResponse.engine`: the catalog has it before the first schema fetch.
-- [ ] Source settings row: full binding, read-only for members, editable for owners.
+- [x] Source settings row: full binding, read-only for everyone — `CurrentBinding.tsx`
+      (notion-database-sys 49a6d115), live on osionos main 350248dc7.
+- [ ] Owners edit the binding — waits for a grobase mount PATCH (O3's self-serve routes).
 - [x] ~~Delete `DbSourceDropdown`~~ — not dead: `dbmsMiddleware.ts` serves `/api/dbms/*` to the Vite playground and `HttpAdapter.ts` calls it. Live mounts render the badge; the playground keeps the switcher (`DataSourceIndicator`).
 - [x] Unit: badge renders for each of the 10 engines (`live-mount-descriptor.test.ts`); e2e
       `bridge-stub/mountSourceBadge.spec.mjs` asserts network, file and failed states — #227.
