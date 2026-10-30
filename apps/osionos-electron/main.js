@@ -6,7 +6,7 @@
 // the background, and provides a frameless window driven by the shared custom
 // titlebar (see chrome/titlebar.html, injected into renderer/index.html).
 // ===========================================================================
-const { app, BrowserWindow, ipcMain, shell, protocol, net, Menu, globalShortcut } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, protocol, net, Menu, globalShortcut, session } = require("electron");
 const path = require("node:path");
 const os = require("node:os");
 const { spawn } = require("node:child_process");
@@ -14,6 +14,7 @@ const { pathToFileURL } = require("node:url");
 const { existsSync, statSync, mkdirSync, readFileSync, writeFileSync } = require("node:fs");
 const crypto = require("node:crypto");
 const { createExternalOpenThrottle, isExternalHttpUrl, isAppPageUrl, isAllowedSubframeUrl, senderAllowed, baasResponseHeaders, inlineScriptHashes, frameOriginsFrom, rendererCsp, editionOf, cspHeaderName, webSecurityFor, baasTargetOf, isLoopbackUrl } = require("./desktop-guards");
+const { applyTailnetBypass } = require("./desktop-proxy");
 
 // The local mini-baas query-router speaks plain HTTP. The renderer runs from the
 // secure `app://` origin, where a direct http://localhost:8002 fetch is upgraded
@@ -276,6 +277,13 @@ app.whenReady().then(async () => {
     try { await startNative(); } catch (e) { console.error("[native] backend failed to start:", e); }
   } else if (isLoopbackUrl(BAAS_TARGET)) {
     bootSuite();
+  }
+  // Before the first request: the data center's tailnet goes direct, the rest keeps the system proxy.
+  try {
+    const bypass = await applyTailnetBypass(session.defaultSession, BAAS_TARGET);
+    if (bypass) console.info(`[desktop] direct to the tailnet (${bypass.proxyBypassRules}); other traffic via ${bypass.proxyRules}`);
+  } catch (e) {
+    console.error("[desktop] tailnet proxy exception not applied; every request uses the system proxy:", e && e.message ? e.message : e);
   }
   createWindow();
   // OS-level recovery that works even if the renderer is completely dead (a black
