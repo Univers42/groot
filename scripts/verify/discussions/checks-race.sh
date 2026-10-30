@@ -8,6 +8,8 @@
 P4="33333333-0000-4000-8000-000000000004"
 P5="33333333-0000-4000-8000-000000000005"
 P6="33333333-0000-4000-8000-000000000006"
+P_SPREAD="33333333-0000-4000-8000-000000000017"
+P_EDIT="33333333-0000-4000-8000-000000000018"
 
 # bg_sql <app-name> <sql> <file-stem> — a session in the background, named so it can be found.
 bg_sql() {
@@ -72,6 +74,58 @@ check_edit_race() {
 	return "${ok}"
 }
 
+# d8 — 10 accepts on 10 different blocks of one page, released together: each
+# splice reads the content the previous one wrote, so all 10 land (no lost update).
+spread_accepts() {
+	blocks=""
+	n=1
+	while [ "${n}" -le 10 ]; do
+		blocks="${blocks}${blocks:+,}{\"id\":\"x${n}\",\"type\":\"paragraph\",\"content\":\"word ${n}\"}"
+		n=$((n + 1))
+	done
+	seed_page "${P_SPREAD}" "[${blocks}]"
+	n=1
+	while [ "${n}" -le 10 ]; do
+		suggest "aaaaaaaa-0000-4000-8000-$(printf '%012d' "${n}")" "${P_SPREAD}" "x${n}" 0 4 word '' " ${n}" 'done'
+		n=$((n + 1))
+	done
+	bg_sql disc-spread-gate "BEGIN; SELECT 1 FROM public.osionos_pages WHERE id = '${P_SPREAD}' FOR NO KEY UPDATE; SELECT pg_sleep(3); COMMIT;" "${WORK}/spread-gate"
+	gate=$!
+	sleeping disc-spread-gate || { printf '  FAIL d8 the spread gate never held the page\n'; return 1; }
+	pids=""
+	n=1
+	while [ "${n}" -le 10 ]; do
+		bg_sql disc-spread "SELECT public.osionos_decide_suggestion('aaaaaaaa-0000-4000-8000-$(printf '%012d' "${n}")', '${U1}', 'accepted');" "${WORK}/spread${n}"
+		pids="${pids} $!"
+		n=$((n + 1))
+	done
+	ok_spread=0
+	wait_until "SELECT count(*) >= 10 FROM pg_stat_activity WHERE application_name = 'disc-spread' AND wait_event_type = 'Lock'" ||
+		{ printf '  FAIL d8 fewer than 10 spread accepts were ever waiting together\n'; ok_spread=1; }
+	wait "${gate}" || true
+	for pid in ${pids}; do wait "${pid}" || ok_spread=1; done
+	check d8 "10 accepts on 10 blocks of one page all land" 10 \
+		"$(q "SELECT count(*) FROM jsonb_array_elements((SELECT content FROM public.osionos_pages WHERE id = '${P_SPREAD}')) b WHERE b ->> 'content' LIKE 'done %'")" || ok_spread=1
+	return "${ok_spread}"
+}
+
+# d8 — a page edit (the outbox PATCH) holds the row while an accept arrives: the
+# decide waits on the page lock and splices into the edited text, never over it.
+# The edit sits outside the anchor's 16-code-point context, so the splice still
+# applies; an edit inside it would answer stale instead.
+edit_during_decide() {
+	seed_page "${P_EDIT}" '[{"id":"pe","type":"paragraph","content":"aaaa then some filler, edit me here"}]'
+	s="55555555-0000-4000-8000-000000000052"
+	suggest "${s}" "${P_EDIT}" pe 31 35 here 'filler, edit me ' '' there
+	bg_sql disc-patch "BEGIN; UPDATE public.osionos_pages SET content = '[{\"id\":\"pe\",\"type\":\"paragraph\",\"content\":\"AAAA then some filler, edit me here\"}]' WHERE id = '${P_EDIT}'; SELECT pg_sleep(2); COMMIT;" "${WORK}/patch"
+	pid=$!
+	sleeping disc-patch || { printf '  FAIL d8 the page edit never reached its sleep\n'; return 1; }
+	out="$(decide "${s}" accepted)" || return 1
+	wait "${pid}" || { printf '  FAIL d8 the page edit failed: %s\n' "$(cat "${WORK}/patch.err")"; return 1; }
+	check d8 "an accept during a page edit answers ok" true "$(printf '%s' "${out}" | jq -r .ok)" || return 1
+	check d8 "an accept during a page edit keeps the edit" "AAAA then some filler, edit me there" "$(block_text "${P_EDIT}" pe)"
+}
+
 # d8 — 50 overlapping proposals accepted at once: one wins, 49 are superseded,
 # nobody deadlocks; a reply, a reaction and a comment never wait on a held decide.
 check_concurrent_accepts() {
@@ -108,6 +162,9 @@ check_concurrent_accepts() {
 		"$(q "SELECT block = 'the ' || (c.suggestion ->> 'insert') || ' target words' FROM public.osionos_page_comments c,
 		      LATERAL (SELECT content #>> '{0,content}' AS block FROM public.osionos_pages WHERE id = '${P6}') p
 		      WHERE c.page_id = '${P6}' AND c.status = 'accepted'")" || ok=1
+
+	spread_accepts || ok=1
+	edit_during_decide || ok=1
 
 	h="55555555-0000-4000-8000-000000000051"
 	suggest "${h}" "${P6}" c2 0 4 held '' ' text here' kept
