@@ -343,6 +343,10 @@ INSERT INTO osionos_account_data_map_seed VALUES
 ('osionos_pages', 'owner_id', 'owner', 'transfer', '{id,workspace_id,title,visibility,content,properties,created_at,updated_at}', NULL, NULL, 'workspace_id', NULL),
 ('osionos_pages', 'collaborators', 'peer', 'scrub_jsonb', NULL, NULL, NULL, 'workspace_id', NULL),
 ('osionos_page_comments', 'author_id', 'author', 'anonymise', '{id,page_id,content,created_at}', NULL, NULL, NULL, NULL),
+-- a decider is tombstoned like an author; a reaction is the reacting user's and goes with them
+-- (anonymising would collide on the (comment, user, emoji) key at the second erased user)
+('osionos_page_comments', 'decided_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
+('osionos_page_comment_reactions', 'user_id', 'member', 'delete', '{comment_id,emoji,created_at}', NULL, NULL, NULL, NULL),
 -- an access request is the requester's (it goes with them); the owner who decided it is tombstoned
 ('osionos_page_access_requests', 'requester_id', 'member', 'delete', NULL, NULL, NULL, NULL, NULL),
 ('osionos_page_access_requests', 'decided_by', 'author', 'anonymise', NULL, NULL, NULL, NULL, NULL),
