@@ -24,7 +24,7 @@
     "productName": "osionos",
     "executableName": "osionos",
     "directories": { "output": "dist" },
-    "files": ["main.js", "preload.js", "desktop-guards.js", "desktop-config.json", "renderer/**/*"],
+    "files": ["main.js", "preload.js", "desktop-guards.js", "desktop-proxy.js", "desktop-config.json", "renderer/**/*"],
     "linux": {
       "target": ["deb", "AppImage"],
       "category": "Office",
