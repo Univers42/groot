@@ -1,8 +1,8 @@
-<!-- osionos desktop custom window chrome — shared by the Electron and Tauri
-     shells (injected into the bundled index.html before </body> at build time).
-     Detects the host (Electron preload `window.osionosDesktop` OR Tauri
-     `window.__TAURI__`) and wires the window controls accordingly. In a plain
-     browser neither exists, so it no-ops cleanly (and the layout spacing is
+<!-- osionos desktop window chrome for the TAURI shell (injected into the bundled
+     index.html before </body> at build time). The Electron shell no longer injects
+     it: there the app's own top bar (src/widgets/top-bar) drives the frameless
+     window through window.osionosDesktop, and this bar was a duplicate. In a plain
+     browser no host exists, so it no-ops cleanly (and the layout spacing is
      scoped to html.osio-has-titlebar, so there is NO empty gap). Styled to the
      osionos design chart (logo #0B63CE, accent #0071e3 / dark #38bdf8). -->
 <style id="osio-tb-style">

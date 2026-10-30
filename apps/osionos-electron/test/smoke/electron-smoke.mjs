@@ -76,20 +76,33 @@ async function webSecurityOn(app) {
   return "webPreferences.webSecurity=true";
 }
 
+// The app's own bar is the window's chrome: one set of controls, no injected legacy bar.
+function windowButton(page, name) {
+  return page.getByRole("button", { name, exact: true }).first();
+}
+
+async function singleTitlebar(page) {
+  await windowButton(page, "Close window").waitFor({ timeout: SLOW });
+  if (await page.locator("#osio-titlebar").count()) throw new Error("the legacy #osio-titlebar is still injected");
+  const closes = await page.getByRole("button", { name: "Close window", exact: true }).count();
+  if (closes !== 1) throw new Error(`${closes} "Close window" buttons, expected 1`);
+  return "one bar, one set of window controls";
+}
+
 async function titlebarMaximize(app, page) {
   const isMax = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isMaximized());
   const before = await isMax();
-  await page.locator("#osio-titlebar .tb-max").click();
+  await windowButton(page, "Maximize window").click();
   await page.waitForTimeout(500); // the WM acknowledges maximize asynchronously
   const after = await isMax();
   if (before === after) throw new Error(`isMaximized stayed ${before}`);
-  await page.locator("#osio-titlebar .tb-max").click();
+  await windowButton(page, "Maximize window").click();
   await page.waitForTimeout(500);
   return `isMaximized ${before} -> ${after} -> ${await isMax()}`;
 }
 
 async function titlebarMinimize(app, page) {
-  await page.locator("#osio-titlebar .tb-min").click();
+  await windowButton(page, "Minimize window").click();
   const min = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isMinimized());
   await page.waitForTimeout(1000); // the WM acknowledges iconify asynchronously
   const now = await min();
@@ -155,6 +168,7 @@ await check("csp-counter-selftest", () => cspCounterSelfTest(page));
 await check("window.open-null", () => windowOpenIsNull(page));
 await check("csp-header", () => cspHeader(page));
 await check("web-security", () => webSecurityOn(app));
+await check("single-titlebar", () => singleTitlebar(page));
 await check("titlebar-maximize", () => titlebarMaximize(app, page));
 await check("titlebar-minimize", () => titlebarMinimize(app, page));
 const loggedIn = await check("login", () => login(page));

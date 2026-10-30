@@ -16,7 +16,7 @@
 #   e.g.  bash apps/osionos-electron/build.sh --local --all
 #
 # 1. Build the STANDALONE osionos frontend (offline-capable, base=./).
-# 2. Extract the dist into renderer/ and inject the shared custom titlebar.
+# 2. Extract the dist into renderer/ (the app's own top bar is the window's chrome).
 # 3. Package with electron-builder inside a container (no host Node).
 # Install:  sudo bash apps/osionos-electron/install-app.sh   (full)
 #           bash apps/osionos-electron/local-edition/install.sh  (local edition)
@@ -113,16 +113,6 @@ cid="$(docker create "$FE_TAG")"
 rm -rf "$EL/renderer" && mkdir -p "$EL/renderer"
 docker cp "$cid:/usr/share/nginx/html/." "$EL/renderer/"
 docker rm -f "$cid" >/dev/null
-
-echo "[2b/4] Injecting shared custom titlebar…"
-docker run --rm -v "$REPO/$EL":/d -v "$REPO/apps/osionos-desktop/chrome":/c -w /d \
-  public.ecr.aws/docker/library/node:22-alpine node -e '
-  const fs=require("fs"); const idx="renderer/index.html";
-  let html=fs.readFileSync(idx,"utf8");
-  const snip=fs.readFileSync("/c/titlebar.html","utf8");
-  if(!html.includes("osio-titlebar")){ html=html.replace("</body>", snip+"\n</body>"); fs.writeFileSync(idx,html); console.log("[chrome] titlebar injected"); }
-  else console.log("[chrome] already present");
-'
 
 # The smoke harness needs only the renderer; packaging is the slow, heavy part.
 if [ "$RENDERER_ONLY" = 1 ]; then echo "Renderer ready in $EL/renderer (--renderer-only)."; exit 0; fi
