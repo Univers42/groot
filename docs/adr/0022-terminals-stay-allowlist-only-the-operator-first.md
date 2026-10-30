@@ -56,3 +56,5 @@
 - Every step on baas waits until baas has a disk again (the 2026-10-18 23:47 event).
 - The residual for stage 1 (K1/K2 unmitigated, slirp reaching host loopback, and the roster being trusted
   people rather than a boundary) is not signed yet. Stage 1 does not open without that signature.
+
+- **Amendment 2026-10-30:** the owner's own machines now get terminals through VS Code's server ([ADR-006](../ide/ADR-006-vscode-backend-osionos-host.md), [0034](0034-the-ide-runs-on-vs-codes-server-behind-a-non-public-node-proxy.md)), owner only. This ADR still governs the hosted sandbox and every non-owner user (C21 BLOCKED).
