@@ -3,8 +3,8 @@
 //
 // Renders the bundled offline osionos (renderer/) with Chromium (fast on every
 // OS, unlike Tauri's WebKitGTK on Linux), boots the local Track Binocle BaaS in
-// the background, and provides a frameless window driven by the shared custom
-// titlebar (see chrome/titlebar.html, injected into renderer/index.html).
+// the background, and provides a frameless window whose chrome is the app's own
+// top bar (its window controls call the preload bridge).
 // ===========================================================================
 const { app, BrowserWindow, ipcMain, shell, protocol, net, Menu, globalShortcut, session } = require("electron");
 const path = require("node:path");
