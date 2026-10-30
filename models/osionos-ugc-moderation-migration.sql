@@ -331,6 +331,11 @@ CREATE TRIGGER ai_jobs_enqueue_feed_comments_update
     FOR EACH STATEMENT
     EXECUTE FUNCTION public.ai_jobs_enqueue_feed_comments();
 
+-- A suggested edit (#228, osionos-discussions-migration.sql) is moderated on
+-- what it shows: the comment, the proposed insert and the quoted text, so a PATCH
+-- of the insert re-queues (S8). to_jsonb(row) reads the columns only where they
+-- exist, so this file still applies, and still hashes plain comments to the same
+-- digest, on a database without them.
 CREATE OR REPLACE FUNCTION public.ai_jobs_enqueue_page_comments()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -347,12 +352,15 @@ BEGIN
         IF TG_OP = 'UPDATE' THEN
             INSERT INTO public.ai_jobs (kind, subject_kind, subject_id, workspace_id, content_sha256)
             SELECT 'moderate', 'page_comment', n.id::text, p.workspace_id,
-                   encode(sha256(convert_to(n.content, 'UTF8')), 'hex')
+                   encode(sha256(convert_to(n.content
+                       || coalesce(to_jsonb(n) -> 'suggestion' ->> 'insert', '')
+                       || coalesce(to_jsonb(n) -> 'anchor' ->> 'quote', ''), 'UTF8')), 'hex')
               FROM new_rows n
               JOIN old_rows o ON o.id = n.id
               JOIN public.osionos_pages p ON p.id = n.page_id
               JOIN public.osionos_workspaces w ON w.id = p.workspace_id
-             WHERE o.content IS DISTINCT FROM n.content
+             WHERE (o.content IS DISTINCT FROM n.content
+                    OR to_jsonb(o) -> 'suggestion' IS DISTINCT FROM to_jsonb(n) -> 'suggestion')
                AND p.archived_at IS NULL
                AND (p.visibility = 'public' OR w.visibility = 'public')
             ON CONFLICT (kind, subject_kind, subject_id) DO UPDATE
@@ -364,7 +372,9 @@ BEGIN
         ELSE
             INSERT INTO public.ai_jobs (kind, subject_kind, subject_id, workspace_id, content_sha256)
             SELECT 'moderate', 'page_comment', n.id::text, p.workspace_id,
-                   encode(sha256(convert_to(n.content, 'UTF8')), 'hex')
+                   encode(sha256(convert_to(n.content
+                       || coalesce(to_jsonb(n) -> 'suggestion' ->> 'insert', '')
+                       || coalesce(to_jsonb(n) -> 'anchor' ->> 'quote', ''), 'UTF8')), 'hex')
               FROM new_rows n
               JOIN public.osionos_pages p ON p.id = n.page_id
               JOIN public.osionos_workspaces w ON w.id = p.workspace_id
