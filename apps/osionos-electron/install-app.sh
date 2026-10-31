@@ -3,7 +3,8 @@
 # rebuilds always replace the previous one). Run with sudo.
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-DEB="$(ls -t "$REPO"/apps/osionos-electron/dist/osionos*.deb 2>/dev/null | head -1)"
+# A .deb built elsewhere (e.g. a branch build) can be named as the first argument.
+DEB="${1:-$(ls -t "$REPO"/apps/osionos-electron/dist/osionos*.deb 2>/dev/null | head -1)}"
 [ -n "${DEB:-}" ] || { echo "No .deb found — run: bash apps/osionos-electron/build.sh"; exit 1; }
 
 # Remove the older Tauri build if present — it installs as package 'osionos'
