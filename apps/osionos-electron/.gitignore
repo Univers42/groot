@@ -3,7 +3,6 @@ dist/
 dist-local/
 renderer/
 icon.png
-package-lock.json
 .electron-cache/
 .builder-home/
 native-runtime/

@@ -15,8 +15,11 @@
     "dist:all": "electron-builder --linux deb AppImage --win nsis",
     "dist:native": "electron-builder --config electron-builder.native.json --linux deb AppImage"
   },
+  "dependencies": {
+    "node-pty": "1.1.0"
+  },
   "devDependencies": {
-    "electron": "^32.2.0",
+    "electron": "44.8.0",
     "electron-builder": "^25.1.8"
   },
   "build": {
@@ -24,7 +27,8 @@
     "productName": "osionos",
     "executableName": "osionos",
     "directories": { "output": "dist" },
-    "files": ["main.js", "preload.js", "desktop-guards.js", "desktop-proxy.js", "desktop-config.json", "renderer/**/*"],
+    "files": ["main.js", "preload.js", "desktop-guards.js", "desktop-proxy.js", "desktop-pty.js", "pty-host.js", "desktop-config.json", "renderer/**/*", "node_modules/node-pty/**/*"],
+    "asarUnpack": ["node_modules/node-pty/**/*"],
     "linux": {
       "target": ["deb", "AppImage"],
       "category": "Office",
@@ -43,5 +47,8 @@
       "createDesktopShortcut": true,
       "shortcutName": "osionos"
     }
+  },
+  "allowScripts": {
+    "node-pty@1.1.0": true
   }
 }

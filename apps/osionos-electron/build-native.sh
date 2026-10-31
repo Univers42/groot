@@ -87,7 +87,7 @@ if [ "$MODE" = "--dist" ]; then
   docker run --rm --user "$(id -u):$(id -g)" \
     -e HOME=/project/.builder-home -e ELECTRON_CACHE=/tmp/.cache/electron -e ELECTRON_BUILDER_CACHE=/tmp/.cache/electron-builder -e npm_config_cache=/tmp/.npm \
     -v "$REPO/$EL":/project -w /project electronuserland/builder:latest \
-    sh -c "npm install --no-audit --no-fund && npm run dist:native -- --config.extraMetadata.version=${VER}-native"
+    sh -c "npm ci --no-audit --no-fund && npm run dist:native -- --config.extraMetadata.version=${VER}-native"
   echo "Done. Native artifacts in $EL/dist-native/ :"
   ls -1 "$EL"/dist-native/*.deb "$EL"/dist-native/*.AppImage 2>/dev/null || true
   exit 0

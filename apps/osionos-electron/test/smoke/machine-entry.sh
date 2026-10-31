@@ -3,10 +3,15 @@
 # trusts the dev CA, then execs the smoke under xvfb. Password arrives on stdin (kept for node).
 set -eu
 cd /cache
-if [ ! -x node_modules/electron/dist/electron ]; then
+# The smoke drives the Electron the app ships (package.json pins it); the cache follows that pin.
+want="$(node -p "require('/app/package.json').devDependencies.electron")"
+have="$(node -p "try { require('/cache/node_modules/electron/package.json').version } catch { '' }")"
+if [ "$have" != "$want" ] || [ ! -x node_modules/electron/dist/electron ]; then
 	[ -f package.json ] || echo '{"name":"smoke-cache","private":true}' >package.json
-	npm install --no-audit --no-fund --no-save electron@32.2.7 playwright-core@1.49.1 >&2
+	npm install --no-audit --no-fund --no-save "electron@$want" playwright-core@1.49.1 >&2
 fi
+# npm 11 holds back install scripts it has not been told to allow, electron's binary download included.
+[ -x node_modules/electron/dist/electron ] || node node_modules/electron/install.js >&2
 mkdir -p "$HOME/.pki/nssdb"
 certutil -d "sql:$HOME/.pki/nssdb" -N --empty-password </dev/null >/dev/null 2>&1 || true
 certutil -d "sql:$HOME/.pki/nssdb" -A -t "C,," -n osionos-dev -i /ca.pem </dev/null
