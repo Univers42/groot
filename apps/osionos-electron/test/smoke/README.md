@@ -10,7 +10,9 @@ socket, `--network host`). The demo password goes host -> fifo -> container stdi
 
 `machine` opens `/machine` on this laptop's osionos-node (`127.0.0.1:4100`, started with
 `--app-origin app://osionos`). It sends the emailed step-up code, then waits up to 25 minutes for
-the code in `$SMOKE_OUT/code.txt`. It checks that the IDE window connects and that a save and a
+the code in `$SMOKE_OUT/code.txt`. `MACHINE_FOLDER` must hold `hello.py` (with a `def greet`) and
+`notes/readme.md` (with "opened from the osionos file tree"); the file tree opens both. It checks
+that the IDE window connects and that a save and a
 terminal probe reach `MACHINE_FOLDER` (check the disk yourself). It also checks that no token is in
 storage or the HAR (C5), and that `app://osionos` cannot reach the node directly (C7).
 
