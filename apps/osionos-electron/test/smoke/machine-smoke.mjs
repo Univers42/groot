@@ -78,11 +78,17 @@ try {
     return "status connected";
   });
 
+  // The folder holds notes/readme.md: a folder expands in place, a file opens in the editor.
+  await check("file-tree", async () => {
+    const tree = ide.locator("#explorer");
+    await tree.getByRole("treeitem", { name: "notes" }).click();
+    await tree.getByRole("treeitem", { name: "readme.md" }).click({ timeout: 15_000 });
+    await ide.locator(".monaco-editor .view-lines").filter({ hasText: "opened from the osionos file tree" }).waitFor({ timeout: 30_000 });
+    return "notes/ expanded, readme.md opened";
+  });
+
   await check("edit-and-save", async () => {
-    await ide.locator("#quick-open").click();
-    await ide.keyboard.type("hello.py");
-    await sleep(1500);
-    await ide.keyboard.press("Enter");
+    await ide.locator("#explorer").getByRole("treeitem", { name: "hello.py" }).click();
     await ide.locator(".monaco-editor .view-lines").filter({ hasText: "def greet" }).waitFor({ timeout: 30_000 });
     await ide.locator(".monaco-editor .view-lines").click();
     await ide.keyboard.press("Control+End");
