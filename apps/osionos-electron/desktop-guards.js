@@ -61,12 +61,13 @@ function isExternalHttpUrl(url) {
 function isMachineWindowUrl(url) {
   // WHY: /machine opens this machine's IDE page (osionos-node) as its own window and reaches it
   // through window.opener (C0-F1, C23). Only the exact loopback address, never a remote host:
-  // a node elsewhere is reached through its own tunnel, not by widening this.
+  // a node elsewhere is reached through its own tunnel, not by widening this. No folder named
+  // opens the machine's home folder (the terminal panel's one click).
   try {
     const u = new URL(url);
     if (u.protocol !== "http:" || u.hostname !== "127.0.0.1" || u.port === "") return false;
     if (u.username !== "" || u.password !== "" || u.pathname !== "/") return false;
-    return u.searchParams.has("node") && u.searchParams.has("folder");
+    return u.searchParams.has("node");
   } catch {
     return false;
   }

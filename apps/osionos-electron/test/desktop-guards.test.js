@@ -267,11 +267,13 @@ describe("baas target", () => {
 describe("isMachineWindowUrl", () => {
   // /machine opens this machine's IDE page as its own window and reaches it through
   // window.opener (C0-F1, C23); only a loopback osionos-node page qualifies.
-  it("accepts the loopback IDE page naming a node and a folder", () => {
+  it("accepts the loopback IDE page naming a node, with or without a folder", () => {
     assert.equal(isMachineWindowUrl("http://127.0.0.1:4100/?node=laptop&folder=%2Fhome%2Fme%2Fproj"), true);
     assert.equal(isMachineWindowUrl("http://127.0.0.1:43123/?folder=%2Fx&node=vm"), true);
+    // One click from the terminal panel opens the machine's home folder: no folder named.
+    assert.equal(isMachineWindowUrl("http://127.0.0.1:4100/?node=m-abcdefghijklmnop"), true);
   });
-  it("refuses any other host, scheme, path or a page without node and folder", () => {
+  it("refuses any other host, scheme, path or a page without a node", () => {
     for (const url of [
       "https://127.0.0.1:4100/?node=laptop&folder=%2Fx",
       "http://localhost:4100/?node=laptop&folder=%2Fx",
@@ -280,7 +282,8 @@ describe("isMachineWindowUrl", () => {
       "http://127.0.0.1.evil.example:4100/?node=laptop&folder=%2Fx",
       "http://user:pw@127.0.0.1:4100/?node=laptop&folder=%2Fx",
       "http://127.0.0.1:4100/assets/x.js?node=laptop&folder=%2Fx",
-      "http://127.0.0.1:4100/?node=laptop",
+      "http://127.0.0.1:4100/?folder=%2Fx",
+      "http://127.0.0.1:4100/",
       "http://127.0.0.1/?node=laptop&folder=%2Fx",
       "app://osionos/machine?node=laptop&folder=%2Fx",
       "javascript:alert(1)",
