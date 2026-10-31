@@ -10,5 +10,5 @@ exec docker run --rm -i --network host --ipc host \
 	-v "$E_DIR":/app:ro -v "$HERE":/smoke:ro -v "$OUT":/out \
 	-v osionos-electron-smoke-cache:/cache \
 	-v "$REPO/apps/grobase/certs/track-binocle-local-ca.pem":/ca.pem:ro \
-	-e DEMO_LOGIN_EMAIL "$@" \
-	--entrypoint /smoke/container-entry.sh "$IMG" <&3
+	-e DEMO_LOGIN_EMAIL -e MACHINE_FOLDER "$@" \
+	--entrypoint "/smoke/${ENTRY:-container-entry.sh}" "$IMG" <&3

@@ -18,6 +18,7 @@ const {
   webSecurityFor,
   baasTargetOf,
   isLoopbackUrl,
+  isMachineWindowUrl,
 } = require("../desktop-guards");
 
 function mainEvent(overrides) {
@@ -260,5 +261,30 @@ describe("baas target", () => {
   });
   it("isLoopbackUrl: an unparsable target counts as local, so the suite still boots as before", () => {
     assert.equal(isLoopbackUrl("not a url"), true);
+  });
+});
+
+describe("isMachineWindowUrl", () => {
+  // /machine opens this machine's IDE page as its own window and reaches it through
+  // window.opener (C0-F1, C23); only a loopback osionos-node page qualifies.
+  it("accepts the loopback IDE page naming a node and a folder", () => {
+    assert.equal(isMachineWindowUrl("http://127.0.0.1:4100/?node=laptop&folder=%2Fhome%2Fme%2Fproj"), true);
+    assert.equal(isMachineWindowUrl("http://127.0.0.1:43123/?folder=%2Fx&node=vm"), true);
+  });
+  it("refuses any other host, scheme, path or a page without node and folder", () => {
+    for (const url of [
+      "https://127.0.0.1:4100/?node=laptop&folder=%2Fx",
+      "http://localhost:4100/?node=laptop&folder=%2Fx",
+      "http://192.168.1.5:4100/?node=laptop&folder=%2Fx",
+      "http://evil.example/?node=laptop&folder=%2Fx",
+      "http://127.0.0.1.evil.example:4100/?node=laptop&folder=%2Fx",
+      "http://user:pw@127.0.0.1:4100/?node=laptop&folder=%2Fx",
+      "http://127.0.0.1:4100/assets/x.js?node=laptop&folder=%2Fx",
+      "http://127.0.0.1:4100/?node=laptop",
+      "http://127.0.0.1/?node=laptop&folder=%2Fx",
+      "app://osionos/machine?node=laptop&folder=%2Fx",
+      "javascript:alert(1)",
+      "not a url",
+    ]) assert.equal(isMachineWindowUrl(url), false, url);
   });
 });

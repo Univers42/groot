@@ -58,6 +58,20 @@ function isExternalHttpUrl(url) {
   }
 }
 
+function isMachineWindowUrl(url) {
+  // WHY: /machine opens this machine's IDE page (osionos-node) as its own window and reaches it
+  // through window.opener (C0-F1, C23). Only the exact loopback address, never a remote host:
+  // a node elsewhere is reached through its own tunnel, not by widening this.
+  try {
+    const u = new URL(url);
+    if (u.protocol !== "http:" || u.hostname !== "127.0.0.1" || u.port === "") return false;
+    if (u.username !== "" || u.password !== "" || u.pathname !== "/") return false;
+    return u.searchParams.has("node") && u.searchParams.has("folder");
+  } catch {
+    return false;
+  }
+}
+
 function isAppPageUrl(url) {
   // WHY: the shell hosts exactly one app origin; /__baas/ is the main-process relay, not a page.
   // Ponytail: pathname prefix check gets wrong a page that legitimately starts with /__baas/ (none exists).
@@ -196,6 +210,7 @@ function createExternalOpenThrottle(opts) {
 }
 
 module.exports = {
+  isMachineWindowUrl,
   createExternalOpenThrottle,
   isExternalHttpUrl,
   isAppPageUrl,

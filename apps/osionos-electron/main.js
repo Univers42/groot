@@ -13,7 +13,7 @@ const { spawn } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
 const { existsSync, statSync, mkdirSync, readFileSync, writeFileSync } = require("node:fs");
 const crypto = require("node:crypto");
-const { createExternalOpenThrottle, isExternalHttpUrl, isAppPageUrl, isAllowedSubframeUrl, senderAllowed, baasResponseHeaders, inlineScriptHashes, frameOriginsFrom, rendererCsp, editionOf, cspHeaderName, webSecurityFor, baasTargetOf, isLoopbackUrl } = require("./desktop-guards");
+const { createExternalOpenThrottle, isExternalHttpUrl, isAppPageUrl, isMachineWindowUrl, isAllowedSubframeUrl, senderAllowed, baasResponseHeaders, inlineScriptHashes, frameOriginsFrom, rendererCsp, editionOf, cspHeaderName, webSecurityFor, baasTargetOf, isLoopbackUrl } = require("./desktop-guards");
 const { applyTailnetBypass } = require("./desktop-proxy");
 
 // The local mini-baas query-router speaks plain HTTP. The renderer runs from the
@@ -124,9 +124,16 @@ let mainWindow = null;
 // Every WebContents gets the same guards (per-window wiring missed child windows). The main
 // frame never leaves app://osionos: the Mail/Calendar buttons set location.href to an external
 // URL, which would strand the user on a page with no titlebar, so it opens in the system browser.
+// A machine window (/machine, C23) is this machine's own IDE page, opened as a child window so the
+// app can hand it a session through window.opener; it is the only page allowed off app://osionos,
+// and only in a window the app opened. Its inherited preload is inert there: win:* is accepted from
+// the main window alone (C12).
+const MACHINE_WINDOW = { width: 1400, height: 900, frame: true, autoHideMenuBar: true, backgroundColor: "#ffffff" };
 app.on("web-contents-created", (_e, contents) => {
   const openThrottle = createExternalOpenThrottle();
+  const isMachinePage = (url) => contents.opener != null && isMachineWindowUrl(url);
   contents.setWindowOpenHandler(({ url }) => {
+    if (isMachineWindowUrl(url)) return { action: "allow", overrideBrowserWindowOptions: MACHINE_WINDOW };
     if (isExternalHttpUrl(url)) {
       if (openThrottle.allow()) shell.openExternal(url);
       else console.warn("window.open throttled for host " + new URL(url).host);
@@ -135,12 +142,13 @@ app.on("web-contents-created", (_e, contents) => {
   });
   contents.on("will-attach-webview", (e) => e.preventDefault());
   contents.on("will-navigate", (e, url) => {
-    if (isAppPageUrl(url)) return;
+    if (isAppPageUrl(url) || isMachinePage(url)) return;
     e.preventDefault();
     if (isExternalHttpUrl(url)) shell.openExternal(url);
   });
   contents.on("will-frame-navigate", (d) => {
-    if (d.isMainFrame ? !isAppPageUrl(d.url) : !isAllowedSubframeUrl(d.url)) d.preventDefault();
+    const allowed = d.isMainFrame ? isAppPageUrl(d.url) || isMachinePage(d.url) : isAllowedSubframeUrl(d.url);
+    if (!allowed) d.preventDefault();
   });
 });
 

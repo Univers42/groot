@@ -1,5 +1,7 @@
 #!/bin/sh
-# Usage: run-smoke.sh full|local|native
+# Usage: run-smoke.sh full|local|native|machine
+# machine: the C23 /machine run; needs a running osionos-node on 127.0.0.1:4100 and MACHINE_FOLDER,
+# and waits for the emailed step-up code in $SMOKE_OUT/code.txt.
 # Ponytail: the BaaS target is the grobase the build baked (desktop-config.json), else
 # 127.0.0.1:8000, where nothing may listen; BaaS calls are then offline unless OSIONOS_BAAS_URL
 # points at a live Kong.
@@ -11,11 +13,15 @@ REPO="$(cd "$E_DIR/../.." && pwd)"
 IMG=osionos-electron-smoke:1.49.1
 OUT="${SMOKE_OUT:-/tmp/osionos-electron-smoke-out}"
 
+ENTRY=container-entry.sh
+LIMITS="--timeout 900 --idle 300"
 case "$EDITION" in
 full) ;;
+# Caveat: the run is silent while it waits for the owner's code, so its idle limit covers that wait.
+machine) ENTRY=machine-entry.sh; LIMITS="--timeout 2400 --idle 1800"; : "${MACHINE_FOLDER:?MACHINE_FOLDER must name a folder on this machine}" ;;
 local) echo "SKIP local — needs a lean backend on :4000 over plain HTTP; :4000 is the live HTTPS bridge (a second one would touch the live stack)"; exit 0 ;;
 native) echo "SKIP native — needs native-runtime/ from build-native.sh (embedded postgres+gotrue, heavy); not built here"; exit 0 ;;
-*) echo "usage: $0 full|local|native" >&2; exit 2 ;;
+*) echo "usage: $0 full|local|native|machine" >&2; exit 2 ;;
 esac
 
 [ -f "$E_DIR/renderer/index.html" ] || bash "$E_DIR/build.sh" --renderer-only
@@ -34,5 +40,5 @@ trap 'rm -rf "$fifo_dir"' EXIT
 mkfifo "$fifo_dir/pw"
 printf '%s' "$pw" >"$fifo_dir/pw" &
 exec 3<"$fifo_dir/pw"
-export E_DIR HERE REPO IMG OUT DEMO_LOGIN_EMAIL
-"$REPO/.claude/tools/watch.sh" --timeout 900 --idle 300 -- sh "$HERE/docker-run.sh"
+export E_DIR HERE REPO IMG OUT DEMO_LOGIN_EMAIL ENTRY MACHINE_FOLDER
+"$REPO/.claude/tools/watch.sh" $LIMITS -- sh "$HERE/docker-run.sh"
