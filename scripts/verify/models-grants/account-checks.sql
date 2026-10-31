@@ -98,6 +98,7 @@ SELECT 'account_plane_expected', count(*), coalesce(string_agg(t, ' ' ORDER BY t
                    'osionos_account_deletion_requests',
                    'osionos_published_pages',
                    'osionos_personal_access_tokens',
+                   'osionos_machines',
                    'osionos_follows',
                    'osionos_presence']) AS t
  WHERE to_regclass('public.' || t) IS NULL
@@ -145,7 +146,10 @@ WITH expected(tbl, cols, opclass, uniq, pred) AS (
     -- P5-1-a: the personal access tokens. The unique index on the hash is the
     -- lookup a bearer token is resolved with; the owner index is the list.
     ('osionos_personal_access_tokens', 'token_hash',               'btree',         true,  NULL),
-    ('osionos_personal_access_tokens', 'user_id,created_at',       'btree',         false, NULL)
+    ('osionos_personal_access_tokens', 'user_id,created_at',       'btree',         false, NULL),
+    -- Own machines: one live default per user, and the owner's list.
+    ('osionos_machines',             'user_id',                     'btree',         true,  'is_default and (revoked_at is null)'),
+    ('osionos_machines',             'user_id',                     'btree',         false, NULL)
 ),
 found AS (
   SELECT c.relname AS tbl,
@@ -2073,6 +2077,11 @@ BEGIN
     v_iscol := EXISTS (SELECT 1 FROM public.osionos_account_data_map m WHERE m.table_name = p_table AND m.column_name = a.attname);
     v_force := CASE p_table || '.' || a.attname
       WHEN 'osionos_personal_access_tokens.scopes' THEN '''{read}''::text[]'
+      -- osionos_machines: four shape CHECKs a random string never meets.
+      WHEN 'osionos_machines.id' THEN '''m-'' || translate(left(md5(random()::text), 16), ''0189'', ''abcd'')'
+      WHEN 'osionos_machines.platform' THEN '''linux-x64'''
+      WHEN 'osionos_machines.pubkey' THEN 'left(md5(random()::text) || md5(random()::text), 43)'
+      WHEN 'osionos_machines.fingerprint' THEN '''AAAA-BBBB-CCCC-DDDD'''
       WHEN 'ai_access_tokens.scopes' THEN '''{read}''::text[]'
       WHEN 'ai_access_tokens.workspace_ids' THEN 'ARRAY[gen_random_uuid()]'
       WHEN 'osionos_account_deletion_requests.successor_user_id' THEN 'NULL'
@@ -3757,6 +3766,162 @@ BEGIN
   PERFORM pg_temp.p5_ok('and the canary names the table', pg_temp.p5_hits(a) LIKE '%osionos_activity_events%');
 END $$;
 SELECT * FROM pg_temp.p5_row('p4_activity_canary_mutation', 3);
+ROLLBACK;
+
+-- ===== Own machines (models/osionos-machines-migration.sql, ADR 0037) =====
+-- p6_machines_acl: the account role's exact reach on public.osionos_machines.
+-- The seven published columns of its own rows and nothing else: pubkey and
+-- user_id answer 42501, every write answers 42501, B's row is invisible to A;
+-- anon and authenticated hold nothing; the service role inserts, updates and
+-- deletes. The catalog half compares the column ACL in both directions.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('a6a6a6a6-0000-4000-8000-00000000000a'), ('b6b6b6b6-0000-4000-8000-00000000000b');
+DO $$
+DECLARE
+  a constant uuid := 'a6a6a6a6-0000-4000-8000-00000000000a';
+  b constant uuid := 'b6b6b6b6-0000-4000-8000-00000000000b';
+  v_ins text := 'INSERT INTO public.osionos_machines (id, user_id, name, platform, pubkey, fingerprint) VALUES ';
+  v_r text; v_role text; v_col text;
+  v_pub constant text[] := ARRAY['id', 'name', 'platform', 'fingerprint', 'is_default', 'created_at', 'revoked_at'];
+BEGIN
+  v_r := pg_temp.p5_as_svc(v_ins || format('(%L, %L, %L, %L, %L, %L)', 'm-aaaaaaaaaaaaaaaa', a, 'A laptop', 'linux-x64', repeat('A', 43), 'AAAA-AAAA-AAAA-AAAA') || ' RETURNING id');
+  PERFORM pg_temp.p5_ok('service_role inserts A''s machine, got ' || v_r, v_r = 'ok');
+  v_r := pg_temp.p5_as_svc(v_ins || format('(%L, %L, %L, %L, %L, %L)', 'm-bbbbbbbbbbbbbbbb', b, 'B mac', 'darwin-arm64', repeat('B', 43), 'BBBB-BBBB-BBBB-BBBB') || ' RETURNING id');
+  PERFORM pg_temp.p5_ok('service_role inserts B''s machine, got ' || v_r, v_r = 'ok');
+  v_r := pg_temp.p5_as_svc('UPDATE public.osionos_machines SET name = ''renamed'' WHERE id = ''m-bbbbbbbbbbbbbbbb'' RETURNING id');
+  PERFORM pg_temp.p5_ok('service_role updates, got ' || v_r, v_r = 'ok');
+  -- catalog: exactly the seven columns, no write, no pubkey, no user_id
+  FOREACH v_col IN ARRAY v_pub LOOP
+    PERFORM pg_temp.p5_ok('account role may SELECT ' || v_col, has_column_privilege('osionos_account_user', 'public.osionos_machines', v_col, 'SELECT'));
+  END LOOP;
+  PERFORM pg_temp.p5_ok('account role SELECTs no other column: ' || coalesce((SELECT string_agg(attname, ',') FROM pg_attribute
+      WHERE attrelid = 'public.osionos_machines'::regclass AND attnum > 0 AND NOT attisdropped AND attname <> ALL (v_pub)
+        AND has_column_privilege('osionos_account_user', attrelid, attname, 'SELECT')), 'none'),
+    NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'public.osionos_machines'::regclass AND attnum > 0 AND NOT attisdropped
+        AND attname <> ALL (v_pub) AND has_column_privilege('osionos_account_user', attrelid, attname, 'SELECT')));
+  PERFORM pg_temp.p5_ok('account role holds no write privilege',
+    NOT has_any_column_privilege('osionos_account_user', 'public.osionos_machines', 'INSERT,UPDATE,REFERENCES')
+    AND NOT has_table_privilege('osionos_account_user', 'public.osionos_machines', 'DELETE,TRUNCATE,TRIGGER'));
+  FOREACH v_role IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+    PERFORM pg_temp.p5_ok(v_role || ' reaches nothing', NOT has_any_column_privilege(v_role, 'public.osionos_machines', 'SELECT,INSERT,UPDATE,REFERENCES')
+      AND NOT has_table_privilege(v_role, 'public.osionos_machines', 'DELETE,TRUNCATE,TRIGGER'));
+  END LOOP;
+  PERFORM pg_temp.p5_ok('RLS enabled and forced', (SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE oid = 'public.osionos_machines'::regclass));
+  -- exercised as the role
+  v_r := pg_temp.p5_as_acct('SELECT pubkey FROM public.osionos_machines', a);
+  PERFORM pg_temp.p5_ok('pubkey unreadable (42501), got ' || v_r, v_r LIKE '42501:%');
+  v_r := pg_temp.p5_as_acct('SELECT user_id FROM public.osionos_machines', a);
+  PERFORM pg_temp.p5_ok('user_id unreadable (42501), got ' || v_r, v_r LIKE '42501:%');
+  v_r := pg_temp.p5_as_acct(v_ins || format('(%L, %L, %L, %L, %L, %L)', 'm-cccccccccccccccc', a, 'x', 'linux-x64', repeat('C', 43), 'CCCC-CCCC-CCCC-CCCC'), a);
+  PERFORM pg_temp.p5_ok('INSERT refused (42501), got ' || v_r, v_r LIKE '42501:%');
+  v_r := pg_temp.p5_as_acct('UPDATE public.osionos_machines SET is_default = true', a);
+  PERFORM pg_temp.p5_ok('UPDATE refused (42501), got ' || v_r, v_r LIKE '42501:%');
+  v_r := pg_temp.p5_as_acct('DELETE FROM public.osionos_machines', a);
+  PERFORM pg_temp.p5_ok('DELETE refused (42501), got ' || v_r, v_r LIKE '42501:%');
+  v_r := pg_temp.p5_as_acct('SELECT * FROM public.osionos_machines', a);
+  PERFORM pg_temp.p5_ok('select=* refused (42501), got ' || v_r, v_r LIKE '42501:%');
+  SET LOCAL ROLE osionos_account_user;
+  PERFORM set_config('request.jwt.claims', format('{"sub":"%s","aud":"osionos-account","role":"osionos_account_user"}', a), true);
+  PERFORM set_config('osionos.check.p6_seen', (SELECT string_agg(id, ',' ORDER BY id) FROM public.osionos_machines WHERE id IS NOT NULL), true);
+  RESET ROLE;
+  SET LOCAL ROLE anon;
+  BEGIN
+    PERFORM (SELECT count(*) FROM public.osionos_machines);
+    PERFORM set_config('osionos.check.p6_anon', 'read', true);
+  EXCEPTION WHEN insufficient_privilege THEN
+    PERFORM set_config('osionos.check.p6_anon', '42501', true);
+  END;
+  RESET ROLE;
+  PERFORM pg_temp.p5_ok('the account role sees only its own machine, saw ' || coalesce(current_setting('osionos.check.p6_seen'), 'none'),
+    current_setting('osionos.check.p6_seen') = 'm-aaaaaaaaaaaaaaaa');
+  PERFORM pg_temp.p5_ok('anon read refused (42501), got ' || current_setting('osionos.check.p6_anon'), current_setting('osionos.check.p6_anon') = '42501');
+  v_r := pg_temp.p5_as_svc('DELETE FROM public.osionos_machines WHERE id = ''m-bbbbbbbbbbbbbbbb'' RETURNING id');
+  PERFORM pg_temp.p5_ok('service_role deletes, got ' || v_r, v_r = 'ok');
+END $$;
+SELECT * FROM pg_temp.p5_row('p6_machines_acl', 24);
+ROLLBACK;
+
+-- p6_machines_rules: the table refuses what the bridge must never write, as the
+-- service role (its only writer). Each probe is reduced to its SQLSTATE.
+-- A second live default for one user is 23505; a revoked default does not block
+-- a new one, and another user's default does not either. A bad id, platform,
+-- pubkey, fingerprint or name is 23514.
+BEGIN;
+INSERT INTO auth.users (id) VALUES ('a6a6a6a6-0000-4000-8000-00000000000a'), ('b6b6b6b6-0000-4000-8000-00000000000b');
+CREATE OR REPLACE FUNCTION pg_temp.p6_ins(p_id text, p_user text, p_platform text, p_pubkey text, p_fp text, p_default boolean,
+                                          p_name text DEFAULT 'machine') RETURNS text
+LANGUAGE plpgsql AS $$
+DECLARE v_r text;
+BEGIN
+  v_r := pg_temp.p5_as_svc(format('INSERT INTO public.osionos_machines (id, user_id, name, platform, pubkey, fingerprint, is_default) VALUES (%L, %L, %L, %L, %L, %L, %L)',
+                                  p_id, p_user, p_name, p_platform, p_pubkey, p_fp, p_default) || ' RETURNING id');
+  RETURN split_part(v_r, ':', 1);
+END $$;
+DO $$
+DECLARE
+  a constant text := 'a6a6a6a6-0000-4000-8000-00000000000a';
+  b constant text := 'b6b6b6b6-0000-4000-8000-00000000000b';
+  k constant text := repeat('Q', 42) || '_';
+  f constant text := 'ABCD-EFGH-IJKL-MN23';
+BEGIN
+  PERFORM pg_temp.p5_ok('first default accepted', pg_temp.p6_ins('m-aaaaaaaaaaaaaaaa', a, 'linux-x64', k, f, true) = 'ok');
+  PERFORM pg_temp.p5_ok('second live default refused (23505)', pg_temp.p6_ins('m-aaaaaaaaaaaaaaab', a, 'linux-arm64', k, f, true) = '23505');
+  PERFORM pg_temp.p5_ok('a non-default beside it accepted', pg_temp.p6_ins('m-aaaaaaaaaaaaaaac', a, 'win32-x64', k, f, false) = 'ok');
+  PERFORM pg_temp.p5_ok('another user''s default accepted', pg_temp.p6_ins('m-bbbbbbbbbbbbbbbb', b, 'darwin-x64', k, f, true) = 'ok');
+  PERFORM pg_temp.p5_ok('revoke the default', pg_temp.p5_as_svc('UPDATE public.osionos_machines SET revoked_at = now() WHERE id = ''m-aaaaaaaaaaaaaaaa'' RETURNING id') = 'ok');
+  PERFORM pg_temp.p5_ok('a new default after the revoke accepted', pg_temp.p6_ins('m-aaaaaaaaaaaaaaad', a, 'darwin-arm64', k, f, true) = 'ok');
+  PERFORM pg_temp.p5_ok('upper-case id refused (23514)', pg_temp.p6_ins('m-AAAAAAAAAAAAAAAA', a, 'linux-x64', k, f, false) = '23514');
+  PERFORM pg_temp.p5_ok('id with a 1 refused (23514)', pg_temp.p6_ins('m-aaaaaaaaaaaaaaa1', a, 'linux-x64', k, f, false) = '23514');
+  PERFORM pg_temp.p5_ok('short id refused (23514)', pg_temp.p6_ins('m-aaaa', a, 'linux-x64', k, f, false) = '23514');
+  PERFORM pg_temp.p5_ok('id without prefix refused (23514)', pg_temp.p6_ins('laptop', a, 'linux-x64', k, f, false) = '23514');
+  PERFORM pg_temp.p5_ok('platform linux-ia32 refused (23514)', pg_temp.p6_ins('m-aaaaaaaaaaaaaaae', a, 'linux-ia32', k, f, false) = '23514');
+  PERFORM pg_temp.p5_ok('platform freebsd-x64 refused (23514)', pg_temp.p6_ins('m-aaaaaaaaaaaaaaae', a, 'freebsd-x64', k, f, false) = '23514');
+  PERFORM pg_temp.p5_ok('platform with a trailing newline refused (23514)', pg_temp.p6_ins('m-aaaaaaaaaaaaaaae', a, E'linux-x64\n', k, f, false) = '23514');
+  PERFORM pg_temp.p5_ok('44-char pubkey refused (23514)', pg_temp.p6_ins('m-aaaaaaaaaaaaaaae', a, 'linux-x64', k || 'Q', f, false) = '23514');
+  PERFORM pg_temp.p5_ok('padded base64 pubkey refused (23514)', pg_temp.p6_ins('m-aaaaaaaaaaaaaaae', a, 'linux-x64', repeat('Q', 42) || '=', f, false) = '23514');
+  PERFORM pg_temp.p5_ok('lower-case fingerprint refused (23514)', pg_temp.p6_ins('m-aaaaaaaaaaaaaaae', a, 'linux-x64', k, lower(f), false) = '23514');
+  PERFORM pg_temp.p5_ok('fingerprint with a 0 refused (23514)', pg_temp.p6_ins('m-aaaaaaaaaaaaaaae', a, 'linux-x64', k, 'ABC0-EFGH-IJKL-MNOP', false) = '23514');
+  PERFORM pg_temp.p5_ok('three-group fingerprint refused (23514)', pg_temp.p6_ins('m-aaaaaaaaaaaaaaae', a, 'linux-x64', k, 'ABCD-EFGH-IJKL', false) = '23514');
+  PERFORM pg_temp.p5_ok('empty name refused (23514)', pg_temp.p6_ins('m-aaaaaaaaaaaaaaae', a, 'linux-x64', k, f, false, '') = '23514');
+  PERFORM pg_temp.p5_ok('65-char name refused (23514)', pg_temp.p6_ins('m-aaaaaaaaaaaaaaae', a, 'linux-x64', k, f, false, repeat('n', 65)) = '23514');
+  PERFORM pg_temp.p5_ok('64-char name accepted', pg_temp.p6_ins('m-aaaaaaaaaaaaaaae', a, 'linux-x64', k, f, false, repeat('n', 64)) = 'ok');
+END $$;
+SELECT * FROM pg_temp.p5_row('p6_machines_rules', 21);
+ROLLBACK;
+
+-- p6_machines_erase: the erase removes the user's machines through the
+-- registry. B's machine is untouched. The FK cascade fires only when the
+-- auth.users row is deleted (GoTrue's delete, after the erase), so
+-- p6_machines_erase_mutation drops the registry row and expects the machines to
+-- survive the erase: that proves the registry row, not the cascade, does it.
+BEGIN;
+DO $$
+DECLARE
+  a constant uuid := 'a5a5a5a5-0000-4000-8000-00000000000a';
+  b constant uuid := 'b5b5b5b5-0000-4000-8000-00000000000b';
+BEGIN
+  PERFORM pg_temp.p5_world();
+  PERFORM pg_temp.p5_ok('registry row is (owner, delete)', EXISTS (SELECT 1 FROM public.osionos_account_data_map
+    WHERE table_name = 'osionos_machines' AND column_name = 'user_id' AND role = 'owner' AND erase = 'delete'));
+  PERFORM pg_temp.p5_ok('A has a seeded machine', EXISTS (SELECT 1 FROM public.osionos_machines WHERE user_id = a));
+  PERFORM pg_temp.p5_ok('B has a seeded machine', EXISTS (SELECT 1 FROM public.osionos_machines WHERE user_id = b));
+  PERFORM pg_temp.p5_ok('erase ok', pg_temp.p5_as_svc('SELECT public.osionos_account_erase(''' || a || ''')::text') = 'ok');
+  PERFORM pg_temp.p5_ok('no machine of A remains', NOT EXISTS (SELECT 1 FROM public.osionos_machines WHERE user_id = a));
+  PERFORM pg_temp.p5_ok('B''s machine remains', EXISTS (SELECT 1 FROM public.osionos_machines WHERE user_id = b));
+  PERFORM pg_temp.p5_ok('the canary does not see the table', pg_temp.p5_hits(a) NOT LIKE '%osionos_machines%');
+END $$;
+SELECT * FROM pg_temp.p5_row('p6_machines_erase', 7);
+ROLLBACK;
+BEGIN;
+DO $$
+DECLARE a constant uuid := 'a5a5a5a5-0000-4000-8000-00000000000a';
+BEGIN
+  PERFORM pg_temp.p5_world();
+  DELETE FROM public.osionos_account_data_map WHERE table_name = 'osionos_machines';
+  PERFORM pg_temp.p5_ok('erase ok', pg_temp.p5_as_svc('SELECT public.osionos_account_erase(''' || a || ''')::text') = 'ok');
+  PERFORM pg_temp.p5_ok('without the row A''s machine survives the erase', EXISTS (SELECT 1 FROM public.osionos_machines WHERE user_id = a));
+END $$;
+SELECT * FROM pg_temp.p5_row('p6_machines_erase_mutation', 2);
 ROLLBACK;
 
 -- The two isolation rows are LAST: a regressed regex in the uid helper raises
