@@ -6,7 +6,7 @@
 // the background, and provides a frameless window whose chrome is the app's own
 // top bar (its window controls call the preload bridge).
 // ===========================================================================
-const { app, BrowserWindow, ipcMain, shell, protocol, net, Menu, globalShortcut, session } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, protocol, net, Menu, globalShortcut, session, utilityProcess } = require("electron");
 const path = require("node:path");
 const os = require("node:os");
 const { spawn } = require("node:child_process");
@@ -15,6 +15,7 @@ const { existsSync, statSync, mkdirSync, readFileSync, writeFileSync } = require
 const crypto = require("node:crypto");
 const { createExternalOpenThrottle, isExternalHttpUrl, isAppPageUrl, isMachineWindowUrl, isAllowedSubframeUrl, senderAllowed, baasResponseHeaders, inlineScriptHashes, frameOriginsFrom, rendererCsp, editionOf, cspHeaderName, webSecurityFor, baasTargetOf, isLoopbackUrl } = require("./desktop-guards");
 const { applyTailnetBypass } = require("./desktop-proxy");
+const { ptyEnabledFor, createPtyBroker } = require("./desktop-pty");
 
 // The local mini-baas query-router speaks plain HTTP. The renderer runs from the
 // secure `app://` origin, where a direct http://localhost:8002 fetch is upgraded
@@ -166,6 +167,29 @@ ipcMain.on("win:close", (event) => {
   if (mainWindow) mainWindow.close();
 });
 
+// The local terminal (devil verdict 2026-10-31): FULL only (C2). Shells live in a utilityProcess
+// started on the first create (C6); every call is re-checked by the broker (C5).
+const PTY_ENABLED = ptyEnabledFor(EDITION);
+const ptyBroker = PTY_ENABLED ? createPtyBroker({
+  senderAllowed,
+  mainContents: () => mainWindow && mainWindow.webContents,
+  startHost: startPtyHost,
+  randomId: () => crypto.randomUUID(),
+}) : null;
+function startPtyHost() {
+  const child = utilityProcess.fork(path.join(__dirname, "pty-host.js"), [], { serviceName: "osionos-terminal" });
+  child.on("message", (message) => ptyBroker.onHostMessage(message));
+  child.on("exit", () => ptyBroker.onHostExit());
+  return { post: (message) => child.postMessage(message) };
+}
+if (ptyBroker) {
+  ipcMain.handle("pty:create", (event, cols, rows) => ptyBroker.create(event, cols, rows));
+  ipcMain.on("pty:write", (event, id, data) => ptyBroker.write(event, id, data));
+  ipcMain.on("pty:resize", (event, id, cols, rows) => ptyBroker.resize(event, id, cols, rows));
+  ipcMain.on("pty:ack", (event, id, chars) => ptyBroker.ack(event, id, chars));
+  ipcMain.on("pty:kill", (event, id) => ptyBroker.kill(event, id));
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
@@ -188,9 +212,16 @@ function createWindow() {
       // navigation/window-open guards (web-contents-created) keep foreign pages out
       // of this window, and authz stays in the auth-gateway + Postgres RLS.
       webSecurity: webSecurityFor(EDITION),
+      additionalArguments: PTY_ENABLED ? ["--osionos-pty"] : [],
     },
   });
   mainWindow = win;
+  // A reload, a renderer crash or a closed window ends the page that owned the shells (C6).
+  const contentsId = win.webContents.id;
+  const endShells = () => { if (ptyBroker) ptyBroker.killOwnedBy(contentsId); };
+  win.webContents.on("did-start-navigation", (details) => { if (details.isMainFrame && !details.isSameDocument) endShells(); });
+  win.webContents.on("render-process-gone", endShells);
+  win.webContents.on("destroyed", endShells);
   // A destroyed BrowserWindow throws on .webContents; the win:* handlers read it on every message.
   win.on("closed", () => { if (mainWindow === win) mainWindow = null; });
 

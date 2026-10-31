@@ -132,7 +132,7 @@ docker run --rm --user "$(id -u):$(id -g)" \
   -e npm_config_cache=/tmp/.npm \
   -v "$REPO/$EL":/project -w /project \
   "$BUILDER_IMG" \
-  sh -c "npm install --no-audit --no-fund && npm run $DIST_SCRIPT $DIST_EXTRA"
+  sh -c "npm ci --no-audit --no-fund && npm run $DIST_SCRIPT $DIST_EXTRA"
 
 echo
 echo "Done ($EDITION/$PLATFORM). Artifacts in $EL/$OUT_DIR/ :"
