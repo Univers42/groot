@@ -1,7 +1,8 @@
 # osionos develop beta (ADR 0040)
 
-https://baas.tail10f2ea.ts.net:8444/ (tailnet only) serves osionos `origin/develop`, rebuilt by a
-systemd user timer within ~3 minutes of a push, against production's bridge and data.
+https://baas-beta.tail10f2ea.ts.net/ (tailnet only) serves osionos `origin/develop`, rebuilt by a
+systemd user timer within ~3 minutes of a push, against production's bridge and data. Its bridge
+is https://baas-beta.tail10f2ea.ts.net:10000 (production's, behind the beta edge).
 Conditions B1–B12: `docs/ops/beta-develop-verdict-2026-11-01.md`.
 
 ## Where it runs
@@ -10,21 +11,31 @@ Conditions B1–B12: `docs/ops/beta-develop-verdict-2026-11-01.md`.
 |---|---|
 | Checkout, `build.env`, `deployed` sha, logs | host `/mnt/storage/dlesieur/osionos-beta/` (`/home` is full) |
 | `osionos-beta-app` (develop build), `osionos-beta-edge` (nginx) | host, compose project `osionos-beta`, ports 127.0.0.1:3010/3011 |
+| `osionos-beta-ts`: its own tailnet node `baas-beta` | host, same project; `ts-serve.json` serves :443 → edge :3010, :10000 → edge :3011; state in `ts-state/` |
 | Timer | host `~/.config/systemd/user/osionos-beta.{service,timer}` |
-| Tailnet exposure | VM baas: `tailscale serve --bg --https=8444 http://10.0.2.2:3010`, `--https=10001 http://10.0.2.2:3011` (no Funnel) |
-| VM wall | host `/mnt/storage/virtual_machines/baas/wall` = `3001 8787 4000 3010 3011` |
 
 `build.env` holds PUBLIC_SITE_ORIGIN, PUBLIC_MAIL_ORIGIN, PUBLIC_CALENDAR_ORIGIN (from `.env.public`)
-and production's GRAPH_RENDER_SHA; no secret.
+and production's GRAPH_RENDER_SHA; no secret. `ts-authkey` was read once to join the tailnet;
+the node stays logged in from `ts-state/`.
+
+## Sign-in
+
+The beta is built with `VITE_AUTH_MODE=portal`: it shows its own sign-in and logs in at the bridge
+with the production accounts. Prismatica's handoff only ever targets production (:8443).
 
 ## Operate
 
 - Logs: `journalctl --user -u osionos-beta -n 50` (host). Force a rebuild: `update.sh --force`.
-- Kill switch (B10, rehearsed 2026-11-01): on the VM `tailscale serve --https=8444 off && tailscale serve --https=10001 off`,
-  on the host `BETA_SHA=$(cat deployed) docker compose -f compose.yml down`.
+- Kill switch (B10): on the host `BETA_SHA=$(cat deployed) docker compose -f compose.yml down`
+  (the tailnet node goes with it).
+- A browser on a machine that routes through Tor (this laptop's `global-proxy`) must send the
+  tailnet direct; invisibility-cloak's `global-proxy` does so since `324e40e`.
 
 ## What it does not do
 
 - Develop's bridge changes are not in the beta: it uses production's bridge.
 - Sign-in emails and OAuth redirects land on production (:8443).
-- Cookies are shared with production (same host): a develop XSS reaches production sessions.
+- Realtime (`/realtime/v1/ws`) answers 400 "Connection header did not include 'upgrade'", as
+  production does (2026-11-01): live updates need a reload.
+- A computer's osionos-node opens a terminal for the beta only when started with
+  `--app-origin https://baas-beta.tail10f2ea.ts.net`; that lets develop's code drive that shell.

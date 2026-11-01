@@ -19,12 +19,12 @@ timeout 600 git submodule update --init --recursive -q
 
 # shellcheck source=/dev/null
 . "$B/build.env"   # PUBLIC_* origins and GRAPH_RENDER_SHA only: no secrets.
-BETA=https://baas.tail10f2ea.ts.net:8444
+BETA=https://baas-beta.tail10f2ea.ts.net
 timeout 2700 nice -n 10 ionice -c3 docker build -q \
   -f "$DOCKERFILE" \
   --label osionos.beta=1 --label "osionos.beta.sha=$sha" \
   --build-arg GRAPH_RENDER_SHA="$GRAPH_RENDER_SHA" \
-  --build-arg VITE_API_URL=https://baas.tail10f2ea.ts.net:10001 \
+  --build-arg VITE_API_URL=https://baas-beta.tail10f2ea.ts.net:10000 \
   --build-arg VITE_PRISMATICA_URL="$PUBLIC_SITE_ORIGIN" \
   --build-arg VITE_BAAS_URL="$BETA" \
   --build-arg VITE_BAAS_API_KEY= --build-arg VITE_BAAS_KONG_KEY= --build-arg VITE_BAAS_REALTIME_TOKEN= \
@@ -33,6 +33,7 @@ timeout 2700 nice -n 10 ionice -c3 docker build -q \
   --build-arg VITE_CALENDAR_APP_URL="$PUBLIC_CALENDAR_ORIGIN" \
   --build-arg VITE_WHITEBOARD_APP_URL= \
   --build-arg VITE_REQUIRE_BRIDGE_SESSION=true --build-arg VITE_ALLOW_OFFLINE_MODE=false \
+  --build-arg VITE_AUTH_MODE=portal \
   --build-arg VITE_PAGE_ACTION_SYNC_ENABLED=true \
   --build-arg VITE_OSIO_COLLAB_SHARED=1 --build-arg VITE_OSIO_COLLAB_FASTSEND=1 \
   --build-arg VITE_APP_VERSION="beta-$sha" \
