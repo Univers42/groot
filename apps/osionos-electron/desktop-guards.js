@@ -88,14 +88,10 @@ function isAppPageUrl(url) {
 
 const PDF_DATA_URL = /^data:application\/pdf[;,]/i;
 
-// ADR 0038 (A4): the app's own terminal page, matched on the raw string so no normalisation
-// (traversal, encoded dots, backslashes, userinfo, a fragment) can turn another app page into it.
-const TERMINAL_PAGE = /^app:\/\/osionos\/terminal\/index\.html(\?[^#\\]*)?$/;
-
-// ADR 0038 (A2): no other site may frame the terminal page, a third-party embed nesting it included.
-function pagePolicy(policy, pathname) {
-  return pathname.startsWith("/terminal/") ? policy + "; frame-ancestors 'self'" : policy;
-}
+// ADR 0039 (A4 re-pinned): the terminal's own origin, its index page, matched on the raw string so
+// no normalisation (traversal, encoded dots, backslashes, userinfo, a fragment) can turn another
+// app: URL into it.
+const TERMINAL_PAGE = /^app:\/\/terminal\/index\.html(\?[^#\\]*)?$/;
 
 function isAllowedSubframeUrl(url) {
   // WHY: subframes may only embed remote http(s) pages; frame-src narrows further.
@@ -185,8 +181,8 @@ function rendererCsp(opts) {
   const hashes = Array.isArray(o.scriptHashes) ? o.scriptHashes : [];
   const frames = Array.isArray(o.frameOrigins) ? o.frameOrigins : [];
   const scriptSrc = ["'self'", "'wasm-unsafe-eval'"].concat(hashes).join(" ");
-  // The only app: source is the terminal page's path (ADR 0038, A5).
-  const frameSrc = ["https:", "app://osionos/terminal/"].concat(frames).join(" ");
+  // The only app: source is the terminal's own origin (ADR 0039, A5 re-pinned).
+  const frameSrc = ["https:", "app://terminal/"].concat(frames).join(" ");
   return [
     "default-src 'self'",
     "script-src " + scriptSrc,
@@ -233,7 +229,6 @@ module.exports = {
   rendererCsp,
   editionOf,
   HARDENED_EDITIONS,
-  pagePolicy,
   cspHeaderName,
   webSecurityFor,
   baasTargetOf,

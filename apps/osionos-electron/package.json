@@ -27,7 +27,7 @@
     "productName": "osionos",
     "executableName": "osionos",
     "directories": { "output": "dist" },
-    "files": ["main.js", "preload.js", "desktop-guards.js", "desktop-proxy.js", "desktop-pty.js", "pty-host.js", "desktop-config.json", "renderer/**/*", "node_modules/node-pty/**/*"],
+    "files": ["main.js", "preload.js", "desktop-guards.js", "desktop-proxy.js", "desktop-pty.js", "desktop-app-protocol.js", "pty-host.js", "desktop-config.json", "renderer/**/*", "node_modules/node-pty/**/*"],
     "asarUnpack": ["node_modules/node-pty/**/*"],
     "linux": {
       "target": ["deb", "AppImage"],

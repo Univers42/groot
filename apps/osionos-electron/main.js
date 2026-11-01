@@ -10,12 +10,12 @@ const { app, BrowserWindow, ipcMain, shell, protocol, net, Menu, globalShortcut,
 const path = require("node:path");
 const os = require("node:os");
 const { spawn } = require("node:child_process");
-const { pathToFileURL } = require("node:url");
 const { existsSync, statSync, mkdirSync, readFileSync, writeFileSync } = require("node:fs");
 const crypto = require("node:crypto");
-const { createExternalOpenThrottle, isExternalHttpUrl, isAppPageUrl, isMachineWindowUrl, isAllowedSubframeUrl, senderAllowed, pagePolicy, baasResponseHeaders, inlineScriptHashes, frameOriginsFrom, rendererCsp, editionOf, cspHeaderName, webSecurityFor, baasTargetOf, isLoopbackUrl } = require("./desktop-guards");
+const { createExternalOpenThrottle, isExternalHttpUrl, isAppPageUrl, isMachineWindowUrl, isAllowedSubframeUrl, senderAllowed, inlineScriptHashes, frameOriginsFrom, rendererCsp, editionOf, cspHeaderName, webSecurityFor, baasTargetOf, isLoopbackUrl } = require("./desktop-guards");
 const { applyTailnetBypass } = require("./desktop-proxy");
 const { ptyEnabledFor, createPtyBroker } = require("./desktop-pty");
+const { createAppHandler } = require("./desktop-app-protocol");
 
 // The local mini-baas query-router speaks plain HTTP. The renderer runs from the
 // secure `app://` origin, where a direct http://localhost:8002 fetch is upgraded
@@ -34,6 +34,7 @@ const BAAS_TARGET = baasTargetOf(process.env.OSIONOS_BAAS_URL, bakedBaasUrl());
 // Serve the bundled renderer from a stable app:// origin (so the bridge's CORS
 // can allow it) instead of file:// (origin "null", which CORS rejects). Must be
 // registered before the app is ready. webSecurity depends on the edition (see EDITION).
+// standard + secure apply to every host, so app://terminal (ADR 0039) is its own secure origin.
 protocol.registerSchemesAsPrivileged([
   { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
 ]);
@@ -270,46 +271,7 @@ app.whenReady().then(async () => {
   } catch (err) {
     console.error("[desktop] renderer CSP fallback without hashes:", err && err.message ? err.message : err);
   }
-  protocol.handle("app", async (request) => {
-    const url = new URL(request.url);
-    // BaaS proxy: relay same-origin app://osionos/__baas/* to the plain-HTTP
-    // query-router from the main process (no renderer HTTPS-upgrade). Buffer both
-    // directions and forward only the headers the router needs, so the response
-    // can't trip Chromium with a content-encoding/length mismatch (which showed
-    // up as net::ERR_UNEXPECTED). Never throw — return a 502 on failure.
-    if (url.pathname.startsWith("/__baas/")) {
-      const target = BAAS_TARGET + url.pathname.slice("/__baas".length) + url.search;
-      const headers = new Headers();
-      for (const name of ["content-type", "accept", "x-baas-api-key", "apikey", "authorization"]) {
-        const value = request.headers.get(name);
-        if (value) headers.set(name, value);
-      }
-      const init = { method: request.method, headers };
-      if (request.method !== "GET" && request.method !== "HEAD") {
-        init.body = await request.arrayBuffer();
-      }
-      try {
-        const upstream = await net.fetch(target, init);
-        const body = await upstream.arrayBuffer();
-        // WHY: upstream MIME/headers are never trusted; baasResponseHeaders forces octet-stream + sandbox.
-        return new Response(body, { status: upstream.status, statusText: upstream.statusText, headers: baasResponseHeaders(upstream.headers.get("content-type")) });
-      } catch (error) {
-        return new Response(JSON.stringify({ error: "baas proxy failed", detail: String(error) }), {
-          status: 502,
-          headers: baasResponseHeaders("application/json"),
-        });
-      }
-    }
-    let pathname = decodeURIComponent(url.pathname);
-    if (pathname === "/" || pathname === "") pathname = "/index.html";
-    let filePath = path.join(rendererDir, pathname);
-    if (!filePath.startsWith(rendererDir) || !existsSync(filePath)) filePath = path.join(rendererDir, "index.html");
-    // WHY: every app:// file response (including the index fallback) carries the CSP (enforced in FULL, Report-Only in LOCAL/NATIVE whose C15 smoke is pending).
-    const res = await net.fetch(pathToFileURL(filePath).toString());
-    const headers = new Headers(res.headers);
-    headers.set(cspHeaderName(EDITION), pagePolicy(rendererPolicy, pathname));
-    return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
-  });
+  protocol.handle("app", createAppHandler({ net, rendererDir, baasTarget: BAAS_TARGET, rendererPolicy, rendererCspHeader: cspHeaderName(EDITION) }));
   // A grobase elsewhere (the tailnet data center) leaves nothing on this machine to boot.
   if (IS_NATIVE) {
     try { await startNative(); } catch (e) { console.error("[native] backend failed to start:", e); }

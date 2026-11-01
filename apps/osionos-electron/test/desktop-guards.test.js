@@ -12,7 +12,6 @@ const {
   inlineScriptHashes,
   frameOriginsFrom,
   rendererCsp,
-  pagePolicy,
   createExternalOpenThrottle,
   editionOf,
   cspHeaderName,
@@ -105,19 +104,23 @@ describe("isAllowedSubframeUrl", () => {
     assert.equal(isAllowedSubframeUrl("data:text/html,hi"), false);
     assert.equal(isAllowedSubframeUrl("javascript:alert(1)"), false);
   });
-  // ADR 0038 amendment A4: the app's own terminal page, exactly, and nothing else on app://.
+  // ADR 0039 (A4 re-pinned): the terminal's own origin, exactly its index page, and nothing else on app://.
   it("true for the terminal page alone among app:// URLs", () => {
-    assert.equal(isAllowedSubframeUrl("app://osionos/terminal/index.html"), true);
-    assert.equal(isAllowedSubframeUrl("app://osionos/terminal/index.html?theme=light"), true);
+    assert.equal(isAllowedSubframeUrl("app://terminal/index.html"), true);
+    assert.equal(isAllowedSubframeUrl("app://terminal/index.html?theme=light"), true);
     for (const url of [
-      "app://osionos/terminal/",
-      "app://osionos/terminal/../index.html",
-      "app://osionos/terminal/%2e%2e/index.html",
-      "app://osionos/terminal\\index.html",
-      "app://x/terminal/index.html",
-      "app://u:p@osionos/terminal/index.html",
-      "app://osionos/terminal/index.html#x",
-      "app://osionos/terminal/other.html",
+      "app://osionos/terminal/index.html",
+      "app://osionos/terminal/index.html?theme=light",
+      "app://terminal/",
+      "app://terminal/../index.html",
+      "app://terminal/%2e%2e/index.html",
+      "app://terminal\\index.html",
+      "app://terminal/assets/index.js",
+      "app://terminal.evil/index.html",
+      "app://u:p@terminal/index.html",
+      "app://terminal/index.html#x",
+      "app://terminal/index.html?a#b",
+      "app://terminal/other.html",
     ]) assert.equal(isAllowedSubframeUrl(url), false, url);
   });
   it("true for http/https", () => {
@@ -184,17 +187,9 @@ describe("rendererCsp", () => {
     assert.ok(policy.includes("base-uri 'none'"));
     const frameSrc = policy.split(";").map((s) => s.trim()).find((s) => s.startsWith("frame-src "));
     assert.ok(!frameSrc.includes("'self'"));
-    // ADR 0038 (A5): the only app: source is the terminal page's path.
-    assert.deepEqual(frameSrc.split(/\s+/).filter((source) => source.startsWith("app:")), ["app://osionos/terminal/"]);
+    // ADR 0039 (A5 re-pinned): the only app: source is the terminal's own origin.
+    assert.deepEqual(frameSrc.split(/\s+/).filter((source) => source.startsWith("app:")), ["app://terminal/"]);
     assert.ok(frameSrc.includes("http://localhost:3002"));
-  });
-});
-
-describe("pagePolicy (ADR 0038, A2)", () => {
-  it("only the app may frame its terminal page; other pages keep the policy as is", () => {
-    assert.equal(pagePolicy("default-src 'self'", "/terminal/index.html"), "default-src 'self'; frame-ancestors 'self'");
-    assert.equal(pagePolicy("default-src 'self'", "/terminal/assets/x.js"), "default-src 'self'; frame-ancestors 'self'");
-    assert.equal(pagePolicy("default-src 'self'", "/index.html"), "default-src 'self'");
   });
 });
 
@@ -209,14 +204,14 @@ describe("rendererCsp pinned output", () => {
   it("default opts", () => {
     assert.equal(
       rendererCsp(),
-      "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; " + tail + "frame-src https: app://osionos/terminal/; object-src 'none'; base-uri 'none'",
+      "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; " + tail + "frame-src https: app://terminal/; object-src 'none'; base-uri 'none'",
     );
   });
   it("with frame origins and script hashes", () => {
     assert.equal(
       rendererCsp({ scriptHashes: ["'sha256-abc'"], frameOrigins: ["http://localhost:3002"] }),
       "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-abc'; " +
-        tail + "frame-src https: app://osionos/terminal/ http://localhost:3002; object-src 'none'; base-uri 'none'",
+        tail + "frame-src https: app://terminal/ http://localhost:3002; object-src 'none'; base-uri 'none'",
     );
   });
 });

@@ -1,8 +1,9 @@
 // The local terminal against the REAL main.js and preload (devil verdict 2026-10-31, C1-C8, and
-// Amendment 2 / ADR 0039, T2, T3, T5): Playwright _electron under xvfb, no sign-in (the preload API
+// Amendment 2 / ADR 0039, T2-T5): Playwright _electron under xvfb, no sign-in (the preload API
 // exists before login). The page drives each pty on its own port, as the terminal frame does.
 // Caveat: the shell is the container's (root, /bin/bash), not a person's; latencies are one
 // sample on this host, and the /__baas/ probe reads SKIP when the configured grobase is unreachable.
+// The terminal frame here gets no handoff, so its CSP count covers the page's boot, not VS Code's.
 import { execFileSync } from "node:child_process";
 import http from "node:http";
 import { createRequire } from "node:module";
@@ -30,6 +31,12 @@ const shellsOf = (pid) => ps().filter((p) => p.ppid === pid).length;
 const app = await _electron.launch({ executablePath: "/cache/node_modules/electron/dist/electron", args: ["/app"] });
 const page = await app.firstWindow();
 await page.waitForLoadState("domcontentloaded");
+const cspLines = [];
+page.on("console", (m) => {
+  const text = m.text();
+  if (!/Content Security Policy|Refused to/i.test(text)) return;
+  cspLines.push(`${m.location()?.url ?? "?"} ${text.slice(0, 120)}`);
+});
 // A pty driven from the page, the way the terminal frame drives it: create through the preload,
 // then the port the preload reposts to this window carries write/resize/ack in and data/exit out.
 const open = (cols = 80, rows = 24) => page.evaluate(async ([c, r]) => {
@@ -202,6 +209,54 @@ try {
     await type(next, "echo again-$((1+1))\r");
     await until(async () => /again-2/.test(await output(next)), 10000, "a shell on the new host");
     return `host ${host} killed; the page saw exit -1 and a new host ${hostPid()} answers`;
+  });
+  // ADR 0039 (T4): the terminal on its own origin. No handoff here: the frame only boots.
+  const terminal = await page.evaluate(() => new Promise((ok) => {
+    const frame = document.createElement("iframe");
+    frame.style.cssText = "position:fixed;left:0;top:0;width:600px;height:300px;border:0;z-index:99999";
+    frame.addEventListener("load", () => ok(true));
+    frame.src = "app://terminal/index.html";
+    document.body.appendChild(frame);
+    setTimeout(() => ok(false), 8000);
+  }));
+  await sleep(1500);
+  await check("T4 the terminal page loads on app://terminal, a secure origin in its own process", async () => {
+    assert(terminal, "the frame never loaded");
+    const frame = page.frames().find((f) => f.url().startsWith("app://terminal/"));
+    assert(frame, "no app://terminal frame");
+    const where = await frame.evaluate(() => ({ origin: location.origin, secure: isSecureContext, title: document.title }));
+    assert(where.origin === "app://terminal" && where.secure, JSON.stringify(where));
+    const pids = await app.evaluate(({ BrowserWindow }) => {
+      const main = BrowserWindow.getAllWindows()[0].webContents.mainFrame;
+      return [main.osProcessId, main.framesInSubtree.find((f) => f.url.startsWith("app://terminal/"))?.osProcessId];
+    });
+    assert(pids[1] && pids[0] !== pids[1], `pids ${pids}`);
+    return `origin ${where.origin}, isSecureContext, "${where.title}"; app pid ${pids[0]}, terminal pid ${pids[1]}`;
+  });
+  await check("T4 the handler: 404s carry the terminal policy, app://osionos/terminal/ is gone", async () => {
+    const got = await app.evaluate(async ({ net }) => {
+      const out = [];
+      for (const url of ["app://terminal/__baas/rest/v1/x", "app://terminal/missing.js", "app://terminal/..%2findex.html", "app://x/index.html", "app://osionos/terminal/index.html", "app://terminal/index.html"]) {
+        const r = await net.fetch(url);
+        out.push([url, r.status, r.headers.get("content-security-policy") ?? ""]);
+      }
+      return out;
+    });
+    const bad = got.filter(([url, status, csp]) => status !== (url === "app://terminal/index.html" ? 200 : 404) || !csp.includes("frame-ancestors app://osionos"));
+    assert(bad.length === 0, JSON.stringify(bad));
+    return `${got.length - 1} URLs 404, the page 200, all with frame-ancestors app://osionos`;
+  });
+  await check("T4 (c) CSP on the terminal page: 0 violations at boot, a deliberate one is counted", async () => {
+    const boot = cspLines.filter((l) => l.startsWith("app://terminal")).length;
+    const frame = page.frames().find((f) => f.url().startsWith("app://terminal/"));
+    await frame.evaluate(() => document.body.insertAdjacentHTML("beforeend", '<img src="x-missing" onerror="window.__p=1">'));
+    await sleep(800);
+    const ran = await frame.evaluate(() => window.__p);
+    const after = cspLines.filter((l) => l.startsWith("app://terminal")).length;
+    assert(ran === undefined, "the inline handler ran");
+    assert(after > boot, `the deliberate violation was not counted (${boot} -> ${after}); U3: the frame's console may not reach the page`);
+    assert(boot === 0, `${boot} violations at boot: ${cspLines.join(" | ").slice(0, 200)}`);
+    return `boot 0, control ${after - boot} counted`;
   });
 } catch (e) {
   failures++;

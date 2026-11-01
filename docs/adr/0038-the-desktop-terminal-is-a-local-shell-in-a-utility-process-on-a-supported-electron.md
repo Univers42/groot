@@ -40,3 +40,7 @@
 - **A4:** `isAllowedSubframeUrl` admits exactly `app://osionos/terminal/index.html` (an optional query, no fragment, no `..`, no other host).
 - **A5:** `frame-src`'s only `app:` source is `app://osionos/terminal/`.
 - **A6, measured:** `sh test/smoke/run-smoke.sh terminal` gives 5/5 on Electron 44.8.0: the handoff, typing round-trip, no-port refusal, nested refusal, and 0 CSP console lines. First shell output arrives 0.83–1.05 s after the frame is added (4 runs, xvfb, no GPU). The smoke plays the panel's side of the port because the dock sits behind sign-in; osionos `terminal-port.test.ts` pins that protocol.
+
+## Amended by 0039 (2026-11-01)
+
+The terminal page moves to `app://terminal/` with a direct port per pty, and A2, A4, A5 and C5 (for port traffic) change. See [0039](0039-the-desktop-terminal-runs-on-its-own-origin-with-a-direct-port-to-the-pty-host.md).
