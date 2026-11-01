@@ -8,12 +8,11 @@
 // ===========================================================================
 const { app, BrowserWindow, ipcMain, shell, protocol, net, Menu, globalShortcut, session, utilityProcess, MessageChannelMain } = require("electron");
 const path = require("node:path");
-const os = require("node:os");
-const { spawn } = require("node:child_process");
-const { existsSync, statSync, mkdirSync, readFileSync, writeFileSync } = require("node:fs");
+const { existsSync, statSync, readFileSync } = require("node:fs");
 const crypto = require("node:crypto");
 const { createExternalOpenThrottle, isExternalHttpUrl, isAppPageUrl, isMachineWindowUrl, isAllowedSubframeUrl, senderAllowed, inlineScriptHashes, frameOriginsFrom, rendererCsp, editionOf, cspHeaderName, webSecurityFor, baasTargetOf, isLoopbackUrl } = require("./desktop-guards");
 const { applyTailnetBypass } = require("./desktop-proxy");
+const { bootSuite, startNative } = require("./desktop-backend");
 const { ptyEnabledFor, createPtyBroker } = require("./desktop-pty");
 const { createAppHandler } = require("./desktop-app-protocol");
 const { appKeyAction } = require("./desktop-keys");
@@ -66,28 +65,6 @@ if (process.platform === "linux") {
   }
 }
 
-function trackBinocleHome() {
-  return process.env.TRACK_BINOCLE_HOME
-    || path.join(os.homedir(), "Documents", "ft_transcendence");
-}
-
-// Best-effort: bring the local suite up so opening the app starts the backend.
-function bootSuite() {
-  // LOCAL edition: the installer points OSIONOS_LOCAL_COMPOSE at the bundled
-  // docker-compose.local.yml and we bring up only the lean `local` profile (HTTP).
-  // Otherwise (dev repo) fall back to the full `dev` profile in the repo checkout.
-  const localCompose = process.env.OSIONOS_LOCAL_COMPOSE;
-  const cwd = localCompose ? path.dirname(localCompose) : trackBinocleHome();
-  const args = localCompose
-    ? ["compose", "-f", localCompose, "--profile", "local", "up", "-d"]
-    : ["compose", "--profile", "dev", "up", "-d"];
-  try {
-    const child = spawn("docker", args, { cwd, detached: true, stdio: "ignore" });
-    child.on("error", () => {}); // docker missing / no compose -> the app just shows offline
-    child.unref();
-  } catch { /* ignore */ }
-}
-
 // NATIVE edition: a bundled `native-runtime/` (extraResources) means NO Docker —
 // supervise embedded postgres + postgrest + gateway + bridge as child processes.
 const NATIVE_DIR = path.join(process.resourcesPath || __dirname, "native-runtime");
@@ -98,29 +75,6 @@ const IS_NATIVE = existsSync(path.join(NATIVE_DIR, "native", "supervisor.mjs"));
 // enforcement; its :4000 calls then rely on the bridge's CORS). Escape hatch: set the env.
 const EDITION = editionOf({ isNative: IS_NATIVE, localCompose: process.env.OSIONOS_LOCAL_COMPOSE });
 let nativeHandle = null;
-
-// Boot the bundled backend (no Docker). Node children run under Electron's own
-// binary via ELECTRON_RUN_AS_NODE, so we ship no separate `node`. The pg superuser
-// password is generated once and persisted (postgres bakes it into PGDATA at initdb).
-async function startNative() {
-  const { pathToFileURL } = require("node:url");
-  const { startSuite, DEFAULT_PORTS } = await import(pathToFileURL(path.join(NATIVE_DIR, "native", "supervisor.mjs")).href);
-  const dataDir = path.join(app.getPath("userData"), "native");
-  mkdirSync(dataDir, { recursive: true });
-  const pwPath = path.join(dataDir, "pgsuper.key");
-  const superPass = existsSync(pwPath) ? readFileSync(pwPath, "utf8").trim()
-    : (() => { const p = crypto.randomBytes(18).toString("hex"); writeFileSync(pwPath, p, { mode: 0o600 }); return p; })();
-  const pgBin = path.join(NATIVE_DIR, "pgsql", "bin");
-  const bin = {
-    node: process.execPath, nodeEnv: { ELECTRON_RUN_AS_NODE: "1" },
-    initdb: path.join(pgBin, "initdb"), postgres: path.join(pgBin, "postgres"),
-    postgrest: path.join(NATIVE_DIR, "bin", "postgrest"),
-    gotrue: path.join(NATIVE_DIR, "bin", "gotrue"), gotrueMigrations: path.join(NATIVE_DIR, "gotrue-migrations"),
-    gatewayDir: path.join(NATIVE_DIR, "gateway"), gatewayScript: path.join(NATIVE_DIR, "gateway", "scripts", "auth-gateway.mjs"),
-    bridgeScript: path.join(NATIVE_DIR, "bridge", "bridge-api.mjs"),
-  };
-  nativeHandle = await startSuite({ bin, dataDir, ports: DEFAULT_PORTS, superPass, migrationsDir: path.join(NATIVE_DIR, "models"), appUrl: "app://osionos" });
-}
 
 let mainWindow = null;
 
@@ -277,7 +231,7 @@ app.whenReady().then(async () => {
   protocol.handle("app", createAppHandler({ net, rendererDir, baasTarget: BAAS_TARGET, rendererPolicy, rendererCspHeader: cspHeaderName(EDITION) }));
   // A grobase elsewhere (the tailnet data center) leaves nothing on this machine to boot.
   if (IS_NATIVE) {
-    try { await startNative(); } catch (e) { console.error("[native] backend failed to start:", e); }
+    try { nativeHandle = await startNative({ nativeDir: NATIVE_DIR, userDataDir: app.getPath("userData") }); } catch (e) { console.error("[native] backend failed to start:", e); }
   } else if (isLoopbackUrl(BAAS_TARGET)) {
     bootSuite();
   }
