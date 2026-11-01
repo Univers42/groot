@@ -1,5 +1,5 @@
 // The local terminal against the REAL main.js and preload (devil verdict 2026-10-31, C1-C8, and
-// Amendment 2 / ADR 0039, T2-T5): Playwright _electron under xvfb, no sign-in (the preload API
+// Amendment 2 / ADR 0039, T2-T4, T9): Playwright _electron under xvfb, no sign-in (the preload API
 // exists before login). The page drives each pty on its own port, as the terminal frame does.
 // Caveat: the shell is the container's (root, /bin/bash), not a person's; latencies are one
 // sample on this host, and the /__baas/ probe reads SKIP when the configured grobase is unreachable.
@@ -257,6 +257,33 @@ try {
     assert(after > boot, `the deliberate violation was not counted (${boot} -> ${after}); U3: the frame's console may not reach the page`);
     assert(boot === 0, `${boot} violations at boot: ${cspLines.join(" | ").slice(0, 200)}`);
     return `boot 0, control ${after - boot} counted`;
+  });
+  await check("T9 Ctrl+R in the terminal frame is the shell's; outside it main still reloads", async () => {
+    const box = await page.evaluate(() => { const r = document.querySelector('iframe[src="app://terminal/index.html"]').getBoundingClientRect(); return { x: r.x + 50, y: r.y + 50 }; });
+    // What main's before-input-event sees, so 0 navigations cannot pass on a key that never reached it.
+    await app.evaluate(({ BrowserWindow }) => {
+      const wc = BrowserWindow.getAllWindows()[0].webContents;
+      globalThis.__keys = [];
+      wc.on("before-input-event", (_e, i) => { if (i.type === "keyDown" && /^r$/i.test(i.key)) globalThis.__keys.push(wc.focusedFrame?.url ?? null); });
+    });
+    const keysSeen = () => app.evaluate(() => globalThis.__keys);
+    // Playwright's keyboard (CDP) bypasses before-input-event (measured: main saw no key); sendInputEvent does not.
+    const ctrlR = () => app.evaluate(({ BrowserWindow }) => {
+      const wc = BrowserWindow.getAllWindows()[0].webContents;
+      for (const type of ["keyDown", "keyUp"]) wc.sendInputEvent({ type, keyCode: "R", modifiers: ["control"] });
+    });
+    let navigations = 0;
+    page.on("framenavigated", (f) => { if (f === page.mainFrame()) navigations++; });
+    await page.mouse.click(box.x, box.y);
+    await ctrlR();
+    await sleep(1000);
+    const inside = await keysSeen();
+    assert(inside.length === 1 && inside[0]?.startsWith("app://terminal/"), `main saw ${JSON.stringify(inside)}`);
+    assert(navigations === 0, `${navigations} main-frame navigations with the terminal focused`);
+    await page.mouse.click(1200, 800);
+    await ctrlR();
+    await until(async () => navigations > 0, 5000, `the reload outside the terminal (main saw ${JSON.stringify(await keysSeen())})`);
+    return `main saw Ctrl+R from ${inside[0]}: 0 navigations; outside, from ${(await keysSeen().catch(() => []))[1] ?? "the app"}: reloaded`;
   });
 } catch (e) {
   failures++;

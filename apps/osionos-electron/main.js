@@ -16,6 +16,7 @@ const { createExternalOpenThrottle, isExternalHttpUrl, isAppPageUrl, isMachineWi
 const { applyTailnetBypass } = require("./desktop-proxy");
 const { ptyEnabledFor, createPtyBroker } = require("./desktop-pty");
 const { createAppHandler } = require("./desktop-app-protocol");
+const { appKeyAction } = require("./desktop-keys");
 
 // The local mini-baas query-router speaks plain HTTP. The renderer runs from the
 // secure `app://` origin, where a direct http://localhost:8002 fetch is upgraded
@@ -237,18 +238,20 @@ function createWindow() {
   // Zoom — wired explicitly (Tauri's zoomHotkeysEnabled has no Electron equivalent).
   const wc = win.webContents;
   const clamp = (z) => Math.max(-3, Math.min(6, z));
-  // Keyboard: Ctrl/Cmd +  /  -  /  0
+  // Reload (F5, Ctrl/Cmd+R), back to home (Ctrl/Cmd+Shift+H) and zoom (Ctrl/Cmd + = - 0), except
+  // while the terminal frame has focus: those keys are the shell's (ADR 0039, T9).
+  const keyActions = {
+    reload: () => wc.reload(),
+    home: () => wc.loadURL("app://osionos/index.html"),
+    zoomIn: () => wc.setZoomLevel(clamp(wc.getZoomLevel() + 0.5)),
+    zoomOut: () => wc.setZoomLevel(clamp(wc.getZoomLevel() - 0.5)),
+    zoomReset: () => wc.setZoomLevel(0),
+  };
   wc.on("before-input-event", (event, input) => {
-    if (input.type !== "keyDown") return;
-    // Reload / back-to-home recovery (F5, Ctrl/Cmd+R, Ctrl/Cmd+Shift+H).
-    if (input.key === "F5" || ((input.control || input.meta) && /^r$/i.test(input.key))) { wc.reload(); event.preventDefault(); return; }
-    if ((input.control || input.meta) && input.shift && /^h$/i.test(input.key)) { wc.loadURL("app://osionos/index.html"); event.preventDefault(); return; }
-    if (!(input.control || input.meta)) return;
-    const zoomIn = input.key === "=" || input.key === "+" || input.code === "Equal" || input.code === "NumpadAdd";
-    const zoomOut = input.key === "-" || input.key === "_" || input.code === "Minus" || input.code === "NumpadSubtract";
-    if (zoomIn) { wc.setZoomLevel(clamp(wc.getZoomLevel() + 0.5)); event.preventDefault(); }
-    else if (zoomOut) { wc.setZoomLevel(clamp(wc.getZoomLevel() - 0.5)); event.preventDefault(); }
-    else if (input.key === "0") { wc.setZoomLevel(0); event.preventDefault(); }
+    const action = appKeyAction(input, wc.focusedFrame && wc.focusedFrame.url);
+    if (!action) return;
+    keyActions[action]();
+    event.preventDefault();
   });
   // Ctrl + mouse-wheel: Chromium emits zoom-changed (no custom wheel listener,
   // so this can't slow scrolling back down).
