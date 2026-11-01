@@ -3,5 +3,6 @@
   "Web": {
     "${TS_CERT_DOMAIN}:443": { "Handlers": { "/": { "Proxy": "http://osionos-beta-edge:3010" } } },
     "${TS_CERT_DOMAIN}:10000": { "Handlers": { "/": { "Proxy": "http://osionos-beta-edge:3011" } } }
-  }
+  },
+  "AllowFunnel": { "${TS_CERT_DOMAIN}:443": true, "${TS_CERT_DOMAIN}:10000": true }
 }
