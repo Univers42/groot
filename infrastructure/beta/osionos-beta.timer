@@ -1,0 +1,9 @@
+[Unit]
+Description=Check osionos develop for the beta every 3 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=3min
+
+[Install]
+WantedBy=timers.target

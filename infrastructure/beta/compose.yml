@@ -1,0 +1,23 @@
+# The develop beta (groot ADR 0040, devil verdict docs/ops/beta-develop-verdict-2026-11-01.md):
+# its own project, its own containers; production's network is only joined, never managed.
+name: osionos-beta
+services:
+  app:
+    image: osionos-beta/web:${BETA_SHA:?BETA_SHA is the develop commit to serve}
+    container_name: osionos-beta-app
+    labels: { osionos.beta: "1" }
+    restart: unless-stopped
+    networks: [beta]
+  edge:
+    image: public.ecr.aws/docker/library/nginx:1.27-alpine
+    container_name: osionos-beta-edge
+    labels: { osionos.beta: "1" }
+    restart: unless-stopped
+    volumes: ["./edge.conf:/etc/nginx/conf.d/default.conf:ro"]
+    # Loopback only (B4): the VM's tailnet-only serve is the one way in.
+    ports: ["127.0.0.1:3010:3010", "127.0.0.1:3011:3011"]
+    networks: [beta, track-binocle_default]
+    depends_on: [app]
+networks:
+  beta: {}
+  track-binocle_default: { external: true }
