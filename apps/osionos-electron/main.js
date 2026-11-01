@@ -6,7 +6,7 @@
 // the background, and provides a frameless window whose chrome is the app's own
 // top bar (its window controls call the preload bridge).
 // ===========================================================================
-const { app, BrowserWindow, ipcMain, shell, protocol, net, Menu, globalShortcut, session, utilityProcess } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, protocol, net, Menu, globalShortcut, session, utilityProcess, MessageChannelMain } = require("electron");
 const path = require("node:path");
 const os = require("node:os");
 const { spawn } = require("node:child_process");
@@ -168,25 +168,24 @@ ipcMain.on("win:close", (event) => {
 });
 
 // The local terminal (devil verdict 2026-10-31): FULL only (C2). Shells live in a utilityProcess
-// started on the first create (C6); every call is re-checked by the broker (C5).
+// started on the first create (C6); create and kill are re-checked by the broker (C5). Each pty's
+// I/O runs on its own MessageChannelMain, frame to host, never through main (ADR 0039).
 const PTY_ENABLED = ptyEnabledFor(EDITION);
 const ptyBroker = PTY_ENABLED ? createPtyBroker({
   senderAllowed,
   mainContents: () => mainWindow && mainWindow.webContents,
   startHost: startPtyHost,
   randomId: () => crypto.randomUUID(),
+  createChannel: () => new MessageChannelMain(),
 }) : null;
 function startPtyHost() {
   const child = utilityProcess.fork(path.join(__dirname, "pty-host.js"), [], { serviceName: "osionos-terminal" });
   child.on("message", (message) => ptyBroker.onHostMessage(message));
   child.on("exit", () => ptyBroker.onHostExit());
-  return { post: (message) => child.postMessage(message) };
+  return { post: (message, ports) => child.postMessage(message, ports) };
 }
 if (ptyBroker) {
   ipcMain.handle("pty:create", (event, cols, rows) => ptyBroker.create(event, cols, rows));
-  ipcMain.on("pty:write", (event, id, data) => ptyBroker.write(event, id, data));
-  ipcMain.on("pty:resize", (event, id, cols, rows) => ptyBroker.resize(event, id, cols, rows));
-  ipcMain.on("pty:ack", (event, id, chars) => ptyBroker.ack(event, id, chars));
   ipcMain.on("pty:kill", (event, id) => ptyBroker.kill(event, id));
 }
 

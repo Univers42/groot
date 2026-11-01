@@ -56,103 +56,159 @@ describe("shellCommand", () => {
   });
 });
 
-describe("createPtySessions — the host (C7)", () => {
+function fakePort() {
+  const handlers = {};
+  return {
+    sent: [], closes: 0, started: false,
+    on(name, cb) { handlers[name] = cb; },
+    start() { this.started = true; },
+    postMessage(m) { this.sent.push(m); },
+    close() { this.closes++; },
+    deliver(data, ports = []) { handlers.message({ data, ports }); },
+    remoteClose() { handlers.close(); },
+  };
+}
+
+describe("createPtySessions — the host (C7, ADR 0039)", () => {
   const make = () => {
     const { spawn, spawned } = fakeSpawn();
     const posted = [];
     const sessions = createPtySessions({ spawn, post: (m) => posted.push(m), env: { HOME: "/home/me", ELECTRON_X: "1" }, home: "/home/me", shell: "/usr/bin/hellish", args: [] });
-    return { sessions, spawned, posted };
+    const port = fakePort();
+    return { sessions, spawned, posted, port };
   };
   it("spawns the person's shell with the host's arguments, in the home folder, at the asked size, with a clean env", () => {
-    const { sessions, spawned } = make();
-    sessions.handle({ op: "create", id: "a", cols: 100, rows: 30 });
+    const { sessions, spawned, port } = make();
+    sessions.handle({ op: "create", id: "a", cols: 100, rows: 30 }, [port]);
     assert.equal(spawned[0].file, "/usr/bin/hellish");
     assert.deepEqual(spawned[0].args, []);
     assert.equal(spawned[0].opts.cwd, "/home/me");
     assert.deepEqual(spawned[0].size, [100, 30]);
     assert.equal(spawned[0].opts.env.ELECTRON_X, undefined);
+    assert.equal(port.started, true);
   });
-  it("pauses past the high watermark of unacknowledged output and resumes below the low one", () => {
-    const { sessions, spawned, posted } = make();
-    sessions.handle({ op: "create", id: "a", cols: 80, rows: 24 });
+  it("output goes on the port, never to main; it pauses past the high watermark and resumes on a port ack", () => {
+    const { sessions, spawned, posted, port } = make();
+    sessions.handle({ op: "create", id: "a", cols: 80, rows: 24 }, [port]);
     const p = spawned[0];
     p.emit("x".repeat(PTY_LIMITS.highWatermark + 1));
     assert.equal(p.paused, true);
-    assert.equal(posted.at(-1).op, "data");
-    sessions.handle({ op: "ack", id: "a", chars: PTY_LIMITS.highWatermark + 1 - PTY_LIMITS.lowWatermark + 1 });
+    assert.equal(port.sent.at(-1).op, "data");
+    assert.equal("id" in port.sent.at(-1), false);
+    assert.deepEqual(posted, []);
+    port.deliver({ op: "ack", chars: PTY_LIMITS.highWatermark + 1 - PTY_LIMITS.lowWatermark + 1 });
     assert.equal(p.paused, false);
   });
-  it("forwards writes, resizes, kills, and reports the exit once", () => {
-    const { sessions, spawned, posted } = make();
-    sessions.handle({ op: "create", id: "a", cols: 80, rows: 24 });
-    sessions.handle({ op: "write", id: "a", data: "ls\r" });
-    sessions.handle({ op: "resize", id: "a", cols: 120, rows: 40 });
+  it("forwards port writes and resizes; main's kill closes the port and the exit reaches main once", () => {
+    const { sessions, spawned, posted, port } = make();
+    sessions.handle({ op: "create", id: "a", cols: 80, rows: 24 }, [port]);
+    port.deliver({ op: "write", data: "ls\r" });
+    port.deliver({ op: "resize", cols: 120, rows: 40 });
     assert.deepEqual(spawned[0].written, ["ls\r"]);
     assert.deepEqual(spawned[0].size, [120, 40]);
     sessions.handle({ op: "kill", id: "a" });
     assert.equal(spawned[0].killed, true);
+    assert.equal(port.closes, 1);
+    port.deliver({ op: "write", data: "late" });
     spawned[0].exit({ exitCode: 0 });
-    assert.deepEqual(posted.filter((m) => m.op === "exit"), [{ op: "exit", id: "a", exitCode: 0 }]);
-    sessions.handle({ op: "write", id: "a", data: "late" });
+    assert.deepEqual(posted, [{ op: "exit", id: "a", exitCode: 0 }]);
     assert.deepEqual(spawned[0].written, ["ls\r"]);
+    assert.equal(port.closes, 1);
   });
-  it("a failed spawn reports an exit instead of throwing", () => {
-    const posted = [];
-    const sessions = createPtySessions({ spawn: () => { throw new Error("no shell"); }, post: (m) => posted.push(m), env: {}, home: "/", shell: "/nope", args: [] });
+  it("main's channel carries create and kill only: write, resize and ack from main do nothing", () => {
+    const { sessions, spawned, port } = make();
+    sessions.handle({ op: "create", id: "a", cols: 80, rows: 24 }, [port]);
+    sessions.handle({ op: "write", id: "a", data: "x" });
+    sessions.handle({ op: "resize", id: "a", cols: 90, rows: 30 });
+    assert.deepEqual(spawned[0].written, []);
+    assert.deepEqual(spawned[0].size, [80, 24]);
+  });
+  it("a create without exactly one port spawns nothing and frees the slot", () => {
+    const { sessions, spawned, posted } = make();
     sessions.handle({ op: "create", id: "a", cols: 80, rows: 24 });
+    sessions.handle({ op: "create", id: "b", cols: 80, rows: 24 }, [fakePort(), fakePort()]);
+    assert.equal(spawned.length, 0);
+    assert.deepEqual(posted, [{ op: "exit", id: "a", exitCode: -1 }, { op: "exit", id: "b", exitCode: -1 }]);
+  });
+  it("a failed spawn reports an exit to main and on the port instead of throwing", () => {
+    const posted = [];
+    const port = fakePort();
+    const sessions = createPtySessions({ spawn: () => { throw new Error("no shell"); }, post: (m) => posted.push(m), env: {}, home: "/", shell: "/nope", args: [] });
+    sessions.handle({ op: "create", id: "a", cols: 80, rows: 24 }, [port]);
     assert.deepEqual(posted, [{ op: "exit", id: "a", exitCode: -1 }]);
+    assert.deepEqual(port.sent, [{ op: "exit", exitCode: -1 }]);
+    assert.equal(port.closes, 1);
   });
 });
 
 function fakeWorld({ allowed = true } = {}) {
   const sent = [];
   const hostMsgs = [];
+  const hostPorts = [];
+  const pagePorts = [];
   let starts = 0;
-  const main = { id: 1, isDestroyed: () => false, send: (...a) => sent.push(a) };
+  const main = { id: 1, isDestroyed: () => false, send: (...a) => sent.push(a), postMessage: (ch, m, ports) => pagePorts.push([ch, m, ports]) };
   const broker = createPtyBroker({
     senderAllowed: (event) => allowed && event.sender === main,
     mainContents: () => main,
-    startHost: () => { starts++; return { post: (m) => hostMsgs.push(m) }; },
+    startHost: () => { starts++; return { post: (m, ports) => { hostMsgs.push(m); hostPorts.push(ports); } }; },
     randomId: (() => { let n = 0; return () => `p${++n}`; })(),
+    createChannel: (() => { let n = 0; return () => { n++; return { port1: `host-end-${n}`, port2: `page-end-${n}` }; }; })(),
   });
   const ev = (sender = main) => ({ sender });
-  return { broker, main, sent, hostMsgs, ev, starts: () => starts };
+  return { broker, main, sent, hostMsgs, hostPorts, pagePorts, ev, starts: () => starts };
 }
 
-describe("createPtyBroker — the main process (C5, C6)", () => {
-  it("a refused sender never reaches the host", () => {
+describe("createPtyBroker — the main process (C5, C6, ADR 0039)", () => {
+  it("has no write, resize or ack: keystrokes travel on the pty's port only", () => {
+    const { broker } = fakeWorld();
+    for (const name of ["write", "resize", "ack"]) assert.equal(broker[name], undefined, name);
+  });
+  it("a refused sender never reaches the host and gets no port", () => {
     const w = fakeWorld({ allowed: false });
     assert.equal(w.broker.create(w.ev(), 80, 24), null);
-    w.broker.write(w.ev(), "p1", "rm -rf ~\r");
     assert.equal(w.starts(), 0);
     assert.deepEqual(w.hostMsgs, []);
+    assert.deepEqual(w.pagePorts, []);
   });
-  it("creates at a validated size and refuses malformed input", () => {
+  it("creates at a validated size, binds one channel end to the host's pty and posts the other to the page", () => {
     const w = fakeWorld();
     for (const [c, r] of [[0, 24], [80, 1001], [80.5, 24], ["80", 24], [NaN, 24]]) assert.equal(w.broker.create(w.ev(), c, r), null, `${c}x${r}`);
+    assert.deepEqual(w.pagePorts, []);
     const id = w.broker.create(w.ev(), 80, 24);
     assert.equal(id, "p1");
     assert.deepEqual(w.hostMsgs.at(-1), { op: "create", id: "p1", cols: 80, rows: 24 });
-    w.broker.write(w.ev(), id, "x".repeat(PTY_LIMITS.maxWrite + 1));
-    w.broker.write(w.ev(), id, 42);
-    w.broker.resize(w.ev(), id, 0, 10);
-    assert.equal(w.hostMsgs.length, 1);
-    w.broker.write(w.ev(), id, "echo hi\r");
-    assert.deepEqual(w.hostMsgs.at(-1), { op: "write", id: "p1", data: "echo hi\r" });
+    assert.deepEqual(w.hostPorts.at(-1), ["host-end-1"]);
+    assert.deepEqual(w.pagePorts, [["pty:port", { id: "p1" }, ["page-end-1"]]]);
   });
   it("a pty id is bound to the page that created it", () => {
     const w = fakeWorld();
     const id = w.broker.create(w.ev(), 80, 24);
-    w.broker.write(w.ev(), "p999", "x");
     w.broker.kill(w.ev(), "p999");
+    w.broker.kill(w.ev({ id: 2, isDestroyed: () => false, send() {} }), id);
     assert.equal(w.hostMsgs.length, 1);
-    w.broker.onHostMessage({ op: "data", id, data: "hello" });
-    assert.deepEqual(w.sent.at(-1), ["pty:data", id, "hello"]);
+    w.broker.kill(w.ev(), id);
+    assert.deepEqual(w.hostMsgs.at(-1), { op: "kill", id });
   });
-  it("refuses a ninth shell per window", () => {
+  it("refuses a ninth concurrent shell per window", () => {
     const w = fakeWorld();
     for (let i = 0; i < PTY_LIMITS.maxPerWindow; i++) assert.notEqual(w.broker.create(w.ev(), 80, 24), null);
     assert.equal(w.broker.create(w.ev(), 80, 24), null);
+  });
+  it("create 8, exit 8: every exit frees its slot and reaches the page, and a 9th create succeeds", () => {
+    const w = fakeWorld();
+    const ids = [];
+    for (let i = 0; i < PTY_LIMITS.maxPerWindow; i++) ids.push(w.broker.create(w.ev(), 80, 24));
+    for (const id of ids) w.broker.onHostMessage({ op: "exit", id, exitCode: 0 });
+    assert.deepEqual(w.sent, ids.map((id) => ["pty:exit", id, 0]));
+    assert.notEqual(w.broker.create(w.ev(), 80, 24), null);
+  });
+  it("ignores host messages other than an exit of a pty it owns", () => {
+    const w = fakeWorld();
+    const id = w.broker.create(w.ev(), 80, 24);
+    w.broker.onHostMessage({ op: "data", id, data: "hello" });
+    w.broker.onHostMessage({ op: "exit", id: "p999", exitCode: 0 });
+    assert.deepEqual(w.sent, []);
   });
   it("a reload, crash or close kills every shell the page owned", () => {
     const w = fakeWorld();
@@ -169,13 +225,5 @@ describe("createPtyBroker — the main process (C5, C6)", () => {
     assert.deepEqual(w.sent.at(-1), ["pty:exit", id, -1]);
     w.broker.create(w.ev(), 80, 24);
     assert.equal(w.starts(), 2);
-  });
-  it("an exit frees the slot and later writes to that id are dropped", () => {
-    const w = fakeWorld();
-    const id = w.broker.create(w.ev(), 80, 24);
-    w.broker.onHostMessage({ op: "exit", id, exitCode: 0 });
-    assert.deepEqual(w.sent.at(-1), ["pty:exit", id, 0]);
-    w.broker.write(w.ev(), id, "x");
-    assert.equal(w.hostMsgs.length, 1);
   });
 });

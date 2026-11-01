@@ -1,6 +1,7 @@
 // The pty host: a utilityProcess that owns every terminal shell, so a flood of output or a crash
-// here never stalls the main process (window controls, the BaaS relay). Messages come only from
-// the main process's broker (desktop-pty.js), which has already checked the sender.
+// here never stalls the main process (window controls, the BaaS relay). The parent port carries
+// only main's create and kill, already checked by the broker (desktop-pty.js); each pty's I/O
+// arrives on its own port, straight from the terminal frame, and is validated in bindPtyPort.
 const os = require("node:os");
 const pty = require("node-pty");
 const { createPtySessions, shellCommand } = require("./desktop-pty");
@@ -14,4 +15,6 @@ const sessions = createPtySessions({
   shell,
   args,
 });
-process.parentPort.on("message", (event) => sessions.handle(event.data));
+process.parentPort.on("message", (event) => {
+  try { sessions.handle(event.data, event.ports); } catch (err) { console.error("[pty-host] dropped a message from main:", err && err.message); }
+});

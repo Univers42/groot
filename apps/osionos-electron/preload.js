@@ -9,30 +9,35 @@ const { contextBridge, ipcRenderer } = require("electron");
 // http://127.0.0.1) never sees the API. The main process re-checks every call regardless.
 const ptyAllowed = process.argv.includes("--osionos-pty") && location.origin === "app://osionos";
 
+// Each pty's port arrives from main and is reposted to this window, the app's main world, as
+// { type: "osionos-pty-port", id } (ADR 0039). contextBridge cannot carry a MessagePort, so the
+// panel must check event.source === window before it trusts one: embeds post to the same event.
 function localPtyApi() {
-  const listeners = { data: new Map(), exit: new Map() };
-  const dispatch = (kind) => (_event, id, value) => {
-    for (const cb of listeners[kind].get(id) || []) cb(value);
-  };
-  ipcRenderer.on("pty:data", dispatch("data"));
-  ipcRenderer.on("pty:exit", dispatch("exit"));
-  const subscribe = (kind, id, cb) => {
-    const set = listeners[kind].get(id) || new Set();
+  const exits = new Map();
+  ipcRenderer.on("pty:exit", (_event, id, exitCode) => {
+    for (const cb of exits.get(id) || []) cb(exitCode);
+  });
+  ipcRenderer.on("pty:port", (event, message) => {
+    const id = message && message.id;
+    if (typeof id !== "string" || event.ports.length !== 1) {
+      for (const port of event.ports) port.close();
+      return;
+    }
+    window.postMessage({ type: "osionos-pty-port", id }, location.origin, [event.ports[0]]);
+  });
+  const onExit = (id, cb) => {
+    const set = exits.get(id) || new Set();
     set.add(cb);
-    listeners[kind].set(id, set);
+    exits.set(id, set);
     return () => {
       set.delete(cb);
-      if (set.size === 0) listeners[kind].delete(id);
+      if (set.size === 0) exits.delete(id);
     };
   };
   return {
     create: (cols, rows) => ipcRenderer.invoke("pty:create", cols, rows),
-    write: (id, data) => ipcRenderer.send("pty:write", id, data),
-    resize: (id, cols, rows) => ipcRenderer.send("pty:resize", id, cols, rows),
     kill: (id) => ipcRenderer.send("pty:kill", id),
-    ack: (id, chars) => ipcRenderer.send("pty:ack", id, chars),
-    onData: (id, cb) => subscribe("data", id, cb),
-    onExit: (id, cb) => subscribe("exit", id, cb),
+    onExit,
   };
 }
 
