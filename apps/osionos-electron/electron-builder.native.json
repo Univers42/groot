@@ -3,7 +3,8 @@
   "productName": "osionos",
   "executableName": "osionos",
   "directories": { "output": "dist-native" },
-  "files": ["main.js", "preload.js", "desktop-guards.js", "renderer/**/*"],
+  "files": ["main.js", "preload.js", "desktop-guards.js", "desktop-proxy.js", "desktop-pty.js", "pty-host.js", "renderer/**/*", "node_modules/node-pty/**/*"],
+  "asarUnpack": ["node_modules/node-pty/**/*"],
   "extraResources": [{ "from": "native-runtime", "to": "native-runtime" }],
   "linux": {
     "target": ["deb", "AppImage"],

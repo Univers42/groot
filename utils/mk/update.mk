@@ -31,6 +31,10 @@ update_web: submodules-pinned ## Rebuild and restart the osionos web app after e
 	@echo "✅ osionos-app rebuilt + restarted — HARD-RELOAD $(OSIONOS_URL) (Ctrl+Shift+R)."
 
 update_app: ## Rebuild the osionos desktop .deb, then install it (prompts for sudo)
+## Usage: make update_app [OSIONOS_DESKTOP_API_URL=<bridge URL> OSIONOS_DESKTOP_BAAS_URL=<grobase URL> OSIONOS_DESKTOP_ENV_FILE=.env.local]
+## The three variables aim the app at a data center elsewhere (the tailnet one: bridge
+## https://baas.tail10f2ea.ts.net:10000, grobase https://baas.tail10f2ea.ts.net); the app then
+## starts no local stack. Unset, it stays wired to this machine's stack.
 ## Rebuilds the full edition package (apps/osionos-electron/dist/) then installs it. install-app.sh
 ## alone would install the old artifact, so the rebuild always runs first. The install needs root
 ## (dpkg + the setuid chrome-sandbox).
