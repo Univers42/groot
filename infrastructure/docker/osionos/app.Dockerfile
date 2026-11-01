@@ -154,7 +154,10 @@ RUN printf 'VITE_BAAS_URL=%s\nVITE_BAAS_REALTIME_TOKEN=%s\nVITE_CHAT_WS=%s\nVITE
 # assets so nginx's gzip_static serves them with zero CPU per request.
 # The app outgrew Node's default ~2 GiB heap during rollup's render phase —
 # raise the cap (it's a ceiling, not a reservation).
+# The desktop's terminal page (VS Code's own terminal, ADR 0038) builds into build/terminal after the
+# app, whose build empties build/; an app version without vite.terminal.config.ts skips it.
 RUN NODE_OPTIONS=--max-old-space-size=4096 pnpm exec vite build --base "$VITE_BASE" \
+ && { [ ! -f vite.terminal.config.ts ] || NODE_OPTIONS=--max-old-space-size=4096 pnpm exec vite build --config vite.terminal.config.ts; } \
  && find build -name '*.map' -delete \
  && find build -type f \( -name '*.js' -o -name '*.css' -o -name '*.svg' \
       -o -name '*.json' -o -name '*.wasm' \) -size +1k -print0 \

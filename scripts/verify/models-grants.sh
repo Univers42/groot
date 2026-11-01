@@ -151,6 +151,10 @@
 #   _maintain/_maintain_failure partition upkeep · _children_closed/_grants RLS and ACLs on
 #   every child · _canary_seedable/_canary_mutation the erase canary covers the table ·
 #   _maintain_concurrent/_maintain_lock_timeout/_registry_reapply shell-driven sessions
+#  p6_machines_* own machines (models/osionos-machines-migration.sql): _acl the account role's
+#   seven columns of its own rows, no pubkey, no write, anon nothing, service_role writes ·
+#   _rules one live default per user (23505) and the id/platform/pubkey/fingerprint/name CHECKs (23514) ·
+#   _erase the erase removes A's machines and keeps B's · _erase_mutation without the registry row they survive
 #
 # ISOLATION
 #   Throwaway containers only (--rm --network none, no port, no volume); the live
@@ -775,6 +779,10 @@ run_checks() {
 	check_count "$1" p4_activity_erase_rollup p4_activity_erase_rollup
 	check_count "$1" p4_activity_canary_seedable p4_activity_canary_seedable
 	check_count "$1" p4_activity_canary_mutation p4_activity_canary_mutation
+	check_count "$1" p6_machines_acl p6_machines_acl
+	check_count "$1" p6_machines_rules p6_machines_rules
+	check_count "$1" p6_machines_erase p6_machines_erase
+	check_count "$1" p6_machines_erase_mutation p6_machines_erase_mutation
 	p4_activity_maintain_concurrent "$1"
 	p4_activity_maintain_lock_timeout "$1"
 	p4_activity_registry_reapply "$1"

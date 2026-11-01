@@ -3,32 +3,33 @@
 //
 // Renders the bundled offline osionos (renderer/) with Chromium (fast on every
 // OS, unlike Tauri's WebKitGTK on Linux), boots the local Track Binocle BaaS in
-// the background, and provides a frameless window driven by the shared custom
-// titlebar (see chrome/titlebar.html, injected into renderer/index.html).
+// the background, and provides a frameless window whose chrome is the app's own
+// top bar (its window controls call the preload bridge).
 // ===========================================================================
-const { app, BrowserWindow, ipcMain, shell, protocol, net, Menu, globalShortcut } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, protocol, net, Menu, globalShortcut, session, utilityProcess } = require("electron");
 const path = require("node:path");
 const os = require("node:os");
 const { spawn } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
 const { existsSync, statSync, mkdirSync, readFileSync, writeFileSync } = require("node:fs");
 const crypto = require("node:crypto");
-const { createExternalOpenThrottle, isExternalHttpUrl, isAppPageUrl, isAllowedSubframeUrl, senderAllowed, baasResponseHeaders, inlineScriptHashes, frameOriginsFrom, rendererCsp, editionOf, cspHeaderName, webSecurityFor } = require("./desktop-guards");
+const { createExternalOpenThrottle, isExternalHttpUrl, isAppPageUrl, isMachineWindowUrl, isAllowedSubframeUrl, senderAllowed, pagePolicy, baasResponseHeaders, inlineScriptHashes, frameOriginsFrom, rendererCsp, editionOf, cspHeaderName, webSecurityFor, baasTargetOf, isLoopbackUrl } = require("./desktop-guards");
+const { applyTailnetBypass } = require("./desktop-proxy");
+const { ptyEnabledFor, createPtyBroker } = require("./desktop-pty");
 
 // The local mini-baas query-router speaks plain HTTP. The renderer runs from the
 // secure `app://` origin, where a direct http://localhost:8002 fetch is upgraded
 // to https and fails (ERR_SSL_PROTOCOL_ERROR — the router has no TLS). So the
 // renderer calls it same-origin via app://osionos/__baas/* and the app:// handler
 // relays to this target in the main process, where no mixed-content/upgrade rules
-// apply. Override with OSIONOS_BAAS_URL if the router runs elsewhere.
-//
-// MUST be 127.0.0.1, not "localhost": Chromium's net.fetch resolves "localhost" to
-// IPv6 ::1 first, but the grobase Kong binds IPv4-only (127.0.0.1:8000), so an
-// ::1 attempt is refused → net.fetch throws → the proxy returns 502 (the graph /
-// database calls fail). Coerce any localhost override to IPv4 too.
-const BAAS_TARGET = (process.env.OSIONOS_BAAS_URL || "http://127.0.0.1:8000")
-  .replace(/\/+$/, "")
-  .replace(/\/\/localhost(?=[:/]|$)/, "//127.0.0.1");
+// apply. OSIONOS_BAAS_URL at launch overrides it; a build for a grobase elsewhere
+// (build.sh with OSIONOS_DESKTOP_BAAS_URL) bakes it into desktop-config.json, so the
+// app launched from the menu reaches it with no environment.
+function bakedBaasUrl() {
+  try { return JSON.parse(readFileSync(path.join(__dirname, "desktop-config.json"), "utf8")).baasUrl || ""; }
+  catch { return ""; }
+}
+const BAAS_TARGET = baasTargetOf(process.env.OSIONOS_BAAS_URL, bakedBaasUrl());
 
 // Serve the bundled renderer from a stable app:// origin (so the bridge's CORS
 // can allow it) instead of file:// (origin "null", which CORS rejects). Must be
@@ -124,9 +125,16 @@ let mainWindow = null;
 // Every WebContents gets the same guards (per-window wiring missed child windows). The main
 // frame never leaves app://osionos: the Mail/Calendar buttons set location.href to an external
 // URL, which would strand the user on a page with no titlebar, so it opens in the system browser.
+// A machine window (/machine, C23) is this machine's own IDE page, opened as a child window so the
+// app can hand it a session through window.opener; it is the only page allowed off app://osionos,
+// and only in a window the app opened. Its inherited preload is inert there: win:* is accepted from
+// the main window alone (C12).
+const MACHINE_WINDOW = { width: 1400, height: 900, frame: true, autoHideMenuBar: true, backgroundColor: "#ffffff" };
 app.on("web-contents-created", (_e, contents) => {
   const openThrottle = createExternalOpenThrottle();
+  const isMachinePage = (url) => contents.opener != null && isMachineWindowUrl(url);
   contents.setWindowOpenHandler(({ url }) => {
+    if (isMachineWindowUrl(url)) return { action: "allow", overrideBrowserWindowOptions: MACHINE_WINDOW };
     if (isExternalHttpUrl(url)) {
       if (openThrottle.allow()) shell.openExternal(url);
       else console.warn("window.open throttled for host " + new URL(url).host);
@@ -135,12 +143,13 @@ app.on("web-contents-created", (_e, contents) => {
   });
   contents.on("will-attach-webview", (e) => e.preventDefault());
   contents.on("will-navigate", (e, url) => {
-    if (isAppPageUrl(url)) return;
+    if (isAppPageUrl(url) || isMachinePage(url)) return;
     e.preventDefault();
     if (isExternalHttpUrl(url)) shell.openExternal(url);
   });
   contents.on("will-frame-navigate", (d) => {
-    if (d.isMainFrame ? !isAppPageUrl(d.url) : !isAllowedSubframeUrl(d.url)) d.preventDefault();
+    const allowed = d.isMainFrame ? isAppPageUrl(d.url) || isMachinePage(d.url) : isAllowedSubframeUrl(d.url);
+    if (!allowed) d.preventDefault();
   });
 });
 
@@ -157,6 +166,29 @@ ipcMain.on("win:close", (event) => {
   if (!senderAllowed(event, mainWindow && mainWindow.webContents)) return;
   if (mainWindow) mainWindow.close();
 });
+
+// The local terminal (devil verdict 2026-10-31): FULL only (C2). Shells live in a utilityProcess
+// started on the first create (C6); every call is re-checked by the broker (C5).
+const PTY_ENABLED = ptyEnabledFor(EDITION);
+const ptyBroker = PTY_ENABLED ? createPtyBroker({
+  senderAllowed,
+  mainContents: () => mainWindow && mainWindow.webContents,
+  startHost: startPtyHost,
+  randomId: () => crypto.randomUUID(),
+}) : null;
+function startPtyHost() {
+  const child = utilityProcess.fork(path.join(__dirname, "pty-host.js"), [], { serviceName: "osionos-terminal" });
+  child.on("message", (message) => ptyBroker.onHostMessage(message));
+  child.on("exit", () => ptyBroker.onHostExit());
+  return { post: (message) => child.postMessage(message) };
+}
+if (ptyBroker) {
+  ipcMain.handle("pty:create", (event, cols, rows) => ptyBroker.create(event, cols, rows));
+  ipcMain.on("pty:write", (event, id, data) => ptyBroker.write(event, id, data));
+  ipcMain.on("pty:resize", (event, id, cols, rows) => ptyBroker.resize(event, id, cols, rows));
+  ipcMain.on("pty:ack", (event, id, chars) => ptyBroker.ack(event, id, chars));
+  ipcMain.on("pty:kill", (event, id) => ptyBroker.kill(event, id));
+}
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -180,9 +212,16 @@ function createWindow() {
       // navigation/window-open guards (web-contents-created) keep foreign pages out
       // of this window, and authz stays in the auth-gateway + Postgres RLS.
       webSecurity: webSecurityFor(EDITION),
+      additionalArguments: PTY_ENABLED ? ["--osionos-pty"] : [],
     },
   });
   mainWindow = win;
+  // A reload, a renderer crash or a closed window ends the page that owned the shells (C6).
+  const contentsId = win.webContents.id;
+  const endShells = () => { if (ptyBroker) ptyBroker.killOwnedBy(contentsId); };
+  win.webContents.on("did-start-navigation", (details) => { if (details.isMainFrame && !details.isSameDocument) endShells(); });
+  win.webContents.on("render-process-gone", endShells);
+  win.webContents.on("destroyed", endShells);
   // A destroyed BrowserWindow throws on .webContents; the win:* handlers read it on every message.
   win.on("closed", () => { if (mainWindow === win) mainWindow = null; });
 
@@ -269,13 +308,21 @@ app.whenReady().then(async () => {
     // WHY: every app:// file response (including the index fallback) carries the CSP (enforced in FULL, Report-Only in LOCAL/NATIVE whose C15 smoke is pending).
     const res = await net.fetch(pathToFileURL(filePath).toString());
     const headers = new Headers(res.headers);
-    headers.set(cspHeaderName(EDITION), rendererPolicy);
+    headers.set(cspHeaderName(EDITION), pagePolicy(rendererPolicy, pathname));
     return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
   });
+  // A grobase elsewhere (the tailnet data center) leaves nothing on this machine to boot.
   if (IS_NATIVE) {
     try { await startNative(); } catch (e) { console.error("[native] backend failed to start:", e); }
-  } else {
+  } else if (isLoopbackUrl(BAAS_TARGET)) {
     bootSuite();
+  }
+  // Before the first request: the data center's tailnet goes direct, the rest keeps the system proxy.
+  try {
+    const bypass = await applyTailnetBypass(session.defaultSession, BAAS_TARGET);
+    if (bypass) console.info(`[desktop] direct to the tailnet (${bypass.proxyBypassRules}); other traffic via ${bypass.proxyRules}`);
+  } catch (e) {
+    console.error("[desktop] tailnet proxy exception not applied; every request uses the system proxy:", e && e.message ? e.message : e);
   }
   createWindow();
   // OS-level recovery that works even if the renderer is completely dead (a black
