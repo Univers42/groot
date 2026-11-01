@@ -1,8 +1,41 @@
 {
-  "TCP": { "443": { "HTTPS": true }, "10000": { "HTTPS": true } },
-  "Web": {
-    "${TS_CERT_DOMAIN}:443": { "Handlers": { "/": { "Proxy": "http://osionos-beta-edge:3010" } } },
-    "${TS_CERT_DOMAIN}:10000": { "Handlers": { "/": { "Proxy": "http://osionos-beta-edge:3011" } } }
+  "TCP": {
+    "443": {
+      "HTTPS": true
+    },
+    "10000": {
+      "HTTPS": true
+    },
+    "8443": {
+      "HTTPS": true
+    }
   },
-  "AllowFunnel": { "${TS_CERT_DOMAIN}:443": true, "${TS_CERT_DOMAIN}:10000": true }
+  "Web": {
+    "${TS_CERT_DOMAIN}:443": {
+      "Handlers": {
+        "/": {
+          "Proxy": "http://osionos-beta-edge:3010"
+        }
+      }
+    },
+    "${TS_CERT_DOMAIN}:10000": {
+      "Handlers": {
+        "/": {
+          "Proxy": "http://osionos-beta-edge:3011"
+        }
+      }
+    },
+    "${TS_CERT_DOMAIN}:8443": {
+      "Handlers": {
+        "/": {
+          "Proxy": "http://osionos-beta-edge:3012"
+        }
+      }
+    }
+  },
+  "AllowFunnel": {
+    "${TS_CERT_DOMAIN}:443": true,
+    "${TS_CERT_DOMAIN}:10000": true,
+    "${TS_CERT_DOMAIN}:8443": true
+  }
 }
