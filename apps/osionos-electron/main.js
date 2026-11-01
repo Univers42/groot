@@ -13,7 +13,7 @@ const { spawn } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
 const { existsSync, statSync, mkdirSync, readFileSync, writeFileSync } = require("node:fs");
 const crypto = require("node:crypto");
-const { createExternalOpenThrottle, isExternalHttpUrl, isAppPageUrl, isMachineWindowUrl, isAllowedSubframeUrl, senderAllowed, baasResponseHeaders, inlineScriptHashes, frameOriginsFrom, rendererCsp, editionOf, cspHeaderName, webSecurityFor, baasTargetOf, isLoopbackUrl } = require("./desktop-guards");
+const { createExternalOpenThrottle, isExternalHttpUrl, isAppPageUrl, isMachineWindowUrl, isAllowedSubframeUrl, senderAllowed, pagePolicy, baasResponseHeaders, inlineScriptHashes, frameOriginsFrom, rendererCsp, editionOf, cspHeaderName, webSecurityFor, baasTargetOf, isLoopbackUrl } = require("./desktop-guards");
 const { applyTailnetBypass } = require("./desktop-proxy");
 const { ptyEnabledFor, createPtyBroker } = require("./desktop-pty");
 
@@ -308,7 +308,7 @@ app.whenReady().then(async () => {
     // WHY: every app:// file response (including the index fallback) carries the CSP (enforced in FULL, Report-Only in LOCAL/NATIVE whose C15 smoke is pending).
     const res = await net.fetch(pathToFileURL(filePath).toString());
     const headers = new Headers(res.headers);
-    headers.set(cspHeaderName(EDITION), rendererPolicy);
+    headers.set(cspHeaderName(EDITION), pagePolicy(rendererPolicy, pathname));
     return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
   });
   // A grobase elsewhere (the tailnet data center) leaves nothing on this machine to boot.

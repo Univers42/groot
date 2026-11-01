@@ -22,4 +22,4 @@ trap 'kill $xvfb_pid 2>/dev/null' EXIT # openbox dies with the display
 sleep 1
 DISPLAY=:77 openbox >/dev/null 2>&1 &
 sleep 1
-DISPLAY=:77 node /smoke/pty-smoke.mjs
+DISPLAY=:77 node "/smoke/${SMOKE_SCRIPT:-pty-smoke.mjs}"

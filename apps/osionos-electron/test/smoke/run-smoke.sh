@@ -1,5 +1,5 @@
 #!/bin/sh
-# Usage: run-smoke.sh full|local|native|machine|pty
+# Usage: run-smoke.sh full|local|native|machine|pty|terminal
 # machine: the C23 /machine run; needs a running osionos-node on 127.0.0.1:4100 and MACHINE_FOLDER,
 # and waits for the emailed step-up code in $SMOKE_OUT/code.txt.
 # Ponytail: the BaaS target is the grobase the build baked (desktop-config.json), else
@@ -15,6 +15,7 @@ IMG=osionos-electron-smoke:1.49.1
 OUT="${SMOKE_OUT:-/tmp/osionos-electron-smoke-out}"
 
 ENTRY=container-entry.sh
+SMOKE_SCRIPT=pty-smoke.mjs
 LIMITS="--timeout 900 --idle 300"
 case "$EDITION" in
 full) ;;
@@ -23,15 +24,17 @@ machine) ENTRY=machine-entry.sh; LIMITS="--timeout 2400 --idle 1800"; : "${MACHI
 local) echo "SKIP local — needs a lean backend on :4000 over plain HTTP; :4000 is the live HTTPS bridge (a second one would touch the live stack)"; exit 0 ;;
 # pty: the local terminal (devil verdict 2026-10-31, C1-C8); the API exists before sign-in.
 pty) ENTRY=pty-entry.sh; LIMITS="--timeout 600 --idle 300" ;;
+# terminal: VS Code's terminal page in the panel's frame (ADR 0038, amendment A1-A6).
+terminal) ENTRY=pty-entry.sh; SMOKE_SCRIPT=terminal-page-smoke.mjs; LIMITS="--timeout 600 --idle 300" ;;
 native) echo "SKIP native — needs native-runtime/ from build-native.sh (embedded postgres+gotrue, heavy); not built here"; exit 0 ;;
-*) echo "usage: $0 full|local|native|machine" >&2; exit 2 ;;
+*) echo "usage: $0 full|local|native|machine|pty|terminal" >&2; exit 2 ;;
 esac
 
 [ -f "$E_DIR/renderer/index.html" ] || bash "$E_DIR/build.sh" --renderer-only
-if [ "$EDITION" = pty ]; then
+if [ "$EDITION" = pty ] || [ "$EDITION" = terminal ]; then
 	mkdir -p "$OUT"
 	docker build -q -t "$IMG" "$HERE" >/dev/null
-	export E_DIR HERE REPO IMG OUT ENTRY
+	export E_DIR HERE REPO IMG OUT ENTRY SMOKE_SCRIPT
 	exec "$REPO/.claude/tools/watch.sh" $LIMITS -- sh "$HERE/docker-run.sh" 3</dev/null
 fi
 # shellcheck source=/dev/null

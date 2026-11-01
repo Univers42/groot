@@ -30,3 +30,13 @@
 - One stored XSS on `app://osionos` would now type into a shell. What holds it: the enforced CSP (FULL), embeds on other origins, no command from page content reaching the shell (C3), a supported Chromium.
 - LOCAL and NATIVE editions have no local terminal until their CSP is enforced.
 - Proof: `test/desktop-pty.test.js` (15 tests) and `sh test/smoke/run-smoke.sh pty` (12 checks, C1–C8, green on 2026-10-31 with Electron 44.8.0). The signed-in C15 smoke on 44.8.0 still owes a run (it needs the account password).
+
+## Amendment 1 — the panel is VS Code's own terminal (2026-11-01)
+
+- **Why:** the owner asked for VS Code's terminal, not the app's xterm. The app runs plain `monaco-editor`, which clashes with `monaco-vscode-api`, so VS Code's terminal runs in its own page: osionos `src/terminal-client`, built by `vite.terminal.config.ts` into `terminal/` of the renderer (`app.Dockerfile`).
+- **A1:** the panel hands a `MessagePort` to the iframe it rendered; the page never reads `window.parent`. A frame of the page that got no port draws nothing.
+- **A2:** the shell serves `/terminal/*` with `frame-ancestors 'self'` (`pagePolicy`), and the page starts only as a direct child of the top window.
+- **A3:** the page loads no task, debug, extension, gallery, remote-agent, scm or search service, and its workspace is untrusted.
+- **A4:** `isAllowedSubframeUrl` admits exactly `app://osionos/terminal/index.html` (an optional query, no fragment, no `..`, no other host).
+- **A5:** `frame-src`'s only `app:` source is `app://osionos/terminal/`.
+- **A6, measured:** `sh test/smoke/run-smoke.sh terminal` gives 5/5 on Electron 44.8.0: the handoff, typing round-trip, no-port refusal, nested refusal, and 0 CSP console lines. First shell output arrives 0.83–1.05 s after the frame is added (4 runs, xvfb, no GPU). The smoke plays the panel's side of the port because the dock sits behind sign-in; osionos `terminal-port.test.ts` pins that protocol.
