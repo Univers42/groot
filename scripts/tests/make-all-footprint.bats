@@ -18,6 +18,9 @@ setup() {
 # Fake docker: no image is cached; RUNNING lists the containers that are up.
 case "\$1" in
   image) exit 1 ;;
+  # Nothing here is a real container. A successful exec is what vault-restore
+  # reads as "minio serves TLS only", and it then refuses before any pull.
+  exec) exit 1 ;;
   pull) echo "\$3" >> "$PULLS" ;;
   ps) for c in \${RUNNING:-}; do echo "\$c"; done ;;
 esac
