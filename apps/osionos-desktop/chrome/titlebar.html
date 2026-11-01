@@ -1,8 +1,8 @@
-<!-- osionos desktop custom window chrome — shared by the Electron and Tauri
-     shells (injected into the bundled index.html before </body> at build time).
-     Detects the host (Electron preload `window.osionosDesktop` OR Tauri
-     `window.__TAURI__`) and wires the window controls accordingly. In a plain
-     browser neither exists, so it no-ops cleanly (and the layout spacing is
+<!-- osionos desktop window chrome for the TAURI shell (injected into the bundled
+     index.html before </body> at build time). The Electron shell no longer injects
+     it: there the app's own top bar (src/widgets/top-bar) drives the frameless
+     window through window.osionosDesktop, and this bar was a duplicate. In a plain
+     browser no host exists, so it no-ops cleanly (and the layout spacing is
      scoped to html.osio-has-titlebar, so there is NO empty gap). Styled to the
      osionos design chart (logo #0B63CE, accent #0071e3 / dark #38bdf8). -->
 <style id="osio-tb-style">
@@ -21,6 +21,8 @@
   body{ margin:0; }
   /* spacing only when a titlebar is actually mounted (no gap in a plain browser) */
   html.osio-has-titlebar #root>*{ margin-top:var(--tb-h) !important; height:calc(100vh - var(--tb-h)) !important; }
+  /* contain that margin: collapsed through #root it pushed the page 36px past the window */
+  html.osio-has-titlebar #root{ display:flow-root; }
   #osio-titlebar{
     position:fixed; inset:0 0 auto 0; height:var(--tb-h); z-index:2147483647;
     display:flex; align-items:center; gap:10px; padding-left:11px;

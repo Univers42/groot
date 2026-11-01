@@ -136,13 +136,18 @@ preview_all() {
 }
 
 # Moved, not copied, so each dump exists once on disk; a timestamped backup is never overwritten
-# by a later run.
+# by a later run. A file git tracks is git's to version: the vault holds a snapshot of whatever
+# the pusher had, and swapping it in dirtied six templates with stale copies (2026-10-29).
 install_main() {
-	local stage="$1" path written=0 same=0
+	local stage="$1" path written=0 same=0 tracked=0
 	while IFS= read -r path; do
 		[ -f "$stage/$path" ] || continue
 		if [ -f "$REPO/$path" ] && cmp -s "$stage/$path" "$REPO/$path"; then
 			same=$((same + 1))
+			continue
+		fi
+		if [ -f "$REPO/$path" ] && is_git_tracked "$REPO/$path"; then
+			tracked=$((tracked + 1))
 			continue
 		fi
 		[ ! -e "$REPO/$path" ] || mv -f "$REPO/$path" "$REPO/$path.bak-$STAMP"
@@ -150,7 +155,7 @@ install_main() {
 		mv -f "$stage/$path" "$REPO/$path"
 		written=$((written + 1))
 	done <"$WORK/$MAIN_ENV.files"
-	note "✓ $MAIN_ENV → ./ : $written file(s) written, $same already identical"
+	note "✓ $MAIN_ENV → ./ : $written file(s) written, $same already identical, $tracked tracked by git kept as git has it"
 }
 
 install_env() {

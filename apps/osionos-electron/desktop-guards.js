@@ -25,6 +25,22 @@ function webSecurityFor(edition) {
   return HARDENED_EDITIONS.has(edition);
 }
 
+function baasTargetOf(envValue, bakedValue) {
+  // WHY: Kong binds 127.0.0.1 only and Chromium tries "localhost" as ::1 first (refused -> 502).
+  return (envValue || bakedValue || "http://127.0.0.1:8000")
+    .replace(/\/+$/, "")
+    .replace(/\/\/localhost(?=[:/]|$)/, "//127.0.0.1");
+}
+
+// Caveat: "local" is judged by name only — a local Kong addressed by this machine's LAN IP or
+// 0.0.0.0 reads as remote, so the suite is not booted; launch with OSIONOS_BAAS_URL=127.0.0.1.
+function isLoopbackUrl(url) {
+  // WHY: an unparsable target keeps the pre-remote behaviour (boot the local suite).
+  let host;
+  try { host = new URL(url).hostname; } catch { return true; }
+  return host === "localhost" || host === "[::1]" || /^127\./.test(host);
+}
+
 // WHY: the renderer frames mail/calendar/whiteboard loopback apps by default.
 const DEFAULT_FRAME_ORIGINS = [
   "http://localhost:3002",
@@ -37,6 +53,21 @@ function isExternalHttpUrl(url) {
   try {
     const u = new URL(url);
     return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function isMachineWindowUrl(url) {
+  // WHY: /machine opens this machine's IDE page (osionos-node) as its own window and reaches it
+  // through window.opener (C0-F1, C23). Only the exact loopback address, never a remote host:
+  // a node elsewhere is reached through its own tunnel, not by widening this. No folder named
+  // opens the machine's home folder (the terminal panel's one click).
+  try {
+    const u = new URL(url);
+    if (u.protocol !== "http:" || u.hostname !== "127.0.0.1" || u.port === "") return false;
+    if (u.username !== "" || u.password !== "" || u.pathname !== "/") return false;
+    return u.searchParams.has("node");
   } catch {
     return false;
   }
@@ -57,13 +88,22 @@ function isAppPageUrl(url) {
 
 const PDF_DATA_URL = /^data:application\/pdf[;,]/i;
 
+// ADR 0038 (A4): the app's own terminal page, matched on the raw string so no normalisation
+// (traversal, encoded dots, backslashes, userinfo, a fragment) can turn another app page into it.
+const TERMINAL_PAGE = /^app:\/\/osionos\/terminal\/index\.html(\?[^#\\]*)?$/;
+
+// ADR 0038 (A2): no other site may frame the terminal page, a third-party embed nesting it included.
+function pagePolicy(policy, pathname) {
+  return pathname.startsWith("/terminal/") ? policy + "; frame-ancestors 'self'" : policy;
+}
+
 function isAllowedSubframeUrl(url) {
   // WHY: subframes may only embed remote http(s) pages; frame-src narrows further.
   // about:blank is the initial document of every iframe. data:application/pdf is the
   // attachment preview (FilePreviewModal frames the stored data: URL); it opens in the
   // PDF viewer, never as an HTML document. Enforcing the C14 CSP (frame-src without
   // data:) breaks that preview — the enforcement ruling has to move it first.
-  if (url === "about:blank" || PDF_DATA_URL.test(url)) return true;
+  if (url === "about:blank" || PDF_DATA_URL.test(url) || TERMINAL_PAGE.test(url)) return true;
   try {
     const u = new URL(url);
     return u.protocol === "http:" || u.protocol === "https:";
@@ -145,7 +185,8 @@ function rendererCsp(opts) {
   const hashes = Array.isArray(o.scriptHashes) ? o.scriptHashes : [];
   const frames = Array.isArray(o.frameOrigins) ? o.frameOrigins : [];
   const scriptSrc = ["'self'", "'wasm-unsafe-eval'"].concat(hashes).join(" ");
-  const frameSrc = ["https:"].concat(frames).join(" ");
+  // The only app: source is the terminal page's path (ADR 0038, A5).
+  const frameSrc = ["https:", "app://osionos/terminal/"].concat(frames).join(" ");
   return [
     "default-src 'self'",
     "script-src " + scriptSrc,
@@ -180,6 +221,7 @@ function createExternalOpenThrottle(opts) {
 }
 
 module.exports = {
+  isMachineWindowUrl,
   createExternalOpenThrottle,
   isExternalHttpUrl,
   isAppPageUrl,
@@ -191,6 +233,9 @@ module.exports = {
   rendererCsp,
   editionOf,
   HARDENED_EDITIONS,
+  pagePolicy,
   cspHeaderName,
   webSecurityFor,
+  baasTargetOf,
+  isLoopbackUrl,
 };

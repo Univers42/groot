@@ -12,10 +12,14 @@ const {
   inlineScriptHashes,
   frameOriginsFrom,
   rendererCsp,
+  pagePolicy,
   createExternalOpenThrottle,
   editionOf,
   cspHeaderName,
   webSecurityFor,
+  baasTargetOf,
+  isLoopbackUrl,
+  isMachineWindowUrl,
 } = require("../desktop-guards");
 
 function mainEvent(overrides) {
@@ -101,6 +105,21 @@ describe("isAllowedSubframeUrl", () => {
     assert.equal(isAllowedSubframeUrl("data:text/html,hi"), false);
     assert.equal(isAllowedSubframeUrl("javascript:alert(1)"), false);
   });
+  // ADR 0038 amendment A4: the app's own terminal page, exactly, and nothing else on app://.
+  it("true for the terminal page alone among app:// URLs", () => {
+    assert.equal(isAllowedSubframeUrl("app://osionos/terminal/index.html"), true);
+    assert.equal(isAllowedSubframeUrl("app://osionos/terminal/index.html?theme=light"), true);
+    for (const url of [
+      "app://osionos/terminal/",
+      "app://osionos/terminal/../index.html",
+      "app://osionos/terminal/%2e%2e/index.html",
+      "app://osionos/terminal\\index.html",
+      "app://x/terminal/index.html",
+      "app://u:p@osionos/terminal/index.html",
+      "app://osionos/terminal/index.html#x",
+      "app://osionos/terminal/other.html",
+    ]) assert.equal(isAllowedSubframeUrl(url), false, url);
+  });
   it("true for http/https", () => {
     assert.equal(isAllowedSubframeUrl("https://localhost:3007/"), true);
     assert.equal(isAllowedSubframeUrl("http://localhost:3002/"), true);
@@ -165,8 +184,17 @@ describe("rendererCsp", () => {
     assert.ok(policy.includes("base-uri 'none'"));
     const frameSrc = policy.split(";").map((s) => s.trim()).find((s) => s.startsWith("frame-src "));
     assert.ok(!frameSrc.includes("'self'"));
-    assert.ok(!frameSrc.includes("app:"));
+    // ADR 0038 (A5): the only app: source is the terminal page's path.
+    assert.deepEqual(frameSrc.split(/\s+/).filter((source) => source.startsWith("app:")), ["app://osionos/terminal/"]);
     assert.ok(frameSrc.includes("http://localhost:3002"));
+  });
+});
+
+describe("pagePolicy (ADR 0038, A2)", () => {
+  it("only the app may frame its terminal page; other pages keep the policy as is", () => {
+    assert.equal(pagePolicy("default-src 'self'", "/terminal/index.html"), "default-src 'self'; frame-ancestors 'self'");
+    assert.equal(pagePolicy("default-src 'self'", "/terminal/assets/x.js"), "default-src 'self'; frame-ancestors 'self'");
+    assert.equal(pagePolicy("default-src 'self'", "/index.html"), "default-src 'self'");
   });
 });
 
@@ -181,14 +209,14 @@ describe("rendererCsp pinned output", () => {
   it("default opts", () => {
     assert.equal(
       rendererCsp(),
-      "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; " + tail + "frame-src https:; object-src 'none'; base-uri 'none'",
+      "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; " + tail + "frame-src https: app://osionos/terminal/; object-src 'none'; base-uri 'none'",
     );
   });
   it("with frame origins and script hashes", () => {
     assert.equal(
       rendererCsp({ scriptHashes: ["'sha256-abc'"], frameOrigins: ["http://localhost:3002"] }),
       "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-abc'; " +
-        tail + "frame-src https: http://localhost:3002; object-src 'none'; base-uri 'none'",
+        tail + "frame-src https: app://osionos/terminal/ http://localhost:3002; object-src 'none'; base-uri 'none'",
     );
   });
 });
@@ -239,5 +267,52 @@ describe("edition hardening", () => {
   it("unknown edition fails closed to report-only and false", () => {
     assert.equal(cspHeaderName("beta"), "content-security-policy-report-only");
     assert.equal(webSecurityFor("beta"), false);
+  });
+});
+
+describe("baas target", () => {
+  it("baasTargetOf: launch env wins, then the baked URL, then the local Kong", () => {
+    assert.equal(baasTargetOf("https://env.example/", "https://baked.example"), "https://env.example");
+    assert.equal(baasTargetOf("", "https://baas.example.ts.net/"), "https://baas.example.ts.net");
+    assert.equal(baasTargetOf(undefined, undefined), "http://127.0.0.1:8000");
+  });
+  it("baasTargetOf: localhost is coerced to IPv4 (Kong binds 127.0.0.1 only)", () => {
+    assert.equal(baasTargetOf("http://localhost:8000", ""), "http://127.0.0.1:8000");
+  });
+  it("isLoopbackUrl: the local Kong is loopback, a tailnet grobase is not", () => {
+    assert.equal(isLoopbackUrl("http://127.0.0.1:8000"), true);
+    assert.equal(isLoopbackUrl("http://[::1]:8000"), true);
+    assert.equal(isLoopbackUrl("https://baas.example.ts.net"), false);
+  });
+  it("isLoopbackUrl: an unparsable target counts as local, so the suite still boots as before", () => {
+    assert.equal(isLoopbackUrl("not a url"), true);
+  });
+});
+
+describe("isMachineWindowUrl", () => {
+  // /machine opens this machine's IDE page as its own window and reaches it through
+  // window.opener (C0-F1, C23); only a loopback osionos-node page qualifies.
+  it("accepts the loopback IDE page naming a node, with or without a folder", () => {
+    assert.equal(isMachineWindowUrl("http://127.0.0.1:4100/?node=laptop&folder=%2Fhome%2Fme%2Fproj"), true);
+    assert.equal(isMachineWindowUrl("http://127.0.0.1:43123/?folder=%2Fx&node=vm"), true);
+    // One click from the terminal panel opens the machine's home folder: no folder named.
+    assert.equal(isMachineWindowUrl("http://127.0.0.1:4100/?node=m-abcdefghijklmnop"), true);
+  });
+  it("refuses any other host, scheme, path or a page without a node", () => {
+    for (const url of [
+      "https://127.0.0.1:4100/?node=laptop&folder=%2Fx",
+      "http://localhost:4100/?node=laptop&folder=%2Fx",
+      "http://192.168.1.5:4100/?node=laptop&folder=%2Fx",
+      "http://evil.example/?node=laptop&folder=%2Fx",
+      "http://127.0.0.1.evil.example:4100/?node=laptop&folder=%2Fx",
+      "http://user:pw@127.0.0.1:4100/?node=laptop&folder=%2Fx",
+      "http://127.0.0.1:4100/assets/x.js?node=laptop&folder=%2Fx",
+      "http://127.0.0.1:4100/?folder=%2Fx",
+      "http://127.0.0.1:4100/",
+      "http://127.0.0.1/?node=laptop&folder=%2Fx",
+      "app://osionos/machine?node=laptop&folder=%2Fx",
+      "javascript:alert(1)",
+      "not a url",
+    ]) assert.equal(isMachineWindowUrl(url), false, url);
   });
 });
