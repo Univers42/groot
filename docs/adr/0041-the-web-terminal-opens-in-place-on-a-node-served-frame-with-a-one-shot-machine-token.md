@@ -41,3 +41,36 @@
 - **W15, decided by the owner on 2026-11-01: the beta stays trusted.** "Beta and production are live apps that everyone can reach; that's important for my colleague." Accepted risk: every commit pushed to osionos `develop` can run commands in the owner's shell. That needs the owner to open the beta and pass the emailed step-up. To withdraw it, remove `--app-origin https://baas-beta.tail10f2ea.ts.net` from `~/.config/systemd/user/osionos-node.service` and restart the node.
 - The builder owes W1–W16. The status becomes "accepted" when they are green and shown. U1 and U5 are measured before merging to develop (a merge ships to the beta). Firefox, Safari and U6 are measured before main.
 - To reverse: drop `/terminal/` and `/api/pty`, and restore the window card. That is one release plus a node restart.
+
+## Amendment 1 (2026-11-01): "remember this computer", PROCEED-WITH-CONDITIONS (R1–R14)
+
+The owner: "we cannot ask constantly to people to send themselves a mail to be connected". The full
+ruling is in the osionos verdict file, "Amendment 1".
+
+- **Context.** `ts.net` is a public suffix (`/usr/share/publicsuffix/public_suffix_list.dat:15841`), so
+  production and the beta are the **same site**, and the frame shares one localStorage partition under both.
+  The node has no live revocation channel: `revoke()` has no caller, and only the heartbeat's 410 reaches it.
+  The app-side whoami check is the app's word, so it is no boundary. A new bridge assertion in the machine
+  token's format would be accepted by every node not yet updated.
+- **Decision.** The node issues a device secret after a step-up, kept hashed on the node and in the frame's
+  storage. It is a **second factor**: each later load also needs a bridge-signed resume assertion, minted with
+  no step-up but after the machine-key identity check. The assertion has its own prefix, is 60 s and one-shot,
+  and has `sub === owner`. The secret is bound to the app origin and issued to the production origin only.
+  It lasts 30 days sliding, 90 days absolute, and at most 8 are kept per node. It is wiped on the 410, on
+  unpair, on revoke and on "Forget this computer".
+- **Alternatives.** A bearer device secret alone: 30 days with no step-up, readable under the beta and by a
+  port squatter, and no revocation. A per-session ssh tunnel: a cloud-held key to every user's machine
+  (`.out-of-scope/ssh-tunnel-per-terminal-session.md`).
+- **Consequences.** One email per computer per 90 days. Sign-out-everywhere and machine removal take effect
+  through the bridge refusing the resume mint, with a lag of up to the access token's TTL (unverified, R-U1).
+  The W15 acceptance above ("needs … the emailed step-up") still holds only because R5 keeps the beta off
+  remember. An owner override of R5 must be recorded here. R1–R14 are open.
+- **R5 overridden by the owner, 2026-11-01: the beta is remembered too.** Asked whether the beta should also
+  remember the computer, the owner chose "Beta too". The owner's unit and the Connector name both
+  `https://baas.tail10f2ea.ts.net:8443` and `https://baas-beta.tail10f2ea.ts.net` as remember origins.
+  Accepted risk, replacing the W15 sentence above: after one emailed code per computer, any commit pushed to
+  osionos `develop` can run commands in the owner's shell with no further code, for up to 30 days sliding and
+  90 days absolute, until "Forget this computer", unpair or sign-out-everywhere. R4 still binds each secret to
+  the origin that received it, so the beta's secret does not open shells for production's frame, or the
+  reverse. To withdraw it, drop the beta from the remember origins and restart the node. Its secrets then stop
+  opening shells, and R7 deletes them.
