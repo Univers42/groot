@@ -4,7 +4,8 @@
 # A failed fetch, build or health check leaves the running beta as it is (B9).
 set -euo pipefail
 B=/mnt/storage/dlesieur/osionos-beta
-DOCKERFILE="$HOME/Documents/groot/infrastructure/docker/osionos/app.Dockerfile"
+# Production builds with groot main's Dockerfile (deploy/root), not the live checkout's, which lags.
+DOCKERFILE="$B/app.Dockerfile"
 exec 9>"$B/.lock"
 flock -n 9 || { echo "another update is running"; exit 0; }
 log() { echo "$(date -Is) $*"; }
@@ -19,6 +20,9 @@ timeout 600 git submodule update --init --recursive -q
 
 # shellcheck source=/dev/null
 . "$B/build.env"   # PUBLIC_* origins and GRAPH_RENDER_SHA only: no secrets.
+timeout 120 git -C "$B/root" fetch -q origin main
+git -C "$B/root" show origin/main:infrastructure/docker/osionos/app.Dockerfile > "$DOCKERFILE.tmp"
+mv "$DOCKERFILE.tmp" "$DOCKERFILE"
 BETA=https://baas-beta.tail10f2ea.ts.net
 timeout 2700 nice -n 10 ionice -c3 docker build -q \
   -f "$DOCKERFILE" \
@@ -34,6 +38,7 @@ timeout 2700 nice -n 10 ionice -c3 docker build -q \
   --build-arg VITE_WHITEBOARD_APP_URL= \
   --build-arg VITE_REQUIRE_BRIDGE_SESSION=true --build-arg VITE_ALLOW_OFFLINE_MODE=false \
   --build-arg VITE_AUTH_MODE=portal \
+  --build-arg VITE_AI_URL=https://baas-beta.tail10f2ea.ts.net:10000 \
   --build-arg VITE_PAGE_ACTION_SYNC_ENABLED=true \
   --build-arg VITE_OSIO_COLLAB_SHARED=1 --build-arg VITE_OSIO_COLLAB_FASTSEND=1 \
   --build-arg VITE_APP_VERSION="beta-$sha" \
