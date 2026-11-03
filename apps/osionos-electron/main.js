@@ -6,16 +6,16 @@
 // the background, and provides a frameless window whose chrome is the app's own
 // top bar (its window controls call the preload bridge).
 // ===========================================================================
-const { app, BrowserWindow, ipcMain, shell, protocol, net, Menu, globalShortcut, session, utilityProcess } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, protocol, net, Menu, globalShortcut, session, utilityProcess, MessageChannelMain } = require("electron");
 const path = require("node:path");
-const os = require("node:os");
-const { spawn } = require("node:child_process");
-const { pathToFileURL } = require("node:url");
-const { existsSync, statSync, mkdirSync, readFileSync, writeFileSync } = require("node:fs");
+const { existsSync, statSync, readFileSync } = require("node:fs");
 const crypto = require("node:crypto");
-const { createExternalOpenThrottle, isExternalHttpUrl, isAppPageUrl, isMachineWindowUrl, isAllowedSubframeUrl, senderAllowed, pagePolicy, baasResponseHeaders, inlineScriptHashes, frameOriginsFrom, rendererCsp, editionOf, cspHeaderName, webSecurityFor, baasTargetOf, isLoopbackUrl } = require("./desktop-guards");
+const { createExternalOpenThrottle, isExternalHttpUrl, isAppPageUrl, isMachineWindowUrl, isAllowedSubframeUrl, senderAllowed, inlineScriptHashes, frameOriginsFrom, rendererCsp, editionOf, cspHeaderName, webSecurityFor, baasTargetOf, isLoopbackUrl } = require("./desktop-guards");
 const { applyTailnetBypass } = require("./desktop-proxy");
+const { bootSuite, startNative } = require("./desktop-backend");
 const { ptyEnabledFor, createPtyBroker } = require("./desktop-pty");
+const { createAppHandler } = require("./desktop-app-protocol");
+const { appKeyAction } = require("./desktop-keys");
 
 // The local mini-baas query-router speaks plain HTTP. The renderer runs from the
 // secure `app://` origin, where a direct http://localhost:8002 fetch is upgraded
@@ -34,6 +34,7 @@ const BAAS_TARGET = baasTargetOf(process.env.OSIONOS_BAAS_URL, bakedBaasUrl());
 // Serve the bundled renderer from a stable app:// origin (so the bridge's CORS
 // can allow it) instead of file:// (origin "null", which CORS rejects). Must be
 // registered before the app is ready. webSecurity depends on the edition (see EDITION).
+// standard + secure apply to every host, so app://terminal (ADR 0039) is its own secure origin.
 protocol.registerSchemesAsPrivileged([
   { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
 ]);
@@ -64,28 +65,6 @@ if (process.platform === "linux") {
   }
 }
 
-function trackBinocleHome() {
-  return process.env.TRACK_BINOCLE_HOME
-    || path.join(os.homedir(), "Documents", "ft_transcendence");
-}
-
-// Best-effort: bring the local suite up so opening the app starts the backend.
-function bootSuite() {
-  // LOCAL edition: the installer points OSIONOS_LOCAL_COMPOSE at the bundled
-  // docker-compose.local.yml and we bring up only the lean `local` profile (HTTP).
-  // Otherwise (dev repo) fall back to the full `dev` profile in the repo checkout.
-  const localCompose = process.env.OSIONOS_LOCAL_COMPOSE;
-  const cwd = localCompose ? path.dirname(localCompose) : trackBinocleHome();
-  const args = localCompose
-    ? ["compose", "-f", localCompose, "--profile", "local", "up", "-d"]
-    : ["compose", "--profile", "dev", "up", "-d"];
-  try {
-    const child = spawn("docker", args, { cwd, detached: true, stdio: "ignore" });
-    child.on("error", () => {}); // docker missing / no compose -> the app just shows offline
-    child.unref();
-  } catch { /* ignore */ }
-}
-
 // NATIVE edition: a bundled `native-runtime/` (extraResources) means NO Docker —
 // supervise embedded postgres + postgrest + gateway + bridge as child processes.
 const NATIVE_DIR = path.join(process.resourcesPath || __dirname, "native-runtime");
@@ -96,29 +75,6 @@ const IS_NATIVE = existsSync(path.join(NATIVE_DIR, "native", "supervisor.mjs"));
 // enforcement; its :4000 calls then rely on the bridge's CORS). Escape hatch: set the env.
 const EDITION = editionOf({ isNative: IS_NATIVE, localCompose: process.env.OSIONOS_LOCAL_COMPOSE });
 let nativeHandle = null;
-
-// Boot the bundled backend (no Docker). Node children run under Electron's own
-// binary via ELECTRON_RUN_AS_NODE, so we ship no separate `node`. The pg superuser
-// password is generated once and persisted (postgres bakes it into PGDATA at initdb).
-async function startNative() {
-  const { pathToFileURL } = require("node:url");
-  const { startSuite, DEFAULT_PORTS } = await import(pathToFileURL(path.join(NATIVE_DIR, "native", "supervisor.mjs")).href);
-  const dataDir = path.join(app.getPath("userData"), "native");
-  mkdirSync(dataDir, { recursive: true });
-  const pwPath = path.join(dataDir, "pgsuper.key");
-  const superPass = existsSync(pwPath) ? readFileSync(pwPath, "utf8").trim()
-    : (() => { const p = crypto.randomBytes(18).toString("hex"); writeFileSync(pwPath, p, { mode: 0o600 }); return p; })();
-  const pgBin = path.join(NATIVE_DIR, "pgsql", "bin");
-  const bin = {
-    node: process.execPath, nodeEnv: { ELECTRON_RUN_AS_NODE: "1" },
-    initdb: path.join(pgBin, "initdb"), postgres: path.join(pgBin, "postgres"),
-    postgrest: path.join(NATIVE_DIR, "bin", "postgrest"),
-    gotrue: path.join(NATIVE_DIR, "bin", "gotrue"), gotrueMigrations: path.join(NATIVE_DIR, "gotrue-migrations"),
-    gatewayDir: path.join(NATIVE_DIR, "gateway"), gatewayScript: path.join(NATIVE_DIR, "gateway", "scripts", "auth-gateway.mjs"),
-    bridgeScript: path.join(NATIVE_DIR, "bridge", "bridge-api.mjs"),
-  };
-  nativeHandle = await startSuite({ bin, dataDir, ports: DEFAULT_PORTS, superPass, migrationsDir: path.join(NATIVE_DIR, "models"), appUrl: "app://osionos" });
-}
 
 let mainWindow = null;
 
@@ -168,25 +124,24 @@ ipcMain.on("win:close", (event) => {
 });
 
 // The local terminal (devil verdict 2026-10-31): FULL only (C2). Shells live in a utilityProcess
-// started on the first create (C6); every call is re-checked by the broker (C5).
+// started on the first create (C6); create and kill are re-checked by the broker (C5). Each pty's
+// I/O runs on its own MessageChannelMain, frame to host, never through main (ADR 0039).
 const PTY_ENABLED = ptyEnabledFor(EDITION);
 const ptyBroker = PTY_ENABLED ? createPtyBroker({
   senderAllowed,
   mainContents: () => mainWindow && mainWindow.webContents,
   startHost: startPtyHost,
   randomId: () => crypto.randomUUID(),
+  createChannel: () => new MessageChannelMain(),
 }) : null;
 function startPtyHost() {
   const child = utilityProcess.fork(path.join(__dirname, "pty-host.js"), [], { serviceName: "osionos-terminal" });
   child.on("message", (message) => ptyBroker.onHostMessage(message));
   child.on("exit", () => ptyBroker.onHostExit());
-  return { post: (message) => child.postMessage(message) };
+  return { post: (message, ports) => child.postMessage(message, ports) };
 }
 if (ptyBroker) {
   ipcMain.handle("pty:create", (event, cols, rows) => ptyBroker.create(event, cols, rows));
-  ipcMain.on("pty:write", (event, id, data) => ptyBroker.write(event, id, data));
-  ipcMain.on("pty:resize", (event, id, cols, rows) => ptyBroker.resize(event, id, cols, rows));
-  ipcMain.on("pty:ack", (event, id, chars) => ptyBroker.ack(event, id, chars));
   ipcMain.on("pty:kill", (event, id) => ptyBroker.kill(event, id));
 }
 
@@ -237,18 +192,20 @@ function createWindow() {
   // Zoom — wired explicitly (Tauri's zoomHotkeysEnabled has no Electron equivalent).
   const wc = win.webContents;
   const clamp = (z) => Math.max(-3, Math.min(6, z));
-  // Keyboard: Ctrl/Cmd +  /  -  /  0
+  // Reload (F5, Ctrl/Cmd+R), back to home (Ctrl/Cmd+Shift+H) and zoom (Ctrl/Cmd + = - 0), except
+  // while the terminal frame has focus: those keys are the shell's (ADR 0039, T9).
+  const keyActions = {
+    reload: () => wc.reload(),
+    home: () => wc.loadURL("app://osionos/index.html"),
+    zoomIn: () => wc.setZoomLevel(clamp(wc.getZoomLevel() + 0.5)),
+    zoomOut: () => wc.setZoomLevel(clamp(wc.getZoomLevel() - 0.5)),
+    zoomReset: () => wc.setZoomLevel(0),
+  };
   wc.on("before-input-event", (event, input) => {
-    if (input.type !== "keyDown") return;
-    // Reload / back-to-home recovery (F5, Ctrl/Cmd+R, Ctrl/Cmd+Shift+H).
-    if (input.key === "F5" || ((input.control || input.meta) && /^r$/i.test(input.key))) { wc.reload(); event.preventDefault(); return; }
-    if ((input.control || input.meta) && input.shift && /^h$/i.test(input.key)) { wc.loadURL("app://osionos/index.html"); event.preventDefault(); return; }
-    if (!(input.control || input.meta)) return;
-    const zoomIn = input.key === "=" || input.key === "+" || input.code === "Equal" || input.code === "NumpadAdd";
-    const zoomOut = input.key === "-" || input.key === "_" || input.code === "Minus" || input.code === "NumpadSubtract";
-    if (zoomIn) { wc.setZoomLevel(clamp(wc.getZoomLevel() + 0.5)); event.preventDefault(); }
-    else if (zoomOut) { wc.setZoomLevel(clamp(wc.getZoomLevel() - 0.5)); event.preventDefault(); }
-    else if (input.key === "0") { wc.setZoomLevel(0); event.preventDefault(); }
+    const action = appKeyAction(input, wc.focusedFrame && wc.focusedFrame.url);
+    if (!action) return;
+    keyActions[action]();
+    event.preventDefault();
   });
   // Ctrl + mouse-wheel: Chromium emits zoom-changed (no custom wheel listener,
   // so this can't slow scrolling back down).
@@ -271,49 +228,10 @@ app.whenReady().then(async () => {
   } catch (err) {
     console.error("[desktop] renderer CSP fallback without hashes:", err && err.message ? err.message : err);
   }
-  protocol.handle("app", async (request) => {
-    const url = new URL(request.url);
-    // BaaS proxy: relay same-origin app://osionos/__baas/* to the plain-HTTP
-    // query-router from the main process (no renderer HTTPS-upgrade). Buffer both
-    // directions and forward only the headers the router needs, so the response
-    // can't trip Chromium with a content-encoding/length mismatch (which showed
-    // up as net::ERR_UNEXPECTED). Never throw — return a 502 on failure.
-    if (url.pathname.startsWith("/__baas/")) {
-      const target = BAAS_TARGET + url.pathname.slice("/__baas".length) + url.search;
-      const headers = new Headers();
-      for (const name of ["content-type", "accept", "x-baas-api-key", "apikey", "authorization"]) {
-        const value = request.headers.get(name);
-        if (value) headers.set(name, value);
-      }
-      const init = { method: request.method, headers };
-      if (request.method !== "GET" && request.method !== "HEAD") {
-        init.body = await request.arrayBuffer();
-      }
-      try {
-        const upstream = await net.fetch(target, init);
-        const body = await upstream.arrayBuffer();
-        // WHY: upstream MIME/headers are never trusted; baasResponseHeaders forces octet-stream + sandbox.
-        return new Response(body, { status: upstream.status, statusText: upstream.statusText, headers: baasResponseHeaders(upstream.headers.get("content-type")) });
-      } catch (error) {
-        return new Response(JSON.stringify({ error: "baas proxy failed", detail: String(error) }), {
-          status: 502,
-          headers: baasResponseHeaders("application/json"),
-        });
-      }
-    }
-    let pathname = decodeURIComponent(url.pathname);
-    if (pathname === "/" || pathname === "") pathname = "/index.html";
-    let filePath = path.join(rendererDir, pathname);
-    if (!filePath.startsWith(rendererDir) || !existsSync(filePath)) filePath = path.join(rendererDir, "index.html");
-    // WHY: every app:// file response (including the index fallback) carries the CSP (enforced in FULL, Report-Only in LOCAL/NATIVE whose C15 smoke is pending).
-    const res = await net.fetch(pathToFileURL(filePath).toString());
-    const headers = new Headers(res.headers);
-    headers.set(cspHeaderName(EDITION), pagePolicy(rendererPolicy, pathname));
-    return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
-  });
+  protocol.handle("app", createAppHandler({ net, rendererDir, baasTarget: BAAS_TARGET, rendererPolicy, rendererCspHeader: cspHeaderName(EDITION) }));
   // A grobase elsewhere (the tailnet data center) leaves nothing on this machine to boot.
   if (IS_NATIVE) {
-    try { await startNative(); } catch (e) { console.error("[native] backend failed to start:", e); }
+    try { nativeHandle = await startNative({ nativeDir: NATIVE_DIR, userDataDir: app.getPath("userData") }); } catch (e) { console.error("[native] backend failed to start:", e); }
   } else if (isLoopbackUrl(BAAS_TARGET)) {
     bootSuite();
   }

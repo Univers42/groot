@@ -1,0 +1,39 @@
+# The develop beta (groot ADR 0040, devil verdict docs/ops/beta-develop-verdict-2026-11-01.md):
+# its own project, its own containers; production's network is only joined, never managed.
+name: osionos-beta
+services:
+  app:
+    image: osionos-beta/web:${BETA_SHA:?BETA_SHA is the develop commit to serve}
+    container_name: osionos-beta-app
+    labels: { osionos.beta: "1" }
+    restart: unless-stopped
+    networks: [beta]
+  edge:
+    image: public.ecr.aws/docker/library/nginx:1.27-alpine
+    container_name: osionos-beta-edge
+    labels: { osionos.beta: "1" }
+    restart: unless-stopped
+    volumes: ["./edge.conf:/etc/nginx/conf.d/default.conf:ro"]
+    # Loopback only (B4): the VM's tailnet-only serve is the one way in.
+    ports: ["127.0.0.1:3010:3010", "127.0.0.1:3011:3011"]
+    networks: [beta, track-binocle_default]
+    depends_on: [app]
+  # The beta's own tailnet node, https://baas-beta.tail10f2ea.ts.net (tailnet only, no Funnel). The key
+  # is read once at first start; after that the node's state in ts-state keeps it logged in.
+  ts:
+    image: tailscale/tailscale:stable
+    container_name: osionos-beta-ts
+    hostname: baas-beta
+    labels: { osionos.beta: "1" }
+    restart: unless-stopped
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_HOSTNAME: baas-beta
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+    volumes: ["./ts-state:/var/lib/tailscale", "./ts-serve.json:/config/serve.json:ro"]
+    networks: [beta]
+    depends_on: [edge]
+networks:
+  beta: {}
+  track-binocle_default: { external: true }

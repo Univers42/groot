@@ -1,0 +1,7 @@
+[Unit]
+Description=osionos develop beta: rebuild when origin/develop moves (ADR 0040)
+
+[Service]
+Type=oneshot
+ExecStart=/mnt/storage/dlesieur/osionos-beta/update.sh
+TimeoutStartSec=3600
