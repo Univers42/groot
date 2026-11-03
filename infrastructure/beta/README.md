@@ -33,6 +33,11 @@ with the production accounts. Prismatica's handoff only ever targets production 
 
 ## Operate
 
+- `edge.conf` is read from the host's copy, not from git: after a change, copy
+  `infrastructure/beta/edge.conf` to `/mnt/storage/dlesieur/osionos-beta/edge.conf` and run
+  `docker exec osionos-beta-edge nginx -s reload`. Realtime then answers the handshake with 101, as
+  production's :8443 does (measured 2026-11-03); before osionos #280 the edge stripped its Upgrade.
+
 - Logs: `journalctl --user -u osionos-beta -n 50` (host). Force a rebuild: `update.sh --force`.
 - Kill switch (B10): on the host `BETA_SHA=$(cat deployed) docker compose -f compose.yml down`
   (the tailnet node goes with it).
@@ -43,7 +48,5 @@ with the production accounts. Prismatica's handoff only ever targets production 
 
 - Develop's bridge changes are not in the beta: it uses production's bridge.
 - Sign-in emails and OAuth redirects land on production (:8443).
-- Realtime (`/realtime/v1/ws`) answers 400 "Connection header did not include 'upgrade'", as
-  production does (2026-11-01): live updates need a reload.
 - A computer's osionos-node opens a terminal for the beta only when started with
   `--app-origin https://baas-beta.tail10f2ea.ts.net`; that lets develop's code drive that shell.
