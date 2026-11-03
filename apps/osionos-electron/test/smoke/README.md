@@ -6,6 +6,15 @@ socket, `--network host`). The demo password goes host -> fifo -> container stdi
     sh apps/osionos-electron/test/smoke/run-smoke.sh full     # runs
     sh apps/osionos-electron/test/smoke/run-smoke.sh local    # prints SKIP (reason inline)
     sh apps/osionos-electron/test/smoke/run-smoke.sh native   # prints SKIP (reason inline)
+    MACHINE_FOLDER=$HOME/proj sh apps/osionos-electron/test/smoke/run-smoke.sh machine  # C23
+
+`machine` opens `/machine` on this laptop's osionos-node (`127.0.0.1:4100`, started with
+`--app-origin app://osionos`). It sends the emailed step-up code, then waits up to 25 minutes for
+the code in `$SMOKE_OUT/code.txt`. `MACHINE_FOLDER` must hold `hello.py` (with a `def greet`) and
+`notes/readme.md` (with "opened from the osionos file tree"); the file tree opens both. It checks
+that the IDE window connects and that a save and a
+terminal probe reach `MACHINE_FOLDER` (check the disk yourself). It also checks that no token is in
+storage or the HAR (C5), and that `app://osionos` cannot reach the node directly (C7).
 
 First run builds `renderer/` (`build.sh --renderer-only`), the image, and installs electron 32.2.7 +
 playwright-core 1.49.1 into the `osionos-electron-smoke-cache` volume. Screenshots land in
@@ -22,8 +31,10 @@ playwright-core 1.49.1 into the `osionos-electron-smoke-cache` volume. Screensho
 - Minimize/maximize are read from `BrowserWindow` under openbox, not on a real desktop WM.
 - `database-view` proves the Databases panel loads its catalog, not that a table opens or edits.
 - `chat-send` proves the user turn renders (stub connector), not a real assistant reply.
-- BaaS: `OSIONOS_BAAS_URL` defaults to 127.0.0.1:8000, where nothing listens on this host, so
-  `app://osionos/__baas/*` calls are offline unless you set it to a live Kong.
+- BaaS: unset `OSIONOS_BAAS_URL` means the grobase `build.sh` baked (`OSIONOS_DESKTOP_BAAS_URL`),
+  else 127.0.0.1:8000, where nothing may listen; `app://osionos/__baas/*` calls are then offline
+  unless you set it to a live Kong. Another account: `DEMO_LOGIN_EMAIL` plus `SMOKE_ENV_FILE`,
+  a file holding its `DEMO_LOGIN_PASSWORD`.
 - Local and native editions (SKIP). Windows/macOS.
 - Writes: it creates one page titled `smoke-<id>` in the demo account; nothing deletes it.
 

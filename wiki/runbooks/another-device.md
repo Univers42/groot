@@ -16,6 +16,12 @@ wifi, a 42 seat, a machine on another network. On it you get three things workin
 3. **groot's frontends**, running on the device, reaching the data center's grobase through
    `make link`.
 
+`make link-all` does 2 and 3 in one run once the vault42 credentials are in the environment or
+in `~/.config/42ctl/secrets.env` (`FT_PASSPHRASE`, `FT_PASSWORD`, `FT_EMAIL`, `FT_TENANT`): it
+pulls `prod` without asking (not the `volumes` environment), stops on a failing `make link-paths`
+row (this device off the tailnet, the peer offline, Kong not answering), then runs
+`make link-frontends-start`. The sections below are what it automates, and how to repair a step.
+
 ## 0. Rules for the agent
 
 - **Never print a secret value.** That covers passwords, keys, tokens, and any line of an
