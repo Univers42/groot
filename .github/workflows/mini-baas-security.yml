@@ -282,11 +282,25 @@ jobs:
         run: |
           set -euo pipefail
           VER=8.30.1
-
-          curl --proto "=https" -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz" \
-
-            | sudo tar -xz -C /usr/local/bin gitleaks
+          TMP=$(mktemp -d)
+          for i in 1 2 3; do
+            echo "::group::download gitleaks v${VER} (attempt $i/3)"
+            if curl --proto "=https" --tlsv1.2 -fsSL \
+              "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz" \
+              -o "$TMP/gitleaks.tgz"; then
+              echo "::endgroup::"
+              break
+            fi
+            echo "::endgroup::"
+            echo "download attempt $i failed — retry in $((i * 5))s"
+            sleep $((i * 5))
+            if [[ $i -eq 3 ]]; then echo "::error::gitleaks download failed after 3 attempts"; exit 1; fi
+          done
+          tar -tzf "$TMP/gitleaks.tgz" | head -5
+          sudo tar -xzf "$TMP/gitleaks.tgz" -C /usr/local/bin gitleaks
+          sudo chmod +x /usr/local/bin/gitleaks
           gitleaks version
+          rm -rf "$TMP"
 
       # Rooted INSIDE the submodule: grobase's allowlist names files from its own root
       # (^scripts/verify/…$), so a scan sourced from here reports apps/grobase/… paths that
