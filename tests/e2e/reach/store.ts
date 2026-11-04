@@ -10,7 +10,9 @@ export const FIREFOX_STORE = "/tmp/e2e-home/reach-firefox-store";
 // profile. No ignoreHTTPSErrors anywhere: a certificate problem must fail the test.
 export async function open(browserName: string, trusted: boolean): Promise<{ context: BrowserContext; close(): Promise<void> }> {
   const dir = mkdtempSync(join(tmpdir(), "reach-"));
-  const launch = { headless: true, viewport: { width: 1440, height: 900 } };
+  // Reduced motion, because the landing page's demo rotates by itself otherwise and a control can
+  // leave the page mid-check. It is also what a visitor who asks for it gets.
+  const launch = { headless: true, viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" as const };
   let context: BrowserContext;
   if (browserName === "firefox") {
     if (trusted) cpSync(FIREFOX_STORE, dir, { recursive: true });
