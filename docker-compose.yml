@@ -257,7 +257,11 @@ services:
     volumes:
       - ./infrastructure/livekit/livekit.yaml:/etc/livekit.yaml:ro
     ports:
-      - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${LIVEKIT_HOST_PORT:-7880}:7880"
+      # 7880 is plain ws/http: LITERAL 127.0.0.1, like drawnosaurus (TRACK_BINOCLE_BIND_ADDR
+      # is 0.0.0.0 inside a NAT VM). Browsers reach it through local-https-proxy's
+      # /livekit on :4000; this loopback port serves the host's own tools (agency-simulation).
+      # 7881 and the UDP range carry ICE/DTLS-SRTP media, encrypted, so they keep the bind address.
+      - "127.0.0.1:${LIVEKIT_HOST_PORT:-7880}:7880"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${LIVEKIT_TCP_HOST_PORT:-7881}:7881"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:50000-50060:50000-50060/udp"
     # 7880 is not an env var here: it is `port:` in the mounted infrastructure/livekit/livekit.yaml.
@@ -1409,8 +1413,9 @@ services:
     expose:
       - "8080"
     # Optional direct (plain-HTTP) access for debugging, bypassing the TLS proxy.
+    # LITERAL 127.0.0.1: plain HTTP must not leave the host, even inside a NAT VM.
     ports:
-      - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${OPPOSITE_OSIRIS_WEB_HOST_PORT:-4323}:8080"
+      - "127.0.0.1:${OPPOSITE_OSIRIS_WEB_HOST_PORT:-4323}:8080"
     networks:
       - default
       - mini-baas
