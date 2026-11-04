@@ -17,6 +17,8 @@ services:
       # scripts/host-ports.sh resolve into host-ports.d/osionos-origin.conf.
       - ./infrastructure/tls/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./infrastructure/tls/host-ports.d:/etc/nginx/host-ports.d:ro
+      # LiveKit's signalling on the :4000 TLS origin (the bridge-*.conf include there).
+      - ./infrastructure/tls/bridge-livekit.conf:/etc/nginx/track-binocle.d/bridge-livekit.conf:ro
       - ./apps/grobase/certs:/etc/track-binocle/certs:ro
       # The public API docs on :8444 (/docs/ and /openapi.json in nginx.conf).
       - ./infrastructure/tls/api-docs:/usr/share/track-binocle/api-docs:ro
@@ -111,9 +113,11 @@ services:
       CLAUDE_BIN: ${CLAUDE_BIN:-claude}
       # LiveKit video tokens (scripts/bridge-rtc.mjs): same key pair as the
       # livekit service below; LIVEKIT_URL is the in-network admin/twirp base,
-      # LIVEKIT_CLIENT_URL is what browsers get back to connect the room.
+      # LIVEKIT_CLIENT_URL is what browsers get back to connect the room: the
+      # bridge's own TLS origin, where local-https-proxy fronts the SFU's /rtc
+      # (infrastructure/tls/bridge-livekit.conf). Never the SFU's plain ws://.
       LIVEKIT_URL: ${LIVEKIT_URL:-http://livekit:7880}
-      LIVEKIT_CLIENT_URL: ${LIVEKIT_CLIENT_URL:-ws://127.0.0.1:7880}
+      LIVEKIT_CLIENT_URL: ${LIVEKIT_CLIENT_URL:-wss://localhost:${OSIONOS_BRIDGE_HOST_PORT:-4000}/livekit}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecret-livekit-local-0123456789abcdef}
       # Permission UX proxy (scripts/bridge-perms.mjs) → mini-baas Kong over

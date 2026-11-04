@@ -89,6 +89,11 @@ services:
       OSIONOS_APP_URL: ${PUBLIC_ORIGIN}:8443
       OSIONOS_ALLOWED_ORIGIN: ${PUBLIC_ORIGIN}:8443
       PUBLIC_OSIONOS_APP_URL: ${PUBLIC_ORIGIN}:8443
+      # The video rooms' signalling on the bridge's public origin (:10000 -> the proxy's :4000,
+      # infrastructure/tls/bridge-livekit.conf). https://, not wss://, because PUBLIC_ORIGIN
+      # carries the scheme: livekit-client 2.19.0 maps it to wss:// (toWebsocketUrl). Its own
+      # variable, not LIVEKIT_CLIENT_URL: .env.local's localhost value would win the default.
+      LIVEKIT_CLIENT_URL: ${PUBLIC_LIVEKIT_CLIENT_URL:-${PUBLIC_ORIGIN}:10000/livekit}
       OSIONOS_ADMIN_EMAILS: ${OSIONOS_ADMIN_EMAILS:?set OSIONOS_ADMIN_EMAILS in .env.public (emails, or none)}
       # environment: beats the bridge's env_file (.env.local), so empty here means off.
       OSIONOS_AGENT_CLAUDE: ""
