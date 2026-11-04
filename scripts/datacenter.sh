@@ -112,7 +112,7 @@ vm_ssh() { ssh -o ClearAllForwardings=yes -o BatchMode=yes -o ConnectTimeout=8 "
 require_vm() {
   local names
   names=$(vm_ssh "$1" 'docker ps --format "{{.Names}}"' 2>/dev/null) ||
-    die "the data center VM ($1) does not answer. Start it: make -C vendor/born2root qemu_start. groot never starts grobase here (make all GROBASE_DATACENTER= takes the local path)."
+    die "the data center VM ($1) does not answer. Start it from the born2root checkout that built it (make qemu_start with its profile). groot never starts grobase here (make all GROBASE_DATACENTER= takes the local path)."
   grep -qx mini-baas-waf <<<"$names" ||
     die "the VM ($1) answers but mini-baas-waf is not running; start grobase on the VM. groot never starts grobase here."
 }
