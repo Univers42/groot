@@ -22,6 +22,17 @@ little by little. The laptop has 8 GB RAM, so at most two agents run at a time a
   recreate now passes `livekit-tls.yml:frame-ancestors.yml:ai-edge.yml`.** Rollback:
   `logs/rollback-proxy-ai-edge.sh`.
 - G3 measured (ADR 0041, ff90de9f). WebKit (#304) and the Firefox console (#305) still block main.
+- Calendar 21a6c13 and Mail 9ebc58c (groot#179, named form fields) are live in production. They
+  were built from `git archive` exports in the deploy dir (overlay `apps-web.yml`), not from the
+  host checkout, which is 348 commits behind with local edits. The old images are tagged
+  `:rollback-20261104`, and `logs/rollback-apps-web.sh` restores them. Verified in a cache-free
+  browser context.
+  Found: both apps serve index.html with no Cache-Control, so a browser keeps last month's app
+  inside the frame after a deploy. The fix (no-cache HTML) is queued, with a missing favicon.
+- What the beta still logs is version skew. The develop web runs on production's bridge and AI
+  service, and the new client's probes (`/api/capabilities`, `/api/ai/capabilities`,
+  `agents/settings`) each log one 404 there. That ends when production's bridge and osionos-ai
+  move to main (ADR 0046 D1), after #304 and #305.
 - Beta console sweep at fb21c39d, 19 surfaces: one entry left, the AI `agents/settings` 404
   (#303; client fix #301, then an osionos-ai redeploy). Calendar's frame: groot#179.
 
