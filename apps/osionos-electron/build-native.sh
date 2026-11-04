@@ -37,13 +37,13 @@ cp models/*.sql "$RT/models/"
 
 echo "[4/5] acquire binaries (cached in $CACHE): embedded postgres $PG_VER + postgrest $PGRST_VER"
 if [ ! -f "$CACHE/pg-$PG_VER.txz" ]; then
-  curl -fsSL -o "$CACHE/pg.jar" "https://repo1.maven.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-linux-amd64/${PG_VER}/embedded-postgres-binaries-linux-amd64-${PG_VER}.jar"
+  curl --proto "=https" -fsSL -o "$CACHE/pg.jar" "https://repo1.maven.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-linux-amd64/${PG_VER}/embedded-postgres-binaries-linux-amd64-${PG_VER}.jar"
   rm -rf "$CACHE/pgx"; mkdir -p "$CACHE/pgx"; ( cd "$CACHE/pgx" && unzip -oq "../pg.jar" )
   mv "$CACHE/pgx"/postgres-linux-*.txz "$CACHE/pg-$PG_VER.txz"; rm -rf "$CACHE/pgx" "$CACHE/pg.jar"
 fi
 tar -xJf "$CACHE/pg-$PG_VER.txz" -C "$RT/pgsql"
 if [ ! -f "$CACHE/postgrest-$PGRST_VER" ]; then
-  curl -fsSL -o "$CACHE/pgrst.tar.xz" "https://github.com/PostgREST/postgrest/releases/download/${PGRST_VER}/postgrest-${PGRST_VER}-linux-static-x64.tar.xz"
+  curl --proto "=https" -fsSL -o "$CACHE/pgrst.tar.xz" "https://github.com/PostgREST/postgrest/releases/download/${PGRST_VER}/postgrest-${PGRST_VER}-linux-static-x64.tar.xz"
   tar -xJf "$CACHE/pgrst.tar.xz" -C "$CACHE"; mv "$CACHE/postgrest" "$CACHE/postgrest-$PGRST_VER"; rm -f "$CACHE/pgrst.tar.xz"
 fi
 cp "$CACHE/postgrest-$PGRST_VER" "$RT/bin/postgrest"; chmod +x "$RT/bin/postgrest"
