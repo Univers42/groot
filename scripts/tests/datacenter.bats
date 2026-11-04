@@ -293,6 +293,7 @@ repo() { cd "$BATS_TEST_DIRNAME/../.." || return 1; }
 
 @test "make all: a machine with no data center runs the local pipeline it always ran" {
   repo
+  stub openssl 'exit 0' # `certs` holds $(MAKE), so its recipe runs even under make -n
   run make -n all GROBASE_DATACENTER= SKIP_SYNC=1
   [[ "$output" == *"apply-models-migrations.sh"* ]]
   [[ "$output" != *"datacenter.sh configure"* ]]
@@ -300,6 +301,7 @@ repo() { cd "$BATS_TEST_DIRNAME/../.." || return 1; }
 
 @test "make all: a data center runs its own steps and never reaches apps/grobase up" {
   repo
+  stub openssl 'exit 0' # `certs` holds $(MAKE), so its recipe runs even under make -n
   run make -n all GROBASE_DATACENTER=b2b SKIP_SYNC=1
   [[ "$output" == *"datacenter.sh configure"* ]]
   [[ "$output" == *"datacenter.sh preflight"* ]]
