@@ -9,6 +9,21 @@ little by little. The laptop has 8 GB RAM, so at most two agents run at a time a
   `edge.conf.bak-20261104`. Verified: after a reload, no 400 in the console.
 - Unattended sessions: DEVIL_AUTONOMY=1 and bypassPermissions, in ~/.claude/settings.json and in the
   harness42 profile (370bfd9).
+- Go-live step A, the production proxy (c6ea4df6, ADR 0046).
+- osionos develop: #297, #299 and submodule PRs ndb#28 and ui#4 merged. CI on 75402068 is green
+  with no skips (G1). After that, by direct push (owner rule: no PRs): fb21c39d, the admin role
+  grant (#296) and the Settings console issues (#293).
+- Admin > Users (#296) live: both env-named admins had no `user_roles` admin row. It was granted
+  through the bridge's own service client (undo: delete the two rows). The beta lists 25 users.
+- A dead installed app ("Ocupación de agendas", framing a page that never existed) was deactivated
+  in the owner's marketplace record (re-enable from Marketplace).
+- The production edge's AI limits (56af2ace): reads in their own 20 r/s bucket, writes at 2 r/s,
+  and the beta reads the locked AI routes. Mounted by the overlay `ai-edge.yml`. **Every proxy
+  recreate now passes `livekit-tls.yml:frame-ancestors.yml:ai-edge.yml`.** Rollback:
+  `logs/rollback-proxy-ai-edge.sh`.
+- G3 measured (ADR 0041, ff90de9f). WebKit (#304) and the Firefox console (#305) still block main.
+- Beta console sweep at fb21c39d, 19 surfaces: one entry left, the AI `agents/settings` 404
+  (#303; client fix #301, then an osionos-ai redeploy). Calendar's frame: groot#179.
 
 ## In progress
 
