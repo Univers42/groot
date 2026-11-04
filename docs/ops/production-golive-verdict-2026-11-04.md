@@ -206,3 +206,32 @@ was unreachable. Rows written after 11:26 are not in it.
   Real Safari stays waived as in ADR 0041.
 
 Step B: fast-forward osionos main to `19f9f011`.
+
+## Steps B, C, D1, D2 executed (2026-11-04, 13:30–13:50 CET)
+
+On the owner's order, the osionos history was rewritten to strip co-author trailers. Trees are
+unchanged, shas are not: S = `19f9f011` is now **`1c1d5d84`**, and groot main is `6bbf644a`.
+Backups: `~/.cache/rewrite-backup-20261104/*.bundle`.
+
+- B: osionos main = develop = `1c1d5d84`. The beta serves image `osionos-beta/web:1c1d5d849c1d`.
+- C: the web runs `osionos-web:main-1c1d5d84` (same image id as `main-19f9f011`, `e3e05e9ed3cb`).
+- D1: bridge `track-binocle/osionos-bridge:main-1c1d5d84` (2b52f8851559), built from
+  `deploy/app-main` at `1c1d5d84`. G12: `node --check` and an offline import exit 0. G13: still
+  `2c5aebe9a9ee` and `70b800b16330`. G16: the beta timer was stopped for the recreate and then
+  restarted. Healthy, 0 restarts.
+- D2 (G14): the same image with `livekit-tls.yml`. `LIVEKIT_CLIENT_URL` went from
+  `ws://127.0.0.1:7880` to `wss://baas.tail10f2ea.ts.net:10000/livekit`. Over HTTP/1.1 the
+  WebSocket path reaches LiveKit, which answers 401 without a token. Every later bridge recreate
+  goes through `deploy/bridge-up.sh`; its dry run against the running container reports 0
+  recreates. The pre-D1 rollback stays `logs/rollback-bridge-d1.sh`.
+- V-checks (chrome-devtools, working account, production):
+  - Home: 0 errors, 0 warnings, 0 issues. The skew 404s are gone: `/api/capabilities` and
+    `/api/ai/capabilities` answer 200.
+  - V10: the Whiteboard rail opens the `osionos.hydrawn-app.pages.dev` frame, and
+    `/api/whiteboard/token` answers 200.
+- Open:
+  - Inside the hydrawn frame: a CSP `eval` issue and one unnamed form field (hydrawn repo).
+  - The marketplace app page logs `header-template` 404, because the marketplace database
+    page has no row.
+  - The seeded built-in records show `localhost:300x` and literal `&amp;`.
+  - The last two are being fixed in osionos.
