@@ -46,6 +46,11 @@ test("OD1 a new account builds a CRM workspace in the UI: created, renamed, a cu
   const { context, page } = await openOsionos(browser, "", { token: await loginOrRegister(user) });
   consoleGuard.watch(page, "osionos (CRM account)");
   const s = await osionosSession(page);
+  // The profession step opens when the profile answers, so it has no fixed place in the flow, and
+  // nothing behind it can be clicked until it is answered.
+  await page.addLocatorHandler(page.getByRole("heading", { name: "What do you do?" }), async () => {
+    await page.getByRole("dialog").filter({ hasText: "What do you do?" }).getByRole("button", { name: /^Developer/ }).click();
+  });
 
   await page.getByRole("button", { name: "More workspace options" }).click();
   await page.getByRole("button", { name: "New workspace" }).click();

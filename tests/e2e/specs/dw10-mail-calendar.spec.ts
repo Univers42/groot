@@ -61,7 +61,8 @@ for (const [app, url] of [["Mail", MAIL_URL], ["Calendar", CALENDAR_URL]] as con
     test.skip(reason !== "", `${app} is opt-in and not running: ${reason}`);
 
     const { context, page } = await openOsionos(browser);
-    consoleGuard.watch(page, "osionos");
+    // The demo database's header template: its id has no page row, so 404 is the right answer.
+    consoleGuard.watch(page, "osionos", /marketplace\/header-template/);
     const railEntry = page.getByRole("tablist", { name: "Activity bar" }).getByRole("tab", { name: app, exact: true });
     const listing = await openListing(page, app);
     const uninstall = listing.getByRole("button", { name: "Uninstall", exact: true });
