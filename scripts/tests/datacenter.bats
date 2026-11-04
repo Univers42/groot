@@ -534,6 +534,8 @@ repo() {
   run make -n all GROBASE_DATACENTER=b2b SKIP_SYNC=1
   [[ "$output" == *"datacenter.sh configure"* ]]
   [[ "$output" == *"datacenter.sh preflight"* ]]
+  [[ "$output" == *"mail-bridge"* ]]
+  [[ "$output" == *"calendar-bridge"* ]]
   [[ "$output" != *"apps/grobase up"* ]]
   [[ "$output" != *"-C apps/grobase up"* ]]
 }

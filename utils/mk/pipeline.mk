@@ -9,7 +9,7 @@ GROBASE_DATACENTER ?= $(shell bash scripts/datacenter.sh setting)
 ifeq ($(strip $(GROBASE_DATACENTER)),)
 ALL_STEPS := secrets-ensure certs certs-trust-local backend-up env-local-ensure restore-if-empty demo-login-ensure models-migrate live-data-ensure mounts-reencrypt frontends-up healthcheck showcase
 else
-ALL_STEPS := datacenter-secrets datacenter-vm datacenter-configure datacenter-certs link datacenter-preflight link-demo-login-ensure datacenter-trust link-frontends-start link-healthcheck datacenter-health showcase datacenter-browsers
+ALL_STEPS := datacenter-secrets datacenter-vm datacenter-configure datacenter-certs link datacenter-preflight link-demo-login-ensure datacenter-trust link-frontends-start datacenter-apps link-healthcheck datacenter-health showcase datacenter-browsers
 endif
 all: sync-submodules-soft $(ALL_STEPS) ## Provision a fresh machine end to end: secrets, certs, backend, frontends, checks
 ## Usage: make all [SKIP_SYNC=1] [GROBASE_EDITION=devlean|migrate|full] [PULL_PREBUILT=1]

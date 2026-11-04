@@ -42,6 +42,10 @@ datacenter-preflight: ## Check the VM, then only the writes those checks allow
 datacenter-trust: ## Prove the CA signs the VM's WAF, then import it in every browser store
 	@$(DATACENTER_SCRIPT) trust
 
+datacenter-apps: ## Start Mail and Calendar: opt-in elsewhere, part of the deployment here
+## Their Google sign-in needs a public domain, so on localhost they open without it.
+	@$(LINK_COMPOSE_ENV) $(MAKE) --no-print-directory mail-up calendar-up
+
 datacenter-health: ## born2root's verdict on the platform, its reach and its forwards
 	@$(DATACENTER_SCRIPT) health
 
