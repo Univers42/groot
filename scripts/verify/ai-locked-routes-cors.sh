@@ -88,9 +88,11 @@ if [ "$(code "$r")" = 404 ] && [ "$(acao "$r")" = "$BETA" ]; then pass "g GET be
 # No upstream runs here, so an unrefused request answers 502: only 429 counts as refused.
 # In parallel, so the bucket cannot refill between them; --max-time because the upstream name
 # never resolves under --network none (a refusal is answered before any lookup).
-burst() { docker exec "$NAME" sh -c "for i in \$(seq 1 30); do curl -sk --max-time 3 -o /dev/null -w '%{http_code}\n' -X $1 https://127.0.0.1:4000/api/ai/providers & done; wait" | grep -c '^429$' || true; }
+burst() { docker exec "$NAME" sh -c "for i in \$(seq 1 ${2:-30}); do curl -sk --max-time 3 -o /dev/null -w '%{http_code}\n' -X $1 https://127.0.0.1:4000/api/ai/providers & done; wait" | grep -c '^429$' || true; }
 n=$(burst GET); if [ "$n" = 0 ]; then pass "h 30 GETs at once: none refused"; else fail "h 30 GETs at once: $n refused with 429"; fi
 n=$(burst OPTIONS); if [ "$n" = 0 ]; then pass "h 30 preflights at once: none refused"; else fail "h 30 preflights at once: $n refused with 429"; fi
 n=$(burst POST); if [ "$n" -gt 0 ]; then pass "i 30 POSTs at once: $n refused with 429"; else fail "i 30 POSTs at once: none refused (the bucket is off)"; fi
+
+n=$(burst GET 150); if [ "$n" -gt 0 ]; then pass "j 150 GETs at once: $n refused with 429 (reads still have a bucket)"; else fail "j 150 GETs at once: none refused (reads are unmetered)"; fi
 
 exit "$status"
