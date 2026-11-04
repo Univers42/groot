@@ -24,7 +24,7 @@ INSERT INTO seed_constants (
     campaign_started_at,
     user_login_activity
 ) VALUES (
-    '$2b$12$Y6jhLOeIm2SNmZZDqt9LsOZbtu2I2GQBMN23w0gcfVjHV3MWtKHhG',
+    '$2b$12$Y6jhLOeIm2SNmZZDqt9LsOZbtu2I2GQBMN23w0gcfVjHV3MWtKHhG', -- NOSONAR S8215: demo seed credential, not a live secret
     'light',
     'dark',
     'email_verify',
@@ -121,7 +121,7 @@ WITH seed_activities (user_id, activity_type, activity_data, created_at) AS (
         (3, 'password_reset_request', '{"ip": "10.0.0.4", "source": "mobile"}'::jsonb, TIMESTAMP '2026-05-03 14:10:00'),
         (4, 'account_creation', '{"signup_method": "email", "campaign": "google_ads"}'::jsonb, NULL),
         (5, NULL, '{"ip": "192.168.1.12", "device": "Firefox/Windows", "location": "Paris, France"}'::jsonb, TIMESTAMP '2026-05-03 10:22:00'),
-        (6, 'email_verified', '{"verify_token": "abc123xyz_verify_token_6"}'::jsonb, TIMESTAMP '2026-05-02 09:05:00'),
+        (6, 'email_verified', '{"verify_token": "abc123xyz_verify_token_6"}'::jsonb, TIMESTAMP '2026-05-02 09:05:00'), -- NOSONAR S6418: fake demo token
         (7, NULL, '{"ip": "172.16.0.21", "device": "Safari/iPhone", "location": "Berlin, Germany"}'::jsonb, TIMESTAMP '2026-05-03 11:12:00'),
         (8, 'settings_change', '{"notifications": false, "source": "web"}'::jsonb, TIMESTAMP '2026-05-02 14:00:00'),
         (9, NULL, '{"ip": "192.168.1.42", "device": "Chrome/Mac", "location": "London, UK"}'::jsonb, TIMESTAMP '2026-05-03 13:18:00'),

@@ -15,6 +15,7 @@ import { randomBytes, createHmac } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -159,7 +160,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     superUser: process.env.PGSUPERUSER || "postgres",
     superPass: process.env.PGSUPERPASS || "postgres",
     migrationsDir: process.env.OSIONOS_MIGRATIONS_DIR || join(HERE, "..", "..", "..", "models"),
-    dataDir: process.env.OSIONOS_DATA_DIR || "/tmp/osio-native",
+    dataDir: process.env.OSIONOS_DATA_DIR || join(tmpdir(), "osio-native"),
   };
   const { bootstrapped } = await firstRun(cfg);
   console.log(`[firstrun] ${bootstrapped ? "bootstrapped schema" : "schema already present"}; secrets in ${cfg.dataDir}/secrets.json`);

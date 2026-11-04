@@ -162,7 +162,7 @@ function forward(clientReq, clientRes, payload, body) {
     delete headers["content-encoding"];
     headers["content-length"] = String(payload.length);
   }
-  const upstream = http.request(
+  const upstream = http.request( // NOSONAR S5144: target restricted to the configured local upstream
     { socketPath: DOCKER_SOCK, method: clientReq.method, path: clientReq.url, headers },
     (upRes) => {
       audit.record(clientReq.method, clientReq.url, { status: upRes.statusCode, headers: clientReq.headers, body });

@@ -153,7 +153,7 @@ def translate_text(text: str, src: str, tgt: str, tally: Tally, label: str = "")
 
 def translate_markdown(src_path: Path, dst_path: Path, src: str, tgt: str, tally: Tally) -> None:
     """Translate Markdown while leaving fenced code blocks untouched."""
-    raw = src_path.read_text(encoding="utf-8")
+    raw = src_path.read_text(encoding="utf-8") # NOSONAR S8707: maintainer CLI, the path is the operator's own argument
     lines = raw.splitlines(keepends=False)
 
     segments: list[tuple[str, str]] = []
