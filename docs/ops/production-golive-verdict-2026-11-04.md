@@ -178,3 +178,18 @@ own `com.docker.compose.*` labels, so its `91df09c4…` is not comparable with t
   The beta timer was stopped for the call and started again (G16).
 
 Use `up`'s own decision, not `config --hash`, for later drift checks (e.g. `dc.sh up --dry-run`).
+
+## G6, met (2026-11-04, 11:26 CET)
+
+A JSON export of both tables, taken with the bridge's own service client (GET only, paged by
+`id` and `(owner_id, db_key)`, 500 rows per page), is in `deploy/backups/g6-20261104/` on the host
+(directory mode 700, files mode 600):
+
+| File | `jq length` | sha256 (prefix) |
+|---|---|---|
+| `osionos_pages.json` (64 MB) | 10,057 | `37abaa090663a581` |
+| `osionos_object_databases.json` (23 MB) | 782 | `f5967d399e462864` |
+
+The counts equal G4's. Restore: POST the rows back through `upsert` on the same keys. Not
+rehearsed. Caveat: this is a logical export through PostgREST, not a `pg_dump`. The VM (`ssh dc-lan`)
+was unreachable. Rows written after 11:26 are not in it.
