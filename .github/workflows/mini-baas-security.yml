@@ -407,16 +407,16 @@ jobs:
       - name: Install govulncheck
         run: |
           set -euo pipefail
-          # tools/govulncheck carries go.mod+go.sum so the install is lockfile-enforced (S8545).
+          # Locked by tools/govulncheck/go.sum. -mod=readonly refuses any resolve outside the sum.
           cd tools/govulncheck
-          go install golang.org/x/vuln/cmd/govulncheck
-          "$(go env GOPATH)/bin/govulncheck" -version
+          GOBIN="$RUNNER_TEMP/bin" go install -mod=readonly golang.org/x/vuln/cmd/govulncheck # NOSONAR S8545: go.sum lockfile in tools/govulncheck
+          "$RUNNER_TEMP/bin/govulncheck" -version
 
       - name: govulncheck (reachability-based, blocking)
         run: |
           set -euo pipefail
           cd apps/grobase/src/control-plane
-          "$(go env GOPATH)/bin/govulncheck" ./...
+          "$RUNNER_TEMP/bin/govulncheck" ./...
 
   # ── 6. DAST — ZAP baseline on main only (heavy) ────────────────────────────
   dast-zap:
