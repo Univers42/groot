@@ -8,7 +8,9 @@ import {
   gateway,
   linkIn,
   login,
+  mailsTo,
   register,
+  registerNow,
   resend,
   reservedAddress,
   waitForMails,
@@ -18,7 +20,9 @@ import {
 // link; the first link is dead, the second confirms, and the password chosen at sign-up still
 // signs in (C3: generate_link(signup) must not overwrite it). A taken address answers the same
 // 202 and gets "you already have an account" (Q6). It needs AUTH_REQUIRE_EMAIL_VERIFICATION=true
-// (C13); on a stack without it the register answer is 200 and the spec skips, saying so.
+// (C13); on a stack without it the register answer is 200 and the spec skips, saying so. The taken
+// address registers back to back on purpose: two overlapping jobs both found no profile and sent
+// a second link (ADR 0048), which spacing the calls would hide.
 // Leaves its e2e-pr1-*@example.test accounts behind (no teardown yet; local backend only).
 
 test.describe.configure({ mode: "serial" });
@@ -64,11 +68,12 @@ test("PR1 sign-up mails a link; a resend kills the first; the second confirms; t
 test("PR1 a taken address answers the same 202 and is mailed 'you already have an account'", async () => {
   test.setTimeout(120_000);
   const email = reservedAddress("pr1");
-  const first = await register(email);
+  const first = await registerNow(email);
   test.skip(first.status === 200, "AUTH_REQUIRE_EMAIL_VERIFICATION is false on this stack (C13)");
-  const taken = await register(email, SPEC_PASSWORD, `pr_other_${Date.now()}`);
+  const taken = await registerNow(email, SPEC_PASSWORD, `pr_other_${Date.now()}`);
   expect({ status: taken.status, body: taken.body }).toEqual({ status: first.status, body: first.body });
   await waitForMails(email, SUBJECTS.exists, 1);
+  expect((await mailsTo(email, SUBJECTS.confirm)).length, "the second register sent no second link").toBe(1);
 });
 
 test("PR1 the confirm and reset pages send Referrer-Policy: no-referrer (C2)", async () => {
