@@ -1,0 +1,31 @@
+---
+description: Commits and pull requests have one human author. No Cursor co-author trailer.
+alwaysApply: true
+---
+
+# One author on commits
+
+A commit or pull request has one author: the person who asked for it. The message must not contain `Co-authored-by` or `Generated with`.
+
+Passing a clean message is not enough. The commit path can append `Co-authored-by: Cursor <cursoragent@cursor.com>` after the text you supplied. Reviewers read the stored object.
+
+After every `git commit` you create, including a commit inside a submodule, read the stored message:
+
+```sh
+git log -1 --format='%B' | grep -E -i 'co-authored-by|generated with'
+```
+
+No output means the object is clean. Any output means a trailer was injected. When that commit is one you just created and it is not on the remote, amend the message back to the exact text you intended, trailer removed, same tree, no `--no-verify`. Leave a commit that is already pushed alone and say so.
+
+Author and committer stay the person who asked for the commit. Do not set either to Cursor.
+
+```sh
+git commit -m "$(cat <<'EOF'
+fix(scope): what changed
+
+Why it had to change.
+EOF
+)"
+```
+
+The same ban applies to a pull request title and body.
