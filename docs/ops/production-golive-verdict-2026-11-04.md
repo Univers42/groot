@@ -193,3 +193,16 @@ A JSON export of both tables, taken with the bridge's own service client (GET on
 The counts equal G4's. Restore: POST the rows back through `upsert` on the same keys. Not
 rehearsed. Caveat: this is a logical export through PostgREST, not a `pg_dump`. The VM (`ssh dc-lan`)
 was unreachable. Rows written after 11:26 are not in it.
+
+## G1–G3 at S = osionos `19f9f011` (2026-11-04, 11:35 CET)
+
+- G1: CI run 41807874086 on `19f9f011` was a success, with every job green and none skipped.
+- G2: the beta serves `19f9f011` (`/mnt/storage/dlesieur/osionos-beta/deployed`).
+- G3: measured (ADR 0041, ff90de9f). #304, the WebKit extra token, was fixed in e1cb2d68: chromium,
+  firefox and webkit each pass 2 of 2, with token = 1. Waived, as a named risk under the owner's
+  autonomy instruction: #305's Firefox-only "Layout was forced before the page was fully loaded".
+  It appears with a blank static page in the dock's frame too, so it is not the terminal page.
+  Firefox is not the subject's reference browser (penultimate Chrome), and #305 stays open.
+  Real Safari stays waived as in ADR 0041.
+
+Step B: fast-forward osionos main to `19f9f011`.
