@@ -101,7 +101,7 @@ sudo, `CERT_TRUST_MODE=user` trusts the browsers only and `skip` trusts nothing 
 **Ports bound on the host** (from `docker-compose.yml`, all on `127.0.0.1` except inside a
 QEMU/VirtualBox NAT VM, where `infrastructure/scripts/detect-bind-addr.sh` binds `0.0.0.0` so the
 host can reach the guest): 443, 3001, 3002, 3003, 3007 (always loopback), 4000, 4100, 4200, 4322,
-4323, 7880, 7881, 8444, 8787 and UDP 50000–50060. grobase adds Kong on `127.0.0.1:8000`
+4323 and 7880 (always loopback: plain HTTP), 7881, 8444, 8787 and UDP 50000–50060. grobase adds Kong on `127.0.0.1:8000`
 (literal loopback in its `orchestrators/compose/base/gateway.yml`).
 
 ### Defense bring-up (pinned)
@@ -209,8 +209,12 @@ are in [ADR 0016](docs/adr/0016-self-documenting-pruned-root-make.md).
 | osionos-bridge | `https://localhost:4000` |
 | auth-gateway | `https://localhost:8787/api/auth` |
 | grobase API (TLS edge) | `https://localhost:8444` |
-| grobase API gateway (Kong, plain HTTP, loopback only) | `http://127.0.0.1:8000` |
-| LiveKit | `ws://127.0.0.1:7880` |
+| LiveKit signalling (video rooms) | `wss://localhost:4000/livekit` |
+
+Only the TLS ports above are entry points. Kong's own plain-HTTP listener (`127.0.0.1:8000`) and
+LiveKit's `127.0.0.1:7880` are bound to the host's loopback for the backend's own tools; a browser
+never gets them (`scripts/verify/https-only.sh`, run in CI, fails on any `ws://` or `http://` URL
+handed outside the backend).
 
 `make showcase` prints the list of what is actually running.
 
