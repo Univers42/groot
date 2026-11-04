@@ -66,8 +66,10 @@ media server for video rooms).
   with its own database and scoped API key.
 - **Per-request owner isolation.** The Rust data plane scopes every query to its owner on every
   request; permissions are rows (ABAC/RBAC), not `if` statements.
-- **One API over many databases.** PostgreSQL, MySQL, MongoDB, Redis, SQLite, MSSQL, DynamoDB and
-  even remote HTTP APIs are queried through the same envelope and the same API key.
+- **One API over many databases.** PostgreSQL, MySQL, MongoDB, Redis, SQLite, MSSQL and even
+  remote HTTP APIs are queried through the same envelope and the same API key. DynamoDB is an
+  opt-in build, left out of the default one
+  ([`wiki/platform/08-engines.md`](wiki/platform/08-engines.md)).
 - **Collaborative editor.** Block-based pages, a database block with table / board / calendar
   views, real-time co-editing, channels and direct messages, video rooms.
 - **Single-command deployment.** `make all` builds and starts the whole stack in Docker, serves
@@ -392,7 +394,8 @@ independently — each written in the language that suits it.
   transactional guarantees, and a mature ecosystem. RLS is what makes per-owner isolation
   enforceable inside the database itself, not only in application code.
 - **MySQL, MongoDB, Redis, MinIO** (object storage) run in the default edition; **SQLite, MSSQL,
-  DynamoDB** and remote **HTTP** APIs are supported through the same data-plane interface. This is a
+  DynamoDB** (opt-in build, [`wiki/platform/08-engines.md`](wiki/platform/08-engines.md)) and
+  remote **HTTP** APIs are supported through the same data-plane interface. This is a
   deliberate feature of the platform (one API over many engines), not a need of osionos itself.
 
 ### Other significant technologies
@@ -539,7 +542,7 @@ foreign-key clash (`scripts/apply-models-migrations.sh:27-38`).
 | Calendar | Google Calendar events via Google OAuth |
 | Contract-driven provisioning | One JSON contract → isolated database, roles, keys and frontend `.env` |
 | Self-serve applications | `POST /v1/tenants/me/apps` creates a new isolated app with its own database and key |
-| Multi-engine data API | One API and one key over PostgreSQL, MySQL, MongoDB, SQLite, MSSQL, DynamoDB, Redis, HTTP |
+| Multi-engine data API | One API and one key over PostgreSQL, MySQL, MongoDB, SQLite, MSSQL, Redis, HTTP; DynamoDB in an opt-in build |
 | Public API | Key-authenticated, rate-limited API behind Kong, documented with OpenAPI |
 
 ---
@@ -547,55 +550,69 @@ foreign-key clash (`scripts/apply-models-migrations.sh:27-38`).
 ## Modules
 
 The subject requires **14 points** (Major = 2, Minor = 1). A module that cannot be demonstrated
-live scores zero, so the confidence column is honest about where each one stands:
+live scores zero. Every row is graded by **one rule**, the one in osionos
+[`docs/ai/README.md`](https://github.com/Univers42/osionos/blob/develop/docs/ai/README.md) (lines 7–8: a row is never A when its
+demonstration needs something switched off or unmeasured):
 
-- **A** — works as-is in the default stack
-- **B** — backend exists; needs a feature flag and a migration, no new code
-- **C** — backend exists; needs a user-facing screen to be demonstrable
+- **A**: the demo works on the default stack (`make all SKIP_SYNC=1`, nothing switched on), and a
+  green CI job drives that path against a running service.
+- **B**: it works, but the demo needs something switched on (a flag, a profile, an edition), or
+  its only evidence is unit tests with fakes or a run that was never repeated.
+- **C**: partial. **Not claimed.** These rows are listed under [Not claimed yet](#not-claimed-yet).
 
-Only the **A** rows — **10 points**, including the two modules of choice, are
-demonstrable in the default stack today, which is four points below the 14 required.
+**Claimed = A and B only: 23 points against the 14 required. 6 of them are A.**
+Paths are prefixed by repository: `G` groot, `GB` grobase (`apps/grobase`), `OS` osionos
+(`apps/osionos/app`), `OO` opposite-osiris (`apps/opposite-osiris`). They point at the commits
+groot `develop` pins. CI names a workflow job: `GB-CI` is grobase `ci.yml`, `OS-CI` is osionos
+`ci.yml`.
 
-| # | Module | Category | Type | Pts | Conf | How it is implemented |
-|---|---|---|---|--:|:--:|---|
-| 1 | Public API (key, rate limit, docs, ≥5 endpoints) | Web | Major | 2 | A | Kong gateway with key auth and rate limiting; OpenAPI specs in grobase `infra/config/openapi/` |
-| 2 | Backend as microservices | DevOps | Major | 2 | A | 15 compose planes (Go control, Rust data, Rust realtime, TS app, storage, auth…) talking over an internal network with HMAC-signed service calls |
-| 3 | Real-time features via WebSockets | Web | Major | 2 | A | Rust realtime plane; changes published as events; protected channel namespaces (gate `m175`) |
-| 4 | Real-time collaboration | Web | Minor | 1 | A | osionos live co-editing over `collab:<spaceId>` on the realtime plane |
-| 5 | Advanced permissions | User management | Major | 2 | C | Roles and policies as rows, ABAC conditions; needs `PERMISSION_CONDITIONS_ENABLED` + `API_KEY_ABAC_ENABLED`, migration `063` |
-| 6 | Organisation system | User management | Major | 2 | C | Organisations are **on in production**; only a management screen is missing |
-| 7 | Monitoring with Prometheus + Grafana | DevOps | Major | 2 | C | Observability plane; needs `TENANT_OBS_ENABLED` **and** `DATA_PLANE_TENANT_OBS` |
-| 8 | Health/status page, backups, disaster recovery | DevOps | Minor | 1 | C | `TENANT_BACKUP_ENABLED`, migration `042` |
-| 9 | GDPR compliance | Data | Minor | 1 | B | Data export and hard erase: `TENANT_EXPORT_ENABLED` + `HARD_ERASE_ENABLED`; `gdpr_requests` table |
-| 10 | Two-factor authentication | User management | Minor | 1 | B | TOTP (grobase `one` shape) or passkeys (`PASSKEYS_ENABLED`) |
-| 11 | Remote authentication (OAuth 2.0) | User management | Minor | 1 | B | `SSO_ENABLED`, migration `053` |
-| 12 | File upload and management | Web | Minor | 1 | C | Storage plane on MinIO, `STORAGE_BUCKET_SCOPE_ENABLED` |
-| 13 | **Module of choice:** contract-driven application factory | Free choice | Major | 2 | A | See justification below |
-| 14 | **Module of choice:** SSRF guard on the HTTP engine | Free choice | Minor | 1 | A | See justification below |
-| 15 | Complete LLM system interface (text + images) | Artificial Intelligence | Major | 2 | B | Text streams with resume, cancel and rate limits; image generation needs `OSIONOS_AI_IMAGES=on`, `--profile ai --profile ai-gpu-vulkan` and the prompt guard (C72), without which the service refuses to start; off on the public stack. [M1 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m1-images.md) |
-| 16 | Complete RAG on a large dataset | Artificial Intelligence | Major | 2 | B | `--profile ai`: permission-aware hybrid search with citations; the reranker is off by default, and the 110k-chunk corpus is a separate eval stack. [M2 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m2-rag.md) |
-| 17 | ML recommendation system | Artificial Intelligence | Major | 2 | B | iALS + logistic ranker; needs `OSIONOS_RECS_FOR_YOU=1`, the beacon is opt-in, and the nightly job skips under 20 users. [M3 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m3-recs.md) |
-| 18 | Content moderation AI | Artificial Intelligence | Minor | 1 | B | L0 rules + L1 classifier; needs `OSIONOS_MODERATION_ACTIONS=hold` and `OSIONOS_MODERATION_STATE=1`; L1 is log-only (no auto-removal); the public stack runs `log`. [M4 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m4-moderation.md) |
-| 19 | Voice / speech | Artificial Intelligence | Minor | 1 | B | `--profile ai` with the speech model in its volume: dictation and read-aloud; off on the public stack (`503 voice_unavailable`). [M5 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m5-voice.md) |
-| 20 | Sentiment analysis | Artificial Intelligence | Minor | 1 | C | Opt-in per workspace (owner/admin, Settings › AI) with `OSIONOS_SENTIMENT_URL`; off on the public stack; the model licence is undeclared. [M6 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m6-sentiment.md) |
-| 21 | Image recognition and tagging | Artificial Intelligence | Minor | 1 | C | `--profile ai --profile ai-vlm` with the VLM in its volume; the browser flow and in-app search are not verified end to end; off on the public stack. [M7 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m7-images-tags.md) |
+| # | Module | Category | Type | Pts | Grade | Core files | Tests → CI job | Docs | Demo (3 steps) |
+|---|---|---|---|--:|:--:|---|---|---|---|
+| 1 | Public API (key, rate limit, docs, ≥5 endpoints) | Web | Major | 2 | **A** | `GB infra/docker/services/kong/conf/kong.yml:221-248` (`/rest/v1`: key-auth + rate-limiting); `GB infra/config/openapi/grobase-public.json` | `GB scripts/verify/m102-gateway-query-path.sh` → GB-CI "Integration Tests" (`ci.yml:927`) | `GB infra/config/openapi/README.md` | `make all SKIP_SYNC=1` → `/rest/v1` without `apikey` answers 401, with it 200 → repeat until 429 |
+| 2 | Backend as microservices | DevOps | Major | 2 | **A** | `GB orchestrators/compose/base/*.yml` (16 files); `GB orchestrators/makes/30-planes.mk:33`; `GB src/control-plane`; `GB src/data-plane-router` | GB-CI unit suites (`ci.yml:1436`) + "Engine conformance" legs (`ci.yml:1532`) | [`wiki/platform/02-planes.md`](wiki/platform/02-planes.md) | `make -C apps/grobase planes` → `docker compose ps` → `make healthcheck` |
+| 3 | Real-time features via WebSockets | Web | Major | 2 | **A** | `GB infra/docker/services/realtime/realtime-agnostic/crates/realtime-auth/src/jwt/mod.rs:90-94`; `GB kong.yml:314-315` (`/realtime/v1/ws`); `OS scripts/bridge-collab.mjs:626` | GB-CI `rust-realtime` suite (`ci.yml:1436`), live gates m184, m189, m201 (`ci.yml:735,855,1479`) | [`wiki/platform/05-realtime.md`](wiki/platform/05-realtime.md) | two browsers on one page → type in one → the other updates |
+| 4 | Real-time collaboration | Web | Minor | 1 | **B** | `OS src/features/collab/model/{remoteCursors,collabPresence,blockSync}.ts`; `OS scripts/bridge-collab.mjs:626` | `OS tests/bridge/bridge-collab-*` (9) → OS-CI "quality (root)" Bridge tests (`ci.yml:291`); `G tests/e2e/specs/dw8-realtime.spec.ts` (run by hand) | [`wiki/product/02-osionos.md`](wiki/product/02-osionos.md) | as row 3 → watch the remote cursor and presence → edit the same block from both |
+| 5 | Advanced permissions | User management | Major | 2 | **B** | `OS scripts/bridge-roles.mjs:28-29`; `OS scripts/bridge-share-rules.mjs:38`; `OS scripts/bridge-page-access.mjs:217`; `OS src/features/admin-users/api.ts` | `OS tests/bridge/bridge-page-access*` (7), `bridge-share-rules-*` (2) → OS-CI Bridge tests | [`wiki/platform/07-isolation.md`](wiki/platform/07-isolation.md) | sign in as admin → change a member's role → that member loses access |
+| 6 | Organisation system | User management | Major | 2 | **B** | `OS scripts/bridge-workspace-teams.mjs:229`; `OS scripts/bridge-workspace-invites.mjs:134`; `OS src/features/settings/teamspaces/TeamspacesPanel.tsx` | `OS tests/bridge/bridge-workspace-*` (7) → OS-CI Bridge tests | [`wiki/platform/06-contracts.md`](wiki/platform/06-contracts.md) | create a workspace → create a teamspace → invite a user, who accepts |
+| 8 | Health/status page, backups, disaster recovery | DevOps | Minor | 1 | **B** | `GB infra/docker/services/status-page/{server,availability}.py`; `GB orchestrators/compose/base/ops.yml`; `GB scripts/verify/m241-status-backup-recovery.sh` | m241 → GB `operational-reliability.yml:27`; m192 → GB-CI (`ci.yml:582`), **red on grobase `develop`** ([run 41870904860](https://github.com/Univers42/grobase/actions/runs/41870904860)) | [`wiki/operations/04-troubleshooting.md`](wiki/operations/04-troubleshooting.md) | bring up the `ops` plane (not in the default edition) → open the status page → stop a container, then `m241 --live` |
+| 9 | GDPR compliance | Data | Minor | 1 | **B** | `OS scripts/bridge-account-export.mjs:143`; `OS scripts/bridge-account-erasure.mjs:79`; `OS src/features/settings/ui/AccountExportSection.tsx`; `OS src/features/settings/ui/danger/AccountDangerZone.tsx` | `OS tests/bridge/bridge-account-export*` (3), `bridge-account-erasure` (1) → OS-CI Bridge tests; `G models-grants.yml` | [`wiki/security/01-model.md`](wiki/security/01-model.md) | Settings › export my data → open the archive → delete the account |
+| 10 | Two-factor authentication | User management | Minor | 1 | **B** | `OS scripts/bridge-account-mfa-totp.mjs:68`; `OS scripts/bridge-account-mfa.mjs:187`; `OS scripts/bridge-account-passkeys.mjs:100`; `OS src/features/settings/profile/TwoFactorModal.tsx` | `OS tests/bridge/bridge-account-mfa-*` (6), `bridge-account-passkeys` (1) → OS-CI Bridge tests | osionos `docs/account-platform` | enable TOTP → sign out → sign in with the code |
+| 13 | **Module of choice:** contract-driven application factory | Free choice | Major | 2 | **B** | `GB src/control-plane/internal/tenants/selfserve_apps.go:55-58`; `GB src/control-plane/cmd/tenant-control/mount_appsselfserve.go:26`; `GB scripts/verify/m177-selfserve-apps.sh` | m176 → GB-CI (`ci.yml:192`); **m177 in no workflow** | [`wiki/platform/06-contracts.md`](wiki/platform/06-contracts.md), [justification](#justification--module-of-choice-major-contract-driven-application-factory) | set `APPS_SELFSERVE_ENABLED` (empty by default) → OTP login, `POST /v1/tenants/me/apps` twice → one app's key reads the other: 4xx |
+| 14 | **Module of choice:** SSRF guard on the HTTP engine | Free choice | Minor | 1 | **B** | `GB src/data-plane-router/crates/data-plane-pool/src/dial_guard/classify.rs:91-127`; `GB src/data-plane-router/crates/data-plane-pool/src/http/validate.rs:83-98` | `GB …/dial_guard/classify_tests.rs` → GB-CI `rust-data-plane` + "Engine conformance (http)" | [`wiki/security/04-network.md`](wiki/security/04-network.md), [justification](#justification--module-of-choice-minor-ssrf-guard-on-the-http-engine) | mount an `http` source at `169.254.169.254` → query it → refused. Whether the default edition mounts the `http` engine is unverified (guess: it does not) |
+| 15 | Complete LLM system interface: text, streaming, error handling, rate limiting. Images exist but are **off by default** and not part of this claim | Artificial Intelligence | Major | 2 | **B** | osionos `services/osionos-ai/src/routes/runs.ts:178-324`, `src/runs/{runner,upstream,upstreamError,streamPump}.ts`, `src/rateLimit.ts:84`, `src/http.ts:108-129`; client `src/features/ai/model/runStream.ts`. All 12 hops: [`wiki/project/ai-llm-interface.md`](wiki/project/ai-llm-interface.md) | `services/osionos-ai/tests/{runs,complete,upstreamError*,runRateLimit,failover,quotaFailover}.test.ts` → OS-CI "AI service (tsc + suite)" (`ci.yml:314`); `tests/canvas/ai-{chat-store,run-dispatch,run-stream}.test.ts` → "quality (root)" Canvas unit tests (`ci.yml:285`) | [`wiki/project/ai-llm-interface.md`](wiki/project/ai-llm-interface.md), [`wiki/runbooks/osionos-ai.md`](wiki/runbooks/osionos-ai.md), [M1 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m1-images.md) | `docker compose --profile ai up -d --build` → ask a question and watch it stream → reload mid-answer (it resumes), or stop it |
+| 16 | Complete RAG on a large dataset | Artificial Intelligence | Major | 2 | **B** | osionos `services/osionos-ai/src/retrieval/search.ts:277,469,564`, `src/retrieval/rerank.ts:16`; `G models/osionos-ai-rag-migration.sql:60,91` | `services/osionos-ai/tests/{retrieval,aclAgreement,rerank}.test.ts` → OS-CI AI service | [M2 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m2-rag.md), osionos `services/osionos-ai/eval/wiki/RESULTS-rag.md` | `--profile ai` → ask a workspace question → click a citation, then show the 110 363-chunk measurement (run on a separate eval stack; the reranker is off by default) |
+| 18 | Content moderation AI | Artificial Intelligence | Minor | 1 | **B** | osionos `scripts/bridge-moderation-gate.mjs:70`; `services/osionos-ai/src/moderation/l1.ts:99` | `services/osionos-ai/tests/moderation*.test.ts` (4) → OS-CI AI service; `tests/bridge/bridge-moderation*` (5) → Bridge tests | [M4 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m4-moderation.md) | set `OSIONOS_MODERATION_ACTIONS=hold` and `OSIONOS_MODERATION_STATE=1` → post a toxic comment → it waits in the admin console (no auto-removal, by design) |
+| 19 | Voice / speech | Artificial Intelligence | Minor | 1 | **B** | osionos `services/osionos-ai/src/routes/voice.ts:104`, `src/features/voice/ui/DictationButton.tsx`, `src/features/voice/model/readAloud.ts`; `G docker-compose.yml:777` | `services/osionos-ai/tests/voice.test.ts` → OS-CI AI service | [M5 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m5-voice.md) | `--profile ai`, with the speech model fetched into its volume → dictate into a page → read it aloud (read-aloud voices not measured yet) |
 
-**Point calculation**
+The table skips the numbers 7, 11, 12, 17, 20 and 21. Those rows moved to the next table.
 
-| | Points |
-|---|--:|
-| Catalogue modules listed (rows 1–12) | 18 |
-| Modules of choice (rows 13–14) | 3 |
-| Artificial Intelligence modules (rows 15–21: 2 + 2 + 2 + 1 + 1 + 1 + 1) | 10 |
-| **Total listed** | **31** |
-| Demonstrable today (confidence A: rows 1–4 = 7, rows 13–14 = 3) | **10** |
-| Required | 14 |
+**Point calculation** (free choice is capped at 3, [`wiki/project/01-subject.md`](wiki/project/01-subject.md#points))
 
-The **AI opponent** module is not claimed: osionos has no game.
+| | Before (2026-10) | After |
+|---|--:|--:|
+| Catalogue modules claimed (rows 1–12) | 18 | 14: 6 A (rows 1–3) + 8 B (rows 4–6, 8–10) |
+| Modules of choice (rows 13–14, cap 3) | 3 | 3, all B |
+| Artificial Intelligence modules (rows 15–21) | 10 | 6, all B (rows 15, 16, 18, 19) |
+| **Total claimed** | **31 listed** | **23 (A + B)** |
+| Of which A | 10 | **6** |
+| Required | 14 | 14 |
 
-The **Multiple languages** module is not claimed: osionos lists four languages in its settings,
-but switching only records a stub action (`i18n_change_stub` in osionos
-`src/features/settings/SettingsCenter.tsx`); no translation resources are loaded.
+What moved: rows 1–4, 13 and 14 were A under the old legend ("works as-is"). Under one rule,
+the rows that need a switch or have only unit-level evidence are B: rows 4, 13 and 14. The six
+rows below no longer count.
+
+### Not claimed yet
+
+| Module | Was | Why it is not claimed, in one line |
+|---|---|---|
+| Remote authentication (OAuth 2.0), User management, Minor | 1, B | The opposite-osiris commit groot pins (`ea8836db`) is on no branch and has no `scripts/auth/oauth-providers.mjs`. Claim it after the opposite-osiris pin bump |
+| Monitoring with Prometheus + Grafana, DevOps, Major | 2, C | The default edition ships no observability plane, and its gate m85 runs in no workflow |
+| File upload and management, Web, Minor | 1, C | Avatars and page files upload (`OS scripts/bridge-media.mjs:160`), but no general file manager is verified, and gate m159 runs in no workflow |
+| ML recommendation system, AI, Major | 2, B | Needs 20+ real users, the offline numbers are synthetic, and the `osionos-ml` Python tests run in no CI |
+| Sentiment analysis, AI, Minor | 1, C | The model licence is undeclared |
+| Image recognition and tagging, AI, Minor | 1, C | The browser flow is unverified. Locally the VLM starts with `--profile ai` (`G docker-compose.yml:993-995`); `--profile ai-vlm` exists only in `docker-compose.public.yml:207` |
+| AI opponent, AI | — | osionos has no game |
+| Multiple languages, Accessibility | — | `i18next` is a dependency (osionos `package.json:92`), but no source file imports it and no translation resource exists |
 
 ### Justification — Module of choice (Major): contract-driven application factory
 
@@ -692,9 +709,14 @@ This project was built with **heavy AI assistance**, and we state it plainly.
   rules must be expressed as policies, schema constraints or database triggers.
 - **Documented security weaknesses.** Known and declared in
   [`wiki/security/03-known-weaknesses.md`](wiki/security/03-known-weaknesses.md).
-- **Several features are behind flags that are off by default** — see the confidence column in
+- **Several features are behind flags that are off by default** — see the Grade column in
   [Modules](#modules).
-- **No interface translation.** The language setting in osionos is a stub (see [Modules](#modules)).
+- **No interface translation.** osionos ships no translation resources (see
+  [Not claimed yet](#not-claimed-yet)).
+- **Most AI features are off on the public stack.** `docker-compose.public.yml:103-135` empties
+  `OSIONOS_AI_IMAGES`, `OSIONOS_AI_STT_URL` (voice answers `503 voice_unavailable`) and
+  `OSIONOS_AI_VLM_URL`, and sets `OSIONOS_MODERATION_ACTIONS` to `log`. The AI modules are
+  demonstrated on the local stack with `docker compose --profile ai`, not on the public URL.
 - **Whiteboard editing is loopback-only and has no per-user authorization yet** (see
   [Demo](#demo)).
 
