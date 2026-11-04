@@ -20,7 +20,8 @@ name: Fresh-Machine Migration
 
 on:
   push:
-    branches: [main]
+    # test/fresh-machine/*: no token on the dev box can dispatch this, so a branch tries it first.
+    branches: [main, "test/fresh-machine/**"]
     paths:
       - ".github/workflows/fresh-machine.yml"
       - "infrastructure/**"
@@ -212,6 +213,8 @@ jobs:
       - name: "☄  make all   — provisions the whole machine from nothing"
         env:
           SKIP_SYNC_INPUT: ${{ github.event.inputs.skip_sync }}
+          # The sign-in code pr5 asks for. grobase's flags are structural: off, the route is absent.
+          EMAIL_OTP_ENABLED: "true"
           # team: a failed pull FAILS make all at once, named. Unset, make all would fall back
           # to LOCAL mode and this run would prove the wrong thing under the team label.
           VAULT42_SOURCE: ${{ steps.pre.outputs.mode == 'team' && 'team' || '' }}
@@ -363,6 +366,21 @@ jobs:
       - name: e2e GR2 — osionos's second brain is graph_render (Playwright, live stack)
         if: success()
         run: bash tests/e2e/run.sh specs/gr2-osionos-graph.spec.ts
+
+      # Sign-up, reset and the sign-in code end to end, read back from Mailpit. Only a throwaway
+      # stack can: the guard in tests/e2e/run.sh keeps these specs off a linked grobase.
+      - name: e2e PR — account mail on this throwaway stack (Mailpit, nothing leaves the runner)
+        if: success()
+        run: bash scripts/verify/account-mail.sh
+
+      - name: Name the account-mail failure in annotations (readable without a token)
+        if: failure()
+        run: |
+          log=tests/e2e/test-results/account-mail.log
+          test -s "$log" || exit 0
+          tail -n 42 "$log" \
+            | sed -E 's/\x1b\[[0-9;]*m//g; s/([A-Z_]*(PASSWORD|SECRET|TOKEN|KEY|PASSPHRASE)[A-Z_]*=)[^ ]*/\1<redacted>/g' \
+            | awk '{ buf = buf $0 "%0A"; n++ } n == 6 { printf "::error title=account mail tail %d::%s\n", ++c, buf; buf = ""; n = 0 } END { if (n) printf "::error title=account mail tail %d::%s\n", ++c, buf }'
 
       - name: Upload the e2e results
         if: failure()

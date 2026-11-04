@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { request, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { confirmByMail } from "./account-mail";
 import { E2E_EMAIL, E2E_PASSWORD, GATEWAY_URL, OSIONOS_URL, TOKEN_FILE } from "./env";
 
 // The local gateway accepts this placeholder only when TURNSTILE_BYPASS_LOCAL=true.
@@ -55,7 +56,9 @@ async function freshLogin(user: E2eUser): Promise<string> {
   if (login.status !== 200) {
     const profile = { username: user.username, confirmPassword: user.password };
     const reg = await postJson("/api/auth/register", { ...credentials, profile });
-    if (reg.status !== 200) throw new Error(`register ${user.email}: HTTP ${reg.status} ${String(reg.body.message)}`);
+    // 202: this stack verifies email (C13), so the account opens through its mail.
+    if (reg.status === 202) await confirmByMail(user.email);
+    else if (reg.status !== 200) throw new Error(`register ${user.email}: HTTP ${reg.status} ${String(reg.body.message)}`);
     login = await postJson("/api/auth/login", credentials);
   }
   const token = login.body.access_token;
