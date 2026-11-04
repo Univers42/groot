@@ -36,6 +36,7 @@ No sudo and no prompt. Without credentials `make all` is the local pipeline, unc
 | Demo password, without force | `link-demo-login-ensure` | |
 | Prove the CA, import it in the browsers | `datacenter-trust` | the CA does not verify the WAF, or a store still lacks it |
 | Build and start the frontends | `link-frontends-start` | a build fails, or the link does not verify |
+| Start Mail and Calendar | `datacenter-apps` | a build fails |
 | Health checks, URLs | `link-healthcheck`, `datacenter-health`, `showcase` | a probe fails |
 | Relaunch the browsers | `datacenter-browsers` | never |
 
@@ -90,4 +91,5 @@ containers, so it is never used.
 - It does not start or build the VM.
 - It does not put every hop on TLS: containers reach the relay in plain HTTP on this machine's Docker
   network. TLS covers the hop leaving Docker and the browser's hop to the edge.
-- It does not start Mail and Calendar (`make mail-up calendar-up`).
+- It does not give Mail and Calendar their Google sign-in: Google needs a public domain, so on
+  localhost they open without it.

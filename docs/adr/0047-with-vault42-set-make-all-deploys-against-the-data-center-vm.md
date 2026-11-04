@@ -52,8 +52,8 @@
 - **Steps, in order:** sync submodules; pull the vault if a required file is missing; bring the VM to
   the state above; pin its host key and write the link's settings; copy its certificates; link; converge
   models and the key; set the demo password without force; prove the CA signs the WAF and import it in
-  every browser store; build and start the frontends; health check; born2root's `make health`; relaunch
-  the browsers.
+  every browser store; build and start the frontends and Mail and Calendar; health check; born2root's
+  `make health`; relaunch the browsers.
 
 ## What "HTTPS" means here
 

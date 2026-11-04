@@ -42,9 +42,9 @@ row (this device off the tailnet, the peer offline, Kong not answering), then ru
   - the vault42 passphrase and the codes it emails;
   - the Tailscale login;
   - every `sudo`.
-- **Do not run `make all` on this device for this test.** It builds and starts a *local*
-  grobase, which is the opposite of linking to the data center. `make link-frontends-up`
-  (§8) is the command.
+- **Do not run `make all` on this device for this test.** With vault42 credentials it looks for
+  the VM on this host and stops when there is none; without them it builds a *local* grobase.
+  Neither is linking to the data center. `make link-frontends-up` (§8) is the command.
 - **Record as you go (§9).** UNKNOWN = FAIL: a step you could not run is a `SKIP` with its
   reason, never a `PASS`.
 
