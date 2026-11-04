@@ -81,7 +81,7 @@ containers, so it is never used.
 | `has no make <target>` | groot's born2root pin is behind | Move the pin |
 | `holds N tenants and no record of a seed` | Rows of unknown origin | If they are expendable, from born2root: `make set_seeds FORCE=1` |
 | `the VM is still not converged` | A long reader kept a table past the 2 s lock budget, such as the hourly backup at `:15` | `make all` again |
-| `the app's API key does not verify` | `./.env.local` and the VM disagree | Read ADR 0003, then `make link-live-data-ensure` |
+| `the app's key or the rows it owns need a repair` | They drifted after this seed was converged | Read ADR 0003, then `make link-live-data-ensure` |
 | `Firefox is installed but has no profile` | It never started | Start it once, then `make all` |
 
 ## What it does not do

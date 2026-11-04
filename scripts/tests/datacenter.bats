@@ -298,7 +298,7 @@ esac'
   [[ "$output" == *"pin has to move"* ]]
 }
 
-@test "vm: an empty platform is seeded unforced, and the run remembers it did" {
+@test "vm: an empty platform is seeded unforced" {
   vault_set
   stub ssh 'echo "ssh $*" >>"$LOG"
 case "$*" in
@@ -311,7 +311,6 @@ esac'
   DATACENTER_ALLOW_WRITES=1 dc vm
   [ "$status" -eq 0 ]
   grep -E '^make .*set_seeds' "$LOG" | grep -v -- ' -n ' | grep -vq FORCE
-  [ -f "$XDG_STATE_HOME/groot/seeded-this-run" ]
 }
 
 @test "vm: rows with no record of a seed stop, naming the forced seed; nothing is seeded" {
@@ -436,23 +435,58 @@ case "$*" in *"pg_restore -l"*) echo "1; 2 TABLE DATA public osionos_pages postg
   ! grep -qx 'models ' "$LOG"
 }
 
-@test "preflight: a key that does not verify stops when this run did not seed" {
+# A seed on record, S1 unless SEED says otherwise, and a docker that answers the marker from a file.
+seed_on_record() {
+  vault_set
+  stub ssh 'echo "ssh $*" >>"$LOG"; case "$*" in *seeds.last*) echo "seeded_at=${SEED-S1}" ;; esac'
+  stub docker 'echo "docker $*" >>"$LOG"
+case "$*" in *"select sha"*) cat "$LOG.applied" ;; *"select seeded_at"*) cat "$LOG.seed" 2>/dev/null ;; esac'
+}
+
+@test "preflight: a seed not yet converged moves its rows onto the key, once, and records it" {
+  seed_on_record
+  in_tree ensure-live-data-access.sh 'echo "live-data $*" >>"$LOG"; [ -f "$LOG.fixed" ] && exit 0; [ "${1:-}" = --check ] && exit 1; touch "$LOG.fixed"'
+  DATACENTER_ALLOW_WRITES=1 dc preflight
+  [ "$status" -eq 0 ]
+  grep -qx 'live-data ' "$LOG"
+  [[ "$output" == *"seed S1 has not been converged"* ]]
+  grep -q 'docker exec -i mini-baas-postgres psql' "$LOG"
+}
+
+@test "preflight: the same seed never re-stamps twice, so later rows are left alone" {
+  seed_on_record
+  echo S1 >"$LOG.seed"
   in_tree ensure-live-data-access.sh 'echo "live-data $*" >>"$LOG"; exit 1'
   DATACENTER_ALLOW_WRITES=1 dc preflight
   [ "$status" -eq 1 ]
   [[ "$output" == *"link-live-data-ensure"* ]]
-  [ "$(grep -c '^live-data' "$LOG")" -eq 1 ]
-  grep -qx 'live-data --check' "$LOG"
+  ! grep -qx 'live-data ' "$LOG"
 }
 
-@test "preflight: right after this run's seed, the key converges" {
-  in_tree ensure-live-data-access.sh 'echo "live-data $*" >>"$LOG"; [ "${1:-}" != --check ]'
-  mkdir -p "$XDG_STATE_HOME/groot"
-  : >"$XDG_STATE_HOME/groot/seeded-this-run"
+@test "preflight: with no seed on record the repair stays manual" {
+  seed_on_record
+  export SEED=
+  stub ssh 'echo "ssh $*" >>"$LOG"'
+  in_tree ensure-live-data-access.sh 'echo "live-data $*" >>"$LOG"; exit 1'
+  DATACENTER_ALLOW_WRITES=1 dc preflight
+  [ "$status" -eq 1 ]
+  ! grep -qx 'live-data ' "$LOG"
+}
+
+@test "preflight: with no terminal a seed needing a repair stops, and nothing is written" {
+  seed_on_record
+  in_tree ensure-live-data-access.sh 'echo "live-data $*" >>"$LOG"; exit 1'
+  run bash "$ROOT/scripts/datacenter.sh" preflight </dev/null
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"from a terminal"* ]]
+  ! grep -qx 'live-data ' "$LOG"
+}
+
+@test "preflight: a seed that already converges is recorded, so a later drift cannot re-stamp" {
+  seed_on_record
   DATACENTER_ALLOW_WRITES=1 dc preflight
   [ "$status" -eq 0 ]
-  grep -qx 'live-data ' "$LOG"
-  [ ! -e "$XDG_STATE_HOME/groot/seeded-this-run" ]
+  grep -q 'docker exec -i mini-baas-postgres psql' "$LOG"
 }
 
 @test "preflight: a database it cannot see is a stop, not a pass" {

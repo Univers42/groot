@@ -196,6 +196,7 @@ EOF
 
 cmd_preflight() {
   local host sock="$LINK_DIR/tenant-control-3022.sock"
+  ALIAS=$(cmd_setting)
   host=$(bash "$REPO/scripts/grobase-link.sh" docker-host) || die "no daemon for the linked VM; re-run make all"
   [ -z "$host" ] || export DOCKER_HOST="$host"
   models_converge

@@ -17,7 +17,6 @@ VM_NAME=""
 VM_CONFIG=""
 VM_SECRETS=""
 REMOTE_DIR=/opt/grobase
-SEED_MARK="$STATE_DIR/seeded-this-run"
 
 # autostart_value NAME — NAME's value in the b2b-autostart block of the crontab.
 autostart_value() {
@@ -123,7 +122,7 @@ tenant_rows() {
 }
 
 # seeded: a platform with rows and a record is left alone. Rows with no record stop, because nothing
-# says where they came from, and only a run that seeded may re-stamp owners later (cmd_preflight).
+# says where they came from.
 ensure_seeded() {
   local rows last
   rows=$(tenant_rows)
@@ -139,14 +138,12 @@ ensure_seeded() {
   born2root_make set_seeds || die "the seed failed. From born2root: make set_seeds"
   last=$(vm_ssh "$ALIAS" 'cat /etc/b2b/seeds.last 2>/dev/null' 2>/dev/null)
   [ -n "$last" ] || die "make set_seeds finished, but the VM has no record of it"
-  (umask 077 && mkdir -p "$STATE_DIR" && : >"$SEED_MARK")
 }
 
 cmd_vm() {
   ALIAS=$(cmd_setting)
   [ -n "$ALIAS" ] || die "this machine has no data center (no vault42 credentials, no GROBASE_DATACENTER)"
   load_vm_paths
-  rm -f "$SEED_MARK"
   await_vm
   ensure_grobase
   ensure_seeded

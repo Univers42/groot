@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # datacenter-models.sh — what make all may write to the VM's databases, and when: a verified dump
-# before any schema change, and an owner re-stamp only after a seed this run made.
+# before any schema change, and an owner re-stamp once per recorded seed.
 # Sourced by scripts/datacenter.sh, which defines note, die, REPO, PG_CTN, MODELS, DUMP_DIR.
 # Caveat: pg_restore reads the dump back but no schema or row is compared to the live database, so a
 # dump can verify and still predate a write made while it ran (under-reports); make all holds no lock.
@@ -63,14 +63,37 @@ models_converge() {
     die "the VM is still not converged. realtime-cdc-off gives each table 2 s, so a long reader such as the VM's hourly backup (at :15) can keep a trigger: run make all again"
 }
 
-# Only a run that seeded may re-stamp: outside that nothing says the rows are the seed's, and the
-# re-stamp writes five databases the dump does not cover (ADR 0003).
+# seed_id — the seed the VM records, whoever loaded it. Empty means no seed is on record.
+seed_id() { vm_ssh "$ALIAS" 'cat /etc/b2b/seeds.last 2>/dev/null' 2>/dev/null | sed -n 's/^seeded_at=//p' | head -n 1; }
+converged_seed() {
+  docker exec "$PG_CTN" psql -U postgres -d postgres -tA -c 'select seeded_at from groot_meta.seed_state' 2>/dev/null || true
+}
+record_seed() {
+  docker exec -i "$PG_CTN" psql -U postgres -d postgres -v ON_ERROR_STOP=1 >/dev/null <<SQL || die "the key converged, but the marker could not be written"
+CREATE SCHEMA IF NOT EXISTS groot_meta;
+CREATE TABLE IF NOT EXISTS groot_meta.seed_state (seeded_at text NOT NULL);
+TRUNCATE groot_meta.seed_state;
+INSERT INTO groot_meta.seed_state VALUES ('$1');
+SQL
+}
+
+# Once per recorded seed, by the owner's decision: a seed born2root loaded counts like one this run
+# loaded, because its rows are known to be the seed's until the marker says this seed is converged.
+# After that a mismatch stops, so rows users added are never re-stamped by a later run. The re-stamp
+# writes five databases the dump does not cover (ADR 0003): a new seed restores them.
 live_data_converge() {
-  bash "$REPO/scripts/ensure-live-data-access.sh" --check && return 0
-  [ -f "$SEED_MARK" ] ||
-    die "the app's API key does not verify on the VM, and this run did not seed it, so make all leaves its rows alone. Read ADR 0003, then: make link-live-data-ensure"
-  require_writes "re-stamping the seeded rows"
-  note "the key does not verify on the freshly seeded VM: converging it"
+  local seed
+  seed=$(seed_id)
+  if bash "$REPO/scripts/ensure-live-data-access.sh" --check; then
+    [ -z "$seed" ] || [ "$(converged_seed)" = "$seed" ] || ! writes_allowed || record_seed "$seed"
+    return 0
+  fi
+  if [ -z "$seed" ] || [ "$(converged_seed)" = "$seed" ]; then
+    die "the app's key or the rows it owns need a repair, and no new seed explains it, so make all leaves them alone. Read ADR 0003, then: make link-live-data-ensure"
+  fi
+  require_writes "converging the key on the seeded rows"
+  note "seed $seed has not been converged: moving its rows onto the app's key"
   bash "$REPO/scripts/ensure-live-data-access.sh" || die "the key could not be converged"
-  rm -f "$SEED_MARK"
+  bash "$REPO/scripts/ensure-live-data-access.sh" --check || die "the key still does not converge"
+  record_seed "$seed"
 }

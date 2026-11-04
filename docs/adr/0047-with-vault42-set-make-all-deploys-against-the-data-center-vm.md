@@ -84,9 +84,11 @@ is not "every hop is HTTPS".
 6. VM writes need a terminal, or `DATACENTER_ALLOW_WRITES=1`: `POST /rebuild`, the Update button, is
    unauthenticated with CORS `*`. Models apply, by the owner's decision, after a dump read back in full,
    and a hash of `models/*.sql` kept in `groot_meta.models_state` catches a column-only change. Armed
-   triggers run `realtime-cdc-off` alone. A key that does not verify stops, unless this same run seeded
-   the VM, by the owner's decision: outside that nothing says the rows are the seed's, and the re-stamp
-   writes five databases the dump does not cover.
+   triggers run `realtime-cdc-off` alone. A key or row owner that needs a repair converges once per
+   seed recorded in `/etc/b2b/seeds.last`, whoever loaded it, by the owner's decision: until
+   `groot_meta.seed_state` holds that seed the rows are known to be the seed's. After that a mismatch
+   stops, so rows users added are never re-stamped. The re-stamp writes five databases the dump does
+   not cover; a new seed restores them.
 7. Browsers restart last, only if a store changed and stdin is a terminal.
 8. Admin ssh drops the alias's forwards and accepts only the pinned host key. For this user's own VM the
    key is re-read every run, so a rebuild needs nothing; any other target keeps a strict pin. born2root
