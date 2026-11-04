@@ -6,7 +6,8 @@ export default defineConfig({
   testDir: "./specs",
   // run.sh sets E2E_SKIP_MAIL_SPECS (to the reason) when the specs that send real mail may not
   // run on this machine (scripts/lib/e2e-mail-guard.sh, gotrue-otp-exp.sh).
-  testIgnore: process.env.E2E_SKIP_MAIL_SPECS ? [/\/(pr|dm)\d[^/]*\.spec\.ts$/] : [],
+  // The st* specs have their own config (site.config.ts), which gives them the site as baseURL.
+  testIgnore: [/\/st\d+-[^/]*\.spec\.ts$/, ...(process.env.E2E_SKIP_MAIL_SPECS ? [/\/(pr|dm)\d[^/]*\.spec\.ts$/] : [])],
   globalSetup: "./lib/global-setup.ts",
   fullyParallel: false,
   workers: 1,

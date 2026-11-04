@@ -75,13 +75,14 @@ for (const [app, url] of [["Mail", MAIL_URL], ["Calendar", CALENDAR_URL]] as con
       await toRail(page);
       await expect(railEntry, `installing ${app} added no rail entry`).toBeVisible();
       await railEntry.click();
-      const pane = page.locator(`iframe[title="${app}"]`);
+      // Opening from the rail can keep a hidden pane for the same app: the visible one is under test.
+      const pane = page.locator(`iframe[title="${app}"]:visible`);
       await expect(pane).toBeVisible();
 
       await page.waitForTimeout(15_000); // deliberately past the 8 s grace timer
       await expect(page.getByTestId("embed-unavailable")).toHaveCount(0);
       await expect(pane).toBeVisible();
-      await page.frameLocator(`iframe[title="${app}"]`).locator("body").click();
+      await page.frameLocator(`iframe[title="${app}"]:visible`).locator("body").click();
       await expect(pane).toBeVisible();
     } finally {
       const again = await openListing(page, app);
