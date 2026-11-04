@@ -94,6 +94,9 @@ restore_until_first_stop() {
   local root="$BATS_TEST_TMPDIR/grobase" seeds="$BATS_TEST_TMPDIR/seeds"
   mkdir -p "$root/scripts/ops" "$root/scripts/lib" "$seeds"
   cp "$REPO/apps/grobase/scripts/ops/vault-restore.sh" "$root/scripts/ops/"
+  # vault-restore sources lib-mount-rebind.sh unconditionally (grobase a74eea31);
+  # lib-netseg.sh is optional and only present on some pins.
+  cp "$REPO/apps/grobase/scripts/lib/lib-mount-rebind.sh" "$root/scripts/lib/"
   [ -f "$REPO/apps/grobase/scripts/lib/lib-netseg.sh" ] && cp "$REPO/apps/grobase/scripts/lib/lib-netseg.sh" "$root/scripts/lib/"
   for f in postgres-all.sql.gz mysql-all.sql.gz mongo.archive.gz minio.tar.gz redis.rdb dynamodb-all.tar.gz; do
     : > "$seeds/$f"
