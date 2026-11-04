@@ -65,9 +65,9 @@ def q(value) -> str:
 
 
 def ts(base: datetime, max_days: int) -> str:
-    return (base + timedelta(days=random.randint(0, max_days),
-                             hours=random.randint(0, 23),
-                             minutes=random.randint(0, 59))).strftime("%Y-%m-%d %H:%M:%S+00")
+    return (base + timedelta(days=random.randint(0, max_days), # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+                             hours=random.randint(0, 23), # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+                             minutes=random.randint(0, 59))).strftime("%Y-%m-%d %H:%M:%S+00") # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
 
 
 OPS = ["Nightfall", "Cobalt Ledger", "Silent Harbor", "Glass Orchid", "Iron Veil",
@@ -147,15 +147,15 @@ def main() -> None:
     # cases ──────────────────────────────────────────────────────────────────
     cases = []
     for i in range(1, 41):
-        status = random.choice(CASE_STATUS)
+        status = random.choice(CASE_STATUS) # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
         opened = ts(BASE - timedelta(days=400), 380)
         closed = ts(BASE, 200) if status in ("closed", "cold") else None
         cases.append([i, f"BIA-{2025 + (i % 2)}-{i:03d}", f"Operation {OPS[i - 1]}",
-                      status, random.choice(PRIORITIES), random.choice(CLASSIF),
-                      round(random.uniform(8_000, 250_000), 2), random.choice(inv_names),
-                      random.choice(CLIENTS), opened, closed,
-                      f"Investigation into {random.choice(['suspected money laundering', 'asset concealment', 'procurement fraud', 'sanctions evasion', 'art-market fraud', 'insurance fraud', 'corporate espionage'])} "
-                      f"involving {random.choice(['offshore structures', 'a shipping network', 'shell companies', 'a freeport vault', 'crypto mixers', 'trade mis-invoicing'])}.",
+                      status, random.choice(PRIORITIES), random.choice(CLASSIF), # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+                      round(random.uniform(8_000, 250_000), 2), random.choice(inv_names), # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+                      random.choice(CLIENTS), opened, closed, # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+                      f"Investigation into {random.choice(['suspected money laundering', 'asset concealment', 'procurement fraud', 'sanctions evasion', 'art-market fraud', 'insurance fraud', 'corporate espionage'])} " # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+                      f"involving {random.choice(['offshore structures', 'a shipping network', 'shell companies', 'a freeport vault', 'crypto mixers', 'trade mis-invoicing'])}.", # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
                       owner])
     emit("cases", ["id", "code", "title", "status", "priority", "classification", "budget",
                    "lead_investigator", "client", "opened_at", "closed_at", "summary", "owner_id"], cases)
@@ -165,17 +165,17 @@ def main() -> None:
     used = set()
     for i in range(1, 61):
         while True:
-            name = f"{random.choice(FIRST)} {random.choice(LAST)}"
+            name = f"{random.choice(FIRST)} {random.choice(LAST)}" # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
             if name not in used:
                 used.add(name)
                 break
-        alias = random.choice([None, None, f"“{random.choice(['The Banker', 'Marquis', 'Cashmere', 'Doc', 'The Courier', 'Magpie', 'Halcyon', 'Brick'])}”"])
-        dob = (datetime(1955, 1, 1) + timedelta(days=random.randint(0, 14_000))).strftime("%Y-%m-%d")
-        ssn = f"{random.randint(100, 999)}-{random.randint(10, 99)}-{random.randint(1000, 9999)}"
-        subjects.append([i, random.randint(1, 40), name, alias, ssn,
-                         random.choice(["CH", "DE", "RU", "FR", "IT", "NL", "AE", "MT", "PA", "CY"]),
-                         random.choice(RISK), random.choice(OCCUP), dob,
-                         random.choice([None, "Known to travel under secondary passport.",
+        alias = random.choice([None, None, f"“{random.choice(['The Banker', 'Marquis', 'Cashmere', 'Doc', 'The Courier', 'Magpie', 'Halcyon', 'Brick'])}”"]) # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+        dob = (datetime(1955, 1, 1) + timedelta(days=random.randint(0, 14_000))).strftime("%Y-%m-%d") # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+        ssn = f"{random.randint(100, 999)}-{random.randint(10, 99)}-{random.randint(1000, 9999)}" # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+        subjects.append([i, random.randint(1, 40), name, alias, ssn, # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+                         random.choice(["CH", "DE", "RU", "FR", "IT", "NL", "AE", "MT", "PA", "CY"]), # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+                         random.choice(RISK), random.choice(OCCUP), dob, # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+                         random.choice([None, "Known to travel under secondary passport.", # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
                                         "Frequent contact with case principals.",
                                         "Cooperative witness — handle with care.",
                                         "Surveillance authorized by client mandate."]),
@@ -186,26 +186,26 @@ def main() -> None:
     # locations ──────────────────────────────────────────────────────────────
     locations = []
     for i in range(1, 51):
-        city, country, lat, lng = random.choice(CITIES)
-        kind = random.choice(LOC_KINDS)
+        city, country, lat, lng = random.choice(CITIES) # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+        kind = random.choice(LOC_KINDS) # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
         locations.append([i, f"{kind.title()} — {city} #{i}", kind,
-                          f"{random.randint(1, 220)} {random.choice(['Quai', 'Strasse', 'Avenue', 'Laan', 'Via', 'Rua'])} {random.choice(LAST)}",
+                          f"{random.randint(1, 220)} {random.choice(['Quai', 'Strasse', 'Avenue', 'Laan', 'Via', 'Rua'])} {random.choice(LAST)}", # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
                           city, country,
                           round(lat + random.uniform(-0.05, 0.05), 6),
                           round(lng + random.uniform(-0.05, 0.05), 6),
-                          random.random() < 0.3, owner])
+                          random.random() < 0.3, owner]) # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
     emit("locations", ["id", "label", "kind", "address", "city", "country", "lat", "lng",
                        "surveillance_active", "owner_id"], locations)
 
     # evidence ───────────────────────────────────────────────────────────────
     evidence = []
     for i in range(1, 121):
-        kind = random.choice(EV_KINDS)
-        evidence.append([i, random.randint(1, 40), kind,
-                         f"{kind.title()} recovered during {random.choice(['site visit', 'records request', 'surveillance op', 'source meeting', 'forensic imaging'])}.",
-                         f"BIA-EV-{i:04d} sealed; custody log {random.randint(2, 6)} entries",
-                         random.randint(1, 50), random.choice([p['name'] for p in people]),
-                         ts(BASE - timedelta(days=300), 290), random.random() < 0.92, owner])
+        kind = random.choice(EV_KINDS) # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+        evidence.append([i, random.randint(1, 40), kind, # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+                         f"{kind.title()} recovered during {random.choice(['site visit', 'records request', 'surveillance op', 'source meeting', 'forensic imaging'])}.", # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+                         f"BIA-EV-{i:04d} sealed; custody log {random.randint(2, 6)} entries", # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+                         random.randint(1, 50), random.choice([p['name'] for p in people]), # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+                         ts(BASE - timedelta(days=300), 290), random.random() < 0.92, owner]) # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
     emit("evidence", ["id", "case_id", "kind", "description", "chain_of_custody",
                       "storage_location_id", "collected_by", "collected_at",
                       "integrity_verified", "owner_id"], evidence)
@@ -213,9 +213,9 @@ def main() -> None:
     # leads ──────────────────────────────────────────────────────────────────
     leads = []
     for i in range(1, 81):
-        leads.append([i, random.randint(1, 40), random.choice([None, random.randint(1, 60)]),
-                      random.choice(LEAD_SRC), random.choice(CRED), random.choice(LEAD_STATUS),
-                      random.choice(["Subject seen meeting unknown male at marina.",
+        leads.append([i, random.randint(1, 40), random.choice([None, random.randint(1, 60)]), # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+                      random.choice(LEAD_SRC), random.choice(CRED), random.choice(LEAD_STATUS), # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+                      random.choice(["Subject seen meeting unknown male at marina.", # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
                                      "Invoice totals diverge from customs declaration.",
                                      "New shell entity registered with shared director.",
                                      "Repeated structuring just under reporting threshold.",
@@ -229,56 +229,56 @@ def main() -> None:
     # transactions ───────────────────────────────────────────────────────────
     txns = []
     for i in range(1, 151):
-        flagged = random.random() < 0.35
-        amount = round(random.choice([random.uniform(900, 9_900),
+        flagged = random.random() < 0.35 # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+        amount = round(random.choice([random.uniform(900, 9_900), # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
                                       random.uniform(9_000, 9_999),
                                       random.uniform(10_000, 480_000)]), 2)
-        txns.append([i, random.randint(1, 60), amount, random.choice(CURRENCIES),
-                     random.choice(COUNTERPARTIES),
-                     f"{random.choice(['CH', 'MT', 'AE', 'VG', 'PA'])}{random.randint(10**10, 10**11 - 1)}",
-                     flagged, ts(BASE - timedelta(days=365), 360), random.choice(METHODS), owner])
+        txns.append([i, random.randint(1, 60), amount, random.choice(CURRENCIES), # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+                     random.choice(COUNTERPARTIES), # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+                     f"{random.choice(['CH', 'MT', 'AE', 'VG', 'PA'])}{random.randint(10**10, 10**11 - 1)}", # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+                     flagged, ts(BASE - timedelta(days=365), 360), random.choice(METHODS), owner]) # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
     emit("transactions", ["id", "subject_id", "amount", "currency", "counterparty",
                           "account_ref", "flagged", "executed_at", "method", "owner_id"], txns)
 
     # vehicles ───────────────────────────────────────────────────────────────
     vehicles = []
     for i in range(1, 31):
-        make, model = random.choice(MAKES)
-        plate = f"{random.choice(['ZH', 'GE', 'HH', 'B', 'NL', 'F'])}-{random.randint(1000, 99999)}"
-        vehicles.append([i, random.choice([None, random.randint(1, 60)]), plate, make, model,
-                         random.choice(COLORS), random.randint(2012, 2025),
-                         random.choice([None, random.randint(1, 50)]), owner])
+        make, model = random.choice(MAKES) # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+        plate = f"{random.choice(['ZH', 'GE', 'HH', 'B', 'NL', 'F'])}-{random.randint(1000, 99999)}" # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+        vehicles.append([i, random.choice([None, random.randint(1, 60)]), plate, make, model, # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+                         random.choice(COLORS), random.randint(2012, 2025), # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+                         random.choice([None, random.randint(1, 50)]), owner]) # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
     emit("vehicles", ["id", "owner_subject_id", "plate", "make", "model", "color", "year",
                       "last_seen_location_id", "owner_id"], vehicles)
 
     # communications ─────────────────────────────────────────────────────────
     comms = []
     for i in range(1, 201):
-        comms.append([i, random.randint(1, 60), random.choice(CHANNELS),
-                      random.choice([f"{random.choice(FIRST)} {random.choice(LAST)}",
+        comms.append([i, random.randint(1, 60), random.choice(CHANNELS), # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+                      random.choice([f"{random.choice(FIRST)} {random.choice(LAST)}", # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
                                      "unknown number", "unregistered SIM",
-                                     random.choice(COUNTERPARTIES)]),
+                                     random.choice(COUNTERPARTIES)]), # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
                       ts(BASE - timedelta(days=200), 195),
-                      random.choice(["Arranged meeting; location referenced obliquely.",
+                      random.choice(["Arranged meeting; location referenced obliquely.", # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
                                      "Discussed 'paperwork' for upcoming shipment.",
                                      "Payment confirmation — amount matches txn pattern.",
                                      "Subject anxious about 'the audit'.",
                                      "Travel plans: short-notice flight, cash ticket.",
                                      "Mentioned contact at the freeport by first name.",
                                      "Routine personal call — no case relevance."]),
-                      random.choice(COMM_CLASS), random.randint(1, 40), owner])
+                      random.choice(COMM_CLASS), random.randint(1, 40), owner]) # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
     emit("communications", ["id", "subject_id", "channel", "counterparty", "intercepted_at",
                             "summary", "classification", "case_id", "owner_id"], comms)
 
     # reports ────────────────────────────────────────────────────────────────
     reports = []
     for i in range(1, 41):
-        author = random.choice([p["name"] for p in people if p["dept"] in ("analysis", "investigations", "forensics")])
-        reports.append([i, i, f"{random.choice(['Interim', 'Surveillance', 'Financial', 'Forensic', 'Closing'])} report — Operation {OPS[i - 1]}",
-                        author, random.choice(REPORT_STATUS), random.choice(CLASSIF),
+        author = random.choice([p["name"] for p in people if p["dept"] in ("analysis", "investigations", "forensics")]) # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+        reports.append([i, i, f"{random.choice(['Interim', 'Surveillance', 'Financial', 'Forensic', 'Closing'])} report — Operation {OPS[i - 1]}", # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+                        author, random.choice(REPORT_STATUS), random.choice(CLASSIF), # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
                         ts(BASE - timedelta(days=100), 95),
                         f"Findings summary for Operation {OPS[i - 1]}: "
-                        f"{random.choice(['fund flows traced through three jurisdictions', 'subject network mapped, two new principals identified', 'evidence chain complete and verified', 'surveillance window produced actionable pattern-of-life', 'ledger reconstruction shows systematic skimming'])}.",
+                        f"{random.choice(['fund flows traced through three jurisdictions', 'subject network mapped, two new principals identified', 'evidence chain complete and verified', 'surveillance window produced actionable pattern-of-life', 'ledger reconstruction shows systematic skimming'])}.", # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
                         owner])
     emit("reports", ["id", "case_id", "title", "author", "status", "classification",
                      "published_at", "body", "owner_id"], reports)
@@ -286,11 +286,11 @@ def main() -> None:
     # assignments ────────────────────────────────────────────────────────────
     assignments = []
     for i in range(1, 101):
-        assignments.append([i, ((i - 1) % 40) + 1, random.choice(emails),
-                            random.choice(ROLES_ON_CASE), round(random.uniform(4, 160), 1),
+        assignments.append([i, ((i - 1) % 40) + 1, random.choice(emails), # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+                            random.choice(ROLES_ON_CASE), round(random.uniform(4, 160), 1), # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
                             round(random.uniform(45, 180), 2),
-                            (BASE - timedelta(days=random.randint(10, 300))).strftime("%Y-%m-%d"),
-                            random.random() < 0.7, owner])
+                            (BASE - timedelta(days=random.randint(10, 300))).strftime("%Y-%m-%d"), # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+                            random.random() < 0.7, owner]) # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
     emit("assignments", ["id", "case_id", "employee_email", "role_on_case", "hours",
                          "hourly_rate", "started_at", "active", "owner_id"], assignments)
 
@@ -307,21 +307,21 @@ def main() -> None:
 
     seen_pairs = set()
     for _ in range(30):  # subject ↔ subject associations
-        a, b = random.randint(1, 60), random.randint(1, 60)
+        a, b = random.randint(1, 60), random.randint(1, 60) # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
         if a == b or (min(a, b), max(a, b)) in seen_pairs:
             continue
         seen_pairs.add((min(a, b), max(a, b)))
         edge(nid("subjects", a), nid("subjects", b), "associate",
-             random.choice(["business partner", "family", "frequent contact",
+             random.choice(["business partner", "family", "frequent contact", # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
                             "co-director", "courier for", "introduced by informant"]),
              directed=False)
     for _ in range(25):  # subject → location patterns of life
-        edge(nid("subjects", random.randint(1, 60)), nid("locations", random.randint(1, 50)),
-             "frequents", random.choice(["weekly visits", "registered address",
+        edge(nid("subjects", random.randint(1, 60)), nid("locations", random.randint(1, 50)), # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+             "frequents", random.choice(["weekly visits", "registered address", # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
                                          "meeting spot", "storage access", "owns via proxy"]))
     for _ in range(25):  # cross-case discoveries: case → subject outside its FK chain
-        edge(nid("cases", random.randint(1, 40)), nid("subjects", random.randint(1, 60)),
-             "involves", random.choice(["person of interest", "witness", "beneficial owner",
+        edge(nid("cases", random.randint(1, 40)), nid("subjects", random.randint(1, 60)), # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
+             "involves", random.choice(["person of interest", "witness", "beneficial owner", # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
                                         "intermediary", "unconfirmed link"]))
     emit("edges", ["id", '"from"', '"to"', "type", "label", "directed", "owner_id"], edges)
 

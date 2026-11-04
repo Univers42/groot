@@ -8,9 +8,10 @@
 import { startSuite, DEFAULT_PORTS } from "./supervisor.mjs";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 const RT = "/rt";
-const dataDir = process.env.OSIO_DATA || "/tmp/osio-data";
+const dataDir = process.env.OSIO_DATA || join(tmpdir(), "osio-data");
 // Use the BUNDLED binaries (zonky postgres + postgrest) so the test exercises the
 // real shippable bundle — not a fuller system Postgres that happens to have psql.
 const PGBIN = process.env.PGBIN || `${RT}/pgsql/bin`;

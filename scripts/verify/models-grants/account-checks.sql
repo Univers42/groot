@@ -2048,10 +2048,20 @@ ROLLBACK;
 -- ===== P5-6-a: account data map, erase function, export jobs =====
 CREATE OR REPLACE FUNCTION pg_temp.p5_literal(p_rel regclass, p_col text) RETURNS text
 LANGUAGE sql AS $$
-  SELECT (regexp_match(pg_get_constraintdef(c.oid), '''([^'']*)''::'))[1]
+  -- Prefer the first quoted literal from a column CHECK.
+  -- Handles both forms Postgres emits:
+  --   CHECK (kind IN ('skill', 'rule', 'command'))
+  --   CHECK ((kind = ANY (ARRAY['skill'::text, 'rule'::text, ...])))
+  SELECT COALESCE(
+    (regexp_match(pg_get_constraintdef(c.oid), '''([^'']+)''::'))[1],
+    (regexp_match(pg_get_constraintdef(c.oid), '''([^'']+)'''))[1]
+  )
     FROM pg_constraint c
    WHERE c.conrelid = p_rel AND c.contype = 'c'
-     AND pg_get_constraintdef(c.oid) ~ ('\(\(?' || p_col || ' (= ANY|IN|= .)|\(' || p_col || '\)::text = ANY')
+     AND (
+       pg_get_constraintdef(c.oid) ~ ('\(\(?' || p_col || ' (= ANY|IN|= .)|\(' || p_col || '\)::text = ANY')
+       OR pg_get_constraintdef(c.oid) ~ ('\y' || p_col || '\y.*\yIN\y')
+     )
    LIMIT 1
 $$;
 
@@ -2095,6 +2105,23 @@ BEGIN
       WHEN 'osionos_messages.ai_run_id' THEN CASE WHEN p_col = 'ai_requested_by' THEN 'gen_random_uuid()' ELSE 'NULL' END
       WHEN 'osionos_messages.ai_requested_by' THEN 'NULL'
       WHEN 'osionos_messages.author_id' THEN CASE WHEN p_col = 'ai_requested_by' THEN 'public.osionos_ai_bot_author()' END
+      -- ai_context_items: kind/scope/slug CHECKs reject random text; force valid values.
+      WHEN 'ai_context_items.kind' THEN '''skill'''
+      WHEN 'ai_context_items.scope' THEN '''user'''
+      WHEN 'ai_context_items.slug' THEN '''p5-'' || translate(left(md5(random()::text), 8), ''0189'', ''abcd'')'
+      WHEN 'ai_context_items.name' THEN '''p5 skill'''
+      WHEN 'ai_context_items.description' THEN '''p5 canary skill description'''
+      WHEN 'ai_context_items.body' THEN '''p5 canary skill body'''
+      -- page comments (discussions migration):
+      -- decided_check: (status = 'open') = (decided_by IS NULL AND decided_at IS NULL)
+      -- When the canary seeds decided_by as the user column, pair it with accepted + decided_at.
+      -- Otherwise keep the row open with null decided_*.
+      WHEN 'osionos_page_comments.kind' THEN '''comment'''
+      WHEN 'osionos_page_comments.status' THEN CASE WHEN p_col = 'decided_by' THEN '''accepted''' ELSE '''open''' END
+      WHEN 'osionos_page_comments.decided_at' THEN CASE WHEN p_col = 'decided_by' THEN 'now()' ELSE 'NULL' END
+      WHEN 'osionos_page_comments.decided_by' THEN CASE WHEN p_col = 'decided_by' THEN NULL ELSE 'NULL' END
+      -- reactions: emoji CHECK is char_length 1..16; random text is longer
+      WHEN 'osionos_page_comment_reactions.emoji' THEN '''ok'''
       ELSE NULL END;
     CONTINUE WHEN v_force IS NULL AND NOT v_iscol AND a.attname <> p_col AND a.attname IS DISTINCT FROM p_col2 AND (a.atthasdef OR NOT a.attnotnull);
     v_typ := a.typ;

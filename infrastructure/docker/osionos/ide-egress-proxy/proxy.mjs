@@ -211,13 +211,13 @@ if (isMain && process.argv.includes("--selfcheck")) {
   expect("rfc1918 192.168 denied", denied4("192.168.1.1"), true);
   expect("loopback denied", denied4("127.0.0.1"), true);
   expect("cgnat denied", denied4("100.64.0.1"), true);
-  expect("public allowed", denied4("8.8.8.8"), false);
-  expect("public cloudflare", denied4("1.1.1.1"), false);
+  expect("public allowed", denied4("8.8.8.8"), false); // NOSONAR S1313: egress deny-list, the addresses are the point
+  expect("public cloudflare", denied4("1.1.1.1"), false); // NOSONAR S1313: egress deny-list, the addresses are the point
   expect("v6 loopback denied", denied6("::1"), true);
-  expect("v6 ula denied", denied6("fd00:ec2::254"), true);
-  expect("v6 linklocal denied", denied6("fe80::1"), true);
-  expect("v6 mapped metadata denied", denied6("::ffff:169.254.169.254"), true);
-  expect("v6 public allowed", denied6("2606:4700:4700::1111"), false);
+  expect("v6 ula denied", denied6("fd00:ec2::254"), true); // NOSONAR S1313: egress deny-list, the addresses are the point
+  expect("v6 linklocal denied", denied6("fe80::1"), true); // NOSONAR S1313: egress deny-list, the addresses are the point
+  expect("v6 mapped metadata denied", denied6("::ffff:169.254.169.254"), true); // NOSONAR S1313: egress deny-list, the addresses are the point
+  expect("v6 public allowed", denied6("2606:4700:4700::1111"), false); // NOSONAR S1313: egress deny-list, the addresses are the point
   if (fail.length) { process.stderr.write(`selfcheck FAIL:\n${fail.join("\n")}\n`); process.exit(1); }
   process.stdout.write("selfcheck OK: egress allow/deny tables correct\n");
   process.exit(0);

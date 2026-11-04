@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: nginx from mirror.gcr.io under its public.ecr.aws name
         # Same reason as graph-studio.yml: public.ecr.aws rate-limits anonymous pulls per runner IP.
         run: |

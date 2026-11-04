@@ -137,12 +137,12 @@ resolve_auto() {
 resolve_host() { # a bare host or alias: ssh first, then Kong's plain port, then https
   if remote_has_grobase "$1"; then
     printf 'ssh %s\n' "$1"
-  elif url_reachable "http://$1:8000"; then
-    printf 'direct http://%s:8000\n' "$1"
+  elif url_reachable "http://$1:8000"; then # NOSONAR S5332: plain http on the local docker network / dev loopback
+    printf 'direct http://%s:8000\n' "$1" # NOSONAR S5332: plain http on the local docker network / dev loopback
   elif url_reachable "https://$1"; then
     printf 'direct https://%s\n' "$1"
   else
-    die "$1: ssh shows no mini-baas-kong there and neither http://$1:8000 nor https://$1 answers from a container"
+    die "$1: ssh shows no mini-baas-kong there and neither http://$1:8000 nor https://$1 answers from a container" # NOSONAR S5332: plain http on the local docker network / dev loopback
   fi
 }
 # relay_cafile -> the CA file the relay verifies Kong with, as the relay sees it: the copy up

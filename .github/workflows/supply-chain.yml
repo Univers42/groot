@@ -19,7 +19,7 @@ jobs:
     name: npm frozen installs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
       # Init only the frontend submodules we install here (not the heavy grobase
@@ -32,7 +32,7 @@ jobs:
           git submodule update --init \
             apps/mail apps/calendar apps/osionos/app
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "22"
 
@@ -63,7 +63,7 @@ jobs:
     name: pnpm frozen installs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
       - name: Check out osionos submodule
@@ -75,7 +75,7 @@ jobs:
           # path into the grobase submodule, so init grobase (non-recursive) too.
           git submodule update --init apps/grobase apps/opposite-osiris apps/osionos/app
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "22"
 

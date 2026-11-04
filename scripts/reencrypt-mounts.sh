@@ -135,7 +135,7 @@ dsn_for() {
 		;;
 	osionos-iot)
 		# dynamodb-local takes static fake credentials by design.
-		printf 'dynamodb://local?endpoint=http://dynamodb-local:8000&region=us-east-1&access_key=fake&secret_key=fake'
+		printf 'dynamodb://local?endpoint=http://dynamodb-local:8000&region=us-east-1&access_key=fake&secret_key=fake' # NOSONAR S5332: plain http on the local docker network / dev loopback
 		;;
 	*) return 1 ;;
 	esac

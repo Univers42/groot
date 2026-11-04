@@ -24,7 +24,7 @@ function bootSuite() {
     ? ["compose", "-f", localCompose, "--profile", "local", "up", "-d"]
     : ["compose", "--profile", "dev", "up", "-d"];
   try {
-    const child = spawn("docker", args, { cwd, detached: true, stdio: "ignore" });
+    const child = spawn("docker", args, { cwd, detached: true, stdio: "ignore" }); // NOSONAR S4036: fixed tool name, PATH is the dev/CI image
     child.on("error", () => {}); // docker missing / no compose -> the app just shows offline
     child.unref();
   } catch { /* ignore */ }
