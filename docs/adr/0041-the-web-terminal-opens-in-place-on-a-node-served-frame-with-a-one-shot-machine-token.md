@@ -64,7 +64,7 @@ ruling is in the osionos verdict file, "Amendment 1".
 - **Consequences.** One email per computer per 90 days. Sign-out-everywhere and machine removal take effect
   through the bridge refusing the resume mint, with a lag of up to the access token's TTL (unverified, R-U1).
   The W15 acceptance above ("needs … the emailed step-up") still holds only because R5 keeps the beta off
-  remember. An owner override of R5 must be recorded here. R1–R14 are open.
+  remember. An owner override of R5 must be recorded here. R1–R14 landed on osionos develop in aebe75df (2026-11-04), each with its test; R-U1 (the production access-token TTL) and R-U2 (Safari, Firefox) stay open before main.
 - **R5 overridden by the owner, 2026-11-01: the beta is remembered too.** Asked whether the beta should also
   remember the computer, the owner chose "Beta too". The owner's unit and the Connector name both
   `https://baas.tail10f2ea.ts.net:8443` and `https://baas-beta.tail10f2ea.ts.net` as remember origins.
