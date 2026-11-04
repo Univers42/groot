@@ -32,9 +32,6 @@ scripts/*
 !scripts/bridge-share-rules.mjs
 !scripts/bridge-live-workspaces.mjs
 !scripts/bridge-graph-edges.mjs
-!scripts/bridge-page-access.mjs
-!scripts/bridge-share-rules.mjs
-!scripts/bridge-access-generation.mjs
 !scripts/bridge-moderation.mjs
 # The lists of the L0 gate: the module reads them next to itself, at import.
 !scripts/moderation-lists/

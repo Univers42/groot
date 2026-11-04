@@ -32,9 +32,6 @@
 #   services/osionos-ai/src/retrieval/shareRules.ts -> scripts/bridge-page-access.mjs
 #                                           -> scripts/bridge-share-rules.mjs
 #   services/osionos-ai/src/retrieval/related.ts -> scripts/bridge-graph-edges.mjs -> scripts/bridge-page-read.mjs
-#   services/osionos-ai/src/retrieval/shareRules.ts -> scripts/bridge-page-access.mjs
-#                                           -> scripts/bridge-share-rules.mjs
-#                                           -> scripts/bridge-access-generation.mjs
 # The thirteenth is the L0 gate of the image prompt (devil C72): the module reads
 # its lists next to itself, so they travel with it:
 #   scripts/bridge-moderation.mjs          -> scripts/moderation-lists/{en,fr,es}.txt
