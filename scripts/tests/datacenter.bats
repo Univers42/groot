@@ -557,6 +557,17 @@ repo() {
   [[ "$output" != *"apps/grobase"* ]]
 }
 
+# Measured 2026-11-04: osionos-node held 127.0.0.1:4100, and the edge publishes that port for the
+# Mail bridge, so the whole edge refused to start. The container's own port stays fixed: nginx
+# proxies to mail-bridge:4100, so moving that with the host's would break Mail.
+@test "host ports: the Mail and Calendar bridges move like every other published port" {
+  run bash "$BATS_TEST_DIRNAME/../host-ports.sh" list
+  [[ "$output" == *"MAIL_BRIDGE_HOST_PORT=4100"* ]]
+  [[ "$output" == *"CALENDAR_BRIDGE_HOST_PORT=4200"* ]]
+  grep -q 'MAIL_BRIDGE_PORT: ${MAIL_BRIDGE_PORT:-4100}' "$BATS_TEST_DIRNAME/../../docker-compose.yml"
+  ! grep -q 'https://localhost:${MAIL_BRIDGE_PORT' "$BATS_TEST_DIRNAME/../../docker-compose.yml"
+}
+
 @test "sync: vendor/born2root stays at its gitlink, because groot drives that tested commit" {
   grep -E '^PARENT_PINNED' "$BATS_TEST_DIRNAME/../../utils/mk/repo.mk" | grep -q 'vendor/born2root'
 }

@@ -24,9 +24,9 @@ services:
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${OSIONOS_BRIDGE_HOST_PORT:-4000}:4000"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${AUTH_GATEWAY_HOST_PORT:-8787}:8787"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${MAIL_HOST_PORT:-3002}:3002"
-      - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${MAIL_BRIDGE_PORT:-4100}:4100"
+      - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${MAIL_BRIDGE_HOST_PORT:-4100}:4100"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${CALENDAR_HOST_PORT:-3003}:3003"
-      - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${CALENDAR_BRIDGE_PORT:-4200}:4200"
+      - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${CALENDAR_BRIDGE_HOST_PORT:-4200}:4200"
       # drawnosaurus. LITERAL 127.0.0.1, not TRACK_BINOCLE_BIND_ADDR: that variable comes
       # from detect-bind-addr.sh and resolves to 0.0.0.0 here (every line above is
       # currently published on every interface — `ss -ltn`). drawnosaurus has no per-user
@@ -1132,8 +1132,8 @@ services:
       NODE_ENV: development
       MAIL_BRIDGE_PORT: ${MAIL_BRIDGE_PORT:-4100}
       MAIL_APP_ORIGIN: https://localhost:${MAIL_HOST_PORT:-3002}
-      MAIL_BRIDGE_PUBLIC_ORIGIN: https://localhost:${MAIL_BRIDGE_PORT:-4100}
-      GMAIL_REDIRECT_URI: https://localhost:${MAIL_BRIDGE_PORT:-4100}/auth/gmail/callback
+      MAIL_BRIDGE_PUBLIC_ORIGIN: https://localhost:${MAIL_BRIDGE_HOST_PORT:-4100}
+      GMAIL_REDIRECT_URI: https://localhost:${MAIL_BRIDGE_HOST_PORT:-4100}/auth/gmail/callback
       VAULT_ADDR: ${MAIL_BRIDGE_VAULT_ADDR:-http://vault:8200}
     volumes:
       - ./apps/mail:/app
@@ -1176,7 +1176,7 @@ services:
     environment:
       NODE_ENV: development
       CHOKIDAR_USEPOLLING: "true"
-      VITE_MAIL_BRIDGE_URL: https://localhost:${MAIL_BRIDGE_PORT:-4100}
+      VITE_MAIL_BRIDGE_URL: https://localhost:${MAIL_BRIDGE_HOST_PORT:-4100}
     volumes:
       - ./apps/mail:/app
       - mail-node-modules:/app/node_modules
@@ -1222,8 +1222,8 @@ services:
       NODE_ENV: development
       CALENDAR_BRIDGE_PORT: ${CALENDAR_BRIDGE_PORT:-4200}
       CALENDAR_APP_ORIGIN: https://localhost:${CALENDAR_HOST_PORT:-3003}
-      CALENDAR_BRIDGE_PUBLIC_ORIGIN: https://localhost:${CALENDAR_BRIDGE_PORT:-4200}
-      CALENDAR_REDIRECT_URI: https://localhost:${CALENDAR_BRIDGE_PORT:-4200}/auth/google/callback
+      CALENDAR_BRIDGE_PUBLIC_ORIGIN: https://localhost:${CALENDAR_BRIDGE_HOST_PORT:-4200}
+      CALENDAR_REDIRECT_URI: https://localhost:${CALENDAR_BRIDGE_HOST_PORT:-4200}/auth/google/callback
       CALENDAR_BAAS_URL: http://mini-baas-kong:8000
       CALENDAR_BAAS_PUBLIC_URL: https://localhost:${KONG_HTTP_PORT:-8000}
       VAULT_ADDR: ${CALENDAR_BRIDGE_VAULT_ADDR:-http://vault:8200}
@@ -1268,7 +1268,7 @@ services:
     environment:
       NODE_ENV: development
       CHOKIDAR_USEPOLLING: "true"
-      VITE_CALENDAR_BRIDGE_URL: https://localhost:${CALENDAR_BRIDGE_PORT:-4200}
+      VITE_CALENDAR_BRIDGE_URL: https://localhost:${CALENDAR_BRIDGE_HOST_PORT:-4200}
       VITE_CALENDAR_BAAS_URL: https://localhost:${KONG_HTTP_PORT:-8000}
     volumes:
       - ./apps/calendar:/app
