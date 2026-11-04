@@ -60,6 +60,7 @@ No sudo and no prompt. Without credentials `make all` is the local pipeline, unc
 | `no admin ssh` | A rebuilt VM has a new host key | Delete `GROBASE_ADMIN_HOST_KEY` from `datacenter.env`, then `make all` |
 | `does not verify https://localhost:8443` | The CA here is not the VM's | `rm -r apps/grobase/certs`, then `VAULT42_REFRESH=1 make all` |
 | `models migrations are pending` | The VM is behind `models/` | `make all DATACENTER_MIGRATE=1` |
+| `the VM is still not converged` | A long reader held a table past the 2 s lock budget, such as the hourly backup at `:15` | `make all` again |
 | `the app's API key does not verify` | `./.env.local` and the VM disagree | Read ADR 0003, then `make link-live-data-ensure` |
 | `Firefox is installed but has no profile` | It never started | Start it once, then `make all` |
 

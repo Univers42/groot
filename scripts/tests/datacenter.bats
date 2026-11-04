@@ -184,6 +184,15 @@ if [ ! -f "$LOG.cleared" ]; then touch "$LOG.cleared"; echo "[models] realtime r
   ! grep -qx 'models ' "$LOG"
 }
 
+@test "preflight: a trigger a busy table kept stops the run and names the likely cause" {
+  echo 'SELECT 1;' >"$ROOT/models/realtime-cdc-off-migration.sql"
+  in_tree apply-models-migrations.sh 'echo "[models] realtime row broadcasts armed: users" >&2; exit 1'
+  dc preflight
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"hourly backup"* ]]
+  [ "$(grep -c '^live-data' "$LOG")" -eq 0 ]
+}
+
 @test "preflight: unapplied DDL stops without DATACENTER_MIGRATE=1, and nothing is written" {
   in_tree apply-models-migrations.sh 'echo "[models] pending: x.sql (missing table: x)" >&2; exit 1'
   dc preflight
