@@ -567,56 +567,60 @@ A commit count is not effort, and pairing or review does not show in it.
 
 ## Modules
 
-The subject requires **14 points** (Major = 2, Minor = 1). A module that cannot be demonstrated
-live scores zero, so the confidence column is honest about where each one stands:
+The subject requires **14 points** (Major = 2, Minor = 1), and a module that does not work at
+the evaluation scores zero. A module is claimed below only when its evidence is something a
+second person can re-run: a CI job, a test suite, or a script. Status:
 
-- **A** — works as-is in the default stack
-- **B** — backend exists; needs a feature flag and a migration, no new code
-- **C** — backend exists; needs a user-facing screen to be demonstrable
+- **CI** — a CI job proves it on every change (link to the workflow or the tests it runs).
+- **CI + live** — as CI, and a manual check on production is recorded, with its date.
+- **Partial** — CI covers part of the subject's list; the gap is named in the row.
 
-Only the **A** rows — **10 points**, including the two modules of choice, are
-demonstrable in the default stack today, which is four points below the 14 required.
+The osionos links point at osionos `main`; groot's pin of `apps/osionos/app` predates some of
+those tests and moves to `main` with [#172](https://github.com/Univers42/groot/issues/172).
 
-| # | Module | Category | Type | Pts | Conf | How it is implemented |
-|---|---|---|---|--:|:--:|---|
-| 1 | Public API (key, rate limit, docs, ≥5 endpoints) | Web | Major | 2 | A | Kong gateway with key auth and rate limiting; OpenAPI specs in grobase `infra/config/openapi/` |
-| 2 | Backend as microservices | DevOps | Major | 2 | A | 15 compose planes (Go control, Rust data, Rust realtime, TS app, storage, auth…) talking over an internal network with HMAC-signed service calls |
-| 3 | Real-time features via WebSockets | Web | Major | 2 | A | Rust realtime plane; changes published as events; protected channel namespaces (gate `m175`) |
-| 4 | Real-time collaboration | Web | Minor | 1 | A | osionos live co-editing over `collab:<spaceId>` on the realtime plane |
-| 5 | Advanced permissions | User management | Major | 2 | C | Roles and policies as rows, ABAC conditions; needs `PERMISSION_CONDITIONS_ENABLED` + `API_KEY_ABAC_ENABLED`, migration `063` |
-| 6 | Organisation system | User management | Major | 2 | C | Organisations are **on in production**; only a management screen is missing |
-| 7 | Monitoring with Prometheus + Grafana | DevOps | Major | 2 | C | Observability plane; needs `TENANT_OBS_ENABLED` **and** `DATA_PLANE_TENANT_OBS` |
-| 8 | Health/status page, backups, disaster recovery | DevOps | Minor | 1 | C | `TENANT_BACKUP_ENABLED`, migration `042` |
-| 9 | GDPR compliance | Data | Minor | 1 | B | Data export and hard erase: `TENANT_EXPORT_ENABLED` + `HARD_ERASE_ENABLED`; `gdpr_requests` table |
-| 10 | Two-factor authentication | User management | Minor | 1 | B | TOTP (grobase `one` shape) or passkeys (`PASSKEYS_ENABLED`) |
-| 11 | Remote authentication (OAuth 2.0) | User management | Minor | 1 | B | `SSO_ENABLED`, migration `053` |
-| 12 | File upload and management | Web | Minor | 1 | C | Storage plane on MinIO, `STORAGE_BUCKET_SCOPE_ENABLED` |
-| 13 | **Module of choice:** contract-driven application factory | Free choice | Major | 2 | A | See justification below |
-| 14 | **Module of choice:** SSRF guard on the HTTP engine | Free choice | Minor | 1 | A | See justification below |
-| 15 | Complete LLM system interface (text + images) | Artificial Intelligence | Major | 2 | B | Text streams with resume, cancel and rate limits; image generation needs `OSIONOS_AI_IMAGES=on`, `--profile ai --profile ai-gpu-vulkan` and the prompt guard (C72), without which the service refuses to start; off on the public stack. [M1 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m1-images.md) |
-| 16 | Complete RAG on a large dataset | Artificial Intelligence | Major | 2 | B | `--profile ai`: permission-aware hybrid search with citations; the reranker is off by default, and the 110k-chunk corpus is a separate eval stack. [M2 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m2-rag.md) |
-| 17 | ML recommendation system | Artificial Intelligence | Major | 2 | B | iALS + logistic ranker; needs `OSIONOS_RECS_FOR_YOU=1`, the beacon is opt-in, and the nightly job skips under 20 users. [M3 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m3-recs.md) |
-| 18 | Content moderation AI | Artificial Intelligence | Minor | 1 | B | L0 rules + L1 classifier; needs `OSIONOS_MODERATION_ACTIONS=hold` and `OSIONOS_MODERATION_STATE=1`; L1 is log-only (no auto-removal); the public stack runs `log`. [M4 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m4-moderation.md) |
-| 19 | Voice / speech | Artificial Intelligence | Minor | 1 | B | `--profile ai` with the speech model in its volume: dictation and read-aloud; off on the public stack (`503 voice_unavailable`). [M5 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m5-voice.md) |
-| 20 | Sentiment analysis | Artificial Intelligence | Minor | 1 | C | Opt-in per workspace (owner/admin, Settings › AI) with `OSIONOS_SENTIMENT_URL`; off on the public stack; the model licence is undeclared. [M6 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m6-sentiment.md) |
-| 21 | Image recognition and tagging | Artificial Intelligence | Minor | 1 | C | `--profile ai --profile ai-vlm` with the VLM in its volume; the browser flow and in-app search are not verified end to end; off on the public stack. [M7 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m7-images-tags.md) |
+| # | Module | Category | Type | Pts | Status | Evidence | Who (commits) |
+|---|---|---|---|--:|---|---|---|
+| 1 | Backend as microservices | DevOps | Major | 2 | CI | groot [`Fresh-Machine Migration`](.github/workflows/fresh-machine.yml) runs `make all` on a clean runner and asserts every core, engine and app container healthy (green on `main`, [run 41676720776](https://github.com/Univers42/groot/actions/runs/41676720776), 2026-11-03). Demo: `docker compose ps` after `make all` | dlesieur 205, vjan-nie 2, shashemi 1 (grobase `orchestrators/compose`, `src/control-plane`) |
+| 2 | Real-time features via WebSockets | Web | Major | 2 | CI | grobase CI runs gate `m201-realtime-issuer`; groot [`Modules of choice`](.github/workflows/modules-of-choice.yml) runs `m175-collab-namespace-isolation` (the realtime-core subscribe/publish authorisation tests). Demo: two users in one chat channel, a message appears without a reload | dlesieur 43, vjan-nie 5, shashemi 1 (grobase `infra/docker/services/realtime`) |
+| 3 | Allow users to interact with other users (chat, profile, friends) | Web | Major | 2 | CI + live | osionos CI (`make test-canvas`, `make test-bridge`, green on `main` 2026-11-03) runs [`chat-catch-up.test.ts`](https://github.com/Univers42/osionos/blob/main/tests/canvas/chat-catch-up.test.ts) and [`bridge-chat-reply-notify.test.mjs`](https://github.com/Univers42/osionos/blob/main/tests/bridge/bridge-chat-reply-notify.test.mjs) (chat), [`bridge-account-profile.test.mjs`](https://github.com/Univers42/osionos/blob/main/tests/bridge/bridge-account-profile.test.mjs) (profile read and update), [`bridge-social-connections.test.mjs`](https://github.com/Univers42/osionos/blob/main/tests/bridge/bridge-social-connections.test.mjs) and [`bridge-connection-transitions.test.mjs`](https://github.com/Univers42/osionos/blob/main/tests/bridge/bridge-connection-transitions.test.mjs) (friends). Live on 2026-11-04 with two accounts: friend request sent, accepted, listed, removed; a DM shown in the other window without a reload ([#171](https://github.com/Univers42/groot/issues/171)) | dlesieur 72, vjan-nie 1 (chat); dlesieur 38, serjimen 2 (connections) |
+| 4 | Standard user management and authentication | User Management | Major | 2 | CI + live | osionos CI runs [`bridge-avatar.test.mjs`](https://github.com/Univers42/osionos/blob/main/tests/bridge/bridge-avatar.test.mjs) (upload, type and size refusal), [`bridge-presence.test.mjs`](https://github.com/Univers42/osionos/blob/main/tests/bridge/bridge-presence.test.mjs) (online status), and row 3's profile and connections tests. Members without an image get initials (osionos `src/features/collab/model/collabPresence.ts:63`). Live: friend listed with `online=True`, profile page `200` ([#171](https://github.com/Univers42/groot/issues/171)) | dlesieur 34 (osionos `scripts/bridge-*profile*`, `*avatar*`, `*presence*`, `src/features/profile-binding`) |
+| 5 | Remote authentication with OAuth 2.0 | User Management | Minor | 1 | CI + live | opposite-osiris CI (`pnpm test`, green on `main` 2026-11-03) runs [`oauth-providers.test.ts`](https://github.com/Univers42/prismatica/blob/main/tests/unit/auth/oauth-providers.test.ts) and the `gateway-oauth-*` tests. Live: `GET /api/auth/oauth/providers` answers `["google","github"]`; the working account has a linked GitHub identity ([#171](https://github.com/Univers42/groot/issues/171)) | dlesieur 29, danfern3 1 (opposite-osiris `scripts/auth-gateway.mjs`, `src/scripts/portal-oauth.ts`, OAuth tests) |
+| 6 | Use a frontend framework | Web | Minor | 1 | CI | osionos is React (osionos `package.json`); row 1's CI builds and serves it | dlesieur 1239, danfern3 78, vjan-nie 77, serjimen 76, rstancu 38, shashemi 8 (osionos `src`) |
+| 7 | Public API (key, rate limit, docs, ≥5 endpoints) | Web | Major | 2 | CI | groot [`Public API`](.github/workflows/public-api.yml): the `:8444` edge serves the OpenAPI document at `/openapi.json` and renders it at `/docs/` ([`tests/api-docs-edge`](tests/api-docs-edge/docs.bats)); [`scripts/verify/public-api.sh`](scripts/verify/public-api.sh) shows `401` without a key, `401` with a wrong one and a `429` past the limit, against Kong 3.8.0 with grobase's plugins ([`tests/public-api`](tests/public-api/public-api.bats)). Live on 2026-11-04 (3 requests): both `401`s on `https://baas.tail10f2ea.ts.net/rest/v1/`. On a stack: `scripts/verify/public-api.sh https://localhost:8444 --key <anon key> --path <a route with a low limit>` | dlesieur 41, vjan-nie 1 (grobase `infra/docker/services/kong`, `infra/config/openapi`) |
+| 8 | **Module of choice:** contract-driven application factory | Free choice | Major | 2 | Partial | groot [`Modules of choice`](.github/workflows/modules-of-choice.yml) runs gates `m176-contract-isolation-live` and `m177-selfserve-apps` in their static mode (source checks and the Go slug/DSN tests). Their live half (`BAAS_VERIFY_LIVE=1`: two apps, two databases, cross-app key refused) runs in no CI job yet | dlesieur 9 (provisioning), dlesieur 33 (self-serve) |
+| 9 | **Module of choice:** SSRF guard on the HTTP engine | Free choice | Minor | 1 | Partial | 30 unit tests in grobase `src/data-plane-router/crates/data-plane-pool/src/http/mod.rs`, run by grobase CI (`cargo test --workspace`). No end-to-end demo of a mount at `169.254.169.254` being refused yet, and whether it stands apart from row 8 is a team decision ([#177](https://github.com/Univers42/groot/issues/177)) | dlesieur 8 |
+| 10 | Real-time collaborative features | Web | Minor | 1 | CI | osionos CI runs the `tests/bridge/bridge-collab-*.test.mjs` and `tests/canvas/collab-*.test.ts` suites; row 2's `m175` proves `collab:<spaceId>` is closed to wildcard tokens. Demo: two users on one page, each sees the other's cursor and edits | dlesieur 46, shashemi 1 (osionos `src/features/collab`, `scripts/bridge-*collab*`) |
 
 **Point calculation**
 
 | | Points |
 |---|--:|
-| Catalogue modules listed (rows 1–12) | 18 |
-| Modules of choice (rows 13–14) | 3 |
-| Artificial Intelligence modules (rows 15–21: 2 + 2 + 2 + 1 + 1 + 1 + 1) | 10 |
-| **Total listed** | **31** |
-| Demonstrable today (confidence A: rows 1–4 = 7, rows 13–14 = 3) | **10** |
+| Status CI or CI + live (rows 1–7, 10) | 13 |
+| Status Partial (rows 8–9, the modules of choice) | 3 |
+| **Total claimed** | **16** |
 | Required | 14 |
 
-The **AI opponent** module is not claimed: osionos has no game.
+Rows 1–7 and 10 make 13 points on their own; one of the two modules of choice must hold for the
+total to reach 14, and both must hold for the two-point margin.
 
-The **Multiple languages** module is not claimed: osionos lists four languages in its settings,
-but switching only records a stub action (`i18n_change_stub` in osionos
-`src/features/settings/SettingsCenter.tsx`); no translation resources are loaded.
+Team to fill: the date and the name of the second member who ran each row's evidence on a fresh
+`make all` ([#171](https://github.com/Univers42/groot/issues/171), "Done when").
+
+### Not claimed
+
+| Module | Category | Type | Why not |
+|---|---|---|---|
+| Use a framework for both the frontend and backend | Web | Major | The NestJS services of grobase's application plane sit behind compose profiles (`adapter-plane`, `control-plane`, `legacy-node`) and the osionos bridge is plain `node:http`; the frontend half is claimed as row 6 |
+| Advanced permissions | User Management | Major | Admin › Users answers `403` for the platform admin (2026-11-04 audit); needs `PERMISSION_CONDITIONS_ENABLED`, `API_KEY_ABAC_ENABLED`, migration `063` |
+| Organisation system | User Management | Major | Organisations are on in production, but no management screen exists |
+| Monitoring with Prometheus + Grafana | DevOps | Major | Needs `TENANT_OBS_ENABLED` and `DATA_PLANE_TENANT_OBS`; nothing to click |
+| Health/status page, backups, disaster recovery | DevOps | Minor | `TENANT_BACKUP_ENABLED`, migration `042`; nothing to click |
+| GDPR compliance | Data | Minor | The deletion executor is open work (Univers42/osionos#56) |
+| Two-factor authentication | User Management | Minor | TOTP or passkeys need `PASSKEYS_ENABLED`; not on by default |
+| File upload and management | Web | Minor | Uploaded media is readable without authentication (Univers42/osionos#233, #235), which fails "secure storage with access control" |
+| Seven Artificial Intelligence modules | Artificial Intelligence | 3 Major, 4 Minor | Each needs a compose profile or flag that is off on the public stack: [M1 images](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m1-images.md), [M2 RAG](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m2-rag.md), [M3 recommendations](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m3-recs.md), [M4 moderation](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m4-moderation.md), [M5 voice](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m5-voice.md), [M6 sentiment](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m6-sentiment.md), [M7 image tags](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m7-images-tags.md) |
+| AI opponent | Artificial Intelligence | Major | osionos has no game |
+| Multiple languages | Accessibility and Internationalization | Minor | Switching language only records a stub action (`i18n_change_stub` in osionos `src/features/settings/SettingsCenter.tsx`); no translation resources are loaded |
 
 ### Justification — Module of choice (Major): contract-driven application factory
 
@@ -631,7 +635,9 @@ but switching only records a stub action (`i18n_change_stub` in osionos
 - **Why it deserves a Major.** It spans the Go control plane, the Rust data plane and the
   database layer, and it comes with isolation proofs: gate `m177` proves self-serve creation, and
   gate `m176` proves one application cannot read another's data (a foreign mount resolves to zero
-  rows — a 404, never a cross read).
+  rows — a 404, never a cross read). Both run in groot's
+  [`Modules of choice`](.github/workflows/modules-of-choice.yml) workflow in their static mode;
+  their live half needs a running stack (`BAAS_VERIFY_LIVE=1`).
 
 ### Justification — Module of choice (Minor): SSRF guard on the HTTP engine
 
@@ -641,8 +647,9 @@ but switching only records a stub action (`i18n_change_stub` in osionos
   the cloud metadata endpoint `169.254.169.254` — CGNAT, IPv6 ULA and link-local, IPv4-mapped
   addresses and internal hostnames, then **pins** the connection to the validated public IP so a
   later DNS rebind cannot redirect it inward.
-- **Value and weight.** Small, self-contained and demonstrable in seconds (a mount pointing at
-  `169.254.169.254` is refused), and it shows security judgement on a feature we chose to build.
+- **Value and weight.** Small and self-contained, and it shows security judgement on a feature we
+  chose to build. Its 30 unit tests run in grobase CI; the end-to-end demo (a mount pointing at
+  `169.254.169.254` is refused) is not recorded yet ([#177](https://github.com/Univers42/groot/issues/177)).
 
 ---
 
