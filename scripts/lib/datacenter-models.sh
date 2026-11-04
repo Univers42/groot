@@ -9,11 +9,14 @@
 # reads only the table of contents, so a truncated body would pass it. It covers the postgres
 # database only, which is what models/*.sql writes.
 dump_postgres() {
-  local file
+  local file listing
   file="$DUMP_DIR/postgres-$(date +%Y%m%d-%H%M%S).dump"
-  (umask 077 && mkdir -p "$DUMP_DIR")
+  (umask 077 && mkdir -p "$DUMP_DIR" && : >"$file")
   docker exec "$PG_CTN" pg_dump -U postgres -d postgres -Fc >"$file" || die "pg_dump failed; no migration ran"
-  docker exec -i "$PG_CTN" pg_restore -l <"$file" | grep -q 'TABLE DATA public osionos_pages' ||
+  # Listed first, not piped: grep -q exits at its match, the writer takes SIGPIPE, and under
+  # pipefail a good dump reads as a bad one (2026-11-04, this stopped a run on a dump that was fine).
+  listing=$(docker exec -i "$PG_CTN" pg_restore -l <"$file") || die "the dump $file cannot be listed; no migration ran"
+  grep -q 'TABLE DATA public osionos_pages' <<<"$listing" ||
     die "the dump $file does not list osionos_pages; no migration ran"
   docker exec -i "$PG_CTN" pg_restore -f /dev/null <"$file" >/dev/null 2>&1 ||
     die "the dump $file does not read back in full; no migration ran"

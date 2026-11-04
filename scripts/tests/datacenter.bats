@@ -406,6 +406,16 @@ case "$*" in *pg_dump*) echo dump ;; *"pg_restore -l"*) echo "1; 2 TABLE DATA pu
   grep -q 'docker exec -i mini-baas-postgres psql' "$LOG"
 }
 
+@test "preflight: a listing longer than a pipe buffer is not mistaken for a bad dump" {
+  in_tree apply-models-migrations.sh 'echo "models $*" >>"$LOG"; [ "${1:-}" != --check ] || { [ -f "$LOG.done" ] || { echo "[models] pending: x.sql (missing table: x)" >&2; exit 1; }; }; [ "${1:-}" = --check ] || touch "$LOG.done"'
+  stub docker 'echo "docker $*" >>"$LOG"
+case "$*" in *"pg_restore -l"*) echo "1; 2 TABLE DATA public osionos_pages postgres"; i=0; while [ $i -lt 20000 ]; do echo "; padding line $i"; i=$((i+1)); done ;; esac'
+  DATACENTER_ALLOW_WRITES=1 dc preflight
+  [ "$status" -eq 0 ]
+  grep -qx 'models ' "$LOG"
+  [ "$(stat -c %a "$(ls "$XDG_STATE_HOME"/groot/datacenter-dumps/*.dump)")" = 600 ]
+}
+
 @test "preflight: a column-only models change is seen from the hash, though no table is missing" {
   rm "$LOG.applied"
   in_tree apply-models-migrations.sh 'echo "models $*" >>"$LOG"'

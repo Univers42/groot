@@ -56,7 +56,11 @@ vm_stop_reason() {
 
 qemu_running() { pgrep -f "qemu-system.*-name $VM_NAME" >/dev/null 2>&1; }
 ssh_answers() { vm_ssh "$ALIAS" true >/dev/null 2>&1; }
-waf_running() { vm_ssh "$ALIAS" 'docker ps --format "{{.Names}}"' 2>/dev/null | grep -qx mini-baas-waf; }
+waf_running() {
+  local names
+  names=$(vm_ssh "$ALIAS" 'docker ps --format "{{.Names}}"' 2>/dev/null) || return 1
+  grep -qx mini-baas-waf <<<"$names"
+}
 grobase_installed() { vm_ssh "$ALIAS" "test -d $REMOTE_DIR/.git" >/dev/null 2>&1; }
 
 # wait_for WHAT SECONDS CHECK — poll CHECK until it passes or SECONDS run out.
