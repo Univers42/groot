@@ -367,11 +367,44 @@ jobs:
         if: success()
         run: bash tests/e2e/run.sh specs/gr2-osionos-graph.spec.ts
 
+      # Proof branch only, not for main: what the redesign's verdict asks of a local-path stack,
+      # before account-mail.sh leaves the gateway on verification and sign-in codes.
+      - name: e2e redesign candidate — t43, AC1, site specs, reach with the backend
+        if: success()
+        run: |
+          set -o pipefail
+          log=tests/e2e/test-results/candidate.log
+          mkdir -p "$(dirname "$log")"
+          failed=0
+          bash tests/e2e/run.sh specs/t43-landing-sign-in.spec.ts specs/ac1-new-account.spec.ts 2>&1 | tee -a "$log" || failed=1
+          bash tests/e2e/run.sh -c site.config.ts --timeout=25000 2>&1 | tee -a "$log" || failed=1
+          E2E_REACH_BACKEND=1 bash tests/e2e/run.sh -c reach.config.ts 2>&1 | tee -a "$log" || failed=1
+          exit "$failed"
+
       # Sign-up, reset and the sign-in code end to end, read back from Mailpit. Only a throwaway
       # stack can: the guard in tests/e2e/run.sh keeps these specs off a linked grobase.
       - name: e2e PR — account mail on this throwaway stack (Mailpit, nothing leaves the runner)
-        if: success()
+        if: ${{ !cancelled() }}
         run: bash scripts/verify/account-mail.sh
+
+      # A green job does not say the specs ran; these counts do, and they read without a token.
+      - name: Report the spec counts in annotations
+        if: ${{ !cancelled() }}
+        run: |
+          for log in tests/e2e/test-results/candidate.log tests/e2e/test-results/account-mail.log; do
+            test -s "$log" || continue
+            counts=$(sed -E 's/\x1b\[[0-9;]*m//g' "$log" | grep -E '^ +[0-9]+ (passed|failed|skipped|flaky|did not run)' | tr -s ' ' | tr '\n' ';')
+            echo "::notice title=$(basename "$log" .log)::$counts"
+          done
+
+      - name: Name the candidate failure in annotations (readable without a token)
+        if: failure()
+        run: |
+          log=tests/e2e/test-results/candidate.log
+          test -s "$log" || exit 0
+          { grep -E '^ +[0-9]+\) |Error:|Expected|Received' "$log" | sort -u | head -n 36; tail -n 12 "$log"; } \
+            | sed -E 's/\x1b\[[0-9;]*m//g; s/([A-Z_]*(PASSWORD|SECRET|TOKEN|KEY|PASSPHRASE)[A-Z_]*=)[^ ]*/\1<redacted>/g' \
+            | awk '{ buf = buf $0 "%0A"; n++ } n == 6 { printf "::error title=candidate tail %d::%s\n", ++c, buf; buf = ""; n = 0 } END { if (n) printf "::error title=candidate tail %d::%s\n", ++c, buf }'
 
       - name: Name the account-mail failure in annotations (readable without a token)
         if: failure()
