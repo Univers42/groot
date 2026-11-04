@@ -2112,10 +2112,16 @@ BEGIN
       WHEN 'ai_context_items.name' THEN '''p5 skill'''
       WHEN 'ai_context_items.description' THEN '''p5 canary skill description'''
       WHEN 'ai_context_items.body' THEN '''p5 canary skill body'''
-      -- page comments: decided_* CHECK requires decided_at/decided_by both null or both set
-      WHEN 'osionos_page_comments.decided_by' THEN 'NULL'
-      WHEN 'osionos_page_comments.decided_at' THEN 'NULL'
-      WHEN 'osionos_page_comments.decision' THEN 'NULL'
+      -- page comments (discussions migration):
+      -- decided_check: (status = 'open') = (decided_by IS NULL AND decided_at IS NULL)
+      -- When the canary seeds decided_by as the user column, pair it with accepted + decided_at.
+      -- Otherwise keep the row open with null decided_*.
+      WHEN 'osionos_page_comments.kind' THEN '''comment'''
+      WHEN 'osionos_page_comments.status' THEN CASE WHEN p_col = 'decided_by' THEN '''accepted''' ELSE '''open''' END
+      WHEN 'osionos_page_comments.decided_at' THEN CASE WHEN p_col = 'decided_by' THEN 'now()' ELSE 'NULL' END
+      WHEN 'osionos_page_comments.decided_by' THEN CASE WHEN p_col = 'decided_by' THEN NULL ELSE 'NULL' END
+      -- reactions: emoji CHECK is char_length 1..16; random text is longer
+      WHEN 'osionos_page_comment_reactions.emoji' THEN '''ok'''
       ELSE NULL END;
     CONTINUE WHEN v_force IS NULL AND NOT v_iscol AND a.attname <> p_col AND a.attname IS DISTINCT FROM p_col2 AND (a.atthasdef OR NOT a.attnotnull);
     v_typ := a.typ;
