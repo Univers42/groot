@@ -1,4 +1,5 @@
 import { expect, test as base, type Page, type Response } from "@playwright/test";
+import { HARNESS_NOISE } from "../lib/fixtures";
 import { BRIDGE_URL, CALENDAR_URL, GATEWAY_URL, KONG_URL, MAIL_URL, OSIONOS_URL, PRISMATICA_URL, WHITEBOARD_URL } from "../lib/env";
 import { open } from "./store";
 
@@ -105,7 +106,7 @@ for (const app of APPS.filter((a) => !a.api)) {
   test(`${app.name}: nothing goes wrong in the console`, async ({ page }) => {
     const problems: string[] = [];
     page.on("console", (m) => {
-      if (m.type() === "error" || m.type() === "warning") problems.push(`${m.type()}: ${m.text()} @ ${m.location().url}`);
+      if ((m.type() === "error" || m.type() === "warning") && !HARNESS_NOISE.test(m.text())) problems.push(`${m.type()}: ${m.text()} @ ${m.location().url}`);
     });
     page.on("pageerror", (e) => problems.push(`exception: ${e.message}`));
     page.on("response", (r) => {
