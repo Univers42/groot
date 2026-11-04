@@ -1,5 +1,6 @@
-# One line per real person in `git shortlog -sne`. History is public and is not rewritten;
-# this file only changes how authors are displayed.
+# One line per real person in `git shortlog -sne`. It only changes how authors are displayed.
+# (On 2026-11-04 the owner had the history of osionos, groot and grobase rewritten to drop
+# co-author trailers; authors and dates were kept, so this file still applies.)
 #
 # Submodules have no copy of their own; read them through this one:
 #   scripts/contributors.sh            (root and every app submodule)
@@ -49,3 +50,14 @@ Roxana Stancu (rstancu) <ioanaroxana.st@gmail.com>
 opencode (AI agent) <opencode@local>
 opencode (AI agent) <opencode@local> <opencode@localhost>
 opencode (AI agent) <opencode@local> <oc-run@localhost>
+
+# Space Bunny: the OpenCode agent team the owner ran on drawnosaurus (BUNNY.md, "You run a team
+# of agents"), on local addresses. An AI agent, not a member, shown as one line like opencode.
+Space Bunny (AI agent team, run by dlesieur) <bunny@local> bunny <bunny@local>
+Space Bunny (AI agent team, run by dlesieur) <bunny@local> bunny <bunny@localhost>
+Space Bunny (AI agent team, run by dlesieur) <bunny@local> Space Bunny <bunny@localhost>
+Space Bunny (AI agent team, run by dlesieur) <bunny@local> Space Bunny <bunny@drawnosaurus.local>
+Space Bunny (AI agent team, run by dlesieur) <bunny@local> builder <builder@bunny>
+Space Bunny (AI agent team, run by dlesieur) <bunny@local> builder <builder@localhost>
+Space Bunny (AI agent team, run by dlesieur) <bunny@local> builder <builder@drawnosaurus.local>
+Space Bunny (AI agent team, run by dlesieur) <bunny@local> builder <builder@local>
