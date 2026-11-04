@@ -41,10 +41,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 #   typescript → typescript-language-server --stdio
 #   python     → pyright-langserver --stdio
 #   java       → jdtls-launch (wrapper that starts Eclipse JDT LS on stdio)
-# Global, so a `docker exec` LSP relay finds them on PATH. Major-pinned (a dev
-# sandbox toolchain, not a project dependency under the release-age policy).
-RUN npm install -g --no-audit --no-fund \
-      typescript@5 typescript-language-server@4 pyright@1 \
+# Global, so a `docker exec` LSP relay finds them on PATH. Pinned exactly, newest of each
+# major on 2026-11-04; none of the three declares an install script, so none is run.
+RUN npm install -g --ignore-scripts --no-audit --no-fund \
+      typescript@5.9.3 typescript-language-server@4.4.1 pyright@1.1.414 \
     && npm cache clean --force
 
 # 42 school work: valgrind and gdb for leak and crash hunts, readline's headers for
