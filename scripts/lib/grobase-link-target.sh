@@ -56,10 +56,15 @@ api_url() {
   fi
   printf '%s\n' "${url%/}"
 }
+# connect_ip HOST -> the address the relay dials for HOST. GROBASE_CONNECT_IP wins: `localhost` is
+# this machine to a browser but the relay itself inside a container (the note on resolve_ipv4).
+connect_ip() {
+  if [ -n "${CONNECT_IP:-}" ]; then printf '%s\n' "$CONNECT_IP"; else resolve_ipv4 "$1"; fi
+}
 url_reachable() { # from a container of this daemon, where the frontends run
   local host port ip addr
   read -r host port < <(url_hostport "$1")
-  ip=$(resolve_ipv4 "$host")
+  ip=$(connect_ip "$host")
   case "$1" in
   https://*) addr="OPENSSL:$ip:$port,verify=0,snihost=$host" ;; # a reachability probe, not a trust decision
   *) addr="TCP:$ip:$port" ;;
@@ -73,7 +78,7 @@ url_reachable() { # from a container of this daemon, where the frontends run
 kong_addr() {
   local host port ip
   read -r host port < <(url_hostport "$1")
-  ip=$(resolve_ipv4 "$host")
+  ip=$(connect_ip "$host")
   case "$1" in
   https://*) printf 'OPENSSL:%s:%s,verify=1,cafile=%s,commonname=%s,snihost=%s\n' "$ip" "$port" "$2" "$host" "$host" ;;
   *) printf 'TCP:%s:%s\n' "$ip" "$port" ;;
