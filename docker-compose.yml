@@ -18,6 +18,9 @@ services:
       - ./infrastructure/tls/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./infrastructure/tls/host-ports.d:/etc/nginx/host-ports.d:ro
       - ./apps/grobase/certs:/etc/track-binocle/certs:ro
+      # The public API docs on :8444 (/docs/ and /openapi.json in nginx.conf).
+      - ./infrastructure/tls/api-docs:/usr/share/track-binocle/api-docs:ro
+      - ./apps/grobase/infra/config/openapi:/usr/share/track-binocle/openapi:ro
     ports:
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${OPPOSITE_OSIRIS_HOST_PORT:-4322}:4322"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${OSIONOS_APP_HOST_PORT:-3001}:3001"
