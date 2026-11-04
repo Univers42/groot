@@ -44,9 +44,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Global, so a `docker exec` LSP relay finds them on PATH. Major-pinned (a dev
 # sandbox toolchain, not a project dependency under the release-age policy).
+# Exact patch pins (S8543): major-only ranges resolve differently on every rebuild.
 RUN npm install -g --ignore-scripts --no-audit --no-fund \
-      typescript@5 typescript-language-server@4 pyright@1 \
-
+      typescript@5.9.3 typescript-language-server@4.3.3 pyright@1.1.403 \
     && npm cache clean --force
 
 # 42 school work: valgrind and gdb for leak and crash hunts, readline's headers for
