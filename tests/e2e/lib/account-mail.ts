@@ -132,14 +132,19 @@ export async function linkIn(id: string, page: "confirm" | "reset-password"): Pr
   return { token_hash: pick("token_hash"), type: pick("type"), exp: pick("exp"), sig: pick("sig") };
 }
 
+/** Follows the newest confirmation mail for `email`, as a stack that verifies email asks of a new account. */
+export async function confirmByMail(email: string): Promise<void> {
+  const [mail] = await waitForMails(email, SUBJECTS.confirm);
+  const verified = await gateway("/api/auth/verify", await linkIn(mail!.ID, "confirm"));
+  expect(verified.status, `confirming ${email}`).toBe(200);
+}
+
 /** A signed-in account: registered, and confirmed through its mail when the stack verifies email. */
 export async function confirmedAccount(spec: string, password = SPEC_PASSWORD): Promise<string> {
   const email = reservedAddress(spec);
   const reg = await register(email, password);
   if (reg.status === 202) {
-    const [mail] = await waitForMails(email, SUBJECTS.confirm);
-    const verified = await gateway("/api/auth/verify", await linkIn(mail!.ID, "confirm"));
-    expect(verified.status, `confirming ${email}`).toBe(200);
+    await confirmByMail(email);
   } else {
     expect(reg.status, `registering ${email}: ${String(reg.body.message)}`).toBe(200);
   }
