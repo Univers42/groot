@@ -53,23 +53,27 @@ row (this device off the tailnet, the peer offline, Kong not answering), then ru
 | What | Value |
 |---|---|
 | Host (runs the VM) | LAN `192.168.1.132` (`enp7s0`); Tailscale node `dlesieur42-2`, `100.94.109.44` |
-| VM `b2b` | Tailscale node `dlesieur42-1`, `100.94.119.97`, MagicDNS `dlesieur42-1.tail10f2ea.ts.net`; hostname `dlesieur42` |
+| VM `b2b` | Tailscale node `baas`, `100.97.49.118`, MagicDNS `baas.tail10f2ea.ts.net`; hostname `dlesieur42`. The previous VM node is offline for good; nothing here points at it |
 | grobase | `/opt/grobase` in the VM, branch `main` |
-| ssh into the VM | user `dlesieur`, port `4242`, on the Tailscale address or on the host's LAN address |
-| API edge (the WAF) | `:8443` on `100.94.119.97`, `dlesieur42-1.tail10f2ea.ts.net` and `192.168.1.132`; Funnel `https://dlesieur42-1.tail10f2ea.ts.net` (port 443, public certificate) |
-| CA file (`--ca-file`, `GROBASE_CA_FILE`) | `/opt/grobase/certs/track-binocle-local-ca.pem`, SHA-256 `7B:22:BB:3A:8F:5D:76:84:02:6D:61:26:95:37:35:36:AC:F4:7A:03:29:15:2A:4A:64:DF:1A:C7:92:5B:2F:EE`, valid to 2036-10-07 |
-| WAF leaf pin (`--pin-sha256`) | `28e27b66a18a90d701a406fbb479c071a26d08cc2fe250a7bb329d327e780c7a`, valid to 2027-11-12 |
+| ssh into the VM | user `dlesieur`, port `4242`, on `100.97.49.118`, `baas.tail10f2ea.ts.net` or the host's LAN address `192.168.1.132`; host key `SHA256:5uEVhnFXCwx3TKgh3hqn7DsdwF4YQy8C4hWbKY8aRiM` on all three |
+| API edge (the WAF), tailnet and Funnel | `https://baas.tail10f2ea.ts.net:8443` and `https://baas.tail10f2ea.ts.net` (port 443). Both present a Let's Encrypt certificate (CN=YE1, SAN `DNS:baas.tail10f2ea.ts.net` only), so the system store trusts them. `tailscale funnel status` on the VM lists Funnel on for 443, 8443 and 10000. `https://100.97.49.118:8443` does **not** work: TLS handshake fails with `alert internal error` |
+| API edge, LAN | `https://192.168.1.132:8443`, presenting the VM's local-CA leaf (pin below). Measured from the host, not from a second LAN device |
+| CA file (`--ca-file`, `GROBASE_CA_FILE`) | `/opt/grobase/certs/track-binocle-local-ca.pem`, SHA-256 `7B:22:BB:3A:8F:5D:76:84:02:6D:61:26:95:37:35:36:AC:F4:7A:03:29:15:2A:4A:64:DF:1A:C7:92:5B:2F:EE`, valid to 2036-10-07 (same CA as on the old VM). Needed only for the LAN and ssh-tunnel routes |
+| WAF leaf pin (`--pin-sha256`) | `a58da5162106c272f4567f3b08b898fb877d4f0dcf689864f1573f14a099fc48`, valid to 2027-11-21 (the old VM's leaf was re-issued on `baas`). Matches the LAN edge and the VM's `127.0.0.1:8443`; does not match the tailnet and Funnel routes |
 | vault42 | org `univers42`, project `groot`, environment `prod`; CLI image `docker.io/dlesieur/42ctl:latest` |
 | Repositories (public) | `https://github.com/Univers42/groot` and `https://github.com/Univers42/grobase-cli`, branch `main` |
 
-The WAF's certificate names `localhost`, `host.docker.internal`, `local-https-proxy`,
-`track-binocle.test`, `*.track-binocle.test`, `127.0.0.1`, `dlesieur42-1.tail10f2ea.ts.net`,
-`100.94.119.97` and `::1`. It does not name the LAN IP. On the LAN, use the pin (it checks the
-certificate, not the name) or a hosts-file name with the CA file.
+The local-CA leaf names `localhost`, `host.docker.internal`, `local-https-proxy`,
+`track-binocle.test`, `*.track-binocle.test`, `127.0.0.1`, `baas.tail10f2ea.ts.net`,
+`100.97.49.118` and `::1`. It does not name the LAN IP. On the LAN, use the pin (it checks the
+certificate, not the name) or a hosts-file name with the CA file. On the tailnet that leaf is
+never presented: tailscale answers `:8443` on `100.97.49.118` itself, with the Let's Encrypt
+certificate above.
 
-The values above were read on 2026-10-12. A rebuilt VM is a new Tailscale node: it gets a new
-`100.x` address, maybe a new name, and a new leaf certificate. If §5's checks print other
-values, stop and ask the human; do not edit the expected values to match.
+The values above were read on 2026-11-04. A rebuilt VM is a new Tailscale node: it gets a new
+`100.x` address, maybe a new name, and a new leaf certificate (this move did all three). If
+§5's checks print other values, stop and ask the human; do not edit the expected values to
+match.
 
 ## 2. Check the device
 
@@ -89,11 +93,11 @@ without Go, docker builds it. Tailscale is needed only for N4 in §3.
 | # | Network | Where the device is | API URL for the CLI | `make link` target (§8) | Needs |
 |---|---|---|---|---|---|
 | N1 | localhost | on the data-center host itself | `https://127.0.0.1:8443` | `ssh://b2b` | nothing: the host's ssh alias already exists |
-| N2 | LAN, cable | same router as `192.168.1.132` | `https://192.168.1.132:8443` with the pin | `ssh://dlesieur@192.168.1.132:4242` | its key on the VM (§4) |
+| N2 | LAN, cable | same router as `192.168.1.132` | `https://192.168.1.132:8443` with the pin (`dc-lan`, §7) | `ssh://dlesieur@192.168.1.132:4242` | its key on the VM (§4) |
 | N3 | wifi | same wifi as the host | as N2 | as N2 | a wifi that does not isolate its clients |
-| N4 | Tailscale | any network | `https://100.94.119.97:8443` or `https://dlesieur42-1.tail10f2ea.ts.net:8443`, with the pin | `ssh://dlesieur@100.94.119.97:4242`, or `https://100.94.119.97:8443` with the CA file | Tailscale in tailnet `tail10f2ea.ts.net` |
+| N4 | Tailscale | any network | `https://baas.tail10f2ea.ts.net:8443`, system trust, no pin | `ssh://dlesieur@100.97.49.118:4242`, or `https://baas.tail10f2ea.ts.net`, no CA file | Tailscale in tailnet `tail10f2ea.ts.net` |
 | N5 | ssh tunnel | where ssh reaches the VM but `:8443` does not | `https://127.0.0.1:18443` with the pin | already covered: ssh mode *is* ssh (N2/N4) | an ssh path: N2 or N4 |
-| N6 | internet, no Tailscale | anywhere | `https://dlesieur42-1.tail10f2ea.ts.net` (Funnel) | `https://dlesieur42-1.tail10f2ea.ts.net`, no CA file; user plane only (§11) | nothing; **never run with groot yet** (§11) |
+| N6 | internet, no Tailscale | anywhere | `https://baas.tail10f2ea.ts.net` (Funnel) | `https://baas.tail10f2ea.ts.net`, no CA file; user plane only (§11) | nothing; **never run with groot yet** (§11) |
 
 **N1, localhost.** Only on the host that runs the VM. Local mode does not apply: grobase runs
 inside the VM, not on the host's docker daemon. `ssh://b2b` is the host's alias for
@@ -116,9 +120,9 @@ not the data center: use N4 or N6.
 curl -fsSL https://tailscale.com/install.sh | sh
 sudo tailscale up                                # the human opens the URL and logs in with the
                                                  # account that owns the tailnet tail10f2ea.ts.net
-tailscale status | grep dlesieur42-1             # the VM is listed
-tailscale ping dlesieur42-1                      # "pong from dlesieur42-1 ... via DERP(...)" or "via <ip>:<port>"
-getent hosts dlesieur42-1.tail10f2ea.ts.net      # 100.94.119.97: MagicDNS works
+tailscale status | grep baas                     # the VM is listed (also baas-beta: another node)
+tailscale ping baas                              # "pong from baas (100.97.49.118) via DERP(...)" or "via <ip>:<port>"
+getent hosts baas.tail10f2ea.ts.net              # 100.97.49.118: MagicDNS works
 ```
 
 **N4, Tailscale without root (a 42 seat).** Use userspace mode: no network interface, a SOCKS
@@ -140,7 +144,7 @@ Docker containers do not see the proxy, so groot's `make link` cannot use it (§
 `127.0.0.1:8443`:
 
 ```sh
-ssh -f -N -o ExitOnForwardFailure=yes -L 127.0.0.1:18443:127.0.0.1:8443 -p 4242 dlesieur@100.94.119.97
+ssh -f -N -o ExitOnForwardFailure=yes -L 127.0.0.1:18443:127.0.0.1:8443 -p 4242 dlesieur@100.97.49.118
 # on the LAN: ... dlesieur@192.168.1.132
 ```
 
@@ -148,7 +152,7 @@ ssh -f -N -o ExitOnForwardFailure=yes -L 127.0.0.1:18443:127.0.0.1:8443 -p 4242 
 the edge is reachable.
 
 ```sh
-curl -sS -o /dev/null -w '%{http_code}\n' https://dlesieur42-1.tail10f2ea.ts.net/auth/v1/health
+curl -sS -o /dev/null -w '%{http_code}\n' https://baas.tail10f2ea.ts.net/auth/v1/health
 ```
 
 ## 4. ssh access to the VM (N1 to N5)
@@ -159,9 +163,9 @@ the device has:
 
 ```sh
 test -f ~/.ssh/id_ed25519.pub || ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519   # ask the human about a passphrase
-ssh-copy-id -p 4242 dlesieur@100.94.119.97        # N4; on N2/N3: dlesieur@192.168.1.132
+ssh-copy-id -p 4242 dlesieur@100.97.49.118        # N4; on N2/N3: dlesieur@192.168.1.132
                                                   # the human types the VM password once
-ssh -o BatchMode=yes -p 4242 dlesieur@100.94.119.97 'echo key-ok $(hostname)'   # key-ok dlesieur42
+ssh -o BatchMode=yes -p 4242 dlesieur@100.97.49.118 'echo key-ok $(hostname)'   # key-ok dlesieur42
 ```
 
 The CLI's `--ssh` takes an alias or `user@host`, not a port, so give the VM aliases in
@@ -169,7 +173,7 @@ The CLI's `--ssh` takes an alias or `user@host`, not a port, so give the VM alia
 
 ```text
 Host dc-tailnet
-    HostName 100.94.119.97
+    HostName 100.97.49.118
     Port 4242
     User dlesieur
 Host dc-lan
@@ -178,28 +182,36 @@ Host dc-lan
     User dlesieur
 ```
 
-## 5. The two trust anchors
+The first connection to a new address asks to accept the host key. Compare it with
+`SHA256:5uEVhnFXCwx3TKgh3hqn7DsdwF4YQy8C4hWbKY8aRiM` (§1) before answering yes; with `BatchMode`
+an unknown key is a refusal (`Host key verification failed.`), not a prompt.
 
-**The leaf pin** covers every route except Funnel. Check it against the VM before using it:
+## 5. The trust anchors
+
+**The tailnet and Funnel routes need none.** They present a Let's Encrypt certificate that the
+system store trusts: no pin, no CA file. A pin or a CA file given to a context that only has
+these URLs makes `doctor` FAIL the TLS row.
+
+**The leaf pin** covers the LAN edge and the ssh tunnel. Check it against the VM before using it:
 
 ```sh
-ssh -p 4242 dlesieur@100.94.119.97 \
+ssh -p 4242 dlesieur@100.97.49.118 \
   openssl x509 -noout -fingerprint -sha256 -in /opt/grobase/certs/localhost.pem \
   | sed 's/.*=//; s/://g' | tr 'A-F' 'a-f'
-# must print 28e27b66a18a90d701a406fbb479c071a26d08cc2fe250a7bb329d327e780c7a
+# must print a58da5162106c272f4567f3b08b898fb877d4f0dcf689864f1573f14a099fc48
 ```
 
-**The CA file** is what groot's direct link uses, and the CLI when you address the edge by
-name. Copy only the certificate; the CA's key never leaves the VM.
+**The CA file** is for the local-CA routes: the LAN edge addressed by name (hosts-file entry
+`192.168.1.132 grobase.track-binocle.test`). The tailnet direct link does not use it. Copy only the certificate; the CA's key never leaves the VM.
 
 ```sh
-scp -P 4242 dlesieur@100.94.119.97:/opt/grobase/certs/track-binocle-local-ca.pem ~/grobase-ca.pem
+scp -P 4242 dlesieur@100.97.49.118:/opt/grobase/certs/track-binocle-local-ca.pem ~/grobase-ca.pem
 openssl x509 -noout -fingerprint -sha256 -in ~/grobase-ca.pem
 # must print sha256 Fingerprint=7B:22:BB:3A:8F:5D:76:84:02:6D:61:26:95:37:35:36:AC:F4:7A:03:29:15:2A:4A:64:DF:1A:C7:92:5B:2F:EE
 ```
 
-**Funnel's certificate is public** (issued through Tailscale), so the system store trusts it.
-It needs no pin and no CA file, and the pin above does not match it.
+**Funnel's certificate is public** (Let's Encrypt, issued through Tailscale), so the system
+store trusts it. The pin above does not match it.
 
 ## 6. vault42: the team's secrets on this device
 
@@ -287,19 +299,20 @@ grobase version
 git clone -q --depth 1 https://github.com/Univers42/grobase-cli ~/grobase-cli   # for scripts/check-routes.sh
 ```
 
-**Two contexts**, one per trust anchor. Every URL in a context must present the same
-certificate, which is why Funnel gets its own. The first URL that answers is used, and one
+**Three contexts**, one per trust anchor (`dc` and `dc-public` both use the system store but are separate routes). Every URL in a context must present the same
+certificate, which is why the pinned LAN routes get their own context. The first URL that answers is used, and one
 that does not costs `GROBASE_PROBE_TIMEOUT` (2 s) before the next.
 
 ```sh
-# the private routes: Tailscale IP, MagicDNS, LAN IP, ssh tunnel (pinned leaf)
-grobase context add dc \
-  --url https://100.94.119.97:8443 --url https://dlesieur42-1.tail10f2ea.ts.net:8443 \
+# the tailnet route: MagicDNS name, Let's Encrypt certificate (system trust)
+grobase context add dc --url https://baas.tail10f2ea.ts.net:8443 --ssh dc-tailnet
+# the LAN and ssh-tunnel routes: the VM's local-CA leaf (pinned)
+grobase context add dc-lan \
   --url https://192.168.1.132:8443 --url https://127.0.0.1:18443 \
-  --pin-sha256 28e27b66a18a90d701a406fbb479c071a26d08cc2fe250a7bb329d327e780c7a \
-  --ssh dc-tailnet
+  --pin-sha256 a58da5162106c272f4567f3b08b898fb877d4f0dcf689864f1573f14a099fc48 \
+  --ssh dc-lan
 # the internet route: Funnel, public certificate
-grobase context add dc-public --url https://dlesieur42-1.tail10f2ea.ts.net
+grobase context add dc-public --url https://baas.tail10f2ea.ts.net
 ```
 
 On N1, add `--url https://127.0.0.1:8443`. Do not add it anywhere else: on another device,
@@ -353,9 +366,9 @@ pasting values from an env file.
 |---|---|---|---|
 | N1 | `ssh://b2b` | empty | `https://127.0.0.1:8443` |
 | N2, N3 | `ssh://dlesieur@192.168.1.132:4242` | empty | `https://192.168.1.132:8443` |
-| N4, ssh | `ssh://dlesieur@100.94.119.97:4242` | empty | `https://100.94.119.97:8443` |
-| N4, direct | `https://100.94.119.97:8443` | `$HOME/grobase-ca.pem` (absolute path) | empty (taken from the target) |
-| N6 | `https://dlesieur42-1.tail10f2ea.ts.net` | empty (public certificate) | empty |
+| N4, ssh | `ssh://dlesieur@100.97.49.118:4242` | empty | `https://baas.tail10f2ea.ts.net:8443` |
+| N4, direct | `https://baas.tail10f2ea.ts.net` | empty (public certificate) | empty (taken from the target) |
+| N6 | `https://baas.tail10f2ea.ts.net` | empty (public certificate) | empty |
 
 The modes:
 
@@ -417,7 +430,7 @@ A network the device cannot reach is `SKIP (why)`.
 | Test | Command | PASS when |
 |---|---|---|
 | T1 reach | `ROUTES="<route>" ~/grobase-cli/scripts/check-routes.sh` with the credentials of §7 | `PASS  <route> ... login+whoami as <email>` |
-| T2 doctor | `grobase --context dc doctor` (N6: `--context dc-public`) | every row PASS; it names the URL of this network |
+| T2 doctor | `grobase --context dc doctor` (N2, N3, N5: `--context dc-lan`; N6: `--context dc-public`) | every row PASS; it names the URL of this network |
 | T3 identity | `grobase --context dc whoami` | prints this device's email |
 | T4 ssh | `ssh -o BatchMode=yes -p 4242 dlesieur@<addr> true` then `grobase --context dc host health` | exit 0, then `N containers of ...: none unhealthy, crash-looping or failed` |
 | T5 link | `make link GROBASE_TARGET=<§8 value>`, then `make link-verify` | `verify: N frontends reach grobase through the ... link`, exit 0 |
@@ -465,9 +478,10 @@ branch and stop: the human merges it (develop, then main).
 
 | Symptom | Cause | Next step |
 |---|---|---|
-| `tailscale status` does not list `dlesieur42-1`; every tailnet route FAILs | the VM's node expired (key expiry 2027-04-08) or, its auth key being ephemeral, was removed after it went offline | the human runs `make tailnet` in born2root on the host; then re-read §1's values, which may have changed |
+| `tailscale status` does not list `baas`, or shows it offline; every tailnet route FAILs | the VM is down, or its node was removed from the tailnet. Cause not measured for `baas` (**unverified**: key expiry). The previous node stays offline and is not a fallback | the human checks the VM from the host (`ssh -p 4242 dlesieur@192.168.1.132`); then re-read §1's values, which may have changed |
+| `curl` or `doctor` to `https://100.97.49.118:8443` fails (`alert internal error`) | tailscale serves `:8443` with a certificate for the name only | use `https://baas.tail10f2ea.ts.net:8443` |
 | N2/N3 port checks time out from a wifi device, but work from the host | the wifi isolates its clients | N4 or N6 |
-| `doctor` TLS FAIL showing two fingerprints | the leaf was re-issued | re-check §5, then `grobase context pin dc` |
+| `doctor` TLS FAIL showing two fingerprints | a pinned context (`dc-lan`) and the leaf was re-issued | re-check §5, then `grobase context pin dc-lan` |
 | `make link`: `... does not answer from a container of this daemon` | the relay's container cannot reach that URL: a hosts-file name, or userspace Tailscale | the IP form, or ssh mode |
 | `make link`: `cannot read /opt/grobase/.env` | ssh works but the path differs | `GROBASE_REMOTE_DIR=<grobase dir on the VM>` |
 | `direct mode cannot fetch secrets` | no `./.env.grobase-remote` | one ssh-mode `make link` first (N2/N4), or the owner's vault pull |
@@ -500,10 +514,12 @@ More symptoms: CONNECTING.md §7 and [grobase-link](grobase-link.md) "Troublesho
 - **Userspace Tailscale with groot is expected to fail.** The relay runs in a container, and
   containers do not see a userspace Tailscale's SOCKS proxy. Expect `make link` to fail there
   while the CLI works.
-- **The pin and the addresses are 2026-10-12's.** Re-check §5 every time; never adjust the
+- **The pin and the addresses are 2026-11-04's.** Re-check §5 every time; never adjust the
   expected values to match what you see.
 
 ### dlesieur (laptop on the wifi), 2026-10-12
+
+Measured on the old VM `dlesieur42-1` (`100.94.119.97`) before the move to `baas`. The addresses, pin and host key below are that VM's; the numbers are kept as measured.
 
 Ubuntu 26.04.1 LTS (kernel 7.0.0-31), `mawk 1.3.4 20260129` as `awk`; Docker 29.1.3, rootful;
 groot `5eb54d5b`; `grobase version` prints `version dev`, `go1.26.9` (`go install` of grobase-cli
