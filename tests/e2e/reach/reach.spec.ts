@@ -47,6 +47,8 @@ async function reach(page: Page, app: App): Promise<Response> {
     throw error;
   }
   expect(response, `${app.name} answered`).not.toBeNull();
+  // The edge is up either way; an opt-in app that is not running reaches it as a 502.
+  if (app.optIn && (response as Response).status() === 502) test.skip(true, `${app.name} is opt-in and not running: make mail-up calendar-up`);
   return response as Response;
 }
 
@@ -71,11 +73,17 @@ for (const app of APPS) {
     const links = await page.locator("a[href]").evaluateAll((anchors) => anchors.map((a) => (a as HTMLAnchorElement).href));
     const controls = page.locator("a:visible, button:visible, [role=button]:visible, input:visible, textarea:visible, select:visible");
     const count = await controls.count();
+    let clickable = 0;
     for (let i = 0; i < Math.min(count, 60); i++) {
-      await expect(controls.nth(i), `control ${i} of ${count} on ${app.name}`).toBeAttached();
-      await controls.nth(i).scrollIntoViewIfNeeded();
-      await controls.nth(i).click({ trial: true, timeout: 5_000 });
+      const control = controls.nth(i);
+      // A disabled control and a skip link parked off-screen until focused are correct as they are.
+      const box = await control.boundingBox();
+      if (!(await control.isEnabled()) || !box || box.x + box.width <= 0 || box.y + box.height <= 0) continue;
+      await control.scrollIntoViewIfNeeded();
+      await control.click({ trial: true, timeout: 5_000 });
+      clickable += 1;
     }
+    expect(clickable, `clickable controls on ${app.name}`).toBeGreaterThan(0);
     for (const href of [...new Set(links)].filter((l) => l.startsWith(origin) && !l.includes("#")).slice(0, 20)) {
       const response = await page.goto(href, { waitUntil: "domcontentloaded" });
       expect(response?.status(), href).toBeLessThan(400);
