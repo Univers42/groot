@@ -132,7 +132,7 @@ jobs:
         if: env.SNYK_TOKEN == ''
         run: echo "::notice::SNYK_TOKEN not configured — skipping Snyk"
 
-      - uses: snyk/actions/setup@master
+      - uses: snyk/actions/setup@11b673cfb4b0dc0d860a1323caa199d54950dcce # master at 2026-11-04
         if: env.SNYK_TOKEN != ''
 
       - name: Snyk test
@@ -160,7 +160,7 @@ jobs:
           git submodule update --init apps/grobase apps/opposite-osiris apps/calendar apps/mail apps/osionos/app
 
       - name: Trivy filesystem scan
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@8f28faec26515256b6d22074d1d2a8986f4cbd87 # master at 2026-11-04
         with:
           scan-type: fs
           scan-ref: .
@@ -205,7 +205,7 @@ jobs:
       # when the build actually succeeded, so a Docker Hub outage can't red the security gate.
       - name: Trivy image scan
         if: steps.build_img.outcome == 'success'
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@8f28faec26515256b6d22074d1d2a8986f4cbd87 # master at 2026-11-04
         with:
           image-ref: mini-baas/query-router:ci
           severity: HIGH,CRITICAL
@@ -241,7 +241,7 @@ jobs:
           git submodule update --init apps/grobase apps/opposite-osiris apps/calendar apps/mail apps/osionos/app
 
       - name: TruffleHog OSS
-        uses: trufflesecurity/trufflehog@main
+        uses: trufflesecurity/trufflehog@93633ac70c28603931c365b6ef530cab878f4286 # main at 2026-11-04
         with:
           path: ./
           base: ${{ github.event.pull_request.base.sha || github.event.before }}
