@@ -131,6 +131,13 @@ COMPOSE
   [[ "$output" == *"50000-50060 is busy; using 50100-50160"* ]]
 }
 
+@test "a moved LiveKit range stays put while it is free: a new one would drop every call" {
+  printf 'LIVEKIT_UDP_PORTS=50200-50260\n' >"$ROOT/.env.ports"
+  run bash "$REPO/scripts/host-ports.sh" resolve
+  [ "$status" -eq 0 ]
+  [ "$(port LIVEKIT_UDP_PORTS)" = "50200-50260" ]
+}
+
 @test "a running LiveKit does not walk away from its own range" {
   printf '#!/bin/sh\necho "UNCONN 0 0 0.0.0.0:50016 0.0.0.0:*"\n' >"$STUBS/ssu"
   chmod +x "$STUBS/ssu"
