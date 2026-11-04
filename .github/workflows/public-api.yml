@@ -65,10 +65,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - name: kong from mirror.gcr.io under its Docker Hub name
-        run: |
-          docker pull -q mirror.gcr.io/library/kong:3.8.0
-          docker tag mirror.gcr.io/library/kong:3.8.0 kong:3.8.0
+      - name: kong 3.8.0 from Docker Hub
+        # mirror.gcr.io does not carry kong (manifest not found, run 41774624391).
+        run: docker pull -q kong:3.8.0
       - name: install bats
         run: sudo apt-get update -qq && sudo apt-get install -y -qq bats
       - name: bats tests/public-api (no skips allowed)
