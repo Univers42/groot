@@ -15,6 +15,7 @@ REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 IMAGE="${AI_EDGE_TEST_IMAGE:-public.ecr.aws/docker/library/nginx:1.27-alpine}"
 NAME=ai-edge-test
 GOOD=https://example.invalid:8443
+BETA=https://beta.example.invalid
 TLS="$REPO/infrastructure/tls"
 tmp=$(mktemp -d)
 trap 'docker rm -f "$NAME" >/dev/null 2>&1 || true; rm -rf "$tmp"' EXIT
@@ -26,7 +27,7 @@ chmod 644 "$tmp"/*.pem
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 docker run -d --rm --name "$NAME" --network none \
 	-e NGINX_ENVSUBST_FILTER=PUBLIC_ -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx/track-binocle.d \
-	-e PUBLIC_ORIGIN=https://example.invalid -e PUBLIC_MAIL_ORIGIN= -e PUBLIC_CALENDAR_ORIGIN= \
+	-e PUBLIC_ORIGIN=https://example.invalid -e PUBLIC_MAIL_ORIGIN= -e PUBLIC_CALENDAR_ORIGIN= -e PUBLIC_EXTRA_FRAME_ANCESTORS= -e PUBLIC_BETA_ORIGIN="$BETA" \
 	-v "$TLS/nginx.conf:/etc/nginx/nginx.conf:ro" \
 	-v "$tmp:/etc/track-binocle/certs:ro" \
 	-v "$TLS/public.d/bridge-public.conf:/etc/nginx/track-binocle.d/bridge-public.conf:ro" \
@@ -77,5 +78,21 @@ for m in GET OPTIONS; do
 	r=$(req "$m" /api/ai/mcp "$GOOD")
 	if [ -z "$(acao "$r")" ] && [ -n "$(code "$r")" ] && [ "$(code "$r")" != 000 ]; then pass "f $m /api/ai/mcp: no ACAO ($(code "$r"))"; else fail "f $m /api/ai/mcp: no ACAO ($(code "$r") '$(acao "$r")')"; fi
 done
+
+# g: the beta app (its own origin, same bridge) reads the locked 404 too, so its panel says "off".
+r=$(req GET /api/ai/access-tokens "$BETA")
+if [ "$(code "$r")" = 404 ] && [ "$(acao "$r")" = "$BETA" ]; then pass "g GET beta origin: 404 + ACAO"; else fail "g GET beta origin: 404 + ACAO ($(code "$r") '$(acao "$r")')"; fi
+
+# h/i: the bucket guards the model calls. A read (GET) or a preflight never calls a model, and a
+# page load fires more than the burst of them, so they are never refused; a burst of POSTs still is.
+# No upstream runs here, so an unrefused request answers 502: only 429 counts as refused.
+# In parallel, so the bucket cannot refill between them; --max-time because the upstream name
+# never resolves under --network none (a refusal is answered before any lookup).
+burst() { docker exec "$NAME" sh -c "for i in \$(seq 1 ${2:-30}); do curl -sk --max-time 3 -o /dev/null -w '%{http_code}\n' -X $1 https://127.0.0.1:4000/api/ai/providers & done; wait" | grep -c '^429$' || true; }
+n=$(burst GET); if [ "$n" = 0 ]; then pass "h 30 GETs at once: none refused"; else fail "h 30 GETs at once: $n refused with 429"; fi
+n=$(burst OPTIONS); if [ "$n" = 0 ]; then pass "h 30 preflights at once: none refused"; else fail "h 30 preflights at once: $n refused with 429"; fi
+n=$(burst POST); if [ "$n" -gt 0 ]; then pass "i 30 POSTs at once: $n refused with 429"; else fail "i 30 POSTs at once: none refused (the bucket is off)"; fi
+
+n=$(burst GET 150); if [ "$n" -gt 0 ]; then pass "j 150 GETs at once: $n refused with 429 (reads still have a bucket)"; else fail "j 150 GETs at once: none refused (reads are unmetered)"; fi
 
 exit "$status"

@@ -66,12 +66,14 @@ address on port 4100. `make link` then starts the `grobase-link-ide` relay, as i
 The data center is the born2root QEMU VM `b2b` running grobase at `/opt/grobase` on a host whose
 LAN address is `192.168.1.132` (wifi/ethernet `enp7s0`, DHCP). The VM runs grobase `main`, the
 branch groot pins at `apps/grobase`. The whole procedure for another device, every network
-included, with its test plan: [another-device](another-device.md).
+included, with its test plan: [another-device](another-device.md). The VM is the Tailscale node
+`baas` (`100.97.49.118`, `baas.tail10f2ea.ts.net`); the earlier VM node is gone. The
+addresses and certificates below were read on 2026-11-04.
 
 | Path | URL for the API / CLI (the WAF) | ssh target for `make link` |
 |---|---|---|
 | same host | `https://127.0.0.1:8443` or `https://localhost:8443` | `ssh://b2b` (alias = `dlesieur@127.0.0.1:4242`) |
-| Tailscale (any network) | `https://dlesieur42-1.tail10f2ea.ts.net:8443` or `https://100.94.119.97:8443` | `ssh://dlesieur@100.94.119.97:4242` |
+| Tailscale (any network) | `https://baas.tail10f2ea.ts.net:8443` (the IP form fails, see below) | `ssh://dlesieur@100.97.49.118:4242` |
 | LAN / wifi without Tailscale | `https://grobase.track-binocle.test:8443` after adding `192.168.1.132 grobase.track-binocle.test` to the device's hosts file | `ssh://dlesieur@192.168.1.132:4242` once `make link-autostart LAN_IF=enp7s0 LAN_SSH=1` put the VM's password ssh on the LAN; otherwise none |
 
 A fresh clone for the data center: clone groot's `main` with `--recursive`. Plain `make all`
@@ -87,16 +89,27 @@ inside the VM, not on this host's docker daemon. For `make link` use `ssh://b2b`
 URL below (measured here); a direct URL that resolves to `127.x` points the relay, which runs in a
 container, at itself.
 
-**Tailscale, any network**: the WAF answers at `https://100.94.119.97:8443` (or the tailnet name
-`https://dlesieur42-1.tail10f2ea.ts.net:8443`), and ssh reaches `ssh://dlesieur@100.94.119.97:4242`
-once the device's key is on the VM — once, over Tailscale:
-`ssh-copy-id -p 4242 dlesieur@100.94.119.97` (BatchMode never prompts for a password).
+**Tailscale, any network**: the WAF answers at `https://baas.tail10f2ea.ts.net:8443`, and ssh
+reaches `ssh://dlesieur@100.97.49.118:4242` once the device's key is on the VM — once, over
+Tailscale: `ssh-copy-id -p 4242 dlesieur@100.97.49.118` (BatchMode never prompts for a
+password). The first ssh to an address asks to accept the host key; compare it with
+`SHA256:5uEVhnFXCwx3TKgh3hqn7DsdwF4YQy8C4hWbKY8aRiM`.
+
+On the tailnet, tailscale itself answers `:8443` with a Let's Encrypt certificate for
+`baas.tail10f2ea.ts.net` only (CN=YE1, valid to 2027-01-18). So the system store trusts it and no
+CA file or pin is needed, and `https://100.97.49.118:8443` does not work: the handshake ends in
+`alert internal error` (`curl: (35)`). `curl --noproxy '*' https://baas.tail10f2ea.ts.net:8443/`
+returns 200 with certificate verification on (`ssl_verify_result=0`). On a device with a system
+proxy (the laptop's goes through Tor), keep `--noproxy '*'` for tailnet addresses.
 
 ```sh
-GROBASE_TARGET=https://100.94.119.97:8443
-GROBASE_CA_FILE=./grobase-ca.pem
+GROBASE_TARGET=https://baas.tail10f2ea.ts.net
+GROBASE_CA_FILE=
 make link
 ```
+
+`https://baas.tail10f2ea.ts.net` (port 443) is the form the laptop's `.env.grobase-link` holds.
+Whether `make link` direct over `:8443` works is **unverified**: it was not run.
 
 **LAN / wifi without Tailscale**: add `192.168.1.132 grobase.track-binocle.test` to the device's
 hosts file, then the same two keys with the URL as the name (the certificate does not carry the
@@ -114,13 +127,14 @@ LAN name itself has not been run (only the CLI has). Any of the three paths can 
 standing choice in `./.env.grobase-link` (git-ignored), or one run with
 `make link GROBASE_TARGET=… GROBASE_CA_FILE=…`.
 
-**The CA.** The WAF certificate is signed by the VM's own CA ("Track Binocle Local Development
+**The CA**, for the LAN routes only: the tailnet and Funnel routes above need none. The VM's
+local WAF certificate (LAN edge `192.168.1.132:8443`, VM-side `127.0.0.1:8443`) is signed by the VM's own CA ("Track Binocle Local Development
 CA", `/opt/grobase/certs/track-binocle-local-ca.pem` on the VM), a different CA from the one a
 local `make certs` mints. Copy it to the device — the certificate is public, its key never leaves
 the VM — then verify the copy against the value the data center prints for the same file:
 
 ```sh
-scp -P 4242 dlesieur@100.94.119.97:/opt/grobase/certs/track-binocle-local-ca.pem ~/grobase-ca.pem
+scp -P 4242 dlesieur@100.97.49.118:/opt/grobase/certs/track-binocle-local-ca.pem ~/grobase-ca.pem
 openssl x509 -noout -fingerprint -sha256 -in ~/grobase-ca.pem        # this device
 openssl x509 -noout -fingerprint -sha256 -in /opt/grobase/certs/track-binocle-local-ca.pem  # VM
 ```
@@ -130,8 +144,9 @@ copied to `LINK_DIR/ca.pem` and handed to the relay as `cafile=/link/ca.pem`. Em
 relay image's system store, which does not know this CA. Any copy channel works, the fingerprint
 check is what makes it safe; never `curl -k` and never `verify=0`. The certificate's SANs are
 `localhost`, `host.docker.internal`, `local-https-proxy`, `track-binocle.test`,
-`*.track-binocle.test`, `127.0.0.1`, `dlesieur42-1.tail10f2ea.ts.net`, `100.94.119.97` and `::1`
-— not the LAN IP, hence the hosts file. The IPv6 SANs come last on purpose: socat 1.8 (the relay
+`*.track-binocle.test`, `127.0.0.1`, `baas.tail10f2ea.ts.net`, `100.97.49.118` and `::1`
+— not the LAN IP, hence the hosts file. The CA is the same one the old VM had (SHA-256
+`7B:22:BB:3A:…:5B:2F:EE`, valid to 2036-10-07); the leaf is new. The IPv6 SANs come last on purpose: socat 1.8 (the relay
 image, `alpine/socat 1.8.0.1`) aborts verification at the first IPv6 SAN when it connects to an
 IPv4 literal, and grobase's cert generator orders them that way and re-issues an older cert.
 
@@ -143,15 +158,16 @@ bridge publishes. Never
 copy grobase secrets anywhere else, and never push them by hand.
 
 **The grobase CLI** (`github.com/Univers42/grobase-cli`, main `5b5aac7` or later) works against
-all four URLs, with the CA file you copied and secrets on stdin. One context can hold every path:
-`--url` repeats, the first URL that answers `GET /auth/v1/health` is used (probe timeout
-`GROBASE_PROBE_TIMEOUT`, default 2s), so the same context works at home on the LAN and away over
-Tailscale:
+the URLs above, with secrets on stdin. `--url` repeats and the first URL that answers
+`GET /auth/v1/health` is used (probe timeout `GROBASE_PROBE_TIMEOUT`, default 2s), but every URL
+of a context must present the same certificate. The tailnet name (Let's Encrypt) and the LAN
+name (local CA) do not, so they are two contexts. Not run in this edit (**unverified**: the
+`context add` lines below were written from the measured URLs and certificates):
 
 ```sh
-grobase context add dc --url https://grobase.track-binocle.test:8443 \
-  --url https://dlesieur42-1.tail10f2ea.ts.net:8443 --url https://100.94.119.97:8443 \
-  --ca-file ~/grobase-ca.pem --yes
+grobase context add dc --url https://baas.tail10f2ea.ts.net:8443 --yes                  # tailnet, system trust
+grobase context add dc-lan --url https://grobase.track-binocle.test:8443 \
+  --ca-file ~/grobase-ca.pem --yes                                                       # LAN name, local CA
 grobase signup --email <email> --password-stdin --anon-key-stdin   # first time; signed in at once (the VM auto-confirms)
 grobase login --email <email> --password-stdin                     # later
 grobase whoami
@@ -159,36 +175,39 @@ grobase doctor
 eval "$(grobase context env dc)"                                   # GROBASE_TARGET / GROBASE_CA_FILE for make link
 ```
 
-The credential store is mode 600; `doctor`'s only WARN is that the CA is not a system root.
+The credential store is mode 600; `doctor`'s only WARN on `dc-lan` is that the CA is not a system root.
 
-**One context for every network, no CA file and no hosts file**: pin the WAF's leaf certificate
-instead (`--pin-sha256`, the SHA-256 of the leaf's DER). A pin checks the certificate itself, not
-the name in the URL, so the bare LAN IP works where `--ca-file` needs the hosts entry. Check the
-value against the data center before trusting it, then list the paths in the order to try them:
+**The LAN IP without a hosts file or CA file**: pin the local-CA leaf instead (`--pin-sha256`,
+the SHA-256 of the leaf's DER). A pin checks the certificate itself, not the name in the URL, so
+the bare LAN IP works where `--ca-file` needs the hosts entry. It applies to the LAN edge and the
+ssh tunnel, not to the tailnet name. Check the value against the data center before trusting
+it:
 
 ```sh
-ssh -p 4242 dlesieur@100.94.119.97 openssl x509 -noout -fingerprint -sha256 -in /opt/grobase/certs/localhost.pem
-grobase context add b2b --url https://100.94.119.97:8443 --url https://192.168.1.132:8443 \
-  --url https://127.0.0.1:8443 --url https://127.0.0.1:18443 \
-  --pin-sha256 28e27b66a18a90d701a406fbb479c071a26d08cc2fe250a7bb329d327e780c7a
+ssh -p 4242 dlesieur@100.97.49.118 openssl x509 -noout -fingerprint -sha256 -in /opt/grobase/certs/localhost.pem
+grobase context add dc-lan --url https://192.168.1.132:8443 --url https://127.0.0.1:18443 \
+  --pin-sha256 a58da5162106c272f4567f3b08b898fb877d4f0dcf689864f1573f14a099fc48
 grobase doctor        # the reachability row names the URL in use: "200 in 3ms via https://…"
 ```
 
-The four URLs are Tailscale (any network: home wifi, mobile data, another site's network, a
-VPN that leaves the tailnet up), the LAN edge (same wifi, no Tailscale), the host itself, and an
-ssh tunnel for a network that lets only ssh out:
-`ssh -N -L 127.0.0.1:18443:127.0.0.1:8443 -p 4242 dlesieur@100.94.119.97` (the tunnel's far end
-is the VM, whose WAF is on its own `127.0.0.1:8443`). A URL that does not answer costs
+The two URLs are the LAN edge (same wifi, no Tailscale) and an ssh tunnel for a network that
+lets only ssh out:
+`ssh -N -L 127.0.0.1:18443:127.0.0.1:8443 -p 4242 dlesieur@100.97.49.118` (the tunnel's far end
+is the VM, whose local-CA WAF is on its own `127.0.0.1:8443`). A URL that does not answer costs
 `GROBASE_PROBE_TIMEOUT` (2 s) before the next one. The pin breaks when the leaf is re-issued
-(this one expires 2027-11-12): `doctor` then FAILs the TLS row with both fingerprints; check the
-new one the same way, then `grobase context pin b2b`. Use CLI `2ffd17d` or later: before it `doctor` checked TLS on
+(this one expires 2027-11-21): `doctor` then FAILs the TLS row with both fingerprints; check the
+new one the same way, then `grobase context pin dc-lan`. Measured 2026-11-04 on the data-center
+host: `https://192.168.1.132:8443/auth/v1/health` answers 401 and presents the leaf with
+SHA-256 `A5:8D:A5:16:…:FC:48`, the same as the VM's `127.0.0.1:8443`. Use CLI `2ffd17d` or later: before it `doctor` checked TLS on
 the first URL even when an alternate was the one answering, so away from the LAN a working
 context reported FAIL.
 
 From the public internet without Tailscale, the one path is Tailscale Funnel, which the owner
-turned on: `https://dlesieur42-1.tail10f2ea.ts.net` (port 443, a public certificate, so no CA
-file and no pin). The CLI passed login and whoami over it from a container on the public
-internet (2026-10-12). Funnel carries the user plane only. Since grobase `1aaac82e`, WAF
+turned on: `https://baas.tail10f2ea.ts.net` (port 443, a public certificate, so no CA
+file and no pin). `tailscale funnel status` on the VM (2026-11-04) lists Funnel on for ports
+443, 8443 and 10000. The CLI passed login and whoami over the old VM's Funnel URL from a
+container on the public internet (2026-10-12); the public path to `baas` was **not** run, and
+from the laptop the name resolves to the tailnet address, so a laptop probe does not exercise it. Funnel carries the user plane only. Since grobase `1aaac82e`, WAF
 rule 10130 answers 403 on `/admin/v1`, `/meta/v1` and `/realtime/v1/publish` for any request
 Funnel delivers, because Funnel reaches Kong from loopback, which its allow list admits. A
 direct link over Funnel therefore loses the bridge's publish and the adapter registry, and has
@@ -205,7 +224,10 @@ It forwards `<LAN IP>:8443` to the VM's https forward as QEMU actually bound it 
 VM's `ports.env`). With `LAN_SSH=1` a second unit, `grobase-lan-ssh.service`, forwards
 `<LAN IP>:4242` to the VM's sshd (`ssh=` in `ports.env`), which accepts passwords: anyone on the
 LAN can try them (the owner's choice, 2026-10-12; `scripts/grobase-lan-edge.sh`). An install
-without `LAN_SSH=1` removes that unit. Rollback: `make link-autostart-off`. It reads the address and the target at start; the heal timer below
+without `LAN_SSH=1` removes that unit. Measured 2026-11-04 on the host: QEMU already binds
+`0.0.0.0:8443` (`hostfwd=tcp:0.0.0.0:8443-:8443`) and serves the LAN, so the edge unit's
+`socat` fails with `bind … 192.168.1.132:8443: Address already in use` and the unit restarts in a
+loop; the LAN URL answers all the same. Not investigated further. Rollback: `make link-autostart-off`. It reads the address and the target at start; the heal timer below
 restarts it when the LAN URL stops answering TLS, so a DHCP change or a VM restart on another port
 heals within two minutes. Without linger it runs only while that user is logged in on the host.
 
@@ -245,7 +267,7 @@ environment precedence over `--env-file`).
 When `OSIONOS_APP_HOST_PORT` moves, the resolver also writes the override file
 **`infrastructure/tls/host-ports.d/osionos-origin.conf`** (generated, git-ignored) with the
 chosen port. The tracked `infrastructure/tls/nginx.conf` includes this directory via
-`include /etc/nginx/host-ports.d/*.conf;`, so the drawnosaurus server picks up the moved
+`include /etc/nginx/host-ports.d/*.conf;`, so the hydrawn server picks up the moved
 osionos origin for framing and CORS without rewriting any tracked file.
 
 | Question | Answer |
@@ -429,7 +451,7 @@ Chrome 149 (deb, `~/.pki/nssdb`) rendered `https://localhost:4322/` (title "Pris
 One Space.") and `https://localhost:3001/` (osionos gate) with no certificate error; snap Firefox
 (profile `pqdn9c63.default-release-1`) rendered both; snap Chromium 154 failed with
 `ERR_CERT_AUTHORITY_INVALID` until the store was recreated under the new revision, then rendered
-`4322`. `docker ps`: 12 track-binocle containers, all `(healthy)` (`livekit` and `drawnosaurus-*`
+`4322`. `docker ps`: 12 track-binocle containers, all `(healthy)` (`livekit` and `hydrawn-*`
 gained healthchecks in `docker-compose.yml`).
 
 ### Every kind through `make link`, 2026-10-08 23:0x (each run ends with `link-verify`)
@@ -442,18 +464,20 @@ gained healthchecks in `docker-compose.yml`).
 | `ssh://dlesieur@127.0.0.1:4242` | ssh, user@ip:port | exit 0 in 23 s; `closing the master to b2b`, new master, same matrix. Needed a current `known_hosts` entry first: the VM's host key had changed since `[127.0.0.1]:4242` was recorded (`ssh-keygen -R '[127.0.0.1]:4242'`, then one `ssh -o StrictHostKeyChecking=accept-new`); the alias block disables that check, the bare form does not |
 | `local` | guard | exit 1 in 1 s: `no mini-baas-kong on this daemon`; the ssh link stayed up (`link-status` exit 0) |
 | `https://dlesieur42.tail10f2ea.ts.net` | direct | exit 1 in 4 s: `does not answer from a container of this daemon` — campus DNS returns NXDOMAIN for `*.ts.net` and this host is not on the tailnet; the ssh link stayed up (`up_direct` checks before it closes anything) |
-| `make link-healthcheck` after the restore | | exit 0 in 10 s: the matrix, then the stack healthcheck (`auth-gateway-https-200`, bridge `{"ok":true}`, website, osionos, drawnosaurus) |
+| `make link-healthcheck` after the restore | | exit 0 in 10 s: the matrix, then the stack healthcheck (`auth-gateway-https-200`, bridge `{"ok":true}`, website, osionos, hydrawn) |
 
 The matrix each time: `track-binocle-auth-gateway-1`, `-local-https-proxy-1`, `-opposite-osiris-web-1`,
 `-osionos-bridge-1` × `mini-baas-kong:8000` (`HTTP/1.1 404`), `mini-baas-redis:6379` (`+PONG`),
 `mini-baas-mailpit:8025` (`HTTP/1.0 200`), `mailpit:1025` (`220 … Mailpit ESMTP Service ready`),
 `mini-baas-realtime:4000` (`HTTP/1.0 200`), then `edge https://127.0.0.1:8444/auth/v1/health Kong HTTP 401`.
-Those four are the containers on `mini-baas_mini-baas`; `osionos-app`, `livekit` and `drawnosaurus-*`
+Those four are the containers on `mini-baas_mini-baas`; `osionos-app`, `livekit` and `hydrawn-*`
 are not on it (the browser reaches Kong through the vhost), so they are not probed.
 Not exercised on this host: a working `local` link (grobase would have to run on this daemon).
 A working `direct` link is no longer in that case — see the next subsection.
 
 ### Every path, 2026-10-11
+
+Measured on the old VM `dlesieur42-1` (`100.94.119.97`) before the move to `baas`; the addresses, pin and numbers are that VM's.
 
 Measured on the data center host, direct mode to `https://100.94.119.97:8443` with the VM's CA in
 `GROBASE_CA_FILE`, against the linked grobase (`feat/b2b-datacenter`, `4eb80e0c`):
@@ -502,6 +526,8 @@ path relays the names with no WAF in the way, at the price of the device's key o
 
 ### After the host reboot, 2026-10-12
 
+Measured on the old VM `dlesieur42-1` (`100.94.119.97`) before the move to `baas`; the addresses, pin and numbers are that VM's.
+
 The host rebooted. The VM came back with its https forward on `127.0.0.1:8445`, not `8443`:
 born2root's port check counted the LAN edge's `192.168.1.132:8443` as a conflict for a
 `127.0.0.1` bind, and every LAN client hit a dead port. That check is fixed in born2root
@@ -525,6 +551,8 @@ grobase through the ssh link to ssh://b2b` at 01:13:52; `link-status` exit 0. DB
 graph.
 
 ### Afternoon, 2026-10-12: the link as another device runs it
+
+Measured on the old VM `dlesieur42-1` (`100.94.119.97`) before the move to `baas`; the addresses, pin and numbers are that VM's.
 
 - `make link-e2e` over `ssh://b2b`: 18 passed, 5 failed. The DB2 tests logged the demo user
   in once each and the gateway allows 8 logins a minute per IP (`RATE_LIMITS.login`); the
@@ -614,12 +642,12 @@ graph.
 | `frontends-up` fails to bind `127.0.0.1:4322`, `3001`, `4000`, `8787`, `3002`, `4100`, `3003`, `4200` | A QEMU `hostfwd` of a born2root VM holds the port. The `baas` profile (`vendor/born2root/profiles/server.toml`, `[network] forwards`) stopped forwarding those, `8000`, `8001` and `8025` on 2026-10-08: the link needs only the ssh forward, and a hostfwd never reaches a guest-loopback service anyway | `cat <vm dir>/ports.env` shows what the running VM forwards; edit the profile's `forwards` and `make qemu_restart B2B_CONFIG=profiles/server.toml`. Kong's host copy stays on `28000` so a grobase on this daemon can keep `8000` |
 | `make certs`: `not readable by the WAF gid 101 (tried chgrp, setfacl, docker)` | NFS refuses `setfacl` and `chgrp` to a group the user is not in; rootless Docker maps gid 101 to the user's subgid range | `MINI_BAAS_WAF_TLS_GID=none make certs` — the link targets already set it |
 | `[backend] the grobase-link relay is running` | By design | `make link-down`, then `make backend-up` |
-| `drawnosaurus-wasm`: `cannot setuid to unmapped uid <uid> in user namespace` | A rootless daemon has no mapping for the host uid that `--user` asked for; the flag only exists to keep `engine/pkg` user-owned on a rootful daemon, where container root would write it as root | Fixed 2026-10-08: `DRAWNOSAURUS_RUN_USER` (`utils/mk/drawnosaurus.mk`) drops `--user` when `docker info` reports `rootless`. Container root already is the invoking user there |
+| `hydrawn-wasm`: `cannot setuid to unmapped uid <uid> in user namespace` | A rootless daemon has no mapping for the host uid that `--user` asked for; the flag only exists to keep `engine/pkg` user-owned on a rootful daemon, where container root would write it as root | Fixed 2026-10-08: `HYDRAWN_RUN_USER` (`utils/mk/hydrawn.mk`) drops `--user` when `docker info` reports `rootless`. Container root already is the invoking user there |
 | `make link GROBASE_TARGET=local`: `no mini-baas-kong on this daemon` | The monolithic kind is taken as given but still checked: without grobase here the frontends would start against a name that resolves to nothing | `make backend-up` first, or set the target to the machine that runs grobase |
 | After this machine reboots: `track-binocle-grobase-link-1` restarting, the frontends get no answer from grobase | The ssh master and `LINK_DIR` (in `XDG_RUNTIME_DIR`) do not survive a reboot; dockerd re-creates the relay's bind source as root when it restarts the relay, and `make link` replaces that empty directory with this user's (`own_link_dir`) | `make link`; `make link-autostart` once makes it heal on its own |
 | `link-status`: `master to … is gone` | The remote rebooted or the network dropped; `ControlPersist` does not reconnect | `make link` again (the heal timer does it within two minutes when `link-autostart` is installed) |
-| LAN clients time out on `https://<LAN IP>:8443` while `https://100.94.119.97:8443` answers | The VM's https forward is not on `127.0.0.1:8443` (`https=` in the VM's `ports.env`; it was `8445` after the 2026-10-12 reboot) and the edge forwards to the old port | `systemctl --user restart grobase-lan-edge` (the heal timer does it); born2root `fix/host-port-bind` keeps the forward on 8443 at the next VM start |
-| `grobase doctor`: TLS FAIL `pin sha256:… does not match the presented sha256:…` | The WAF's leaf was re-issued | Read the new fingerprint on the data center (`openssl x509 -noout -fingerprint -sha256 -in /opt/grobase/certs/localhost.pem`), compare it with the presented one, then `grobase context pin b2b` |
+| LAN clients time out on `https://<LAN IP>:8443` while `https://baas.tail10f2ea.ts.net:8443` answers | The VM's https forward is not on `127.0.0.1:8443` (`https=` in the VM's `ports.env`; it was `8445` after the 2026-10-12 reboot) and the edge forwards to the old port | `systemctl --user restart grobase-lan-edge` (the heal timer does it); born2root `fix/host-port-bind` keeps the forward on 8443 at the next VM start |
+| `grobase doctor`: TLS FAIL `pin sha256:… does not match the presented sha256:…` | The WAF's leaf was re-issued | Read the new fingerprint on the data center (`openssl x509 -noout -fingerprint -sha256 -in /opt/grobase/certs/localhost.pem`), compare it with the presented one, then `grobase context pin dc-lan` |
 | Browser: certificate warning on `https://localhost:9443` (or any frontend) while `curl --cacert` is fine | A browser store holds an older CA: `make certs` on a fresh tree mints a new one | `make certs-trust-check` to see the stale or missing stores, `make certs-trust-user`, then relaunch the browser |
 | Snap Chromium warns (`ERR_CERT_AUTHORITY_INVALID`) after a snap refresh | Its `HOME` is the revision directory behind `~/snap/chromium/current`; the new revision has no store | `make certs-trust-check` reports it missing; `make certs-trust-user` recreates it; relaunch |
 | Every `/query/v1` call answers 502 `An invalid response was received from the upstream server` right after `query-router` was recreated on the data center, while `query-router` answers from Kong's network | Kong keeps the old container's address for the upstream | `docker restart mini-baas-kong` on the data center (measured 2026-10-11: 502 on all seven mounts before, 200 after) |

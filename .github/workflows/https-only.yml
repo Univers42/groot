@@ -1,0 +1,42 @@
+name: HTTPS only (subject III.3)
+
+# Fails when the resolved compose config or .env.example hands a ws:// or http:// URL to
+# anything outside the backend, or publishes a plaintext port beyond loopback
+# (scripts/verify/https-only.sh), and runs LiveKit's TLS front door against the real nginx.conf
+# (tests/livekit-edge). No path filter: a plaintext URL can arrive from any compose file or env
+# default. Seconds, no secrets, no stack.
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: https-only-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  https-only:
+    name: no plaintext URL or port outside the backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: nginx from mirror.gcr.io under its public.ecr.aws name
+        # Same reason as hydrawn-edge.yml: public.ecr.aws rate-limits anonymous pulls per runner IP.
+        run: |
+          docker pull -q mirror.gcr.io/library/nginx:1.27-alpine
+          docker tag mirror.gcr.io/library/nginx:1.27-alpine public.ecr.aws/docker/library/nginx:1.27-alpine
+      - name: install bats
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bats
+      - name: scripts/verify/https-only.sh
+        run: sh scripts/verify/https-only.sh
+      - name: bats tests/https-only tests/livekit-edge (no skips allowed)
+        shell: bash
+        run: |
+          bats tests/https-only tests/livekit-edge | tee "$RUNNER_TEMP/bats.log"
+          if grep -q '# skip' "$RUNNER_TEMP/bats.log"; then echo "::error::an https-only test was skipped"; exit 1; fi

@@ -4,4 +4,6 @@
 map $http_origin $ai_locked_cors_origin {
   default "";
   "${PUBLIC_ORIGIN}:8443" $http_origin;
+  # The develop beta (ADR 0040) is a second app on the same bridge. Unset, the line names no origin.
+  "${PUBLIC_BETA_ORIGIN}" $http_origin;
 }

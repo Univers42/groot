@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Grobase public API</title>
+  <link rel="stylesheet" href="docs.css">
+</head>
+<body>
+  <main>
+    <h1 id="title">Grobase public API</h1>
+    <p id="summary"></p>
+    <section aria-labelledby="access">
+      <h2 id="access">Access</h2>
+      <ul>
+        <li>Every route needs a key in the <code>apikey</code> header. Without one, or with an
+          unknown one, the gateway answers <code>401</code>.</li>
+        <li>Each route has its own per-IP limit, counted once the key is accepted. Over the limit
+          the gateway answers <code>429</code>; the <code>RateLimit-*</code> response headers give
+          the limit, what is left and the seconds until the reset.</li>
+        <li>Machine-readable document: <a href="/openapi.json">/openapi.json</a> (OpenAPI 3.1).</li>
+      </ul>
+    </section>
+    <section aria-labelledby="ops">
+      <h2 id="ops">Endpoints</h2>
+      <p id="status" role="status">Loading /openapi.json…</p>
+      <div id="operations"></div>
+    </section>
+  </main>
+  <script src="docs.js"></script>
+</body>
+</html>
