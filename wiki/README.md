@@ -88,6 +88,9 @@ zero per-project server code.
 | [02-modules](project/02-modules.md) | Module ledger: points, flags, evidence |
 | [03-team](project/03-team.md) | Roles and contributions |
 | [04-glossary](project/04-glossary.md) | Project vocabulary |
+| [ai-llm-interface](project/ai-llm-interface.md) | The LLM interface: one question through twelve hops, and the tests behind each claim |
+| [ai-audit-2026-10-28](project/ai-audit-2026-10-28.md) | Superseded 2026-11-04: the AI modules against the old pin |
+| [ai-stall-diagnosis-2026-10-29](project/ai-stall-diagnosis-2026-10-29.md) | Why the assistant could stop after a few questions (diagnosis only) |
 
 ---
 
