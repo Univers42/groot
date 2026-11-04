@@ -5,20 +5,21 @@
 #
 #   setting       print the data center's ssh alias; nothing means this machine has none
 #   vault-needed  exit 0 when the vault's tree must be pulled
-#   certs         restore the CA certificate and the edge leaf, never the CA key
+#   vm            wait for the VM, have born2root start grobase in it, seed an empty platform
+#   configure     pin the VM's host key, write the link's settings
+#   certs         copy the CA certificate and the WAF's leaf from the VM, never the CA key
 #   certs-verify  exit 0 when the leaf chains to the CA and is not about to expire
-#   configure     check the VM, pin its host key, write the link's settings
-#   preflight     read-only checks of the VM, then only the writes they allow
+#   preflight     check the VM, then only the writes those checks allow
 #   trust         prove the CA signs the VM's WAF, then import it in every browser store
+#   health        born2root's verdict on the platform, its reach and its forwards
 #   browsers      relaunch the browsers when a store changed and someone is at the terminal
+#   dc TARGET     run an allowed grobase target in the VM (datacenter-vm.sh)
 #
-# Caveat: `pending` in the models check looks for missing TABLES (apply-models-migrations.sh), so a
-# migration that only adds a column reads as converged and is not applied here (under-reports).
-# DATACENTER_MIGRATE=1 replays every file after a verified dump; do that after a models change.
-# Caveat: the first host key is read over the unverified alias, trusted because the loopback
+# Caveat: a models change is seen from a hash of models/*.sql recorded in the VM's database, so a
+# file edited on the VM directly reads as converged (under-reports).
+# Caveat: the host key of this user's own VM is re-read on every run, trusted because the loopback
 # listener is this user's own qemu (kernel-reported pid, uid and comm). A process of this user
-# could fake that, but it could read the ssh key anyway. Delete GROBASE_ADMIN_HOST_KEY from
-# datacenter.env after rebuilding the VM.
+# could fake that, but it could read the ssh key anyway. Any other target keeps a strict pin.
 # Caveat: the default-route source address assumes the host's forward binds that interface;
 # GROBASE_CONNECT_IP in a credential file overrides it. It is re-read on every make all, so a DHCP
 # change between two runs leaves the relay dialling the old address until the next make all.
@@ -33,14 +34,15 @@ CERT_DIR="${LOCAL_CERT_DIR:-$REPO/apps/grobase/certs}"
 CA_CERT="$CERT_DIR/track-binocle-local-ca.pem"
 LEAF_CERT="$CERT_DIR/localhost.pem"
 LEAF_KEY="$CERT_DIR/localhost-key.pem"
-CERT_ARCHIVE="$REPO/secrets/grobase-certs.tar.gz"
 CONF="${GROBASE_LINK_CONF:-$REPO/.env.grobase-link.local}"
 LINK_DIR="${GROBASE_LINK_DIR:-${XDG_RUNTIME_DIR:-/tmp}/track-binocle-link}"
 BROWSER_MARK="$LINK_DIR/browsers-stale"
-DUMP_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/groot/datacenter-dumps"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/groot"
+DUMP_DIR="$STATE_DIR/datacenter-dumps"
+KNOWN_HOSTS="$STATE_DIR/admin_known_hosts"
 DEFAULT_ALIAS=b2b
 WAF_PORT=8443
-VAULT_FILES=".env.local apps/grobase/.env secrets/grobase-certs.tar.gz"
+VAULT_FILES=".env.local apps/grobase/.env"
 PG_CTN=mini-baas-postgres
 TRUST="$REPO/scripts/certs-trust-user.sh"
 MODELS="$REPO/scripts/apply-models-migrations.sh"
@@ -50,6 +52,11 @@ die() {
   note "$*"
   exit 1
 }
+vm_ssh() { ssh -o ClearAllForwardings=yes -o BatchMode=yes -o ConnectTimeout=8 "$@"; }
+# shellcheck source=scripts/lib/datacenter-vm.sh
+. "$REPO/scripts/lib/datacenter-vm.sh"
+# shellcheck source=scripts/lib/datacenter-models.sh
+. "$REPO/scripts/lib/datacenter-models.sh"
 
 # machine_value KEY — KEY's first value across the operator's credential files, the same files
 # scripts/lib/vault42-session.sh reads. Those files are outside the checkout, so a fresh clone
@@ -67,7 +74,7 @@ cmd_setting() {
   alias=$(machine_value GROBASE_DATACENTER) || alias=""
   if [ -z "$alias" ]; then
     { machine_value FT_PASSPHRASE || machine_value VAULT42_PASSPHRASE; } >/dev/null || return 0
-    [ -f "$CTL_CFG_DIR/keystore.v42" ] || return 0
+    [ -f "$CTL_CFG_DIR/keystore.v42" ] || machine_value FT_KEYSTORE_B64 >/dev/null || return 0
     alias=$DEFAULT_ALIAS
   fi
   [ "$alias" = local ] || printf '%s\n' "$alias"
@@ -83,38 +90,44 @@ cmd_vault_needed() {
   return 1
 }
 
-cmd_certs_verify() {
+# verify_set CA LEAF KEY — the leaf chains to the CA, is not about to expire, and the key is its own.
+verify_set() {
   local out
-  [ -s "$LEAF_KEY" ] || die "no $LEAF_KEY; repair: rm -r apps/grobase/certs, then make all"
-  out=$(openssl verify -CAfile "$CA_CERT" "$LEAF_CERT" 2>&1) ||
-    die "the edge certificate does not chain to the CA ($out); repair: rm -r apps/grobase/certs, then make all"
-  openssl x509 -in "$LEAF_CERT" -noout -checkend 86400 >/dev/null ||
-    die "the edge certificate expires within a day; repair: renew it on the VM, then VAULT42_REFRESH=1 make all"
+  [ -s "$3" ] || die "no edge key at $3; make all copies it from the VM"
+  out=$(openssl verify -CAfile "$1" "$2" 2>&1) || die "the edge certificate does not chain to the CA ($out); make all copies both from the VM"
+  openssl x509 -in "$2" -noout -checkend 86400 >/dev/null || die "the edge certificate expires within a day; renew it on the VM, then make all"
+  [ "$(openssl x509 -in "$2" -noout -pubkey | sha256sum)" = "$(openssl pkey -in "$3" -pubout | sha256sum)" ] ||
+    die "the edge key does not match its certificate"
 }
 
-# The CA key stays out: this CA has no name constraints, so its key could impersonate any site in
-# a browser that trusts it, and nothing on this host signs. certs.mk keeps the generator away from
-# a tree without it, because the generator deletes such a CA and mints another.
+cmd_certs_verify() { verify_set "$CA_CERT" "$LEAF_CERT" "$LEAF_KEY"; }
+
+# The pinned path, not the alias, which carries forwards and an unverified host key.
+admin_ssh() {
+  local host port user
+  read -r host port user < <(ssh -G "$ALIAS" | awk '$1 == "hostname" { h = $2 } $1 == "port" { p = $2 } $1 == "user" { u = $2 } END { print h, p, u }')
+  ssh -F /dev/null -o ClearAllForwardings=yes -o BatchMode=yes -o ConnectTimeout=8 -o LogLevel=ERROR \
+    -o StrictHostKeyChecking=yes -o HostKeyAlias=grobase-admin -o UserKnownHostsFile="$KNOWN_HOSTS" \
+    -p "$port" -l "$user" "$host" "$@"
+}
+
+# The VM is the authority on its certificates, so a rebuild that minted a CA needs nothing here. The
+# CA key stays out: this CA has no name constraints, so its key could impersonate any site in a
+# browser that trusts it, and nothing on this host signs. The leaf key is root's on the VM, so it is
+# read as the WAF holds it. Each file lands by rename only after the set verifies.
 cmd_certs() {
-  if [ ! -s "$CA_CERT" ] || [ ! -s "$LEAF_CERT" ] || [ ! -s "$LEAF_KEY" ]; then
-    [ -f "$CERT_ARCHIVE" ] || die "no ${CERT_ARCHIVE#"$REPO"/}; the vault should deliver it: VAULT42_REFRESH=1 make all"
-    tar -xzf "$CERT_ARCHIVE" -C "$REPO" apps/grobase/certs/track-binocle-local-ca.pem \
-      apps/grobase/certs/localhost.pem apps/grobase/certs/localhost-key.pem ||
-      die "${CERT_ARCHIVE#"$REPO"/} does not hold the CA certificate and the edge leaf"
-  fi
-  cmd_certs_verify
-}
-
-vm_ssh() { ssh -o ClearAllForwardings=yes -o BatchMode=yes -o ConnectTimeout=8 "$@"; }
-
-# require_vm ALIAS — the VM answers and runs the WAF, else stop: falling back would start a second
-# grobase here, the thing this path exists to prevent.
-require_vm() {
-  local names
-  names=$(vm_ssh "$1" 'docker ps --format "{{.Names}}"' 2>/dev/null) ||
-    die "the data center VM ($1) does not answer. Start it from the born2root checkout that built it (make qemu_start with its profile). groot never starts grobase here (make all GROBASE_DATACENTER= takes the local path)."
-  grep -qx mini-baas-waf <<<"$names" ||
-    die "the VM ($1) answers but mini-baas-waf is not running; start grobase on the VM. groot never starts grobase here."
+  ALIAS=$(cmd_setting)
+  [ -n "$ALIAS" ] || die "this machine has no data center"
+  (umask 077 && mkdir -p "$CERT_DIR") || die "cannot create $CERT_DIR"
+  INCOMING=$(mktemp -d "$CERT_DIR/.incoming.XXXXXX") || die "cannot write in $CERT_DIR"
+  trap 'rm -rf "$INCOMING"' EXIT
+  admin_ssh "cat $REMOTE_DIR/certs/track-binocle-local-ca.pem" >"$INCOMING/ca" || die "cannot read the VM's CA certificate"
+  admin_ssh 'docker exec mini-baas-waf cat /run/secrets/localhost_cert' >"$INCOMING/leaf" || die "cannot read the WAF's certificate"
+  admin_ssh 'docker exec mini-baas-waf cat /run/secrets/localhost_key' >"$INCOMING/key" || die "cannot read the WAF's key"
+  verify_set "$INCOMING/ca" "$INCOMING/leaf" "$INCOMING/key"
+  mv -f "$INCOMING/ca" "$CA_CERT"
+  mv -f "$INCOMING/leaf" "$LEAF_CERT"
+  mv -f "$INCOMING/key" "$LEAF_KEY"
 }
 
 own_vm_listens() {
@@ -125,19 +138,24 @@ own_vm_listens() {
   return 1
 }
 
-# pinned_host_key ALIAS — the VM's key from the machine file, pinned on first use for a VM this
-# user's own process serves on loopback. Anything else needs the operator to pin it.
+# pinned_host_key ALIAS — this user's own VM is read every run and the pin follows it, because a
+# rebuild changes the key. Anything else keeps what the machine file holds.
 pinned_host_key() {
-  local key endpoint
-  key=$(machine_value GROBASE_ADMIN_HOST_KEY) || key=""
-  if [ -z "$key" ]; then
-    endpoint=$(ssh -G "$1" | awk '$1 == "hostname" { h = $2 } $1 == "port" { p = $2 } END { print h, p }')
-    case "$endpoint" in
-    127.* | "localhost "*) own_vm_listens "${endpoint##* }" ;;
-    *) false ;;
-    esac || die "cannot prove $1 is this user's own VM; put its host key in $MACHINE_FILE as GROBASE_ADMIN_HOST_KEY=<type> <base64>"
-    key=$(vm_ssh "$1" 'cat /etc/ssh/ssh_host_ed25519_key.pub' | awk '{ print $1, $2 }')
-    [[ $key =~ ^ssh-ed25519\ [A-Za-z0-9+/=]+$ ]] || die "the VM gave no ed25519 host key"
+  local key pinned endpoint
+  pinned=$(machine_value GROBASE_ADMIN_HOST_KEY) || pinned=""
+  endpoint=$(ssh -G "$1" | awk '$1 == "hostname" { h = $2 } $1 == "port" { p = $2 } END { print h, p }')
+  case "$endpoint" in
+  127.* | "localhost "*) own_vm_listens "${endpoint##* }" || endpoint="" ;;
+  *) endpoint="" ;;
+  esac
+  if [ -z "$endpoint" ]; then
+    [ -n "$pinned" ] || die "cannot prove $1 is this user's own VM; put its host key in $MACHINE_FILE as GROBASE_ADMIN_HOST_KEY=<type> <base64>"
+    printf '%s\n' "$pinned"
+    return 0
+  fi
+  key=$(vm_ssh "$1" 'cat /etc/ssh/ssh_host_ed25519_key.pub' | awk '{ print $1, $2 }')
+  [[ $key =~ ^ssh-ed25519\ [A-Za-z0-9+/=]+$ ]] || die "the VM gave no ed25519 host key"
+  if [ "$key" != "$pinned" ]; then
     put_env "$MACHINE_FILE" GROBASE_ADMIN_HOST_KEY "$key"
     note "pinned the VM's host key in ${MACHINE_FILE#"$HOME"/}"
   fi
@@ -159,10 +177,11 @@ cmd_configure() {
   local alias key addr
   alias=$(cmd_setting)
   [ -n "$alias" ] || die "this machine has no data center (no vault42 credentials, no GROBASE_DATACENTER)"
-  require_vm "$alias"
   key=$(pinned_host_key "$alias") || exit 1
   addr=$(connect_ip) || exit 1
   umask 077
+  mkdir -p "$STATE_DIR"
+  printf 'grobase-admin %s\n' "$key" >"$KNOWN_HOSTS"
   cat >"$CONF.tmp" <<EOF
 GROBASE_TARGET=https://localhost:$WAF_PORT
 GROBASE_API_URL=https://localhost:$WAF_PORT
@@ -175,47 +194,13 @@ EOF
   note "$alias at https://localhost:$WAF_PORT, reached from containers through $addr"
 }
 
-# The dump is taken before any DDL and read back by the same server's pg_restore: a file that
-# lists no osionos rows is not a backup, whatever its size.
-dump_postgres() {
-  local file
-  file="$DUMP_DIR/postgres-$(date +%Y%m%d-%H%M%S).dump"
-  (umask 077 && mkdir -p "$DUMP_DIR")
-  docker exec "$PG_CTN" pg_dump -U postgres -d postgres -Fc >"$file" || die "pg_dump failed"
-  docker exec -i "$PG_CTN" pg_restore -l <"$file" | grep -q 'TABLE DATA public osionos_pages' ||
-    die "the dump $file does not list osionos_pages; no migration ran"
-  note "verified dump: $file"
-}
-
-# models_converge — the VM's schema against models/*.sql. Armed realtime triggers come back after
-# every grobase `up`, so they are routine and only their own file runs; ADR 0003 records what the
-# full replay can do, so DDL waits for an explicit DATACENTER_MIGRATE=1 and a verified dump.
-models_converge() {
-  local out rc=0
-  out=$(sh "$MODELS" --check 2>&1) || rc=$?
-  printf '%s\n' "$out" >&2
-  ! grep -qE 'not running|query failed' <<<"$out" || die "the VM's postgres could not be read; nothing was written"
-  if grep -q 'pending: ' <<<"$out"; then
-    [ "${DATACENTER_MIGRATE:-0}" = 1 ] ||
-      die "models migrations are pending on the VM. make all DATACENTER_MIGRATE=1 dumps postgres, verifies the dump, then applies them. Nothing was written."
-    dump_postgres
-    sh "$MODELS" || die "the models migrations failed; the dump is in $DUMP_DIR"
-  elif [ "$rc" -ne 0 ]; then
-    docker exec -i "$PG_CTN" psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
-      <"$REPO/models/realtime-cdc-off-migration.sql" >/dev/null || die "realtime-cdc-off failed"
-  fi
-  sh "$MODELS" --check ||
-    die "the VM is still not converged. realtime-cdc-off gives each table 2 s, so a long reader such as the VM's hourly backup (at :15) can keep a trigger: run make all again"
-}
-
 cmd_preflight() {
   local host sock="$LINK_DIR/tenant-control-3022.sock"
   host=$(bash "$REPO/scripts/grobase-link.sh" docker-host) || die "no daemon for the linked VM; re-run make all"
   [ -z "$host" ] || export DOCKER_HOST="$host"
   models_converge
   [ ! -S "$sock" ] || export TENANT_CONTROL_SOCKET="$sock"
-  bash "$REPO/scripts/ensure-live-data-access.sh" --check ||
-    die "the app's API key does not verify on the VM. make all never issues one: it re-stamps demo rows (ADR 0003). Read that, then: make link-live-data-ensure"
+  live_data_converge
 }
 
 # --check alone passes on a machine with no store at all, so a browser installed but never started
@@ -260,14 +245,21 @@ cmd_browsers() {
 case "${1:-}" in
 setting) cmd_setting ;;
 vault-needed) cmd_vault_needed ;;
+vm) cmd_vm ;;
 certs) cmd_certs ;;
 certs-verify) cmd_certs_verify ;;
 configure) cmd_configure ;;
 preflight) cmd_preflight ;;
 trust) cmd_trust ;;
+health)
+  load_vm_paths
+  require_born2root health
+  born2root_make health
+  ;;
 browsers) cmd_browsers ;;
+dc) cmd_dc "${2:-}" ;;
 *)
-  sed -n '6,13p' "$0" >&2
+  sed -n '6,16p' "$0" >&2
   exit 2
   ;;
 esac
