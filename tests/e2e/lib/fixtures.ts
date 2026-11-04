@@ -6,7 +6,7 @@ type Guard = { watch(page: Page, label: string, expected?: RegExp): () => void }
 // and Chromium logs that as the page's error (microsoft/playwright#33343). Measured
 // 2026-10-01: Mail's message frame logs it under Playwright 1.63.0, and the same frame in
 // the same Chromium without Playwright logs nothing. Exact text, blank/srcdoc frames only.
-const HARNESS_NOISE = /^Blocked script execution in 'about:(srcdoc|blank)' because the document's frame is sandboxed and the 'allow-scripts' permission is not set\.$/;
+export const HARNESS_NOISE = /^Blocked script execution in 'about:(srcdoc|blank)' because the document's frame is sandboxed and the 'allow-scripts' permission is not set\.$/;
 
 // Zero console errors is an assertion in every spec: each watched page's errors and
 // uncaught exceptions (frames included) are checked when the test ends. watch returns the

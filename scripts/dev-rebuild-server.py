@@ -29,7 +29,7 @@ _running = False
 def _run_rebuild():
     """Run CMD at the repo root, streaming output live to this terminal; return (code, tail)."""
     proc = subprocess.Popen(
-        ["bash", "-lc", CMD], cwd=str(REPO_ROOT),
+        ["bash", "-lc", CMD], cwd=str(REPO_ROOT), stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
     )
     tail = []

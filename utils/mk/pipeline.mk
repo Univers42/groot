@@ -3,7 +3,15 @@
 # mini-baas). The root pipeline regenerates certs (via grobase), guards that the
 # grobase backend is up, brings up the root FRONTENDS only, then healthchecks.
 ##@ Pipeline
-all: sync-submodules-soft secrets-ensure certs certs-trust-local backend-up env-local-ensure restore-if-empty demo-login-ensure models-migrate live-data-ensure mounts-reencrypt frontends-up healthcheck showcase ## Provision a fresh machine end to end: secrets, certs, backend, frontends, checks
+# Vault42 credentials on this machine turn `all` into the data-center deployment (datacenter.mk,
+# ADR 0047). `make all GROBASE_DATACENTER=` takes this local path anyway.
+GROBASE_DATACENTER ?= $(shell bash scripts/datacenter.sh setting)
+ifeq ($(strip $(GROBASE_DATACENTER)),)
+ALL_STEPS := secrets-ensure certs certs-trust-local backend-up env-local-ensure restore-if-empty demo-login-ensure models-migrate live-data-ensure mounts-reencrypt frontends-up healthcheck showcase
+else
+ALL_STEPS := datacenter-secrets datacenter-vm datacenter-configure datacenter-certs link datacenter-preflight link-demo-login-ensure datacenter-trust link-frontends-start datacenter-apps link-healthcheck datacenter-health showcase datacenter-browsers
+endif
+all: sync-submodules-soft $(ALL_STEPS) ## Provision a fresh machine end to end: secrets, certs, backend, frontends, checks
 ## Usage: make all [SKIP_SYNC=1] [GROBASE_EDITION=devlean|migrate|full] [PULL_PREBUILT=1]
 ## FROM-ZERO self-provisioning: sync submodules to latest → pull secrets from vault42 (or, with NO
 ## vault key, grobase self-generates them) → certs → START the grobase backend if down → derive root
@@ -11,6 +19,8 @@ all: sync-submodules-soft secrets-ensure certs certs-trust-local backend-up env-
 ## no-op otherwise) → set the demo account's password from ./.env.local → build+start frontends →
 ## verify → clickable recap. A clean clone + `make all` reconstitutes the whole machine — with the
 ## vault key it restores the SHARED secrets+data, without it everything is generated locally.
+## With vault42 credentials on this machine, `all` deploys against the data center VM instead and
+## starts no grobase: wiki/runbooks/datacenter.md.
 
 link-all: ## Pull vault42 secrets, check the tailnet path to grobase, build against it
 ## Usage: make link-all [GROBASE_TARGET=https://<host>.<tailnet>.ts.net] [VAULT42_ENVS="prod …"]

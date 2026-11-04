@@ -30,6 +30,7 @@ OSIONOS_BRIDGE_EMAIL_HASH_SALT=salt-keep
 DEMO_LOGIN_PASSWORD=demo-keep
 OSIONOS_IDE_TOKEN_SECRET=ide-secret-keep
 AUTH_LINK_SIGNING_KEY=link-key-keep
+OSIONOS_MACHINE_SIGNING_KEY=machine-seed-keep
 VITE_BAAS_URL=https://localhost:3001
 OSIONOS_ALLOWED_ORIGIN=https://localhost:3001
 OSIONOS_APP_URL=https://localhost:3001
@@ -221,6 +222,17 @@ stale_kong() { sed -i 's/^SB_KONG_KEY=.*/SB_KONG_KEY=anon-OLD/' "$OUT"; }
   [[ "$output" != *"$minted"* ]]
   [ "$minted" != "$(val "$OUT" OSIONOS_APP_SESSION_SECRET)" ]
   [ "$(val "$OUT" DEMO_LOGIN_PASSWORD)" = demo-keep ]
+}
+
+@test "--sync: an .env.local without OSIONOS_MACHINE_SIGNING_KEY gets a 32-byte base64url seed" {
+  sed -i '/^OSIONOS_MACHINE_SIGNING_KEY=/d' "$OUT"
+  printf '#!/bin/sh\nhead -c 32 /dev/urandom\n' >"$BATS_TEST_TMPDIR/bin/openssl"
+  run bash "$SCRIPT" --sync
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"minted OSIONOS_MACHINE_SIGNING_KEY"* ]]
+  minted="$(val "$OUT" OSIONOS_MACHINE_SIGNING_KEY)"
+  [[ "$minted" =~ ^[A-Za-z0-9_-]{43}$ ]]
+  [[ "$output" != *"$minted"* ]]
 }
 
 @test "--sync: an existing OSIONOS_IDE_TOKEN_SECRET is never re-minted" {

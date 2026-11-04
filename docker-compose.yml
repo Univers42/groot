@@ -24,9 +24,9 @@ services:
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${OSIONOS_BRIDGE_HOST_PORT:-4000}:4000"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${AUTH_GATEWAY_HOST_PORT:-8787}:8787"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${MAIL_HOST_PORT:-3002}:3002"
-      - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${MAIL_BRIDGE_PORT:-4100}:4100"
+      - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${MAIL_BRIDGE_HOST_PORT:-4100}:4100"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${CALENDAR_HOST_PORT:-3003}:3003"
-      - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${CALENDAR_BRIDGE_PORT:-4200}:4200"
+      - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${CALENDAR_BRIDGE_HOST_PORT:-4200}:4200"
       # drawnosaurus. LITERAL 127.0.0.1, not TRACK_BINOCLE_BIND_ADDR: that variable comes
       # from detect-bind-addr.sh and resolves to 0.0.0.0 here (every line above is
       # currently published on every interface — `ss -ltn`). drawnosaurus has no per-user
@@ -83,6 +83,7 @@ services:
       OSIONOS_BRIDGE_PORT: 4000
       OSIONOS_APP_URL: ${OSIONOS_APP_URL:-https://localhost:3001}
       OSIONOS_ALLOWED_ORIGIN: ${OSIONOS_ALLOWED_ORIGIN:-https://localhost:3001}
+      OSIONOS_BRIDGE_PUBLIC_ORIGIN: ${OSIONOS_BRIDGE_PUBLIC_ORIGIN:-https://localhost:${OSIONOS_BRIDGE_HOST_PORT:-4000}}
       # Account administrators, comma-separated emails; empty = nobody. The bridge
       # ships without any administrator, so a deployment that wants one names it here.
       OSIONOS_ADMIN_EMAILS: ${OSIONOS_ADMIN_EMAILS:-}
@@ -247,12 +248,15 @@ services:
     command: --config /etc/livekit.yaml
     environment:
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-devsecret-livekit-local-0123456789abcdef}"
+      UDP_PORT: ${LIVEKIT_UDP_PORTS:-}
     volumes:
       - ./infrastructure/livekit/livekit.yaml:/etc/livekit.yaml:ro
     ports:
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${LIVEKIT_HOST_PORT:-7880}:7880"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${LIVEKIT_TCP_HOST_PORT:-7881}:7881"
-      - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:50000-50060:50000-50060/udp"
+      # Published 1:1, because the advertised candidates carry the port. host-ports moves the
+      # range off a busy one (scripts/lib/host-ports-udp.sh); UDP_PORT then overrides livekit.yaml.
+      - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${LIVEKIT_UDP_PORTS:-50000-50060}:${LIVEKIT_UDP_PORTS:-50000-50060}/udp"
     # 7880 is not an env var here: it is `port:` in the mounted infrastructure/livekit/livekit.yaml.
     # Ponytail: timeout 5s (siblings use 3s) because one measured reply took 2.06 s under load;
     # a reply slower than 5 s is still counted as a failure even though the SFU is alive.
@@ -1132,8 +1136,8 @@ services:
       NODE_ENV: development
       MAIL_BRIDGE_PORT: ${MAIL_BRIDGE_PORT:-4100}
       MAIL_APP_ORIGIN: https://localhost:${MAIL_HOST_PORT:-3002}
-      MAIL_BRIDGE_PUBLIC_ORIGIN: https://localhost:${MAIL_BRIDGE_PORT:-4100}
-      GMAIL_REDIRECT_URI: https://localhost:${MAIL_BRIDGE_PORT:-4100}/auth/gmail/callback
+      MAIL_BRIDGE_PUBLIC_ORIGIN: https://localhost:${MAIL_BRIDGE_HOST_PORT:-4100}
+      GMAIL_REDIRECT_URI: https://localhost:${MAIL_BRIDGE_HOST_PORT:-4100}/auth/gmail/callback
       VAULT_ADDR: ${MAIL_BRIDGE_VAULT_ADDR:-http://vault:8200}
     volumes:
       - ./apps/mail:/app
@@ -1176,7 +1180,7 @@ services:
     environment:
       NODE_ENV: development
       CHOKIDAR_USEPOLLING: "true"
-      VITE_MAIL_BRIDGE_URL: https://localhost:${MAIL_BRIDGE_PORT:-4100}
+      VITE_MAIL_BRIDGE_URL: https://localhost:${MAIL_BRIDGE_HOST_PORT:-4100}
     volumes:
       - ./apps/mail:/app
       - mail-node-modules:/app/node_modules
@@ -1222,8 +1226,8 @@ services:
       NODE_ENV: development
       CALENDAR_BRIDGE_PORT: ${CALENDAR_BRIDGE_PORT:-4200}
       CALENDAR_APP_ORIGIN: https://localhost:${CALENDAR_HOST_PORT:-3003}
-      CALENDAR_BRIDGE_PUBLIC_ORIGIN: https://localhost:${CALENDAR_BRIDGE_PORT:-4200}
-      CALENDAR_REDIRECT_URI: https://localhost:${CALENDAR_BRIDGE_PORT:-4200}/auth/google/callback
+      CALENDAR_BRIDGE_PUBLIC_ORIGIN: https://localhost:${CALENDAR_BRIDGE_HOST_PORT:-4200}
+      CALENDAR_REDIRECT_URI: https://localhost:${CALENDAR_BRIDGE_HOST_PORT:-4200}/auth/google/callback
       CALENDAR_BAAS_URL: http://mini-baas-kong:8000
       CALENDAR_BAAS_PUBLIC_URL: https://localhost:${KONG_HTTP_PORT:-8000}
       VAULT_ADDR: ${CALENDAR_BRIDGE_VAULT_ADDR:-http://vault:8200}
@@ -1268,7 +1272,7 @@ services:
     environment:
       NODE_ENV: development
       CHOKIDAR_USEPOLLING: "true"
-      VITE_CALENDAR_BRIDGE_URL: https://localhost:${CALENDAR_BRIDGE_PORT:-4200}
+      VITE_CALENDAR_BRIDGE_URL: https://localhost:${CALENDAR_BRIDGE_HOST_PORT:-4200}
       VITE_CALENDAR_BAAS_URL: https://localhost:${KONG_HTTP_PORT:-8000}
     volumes:
       - ./apps/calendar:/app

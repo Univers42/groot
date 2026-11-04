@@ -39,7 +39,11 @@ backend-up: ## Ensure the grobase backend is up, starting it when it is down
 ## With a vault key, secrets are pulled earlier by `secrets-ensure`; with NO vault key, grobase
 ## self-generates its secrets (no-vault local mode) and `env-local-ensure` derives the root
 ## ./.env.local afterward.
-	@if docker ps -q --filter label=com.docker.compose.service=grobase-link 2>/dev/null | grep -q .; then \
+	@if [ -n '$(strip $(GROBASE_DATACENTER))' ]; then \
+		echo '[backend] this machine deploys against its data center ($(GROBASE_DATACENTER)): groot starts no grobase here (ADR 0047). make all GROBASE_DATACENTER= overrides that.' >&2; \
+		exit 1; \
+	fi; \
+	if docker ps -q --filter label=com.docker.compose.service=grobase-link 2>/dev/null | grep -q .; then \
 		echo '[backend] the grobase-link relay is running: grobase is reached elsewhere (make link-status). Refusing to start a second one under the same names; make link-down first.' >&2; \
 		exit 1; \
 	fi; \

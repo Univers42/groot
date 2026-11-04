@@ -85,7 +85,7 @@ ADAPTER_REGISTRY_SERVICE_TOKEN=ADAPTER_REGISTRY_SERVICE_TOKEN"
 # A moved OSIONOS_APP_HOST_PORT moves them — that is the whole point of the key set.
 PORT_KEYS="VITE_BAAS_URL OSIONOS_ALLOWED_ORIGIN OSIONOS_APP_URL PUBLIC_OSIONOS_APP_URL"
 # Minted once per machine, never derived; an absent or empty one is minted by --sync.
-MINTED="DEMO_LOGIN_PASSWORD OSIONOS_IDE_TOKEN_SECRET AUTH_LINK_SIGNING_KEY"
+MINTED="DEMO_LOGIN_PASSWORD OSIONOS_IDE_TOKEN_SECRET AUTH_LINK_SIGNING_KEY OSIONOS_MACHINE_SIGNING_KEY"
 # Copied from $MEDIA_ENV, never derived: they decide nothing about the exit status.
 MEDIA="UNSPLASH_ACCESS_KEY PIXABAY_API"
 # NOT derived: VITE_BAAS_REALTIME_TOKEN — the generator seeds it with the anon key, but
@@ -110,6 +110,8 @@ gsrc() {
 }
 # URL-safe random secret for the osionos-only app secrets.
 gen() { openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 48; }
+# 32 raw bytes as unpadded base64url: ide-machine-protocol.mjs refuses any other shape.
+gen_seed() { openssl rand 32 | base64 | tr '+/' '-_' | tr -d '=\n'; }
 # 24 alphanumerics: typeable at the login form, above grobase's 12-char prod minimum.
 gen_password() { gen | head -c 24; }
 
@@ -130,6 +132,9 @@ mint_missing() {
       OSIONOS_IDE_TOKEN_SECRET)
         put_env "$OUT" "$key" "$(gen)"
         note "minted $key (was absent) — restart osionos-bridge and osionos-ide-server to use it." ;;
+      OSIONOS_MACHINE_SIGNING_KEY)
+        put_env "$OUT" "$key" "$(gen_seed)"
+        note "minted OSIONOS_MACHINE_SIGNING_KEY (was absent) — restart osionos-bridge to use it." ;;
       AUTH_LINK_SIGNING_KEY)
         put_env "$OUT" "$key" "$(gen)"
         note "minted AUTH_LINK_SIGNING_KEY (was absent) — restart auth-gateway to use it." ;;
@@ -312,6 +317,9 @@ OSIONOS_BRIDGE_SHARED_SECRET=$(gen)
 # AUTH_LINK_SIGNING_KEY: signs the confirm and reset links the auth-gateway mails. Its own
 # key, never another secret: the gateway answers 503 on those links without it.
 AUTH_LINK_SIGNING_KEY=$(gen)
+# OSIONOS_MACHINE_SIGNING_KEY: the Ed25519 seed machine tokens are signed with. Without it every
+# signed-in page gets a 503 from /api/machines, which the app shows as a console error.
+OSIONOS_MACHINE_SIGNING_KEY=$(gen_seed)
 OSIONOS_APP_SESSION_TTL_SECONDS=2592000
 # Local demo account (dev.pro.photo@gmail.com) password — applied by make all, shown by make demo-login.
 DEMO_LOGIN_PASSWORD=$(gen_password)

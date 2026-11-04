@@ -106,6 +106,47 @@ COMPOSE
   [[ "$output" == *"BETA_HOST_PORT default 8444 is held by qemu-system-x86; using 8446"* ]]
 }
 
+# Measured 2026-11-04: docker printed 127.0.0.1:3001-3003->3001-3003/tcp, the old sed matched no
+# port in it, and a second make moved the editor, Mail and Calendar to 3006, 3005 and 3004.
+@test "our own container keeps ports docker prints as one range" {
+  listeners "LISTEN 0 4096 127.0.0.1:3001 0.0.0.0:* users:((\"rootlesskit\",pid=9,fd=3))"
+  our_containers "127.0.0.1:3001-3003->3001-3003/tcp, 127.0.0.1:8444->8444/tcp"
+  run bash "$REPO/scripts/host-ports.sh" resolve
+  [ "$status" -eq 0 ]
+  [ "$(port OSIONOS_APP_HOST_PORT)" = "3001" ]
+}
+
+@test "a free LiveKit range records nothing, so the stack keeps today's value" {
+  run bash "$REPO/scripts/host-ports.sh" resolve
+  [ "$status" -eq 0 ]
+  ! grep -q LIVEKIT_UDP_PORTS "$ROOT/.env.ports"
+}
+
+@test "a busy LiveKit range moves whole, and says so" {
+  printf '#!/bin/sh\necho "UNCONN 0 0 0.0.0.0:50016 0.0.0.0:*"\n' >"$STUBS/ssu"
+  chmod +x "$STUBS/ssu"
+  HOST_PORTS_UDP_LISTENERS="$STUBS/ssu" run bash "$REPO/scripts/host-ports.sh" resolve
+  [ "$status" -eq 0 ]
+  [ "$(port LIVEKIT_UDP_PORTS)" = "50100-50160" ]
+  [[ "$output" == *"50000-50060 is busy; using 50100-50160"* ]]
+}
+
+@test "a moved LiveKit range stays put while it is free: a new one would drop every call" {
+  printf 'LIVEKIT_UDP_PORTS=50200-50260\n' >"$ROOT/.env.ports"
+  run bash "$REPO/scripts/host-ports.sh" resolve
+  [ "$status" -eq 0 ]
+  [ "$(port LIVEKIT_UDP_PORTS)" = "50200-50260" ]
+}
+
+@test "a running LiveKit does not walk away from its own range" {
+  printf '#!/bin/sh\necho "UNCONN 0 0 0.0.0.0:50016 0.0.0.0:*"\n' >"$STUBS/ssu"
+  chmod +x "$STUBS/ssu"
+  our_containers "127.0.0.1:50000-50060->50000-50060/udp"
+  HOST_PORTS_UDP_LISTENERS="$STUBS/ssu" run bash "$REPO/scripts/host-ports.sh" resolve
+  [ "$status" -eq 0 ]
+  ! grep -q LIVEKIT_UDP_PORTS "$ROOT/.env.ports"
+}
+
 @test "our own container keeps the port it publishes" {
   listeners "LISTEN 0 4096 127.0.0.1:3001 0.0.0.0:* users:((\"docker-proxy\",pid=9,fd=3))"
   our_containers "127.0.0.1:3001->3001/tcp"

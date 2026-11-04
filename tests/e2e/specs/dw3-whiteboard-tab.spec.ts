@@ -17,7 +17,7 @@ test("DW3 Whiteboard tab shows the board list and gates + New Board on a title",
 
   const create = board.getByRole("button", { name: "+ New Board" });
   await expect(create).toBeDisabled();
-  await board.getByRole("textbox", { name: "New board title…" }).fill(boardTitle("dw3"));
+  await board.getByRole("textbox", { name: /New board title/ }).fill(boardTitle("dw3"));
   await expect(create).toBeEnabled();
   await context.close();
 });
