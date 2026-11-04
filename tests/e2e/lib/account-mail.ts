@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 import { expect, request } from "@playwright/test";
 import { GATEWAY_URL, KONG_ANON_KEY, KONG_URL, MAILPIT_URL, PRISMATICA_URL } from "./env";
 
-// The account-mail specs (pr1-pr4) drive the gateway's HTTP contract, the one the site's
+// The account-mail specs (pr1-pr6) drive the gateway's HTTP contract, the one the site's
 // /auth/confirm and /auth/reset-password pages call, and read the links out of Mailpit.
 // tests/e2e/run.sh lets them run only on a local backend whose gateway and GoTrue both mail
 // Mailpit (scripts/lib/e2e-mail-guard.sh, verdict B C11 C12).
@@ -60,10 +60,34 @@ export async function gateway(path: string, body: unknown, headers: Record<strin
   }
 }
 
-export const register = (email: string, password = SPEC_PASSWORD, username = `pr_${Date.now()}_${serial}`) =>
+// Kong lets the gateway send 10 mails in a wall-clock minute (kong.yml, email-routes), and the
+// gateway is one client whoever signs up, so a spec's own burst would delay its next mail past
+// waitForMails. 7 s apart is at most 9 in such a minute. /resend-verification is not paced: on the
+// confirmed accounts pr3 probes it mails nothing, and the few that do mail fit the tenth place.
+// Caveat: the next slot lives in this worker process. A failed test restarts the worker, so the
+// first mail after a failure can land early; that can only delay a mail in a run already red.
+const MAIL_GAP_MS = 7_000;
+let nextMailAt = 0;
+
+async function mailSlot(): Promise<void> {
+  const now = Date.now();
+  const slot = Math.max(now, nextMailAt);
+  nextMailAt = slot + MAIL_GAP_MS;
+  if (slot > now) await new Promise((done) => setTimeout(done, slot - now));
+}
+
+/** /register with no pacing: pr6 needs the burst the others stay under. */
+export const registerNow = (email: string, password = SPEC_PASSWORD, username = `pr_${Date.now()}_${serial}`) =>
   gateway("/api/auth/register", { email, password, turnstileToken: TURNSTILE, profile: { username, confirmPassword: password } });
+export const register = async (...args: Parameters<typeof registerNow>) => {
+  await mailSlot();
+  return registerNow(...args);
+};
 export const login = (email: string, password: string) => gateway("/api/auth/login", { email, password, turnstileToken: TURNSTILE });
-export const recover = (email: string) => gateway("/api/auth/recover", { email, turnstileToken: TURNSTILE });
+export const recover = async (email: string) => {
+  await mailSlot();
+  return gateway("/api/auth/recover", { email, turnstileToken: TURNSTILE });
+};
 export const resend = (email: string) => gateway("/api/auth/resend-verification", { email, turnstileToken: TURNSTILE });
 
 // The sign-in code mail grobase sends (loginotp/otp.go): "Your <app> sign-in code", body "… code is 123456".

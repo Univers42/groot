@@ -215,9 +215,6 @@ jobs:
           SKIP_SYNC_INPUT: ${{ github.event.inputs.skip_sync }}
           # The sign-in code pr5 asks for. grobase's flags are structural: off, the route is absent.
           EMAIL_OTP_ENABLED: "true"
-          # GoTrue's 30 mails an hour stopped pr3 at its 19th account (run 2026-11-04): the specs
-          # send about 60, all to Mailpit.
-          GOTRUE_RATE_LIMIT_EMAIL_SENT: "500"
           # team: a failed pull FAILS make all at once, named. Unset, make all would fall back
           # to LOCAL mode and this run would prove the wrong thing under the team label.
           VAULT42_SOURCE: ${{ steps.pre.outputs.mode == 'team' && 'team' || '' }}
