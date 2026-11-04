@@ -60,7 +60,7 @@ models_converge() {
       <"$REPO/models/realtime-cdc-off-migration.sql" >/dev/null || die "realtime-cdc-off failed"
   fi
   sh "$MODELS" --check ||
-    die "the VM is still not converged. realtime-cdc-off gives each table 2 s, so a long reader such as the VM's hourly backup (at :15) can keep a trigger: run make all again"
+    die "the VM is still not converged. realtime-cdc-off gives each table 2 s, so a long reader such as one of the VM's hourly backups can keep a trigger: run make all again"
 }
 
 # seed_id — the seed the VM records, whoever loaded it. Empty means no seed is on record.
