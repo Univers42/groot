@@ -1,0 +1,50 @@
+# Modules of choice — the proof gates behind the README's two modules of choice and the
+# collab namespace isolation, run against the grobase commit groot pins. One job per gate so
+# a red one names itself.
+#
+# These run the gates in their default (static) mode: source checks plus the Go and Rust unit
+# tests, in docker. Their LIVE half (BAAS_VERIFY_LIVE=1) needs a running stack and keys; this
+# workflow does not run it.
+name: Modules of choice
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ["v*"]
+    paths:
+      - "apps/grobase"
+      - ".github/workflows/modules-of-choice.yml"
+  pull_request:
+    paths:
+      - "apps/grobase"
+      - ".github/workflows/modules-of-choice.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: modules-of-choice-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: ${{ matrix.gate }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        gate:
+          - m176-contract-isolation-live
+          - m177-selfserve-apps
+          - m175-collab-namespace-isolation
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check out the pinned grobase (public, anonymous HTTPS)
+        run: |
+          git config --global --add url."https://github.com/".insteadOf "git@github.com:"
+          git submodule update --init --depth 1 apps/grobase
+          git -C apps/grobase log -1 --format='grobase pinned at %h %s'
+      - name: Run scripts/verify/${{ matrix.gate }}.sh
+        run: bash apps/grobase/scripts/verify/${{ matrix.gate }}.sh
