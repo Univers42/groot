@@ -98,6 +98,28 @@ for (const app of APPS) {
   });
 }
 
+// What a page that loads can still hide. With no grobase behind the frontends the calls to it fail
+// by design, so only E2E_REACH_BACKEND=1 turns these lines into failures; without it they are the
+// report that says what else is wrong.
+for (const app of APPS.filter((a) => !a.api)) {
+  test(`${app.name}: nothing goes wrong in the console`, async ({ page }) => {
+    const problems: string[] = [];
+    page.on("console", (m) => {
+      if (m.type() === "error" || m.type() === "warning") problems.push(`${m.type()}: ${m.text()} @ ${m.location().url}`);
+    });
+    page.on("pageerror", (e) => problems.push(`exception: ${e.message}`));
+    page.on("response", (r) => {
+      if (r.status() >= 400) problems.push(`http ${r.status()}: ${r.request().method()} ${r.url()}`);
+    });
+    page.on("requestfailed", (r) => problems.push(`failed: ${r.url()} ${r.failure()?.errorText ?? ""}`));
+    await reach(page, app);
+    await page.waitForLoadState("load");
+    await page.waitForTimeout(3_000);
+    for (const line of [...new Set(problems)]) console.log(`[console ${app.name}] ${line.slice(0, 200)}`);
+    if (process.env.E2E_REACH_BACKEND) expect(problems).toEqual([]);
+  });
+}
+
 // The negative that gives the rest its meaning: the same browser without the CA must refuse.
 test("a browser without the local CA is refused", async ({ browserName }) => {
   const browser = await open(browserName, false);
