@@ -18,26 +18,28 @@ Contributions" sections hold the facts; this page records where they come from. 
 | Member | 42 login | Role(s) | Responsibilities |
 |---|---|---|---|
 | Dylan Lesieur | `dlesieur` | Product Owner · Developer | Product vision, backlog, priorities, validates completed work |
-| Daniel Fernández | `danfern3` | Tech Lead · Product Owner | Architecture, stack decisions, code quality, reviews |
-| Sergio Jiménez de la Cruz | `serjimen` | Project Manager · Developer | Frontend, secrets, deployment |
+| Daniel Fernández | `danfern3` | Tech Lead · Developer | Architecture, stack decisions, code quality, reviews |
+| Sergio Jiménez de la Cruz | `serjimen` | Developer | Frontend, secrets, deployment |
 | Vadim Jan Nieto | `vjan-nie` | Project Manager · Developer | Planning, tracking, communication, unblocking |
 | Seyed Mostafa Hashemian | `shashemi` | Developer | TO CONFIRM by the team |
 
-> TO CONFIRM by the team: `shashemi`'s responsibilities, and one owner per role (two Product
-> Owners and two Project Managers are listed).
+One owner per role, confirmed by the team on 2026-11-04: Product Owner `dlesieur`, Project
+Manager `vjan-nie`, Tech Lead `danfern3`; `serjimen` is a Developer.
+
+> TO CONFIRM by the team: `shashemi`'s responsibilities.
 
 ---
 
 ## How the work was organised
 
 - **Task tracking:** GitHub Issues on `Univers42/groot` and the submodule repositories.
-- **Communication:** not recorded.
-- **Meeting rhythm:** not recorded.
+- **Communication:** Discord (confirmed by the team, 2026-11-04).
+- **Meeting rhythm:** a weekly meeting (confirmed by the team, 2026-11-04).
 - **Code review:** pull requests into `develop`, then `develop` into `main`; merged pull requests
   per login are in the README's [Who committed where](../../README.md#who-committed-where).
 
-> TO CONFIRM by the team: the communication channel, the meeting rhythm, and who reviews whose
-> pull requests.
+> TO CONFIRM by the team: who attended the weekly meeting, where its decisions were written,
+> and who reviews whose pull requests.
 
 ---
 

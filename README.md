@@ -325,22 +325,20 @@ feature flag — see [Modules](#modules).
 
 ## Team Information
 
-Roles as recorded in the team's working notes ([`wiki/project/03-team.md`](wiki/project/03-team.md)).
+One owner per role, as the team confirmed on 2026-11-04 (the earlier working notes in
+[`wiki/project/03-team.md`](wiki/project/03-team.md) named two Product Owners and two Project Managers).
 The "Areas in the history" column is what each member's commits touch
 ([Individual Contributions](#individual-contributions) has the numbers).
 
 | Member | Login | GitHub | Role(s) | Responsibilities | Areas in the history |
 |---|---|---|---|---|---|
 | Dylan Lesieur | `dlesieur` | [@LESdylan](https://github.com/LESdylan) | Product Owner · Developer | Product vision, backlog and priorities; validates completed work | grobase, osionos, mail, calendar, root infrastructure and CI |
-| Daniel Fernández | `danfern3` | [@danielfdez17](https://github.com/danielfdez17) | Tech Lead · Product Owner | Architecture, stack decisions, code quality, reviews | monkey-bot (security test bot), grobase Docker and Kubernetes deployment, osionos editor fixes |
-| Sergio Jiménez de la Cruz | `serjimen` | [@DjSurgeon](https://github.com/DjSurgeon) | Project Manager · Developer | Frontend, secrets management, deployment | the public site (opposite-osiris), osionos accessibility and editor features |
+| Daniel Fernández | `danfern3` | [@danielfdez17](https://github.com/danielfdez17) | Tech Lead · Developer | Architecture, stack decisions, code quality, reviews | monkey-bot (security test bot), grobase Docker and Kubernetes deployment, osionos editor fixes |
+| Sergio Jiménez de la Cruz | `serjimen` | [@DjSurgeon](https://github.com/DjSurgeon) | Developer | Frontend, secrets management, deployment | the public site (opposite-osiris), osionos accessibility and editor features |
 | Vadim Jan Nieto | `vjan-nie` | [@vjan-nie](https://github.com/vjan-nie) | Project Manager · Developer | Planning, tracking, communication, unblocking | QA tooling, end-to-end tests, documentation, Docker |
 | Seyed Mostafa Hashemian | `shashemi` | [@SMOSTAFAH1](https://github.com/SMOSTAFAH1) | Developer | TO CONFIRM by the team | security fixes and SAST, the site's legal pages, TLS edge |
 
 > TO CONFIRM by the team: `shashemi`'s responsibilities.
-
-> TO CONFIRM by the team: one owner per role. The notes name two Product Owners (`dlesieur`,
-> `danfern3`) and two Project Managers (`serjimen`, `vjan-nie`); the subject expects one owner each.
 
 `rstancu` (Roxana Stancu, [@esettes](https://github.com/esettes)) is on the original roster
 ([`archive/wiki-2026-09/CONTRIBUTORS.md`](archive/wiki-2026-09/CONTRIBUTORS.md)) and committed
@@ -368,16 +366,17 @@ What the repository records:
   grobase's CI runs named gates on pull requests and the full `--enterprise` battery, with a
   nightly schedule (grobase `.github/workflows/ci.yml`).
 
+What the team confirmed (2026-11-04), which the repository cannot show:
+
+- **Communication channel:** Discord.
+- **Meeting rhythm:** a weekly meeting.
+
 What the repository does not record:
 
-- **Communication channel:** not recorded.
-- **Meeting rhythm:** not recorded.
 - **Task distribution and code review:** not recorded beyond the merged pull requests per login
   ([Who committed where](#who-committed-where)).
 
-> TO CONFIRM by the team: the communication channel (the tool, and what it was used for).
-
-> TO CONFIRM by the team: the meeting rhythm (how often, who attended, where decisions were written).
+> TO CONFIRM by the team: who attended the weekly meeting and where its decisions were written.
 
 > TO CONFIRM by the team: who assigned work, and who reviewed whose pull requests.
 
@@ -596,8 +595,8 @@ those tests and moves to `main` with [#172](https://github.com/Univers42/groot/i
 | 2 | Real-time features via WebSockets | Web | Major | 2 | CI | grobase CI runs gate `m201-realtime-issuer`; groot [`Modules of choice`](.github/workflows/modules-of-choice.yml) runs `m175-collab-namespace-isolation` (the realtime-core subscribe/publish authorisation tests). Demo: two users in one chat channel, a message appears without a reload | dlesieur 43, vjan-nie 5, shashemi 1 (grobase `infra/docker/services/realtime`) |
 | 3 | Allow users to interact with other users (chat, profile, friends) | Web | Major | 2 | CI + live | osionos CI (`make test-canvas`, `make test-bridge`, green on `main` 2026-11-03) runs [`chat-catch-up.test.ts`](https://github.com/Univers42/osionos/blob/main/tests/canvas/chat-catch-up.test.ts) and [`bridge-chat-reply-notify.test.mjs`](https://github.com/Univers42/osionos/blob/main/tests/bridge/bridge-chat-reply-notify.test.mjs) (chat), [`bridge-account-profile.test.mjs`](https://github.com/Univers42/osionos/blob/main/tests/bridge/bridge-account-profile.test.mjs) (profile read and update), [`bridge-social-connections.test.mjs`](https://github.com/Univers42/osionos/blob/main/tests/bridge/bridge-social-connections.test.mjs) and [`bridge-connection-transitions.test.mjs`](https://github.com/Univers42/osionos/blob/main/tests/bridge/bridge-connection-transitions.test.mjs) (friends). Live on 2026-11-04 with two accounts: friend request sent, accepted, listed, removed; a DM shown in the other window without a reload ([#171](https://github.com/Univers42/groot/issues/171)) | dlesieur 72, vjan-nie 1 (chat); dlesieur 38, serjimen 2 (connections) |
 | 4 | Standard user management and authentication | User Management | Major | 2 | CI + live | osionos CI runs [`bridge-avatar.test.mjs`](https://github.com/Univers42/osionos/blob/main/tests/bridge/bridge-avatar.test.mjs) (upload, type and size refusal), [`bridge-presence.test.mjs`](https://github.com/Univers42/osionos/blob/main/tests/bridge/bridge-presence.test.mjs) (online status), and row 3's profile and connections tests. Members without an image get initials (osionos `src/features/collab/model/collabPresence.ts:63`). Live: friend listed with `online=True`, profile page `200` ([#171](https://github.com/Univers42/groot/issues/171)) | dlesieur 34 (osionos `scripts/bridge-*profile*`, `*avatar*`, `*presence*`, `src/features/profile-binding`) |
-| 5 | Remote authentication with OAuth 2.0 | User Management | Minor | 1 | CI + live | opposite-osiris CI (`pnpm test`, green on `main` 2026-11-03) runs [`oauth-providers.test.ts`](https://github.com/Univers42/prismatica/blob/main/tests/unit/auth/oauth-providers.test.ts) and the `gateway-oauth-*` tests. Live: `GET /api/auth/oauth/providers` answers `["google","github"]`; the working account has a linked GitHub identity ([#171](https://github.com/Univers42/groot/issues/171)) | dlesieur 29, danfern3 1 (opposite-osiris `scripts/auth-gateway.mjs`, `src/scripts/portal-oauth.ts`, OAuth tests) |
-| 6 | Use a frontend framework | Web | Minor | 1 | CI | osionos is React (osionos `package.json`); row 1's CI builds and serves it | dlesieur 1239, danfern3 78, vjan-nie 77, serjimen 76, rstancu 38, shashemi 8 (osionos `src`) |
+| 5 | Remote authentication with OAuth 2.0 | User Management | Minor | 1 | CI + live | opposite-osiris CI (`pnpm test`, green on `main` 2026-11-03) runs [`oauth-providers.test.ts`](https://github.com/Univers42/prismatica/blob/main/tests/unit/auth/oauth-providers.test.ts) and the `gateway-oauth-*` tests. Live: `GET /api/auth/oauth/providers` answers `["google","github"]`; the working account has a linked GitHub identity ([#171](https://github.com/Univers42/groot/issues/171)). On 2026-11-04 "Continue with GitHub" led to a 404 (the site stopped forwarding GoTrue's provider paths in 85063b0); fixed in opposite-osiris dda7f95, after which the button reaches GitHub's sign-in with `redirect_uri=https://prismatica-eta.vercel.app/auth/v1/callback` and Google answers 302 to `accounts.google.com` | dlesieur 29, danfern3 1 (opposite-osiris `scripts/auth-gateway.mjs`, `src/scripts/portal-oauth.ts`, OAuth tests) |
+| 6 | Use a framework for both the frontend and backend | Web | Major | 2 | CI + live | Frontend: osionos is React (osionos `package.json`). Backend: the services every app request crosses are built on axum 0.7, the data plane (grobase [`src/data-plane-router/Cargo.toml:59`](https://github.com/Univers42/grobase/blob/main/src/data-plane-router/Cargo.toml)) and realtime ([`infra/docker/services/realtime/realtime-agnostic/Cargo.toml:44`](https://github.com/Univers42/grobase/blob/main/infra/docker/services/realtime/realtime-agnostic/Cargo.toml)); grobase CI builds and tests both (`cargo test --workspace`), row 1's CI runs them. Live on 2026-11-04: `mini-baas-data-plane-router-rust` and `mini-baas-realtime` running on the production stack. Replaces the frontend-only Minor, which cannot be counted as well | dlesieur 1239, danfern3 78, vjan-nie 77, serjimen 76, rstancu 38, shashemi 8 (osionos `src`); dlesieur 126, vjan-nie 8, shashemi 1 (grobase data plane and realtime) |
 | 7 | Public API (key, rate limit, docs, ≥5 endpoints) | Web | Major | 2 | CI | groot [`Public API`](.github/workflows/public-api.yml): the `:8444` edge serves the OpenAPI document at `/openapi.json` and renders it at `/docs/` ([`tests/api-docs-edge`](tests/api-docs-edge/docs.bats)); [`scripts/verify/public-api.sh`](scripts/verify/public-api.sh) shows `401` without a key, `401` with a wrong one and a `429` past the limit, against Kong 3.8.0 with grobase's plugins ([`tests/public-api`](tests/public-api/public-api.bats)). Live on 2026-11-04 (3 requests): both `401`s on `https://baas.tail10f2ea.ts.net/rest/v1/`. On a stack: `scripts/verify/public-api.sh https://localhost:8444 --key <anon key> --path <a route with a low limit>` | dlesieur 41, vjan-nie 1 (grobase `infra/docker/services/kong`, `infra/config/openapi`) |
 | 8 | **Module of choice:** contract-driven application factory | Free choice | Major | 2 | Partial | groot [`Modules of choice`](.github/workflows/modules-of-choice.yml) runs gates `m176-contract-isolation-live` and `m177-selfserve-apps` in their static mode (source checks and the Go slug/DSN tests). Their live half (`BAAS_VERIFY_LIVE=1`: two apps, two databases, cross-app key refused) runs in no CI job yet | dlesieur 9 (provisioning), dlesieur 33 (self-serve) |
 | 9 | **Module of choice:** SSRF guard on the HTTP engine | Free choice | Minor | 1 | Partial | 30 unit tests in grobase `src/data-plane-router/crates/data-plane-pool/src/http/mod.rs`, run by grobase CI (`cargo test --workspace`). No end-to-end demo of a mount at `169.254.169.254` being refused yet, and whether it stands apart from row 8 is a team decision ([#177](https://github.com/Univers42/groot/issues/177)) | dlesieur 8 |
@@ -607,13 +606,13 @@ those tests and moves to `main` with [#172](https://github.com/Univers42/groot/i
 
 | | Points |
 |---|--:|
-| Status CI or CI + live (rows 1–7, 10) | 13 |
+| Status CI or CI + live (rows 1–7, 10) | 14 |
 | Status Partial (rows 8–9, the modules of choice) | 3 |
-| **Total claimed** | **16** |
+| **Total claimed** | **17** |
 | Required | 14 |
 
-Rows 1–7 and 10 make 13 points on their own; one of the two modules of choice must hold for the
-total to reach 14, and both must hold for the two-point margin.
+Rows 1–7 and 10 make 14 points on their own, the required total; the two modules of choice are
+the margin.
 
 > TO CONFIRM by the team: the date and the name of the second member who ran each row's evidence
 > on a fresh `make all` ([#171](https://github.com/Univers42/groot/issues/171), "Done when").
@@ -622,7 +621,6 @@ total to reach 14, and both must hold for the two-point margin.
 
 | Module | Category | Type | Why not |
 |---|---|---|---|
-| Use a framework for both the frontend and backend | Web | Major | The NestJS services of grobase's application plane sit behind compose profiles (`adapter-plane`, `control-plane`, `legacy-node`) and the osionos bridge is plain `node:http`; the frontend half is claimed as row 6 |
 | Advanced permissions | User Management | Major | Admin › Users answers `403` for the platform admin (2026-11-04 audit); needs `PERMISSION_CONDITIONS_ENABLED`, `API_KEY_ABAC_ENABLED`, migration `063` |
 | Organisation system | User Management | Major | Organisations are on in production, but no management screen exists |
 | Monitoring with Prometheus + Grafana | DevOps | Major | Needs `TENANT_OBS_ENABLED` and `DATA_PLANE_TENANT_OBS`; nothing to click |
@@ -769,7 +767,7 @@ How the identities were joined (the evidence is in [`.mailmap`](.mailmap)):
   2026-09-24: submodule clone paths, formatting); root submodule pins and the `make all` bats fix,
   on `fix/ci` ([#165](https://github.com/Univers42/groot/pull/165), open).
 - **Pull requests:** 4 merged (prismatica).
-- **Features and modules:** block editor (29 commits), frontend framework (row 6, 78), OAuth
+- **Features and modules:** block editor (29 commits), frameworks, frontend half (row 6, 78), OAuth
   (row 5, 1).
 - **Challenges:** not recorded.
 
@@ -785,7 +783,7 @@ How the identities were joined (the evidence is in [`.mailmap`](.mailmap)):
   Spanish and Arabic with right-to-left layout (prismatica #21, #22, #23, #35), the accessible
   privacy policy and terms (#38) and a WCAG 2.2 AA audit pipeline with axe-core fixes (#39).
 - **Features and modules:** sign-in pages (1), legal pages (2), block editor (14), connections
-  (2), frontend framework (row 6, 76).
+  (2), frameworks, frontend half (row 6, 76).
 - **Challenges:** not recorded.
 
   > TO CONFIRM by the team: the challenges this member met.
@@ -797,8 +795,8 @@ How the identities were joined (the evidence is in [`.mailmap`](.mailmap)):
   pins; osionos whiteboard and graph-studio fixes; grobase Docker infrastructure and dependency
   fixes; drawnosaurus (6 commits: engine bumps, the nested-shape binding fix).
 - **Pull requests:** 72 merged (groot 45, osionos 17, prismatica 6, grobase 4).
-- **Features and modules:** block editor (42), legal pages (3), real-time (row 2, 5), frontend
-  framework (row 6, 77).
+- **Features and modules:** block editor (42), legal pages (3), real-time (row 2, 5),
+  frameworks, frontend half (row 6, 77).
 - **Challenges:** not recorded.
 
   > TO CONFIRM by the team: the challenges this member met.
