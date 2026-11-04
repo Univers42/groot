@@ -407,9 +407,9 @@ jobs:
       - name: Install govulncheck
         run: |
           set -euo pipefail
-          # Pin by module version. S8545 wants a lockfile; go install @vX is the Go ecosystem
-          # equivalent of a tagged release (module proxy + sumdb verify the bytes).
-          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4 # NOSONAR S8545: module path@version, sumdb-verified
+          # tools/govulncheck carries go.mod+go.sum so the install is lockfile-enforced (S8545).
+          cd tools/govulncheck
+          go install golang.org/x/vuln/cmd/govulncheck
           "$(go env GOPATH)/bin/govulncheck" -version
 
       - name: govulncheck (reachability-based, blocking)
