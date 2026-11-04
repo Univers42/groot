@@ -61,7 +61,8 @@ for (const [app, url] of [["Mail", MAIL_URL], ["Calendar", CALENDAR_URL]] as con
     test.skip(reason !== "", `${app} is opt-in and not running: ${reason}`);
 
     const { context, page } = await openOsionos(browser);
-    consoleGuard.watch(page, "osionos");
+    // The demo database's header template: its id has no page row, so 404 is the right answer.
+    consoleGuard.watch(page, "osionos", /marketplace\/header-template/);
     const railEntry = page.getByRole("tablist", { name: "Activity bar" }).getByRole("tab", { name: app, exact: true });
     const listing = await openListing(page, app);
     const uninstall = listing.getByRole("button", { name: "Uninstall", exact: true });
@@ -75,13 +76,14 @@ for (const [app, url] of [["Mail", MAIL_URL], ["Calendar", CALENDAR_URL]] as con
       await toRail(page);
       await expect(railEntry, `installing ${app} added no rail entry`).toBeVisible();
       await railEntry.click();
-      const pane = page.locator(`iframe[title="${app}"]`);
+      // Opening from the rail can keep a hidden pane for the same app: the visible one is under test.
+      const pane = page.locator(`iframe[title="${app}"]:visible`);
       await expect(pane).toBeVisible();
 
       await page.waitForTimeout(15_000); // deliberately past the 8 s grace timer
       await expect(page.getByTestId("embed-unavailable")).toHaveCount(0);
       await expect(pane).toBeVisible();
-      await page.frameLocator(`iframe[title="${app}"]`).locator("body").click();
+      await page.frameLocator(`iframe[title="${app}"]:visible`).locator("body").click();
       await expect(pane).toBeVisible();
     } finally {
       const again = await openListing(page, app);

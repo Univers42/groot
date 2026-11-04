@@ -9,7 +9,7 @@ export function boardTitle(spec: string): string {
 
 /** Types a title on the board list, creates the board and opens it. */
 export async function createAndOpenBoard(root: Page | FrameLocator, title: string): Promise<void> {
-  await root.getByRole("textbox", { name: "New board title…" }).fill(title);
+  await root.getByRole("textbox", { name: /New board title/ }).fill(title);
   await root.getByRole("button", { name: "+ New Board" }).click();
   await root.getByRole("link", { name: new RegExp(title) }).click();
   await expect(root.getByRole("application", { name: "Board canvas" })).toBeVisible();

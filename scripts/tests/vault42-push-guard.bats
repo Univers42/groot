@@ -141,14 +141,14 @@ tree_state() { (cd "$ROOT" && find . -exec stat -c '%n %a %s' {} + | sort); }
   (cd "$ROOT/secrets" && sha256sum postgres-all.sql.gz redis.rdb minio.tar.gz >SHA256SUMS)
   run sh "$ROOT/scripts/vault42-team.sh" push
   [ "$status" -eq 0 ]
-  grep -q '^ctl-env personal=0 push --private \*.bak --private .env.grobase-remote' "$BATS_TEST_TMPDIR/ctl.log"
+  grep -q '^ctl-env personal=0 push --private \*.bak\* --private .env.grobase-remote' "$BATS_TEST_TMPDIR/ctl.log"
 }
 
 @test "make vault42-push-all: shared is the team push (.env.grobase-remote sealed), blank is personal; both guarded" {
   run make -C "$ROOT" -f utils/mk/repo.mk vault42-push-all VAULT42_ORG=o VAULT42_PROJECT=p VAULT42_ENV=e
   [ "$status" -eq 0 ]
   [[ "$output" == *"✓ every dump matches"* ]]
-  grep -q -- 'personal=0 push --private \*.bak --private .env.grobase-remote' "$BATS_TEST_TMPDIR/ctl.log"
+  grep -q -- 'personal=0 push --private \*.bak\* --private .env.grobase-remote' "$BATS_TEST_TMPDIR/ctl.log"
   : >"$BATS_TEST_TMPDIR/ctl.log"
   run make -C "$ROOT" -f utils/mk/repo.mk vault42-push-all VAULT42_ORG= VAULT42_ENV=
   [ "$status" -eq 0 ]

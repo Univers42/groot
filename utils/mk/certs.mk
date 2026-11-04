@@ -17,8 +17,14 @@
 # browser stores (scripts/certs-trust-user.sh: Chrome's NSS db and every Firefox
 # profile, no sudo). Both no-op with a message when sudo/certutil are missing.
 ##@ Certificates
+# A CA certificate without its key is deliberate (ADR 0047): the generator would delete it and mint
+# a new CA, which no browser here trusts and the VM's WAF does not chain to.
 certs: ## Generate the local HTTPS CA and localhost cert (delegated to apps/grobase)
-	$(MAKE) -C apps/grobase certs
+	@if [ -f '$(LOCAL_CA_CERT)' ] && [ ! -f '$(LOCAL_CERT_DIR)/track-binocle-local-ca-key.pem' ]; then \
+		LOCAL_CERT_DIR='$(abspath $(LOCAL_CERT_DIR))' bash scripts/datacenter.sh certs-verify; \
+	else \
+		$(MAKE) -C apps/grobase certs; \
+	fi
 
 # Inline trust of the grobase CA: system store + NSS (certutil) when present.
 define TRUST_LOCAL_CA

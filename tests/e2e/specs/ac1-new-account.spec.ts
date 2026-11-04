@@ -43,10 +43,9 @@ test("AC1 a new account signs up on the landing, lands in its own osionos worksp
   const owned = workspaces.filter((w) => w.ownerId === s.userId);
   expect(owned.map((w) => w._id), "one private workspace, the active one").toEqual([s.workspaceId]);
 
-  // The osionos handle is the user's own choice, separate from the sign-up username, which
-  // arrives as the display name (auth-gateway.mjs handoff payload `name`).
-  const handle = `e2e_h_${stamp}`;
-  await bridge(page, s, "PATCH", "/api/profile/me", { username: handle, headline: `e2e headline ${stamp}`, location: "e2e city" });
+  // The handle changes through POST /api/account/username, behind a step-up proof; the sign-up
+  // username arrives as the display name (auth-gateway.mjs handoff payload `name`).
+  await bridge(page, s, "PATCH", "/api/profile/me", { headline: `e2e headline ${stamp}`, location: "e2e city" });
   const pageEntry = await bridge(page, s, "POST", "/api/pages", {
     workspaceId: s.workspaceId,
     title: `e2e-signup-page-${stamp}`,
@@ -62,7 +61,6 @@ test("AC1 a new account signs up on the landing, lands in its own osionos worksp
     expect(s2.workspaceId, "the same private workspace").toBe(s.workspaceId);
     const profile = await bridge(again.page, s2, "GET", `/api/profile/${s.userId}`);
     expect(profile.name, "the sign-up username is the display name").toBe(username);
-    expect(profile.username).toBe(handle);
     expect(profile.headline).toBe(`e2e headline ${stamp}`);
     expect(profile.location).toBe("e2e city");
     const stored = await bridge(again.page, s2, "GET", `/api/pages/${pageId}`);
