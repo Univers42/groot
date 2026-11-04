@@ -162,3 +162,19 @@ aliases or `expose`.
   | `osionos_object_databases.state` (`validatedDatabaseState`) | 782 | **0** |
 
   Not vacuous: 9,023 pages carry 30,684 top-level blocks (children walked to depth 64), 1,034 hold `[]`, none is null, and all 782 database slices hold at least one of `databases`/`pages`/`views`. No repair or tolerance is needed. Caveat: this was a snapshot. A row written after the read, or between pages of the offset scan, was not checked; the rollback trigger "a 422 on a save" covers that window.
+
+## G5, met (2026-11-04, 11:20 CET)
+
+The "drift" was the method, not the bridge. `dc.sh config --hash` hashes the service before `up` adds its
+own `com.docker.compose.*` labels, so its `91df09c4…` is not comparable with the container's label
+`d08c238f…`. Two pieces of evidence:
+- A field diff of the render against `docker inspect` (env compared by name and value, never printed;
+  mounts; image; mem_limit; restart; healthcheck; networks; expose) shows no difference. The remaining
+  ones are image defaults or formatting: null vs `[]`, "30s" vs nanoseconds, project-prefixed network names.
+- `DC_EXTRA=$BR dc.sh up -d --no-deps --no-build osionos-bridge` (with
+  `OSIONOS_PUBLISH_SOCKET_DIR=~/.local/state/osionos-publish/sock`) answered `Container … Running`
+  and recreated nothing: the image and label are unchanged (`70b800b1…`, `d08c238f…`). Compose's own
+  comparison holds that the running container is the render of `$BR`, so the D1 rollback target is real.
+  The beta timer was stopped for the call and started again (G16).
+
+Use `up`'s own decision, not `config --hash`, for later drift checks (e.g. `dc.sh up --dry-run`).
