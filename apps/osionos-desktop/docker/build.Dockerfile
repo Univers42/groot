@@ -32,6 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
+
 # Node 22 for the osionos (Vite) frontend build + create-tauri-app. From the official image, on the
 # same Debian release: the nodesource setup script this replaces ran unverified in a root shell.
 COPY --from=node-toolchain /usr/local/bin/node /usr/local/bin/node

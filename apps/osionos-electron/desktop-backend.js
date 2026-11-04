@@ -24,7 +24,9 @@ function bootSuite() {
     ? ["compose", "-f", localCompose, "--profile", "local", "up", "-d"]
     : ["compose", "--profile", "dev", "up", "-d"];
   try {
+
     const child = spawn("docker", args, { cwd, detached: true, stdio: "ignore" }); // NOSONAR: the user's own docker, found on their PATH with their rights; no fixed path fits Linux, rootless and Windows
+
     child.on("error", () => {}); // docker missing / no compose -> the app just shows offline
     child.unref();
   } catch { /* ignore */ }

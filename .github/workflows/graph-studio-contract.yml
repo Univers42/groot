@@ -46,7 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: fetch graph_render at the gitlink (the submodule is update = none)
         run: |
           pin="$(git ls-tree HEAD apps/graph_render | awk '$2 == "commit" { print $3 }')"
@@ -73,7 +73,7 @@ jobs:
       # tests/e2e/Dockerfile's base, pinned by digest (v1.63.0-noble = @playwright/test in the lockfile)
       PW_IMAGE: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: fetch the pinned pack by digest (no docker) and verify it
         run: tests/graph-studio-contract/fetch-pack.sh "$RUNNER_TEMP/pack"
       # C7 (c7-hierarchy.spec.ts) runs osionos's own graph adapter, not a copy of it.

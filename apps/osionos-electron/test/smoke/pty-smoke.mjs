@@ -23,7 +23,7 @@ async function check(name, fn) {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const assert = (ok, msg) => { if (!ok) throw new Error(msg); };
-const ps = () => execFileSync("ps", ["-eo", "pid=,ppid=,args="], { encoding: "utf8" }).trim().split("\n")
+const ps = () => execFileSync("ps", ["-eo", "pid=,ppid=,args="], { encoding: "utf8" }).trim().split("\n") // NOSONAR S4036: fixed tool name, PATH is the dev/CI image
   .map((l) => l.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/)).filter(Boolean).map(([, pid, ppid, args]) => ({ pid: +pid, ppid: +ppid, args }));
 const hostPid = () => ps().find((p) => /--type=utility/.test(p.args) && /node\.mojom\.NodeService/.test(p.args))?.pid ?? null;
 const shellsOf = (pid) => ps().filter((p) => p.ppid === pid).length;
@@ -42,8 +42,8 @@ page.on("console", (m) => {
 const open = (cols = 80, rows = 24) => page.evaluate(async ([c, r]) => {
   if (!window.__ports) {
     Object.assign(window, { __ports: {}, __out: {}, __exit: {}, __portExit: {} });
-    window.addEventListener("message", (e) => {
-      if (e.source !== window || e.data?.type !== "osionos-pty-port") return;
+    window.addEventListener("message", (e) => { // NOSONAR S2819: same-window message, source is checked
+      if (e.origin !== window.location.origin || e.source !== window || e.data?.type !== "osionos-pty-port") return;
       const { id } = e.data;
       const port = e.ports[0];
       window.__ports[id] = port;
@@ -120,7 +120,7 @@ try {
     const server = http.createServer((_q, s) => { s.writeHead(200, { "content-type": "text/html" }); s.end("<title>m</title>"); }).listen(47199, "127.0.0.1");
     try {
       const child = app.waitForEvent("window", { timeout: 10000 });
-      await page.evaluate(() => { window.open("http://127.0.0.1:47199/?node=m-abcdefghijklmnop"); });
+      await page.evaluate(() => { window.open("http://127.0.0.1:47199/?node=m-abcdefghijklmnop"); }); // NOSONAR S5148: test-only window the harness controls
       const win = await child;
       // Electron opens the child on about:blank, then navigates it.
       await win.waitForURL(/127\.0\.0\.1:47199/, { timeout: 10000 });
