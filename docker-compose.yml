@@ -83,6 +83,7 @@ services:
       OSIONOS_BRIDGE_PORT: 4000
       OSIONOS_APP_URL: ${OSIONOS_APP_URL:-https://localhost:3001}
       OSIONOS_ALLOWED_ORIGIN: ${OSIONOS_ALLOWED_ORIGIN:-https://localhost:3001}
+      OSIONOS_BRIDGE_PUBLIC_ORIGIN: ${OSIONOS_BRIDGE_PUBLIC_ORIGIN:-https://localhost:${OSIONOS_BRIDGE_HOST_PORT:-4000}}
       # Account administrators, comma-separated emails; empty = nobody. The bridge
       # ships without any administrator, so a deployment that wants one names it here.
       OSIONOS_ADMIN_EMAILS: ${OSIONOS_ADMIN_EMAILS:-}
