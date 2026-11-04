@@ -17,7 +17,12 @@ services:
       # scripts/host-ports.sh resolve into host-ports.d/osionos-origin.conf.
       - ./infrastructure/tls/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./infrastructure/tls/host-ports.d:/etc/nginx/host-ports.d:ro
+      # LiveKit's signalling on the :4000 TLS origin (the bridge-*.conf include there).
+      - ./infrastructure/tls/bridge-livekit.conf:/etc/nginx/track-binocle.d/bridge-livekit.conf:ro
       - ./apps/grobase/certs:/etc/track-binocle/certs:ro
+      # The public API docs on :8444 (/docs/ and /openapi.json in nginx.conf).
+      - ./infrastructure/tls/api-docs:/usr/share/track-binocle/api-docs:ro
+      - ./apps/grobase/infra/config/openapi:/usr/share/track-binocle/openapi:ro
     ports:
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${OPPOSITE_OSIRIS_HOST_PORT:-4322}:4322"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${OSIONOS_APP_HOST_PORT:-3001}:3001"
@@ -108,9 +113,11 @@ services:
       CLAUDE_BIN: ${CLAUDE_BIN:-claude}
       # LiveKit video tokens (scripts/bridge-rtc.mjs): same key pair as the
       # livekit service below; LIVEKIT_URL is the in-network admin/twirp base,
-      # LIVEKIT_CLIENT_URL is what browsers get back to connect the room.
+      # LIVEKIT_CLIENT_URL is what browsers get back to connect the room: the
+      # bridge's own TLS origin, where local-https-proxy fronts the SFU's /rtc
+      # (infrastructure/tls/bridge-livekit.conf). Never the SFU's plain ws://.
       LIVEKIT_URL: ${LIVEKIT_URL:-http://livekit:7880}
-      LIVEKIT_CLIENT_URL: ${LIVEKIT_CLIENT_URL:-ws://127.0.0.1:7880}
+      LIVEKIT_CLIENT_URL: ${LIVEKIT_CLIENT_URL:-wss://localhost:${OSIONOS_BRIDGE_HOST_PORT:-4000}/livekit}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecret-livekit-local-0123456789abcdef}
       # Permission UX proxy (scripts/bridge-perms.mjs) → mini-baas Kong over
@@ -250,7 +257,11 @@ services:
     volumes:
       - ./infrastructure/livekit/livekit.yaml:/etc/livekit.yaml:ro
     ports:
-      - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${LIVEKIT_HOST_PORT:-7880}:7880"
+      # 7880 is plain ws/http: LITERAL 127.0.0.1, like drawnosaurus (TRACK_BINOCLE_BIND_ADDR
+      # is 0.0.0.0 inside a NAT VM). Browsers reach it through local-https-proxy's
+      # /livekit on :4000; this loopback port serves the host's own tools (agency-simulation).
+      # 7881 and the UDP range carry ICE/DTLS-SRTP media, encrypted, so they keep the bind address.
+      - "127.0.0.1:${LIVEKIT_HOST_PORT:-7880}:7880"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${LIVEKIT_TCP_HOST_PORT:-7881}:7881"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:50000-50060:50000-50060/udp"
     # 7880 is not an env var here: it is `port:` in the mounted infrastructure/livekit/livekit.yaml.
@@ -1402,8 +1413,9 @@ services:
     expose:
       - "8080"
     # Optional direct (plain-HTTP) access for debugging, bypassing the TLS proxy.
+    # LITERAL 127.0.0.1: plain HTTP must not leave the host, even inside a NAT VM.
     ports:
-      - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${OPPOSITE_OSIRIS_WEB_HOST_PORT:-4323}:8080"
+      - "127.0.0.1:${OPPOSITE_OSIRIS_WEB_HOST_PORT:-4323}:8080"
     networks:
       - default
       - mini-baas

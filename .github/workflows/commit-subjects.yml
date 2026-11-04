@@ -1,0 +1,39 @@
+# Commit subjects — a pushed commit needs a subject of more than one word (#175: 148 root
+# commits on main are titled `update` and the like). History before this check is left as is.
+# Checks the commits a push adds, or a pull request's commits; merges are skipped.
+name: Commit subjects
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  subjects:
+    name: no one-word commit subjects
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Check the subjects of the new commits
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ -n "$BASE" ]; then range="$BASE..$HEAD"
+          elif [ -z "$BEFORE" ] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then range="$AFTER~1..$AFTER"
+          else range="$BEFORE..$AFTER"; fi
+          bad=$(git log --no-merges --format='%h %s' "$range" | awk 'NF <= 2' || true)
+          if [ -n "$bad" ]; then
+            printf '::error::one-word commit subject(s) in %s — write type(scope): what\n%s\n' "$range" "$bad"
+            exit 1
+          fi
+          echo "subjects ok in $range: $(git rev-list --no-merges --count "$range") commit(s)"

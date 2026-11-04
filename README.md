@@ -101,7 +101,7 @@ sudo, `CERT_TRUST_MODE=user` trusts the browsers only and `skip` trusts nothing 
 **Ports bound on the host** (from `docker-compose.yml`, all on `127.0.0.1` except inside a
 QEMU/VirtualBox NAT VM, where `infrastructure/scripts/detect-bind-addr.sh` binds `0.0.0.0` so the
 host can reach the guest): 443, 3001, 3002, 3003, 3007 (always loopback), 4000, 4100, 4200, 4322,
-4323, 7880, 7881, 8444, 8787 and UDP 50000–50060. grobase adds Kong on `127.0.0.1:8000`
+4323 and 7880 (always loopback: plain HTTP), 7881, 8444, 8787 and UDP 50000–50060. grobase adds Kong on `127.0.0.1:8000`
 (literal loopback in its `orchestrators/compose/base/gateway.yml`).
 
 ### Defense bring-up (pinned)
@@ -209,8 +209,12 @@ are in [ADR 0016](docs/adr/0016-self-documenting-pruned-root-make.md).
 | osionos-bridge | `https://localhost:4000` |
 | auth-gateway | `https://localhost:8787/api/auth` |
 | grobase API (TLS edge) | `https://localhost:8444` |
-| grobase API gateway (Kong, plain HTTP, loopback only) | `http://127.0.0.1:8000` |
-| LiveKit | `ws://127.0.0.1:7880` |
+| LiveKit signalling (video rooms) | `wss://localhost:4000/livekit` |
+
+Only the TLS ports above are entry points. Kong's own plain-HTTP listener (`127.0.0.1:8000`) and
+LiveKit's `127.0.0.1:7880` are bound to the host's loopback for the backend's own tools; a browser
+never gets them (`scripts/verify/https-only.sh`, run in CI, fails on any `ws://` or `http://` URL
+handed outside the backend).
 
 `make showcase` prints the list of what is actually running.
 
@@ -321,15 +325,24 @@ feature flag — see [Modules](#modules).
 
 ## Team Information
 
-Roles as recorded in the team's working notes ([`wiki/project/03-team.md`](wiki/project/03-team.md)):
+One owner per role, as the team confirmed on 2026-11-04 (the earlier working notes in
+[`wiki/project/03-team.md`](wiki/project/03-team.md) named two Product Owners and two Project Managers).
+The "Areas in the history" column is what each member's commits touch
+([Individual Contributions](#individual-contributions) has the numbers).
 
-| Member | Login | Role(s) | Responsibilities |
-|---|---|---|---|
-| Dylan Lesieur | `dlesieur` | Product Owner · Developer | Product vision, backlog and priorities; validates completed work |
-| Daniel Fernández | `danfern3` | Tech Lead · Product Owner | Architecture, stack decisions, code quality, reviews |
-| Sergio Jiménez | `serjimen` | Project Manager · Developer | Frontend, secrets management, deployment |
-| Vadim Jan | `vjan-nie` | Project Manager · Developer | Planning, tracking, communication, unblocking |
-| | `shashemi` | Developer | Features and modules |
+| Member | Login | GitHub | Role(s) | Responsibilities | Areas in the history |
+|---|---|---|---|---|---|
+| Dylan Lesieur | `dlesieur` | [@LESdylan](https://github.com/LESdylan) | Product Owner · Developer | Product vision, backlog and priorities; validates completed work | grobase, osionos, mail, calendar, root infrastructure and CI |
+| Daniel Fernández | `danfern3` | [@danielfdez17](https://github.com/danielfdez17) | Tech Lead · Developer | Architecture, stack decisions, code quality, reviews | monkey-bot (security test bot), grobase Docker and Kubernetes deployment, osionos editor fixes |
+| Sergio Jiménez de la Cruz | `serjimen` | [@DjSurgeon](https://github.com/DjSurgeon) | Developer | Frontend, secrets management, deployment | the public site (opposite-osiris), osionos accessibility and editor features |
+| Vadim Jan Nieto | `vjan-nie` | [@vjan-nie](https://github.com/vjan-nie) | Project Manager · Developer | Planning, tracking, communication, unblocking | QA tooling, end-to-end tests, documentation, Docker |
+| Seyed Mostafa Hashemian | `shashemi` | [@SMOSTAFAH1](https://github.com/SMOSTAFAH1) | Developer | TO CONFIRM by the team | security fixes and SAST, the site's legal pages, TLS edge |
+
+> TO CONFIRM by the team: `shashemi`'s responsibilities.
+
+`rstancu` (Roxana Stancu, [@esettes](https://github.com/esettes)) is on the original roster
+([`archive/wiki-2026-09/CONTRIBUTORS.md`](archive/wiki-2026-09/CONTRIBUTORS.md)) and committed
+between 2026-03-18 and 2026-05-02; see [Who committed where](#who-committed-where).
 
 ---
 
@@ -337,10 +350,11 @@ Roles as recorded in the team's working notes ([`wiki/project/03-team.md`](wiki/
 
 What the repository records:
 
-- **Planning:** milestones (M1 hardening, M2 federation, M3 coherence, M4 observability,
-  M5 security, M11 external-app integration) in
+- **Task tracking:** GitHub Issues on [`Univers42/groot`](https://github.com/Univers42/groot/issues)
+  and on each submodule's repository; milestones (M1 hardening, M2 federation, M3 coherence,
+  M4 observability, M5 security, M11 external-app integration) in
   [`archive/wiki-2026-09/todo/`](archive/wiki-2026-09/todo/).
-- **Tools:** GitHub — pull requests on `Univers42/groot`, Dependabot for dependency updates
+- **Tools:** GitHub — pull requests, Dependabot for dependency updates
   ([`.github/dependabot.yml`](.github/dependabot.yml)), GitHub Actions for CI
   ([`.github/workflows/`](.github/workflows/)).
 - **Branch model:** work lands on short-lived `feat/`, `fix/`, `docs/`, `test/` and `chore/`
@@ -351,6 +365,20 @@ What the repository records:
   (`apps/grobase/scripts/verify/run-gate-battery.sh`) are the team's definition of "done":
   grobase's CI runs named gates on pull requests and the full `--enterprise` battery, with a
   nightly schedule (grobase `.github/workflows/ci.yml`).
+
+What the team confirmed (2026-11-04), which the repository cannot show:
+
+- **Communication channel:** Discord.
+- **Meeting rhythm:** a weekly meeting.
+
+What the repository does not record:
+
+- **Task distribution and code review:** not recorded beyond the merged pull requests per login
+  ([Who committed where](#who-committed-where)).
+
+> TO CONFIRM by the team: who attended the weekly meeting and where its decisions were written.
+
+> TO CONFIRM by the team: who assigned work, and who reviewed whose pull requests.
 
 ---
 
@@ -367,7 +395,7 @@ What the repository records:
 | **Zod** | osionos | Schema validation of user input on the client side. |
 | **livekit-client** | osionos | WebRTC video rooms. |
 | **Playwright** | osionos | End-to-end browser tests. |
-| **Plain CSS** | mail, calendar | Each has a single hand-written `src/styles.css`; no framework. |
+| **Tailwind CSS 4** | mail, calendar | `src/styles.css` imports Tailwind's theme and utilities through `@tailwindcss/vite`, without preflight; the app's own rules sit on top. |
 
 ### Backend — grobase
 
@@ -523,79 +551,86 @@ foreign-key clash (`scripts/apply-models-migrations.sh:27-38`).
 
 ## Features List
 
-| Feature | Description |
-|---|---|
-| Sign-up / sign-in | Email and password (hashed and salted) on the public site; email OTP enabled in production with real SMTP |
-| Site → editor handoff | After login, a one-time bridge session hands the user to osionos (`/api/auth/bridge/consume`) — no token in a query string |
-| Legal pages | Privacy Policy, Terms of Service, Cookie Policy, Data Rights, linked from the site |
-| Block editor | Pages built from blocks, nested pages, templates, covers, favourites, search |
-| Database block | A block that is a database, with table / board / calendar views over any mounted data source |
-| Real-time collaboration | Several users editing the same space live, over the protected `collab:<spaceId>` channel |
-| Chat | Workspace channels and direct messages, reactions, mentions, attachments, read receipts |
-| Video rooms | LiveKit-based video channels inside workspaces |
-| Comments, sharing, publishing | Page comments, share rules, public page publishing |
-| Communities & social feed | Communities, connections, feed with likes, comments and shares; blocking and reporting |
-| Mail | Read Gmail inside the workspace via Google OAuth |
-| Calendar | Google Calendar events via Google OAuth |
-| Contract-driven provisioning | One JSON contract → isolated database, roles, keys and frontend `.env` |
-| Self-serve applications | `POST /v1/tenants/me/apps` creates a new isolated app with its own database and key |
-| Multi-engine data API | One API and one key over PostgreSQL, MySQL, MongoDB, SQLite, MSSQL, DynamoDB, Redis, HTTP |
-| Public API | Key-authenticated, rate-limited API behind Kong, documented with OpenAPI |
+"Who" lists the authors of the commits that touch the feature's code, largest share first, with
+the count (`scripts/contributors.sh --paths <repo> <path>...`; the paths are in the last column).
+A commit count is not effort, and pairing or review does not show in it.
+
+| Feature | Description | Who (commits) | Paths counted |
+|---|---|---|---|
+| Sign-up / sign-in | Email and password (hashed and salted) on the public site; email OTP enabled in production with real SMTP | dlesieur 11, serjimen 1 | opposite-osiris `src/pages/auth`, `src/pages/api/auth` |
+| Site → editor handoff | After login, a one-time bridge session hands the user to osionos (`/api/auth/bridge/consume`) — no token in a query string | dlesieur 4 | osionos `scripts/bridge-auth*` |
+| Legal pages | Privacy Policy, Terms of Service, Cookie Policy, Data Rights, linked from the site | shashemi 5, vjan-nie 3, serjimen 2, dlesieur 2 | opposite-osiris `src/pages/legal` |
+| Block editor | Pages built from blocks, nested pages, templates, covers, favourites, search | dlesieur 162, vjan-nie 42, danfern3 29, serjimen 14, rstancu 9, shashemi 2 | osionos `src/features/block-editor` |
+| Database block | A block that is a database, with table / board / calendar views over any mounted data source | dlesieur 126, vjan-nie 2, serjimen 2, rstancu 2 | osionos `src/widgets/database*`, `src/features/*database*`, `src/shared/database*` |
+| Real-time collaboration | Several users editing the same space live, over the protected `collab:<spaceId>` channel | dlesieur 46, shashemi 1 | osionos `src/features/collab`, `scripts/bridge-*collab*` |
+| Chat | Workspace channels and direct messages, reactions, mentions, attachments, read receipts | dlesieur 72, vjan-nie 1 | osionos `src/features/chat`, `src/features/group-chat`, `scripts/bridge-*chat*` |
+| Video rooms | LiveKit-based video channels inside workspaces | dlesieur 13 | osionos `scripts/bridge-*livekit*`, `src/**/*livekit*`, `src/**/*Video*` |
+| Comments, sharing, publishing | Page comments, share rules, public page publishing | dlesieur 44 | osionos `src/features/comments`, `src/features/share`, `scripts/bridge-*publish*`, `scripts/bridge-*share*` |
+| Communities & social feed | Communities, connections, feed with likes, comments and shares; blocking and reporting | dlesieur 38, serjimen 2 | osionos `src/features/communities`, `src/features/connections`, `scripts/bridge-*social*`, `scripts/bridge-*feed*` |
+| Mail | Read Gmail inside the workspace via Google OAuth | dlesieur 35 | `apps/mail` |
+| Calendar | Google Calendar events via Google OAuth | dlesieur 18 | `apps/calendar` |
+| Contract-driven provisioning | One JSON contract → isolated database, roles, keys and frontend `.env` | dlesieur 9 | grobase `scripts/provision-contract.sh`, `infra/config/contracts` |
+| Self-serve applications | `POST /v1/tenants/me/apps` creates a new isolated app with its own database and key | dlesieur 33 | grobase `src/control-plane/internal/tenants` |
+| Multi-engine data API | One API and one key over PostgreSQL, MySQL, MongoDB, SQLite, MSSQL, DynamoDB, Redis, HTTP | dlesieur 99, vjan-nie 3 | grobase `src/data-plane-router` |
+| Public API | Key-authenticated, rate-limited API behind Kong, documented with OpenAPI at `/docs/` | dlesieur 41, vjan-nie 1 | grobase `infra/docker/services/kong`, `infra/config/openapi` |
 
 ---
 
 ## Modules
 
-The subject requires **14 points** (Major = 2, Minor = 1). A module that cannot be demonstrated
-live scores zero, so the confidence column is honest about where each one stands:
+The subject requires **14 points** (Major = 2, Minor = 1), and a module that does not work at
+the evaluation scores zero. A module is claimed below only when its evidence is something a
+second person can re-run: a CI job, a test suite, or a script. Status:
 
-- **A** — works as-is in the default stack
-- **B** — backend exists; needs a feature flag and a migration, no new code
-- **C** — backend exists; needs a user-facing screen to be demonstrable
+- **CI** — a CI job proves it on every change (link to the workflow or the tests it runs).
+- **CI + live** — as CI, and a manual check on production is recorded, with its date.
+- **Partial** — CI covers part of the subject's list; the gap is named in the row.
 
-Only the **A** rows — **10 points**, including the two modules of choice, are
-demonstrable in the default stack today, which is four points below the 14 required.
+The osionos links point at osionos `main`; groot's pin of `apps/osionos/app` predates some of
+those tests and moves to `main` with [#172](https://github.com/Univers42/groot/issues/172).
 
-| # | Module | Category | Type | Pts | Conf | How it is implemented |
-|---|---|---|---|--:|:--:|---|
-| 1 | Public API (key, rate limit, docs, ≥5 endpoints) | Web | Major | 2 | A | Kong gateway with key auth and rate limiting; OpenAPI specs in grobase `infra/config/openapi/` |
-| 2 | Backend as microservices | DevOps | Major | 2 | A | 15 compose planes (Go control, Rust data, Rust realtime, TS app, storage, auth…) talking over an internal network with HMAC-signed service calls |
-| 3 | Real-time features via WebSockets | Web | Major | 2 | A | Rust realtime plane; changes published as events; protected channel namespaces (gate `m175`) |
-| 4 | Real-time collaboration | Web | Minor | 1 | A | osionos live co-editing over `collab:<spaceId>` on the realtime plane |
-| 5 | Advanced permissions | User management | Major | 2 | C | Roles and policies as rows, ABAC conditions; needs `PERMISSION_CONDITIONS_ENABLED` + `API_KEY_ABAC_ENABLED`, migration `063` |
-| 6 | Organisation system | User management | Major | 2 | C | Organisations are **on in production**; only a management screen is missing |
-| 7 | Monitoring with Prometheus + Grafana | DevOps | Major | 2 | C | Observability plane; needs `TENANT_OBS_ENABLED` **and** `DATA_PLANE_TENANT_OBS` |
-| 8 | Health/status page, backups, disaster recovery | DevOps | Minor | 1 | C | `TENANT_BACKUP_ENABLED`, migration `042` |
-| 9 | GDPR compliance | Data | Minor | 1 | B | Data export and hard erase: `TENANT_EXPORT_ENABLED` + `HARD_ERASE_ENABLED`; `gdpr_requests` table |
-| 10 | Two-factor authentication | User management | Minor | 1 | B | TOTP (grobase `one` shape) or passkeys (`PASSKEYS_ENABLED`) |
-| 11 | Remote authentication (OAuth 2.0) | User management | Minor | 1 | B | `SSO_ENABLED`, migration `053` |
-| 12 | File upload and management | Web | Minor | 1 | C | Storage plane on MinIO, `STORAGE_BUCKET_SCOPE_ENABLED` |
-| 13 | **Module of choice:** contract-driven application factory | Free choice | Major | 2 | A | See justification below |
-| 14 | **Module of choice:** SSRF guard on the HTTP engine | Free choice | Minor | 1 | A | See justification below |
-| 15 | Complete LLM system interface (text + images) | Artificial Intelligence | Major | 2 | B | Text streams with resume, cancel and rate limits; image generation needs `OSIONOS_AI_IMAGES=on`, `--profile ai --profile ai-gpu-vulkan` and the prompt guard (C72), without which the service refuses to start; off on the public stack. [M1 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m1-images.md) |
-| 16 | Complete RAG on a large dataset | Artificial Intelligence | Major | 2 | B | `--profile ai`: permission-aware hybrid search with citations; the reranker is off by default, and the 110k-chunk corpus is a separate eval stack. [M2 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m2-rag.md) |
-| 17 | ML recommendation system | Artificial Intelligence | Major | 2 | B | iALS + logistic ranker; needs `OSIONOS_RECS_FOR_YOU=1`, the beacon is opt-in, and the nightly job skips under 20 users. [M3 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m3-recs.md) |
-| 18 | Content moderation AI | Artificial Intelligence | Minor | 1 | B | L0 rules + L1 classifier; needs `OSIONOS_MODERATION_ACTIONS=hold` and `OSIONOS_MODERATION_STATE=1`; L1 is log-only (no auto-removal); the public stack runs `log`. [M4 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m4-moderation.md) |
-| 19 | Voice / speech | Artificial Intelligence | Minor | 1 | B | `--profile ai` with the speech model in its volume: dictation and read-aloud; off on the public stack (`503 voice_unavailable`). [M5 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m5-voice.md) |
-| 20 | Sentiment analysis | Artificial Intelligence | Minor | 1 | C | Opt-in per workspace (owner/admin, Settings › AI) with `OSIONOS_SENTIMENT_URL`; off on the public stack; the model licence is undeclared. [M6 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m6-sentiment.md) |
-| 21 | Image recognition and tagging | Artificial Intelligence | Minor | 1 | C | `--profile ai --profile ai-vlm` with the VLM in its volume; the browser flow and in-app search are not verified end to end; off on the public stack. [M7 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m7-images-tags.md) |
+| # | Module | Category | Type | Pts | Status | Evidence | Who (commits) |
+|---|---|---|---|--:|---|---|---|
+| 1 | Backend as microservices | DevOps | Major | 2 | CI | groot [`Fresh-Machine Migration`](.github/workflows/fresh-machine.yml) runs `make all` on a clean runner and asserts every core, engine and app container healthy (green on `main`, [run 41676720776](https://github.com/Univers42/groot/actions/runs/41676720776), 2026-11-03). Demo: `docker compose ps` after `make all` | dlesieur 205, vjan-nie 2, shashemi 1 (grobase `orchestrators/compose`, `src/control-plane`) |
+| 2 | Real-time features via WebSockets | Web | Major | 2 | CI | grobase CI runs gate `m201-realtime-issuer`; groot [`Modules of choice`](.github/workflows/modules-of-choice.yml) runs `m175-collab-namespace-isolation` (the realtime-core subscribe/publish authorisation tests). Demo: two users in one chat channel, a message appears without a reload | dlesieur 43, vjan-nie 5, shashemi 1 (grobase `infra/docker/services/realtime`) |
+| 3 | Allow users to interact with other users (chat, profile, friends) | Web | Major | 2 | CI + live | osionos CI (`make test-canvas`, `make test-bridge`, green on `main` 2026-11-03) runs [`chat-catch-up.test.ts`](https://github.com/Univers42/osionos/blob/main/tests/canvas/chat-catch-up.test.ts) and [`bridge-chat-reply-notify.test.mjs`](https://github.com/Univers42/osionos/blob/main/tests/bridge/bridge-chat-reply-notify.test.mjs) (chat), [`bridge-account-profile.test.mjs`](https://github.com/Univers42/osionos/blob/main/tests/bridge/bridge-account-profile.test.mjs) (profile read and update), [`bridge-social-connections.test.mjs`](https://github.com/Univers42/osionos/blob/main/tests/bridge/bridge-social-connections.test.mjs) and [`bridge-connection-transitions.test.mjs`](https://github.com/Univers42/osionos/blob/main/tests/bridge/bridge-connection-transitions.test.mjs) (friends). Live on 2026-11-04 with two accounts: friend request sent, accepted, listed, removed; a DM shown in the other window without a reload ([#171](https://github.com/Univers42/groot/issues/171)) | dlesieur 72, vjan-nie 1 (chat); dlesieur 38, serjimen 2 (connections) |
+| 4 | Standard user management and authentication | User Management | Major | 2 | CI + live | osionos CI runs [`bridge-avatar.test.mjs`](https://github.com/Univers42/osionos/blob/main/tests/bridge/bridge-avatar.test.mjs) (upload, type and size refusal), [`bridge-presence.test.mjs`](https://github.com/Univers42/osionos/blob/main/tests/bridge/bridge-presence.test.mjs) (online status), and row 3's profile and connections tests. Members without an image get initials (osionos `src/features/collab/model/collabPresence.ts:63`). Live: friend listed with `online=True`, profile page `200` ([#171](https://github.com/Univers42/groot/issues/171)) | dlesieur 34 (osionos `scripts/bridge-*profile*`, `*avatar*`, `*presence*`, `src/features/profile-binding`) |
+| 5 | Remote authentication with OAuth 2.0 | User Management | Minor | 1 | CI + live | opposite-osiris CI (`pnpm test`, green on `main` 2026-11-03) runs [`oauth-providers.test.ts`](https://github.com/Univers42/prismatica/blob/main/tests/unit/auth/oauth-providers.test.ts) and the `gateway-oauth-*` tests. Live: `GET /api/auth/oauth/providers` answers `["google","github"]`; the working account has a linked GitHub identity ([#171](https://github.com/Univers42/groot/issues/171)). On 2026-11-04 "Continue with GitHub" led to a 404 (the site stopped forwarding GoTrue's provider paths in 85063b0); fixed in opposite-osiris dda7f95, after which the button reaches GitHub's sign-in with `redirect_uri=https://prismatica-eta.vercel.app/auth/v1/callback` and Google answers 302 to `accounts.google.com` | dlesieur 29, danfern3 1 (opposite-osiris `scripts/auth-gateway.mjs`, `src/scripts/portal-oauth.ts`, OAuth tests) |
+| 6 | Use a framework for both the frontend and backend | Web | Major | 2 | CI + live | Frontend: osionos is React (osionos `package.json`). Backend: the services every app request crosses are built on axum 0.7, the data plane (grobase [`src/data-plane-router/Cargo.toml:59`](https://github.com/Univers42/grobase/blob/main/src/data-plane-router/Cargo.toml)) and realtime ([`infra/docker/services/realtime/realtime-agnostic/Cargo.toml:44`](https://github.com/Univers42/grobase/blob/main/infra/docker/services/realtime/realtime-agnostic/Cargo.toml)); grobase CI builds and tests both (`cargo test --workspace`), row 1's CI runs them. Live on 2026-11-04: `mini-baas-data-plane-router-rust` and `mini-baas-realtime` running on the production stack. Replaces the frontend-only Minor, which cannot be counted as well | dlesieur 1239, danfern3 78, vjan-nie 77, serjimen 76, rstancu 38, shashemi 8 (osionos `src`); dlesieur 126, vjan-nie 8, shashemi 1 (grobase data plane and realtime) |
+| 7 | Public API (key, rate limit, docs, ≥5 endpoints) | Web | Major | 2 | CI | groot [`Public API`](.github/workflows/public-api.yml): the `:8444` edge serves the OpenAPI document at `/openapi.json` and renders it at `/docs/` ([`tests/api-docs-edge`](tests/api-docs-edge/docs.bats)); [`scripts/verify/public-api.sh`](scripts/verify/public-api.sh) shows `401` without a key, `401` with a wrong one and a `429` past the limit, against Kong 3.8.0 with grobase's plugins ([`tests/public-api`](tests/public-api/public-api.bats)). Live on 2026-11-04 (3 requests): both `401`s on `https://baas.tail10f2ea.ts.net/rest/v1/`. On a stack: `scripts/verify/public-api.sh https://localhost:8444 --key <anon key> --path <a route with a low limit>` | dlesieur 41, vjan-nie 1 (grobase `infra/docker/services/kong`, `infra/config/openapi`) |
+| 8 | **Module of choice:** contract-driven application factory | Free choice | Major | 2 | Partial | groot [`Modules of choice`](.github/workflows/modules-of-choice.yml) runs gates `m176-contract-isolation-live` and `m177-selfserve-apps` in their static mode (source checks and the Go slug/DSN tests). Their live half (`BAAS_VERIFY_LIVE=1`: two apps, two databases, cross-app key refused) runs in no CI job yet | dlesieur 9 (provisioning), dlesieur 33 (self-serve) |
+| 9 | **Module of choice:** SSRF guard on the HTTP engine | Free choice | Minor | 1 | Partial | 30 unit tests in grobase `src/data-plane-router/crates/data-plane-pool/src/http/mod.rs`, run by grobase CI (`cargo test --workspace`). No end-to-end demo of a mount at `169.254.169.254` being refused yet, and whether it stands apart from row 8 is a team decision ([#177](https://github.com/Univers42/groot/issues/177)) | dlesieur 8 |
+| 10 | Real-time collaborative features | Web | Minor | 1 | CI | osionos CI runs the `tests/bridge/bridge-collab-*.test.mjs` and `tests/canvas/collab-*.test.ts` suites; row 2's `m175` proves `collab:<spaceId>` is closed to wildcard tokens. Demo: two users on one page, each sees the other's cursor and edits | dlesieur 46, shashemi 1 (osionos `src/features/collab`, `scripts/bridge-*collab*`) |
 
 **Point calculation**
 
 | | Points |
 |---|--:|
-| Catalogue modules listed (rows 1–12) | 18 |
-| Modules of choice (rows 13–14) | 3 |
-| Artificial Intelligence modules (rows 15–21: 2 + 2 + 2 + 1 + 1 + 1 + 1) | 10 |
-| **Total listed** | **31** |
-| Demonstrable today (confidence A: rows 1–4 = 7, rows 13–14 = 3) | **10** |
+| Status CI or CI + live (rows 1–7, 10) | 14 |
+| Status Partial (rows 8–9, the modules of choice) | 3 |
+| **Total claimed** | **17** |
 | Required | 14 |
 
-The **AI opponent** module is not claimed: osionos has no game.
+Rows 1–7 and 10 make 14 points on their own, the required total; the two modules of choice are
+the margin.
 
-The **Multiple languages** module is not claimed: osionos lists four languages in its settings,
-but switching only records a stub action (`i18n_change_stub` in osionos
-`src/features/settings/SettingsCenter.tsx`); no translation resources are loaded.
+> TO CONFIRM by the team: the date and the name of the second member who ran each row's evidence
+> on a fresh `make all` ([#171](https://github.com/Univers42/groot/issues/171), "Done when").
+
+### Not claimed
+
+| Module | Category | Type | Why not |
+|---|---|---|---|
+| Advanced permissions | User Management | Major | Admin › Users answers `403` for the platform admin (2026-11-04 audit); needs `PERMISSION_CONDITIONS_ENABLED`, `API_KEY_ABAC_ENABLED`, migration `063` |
+| Organisation system | User Management | Major | Organisations are on in production, but no management screen exists |
+| Monitoring with Prometheus + Grafana | DevOps | Major | Needs `TENANT_OBS_ENABLED` and `DATA_PLANE_TENANT_OBS`; nothing to click |
+| Health/status page, backups, disaster recovery | DevOps | Minor | `TENANT_BACKUP_ENABLED`, migration `042`; nothing to click |
+| GDPR compliance | Data | Minor | The deletion executor is open work (Univers42/osionos#56) |
+| Two-factor authentication | User Management | Minor | TOTP or passkeys need `PASSKEYS_ENABLED`; not on by default |
+| File upload and management | Web | Minor | Uploaded media is readable without authentication (Univers42/osionos#233, #235), which fails "secure storage with access control" |
+| Seven Artificial Intelligence modules | Artificial Intelligence | 3 Major, 4 Minor | Each needs a compose profile or flag that is off on the public stack: [M1 images](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m1-images.md), [M2 RAG](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m2-rag.md), [M3 recommendations](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m3-recs.md), [M4 moderation](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m4-moderation.md), [M5 voice](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m5-voice.md), [M6 sentiment](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m6-sentiment.md), [M7 image tags](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m7-images-tags.md) |
+| AI opponent | Artificial Intelligence | Major | osionos has no game |
+| Multiple languages | Accessibility and Internationalization | Minor | Switching language only records a stub action (`i18n_change_stub` in osionos `src/features/settings/SettingsCenter.tsx`); no translation resources are loaded |
 
 ### Justification — Module of choice (Major): contract-driven application factory
 
@@ -610,7 +645,9 @@ but switching only records a stub action (`i18n_change_stub` in osionos
 - **Why it deserves a Major.** It spans the Go control plane, the Rust data plane and the
   database layer, and it comes with isolation proofs: gate `m177` proves self-serve creation, and
   gate `m176` proves one application cannot read another's data (a foreign mount resolves to zero
-  rows — a 404, never a cross read).
+  rows — a 404, never a cross read). Both run in groot's
+  [`Modules of choice`](.github/workflows/modules-of-choice.yml) workflow in their static mode;
+  their live half needs a running stack (`BAAS_VERIFY_LIVE=1`).
 
 ### Justification — Module of choice (Minor): SSRF guard on the HTTP engine
 
@@ -620,19 +657,162 @@ but switching only records a stub action (`i18n_change_stub` in osionos
   the cloud metadata endpoint `169.254.169.254` — CGNAT, IPv6 ULA and link-local, IPv4-mapped
   addresses and internal hostnames, then **pins** the connection to the validated public IP so a
   later DNS rebind cannot redirect it inward.
-- **Value and weight.** Small, self-contained and demonstrable in seconds (a mount pointing at
-  `169.254.169.254` is refused), and it shows security judgement on a feature we chose to build.
+- **Value and weight.** Small and self-contained, and it shows security judgement on a feature we
+  chose to build. Its 30 unit tests run in grobase CI; the end-to-end demo (a mount pointing at
+  `169.254.169.254` is refused) is not recorded yet ([#177](https://github.com/Univers42/groot/issues/177)).
 
 ---
 
 ## Individual Contributions
 
-The work split is visible in the history of the root repository and of each submodule:
+### Who committed where
 
-```bash
-git shortlog -sn --all
-git submodule foreach 'git shortlog -sn --all'
+Commits per member reachable from the commit groot pins for each repository, one line per person,
+read through the root [`.mailmap`](.mailmap) (counted on 2026-11-04 at root `01654173`):
+
+```sh
+git -C <repo> -c mailmap.file="$PWD/.mailmap" shortlog -sn <pinned sha>   # pins: git ls-tree HEAD apps vendor
 ```
+
+Several members work almost only in submodules, so the root alone understates them.
+
+| Member | GitHub | root | osionos | grobase | opposite-osiris | drawnosaurus | mail | calendar | QA | monkey-bot | First → last commit |
+|---|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|
+| `dlesieur` | @LESdylan | 1577 | 3375 | 1569 | 126 | 676 | 42 | 27 | 1 | 2 | 2026-05-10 → 2026-11-04 |
+| `danfern3` | @danielfdez17 | | 94 | 74 | 8 | 25 | | | 1 | 10 | 2026-03-24 → 2026-10-02 |
+| `serjimen` | @DjSurgeon | | 81 | | 160 | | | | | | 2026-04-11 → 2026-10-29 |
+| `vjan-nie` | @vjan-nie | 173 | 141 | 49 | 23 | 6 | | | 39 | | 2026-03-19 → 2026-11-01 |
+| `shashemi` | @SMOSTAFAH1 | 59 | 18 | 18 | 59 | 9 | | | | | 2026-09-20 → 2026-11-02 |
+| `rstancu` | @esettes | | 104 | | | | | | 2 | | 2026-03-18 → 2026-05-02 |
+
+Work that is not on a pinned commit does not show above: `danfern3`'s 44 root commits sit on
+`fix/ci`, open as [#165](https://github.com/Univers42/groot/pull/165), and most of their 133
+monkey-bot commits are on branches the pin does not reach. A commit count is not effort: one
+large commit and one typo fix weigh the same, and pairing and review do not show in it.
+
+Merged pull requests per login in the project's repositories (groot, osionos, grobase,
+prismatica = opposite-osiris, osionos-mail, osionos-calendar, drawnosaurus, QA, monkey-bot), from
+`gh search prs --owner Univers42 --author <login> --merged` on 2026-11-04:
+
+| GitHub | Merged PRs | Where |
+|---|--:|---|
+| @LESdylan | 260 | osionos 138, grobase 61, groot 56, prismatica 3, osionos-mail 1, osionos-calendar 1 |
+| @vjan-nie | 72 | groot 45, osionos 17, prismatica 6, grobase 4 |
+| @SMOSTAFAH1 | 57 | prismatica 20, groot 19, osionos 12, grobase 6 |
+| @DjSurgeon | 8 | prismatica 7, osionos 1 |
+| @danielfdez17 | 4 | prismatica 4 |
+
+The Who columns of the [Features List](#features-list) and [Modules](#modules) were counted
+on 2026-11-04, before the history rewrite of that day, with `scripts/contributors.sh --paths`
+(all branches). Until the pre-rewrite refs are deleted from a clone, `--all` counts each of those
+commits twice; count from the pinned commit as above instead.
+
+How the identities were joined (the evidence is in [`.mailmap`](.mailmap)):
+
+- Each member committed under several addresses, including GitHub's `noreply` ones; `.mailmap`
+  joins them. A commit count is not effort: one large commit and one typo fix weigh the same.
+- `settes <ioanaroxana.st@…>` is **`rstancu`** (Roxana Stancu): the address belongs to GitHub
+  account [@esettes](https://github.com/esettes), listed for `rstancu` on the original roster
+  ([`archive/wiki-2026-09/CONTRIBUTORS.md`](archive/wiki-2026-09/CONTRIBUTORS.md)). The 104
+  osionos commits (2026-04-10 → 2026-05-02) touch mostly the Playwright browser tests
+  (`tests/browser`), their CI job and committed build assets. `rstancu` is not in the current
+  team table.
+
+  > TO CONFIRM by the team: `rstancu`'s status in the team, and whether that work counts for
+  > this evaluation.
+- `La Cebolla <smhashem545@…>` is **`shashemi`**: opposite-osiris commit `93e6b65` carries
+  `Signed-off-by: Seyed Mostafa Hashemian`.
+- Two groups of grobase commits pair one member's name with another's address. They are
+  attributed by inference:
+  - `LESdylan <vjannieto@…>` (3 commits on grobase's pinned commit, 5 on all branches,
+    2026-09-21 → 2026-11-02) goes to `dlesieur`: the author name
+    is `LESdylan`, and `b4c1d33f` landed through grobase PR #89, opened by `LESdylan`.
+  - `dlesieur <daniel17dev@…>` (5 commits, 2026-03-20/21) goes to `danfern3`: they sit inside
+    `danielfdez17`'s own Docker and Kubernetes series of the same two days.
+
+  > TO CONFIRM by the team: both attributions above.
+- `opencode` (6 commits: 1 root, 5 osionos) is an AI coding agent committing under its own name.
+- `bunny`, `Space Bunny` and `builder` (111 drawnosaurus commits, 2026-09-27/28, addresses on
+  `local`, `localhost` and `drawnosaurus.local`) are not mapped: no address, sign-off or pull
+  request ties them to a member.
+
+  > TO CONFIRM by the team: which member ran `opencode`, and who committed as `bunny`,
+  > `Space Bunny` and `builder` in drawnosaurus.
+- Bots (`dependabot`, `coderabbitai`, `copilot-swe-agent`) are left as they are.
+- On 2026-11-04 the history of groot, osionos and grobase was rewritten to remove
+  `Co-authored-by` trailers; trees and subjects are unchanged, and every commit from the first rewritten one onward has a new SHA. 148 root commits on `main` have a one-word subject
+  (147 `dlesieur`, 1 `vjan-nie`, 2026-05-01 → 2026-10-09); the
+  [`Commit subjects`](.github/workflows/commit-subjects.yml) check refuses new ones.
+
+### dlesieur — Dylan Lesieur
+
+- **Areas:** grobase (Go control plane, Rust data plane and realtime, Kong gateway, contracts
+  and self-serve apps), osionos (editor, chat, collaboration, social, profile, the bridge), mail,
+  calendar, the root's infrastructure, TLS edge and CI; drawnosaurus (676 commits: `apps/web`,
+  the engine, `docs/reference`).
+- **Pull requests:** 260 merged (osionos 138, grobase 61, groot 56).
+- **Features and modules:** most rows of the [Features List](#features-list) and every claimed
+  module row, as the Who columns show.
+- **Challenges:** not recorded.
+
+  > TO CONFIRM by the team: the challenges this member met.
+
+### danfern3 — Daniel Fernández
+
+- **Areas:** `vendor/monkey-bot` (133 commits on all branches, 10 on the pinned commit: form-XSS
+  and mutation testing, configuration);
+  grobase Docker images built from scratch, Kubernetes deployment, the playground and Makefile
+  (March 2026); osionos breadcrumbs, trash, multi-line text in blocks, the markdown engine and
+  code-quality fixes; drawnosaurus (25 commits, `apps/web`, `apps/api`, `packages/contract`,
+  2026-09-24: submodule clone paths, formatting); root submodule pins and the `make all` bats fix,
+  on `fix/ci` ([#165](https://github.com/Univers42/groot/pull/165), open).
+- **Pull requests:** 4 merged (prismatica).
+- **Features and modules:** block editor (29 commits), frameworks, frontend half (row 6, 78), OAuth
+  (row 5, 1).
+- **Challenges:** not recorded.
+
+  > TO CONFIRM by the team: the challenges this member met.
+
+### serjimen — Sergio Jiménez de la Cruz
+
+- **Areas:** the public site, opposite-osiris (160 commits on the pinned commit: hero animation
+  performance, unit tests and benchmarks, security fixes, auth pages); osionos accessibility fixes, page links,
+  move and delete, shared UI refactor, the node installer's self-update (#277) and database probe
+  diagnostics (#278), the changelog.
+- **Pull requests:** 8 merged (prismatica 7, osionos 1), among them the landing page in English,
+  Spanish and Arabic with right-to-left layout (prismatica #21, #22, #23, #35), the accessible
+  privacy policy and terms (#38) and a WCAG 2.2 AA audit pipeline with axe-core fixes (#39).
+- **Features and modules:** sign-in pages (1), legal pages (2), block editor (14), connections
+  (2), frameworks, frontend half (row 6, 76).
+- **Challenges:** not recorded.
+
+  > TO CONFIRM by the team: the challenges this member met.
+
+### vjan-nie — Vadim Jan Nieto
+
+- **Areas:** `vendor/QA` (39 commits: registry, migrations, hooks, CLI); root end-to-end tests,
+  the wiki and README, graph-studio tests, the drawnosaurus TLS edge and its CORS, submodule
+  pins; osionos whiteboard and graph-studio fixes; grobase Docker infrastructure and dependency
+  fixes; drawnosaurus (6 commits: engine bumps, the nested-shape binding fix).
+- **Pull requests:** 72 merged (groot 45, osionos 17, prismatica 6, grobase 4).
+- **Features and modules:** block editor (42), legal pages (3), real-time (row 2, 5),
+  frameworks, frontend half (row 6, 77).
+- **Challenges:** not recorded.
+
+  > TO CONFIRM by the team: the challenges this member met.
+
+### shashemi — Seyed Mostafa Hashemian
+
+- **Areas:** security fixes across root, grobase and opposite-osiris (SAST findings, nginx scan
+  suppressions, IDE socket proxy hardening); the site's legal pages, SEO and accessibility; root
+  CI triggers and the models' export erasure paths; osionos end-to-end fixes; drawnosaurus (9
+  commits, `apps/web`, `apps/api`, `packages/contract`: trail and notes, drawnosaurus #1, and the
+  pen-thickness-with-zoom test, #8).
+- **Pull requests:** 57 merged (prismatica 20, groot 19, osionos 12, grobase 6).
+- **Features and modules:** legal pages (5), collaboration (row 10, 1), real-time (row 2, 1).
+- **Challenges:** not recorded.
+
+  > TO CONFIRM by the team: the challenges this member met.
 
 ### Team-level challenges
 

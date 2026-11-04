@@ -233,6 +233,15 @@ check_env_file() {
   expect env-file ".env.public mode is 600" ".env.public mode is $mode, expected 600" [ "$mode" = 600 ]
 }
 
+# PUBLIC_EXTRA_FRAME_ANCESTORS lands verbatim in the apps' CSP (apps.conf.template), so each
+# space-separated word must be a bare https origin: no wildcard, path, keyword or ';'.
+extra_ancestors_ok() {
+  local origin
+  for origin in $1; do
+    [[ "$origin" =~ ^https://[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*(:[0-9]{1,5})?$ ]] || return 1
+  done
+}
+
 check_env_values() {
   local bad="" v
   [[ -n "$(origin_host)" ]] && [[ "$(penv PUBLIC_ORIGIN)" =~ ^https://[A-Za-z0-9.-]+$ ]] || bad+=" PUBLIC_ORIGIN"
@@ -243,6 +252,7 @@ check_env_values() {
   is_int_between "$(penv AUTH_REGISTER_RATE_LIMIT_PER_HOUR || echo 10)" 1 10 || bad+=" AUTH_REGISTER_RATE_LIMIT_PER_HOUR(1-10)"
   v=$(penv AUTH_TRUSTED_PROXY_HOPS || true)
   is_int_between "${v:-x}" 0 9 || bad+=" AUTH_TRUSTED_PROXY_HOPS(measured integer)"
+  extra_ancestors_ok "$(penv PUBLIC_EXTRA_FRAME_ANCESTORS || true)" || bad+=" PUBLIC_EXTRA_FRAME_ANCESTORS(https origins only)"
   expect env-values ".env.public values are in range" "invalid or unset:$bad" [ -z "$bad" ]
 }
 

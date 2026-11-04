@@ -144,13 +144,14 @@ check_nodev() {
 
 # What is wrong with one response's headers ($1); empty when nothing is. MC4.
 apphdrs_problems() {
-  local headers=$1 csp bad="" d
+  local headers=$1 csp ancestors bad="" d
   [[ -n "$headers" ]] || {
     printf 'no answer'
     return
   }
-  csp=$(grep -i '^content-security-policy:' <<<"$headers" | head -n1 | cut -d: -f2- | tr ';' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-  for d in "frame-ancestors $(penv PUBLIC_ORIGIN || true):8443" "default-src 'self'" "script-src 'self'" "connect-src 'self'"; do
+  csp=$(grep -i '^content-security-policy:' <<<"$headers" | head -n1 | cut -d: -f2- | tr ';' '\n' | tr -s ' ' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+  ancestors=$(printf '%s:8443 %s' "$(penv PUBLIC_ORIGIN || true)" "$(penv PUBLIC_EXTRA_FRAME_ANCESTORS || true)" | tr -s ' ' | sed 's/[[:space:]]*$//')
+  for d in "frame-ancestors $ancestors" "default-src 'self'" "script-src 'self'" "connect-src 'self'"; do
     grep -qFx -- "$d" <<<"$csp" || bad+=" csp:'$d'"
   done
   grep -qi '^x-content-type-options: *nosniff *$' <<<"$headers" || bad+=" nosniff"

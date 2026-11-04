@@ -1,0 +1,8 @@
+body { font: 15px/1.5 system-ui, sans-serif; margin: 0; color: #1d1d1f; background: #fafafa; }
+main { max-width: 64rem; margin: 0 auto; padding: 2rem 1rem; }
+code { font: 13px ui-monospace, monospace; background: #eee; padding: 0 .25rem; border-radius: 3px; }
+table { width: 100%; border-collapse: collapse; margin: .5rem 0 1.5rem; background: #fff; }
+th, td { text-align: left; vertical-align: top; padding: .4rem .6rem; border-bottom: 1px solid #ddd; }
+.method { font: 600 12px ui-monospace, monospace; }
+.get { color: #0b6b2f; } .post { color: #0645ad; } .put, .patch { color: #8a4b00; } .delete { color: #a50e0e; }
+.muted { color: #555; }

@@ -1,0 +1,63 @@
+# One line per real person in `git shortlog -sne`. It only changes how authors are displayed.
+# (On 2026-11-04 the owner had the history of osionos, groot and grobase rewritten to drop
+# co-author trailers; authors and dates were kept, so this file still applies.)
+#
+# Submodules have no copy of their own; read them through this one:
+#   scripts/contributors.sh            (root and every app submodule)
+#   git -C apps/grobase -c mailmap.file="$PWD/.mailmap" shortlog -sne --all
+#
+# Caveat: two author/email pairs mix two members and are resolved by inference, not by
+# proof (see the README, "Individual Contributions"). A new address a member starts
+# committing with shows up as an extra line until it is added here.
+
+# dlesieur
+Dylan Lesieur (dlesieur) <dev.pro.photo@gmail.com>
+Dylan Lesieur (dlesieur) <dev.pro.photo@gmail.com> <139464836+LESdylan@users.noreply.github.com>
+Dylan Lesieur (dlesieur) <dev.pro.photo@gmail.com> <dlesieur42@gmail.com>
+Dylan Lesieur (dlesieur) <dev.pro.photo@gmail.com> <higueraslp@gmail.com>
+Dylan Lesieur (dlesieur) <dev.pro.photo@gmail.com> <dlesieur@student.42.fr>
+Dylan Lesieur (dlesieur) <dev.pro.photo@gmail.com> <dylanlesieur@outlook.fr>
+Dylan Lesieur (dlesieur) <dev.pro.photo@gmail.com> <ajrd91@gmail.com>
+# grobase: author name LESdylan with vjan-nie's address (5 commits; b4c1d33f is in PR #89, opened by LESdylan).
+Dylan Lesieur (dlesieur) <dev.pro.photo@gmail.com> LESdylan <vjannieto@gmail.com>
+
+# danfern3
+# grobase: author name dlesieur with danfern3's address (5 commits, 2026-03-20/21, interleaved with
+# danielfdez17's own Docker/K8s series of the same days) stay with the address: danfern3.
+Daniel Fernández (danfern3) <daniel17dev@gmail.com>
+Daniel Fernández (danfern3) <daniel17dev@gmail.com> <94752973+danielfdez17@users.noreply.github.com>
+
+# serjimen
+Sergio Jiménez de la Cruz (serjimen) <djsurgeon83@gmail.com>
+Sergio Jiménez de la Cruz (serjimen) <djsurgeon83@gmail.com> <130383883+DjSurgeon@users.noreply.github.com>
+
+# vjan-nie
+Vadim Jan Nieto (vjan-nie) <vjannieto@gmail.com>
+Vadim Jan Nieto (vjan-nie) <vjannieto@gmail.com> <vjan-nie@student.42madrid.com>
+
+# shashemi
+Seyed Mostafa Hashemian (shashemi) <smostafahashem123@gmail.com>
+Seyed Mostafa Hashemian (shashemi) <smostafahashem123@gmail.com> <131867400+SMOSTAFAH1@users.noreply.github.com>
+Seyed Mostafa Hashemian (shashemi) <smostafahashem123@gmail.com> <1.318674e+08+SMOSTAFAH1@users.noreply.github.com>
+Seyed Mostafa Hashemian (shashemi) <smostafahashem123@gmail.com> <sm.hashemian@alumnos.upm.es>
+# prismatica 93e6b65 by "La Cebolla" carries Signed-off-by: Seyed Mostafa Hashemian.
+Seyed Mostafa Hashemian (shashemi) <smostafahashem123@gmail.com> <smhashem545@gmail.com>
+
+# rstancu, a member of the original team roster (archive/wiki-2026-09/CONTRIBUTORS.md), GitHub @esettes
+Roxana Stancu (rstancu) <ioanaroxana.st@gmail.com>
+
+# AI coding agent runs, committed under the agent's own name
+opencode (AI agent) <opencode@local>
+opencode (AI agent) <opencode@local> <opencode@localhost>
+opencode (AI agent) <opencode@local> <oc-run@localhost>
+
+# Space Bunny: the OpenCode agent team the owner ran on drawnosaurus (BUNNY.md, "You run a team
+# of agents"), on local addresses. An AI agent, not a member, shown as one line like opencode.
+Space Bunny (AI agent team, run by dlesieur) <bunny@local> bunny <bunny@local>
+Space Bunny (AI agent team, run by dlesieur) <bunny@local> bunny <bunny@localhost>
+Space Bunny (AI agent team, run by dlesieur) <bunny@local> Space Bunny <bunny@localhost>
+Space Bunny (AI agent team, run by dlesieur) <bunny@local> Space Bunny <bunny@drawnosaurus.local>
+Space Bunny (AI agent team, run by dlesieur) <bunny@local> builder <builder@bunny>
+Space Bunny (AI agent team, run by dlesieur) <bunny@local> builder <builder@localhost>
+Space Bunny (AI agent team, run by dlesieur) <bunny@local> builder <builder@drawnosaurus.local>
+Space Bunny (AI agent team, run by dlesieur) <bunny@local> builder <builder@local>

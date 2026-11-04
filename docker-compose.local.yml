@@ -24,6 +24,10 @@ services:
       # The lean edition has no mini-baas Redis; the bridge falls back to its
       # bounded in-memory store.
       OSIONOS_BRIDGE_REDIS_URL: ""
+      # No TLS proxy in this edition, so no /livekit on :4000: the desktop renderer on
+      # this host talks to the SFU's loopback port, like it talks to the plain bridge. A literal:
+      # .env.local carries the TLS edition's wss:// value.
+      LIVEKIT_CLIENT_URL: ws://127.0.0.1:7880
     # The lean local edition runs WITHOUT the mini-baas stack: detach from the
     # external mini-baas network (chat/feed realtime publishes + the perms
     # proxy degrade gracefully — chat/profile/feed persistence only needs the

@@ -1,0 +1,77 @@
+# Public API module — the two proofs a stack is not needed for:
+#   docs   the :8444 edge serves grobase's OpenAPI document at /openapi.json and renders it
+#          at /docs/ (the real nginx.conf, as tests/drawnosaurus-edge runs it);
+#   limits scripts/verify/public-api.sh shows 401 without a key and a 429 past the limit,
+#          against Kong 3.8.0 carrying grobase's key-auth and rate-limiting plugins.
+# Against a running stack: scripts/verify/public-api.sh https://localhost:8444 --key <anon key>.
+name: Public API
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "apps/grobase"
+      - "infrastructure/tls/nginx.conf"
+      - "infrastructure/tls/api-docs/**"
+      - "scripts/verify/public-api.sh"
+      - "tests/api-docs-edge/**"
+      - "tests/public-api/**"
+      - ".github/workflows/public-api.yml"
+  pull_request:
+    paths:
+      - "apps/grobase"
+      - "infrastructure/tls/nginx.conf"
+      - "infrastructure/tls/api-docs/**"
+      - "scripts/verify/public-api.sh"
+      - "tests/api-docs-edge/**"
+      - "tests/public-api/**"
+      - ".github/workflows/public-api.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: public-api-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    name: /docs/ and /openapi.json on the :8444 edge (bats)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check out the pinned grobase (the OpenAPI document lives there)
+        run: |
+          git config --global --add url."https://github.com/".insteadOf "git@github.com:"
+          git submodule update --init --depth 1 apps/grobase
+      - name: nginx from mirror.gcr.io under its public.ecr.aws name
+        # Same reason as drawnosaurus-edge.yml: public.ecr.aws rate-limits anonymous pulls.
+        run: |
+          docker pull -q mirror.gcr.io/library/nginx:1.27-alpine
+          docker tag mirror.gcr.io/library/nginx:1.27-alpine public.ecr.aws/docker/library/nginx:1.27-alpine
+      - name: install bats
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bats
+      - name: bats tests/api-docs-edge (no skips allowed)
+        shell: bash
+        run: |
+          bats tests/api-docs-edge | tee "$RUNNER_TEMP/bats.log"
+          if grep -q '# skip' "$RUNNER_TEMP/bats.log"; then echo "::error::a test was skipped"; exit 1; fi
+
+  limits:
+    name: key 401 and rate-limit 429 against Kong 3.8.0 (bats)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: kong 3.8.0 from Docker Hub
+        # mirror.gcr.io does not carry kong (manifest not found, run 41774624391).
+        run: docker pull -q kong:3.8.0
+      - name: install bats
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bats
+      - name: bats tests/public-api (no skips allowed)
+        shell: bash
+        run: |
+          bats tests/public-api | tee "$RUNNER_TEMP/bats.log"
+          if grep -q '# skip' "$RUNNER_TEMP/bats.log"; then echo "::error::a test was skipped"; exit 1; fi
