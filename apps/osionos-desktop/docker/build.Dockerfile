@@ -46,3 +46,7 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 RUN cargo install tauri-cli --version "^2.0" --locked
 
 WORKDIR /work
+
+# build.sh runs this image with --user "$(id -u):$(id -g)", which overrides this; a run without it
+# gets an unprivileged user too.
+USER 1000:1000
