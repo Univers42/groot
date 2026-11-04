@@ -252,6 +252,8 @@ services:
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN}
       PUBLIC_MAIL_ORIGIN: ${PUBLIC_MAIL_ORIGIN:-}
       PUBLIC_CALENDAR_ORIGIN: ${PUBLIC_CALENDAR_ORIGIN:-}
+      # More origins allowed to frame Mail and Calendar (the beta, ADR 0041), after the app's own.
+      PUBLIC_EXTRA_FRAME_ANCESTORS: ${PUBLIC_EXTRA_FRAME_ANCESTORS:-}
     ports:
       - "127.0.0.1:3102:3102"
       - "127.0.0.1:3103:3103"

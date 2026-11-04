@@ -323,3 +323,24 @@ load public-funnel-helpers
   run_pf verify --pre
   has "SKIP  appenv"
 }
+
+@test "apphdrs expects PUBLIC_EXTRA_FRAME_ANCESTORS after the app origin when it is set" {
+  printf 'PUBLIC_EXTRA_FRAME_ANCESTORS=https://baas-beta.tail10f2ea.ts.net\n' >>"$T/repo/.env.public"
+  run_pf verify --pre
+  [ "$status" -eq 1 ]
+  has "csp:'frame-ancestors https://osionos.tail10f2ea.ts.net:8443 https://baas-beta.tail10f2ea.ts.net'"
+  sed -i 's|frame-ancestors https://osionos.tail10f2ea.ts.net:8443|& https://baas-beta.tail10f2ea.ts.net|' "$T/hdr-3102" "$T/hdr-3103"
+  run_pf verify --pre
+  has "PASS  apphdrs"
+  has "PASS  env-values"
+}
+
+@test "env-values refuses an extra frame ancestor that is not an https origin" {
+  for bad in 'http://beta.example.test' 'https://*.example.test' 'https://beta.example.test/app' "'self'" '*' 'https://a.example.test;script-src'; do
+    sed -i '/^PUBLIC_EXTRA_FRAME_ANCESTORS=/d' "$T/repo/.env.public"
+    printf 'PUBLIC_EXTRA_FRAME_ANCESTORS=https://ok.example.test %s\n' "$bad" >>"$T/repo/.env.public"
+    run_pf verify --pre
+    [ "$status" -eq 1 ]
+    has "PUBLIC_EXTRA_FRAME_ANCESTORS"
+  done
+}

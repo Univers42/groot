@@ -26,7 +26,7 @@ chmod 644 "$tmp"/*.pem
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 docker run -d --rm --name "$NAME" --network none \
 	-e NGINX_ENVSUBST_FILTER=PUBLIC_ -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx/track-binocle.d \
-	-e PUBLIC_ORIGIN=https://example.invalid -e PUBLIC_MAIL_ORIGIN= -e PUBLIC_CALENDAR_ORIGIN= \
+	-e PUBLIC_ORIGIN=https://example.invalid -e PUBLIC_MAIL_ORIGIN= -e PUBLIC_CALENDAR_ORIGIN= -e PUBLIC_EXTRA_FRAME_ANCESTORS= \
 	-v "$TLS/nginx.conf:/etc/nginx/nginx.conf:ro" \
 	-v "$tmp:/etc/track-binocle/certs:ro" \
 	-v "$TLS/public.d/bridge-public.conf:/etc/nginx/track-binocle.d/bridge-public.conf:ro" \
