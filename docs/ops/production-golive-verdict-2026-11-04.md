@@ -154,3 +154,11 @@ aliases or `expose`.
 ## Executed
 
 - **Step A, 2026-11-04 08:23 CET:** G7 held (hash `ab7b4692` = the running label; the dry run named only `local-https-proxy`; `logs/rollback-proxy-174.sh` was written first). Recreated with `livekit-tls.yml:frame-ancestors.yml`. G8 held: healthy in about 10 s, `nginx -t` ok, `:8443` 200, `:10000/api/auth/bridge/health` 200, both app hosts serve `frame-ancestors https://baas.tail10f2ea.ts.net:8443 https://baas-beta.tail10f2ea.ts.net`, and the `/livekit/rtc` include is loaded (1).
+- **G4, 2026-11-04 (read-only): held, 0 refusals.** A node script ran inside the running production bridge (`track-binocle-osionos-bridge-1`, 904b) with `configFromEnv` + `createPg(...).asService()` from `/app/scripts`. It made GET requests only, paging `osionos_pages` by id and `osionos_object_databases` by `(owner_id, db_key)`, and passed each row through osionos develop `19f9f011`'s `scripts/bridge-content-validation.mjs` (sha256 `e7026816…`, identical to `origin/develop`). The validator was copied to the container's `/tmp/g4`, never `/app`, and `/tmp/g4` was deleted afterwards (`ls` → no such file).
+
+  | Table | Rows | Refused (422) |
+  |---|---|---|
+  | `osionos_pages.content` (`validatedPageContent`) | 10,057 | **0** |
+  | `osionos_object_databases.state` (`validatedDatabaseState`) | 782 | **0** |
+
+  Not vacuous: 9,023 pages carry 30,684 top-level blocks (children walked to depth 64), 1,034 hold `[]`, none is null, and all 782 database slices hold at least one of `databases`/`pages`/`views`. No repair or tolerance is needed. Caveat: this was a snapshot. A row written after the read, or between pages of the offset scan, was not checked; the rollback trigger "a 422 on a save" covers that window.
