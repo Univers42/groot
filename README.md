@@ -550,9 +550,10 @@ foreign-key clash (`scripts/apply-models-migrations.sh:27-38`).
 ## Modules
 
 The subject requires **14 points** (Major = 2, Minor = 1). A module that cannot be demonstrated
-live scores zero. Every row is graded by **one rule**, the one in osionos
-[`docs/ai/README.md`](https://github.com/Univers42/osionos/blob/develop/docs/ai/README.md) (lines 7–8: a row is never A when its
-demonstration needs something switched off or unmeasured):
+live scores zero. Every row is graded by **one rule**, groot's own. It keeps the clause of osionos
+[`docs/ai/README.md`](https://github.com/Univers42/osionos/blob/1c1d5d849c1dc43460a194f7ee3d97e17505205c/docs/ai/README.md)
+lines 7–8 (a row is never A when its demonstration needs something switched off or unmeasured),
+but it is stricter than that file's legend, which grades a documented profile A:
 
 - **A**: the demo works on the default stack (`make all SKIP_SYNC=1`, nothing switched on), and a
   green CI job drives that path against a running service.
@@ -563,7 +564,7 @@ demonstration needs something switched off or unmeasured):
 **Claimed = A and B only: 23 points against the 14 required. 6 of them are A.**
 Paths are prefixed by repository: `G` groot, `GB` grobase (`apps/grobase`), `OS` osionos
 (`apps/osionos/app`), `OO` opposite-osiris (`apps/opposite-osiris`). They point at the commits
-groot `develop` pins. CI names a workflow job: `GB-CI` is grobase `ci.yml`, `OS-CI` is osionos
+pinned by groot's `develop` branch. CI names a workflow job: `GB-CI` is grobase `ci.yml`, `OS-CI` is osionos
 `ci.yml`.
 
 | # | Module | Category | Type | Pts | Grade | Core files | Tests → CI job | Docs | Demo (3 steps) |
