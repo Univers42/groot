@@ -32,8 +32,9 @@ export function startRestProxy({ listenPort, routes }) {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const port = Number(process.env.REST_PROXY_PORT || 4010);
-  startRestProxy({ listenPort: port, routes: [
+  await startRestProxy({ listenPort: port, routes: [
     { prefix: "/rest/v1", target: process.env.POSTGREST_URL || "http://127.0.0.1:33001" },
     { prefix: "/auth/v1", target: process.env.GOTRUE_URL || "http://127.0.0.1:9999" },
-  ] }).then(() => console.log(`[rest-proxy] :${port} /rest/v1->postgrest /auth/v1->gotrue`));
+  ] });
+  console.log(`[rest-proxy] :${port} /rest/v1->postgrest /auth/v1->gotrue`);
 }
