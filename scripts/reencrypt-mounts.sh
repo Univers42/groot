@@ -35,7 +35,7 @@
 #   containers' own env, exactly as the seeders first built them, and are never
 #   printed.
 #
-# Usage:  bash scripts/reencrypt-mounts.sh [--check | --force NAME...]
+# Usage:  bash scripts/reencrypt-mounts.sh [[--check | --force NAME...]]
 #           --check  report which mounts are broken; change nothing.
 #           --force  also re-seal the named mounts when /connect answers 200: a DSN that
 #                    still decrypts but carries an engine password changed since. On baas
@@ -74,7 +74,7 @@ urlenc() { python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv
 
 load_service_auth() {
 	local lib="${REPO_ROOT}/apps/grobase/scripts/lib/service-auth.sh"
-	[ -f "${lib}" ] || die "missing ${lib}"
+	[[ -f "${lib}" ]] || die "missing ${lib}"
 	# shellcheck source=/dev/null
 	. "${lib}"
 	# grobase's compose maps the host-side ADAPTER_REGISTRY_SERVICE_TOKEN into the container
@@ -82,9 +82,9 @@ load_service_auth() {
 	# only reaches the container via the monolith shape (env_file: [.env]) or an optional
 	# .env.adapter-registry-go (absent on grobase develop 7abe647d, measured 2026-10-10).
 	SERVICE_TOKEN="$(cenv "${REG_CTN}" ADAPTER_REGISTRY_SERVICE_TOKEN)"
-	[ -n "${SERVICE_TOKEN}" ] || SERVICE_TOKEN="$(cenv "${REG_CTN}" INTERNAL_SERVICE_TOKEN)"
+	[[ -n "${SERVICE_TOKEN}" ]] || SERVICE_TOKEN="$(cenv "${REG_CTN}" INTERNAL_SERVICE_TOKEN)"
 	export SERVICE_TOKEN
-	[ -n "${SERVICE_TOKEN}" ] || die "no adapter-registry service token — is ${REG_CTN} running?"
+	[[ -n "${SERVICE_TOKEN}" ]] || die "no adapter-registry service token — is ${REG_CTN} running?"
 }
 
 # HTTP status of GET /databases/{id}/connect. 200 = ciphertext opens.
@@ -103,24 +103,24 @@ dsn_for() {
 	pg-commerce|agency-db)
 		running "${PG_CTN}" || return 1
 		u="$(cenv "${PG_CTN}" POSTGRES_USER)"; p="$(cenv "${PG_CTN}" POSTGRES_PASSWORD)"
-		[ -n "${u}" ] && [ -n "${p}" ] || return 1
-		local db=commerce; [ "${name}" = "agency-db" ] && db=agency
+		[[ -n "${u}" ]] && [[ -n "${p}" ]] || return 1
+		local db=commerce; [[ "${name}" = "agency-db" ]] && db=agency
 		printf 'postgres://%s:%s@postgres:5432/%s' "$(urlenc "${u}")" "$(urlenc "${p}")" "${db}"
 		;;
 	mysql-ops)
 		running mini-baas-mysql || return 1
 		u="$(cenv mini-baas-mysql MYSQL_USER)"; p="$(cenv mini-baas-mysql MYSQL_PASSWORD)"
-		if [ -z "${u}" ] || [ -z "${p}" ]; then
+		if [[ -z "${u}" ]] || [[ -z "${p}" ]]; then
 			u=root; p="$(cenv mini-baas-mysql MYSQL_ROOT_PASSWORD)"
 		fi
-		[ -n "${p}" ] || return 1
+		[[ -n "${p}" ]] || return 1
 		printf 'mysql://%s:%s@mysql:3306/ops' "$(urlenc "${u}")" "$(urlenc "${p}")"
 		;;
 	mongo-activity)
 		running mini-baas-mongo || return 1
 		u="$(cenv mini-baas-mongo MONGO_INITDB_ROOT_USERNAME)"
 		p="$(cenv mini-baas-mongo MONGO_INITDB_ROOT_PASSWORD)"
-		[ -n "${u}" ] && [ -n "${p}" ] || return 1
+		[[ -n "${u}" ]] && [[ -n "${p}" ]] || return 1
 		printf 'mongodb://%s:%s@mongo:27017/activity?authSource=admin' "$(urlenc "${u}")" "$(urlenc "${p}")"
 		;;
 	osionos-restaurant)
@@ -130,7 +130,7 @@ dsn_for() {
 	osionos-finance)
 		running mini-baas-mssql || return 1
 		p="$(cenv mini-baas-mssql MSSQL_SA_PASSWORD)"
-		[ -n "${p}" ] || return 1
+		[[ -n "${p}" ]] || return 1
 		printf 'mssql://sa:%s@mssql:1433/finance' "${p}"
 		;;
 	osionos-iot)
@@ -186,7 +186,7 @@ main() {
 
 	local broken=0 repaired=0 id name engine code dsn tmp tmpname forced
 	while IFS='|' read -r id name engine; do
-		[ -n "${id}" ] || continue
+		[[ -n "${id}" ]] || continue
 		code="$(connect_code "${id}")"
 		forced=""
 		case "${FORCE}" in *" ${name} "*) forced=" (forced)" ;; esac
@@ -195,7 +195,7 @@ main() {
 		fi
 		broken=$((broken + 1))
 		note "${name} (${engine}): /connect → ${code}${forced}"
-		[ "${CHECK_ONLY}" -eq 1 ] && continue
+		[[ "${CHECK_ONLY}" -eq 1 ]] && continue
 
 		if ! dsn="$(dsn_for "${name}")"; then
 			note "  ↳ engine unavailable — cannot rebuild its DSN; re-run once it is up"
@@ -203,13 +203,13 @@ main() {
 		fi
 		tmpname="zz-reenc-$(printf '%s' "${name}" | tr -c 'a-z0-9-' '-')"
 		tmp="$(register_temp "${engine}" "${dsn}" "${tmpname}")"
-		if [ -z "${tmp}" ]; then
+		if [[ -z "${tmp}" ]]; then
 			note "  ↳ temp registration failed — left untouched"
 			continue
 		fi
 		adopt_ciphertext "${id}" "${tmp}"
 		code="$(connect_code "${id}")"
-		if [ "${code}" = "200" ]; then
+		if [[ "${code}" = "200" ]]; then
 			note "  ↳ repaired (/connect → 200)"
 			repaired=$((repaired + 1))
 		else
@@ -219,11 +219,11 @@ main() {
 		"SELECT id::text||'|'||name||'|'||engine FROM public.tenant_databases
 		  WHERE tenant_id = '${TENANT}' ORDER BY name;" 2>/dev/null)
 
-	if [ "${broken}" -eq 0 ]; then
+	if [[ "${broken}" -eq 0 ]]; then
 		note "all '${TENANT}' mounts open under the current key"
 		exit 0
 	fi
-	if [ "${CHECK_ONLY}" -eq 1 ]; then
+	if [[ "${CHECK_ONLY}" -eq 1 ]]; then
 		note "${broken} mount(s) need repair — run: make mounts-reencrypt"
 		exit 1
 	fi

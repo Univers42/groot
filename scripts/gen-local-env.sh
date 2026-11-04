@@ -103,8 +103,8 @@ gsrc() {
   while :; do
     _one="${_spec%%|*}"
     _v="$(gval "$_one")"
-    [ -n "$_v" ] && { printf '%s' "$_v"; return 0; }
-    [ "$_spec" = "$_one" ] && return 0
+    [[ -n "$_v" ]] && { printf '%s' "$_v"; return 0; }
+    [[ "$_spec" = "$_one" ]] && return 0
     _spec="${_spec#*|}"
   done
 }
@@ -116,7 +116,7 @@ gen_password() { gen | head -c 24; }
 # minted_missing: names of MINTED keys absent or empty in $OUT, one per line.
 minted_missing() {
   for key in $MINTED; do
-    [ -n "$(val "$OUT" "$key")" ] || printf '%s\n' "$key"
+    [[ -n "$(val "$OUT" "$key")" ]] || printf '%s\n' "$key"
   done
 }
 
@@ -145,12 +145,12 @@ mint_missing() {
 media_fill() {
   for key in $MEDIA; do
     want="$(get_env "$MEDIA_ENV" "$key" || true)"
-    [ -n "$want" ] || continue
+    [[ -n "$want" ]] || continue
     have="$(get_env "$OUT" "$key" || true)"
-    if [ -z "$have" ]; then
+    if [[ -z "$have" ]]; then
       put_env "$OUT" "$key" "$want"
       note "copied $key from $MSRC"
-    elif [ "$have" != "$want" ]; then
+    elif [[ "$have" != "$want" ]]; then
       note "kept $key (differs from $MSRC)"
     fi
   done
@@ -161,7 +161,7 @@ media_differing() {
   for key in $MEDIA; do
     want="$(get_env "$MEDIA_ENV" "$key" || true)"
     have="$(get_env "$OUT" "$key" || true)"
-    if [ -n "$want" ] && [ -n "$have" ] && [ "$want" != "$have" ]; then printf '%s\n' "$key"; fi
+    if [[ -n "$want" ]] && [[ -n "$have" ]] && [[ "$want" != "$have" ]]; then printf '%s\n' "$key"; fi
   done
 }
 
@@ -174,16 +174,16 @@ drift_report() {
     dst="${pair%%=*}"
     src="${pair#*=}"
     want="$(gsrc "$src")"
-    if [ -z "$want" ]; then printf 'unknown %s\n' "$dst"; bad=1
+    if [[ -z "$want" ]]; then printf 'unknown %s\n' "$dst"; bad=1
     elif ! grep -q "^$dst=" "$OUT"; then printf 'missing %s\n' "$dst"; bad=1
-    elif [ "$(val "$OUT" "$dst")" = "$want" ]; then printf 'sync %s\n' "$dst"
+    elif [[ "$(val "$OUT" "$dst")" = "$want" ]]; then printf 'sync %s\n' "$dst"
     else printf 'drift %s\n' "$dst"; bad=1
     fi
   done
   want="$(port_url)"
   for dst in $PORT_KEYS; do
     if ! grep -q "^$dst=" "$OUT"; then printf 'missing %s\n' "$dst"; bad=1
-    elif [ "$(val "$OUT" "$dst")" = "$want" ]; then printf 'sync %s\n' "$dst"
+    elif [[ "$(val "$OUT" "$dst")" = "$want" ]]; then printf 'sync %s\n' "$dst"
     else printf 'drift %s\n' "$dst"; bad=1
     fi
   done
@@ -191,12 +191,12 @@ drift_report() {
 }
 
 require_inputs() {
-  [ -f "$GRO_ENV" ] || { note "$SRC not found — bring the backend up first (make backend-up)."; exit 1; }
+  [[ -f "$GRO_ENV" ]] || { note "$SRC not found — bring the backend up first (make backend-up)."; exit 1; }
 }
 
 check_mode() {
   require_inputs
-  [ -f "$OUT" ] || { note "$(basename "$OUT") absent — run without --check to generate it."; exit 1; }
+  [[ -f "$OUT" ]] || { note "$(basename "$OUT") absent — run without --check to generate it."; exit 1; }
   rc=0
   report="$(drift_report)" || rc=$?
   for key in $(minted_missing); do report="$report
@@ -213,12 +213,12 @@ missing $key"; rc=1; done
 # atomic, mode kept, every other line untouched). An EMPTY source is never written.
 sync_mode() {
   require_inputs
-  [ -f "$OUT" ] || { note "$(basename "$OUT") absent — generating it."; generate; return; }
+  [[ -f "$OUT" ]] || { note "$(basename "$OUT") absent — generating it."; generate; return; }
   mint_missing
   media_fill
   rc=0
   report="$(drift_report)" || rc=$?
-  [ "$rc" -ne 0 ] || { note "in sync with $SRC — nothing to write."; exit 0; }
+  [[ "$rc" -ne 0 ]] || { note "in sync with $SRC — nothing to write."; exit 0; }
   changed=""
   unknown=""
   for pair in $DERIVED; do
@@ -235,12 +235,12 @@ sync_mode() {
       changed="$changed $dst"
     fi
   done
-  [ -z "$changed" ] || note "synced from $SRC:$changed"
-  [ -z "$unknown" ] || { note "left as is (EMPTY source in $SRC — is the backend healthy?):$unknown"; exit 1; }
+  [[ -z "$changed" ]] || note "synced from $SRC:$changed"
+  [[ -z "$unknown" ]] || { note "left as is (EMPTY source in $SRC — is the backend healthy?):$unknown"; exit 1; }
 }
 
 generate() {
-if [ -f "$OUT" ] && [ "$FORCE" != 1 ]; then
+if [[ -f "$OUT" ]] && [[ "$FORCE" != 1 ]]; then
   note "$(basename "$OUT") already present — leaving it (FORCE=1 to overwrite; --sync to refresh the derived keys)."
   exit 0
 fi
@@ -256,7 +256,7 @@ PUBLIC="$(gval ANON_KEY)"
 SERVICE="$(gval SERVICE_ROLE_KEY)"
 JWT="$(gval JWT_SECRET)"
 ADAPTER="$(gval ADAPTER_REGISTRY_SERVICE_TOKEN)"
-if [ -z "$PUBLIC" ] || [ -z "$SERVICE" ] || [ -z "$JWT" ]; then
+if [[ -z "$PUBLIC" ]] || [[ -z "$SERVICE" ]] || [[ -z "$JWT" ]]; then
   note "grobase .env is missing ANON_KEY/SERVICE_ROLE_KEY/JWT_SECRET — is the backend healthy?"
   exit 1
 fi
@@ -355,5 +355,5 @@ case "$MODE" in
 --check) check_mode ;;
 --sync) sync_mode ;;
 generate) generate ;;
-*) printf 'usage: gen-local-env.sh [--check|--sync]   (no flag: generate ./.env.local when absent)\n' >&2; exit 2 ;;
+*) printf 'usage: gen-local-env.sh [[--check|--sync]]   (no flag: generate ./.env.local when absent)\n' >&2; exit 2 ;;
 esac
