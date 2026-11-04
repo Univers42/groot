@@ -207,7 +207,7 @@ list_rev() {
 distinct_trees() {
 	local listing
 	for listing in "$@"; do
-		[ ! -s "$listing" ] || sort "$listing" | md5sum
+		[ ! -s "$listing" ] || sort "$listing" | sha256sum
 	done | sort -u | wc -l
 }
 
