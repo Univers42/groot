@@ -4,8 +4,6 @@
 # placeholder, under the group that gives its reason; a real secret is removed, never listed.
 
 # Public by design: browser-safe anon JWT (role=anon) / Supabase publishable key / storage-key names
-apps/grobase/vendor/vite-gourmand/scripts/supabase/setup-supabase.sh:generic-api-key:28
-apps/grobase/vendor/vite-gourmand/wiki/suppabase.md:generic-api-key:1
 apps/opposite-osiris/deploy/fly/fly.toml:jwt:27
 apps/opposite-osiris/src/data/legal.ts:generic-api-key:28
 apps/opposite-osiris/src/data/legal.ts:generic-api-key:29

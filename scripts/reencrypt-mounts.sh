@@ -45,7 +45,7 @@
 #                    containers' credentials. /connect cannot see that; the data plane can.
 #
 # Only the osionos demo mounts are repaired — the DSNs of other tenants' mounts
-# (website, vault42, red-tetris, gourmand) are owned by THEIR contracts and are
+# (website, vault42, red-tetris) are owned by THEIR contracts and are
 # reported, not guessed at.
 
 set -euo pipefail

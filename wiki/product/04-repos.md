@@ -84,9 +84,6 @@ that `make all` succeeds from it. → [DEFENSE.md](../DEFENSE.md)
 Neither is right: there are seven by default plus optional DynamoDB, and MinIO is object storage,
 not an engine adapter. → [platform/08-engines](../platform/08-engines.md)
 
-`vite-gourmand` is listed with "purpose to confirm" — it is one of the re-platformed vendor
-apps, and the one whose external mount feeds osionos dashboards.
-
 ---
 
 See also: [01-apps](01-apps.md) · [platform/01-overview](../platform/01-overview.md)

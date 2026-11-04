@@ -38,10 +38,6 @@ the editor carries:
 The source is **adapter** — the adapter registry, meaning a mounted database — and the view is a
 table. The seam between product and platform is written in a URL.
 
-Better still: grobase's own documentation notes that one of the `vite-gourmand` mounts is
-consumed by osionos dashboards. A restaurant app with its Laravel backend untouched, its
-database mounted, its data appearing inside the editor. The thesis working end to end.
-
 ---
 
 ## Proven across six engines
