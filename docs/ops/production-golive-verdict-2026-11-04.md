@@ -235,3 +235,32 @@ Backups: `~/.cache/rewrite-backup-20261104/*.bundle`.
     page has no row.
   - The seeded built-in records show `localhost:300x` and literal `&amp;`.
   - The last two are being fixed in osionos.
+
+## WAF, D3 and the web with the public site (2026-11-04, 14:30–15:45 CET)
+
+- **WAF (osionos#307).** CRS 921110 refused 160 page saves in 3 hours. grobase `45e43b7e` lifts it on
+  osionos writes. The image `grobase-waf:hydrawn-28879351-g45e43b7e` is the running image with only
+  the exclusions file replaced. It shipped the #286 content exclusions too, which were already on main
+  but never deployed.
+  - m227 A/B on that image at paranoia 1: the old file fails exactly the 4 new cases, the new file
+    passes the whole gate.
+  - Live: the same body gets 401 on `osionos_pages` and 403 on another table, an rpc and a read.
+  - The WAF override moved from `/tmp/hydrawn-edge/` (lost on reboot) to `~/grobase-edge/` on the VM.
+    Rollback: `~/grobase-edge/rollback-waf.sh`.
+- **D3 (osionos#303).** osionos-ai is now `main-1c1d5d84` (was `cors-4fb0102c`), overlay `ai-main.yml`
+  with groot `344ae77c`'s `ai.Dockerfile`.
+  - The deploy dir's `root/` export (2026-10-27) predates `05f725ef`: its image failed an offline boot
+    with `ERR_MODULE_NOT_FOUND`.
+  - The only config drift on recreate was `OSIONOS_TENANT_MOUNTS_URL`, which only the bridge reads.
+  - Rollback: `logs/rollback-ai-d3.sh`.
+- **Web (osionos#294).** The web is now `main-1c1d5d84-site`, with `VITE_PRISMATICA_URL` and groot
+  `344ae77c`'s `app.Dockerfile`, which also builds `/terminal/`. Rollback: `logs/rollback-web-site.sh`.
+- **Checks, chrome-devtools, working account:** beta and production, Home → Settings → Account →
+  Admin → AI Hub → Mail → Calendar → Conversations. Result: 0 failed requests and 0 console
+  errors, warnings or issues. Closed: osionos #307, #303, #294, #293.
+- **Still open from this list:**
+  - The hydrawn frame's two issues: fixed in hydrawn `7f7c371f`, which waits for CI and the `Board`
+    publish.
+  - The write-side clauses of #296.
+  - `deploy/root/` is stale: every later build there should pass groot main's Dockerfile, as
+    `dockerfiles/` now does.
