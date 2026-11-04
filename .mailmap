@@ -51,7 +51,7 @@ opencode (AI agent) <opencode@local>
 opencode (AI agent) <opencode@local> <opencode@localhost>
 opencode (AI agent) <opencode@local> <oc-run@localhost>
 
-# Space Bunny: the OpenCode agent team the owner ran on drawnosaurus (BUNNY.md, "You run a team
+# Space Bunny: the OpenCode agent team the owner ran on hydrawn (BUNNY.md, "You run a team
 # of agents"), on local addresses. An AI agent, not a member, shown as one line like opencode.
 Space Bunny (AI agent team, run by dlesieur) <bunny@local> bunny <bunny@local>
 Space Bunny (AI agent team, run by dlesieur) <bunny@local> bunny <bunny@localhost>

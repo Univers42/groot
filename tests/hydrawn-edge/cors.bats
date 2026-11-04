@@ -1,16 +1,16 @@
 #!/usr/bin/env bats
 # The :3007 front door (infrastructure/tls/nginx.conf) is the one place that answers CORS for
-# drawnosaurus. osionos (https://localhost:3001) creates boards and imports scenes cross-origin
+# hydrawn. osionos (https://localhost:3001) creates boards and imports scenes cross-origin
 # (whiteboardClient.ts: POST /v1/boards and PUT /v1/boards/<slug>, Content-Type + If-Match, no
 # credentials), so those preflight. These tests run the REAL nginx.conf in the image compose runs
-# it in. Behind it sits a stub `drawnosaurus-gateway` that answers like drawnosaurus's fastify-cors
+# it in. Behind it sits a stub `hydrawn-gateway` that answers like hydrawn's fastify-cors
 # does (Access-Control-Allow-Origin https://localhost:3001 for ANY origin, DELETE advertised): the
 # front door must neither forward the preflight nor let those upstream headers through.
 #
 # Needs docker and openssl; everything else runs in containers on a private network, and files
 # go in with `docker cp`, so it also runs from inside a container holding the docker socket:
 #   docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/code" -w /code \
-#     --entrypoint sh bats/bats:1.11.1 -c 'apk add -q docker-cli openssl && bats tests/drawnosaurus-edge'
+#     --entrypoint sh bats/bats:1.11.1 -c 'apk add -q docker-cli openssl && bats tests/hydrawn-edge'
 
 NGINX_IMAGE=public.ecr.aws/docker/library/nginx:1.27-alpine
 CURL_IMAGE=curlimages/curl:8.10.1
@@ -21,7 +21,7 @@ setup_file() {
   NET=wb-edge-$$
   docker network create "$NET" >/dev/null
 
-  STUB=$(docker create --network "$NET" --network-alias drawnosaurus-gateway "$NGINX_IMAGE")
+  STUB=$(docker create --network "$NET" --network-alias hydrawn-gateway "$NGINX_IMAGE")
   cat >"$BATS_FILE_TMPDIR/stub.conf" <<'NGINX'
 events {}
 http {

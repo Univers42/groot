@@ -1,4 +1,4 @@
-// Soft-deletes the suite's boards through the drawnosaurus API. Runs INSIDE the API
+// Soft-deletes the suite's boards through the hydrawn API. Runs INSIDE the API
 // container (make e2e-clean pipes it to `node -`), so it needs no host port or CA.
 // Matches the title by exact, case-sensitive prefix. Deletes nothing unless the whole list
 // was read, and refuses outright if any other title only NEARLY matches ("E2E-x", " e2e-x",

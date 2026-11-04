@@ -365,7 +365,7 @@ clone_super() {
 }
 
 # Superproject whose apps/parent follows main and records its nested lib at lib_1 in both of its
-# commits, while lib's main is at lib_2, which contains lib_1: the drawnosaurus / engine shape.
+# commits, while lib's main is at lib_2, which contains lib_1: the hydrawn / engine shape.
 # apps/parent main moves one commit past the gitlink.
 parent_pin_fixture() {
   upstream lib
@@ -400,7 +400,7 @@ parent_pin_fixture() {
   run make -C "$REPO" -pq __no_such_target__
   line=$(printf '%s\n' "$output" | grep -m1 '^PARENT_PINNED ')
   local p
-  for p in apps/drawnosaurus/engine apps/grobase/vendor/scripts apps/osionos/app/vendor/scripts \
+  for p in apps/hydrawn/engine apps/grobase/vendor/scripts apps/osionos/app/vendor/scripts \
     apps/osionos/app/src/shared/notion-database-sys/vendor/scripts vendor/monkey-bot/vendor/scripts; do
     [[ " ${line#*= } " == *" $p "* ]]
   done
