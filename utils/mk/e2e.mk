@@ -21,12 +21,12 @@ e2e: e2e-preflight ## Run the Docker-first e2e smoke against the live stack
 ## follow with make e2e-clean.
 	bash tests/e2e/run.sh $(E2E_SPECS)
 
-e2e-clean: ## Soft-delete the e2e-* drawnosaurus boards via the API container
+e2e-clean: ## Soft-delete the e2e-* hydrawn boards via the API container
 ## Usage: make e2e-clean [DRY_RUN=1]
-## Soft-delete every drawnosaurus board titled e2e-* via the API container; refuses if any title
+## Soft-delete every hydrawn board titled e2e-* via the API container; refuses if any title
 ## only nearly matches.
-	@api="$$(docker compose ps -q drawnosaurus-api)"; \
-	if [ -z "$$api" ]; then echo '[e2e-clean] drawnosaurus-api is not running' >&2; exit 1; fi; \
+	@api="$$(docker compose ps -q hydrawn-api)"; \
+	if [ -z "$$api" ]; then echo '[e2e-clean] hydrawn-api is not running' >&2; exit 1; fi; \
 	docker exec -i "$$api" node --input-type=module - $(if $(DRY_RUN),--dry-run) < tests/e2e/clean-boards.mjs
 
 roundtrip: ## Prove persistence through the TLS edge: register, write, read back

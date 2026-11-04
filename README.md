@@ -192,7 +192,7 @@ are in [ADR 0016](docs/adr/0016-self-documenting-pruned-root-make.md).
 
 | Command | What it proves |
 |---|---|
-| `make healthcheck` | grobase auth, bridge, osionos, website (and HTTP→HTTPS redirect), auth gateway, drawnosaurus board list (`utils/mk/app.mk`) |
+| `make healthcheck` | grobase auth, bridge, osionos, website (and HTTP→HTTPS redirect), auth gateway, hydrawn board list (`utils/mk/app.mk`) |
 | `make e2e` | Playwright smoke in a pinned container against the running stack: DW3 Whiteboard tab, DW8 two browsers on one board, DW9 the board inside osionos, DW10 Mail/Calendar (`tests/e2e/README.md`) |
 | `make mail-up calendar-up` | Start the opt-in Mail and Calendar apps. Without them DW10 **skips** and prints the reason; it never passes silently. |
 | `make e2e-clean` | Soft-delete the `e2e-*` boards the smoke leaves behind |
@@ -203,7 +203,7 @@ are in [ADR 0016](docs/adr/0016-self-documenting-pruned-root-make.md).
 |---|---|
 | opposite-osiris (start here) | `https://localhost:4322` |
 | osionos editor | `https://localhost:3001` |
-| Whiteboard (drawnosaurus) | `https://localhost:3007` |
+| Whiteboard (hydrawn) | `https://localhost:3007` |
 | mail (opt-in) | `https://localhost:3002` |
 | calendar (opt-in) | `https://localhost:3003` |
 | osionos-bridge | `https://localhost:4000` |
@@ -272,7 +272,7 @@ certificates → Authorities → Import, or run `make certs-trust`.
    window (the e2e smoke asserts within 5 s — `tests/e2e/specs/dw8-realtime.spec.ts`).
 
 Honest limitations of this demo: board editing is **loopback-only** and has **no per-user
-authorization yet** — drawnosaurus is bound to `127.0.0.1:3007` for exactly that reason
+authorization yet** — hydrawn is bound to `127.0.0.1:3007` for exactly that reason
 (`docker-compose.yml:27-32`). We make **no end-to-end-encryption claim**: traffic is TLS to the
 local proxy, nothing more.
 
@@ -676,7 +676,7 @@ git -C <repo> -c mailmap.file="$PWD/.mailmap" shortlog -sn <pinned sha>   # pins
 
 Several members work almost only in submodules, so the root alone understates them.
 
-| Member | GitHub | root | osionos | grobase | opposite-osiris | drawnosaurus | mail | calendar | QA | monkey-bot | First → last commit |
+| Member | GitHub | root | osionos | grobase | opposite-osiris | hydrawn | mail | calendar | QA | monkey-bot | First → last commit |
 |---|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|
 | `dlesieur` | @LESdylan | 1577 | 3375 | 1569 | 126 | 676 | 42 | 27 | 1 | 2 | 2026-05-10 → 2026-11-04 |
 | `danfern3` | @danielfdez17 | | 94 | 74 | 8 | 25 | | | 1 | 10 | 2026-03-24 → 2026-10-02 |
@@ -691,7 +691,7 @@ monkey-bot commits are on branches the pin does not reach. A commit count is not
 large commit and one typo fix weigh the same, and pairing and review do not show in it.
 
 Merged pull requests per login in the project's repositories (groot, osionos, grobase,
-prismatica = opposite-osiris, osionos-mail, osionos-calendar, drawnosaurus, QA, monkey-bot), from
+prismatica = opposite-osiris, osionos-mail, osionos-calendar, hydrawn, QA, monkey-bot), from
 `gh search prs --owner Univers42 --author <login> --merged` on 2026-11-04:
 
 | GitHub | Merged PRs | Where |
@@ -732,12 +732,12 @@ How the identities were joined (the evidence is in [`.mailmap`](.mailmap)):
 
   > TO CONFIRM by the team: both attributions above.
 - `opencode` (6 commits: 1 root, 5 osionos) is an AI coding agent committing under its own name.
-- `bunny`, `Space Bunny` and `builder` (111 drawnosaurus commits, 2026-09-27/28, addresses on
+- `bunny`, `Space Bunny` and `builder` (111 hydrawn commits, 2026-09-27/28, addresses on
   `local`, `localhost` and `drawnosaurus.local`) are not mapped: no address, sign-off or pull
   request ties them to a member.
 
   > TO CONFIRM by the team: which member ran `opencode`, and who committed as `bunny`,
-  > `Space Bunny` and `builder` in drawnosaurus.
+  > `Space Bunny` and `builder` in hydrawn.
 - Bots (`dependabot`, `coderabbitai`, `copilot-swe-agent`) are left as they are.
 - On 2026-11-04 the history of groot, osionos and grobase was rewritten to remove
   `Co-authored-by` trailers; trees and subjects are unchanged, and every commit from the first rewritten one onward has a new SHA. 148 root commits on `main` have a one-word subject
@@ -748,7 +748,7 @@ How the identities were joined (the evidence is in [`.mailmap`](.mailmap)):
 
 - **Areas:** grobase (Go control plane, Rust data plane and realtime, Kong gateway, contracts
   and self-serve apps), osionos (editor, chat, collaboration, social, profile, the bridge), mail,
-  calendar, the root's infrastructure, TLS edge and CI; drawnosaurus (676 commits: `apps/web`,
+  calendar, the root's infrastructure, TLS edge and CI; hydrawn (676 commits: `apps/web`,
   the engine, `docs/reference`).
 - **Pull requests:** 260 merged (osionos 138, grobase 61, groot 56).
 - **Features and modules:** most rows of the [Features List](#features-list) and every claimed
@@ -763,7 +763,7 @@ How the identities were joined (the evidence is in [`.mailmap`](.mailmap)):
   and mutation testing, configuration);
   grobase Docker images built from scratch, Kubernetes deployment, the playground and Makefile
   (March 2026); osionos breadcrumbs, trash, multi-line text in blocks, the markdown engine and
-  code-quality fixes; drawnosaurus (25 commits, `apps/web`, `apps/api`, `packages/contract`,
+  code-quality fixes; hydrawn (25 commits, `apps/web`, `apps/api`, `packages/contract`,
   2026-09-24: submodule clone paths, formatting); root submodule pins and the `make all` bats fix,
   on `fix/ci` ([#165](https://github.com/Univers42/groot/pull/165), open).
 - **Pull requests:** 4 merged (prismatica).
@@ -791,9 +791,9 @@ How the identities were joined (the evidence is in [`.mailmap`](.mailmap)):
 ### vjan-nie — Vadim Jan Nieto
 
 - **Areas:** `vendor/QA` (39 commits: registry, migrations, hooks, CLI); root end-to-end tests,
-  the wiki and README, graph-studio tests, the drawnosaurus TLS edge and its CORS, submodule
+  the wiki and README, graph-studio tests, the hydrawn TLS edge and its CORS, submodule
   pins; osionos whiteboard and graph-studio fixes; grobase Docker infrastructure and dependency
-  fixes; drawnosaurus (6 commits: engine bumps, the nested-shape binding fix).
+  fixes; hydrawn (6 commits: engine bumps, the nested-shape binding fix).
 - **Pull requests:** 72 merged (groot 45, osionos 17, prismatica 6, grobase 4).
 - **Features and modules:** block editor (42), legal pages (3), real-time (row 2, 5),
   frameworks, frontend half (row 6, 77).
@@ -805,8 +805,8 @@ How the identities were joined (the evidence is in [`.mailmap`](.mailmap)):
 
 - **Areas:** security fixes across root, grobase and opposite-osiris (SAST findings, nginx scan
   suppressions, IDE socket proxy hardening); the site's legal pages, SEO and accessibility; root
-  CI triggers and the models' export erasure paths; osionos end-to-end fixes; drawnosaurus (9
-  commits, `apps/web`, `apps/api`, `packages/contract`: trail and notes, drawnosaurus #1, and the
+  CI triggers and the models' export erasure paths; osionos end-to-end fixes; hydrawn (9
+  commits, `apps/web`, `apps/api`, `packages/contract`: trail and notes, hydrawn #1, and the
   pen-thickness-with-zoom test, #8).
 - **Pull requests:** 57 merged (prismatica 20, groot 19, osionos 12, grobase 6).
 - **Features and modules:** legal pages (5), collaboration (row 10, 1), real-time (row 2, 1).

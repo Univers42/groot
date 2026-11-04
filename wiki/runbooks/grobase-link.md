@@ -267,7 +267,7 @@ environment precedence over `--env-file`).
 When `OSIONOS_APP_HOST_PORT` moves, the resolver also writes the override file
 **`infrastructure/tls/host-ports.d/osionos-origin.conf`** (generated, git-ignored) with the
 chosen port. The tracked `infrastructure/tls/nginx.conf` includes this directory via
-`include /etc/nginx/host-ports.d/*.conf;`, so the drawnosaurus server picks up the moved
+`include /etc/nginx/host-ports.d/*.conf;`, so the hydrawn server picks up the moved
 osionos origin for framing and CORS without rewriting any tracked file.
 
 | Question | Answer |
@@ -451,7 +451,7 @@ Chrome 149 (deb, `~/.pki/nssdb`) rendered `https://localhost:4322/` (title "Pris
 One Space.") and `https://localhost:3001/` (osionos gate) with no certificate error; snap Firefox
 (profile `pqdn9c63.default-release-1`) rendered both; snap Chromium 154 failed with
 `ERR_CERT_AUTHORITY_INVALID` until the store was recreated under the new revision, then rendered
-`4322`. `docker ps`: 12 track-binocle containers, all `(healthy)` (`livekit` and `drawnosaurus-*`
+`4322`. `docker ps`: 12 track-binocle containers, all `(healthy)` (`livekit` and `hydrawn-*`
 gained healthchecks in `docker-compose.yml`).
 
 ### Every kind through `make link`, 2026-10-08 23:0x (each run ends with `link-verify`)
@@ -464,13 +464,13 @@ gained healthchecks in `docker-compose.yml`).
 | `ssh://dlesieur@127.0.0.1:4242` | ssh, user@ip:port | exit 0 in 23 s; `closing the master to b2b`, new master, same matrix. Needed a current `known_hosts` entry first: the VM's host key had changed since `[127.0.0.1]:4242` was recorded (`ssh-keygen -R '[127.0.0.1]:4242'`, then one `ssh -o StrictHostKeyChecking=accept-new`); the alias block disables that check, the bare form does not |
 | `local` | guard | exit 1 in 1 s: `no mini-baas-kong on this daemon`; the ssh link stayed up (`link-status` exit 0) |
 | `https://dlesieur42.tail10f2ea.ts.net` | direct | exit 1 in 4 s: `does not answer from a container of this daemon` — campus DNS returns NXDOMAIN for `*.ts.net` and this host is not on the tailnet; the ssh link stayed up (`up_direct` checks before it closes anything) |
-| `make link-healthcheck` after the restore | | exit 0 in 10 s: the matrix, then the stack healthcheck (`auth-gateway-https-200`, bridge `{"ok":true}`, website, osionos, drawnosaurus) |
+| `make link-healthcheck` after the restore | | exit 0 in 10 s: the matrix, then the stack healthcheck (`auth-gateway-https-200`, bridge `{"ok":true}`, website, osionos, hydrawn) |
 
 The matrix each time: `track-binocle-auth-gateway-1`, `-local-https-proxy-1`, `-opposite-osiris-web-1`,
 `-osionos-bridge-1` × `mini-baas-kong:8000` (`HTTP/1.1 404`), `mini-baas-redis:6379` (`+PONG`),
 `mini-baas-mailpit:8025` (`HTTP/1.0 200`), `mailpit:1025` (`220 … Mailpit ESMTP Service ready`),
 `mini-baas-realtime:4000` (`HTTP/1.0 200`), then `edge https://127.0.0.1:8444/auth/v1/health Kong HTTP 401`.
-Those four are the containers on `mini-baas_mini-baas`; `osionos-app`, `livekit` and `drawnosaurus-*`
+Those four are the containers on `mini-baas_mini-baas`; `osionos-app`, `livekit` and `hydrawn-*`
 are not on it (the browser reaches Kong through the vhost), so they are not probed.
 Not exercised on this host: a working `local` link (grobase would have to run on this daemon).
 A working `direct` link is no longer in that case — see the next subsection.
@@ -642,7 +642,7 @@ Measured on the old VM `dlesieur42-1` (`100.94.119.97`) before the move to `baas
 | `frontends-up` fails to bind `127.0.0.1:4322`, `3001`, `4000`, `8787`, `3002`, `4100`, `3003`, `4200` | A QEMU `hostfwd` of a born2root VM holds the port. The `baas` profile (`vendor/born2root/profiles/server.toml`, `[network] forwards`) stopped forwarding those, `8000`, `8001` and `8025` on 2026-10-08: the link needs only the ssh forward, and a hostfwd never reaches a guest-loopback service anyway | `cat <vm dir>/ports.env` shows what the running VM forwards; edit the profile's `forwards` and `make qemu_restart B2B_CONFIG=profiles/server.toml`. Kong's host copy stays on `28000` so a grobase on this daemon can keep `8000` |
 | `make certs`: `not readable by the WAF gid 101 (tried chgrp, setfacl, docker)` | NFS refuses `setfacl` and `chgrp` to a group the user is not in; rootless Docker maps gid 101 to the user's subgid range | `MINI_BAAS_WAF_TLS_GID=none make certs` — the link targets already set it |
 | `[backend] the grobase-link relay is running` | By design | `make link-down`, then `make backend-up` |
-| `drawnosaurus-wasm`: `cannot setuid to unmapped uid <uid> in user namespace` | A rootless daemon has no mapping for the host uid that `--user` asked for; the flag only exists to keep `engine/pkg` user-owned on a rootful daemon, where container root would write it as root | Fixed 2026-10-08: `DRAWNOSAURUS_RUN_USER` (`utils/mk/drawnosaurus.mk`) drops `--user` when `docker info` reports `rootless`. Container root already is the invoking user there |
+| `hydrawn-wasm`: `cannot setuid to unmapped uid <uid> in user namespace` | A rootless daemon has no mapping for the host uid that `--user` asked for; the flag only exists to keep `engine/pkg` user-owned on a rootful daemon, where container root would write it as root | Fixed 2026-10-08: `HYDRAWN_RUN_USER` (`utils/mk/hydrawn.mk`) drops `--user` when `docker info` reports `rootless`. Container root already is the invoking user there |
 | `make link GROBASE_TARGET=local`: `no mini-baas-kong on this daemon` | The monolithic kind is taken as given but still checked: without grobase here the frontends would start against a name that resolves to nothing | `make backend-up` first, or set the target to the machine that runs grobase |
 | After this machine reboots: `track-binocle-grobase-link-1` restarting, the frontends get no answer from grobase | The ssh master and `LINK_DIR` (in `XDG_RUNTIME_DIR`) do not survive a reboot; dockerd re-creates the relay's bind source as root when it restarts the relay, and `make link` replaces that empty directory with this user's (`own_link_dir`) | `make link`; `make link-autostart` once makes it heal on its own |
 | `link-status`: `master to … is gone` | The remote rebooted or the network dropped; `ControlPersist` does not reconnect | `make link` again (the heal timer does it within two minutes when `link-autostart` is installed) |

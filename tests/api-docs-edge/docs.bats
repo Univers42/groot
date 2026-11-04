@@ -5,7 +5,7 @@
 # nginx.conf in the image compose runs it in, with the files docker-compose.yml mounts, in
 # front of a stub `mini-baas-kong` that answers like key-auth does without a key.
 #
-# Needs docker and openssl; files go in with `docker cp`, like tests/drawnosaurus-edge.
+# Needs docker and openssl; files go in with `docker cp`, like tests/hydrawn-edge.
 
 NGINX_IMAGE=public.ecr.aws/docker/library/nginx:1.27-alpine
 CURL_IMAGE=curlimages/curl:8.10.1

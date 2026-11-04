@@ -27,17 +27,17 @@ healthcheck: certs ## Probe the backend, website, osionos app, bridge and auth g
 	@route=health; \
 	[ "$$(curl --cacert $(LOCAL_CA_CERT) --retry 30 --retry-delay 2 --retry-connrefused -m 5 -s -o /dev/null -w '%{http_code}' $(AUTH_URL)/health || true)" != 404 ] || route=availability; \
 	$(CURL_HEALTH) -o /dev/null -w 'auth-gateway-https-%{http_code}\n' $(AUTH_URL)/$$route
-# drawnosaurus is part of the default stack now (T12-P1b), so it is probed like any other
+# hydrawn is part of the default stack now (T12-P1b), so it is probed like any other
 # frontend. Two assertions, because the interesting failure is not "port closed": if the
 # gateway is down, nginx answers 503 from its own fallback page and a plain reachability
 # check would pass. So the board LIST must come back 200 — that is the surface the
 # Whiteboard tab actually embeds.
-	$(CURL_HEALTH) $(DRAWNOSAURUS_URL)/healthz >/dev/null
-	@boards_status="$$($(CURL_HEALTH) -o /dev/null -w '%{http_code}' $(DRAWNOSAURUS_URL)/v1/boards || true)"; \
+	$(CURL_HEALTH) $(HYDRAWN_URL)/healthz >/dev/null
+	@boards_status="$$($(CURL_HEALTH) -o /dev/null -w '%{http_code}' $(HYDRAWN_URL)/v1/boards || true)"; \
 	if [ "$$boards_status" = "200" ]; then \
-		echo '[healthcheck] drawnosaurus board list reachable'; \
+		echo '[healthcheck] hydrawn board list reachable'; \
 	else \
-		echo "[healthcheck] expected drawnosaurus /v1/boards to return 200, got HTTP $$boards_status" >&2; \
+		echo "[healthcheck] expected hydrawn /v1/boards to return 200, got HTTP $$boards_status" >&2; \
 		exit 1; \
 	fi
 

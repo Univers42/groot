@@ -1,6 +1,6 @@
 # Public API module — the two proofs a stack is not needed for:
 #   docs   the :8444 edge serves grobase's OpenAPI document at /openapi.json and renders it
-#          at /docs/ (the real nginx.conf, as tests/drawnosaurus-edge runs it);
+#          at /docs/ (the real nginx.conf, as tests/hydrawn-edge runs it);
 #   limits scripts/verify/public-api.sh shows 401 without a key and a 429 past the limit,
 #          against Kong 3.8.0 carrying grobase's key-auth and rate-limiting plugins.
 # Against a running stack: scripts/verify/public-api.sh https://localhost:8444 --key <anon key>.
@@ -47,7 +47,7 @@ jobs:
           git config --global --add url."https://github.com/".insteadOf "git@github.com:"
           git submodule update --init --depth 1 apps/grobase
       - name: nginx from mirror.gcr.io under its public.ecr.aws name
-        # Same reason as drawnosaurus-edge.yml: public.ecr.aws rate-limits anonymous pulls.
+        # Same reason as hydrawn-edge.yml: public.ecr.aws rate-limits anonymous pulls.
         run: |
           docker pull -q mirror.gcr.io/library/nginx:1.27-alpine
           docker tag mirror.gcr.io/library/nginx:1.27-alpine public.ecr.aws/docker/library/nginx:1.27-alpine

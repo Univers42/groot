@@ -20,7 +20,7 @@ named in the first column, then delete the row.
 
 | README section | Item | Context |
 |---|---|---|
-| Prerequisites | Switch submodule URLs to HTTPS, or keep SSH? | `.gitmodules` uses `git@github.com:` for every submodule except `apps/drawnosaurus`. The README now states an SSH key is required; an evaluator without one fails at the clone. |
+| Prerequisites | Switch submodule URLs to HTTPS, or keep SSH? | `.gitmodules` uses `git@github.com:` for every submodule except `apps/hydrawn`. The README now states an SSH key is required; an evaluator without one fails at the clone. |
 | Instructions | What does a fresh local account see? | The old README said demo data is tied to the team's keys and invisible to a new account. `live-data-ensure` (`utils/mk/baas.mk`, target `live-data-ensure`) now re-stamps seeded demo rows onto the new owner, so that may no longer hold. Verify on a clean clone, then describe it (the "Local mode starts empty" limitation was removed as unproven). |
 | Prerequisites | Disk figure from a clean build | The README's 30 GB comes from `docker system df` on the dev VM with the stack running (2026-10-01), not from a clean build. Re-measure after a clean clone if the number matters. |
 
