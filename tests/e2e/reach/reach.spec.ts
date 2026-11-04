@@ -79,9 +79,15 @@ for (const app of APPS) {
       // A disabled control and a skip link parked off-screen until focused are correct as they are.
       const box = await control.boundingBox();
       if (!(await control.isEnabled()) || !box || box.x + box.width <= 0 || box.y + box.height <= 0) continue;
-      await control.scrollIntoViewIfNeeded();
-      await control.click({ trial: true, timeout: 5_000 });
-      clickable += 1;
+      try {
+        await control.scrollIntoViewIfNeeded({ timeout: 5_000 });
+        await control.click({ trial: true, timeout: 5_000 });
+        clickable += 1;
+      } catch (error) {
+        // The landing page's demo rotates on its own, so a control can leave the page mid-check.
+        // One still on screen that refuses the click is a real failure.
+        if (await control.isVisible()) throw error;
+      }
     }
     expect(clickable, `clickable controls on ${app.name}`).toBeGreaterThan(0);
     for (const href of [...new Set(links)].filter((l) => l.startsWith(origin) && !l.includes("#")).slice(0, 20)) {
