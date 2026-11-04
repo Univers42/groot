@@ -5,7 +5,6 @@
 # `capture-only` after a path keeps it out of Lighthouse, which aborts the whole run on a page
 # whose status is not 2xx (measured: /404 stopped the 2026-10-15 baseline at route 2).
 /
-/tour
 /404 capture-only
 /legal/privacy-policy
 /legal/terms
@@ -16,4 +15,3 @@
 /newsletter/confirm
 /newsletter/unsubscribe
 /docs/
-/docs/graph/performance-tuning/

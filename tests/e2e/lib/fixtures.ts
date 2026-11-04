@@ -1,5 +1,9 @@
 import { expect, test as base, type ConsoleMessage, type Page } from "@playwright/test";
 
+// The Home dashboard's four self-data calls count against 120 a minute per user, which only a suite
+// reloading one account reaches. Chromium logs each refusal as an error; a person never sees one.
+export const SELF_DATA_LIMIT = /status of 429 .* @ .*\/api\/account\/self-data\//;
+
 type Guard = { watch(page: Page, label: string, expected?: RegExp): () => void };
 
 // Playwright's own injected scripts are refused by a sandboxed frame without allow-scripts,
