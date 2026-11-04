@@ -388,7 +388,7 @@ What the repository does not record:
 | **Zod** | osionos | Schema validation of user input on the client side. |
 | **livekit-client** | osionos | WebRTC video rooms. |
 | **Playwright** | osionos | End-to-end browser tests. |
-| **Plain CSS** | mail, calendar | Each has a single hand-written `src/styles.css`; no framework. |
+| **Tailwind CSS 4** | mail, calendar | `src/styles.css` imports Tailwind's theme and utilities through `@tailwindcss/vite`, without preflight; the app's own rules sit on top. |
 
 ### Backend — grobase
 
