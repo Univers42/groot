@@ -321,15 +321,24 @@ feature flag — see [Modules](#modules).
 
 ## Team Information
 
-Roles as recorded in the team's working notes ([`wiki/project/03-team.md`](wiki/project/03-team.md)):
+Roles as recorded in the team's working notes ([`wiki/project/03-team.md`](wiki/project/03-team.md)).
+The "Areas in the history" column is what each member's commits touch
+([Individual Contributions](#individual-contributions) has the numbers).
 
-| Member | Login | Role(s) | Responsibilities |
-|---|---|---|---|
-| Dylan Lesieur | `dlesieur` | Product Owner · Developer | Product vision, backlog and priorities; validates completed work |
-| Daniel Fernández | `danfern3` | Tech Lead · Product Owner | Architecture, stack decisions, code quality, reviews |
-| Sergio Jiménez | `serjimen` | Project Manager · Developer | Frontend, secrets management, deployment |
-| Vadim Jan | `vjan-nie` | Project Manager · Developer | Planning, tracking, communication, unblocking |
-| | `shashemi` | Developer | Features and modules |
+| Member | Login | GitHub | Role(s) | Responsibilities | Areas in the history |
+|---|---|---|---|---|---|
+| Dylan Lesieur | `dlesieur` | [@LESdylan](https://github.com/LESdylan) | Product Owner · Developer | Product vision, backlog and priorities; validates completed work | grobase, osionos, mail, calendar, root infrastructure and CI |
+| Daniel Fernández | `danfern3` | [@danielfdez17](https://github.com/danielfdez17) | Tech Lead · Product Owner | Architecture, stack decisions, code quality, reviews | monkey-bot (security test bot), grobase Docker and Kubernetes deployment, osionos editor fixes |
+| Sergio Jiménez de la Cruz | `serjimen` | [@DjSurgeon](https://github.com/DjSurgeon) | Project Manager · Developer | Frontend, secrets management, deployment | the public site (opposite-osiris), osionos accessibility and editor features |
+| Vadim Jan Nieto | `vjan-nie` | [@vjan-nie](https://github.com/vjan-nie) | Project Manager · Developer | Planning, tracking, communication, unblocking | QA tooling, end-to-end tests, documentation, Docker |
+| Seyed Mostafa Hashemian | `shashemi` | [@SMOSTAFAH1](https://github.com/SMOSTAFAH1) | Developer | Team to fill: responsibilities | security fixes and SAST, the site's legal pages, TLS edge |
+
+Team to fill: one owner per role. The notes name two Product Owners (`dlesieur`, `danfern3`) and
+two Project Managers (`serjimen`, `vjan-nie`); the subject expects each role to have one owner.
+
+`rstancu` (Roxana Stancu, [@esettes](https://github.com/esettes)) is on the original roster
+([`archive/wiki-2026-09/CONTRIBUTORS.md`](archive/wiki-2026-09/CONTRIBUTORS.md)) and committed
+between 2026-03-18 and 2026-05-02; see [Who committed where](#who-committed-where).
 
 ---
 
@@ -337,10 +346,11 @@ Roles as recorded in the team's working notes ([`wiki/project/03-team.md`](wiki/
 
 What the repository records:
 
-- **Planning:** milestones (M1 hardening, M2 federation, M3 coherence, M4 observability,
-  M5 security, M11 external-app integration) in
+- **Task tracking:** GitHub Issues on [`Univers42/groot`](https://github.com/Univers42/groot/issues)
+  and on each submodule's repository; milestones (M1 hardening, M2 federation, M3 coherence,
+  M4 observability, M5 security, M11 external-app integration) in
   [`archive/wiki-2026-09/todo/`](archive/wiki-2026-09/todo/).
-- **Tools:** GitHub — pull requests on `Univers42/groot`, Dependabot for dependency updates
+- **Tools:** GitHub — pull requests, Dependabot for dependency updates
   ([`.github/dependabot.yml`](.github/dependabot.yml)), GitHub Actions for CI
   ([`.github/workflows/`](.github/workflows/)).
 - **Branch model:** work lands on short-lived `feat/`, `fix/`, `docs/`, `test/` and `chore/`
@@ -351,6 +361,13 @@ What the repository records:
   (`apps/grobase/scripts/verify/run-gate-battery.sh`) are the team's definition of "done":
   grobase's CI runs named gates on pull requests and the full `--enterprise` battery, with a
   nightly schedule (grobase `.github/workflows/ci.yml`).
+
+What the repository does not record:
+
+- **Communication channel:** Team to fill (the tool, and what it was used for).
+- **Meeting rhythm:** Team to fill (how often, who attended, how decisions were written down).
+- **Task distribution and code review:** Team to fill (who assigned work, who reviewed whose pull
+  requests).
 
 ---
 
@@ -523,24 +540,28 @@ foreign-key clash (`scripts/apply-models-migrations.sh:27-38`).
 
 ## Features List
 
-| Feature | Description |
-|---|---|
-| Sign-up / sign-in | Email and password (hashed and salted) on the public site; email OTP enabled in production with real SMTP |
-| Site → editor handoff | After login, a one-time bridge session hands the user to osionos (`/api/auth/bridge/consume`) — no token in a query string |
-| Legal pages | Privacy Policy, Terms of Service, Cookie Policy, Data Rights, linked from the site |
-| Block editor | Pages built from blocks, nested pages, templates, covers, favourites, search |
-| Database block | A block that is a database, with table / board / calendar views over any mounted data source |
-| Real-time collaboration | Several users editing the same space live, over the protected `collab:<spaceId>` channel |
-| Chat | Workspace channels and direct messages, reactions, mentions, attachments, read receipts |
-| Video rooms | LiveKit-based video channels inside workspaces |
-| Comments, sharing, publishing | Page comments, share rules, public page publishing |
-| Communities & social feed | Communities, connections, feed with likes, comments and shares; blocking and reporting |
-| Mail | Read Gmail inside the workspace via Google OAuth |
-| Calendar | Google Calendar events via Google OAuth |
-| Contract-driven provisioning | One JSON contract → isolated database, roles, keys and frontend `.env` |
-| Self-serve applications | `POST /v1/tenants/me/apps` creates a new isolated app with its own database and key |
-| Multi-engine data API | One API and one key over PostgreSQL, MySQL, MongoDB, SQLite, MSSQL, DynamoDB, Redis, HTTP |
-| Public API | Key-authenticated, rate-limited API behind Kong, documented with OpenAPI |
+"Who" lists the authors of the commits that touch the feature's code, largest share first, with
+the count (`scripts/contributors.sh --paths <repo> <path>...`; the paths are in the last column).
+A commit count is not effort, and pairing or review does not show in it.
+
+| Feature | Description | Who (commits) | Paths counted |
+|---|---|---|---|
+| Sign-up / sign-in | Email and password (hashed and salted) on the public site; email OTP enabled in production with real SMTP | dlesieur 11, serjimen 1 | opposite-osiris `src/pages/auth`, `src/pages/api/auth` |
+| Site → editor handoff | After login, a one-time bridge session hands the user to osionos (`/api/auth/bridge/consume`) — no token in a query string | dlesieur 4 | osionos `scripts/bridge-auth*` |
+| Legal pages | Privacy Policy, Terms of Service, Cookie Policy, Data Rights, linked from the site | shashemi 5, vjan-nie 3, serjimen 2, dlesieur 2 | opposite-osiris `src/pages/legal` |
+| Block editor | Pages built from blocks, nested pages, templates, covers, favourites, search | dlesieur 162, vjan-nie 42, danfern3 29, serjimen 14, rstancu 9, shashemi 2 | osionos `src/features/block-editor` |
+| Database block | A block that is a database, with table / board / calendar views over any mounted data source | dlesieur 126, vjan-nie 2, serjimen 2, rstancu 2 | osionos `src/widgets/database*`, `src/features/*database*`, `src/shared/database*` |
+| Real-time collaboration | Several users editing the same space live, over the protected `collab:<spaceId>` channel | dlesieur 46, shashemi 1 | osionos `src/features/collab`, `scripts/bridge-*collab*` |
+| Chat | Workspace channels and direct messages, reactions, mentions, attachments, read receipts | dlesieur 72, vjan-nie 1 | osionos `src/features/chat`, `src/features/group-chat`, `scripts/bridge-*chat*` |
+| Video rooms | LiveKit-based video channels inside workspaces | dlesieur 13 | osionos `scripts/bridge-*livekit*`, `src/**/*livekit*`, `src/**/*Video*` |
+| Comments, sharing, publishing | Page comments, share rules, public page publishing | dlesieur 44 | osionos `src/features/comments`, `src/features/share`, `scripts/bridge-*publish*`, `scripts/bridge-*share*` |
+| Communities & social feed | Communities, connections, feed with likes, comments and shares; blocking and reporting | dlesieur 38, serjimen 2 | osionos `src/features/communities`, `src/features/connections`, `scripts/bridge-*social*`, `scripts/bridge-*feed*` |
+| Mail | Read Gmail inside the workspace via Google OAuth | dlesieur 35 | `apps/mail` |
+| Calendar | Google Calendar events via Google OAuth | dlesieur 18 | `apps/calendar` |
+| Contract-driven provisioning | One JSON contract → isolated database, roles, keys and frontend `.env` | dlesieur 9 | grobase `scripts/provision-contract.sh`, `infra/config/contracts` |
+| Self-serve applications | `POST /v1/tenants/me/apps` creates a new isolated app with its own database and key | dlesieur 33 | grobase `src/control-plane/internal/tenants` |
+| Multi-engine data API | One API and one key over PostgreSQL, MySQL, MongoDB, SQLite, MSSQL, DynamoDB, Redis, HTTP | dlesieur 99, vjan-nie 3 | grobase `src/data-plane-router` |
+| Public API | Key-authenticated, rate-limited API behind Kong, documented with OpenAPI at `/docs/` | dlesieur 41, vjan-nie 1 | grobase `infra/docker/services/kong`, `infra/config/openapi` |
 
 ---
 
@@ -627,12 +648,95 @@ but switching only records a stub action (`i18n_change_stub` in osionos
 
 ## Individual Contributions
 
-The work split is visible in the history of the root repository and of each submodule:
+### Who committed where
 
-```bash
-git shortlog -sn --all
-git submodule foreach 'git shortlog -sn --all'
-```
+Commits per member in the root and in each submodule, all branches, one line per person
+(`scripts/contributors.sh`, which reads every repository through the root
+[`.mailmap`](.mailmap); counted on 2026-11-04). Several members work almost only in submodules,
+so the root alone understates them: `serjimen` has no commit in the root, and most of
+`danfern3`'s work is in `vendor/monkey-bot`, osionos and grobase.
+
+| Member | root | osionos | grobase | opposite-osiris | mail | calendar | QA | monkey-bot | Active |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
+| `dlesieur` | 1564 | 3465 | 1597 | 150 | 37 | 22 | 1 | 2 | 2026-04-05 → 2026-11-04 |
+| `danfern3` | 44 | 97 | 75 | 8 | | | 1 | 133 | 2026-03-18 → 2026-11-01 |
+| `serjimen` | | 159 | | 177 | | | | | 2026-04-09 → 2026-11-03 |
+| `vjan-nie` | 176 | 150 | 49 | 23 | | | 39 | | 2026-03-19 → 2026-11-02 |
+| `shashemi` | 59 | 18 | 18 | 60 | | | | | 2026-09-26 → 2026-11-02 |
+| `rstancu` | | 104 | | | | | 2 | 7 | 2026-03-18 → 2026-05-02 |
+
+How the identities were joined (the evidence is in [`.mailmap`](.mailmap)):
+
+- Each member committed under several addresses, including GitHub's `noreply` ones; `.mailmap`
+  joins them. A commit count is not effort: one large commit and one typo fix weigh the same.
+- `settes <ioanaroxana.st@…>` is **`rstancu`** (Roxana Stancu): the address belongs to GitHub
+  account [@esettes](https://github.com/esettes), listed for `rstancu` on the original roster
+  ([`archive/wiki-2026-09/CONTRIBUTORS.md`](archive/wiki-2026-09/CONTRIBUTORS.md)). The 104
+  osionos commits (2026-04-10 → 2026-05-02) touch mostly the Playwright browser tests
+  (`tests/browser`), their CI job and committed build assets. `rstancu` is not in the current
+  team table. Team to fill: `rstancu`'s status in the team and whether that work counts for this
+  evaluation.
+- `La Cebolla <smhashem545@…>` is **`shashemi`**: opposite-osiris commit `93e6b65` carries
+  `Signed-off-by: Seyed Mostafa Hashemian`.
+- Two groups of grobase commits pair one member's name with another's address. They are
+  attributed by inference, and the team should confirm:
+  - 5 commits `LESdylan <vjannieto@…>` (2026-09-21 → 2026-11-02) go to `dlesieur`: the author name
+    is `LESdylan`, and `b4c1d33f` landed through grobase PR #89, opened by `LESdylan`.
+  - 5 commits `dlesieur <daniel17dev@…>` (2026-03-20/21) go to `danfern3`: they sit inside
+    `danielfdez17`'s own Docker and Kubernetes series of the same two days.
+- `opencode` (6 commits: 1 root, 5 osionos) is an AI coding agent committing under its own name.
+  Team to fill: which member ran it.
+- Bots (`dependabot`, `coderabbitai`, `copilot-swe-agent`) are left as they are.
+- History is public and is not rewritten. 148 root commits on `main` have a one-word subject
+  (147 `dlesieur`, 1 `vjan-nie`, 2026-05-01 → 2026-10-09); the
+  [`Commit subjects`](.github/workflows/commit-subjects.yml) check refuses new ones.
+
+### dlesieur — Dylan Lesieur
+
+- **Areas:** grobase (Go control plane, Rust data plane and realtime, Kong gateway, contracts
+  and self-serve apps), osionos (editor, chat, collaboration, social, profile, the bridge), mail,
+  calendar, the root's infrastructure, TLS edge and CI.
+- **Features and modules:** most rows of the [Features List](#features-list) and every claimed
+  module row, as the Who columns show.
+- **Challenges:** Team to fill.
+
+### danfern3 — Daniel Fernández
+
+- **Areas:** `vendor/monkey-bot` (133 commits: form-XSS and mutation testing, configuration);
+  grobase Docker images built from scratch, Kubernetes deployment, the playground and Makefile
+  (March 2026); osionos breadcrumbs, trash, multi-line text in blocks, the markdown engine and
+  code-quality fixes; root submodule pins and the `make all` bats fix.
+- **Features and modules:** block editor (29 commits), frontend framework (row 6, 78), OAuth
+  (row 5, 1).
+- **Challenges:** Team to fill.
+
+### serjimen — Sergio Jiménez de la Cruz
+
+- **Areas:** the public site, opposite-osiris (177 commits: hero animation performance, unit
+  tests and benchmarks, security fixes, auth pages); osionos accessibility fixes, page links,
+  move and delete, shared UI refactor, the node installer's self-update (#277) and database probe
+  diagnostics (#278), the changelog.
+- **Features and modules:** sign-in pages (1), legal pages (2), block editor (14), connections
+  (2), frontend framework (row 6, 76).
+- **Challenges:** Team to fill.
+
+### vjan-nie — Vadim Jan Nieto
+
+- **Areas:** `vendor/QA` (39 commits: registry, migrations, hooks, CLI); root end-to-end tests,
+  the wiki and README, graph-studio tests, the drawnosaurus TLS edge and its CORS, submodule
+  pins; osionos whiteboard and graph-studio fixes; grobase Docker infrastructure and dependency
+  fixes.
+- **Features and modules:** block editor (42), legal pages (3), real-time (row 2, 5), frontend
+  framework (row 6, 77).
+- **Challenges:** Team to fill.
+
+### shashemi — Seyed Mostafa Hashemian
+
+- **Areas:** security fixes across root, grobase and opposite-osiris (SAST findings, nginx scan
+  suppressions, IDE socket proxy hardening); the site's legal pages, SEO and accessibility; root
+  CI triggers and the models' export erasure paths; osionos end-to-end fixes.
+- **Features and modules:** legal pages (5), collaboration (row 10, 1), real-time (row 2, 1).
+- **Challenges:** Team to fill.
 
 ### Team-level challenges
 
