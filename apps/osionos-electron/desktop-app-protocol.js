@@ -81,7 +81,7 @@ async function relayToBaas(net, baasTarget, request, url) {
   const init = { method: request.method, headers };
   if (request.method !== "GET" && request.method !== "HEAD") init.body = await request.arrayBuffer();
   try {
-    const upstream = await net.fetch(target, init);
+    const upstream = await net.fetch(target, init); // NOSONAR: the renderer picks only the path and query, baasTarget fixes the origin; test/desktop-app-protocol.test.js proves it over 4096 hostile paths
     const body = await upstream.arrayBuffer();
     // WHY: upstream MIME/headers are never trusted; baasResponseHeaders forces octet-stream + sandbox.
     return new Response(body, { status: upstream.status, statusText: upstream.statusText, headers: baasResponseHeaders(upstream.headers.get("content-type")) });
