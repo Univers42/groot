@@ -74,3 +74,34 @@ ruling is in the osionos verdict file, "Amendment 1".
   the origin that received it, so the beta's secret does not open shells for production's frame, or the
   reverse. To withdraw it, drop the beta from the remember origins and restart the node. Its secrets then stop
   opening shells, and R7 deletes them.
+
+## Measured 2026-11-04 (G3 of `docs/ops/production-golive-verdict-2026-11-04.md`)
+
+Engine runs used osionos develop `5f6b8ee1` and `tests/e2e/bridge-stub/rememberComputer.spec.mjs`: a real node
+on 127.0.0.1:4100 serving the built terminal page, and a stub bridge. They ran in one container, `g3-browsers`
+(image `osionos-browser-tests:download`, volume `remember_browser_test_node_modules`), on Docker's default
+network, so its own network namespace gave the node a private :4100 and the owner's live node was not touched.
+Firefox and WebKit were installed only inside the container (`playwright install --with-deps firefox webkit`,
+WebKit 26.4 = webkit-2272). **WebKit stands in for Safari. It is not Safari.** The base command was
+`CI=1 PLAYWRIGHT_BRIDGE_STUB=1 PLAYWRIGHT_REUSE_EXISTING_SERVER=1 node node_modules/@playwright/test/cli.js test tests/e2e/bridge-stub/rememberComputer.spec.mjs --retries=0`,
+with vite started by hand (`VITE_API_URL=https://bridge.invalid --mode test --port 3004`). Each row adds its flag.
+
+| Item | Browser / engine | Result | Command / evidence |
+|---|---|---|---|
+| Baseline | Chromium 1217 | **pass**, 49.8 s | base command |
+| Terminal in place | Firefox, headless | **opens**: all 6 opens connect, no hang, no W14 panel | `--browser=firefox` |
+| Remember (R12) + R-U2 | Firefox, headless | **storage survives**: 3 reloads and 2 new tabs resume with no code; `token`=1, `resume`≥5, Forget (R8) works | `--browser=firefox --repeat-each=2`, with the 2 warnings below filtered in a throwaway spec copy: 2/2 pass, 4.0 min |
+| Zero console | Firefox, headless | **FAIL**: 12 frame warnings, 2 per open: "Layout was forced before the page was fully loaded" (page) and "Failed to create WebGL context" (headless, no WebGL) | `--browser=firefox`, spec line 85. osionos #305 |
+| Terminal in place | WebKit 26.4 | **opens**: all opens connect, no hang | `--browser=webkit` |
+| Remember (R12) + R-U2 | WebKit 26.4 | **storage survives** (5/5 later loads resume), **but FAIL**: in 3/3 runs, 1 or 2 remembered loads also take the token path ~300 ms after a successful resume (`token` 2, 2, 3; expected 1). On production, that mint after 600 s asks for a code | `--browser=webkit` and `--repeat-each=2`, spec line 80. osionos #304 |
+| U6, cadence | code read | With remember: one emailed code per computer per 30 days idle, capped at 90 days (`packages/osionos-node/remembered-computers.mjs:27`). Without remember: one code for each terminal open that comes more than 600 s after the last step-up (`scripts/bridge-account-sudo.mjs:51`), so a day with N such opens means N codes. The copy says only "opens here without a code for 30 days" (`src/features/machines/ui/RememberComputerChoice.tsx:23`). It says nothing of the 90-day cap or of the 10-minute window | `rg` on develop `5f6b8ee1` |
+| R-U1, app session TTL | production bridge | `OSIONOS_APP_SESSION_TTL_SECONDS=2592000` (30 d) on `track-binocle-osionos-bridge-1`, the bridge behind baas:10000 | `ssh 100.94.109.44 docker inspect …`, names and values only |
+| R-U1, what bounds the lag | code + production env | The resume mint verifies the bridge's own `osionos_v1` token (`scripts/bridge-account-sudo.mjs:73` → `verifyAppSessionToken`), not a GoTrue JWT. Sign-out-everywhere writes a per-user cut-off (`scripts/bridge-api.mjs:5303`), polled every 10 s; past 60 s stale, verification answers 503 (`scripts/bridge-session-tracker.mjs:37-38`). Cut-offs are on in production (`OSIONOS_SESSION_CUTOFFS` unset, service key and BaaS URL set). **The lag is ≤ 10 s, or the mint fails closed, not the 30-day TTL.** The caveat at `scripts/bridge-machines.mjs:222` ("statelessly … GOTRUE_JWT_EXP") is wrong and should be corrected | same `ssh`, set/unset only |
+| R-U1, GoTrue access TTL | production VM | **not measured**: `ssh dc-lan` timed out. The repo value is `GOTRUE_JWT_EXP: 3600` (`apps/grobase/orchestrators/compose/base/auth-api.yml:42`). It does not bound the resume lag (row above) | — |
+
+Not measured, and accepted for tonight: **real Safari** (macOS or iOS, ITP and storage partitioning on real
+hardware), real (non-headless) Firefox with WebGL, the beta's own token `exp−iat` (no beta login was made), and
+GoTrue's live `GOTRUE_JWT_EXP`. Waiver: the owner's standing instruction for the night of 2026-11-04 is
+autonomy with no questions. The named risk is that Safari users can see the WebKit fallback (#304) as an emailed
+code on a remembered computer, or a partition behaviour WebKit-in-Linux does not reproduce. Main stays gated on
+#304. #305 is a console-bar defect, not a security defect.
