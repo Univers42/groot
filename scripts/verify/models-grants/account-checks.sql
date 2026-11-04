@@ -2048,10 +2048,20 @@ ROLLBACK;
 -- ===== P5-6-a: account data map, erase function, export jobs =====
 CREATE OR REPLACE FUNCTION pg_temp.p5_literal(p_rel regclass, p_col text) RETURNS text
 LANGUAGE sql AS $$
-  SELECT (regexp_match(pg_get_constraintdef(c.oid), '''([^'']*)''::'))[1]
+  -- Prefer the first quoted literal from a column CHECK.
+  -- Handles both forms Postgres emits:
+  --   CHECK (kind IN ('skill', 'rule', 'command'))
+  --   CHECK ((kind = ANY (ARRAY['skill'::text, 'rule'::text, ...])))
+  SELECT COALESCE(
+    (regexp_match(pg_get_constraintdef(c.oid), '''([^'']+)''::'))[1],
+    (regexp_match(pg_get_constraintdef(c.oid), '''([^'']+)'''))[1]
+  )
     FROM pg_constraint c
    WHERE c.conrelid = p_rel AND c.contype = 'c'
-     AND pg_get_constraintdef(c.oid) ~ ('\(\(?' || p_col || ' (= ANY|IN|= .)|\(' || p_col || '\)::text = ANY')
+     AND (
+       pg_get_constraintdef(c.oid) ~ ('\(\(?' || p_col || ' (= ANY|IN|= .)|\(' || p_col || '\)::text = ANY')
+       OR pg_get_constraintdef(c.oid) ~ ('\y' || p_col || '\y.*\yIN\y')
+     )
    LIMIT 1
 $$;
 
@@ -2095,6 +2105,17 @@ BEGIN
       WHEN 'osionos_messages.ai_run_id' THEN CASE WHEN p_col = 'ai_requested_by' THEN 'gen_random_uuid()' ELSE 'NULL' END
       WHEN 'osionos_messages.ai_requested_by' THEN 'NULL'
       WHEN 'osionos_messages.author_id' THEN CASE WHEN p_col = 'ai_requested_by' THEN 'public.osionos_ai_bot_author()' END
+      -- ai_context_items: kind/scope/slug CHECKs reject random text; force valid values.
+      WHEN 'ai_context_items.kind' THEN '''skill'''
+      WHEN 'ai_context_items.scope' THEN '''user'''
+      WHEN 'ai_context_items.slug' THEN '''p5-'' || translate(left(md5(random()::text), 8), ''0189'', ''abcd'')'
+      WHEN 'ai_context_items.name' THEN '''p5 skill'''
+      WHEN 'ai_context_items.description' THEN '''p5 canary skill description'''
+      WHEN 'ai_context_items.body' THEN '''p5 canary skill body'''
+      -- page comments: decided_* CHECK requires decided_at/decided_by both null or both set
+      WHEN 'osionos_page_comments.decided_by' THEN 'NULL'
+      WHEN 'osionos_page_comments.decided_at' THEN 'NULL'
+      WHEN 'osionos_page_comments.decision' THEN 'NULL'
       ELSE NULL END;
     CONTINUE WHEN v_force IS NULL AND NOT v_iscol AND a.attname <> p_col AND a.attname IS DISTINCT FROM p_col2 AND (a.atthasdef OR NOT a.attnotnull);
     v_typ := a.typ;
