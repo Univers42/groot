@@ -335,10 +335,12 @@ The "Areas in the history" column is what each member's commits touch
 | Daniel Fernández | `danfern3` | [@danielfdez17](https://github.com/danielfdez17) | Tech Lead · Product Owner | Architecture, stack decisions, code quality, reviews | monkey-bot (security test bot), grobase Docker and Kubernetes deployment, osionos editor fixes |
 | Sergio Jiménez de la Cruz | `serjimen` | [@DjSurgeon](https://github.com/DjSurgeon) | Project Manager · Developer | Frontend, secrets management, deployment | the public site (opposite-osiris), osionos accessibility and editor features |
 | Vadim Jan Nieto | `vjan-nie` | [@vjan-nie](https://github.com/vjan-nie) | Project Manager · Developer | Planning, tracking, communication, unblocking | QA tooling, end-to-end tests, documentation, Docker |
-| Seyed Mostafa Hashemian | `shashemi` | [@SMOSTAFAH1](https://github.com/SMOSTAFAH1) | Developer | Team to fill: responsibilities | security fixes and SAST, the site's legal pages, TLS edge |
+| Seyed Mostafa Hashemian | `shashemi` | [@SMOSTAFAH1](https://github.com/SMOSTAFAH1) | Developer | TO CONFIRM by the team | security fixes and SAST, the site's legal pages, TLS edge |
 
-Team to fill: one owner per role. The notes name two Product Owners (`dlesieur`, `danfern3`) and
-two Project Managers (`serjimen`, `vjan-nie`); the subject expects each role to have one owner.
+> TO CONFIRM by the team: `shashemi`'s responsibilities.
+
+> TO CONFIRM by the team: one owner per role. The notes name two Product Owners (`dlesieur`,
+> `danfern3`) and two Project Managers (`serjimen`, `vjan-nie`); the subject expects one owner each.
 
 `rstancu` (Roxana Stancu, [@esettes](https://github.com/esettes)) is on the original roster
 ([`archive/wiki-2026-09/CONTRIBUTORS.md`](archive/wiki-2026-09/CONTRIBUTORS.md)) and committed
@@ -368,10 +370,16 @@ What the repository records:
 
 What the repository does not record:
 
-- **Communication channel:** Team to fill (the tool, and what it was used for).
-- **Meeting rhythm:** Team to fill (how often, who attended, how decisions were written down).
-- **Task distribution and code review:** Team to fill (who assigned work, who reviewed whose pull
-  requests).
+- **Communication channel:** not recorded.
+- **Meeting rhythm:** not recorded.
+- **Task distribution and code review:** not recorded beyond the merged pull requests per login
+  ([Who committed where](#who-committed-where)).
+
+> TO CONFIRM by the team: the communication channel (the tool, and what it was used for).
+
+> TO CONFIRM by the team: the meeting rhythm (how often, who attended, where decisions were written).
+
+> TO CONFIRM by the team: who assigned work, and who reviewed whose pull requests.
 
 ---
 
@@ -607,8 +615,8 @@ those tests and moves to `main` with [#172](https://github.com/Univers42/groot/i
 Rows 1–7 and 10 make 13 points on their own; one of the two modules of choice must hold for the
 total to reach 14, and both must hold for the two-point margin.
 
-Team to fill: the date and the name of the second member who ran each row's evidence on a fresh
-`make all` ([#171](https://github.com/Univers42/groot/issues/171), "Done when").
+> TO CONFIRM by the team: the date and the name of the second member who ran each row's evidence
+> on a fresh `make all` ([#171](https://github.com/Univers42/groot/issues/171), "Done when").
 
 ### Not claimed
 
@@ -661,20 +669,45 @@ Team to fill: the date and the name of the second member who ran each row's evid
 
 ### Who committed where
 
-Commits per member in the root and in each submodule, all branches, one line per person
-(`scripts/contributors.sh`, which reads every repository through the root
-[`.mailmap`](.mailmap); counted on 2026-11-04). Several members work almost only in submodules,
-so the root alone understates them: `serjimen` has no commit in the root, and most of
-`danfern3`'s work is in `vendor/monkey-bot`, osionos and grobase.
+Commits per member reachable from the commit groot pins for each repository, one line per person,
+read through the root [`.mailmap`](.mailmap) (counted on 2026-11-04 at root `01654173`):
 
-| Member | root | osionos | grobase | opposite-osiris | mail | calendar | QA | monkey-bot | Active |
-|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
-| `dlesieur` | 1564 | 3465 | 1597 | 150 | 37 | 22 | 1 | 2 | 2026-04-05 → 2026-11-04 |
-| `danfern3` | 44 | 97 | 75 | 8 | | | 1 | 133 | 2026-03-18 → 2026-11-01 |
-| `serjimen` | | 159 | | 177 | | | | | 2026-04-09 → 2026-11-03 |
-| `vjan-nie` | 176 | 150 | 49 | 23 | | | 39 | | 2026-03-19 → 2026-11-02 |
-| `shashemi` | 59 | 18 | 18 | 60 | | | | | 2026-09-26 → 2026-11-02 |
-| `rstancu` | | 104 | | | | | 2 | 7 | 2026-03-18 → 2026-05-02 |
+```sh
+git -C <repo> -c mailmap.file="$PWD/.mailmap" shortlog -sn <pinned sha>   # pins: git ls-tree HEAD apps vendor
+```
+
+Several members work almost only in submodules, so the root alone understates them.
+
+| Member | GitHub | root | osionos | grobase | opposite-osiris | drawnosaurus | mail | calendar | QA | monkey-bot | First → last commit |
+|---|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|
+| `dlesieur` | @LESdylan | 1577 | 3375 | 1569 | 126 | 676 | 42 | 27 | 1 | 2 | 2026-05-10 → 2026-11-04 |
+| `danfern3` | @danielfdez17 | | 94 | 74 | 8 | 25 | | | 1 | 10 | 2026-03-24 → 2026-10-02 |
+| `serjimen` | @DjSurgeon | | 81 | | 160 | | | | | | 2026-04-11 → 2026-10-29 |
+| `vjan-nie` | @vjan-nie | 173 | 141 | 49 | 23 | 6 | | | 39 | | 2026-03-19 → 2026-11-01 |
+| `shashemi` | @SMOSTAFAH1 | 59 | 18 | 18 | 59 | 9 | | | | | 2026-09-20 → 2026-11-02 |
+| `rstancu` | @esettes | | 104 | | | | | | 2 | | 2026-03-18 → 2026-05-02 |
+
+Work that is not on a pinned commit does not show above: `danfern3`'s 44 root commits sit on
+`fix/ci`, open as [#165](https://github.com/Univers42/groot/pull/165), and most of their 133
+monkey-bot commits are on branches the pin does not reach. A commit count is not effort: one
+large commit and one typo fix weigh the same, and pairing and review do not show in it.
+
+Merged pull requests per login in the project's repositories (groot, osionos, grobase,
+prismatica = opposite-osiris, osionos-mail, osionos-calendar, drawnosaurus, QA, monkey-bot), from
+`gh search prs --owner Univers42 --author <login> --merged` on 2026-11-04:
+
+| GitHub | Merged PRs | Where |
+|---|--:|---|
+| @LESdylan | 260 | osionos 138, grobase 61, groot 56, prismatica 3, osionos-mail 1, osionos-calendar 1 |
+| @vjan-nie | 72 | groot 45, osionos 17, prismatica 6, grobase 4 |
+| @SMOSTAFAH1 | 57 | prismatica 20, groot 19, osionos 12, grobase 6 |
+| @DjSurgeon | 8 | prismatica 7, osionos 1 |
+| @danielfdez17 | 4 | prismatica 4 |
+
+The Who columns of the [Features List](#features-list) and [Modules](#modules) were counted
+on 2026-11-04, before the history rewrite of that day, with `scripts/contributors.sh --paths`
+(all branches). Until the pre-rewrite refs are deleted from a clone, `--all` counts each of those
+commits twice; count from the pinned commit as above instead.
 
 How the identities were joined (the evidence is in [`.mailmap`](.mailmap)):
 
@@ -685,20 +718,31 @@ How the identities were joined (the evidence is in [`.mailmap`](.mailmap)):
   ([`archive/wiki-2026-09/CONTRIBUTORS.md`](archive/wiki-2026-09/CONTRIBUTORS.md)). The 104
   osionos commits (2026-04-10 → 2026-05-02) touch mostly the Playwright browser tests
   (`tests/browser`), their CI job and committed build assets. `rstancu` is not in the current
-  team table. Team to fill: `rstancu`'s status in the team and whether that work counts for this
-  evaluation.
+  team table.
+
+  > TO CONFIRM by the team: `rstancu`'s status in the team, and whether that work counts for
+  > this evaluation.
 - `La Cebolla <smhashem545@…>` is **`shashemi`**: opposite-osiris commit `93e6b65` carries
   `Signed-off-by: Seyed Mostafa Hashemian`.
 - Two groups of grobase commits pair one member's name with another's address. They are
-  attributed by inference, and the team should confirm:
-  - 5 commits `LESdylan <vjannieto@…>` (2026-09-21 → 2026-11-02) go to `dlesieur`: the author name
+  attributed by inference:
+  - `LESdylan <vjannieto@…>` (3 commits on grobase's pinned commit, 5 on all branches,
+    2026-09-21 → 2026-11-02) goes to `dlesieur`: the author name
     is `LESdylan`, and `b4c1d33f` landed through grobase PR #89, opened by `LESdylan`.
-  - 5 commits `dlesieur <daniel17dev@…>` (2026-03-20/21) go to `danfern3`: they sit inside
+  - `dlesieur <daniel17dev@…>` (5 commits, 2026-03-20/21) goes to `danfern3`: they sit inside
     `danielfdez17`'s own Docker and Kubernetes series of the same two days.
+
+  > TO CONFIRM by the team: both attributions above.
 - `opencode` (6 commits: 1 root, 5 osionos) is an AI coding agent committing under its own name.
-  Team to fill: which member ran it.
+- `bunny`, `Space Bunny` and `builder` (111 drawnosaurus commits, 2026-09-27/28, addresses on
+  `local`, `localhost` and `drawnosaurus.local`) are not mapped: no address, sign-off or pull
+  request ties them to a member.
+
+  > TO CONFIRM by the team: which member ran `opencode`, and who committed as `bunny`,
+  > `Space Bunny` and `builder` in drawnosaurus.
 - Bots (`dependabot`, `coderabbitai`, `copilot-swe-agent`) are left as they are.
-- History is public and is not rewritten. 148 root commits on `main` have a one-word subject
+- On 2026-11-04 the history of groot, osionos and grobase was rewritten to remove
+  `Co-authored-by` trailers; trees and subjects are unchanged, and every commit from the first rewritten one onward has a new SHA. 148 root commits on `main` have a one-word subject
   (147 `dlesieur`, 1 `vjan-nie`, 2026-05-01 → 2026-10-09); the
   [`Commit subjects`](.github/workflows/commit-subjects.yml) check refuses new ones.
 
@@ -706,48 +750,71 @@ How the identities were joined (the evidence is in [`.mailmap`](.mailmap)):
 
 - **Areas:** grobase (Go control plane, Rust data plane and realtime, Kong gateway, contracts
   and self-serve apps), osionos (editor, chat, collaboration, social, profile, the bridge), mail,
-  calendar, the root's infrastructure, TLS edge and CI.
+  calendar, the root's infrastructure, TLS edge and CI; drawnosaurus (676 commits: `apps/web`,
+  the engine, `docs/reference`).
+- **Pull requests:** 260 merged (osionos 138, grobase 61, groot 56).
 - **Features and modules:** most rows of the [Features List](#features-list) and every claimed
   module row, as the Who columns show.
-- **Challenges:** Team to fill.
+- **Challenges:** not recorded.
+
+  > TO CONFIRM by the team: the challenges this member met.
 
 ### danfern3 — Daniel Fernández
 
-- **Areas:** `vendor/monkey-bot` (133 commits: form-XSS and mutation testing, configuration);
+- **Areas:** `vendor/monkey-bot` (133 commits on all branches, 10 on the pinned commit: form-XSS
+  and mutation testing, configuration);
   grobase Docker images built from scratch, Kubernetes deployment, the playground and Makefile
   (March 2026); osionos breadcrumbs, trash, multi-line text in blocks, the markdown engine and
-  code-quality fixes; root submodule pins and the `make all` bats fix.
+  code-quality fixes; drawnosaurus (25 commits, `apps/web`, `apps/api`, `packages/contract`,
+  2026-09-24: submodule clone paths, formatting); root submodule pins and the `make all` bats fix,
+  on `fix/ci` ([#165](https://github.com/Univers42/groot/pull/165), open).
+- **Pull requests:** 4 merged (prismatica).
 - **Features and modules:** block editor (29 commits), frontend framework (row 6, 78), OAuth
   (row 5, 1).
-- **Challenges:** Team to fill.
+- **Challenges:** not recorded.
+
+  > TO CONFIRM by the team: the challenges this member met.
 
 ### serjimen — Sergio Jiménez de la Cruz
 
-- **Areas:** the public site, opposite-osiris (177 commits: hero animation performance, unit
-  tests and benchmarks, security fixes, auth pages); osionos accessibility fixes, page links,
+- **Areas:** the public site, opposite-osiris (160 commits on the pinned commit: hero animation
+  performance, unit tests and benchmarks, security fixes, auth pages); osionos accessibility fixes, page links,
   move and delete, shared UI refactor, the node installer's self-update (#277) and database probe
   diagnostics (#278), the changelog.
+- **Pull requests:** 8 merged (prismatica 7, osionos 1), among them the landing page in English,
+  Spanish and Arabic with right-to-left layout (prismatica #21, #22, #23, #35), the accessible
+  privacy policy and terms (#38) and a WCAG 2.2 AA audit pipeline with axe-core fixes (#39).
 - **Features and modules:** sign-in pages (1), legal pages (2), block editor (14), connections
   (2), frontend framework (row 6, 76).
-- **Challenges:** Team to fill.
+- **Challenges:** not recorded.
+
+  > TO CONFIRM by the team: the challenges this member met.
 
 ### vjan-nie — Vadim Jan Nieto
 
 - **Areas:** `vendor/QA` (39 commits: registry, migrations, hooks, CLI); root end-to-end tests,
   the wiki and README, graph-studio tests, the drawnosaurus TLS edge and its CORS, submodule
   pins; osionos whiteboard and graph-studio fixes; grobase Docker infrastructure and dependency
-  fixes.
+  fixes; drawnosaurus (6 commits: engine bumps, the nested-shape binding fix).
+- **Pull requests:** 72 merged (groot 45, osionos 17, prismatica 6, grobase 4).
 - **Features and modules:** block editor (42), legal pages (3), real-time (row 2, 5), frontend
   framework (row 6, 77).
-- **Challenges:** Team to fill.
+- **Challenges:** not recorded.
+
+  > TO CONFIRM by the team: the challenges this member met.
 
 ### shashemi — Seyed Mostafa Hashemian
 
 - **Areas:** security fixes across root, grobase and opposite-osiris (SAST findings, nginx scan
   suppressions, IDE socket proxy hardening); the site's legal pages, SEO and accessibility; root
-  CI triggers and the models' export erasure paths; osionos end-to-end fixes.
+  CI triggers and the models' export erasure paths; osionos end-to-end fixes; drawnosaurus (9
+  commits, `apps/web`, `apps/api`, `packages/contract`: trail and notes, drawnosaurus #1, and the
+  pen-thickness-with-zoom test, #8).
+- **Pull requests:** 57 merged (prismatica 20, groot 19, osionos 12, grobase 6).
 - **Features and modules:** legal pages (5), collaboration (row 10, 1), real-time (row 2, 1).
-- **Challenges:** Team to fill.
+- **Challenges:** not recorded.
+
+  > TO CONFIRM by the team: the challenges this member met.
 
 ### Team-level challenges
 

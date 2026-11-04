@@ -1,7 +1,8 @@
 # Team, roles and contributions
 
 > **Status:** Partly verified. Names, logins and the work split come from the git history;
-> roles come from the team's notes. Lines starting "Team to fill" are facts no document holds.
+> roles come from the team's notes. Lines marked "TO CONFIRM by the team" are facts no document
+> or commit holds.
 > **Sources:** `scripts/contributors.sh` (2026-11-04) · [`.mailmap`](../../.mailmap) · the
 > original roster in [`archive/wiki-2026-09/CONTRIBUTORS.md`](../../archive/wiki-2026-09/CONTRIBUTORS.md)
 > · required by the subject, chapters II and VI
@@ -20,27 +21,33 @@ Contributions" sections hold the facts; this page records where they come from. 
 | Daniel Fernández | `danfern3` | Tech Lead · Product Owner | Architecture, stack decisions, code quality, reviews |
 | Sergio Jiménez de la Cruz | `serjimen` | Project Manager · Developer | Frontend, secrets, deployment |
 | Vadim Jan Nieto | `vjan-nie` | Project Manager · Developer | Planning, tracking, communication, unblocking |
-| Seyed Mostafa Hashemian | `shashemi` | Developer | Team to fill: responsibilities |
+| Seyed Mostafa Hashemian | `shashemi` | Developer | TO CONFIRM by the team |
 
-Team to fill: one owner per role (two Product Owners and two Project Managers are listed).
+> TO CONFIRM by the team: `shashemi`'s responsibilities, and one owner per role (two Product
+> Owners and two Project Managers are listed).
 
 ---
 
 ## How the work was organised
 
 - **Task tracking:** GitHub Issues on `Univers42/groot` and the submodule repositories.
-- **Communication:** Team to fill.
-- **Meeting rhythm:** Team to fill.
-- **Code review:** pull requests into `develop`, then `develop` into `main`. Team to fill: who
-  reviews whose pull requests.
+- **Communication:** not recorded.
+- **Meeting rhythm:** not recorded.
+- **Code review:** pull requests into `develop`, then `develop` into `main`; merged pull requests
+  per login are in the README's [Who committed where](../../README.md#who-committed-where).
+
+> TO CONFIRM by the team: the communication channel, the meeting rhythm, and who reviews whose
+> pull requests.
 
 ---
 
 ## Contributions by area
 
 From the commits touching each area (`scripts/contributors.sh --paths REPO PATH...`, all
-branches, merges excluded, 2026-11-04); "whole repository" rows are `scripts/contributors.sh`,
-merges included. A count is not effort.
+branches, merges excluded, 2026-11-04, before that day's history rewrite); "whole repository"
+rows are `scripts/contributors.sh`, merges included. A count is not effort. Until a clone drops
+its pre-rewrite refs, `--all` counts the rewritten commits twice: the README's
+[Who committed where](../../README.md#who-committed-where) counts from the pinned commits instead.
 
 | Area | Who (commits) |
 |---|---|
@@ -50,11 +57,12 @@ merges included. A count is not effort.
 | osionos, `src` | dlesieur 1239, danfern3 78, vjan-nie 77, serjimen 76, rstancu 38, shashemi 8 |
 | opposite-osiris (whole repository) | serjimen 177, dlesieur 150, shashemi 60, vjan-nie 23, danfern3 8 |
 | mail / calendar (whole repositories) | dlesieur 37 / 22 |
+| drawnosaurus (whole repository, at groot's pin `41900d75`) | dlesieur 676, danfern3 25, shashemi 9, vjan-nie 6; 111 by `bunny`, `Space Bunny` and `builder`, not mapped to a member |
 | QA (whole repository) | vjan-nie 39, rstancu 2, danfern3 1, dlesieur 1 |
 | monkey-bot (whole repository) | danfern3 133, rstancu 7, dlesieur 2 |
 | Infrastructure, CI (root `infrastructure`, `.github/workflows`) | dlesieur 263 / 76, vjan-nie 20 / 14, shashemi 9 / 4, danfern3 2 / 0 |
-| vault42 / 42ctl | Team to fill: the repository is outside this tree |
-| Documentation | Team to fill: docs are spread over every repository |
+| vault42 / 42ctl | not counted: the repository is outside this tree |
+| Documentation | not counted: docs are spread over every repository |
 
 ```sh
 scripts/contributors.sh                                   # every repository, one line per member
@@ -70,8 +78,10 @@ parts of the project. It devotes its entire first chapter to the topic, so omitt
 worse than declaring it.
 
 This project was built with heavy AI assistance. Describe it precisely rather than vaguely —
-Team to fill: which tools, for which tasks, on which parts (the README's "How AI was used" has the project-level answer) — and note where output was reviewed, tested or
-rewritten. The subject's own framing is that AI-generated work you cannot explain is the classic
+see the README's "How AI was used" for the project-level answer, and note where output was
+reviewed, tested or rewritten.
+
+> TO CONFIRM by the team: which tools each member used, for which tasks, on which parts. The subject's own framing is that AI-generated work you cannot explain is the classic
 way to fail an evaluation, so the useful disclosure is the one paired with evidence of
 understanding.
 
@@ -101,7 +111,8 @@ the project's actual history:
 - Keeping eight engine adapters at parity → [platform/03-data-plane](../platform/03-data-plane.md)
 - Auditing our own authorisation path and shipping a reversible mitigation
   → [security/03-known-weaknesses](../security/03-known-weaknesses.md)
-- Team to fill: the challenges each member met
+
+> TO CONFIRM by the team: the challenges each member met.
 
 ---
 
