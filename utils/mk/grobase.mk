@@ -3,12 +3,13 @@
 # Frontends the root pipeline owns. The backend (postgres/gotrue/kong/postgrest/...)
 # is the running apps/grobase stack and must NOT be re-upped from here.
 #
-# $(HYDRAWN_SERVICES) is the Whiteboard plane, default-on since T12-P1b. Referenced
-# rather than repeated — hydrawn.mk is included first (Makefile:45 before :49), so the
-# list has one definition. Its wasm artifact is a build INPUT for hydrawn-web, which is
+# $(HYDRAWN_SERVICES) is the Whiteboard plane, default-on since T12-P1b. Referenced rather than
+# repeated, so the list has one definition, and with `=` rather than `:=`: the Makefile includes
+# *.mk sorted, hydrawn.mk comes after this file, and `:=` would drop the Whiteboard from make all
+# without a word. Its wasm artifact is a build INPUT for hydrawn-web, which is
 # why frontends-up takes hydrawn-wasm as a prerequisite below and not as a step inside
 # the recipe: `up -d --build` would otherwise build the web image against a missing pkg/.
-ROOT_FRONTENDS := osionos-bridge osionos-app auth-gateway opposite-osiris-web local-https-proxy livekit $(HYDRAWN_SERVICES)
+ROOT_FRONTENDS = osionos-bridge osionos-app auth-gateway opposite-osiris-web local-https-proxy livekit $(HYDRAWN_SERVICES)
 
 # The ROOT_FRONTENDS images this repo builds that also have a published Docker Hub tag.
 # `frontends-up PULL_PREBUILT=1` pulls these tags instead of building; an *_IMAGE already
