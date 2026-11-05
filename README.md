@@ -607,15 +607,17 @@ pairing and review do not show in it.
 ## License
 
 Osionos Project License: copyright (c) 2026 Osionos contributors, all rights
-reserved. Contributors and persons the copyright holders explicitly authorize
-may access, inspect, run and contribute to the software to evaluate, develop,
-maintain and improve the project; no other use is granted. The full text is in
-[`LICENSE`](LICENSE).
+reserved. It applies to this repository's own files; each git submodule (listed
+in `.gitmodules`) keeps its own licence. Contributors and persons the copyright
+holders explicitly authorize may access, inspect, run and contribute to the
+software to evaluate, develop, maintain and improve the project; no other use is
+granted. The full text is in [`LICENSE`](LICENSE).
 
 grobase (`apps/grobase`, a submodule) carries its own licence: open-core under
 the GNU AGPL v3 (`apps/grobase/LICENSE`), with `apps/grobase/LICENSING.md`
-mapping which parts carry which licence. osionos, opposite-osiris, hydrawn,
-mail and calendar have no licence file of their own.
+mapping which parts carry which licence. monkey-bot (`vendor/monkey-bot`) is
+under the MIT License. osionos, opposite-osiris, hydrawn, mail and calendar
+have no licence file of their own.
 
 ---
 
