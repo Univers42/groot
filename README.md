@@ -44,21 +44,21 @@ assistant, running on grobase, the Backend-as-a-Service we built ourselves.
 The editor: pages built from blocks, database blocks, chat, live collaboration
 and an AI assistant.
 
-*React 19, Vite, TypeScript*
+Built with *React 19, Vite, TypeScript*.
 
 ### grobase
 
 Our backend: sign-in, data, real-time and storage, with no osionos-specific
 code inside.
 
-*Go, Rust, NestJS, Kong*
+Built with *Go, Rust, NestJS, Kong*.
 
 ### Public site
 
 Where users start: the landing page in three languages, sign-up and the legal
 pages.
 
-*Astro, Sass*
+Built with *Astro, Sass*.
 
 ### Why we built it
 
@@ -116,7 +116,7 @@ minutes on a cold machine, and `make showcase` lists what is running.
 | Docker 25+ with Compose v2 | Everything builds and runs in containers |
 | GNU Make, git, curl, openssl | They drive the build and generate local secrets |
 | 8 GB RAM, 30 GB of disk | Measured peak about 6.5 GB; images and cache take 23 GB |
-| A GitHub SSH key | The recursive clone uses git@github.com URLs |
+| A GitHub SSH key | The recursive clone uses `git@github.com` URLs |
 | Chrome, current stable | The browser the project is evaluated on |
 
 Nothing else goes on the host, and no `.env` is written by hand: secrets are
