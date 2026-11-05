@@ -940,6 +940,51 @@ pinned_vm() {
   grep -q '^make .*autostart' "$LOG"
 }
 
+# seed_vm COUNT — this user's own VM at the pin, on the plan, whose platform answers COUNT; the
+# record appears once make runs, as set_seeds would write it.
+seed_vm() {
+  mkdir -p "$ROOT/vendor/born2root/profiles"
+  printf 'grobase_ref = "%s"\n' "$(printf 'a%.0s' $(seq 40))" >"$ROOT/vendor/born2root/profiles/server.toml"
+  vault_set
+  fake_own_vm
+  stub ssh "case \"\$*\" in
+  -G*) printf 'hostname 127.0.0.1\\nport 4242\\nuser dlesieur\\n' ;;
+  *'docker ps'*) echo mini-baas-waf ;;
+  *rev-parse*) printf 'a%.0s' \$(seq 40) ;;
+  *grobase.conf*) echo 'GROBASE_ADDONS=observability engines ops studio control playground secrets mysql8 vault42' ;;
+  *public.tenants*) printf '$1' ;;
+  *seeds.last*) [ ! -e '$LOG.seeded' ] || echo seeded ;;
+esac"
+  stub make "echo \"make \$*\" >>\"\$LOG\"; case \"\$*\" in *set_seeds*) : >\"$LOG.seeded\" ;; esac"
+}
+
+@test "seed: a fresh grobase holding only its vault42 tenant is seeded, then that plane comes back" {
+  seed_vm 0
+  DATACENTER_ALLOW_WRITES=1 dc vm
+  [ "$status" -eq 0 ]
+  grep -q '^make .*set_seeds .*FORCE=1' "$LOG"
+  [ "$(grep -n 'set_seeds' "$LOG" | cut -d: -f1 | head -n 1)" -lt "$(grep -n 'make grobase\|make .*grobase GROBASE_ADDONS' "$LOG" | cut -d: -f1 | tail -n 1)" ]
+}
+
+@test "seed: a platform with accounts and no record stops, and nothing is forced" {
+  seed_vm 3
+  DATACENTER_ALLOW_WRITES=1 dc vm
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no record of a seed"* ]]
+  ! grep -q 'FORCE=1' "$LOG"
+}
+
+@test "seed: a count Postgres could not give is never forced" {
+  seed_vm ''
+  DATACENTER_ALLOW_WRITES=1 dc vm
+  ! grep -q 'FORCE=1' "$LOG"
+}
+
+@test "seed: the query leaves out only the vault42 plane's tenant, and counts accounts" {
+  grep -q "where slug <> 'vault42'" "$ROOT/scripts/lib/datacenter-vm.sh"
+  grep -q 'count(\*) from auth.users' "$ROOT/scripts/lib/datacenter-vm.sh"
+}
+
 @test "vm: a repair that leaves grobase unhealthy names what is failing" {
   pinned_vm
   fake_own_vm

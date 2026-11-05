@@ -201,27 +201,37 @@ ensure_grobase() {
   die "grobase is still $problem in the VM after make grobase. From born2root: make grobase_status"
 }
 
-tenant_rows() {
-  vm_ssh "$ALIAS" "docker exec mini-baas-postgres psql -U postgres -tA -c 'select count(*) from public.tenants'" 2>/dev/null
+# What someone put on the platform. The vault42 plane creates its own tenant on install, with no
+# account behind it, so a fresh grobase holds one tenant and no data.
+platform_rows() {
+  vm_ssh "$ALIAS" "docker exec mini-baas-postgres psql -U postgres -tA -c \"select (select count(*) from public.tenants where slug <> 'vault42') + (select count(*) from auth.users)\"" 2>/dev/null
 }
 
 # seeded: a platform with rows and a record is left alone. Rows with no record stop, because nothing
-# says where they came from.
+# says where they came from. born2root counts the plane's tenant as data and refuses, so an empty
+# platform is forced, on this user's own VM only and only when Postgres answered zero: a count it
+# could not read is not forced, and the guest then refuses. A seed replaces the tenants, the plane's
+# with them, so that plane is provisioned again afterwards.
 ensure_seeded() {
-  local rows last
-  rows=$(tenant_rows)
+  local rows answered last force=""
+  answered=$(platform_rows)
+  rows=$answered
   case "$rows" in '' | *[!0-9]*) rows=0 ;; esac
   last=$(vm_ssh "$ALIAS" 'cat /etc/b2b/seeds.last 2>/dev/null' 2>/dev/null)
   if [ "$rows" -gt 0 ]; then
-    [ -n "$last" ] || die "the VM holds $rows tenants and no record of a seed. If they are expendable, from born2root: make set_seeds FORCE=1"
+    [ -n "$last" ] || die "the VM holds $rows tenants and accounts and no record of a seed. If they are expendable, from born2root: make set_seeds FORCE=1"
     return 0
   fi
   require_writes "seeding the VM"
   require_born2root set_seeds
+  [ "$answered" != 0 ] || ! is_own_vm || force=FORCE=1
   note "the VM's platform is empty: loading the vault's seeds"
-  born2root_make set_seeds || die "the seed failed. From born2root: make set_seeds"
+  born2root_make set_seeds ${force:+"$force"} || die "the seed failed. From born2root: make set_seeds"
   last=$(vm_ssh "$ALIAS" 'cat /etc/b2b/seeds.last 2>/dev/null' 2>/dev/null)
   [ -n "$last" ] || die "make set_seeds finished, but the VM has no record of it"
+  [ -n "$force" ] || return 0
+  note "provisioning the planes the seed replaced"
+  install_grobase_plan || die "make grobase failed after the seed. From born2root: make grobase"
 }
 
 cmd_vm() {
