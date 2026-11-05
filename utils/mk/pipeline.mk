@@ -11,6 +11,9 @@ DATACENTER_ON := $(filter-out local,$(strip $(GROBASE_DATACENTER)))
 # The gate also runs on a machine that resolved to no data center by itself, so half-set credentials
 # stop instead of silently taking the local path. Naming the setting for one run skips it.
 ALL_GATE := $(if $(or $(DATACENTER_ON),$(filter file,$(origin GROBASE_DATACENTER))),datacenter-gate)
+# frontends-up runs on both paths. On a data center datacenter-binds owns the copy: it holds the
+# VM's roster, which local-binds would replace with this checkout's.
+LOCAL_BINDS_STEP := $(if $(DATACENTER_ON),,local-binds)
 ifeq ($(DATACENTER_ON),)
 ALL_STEPS := secrets-ensure certs certs-trust-local backend-up env-local-ensure restore-if-empty demo-login-ensure models-migrate live-data-ensure mounts-reencrypt frontends-up healthcheck showcase
 else

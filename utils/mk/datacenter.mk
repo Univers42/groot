@@ -11,9 +11,15 @@ ifneq ($(DATACENTER_ON),)
 export GROBASE_DATACENTER
 export GROBASE_LINK_CONF ?= $(CURDIR)/.env.grobase-link.local
 export GROBASE_REMOTE_ENV ?= $(CURDIR)/.env.grobase-datacenter.local
+endif
+
+# On both paths, for every target: a target that saw another value would recreate the bridge and
+# the edge on the other bind. Unset wherever the checkout's paths are readable, which is the
+# compose default.
 ifndef GROOT_READ_BINDS
 GROOT_READ_BINDS := $(shell $(DATACENTER_SCRIPT) read-binds)
 endif
+ifneq ($(GROOT_READ_BINDS),)
 export GROOT_READ_BINDS
 endif
 
@@ -52,6 +58,10 @@ datacenter-preflight: ## Check the VM, then only the writes those checks allow
 datacenter-binds: ## Write the agency roster from the VM, copy what an NFS checkout cannot serve
 ## Read-only in the VM. The copy exists only for an NFS checkout under rootless Docker.
 	@$(DATACENTER_SCRIPT) binds
+
+local-binds: ## Copy what an NFS checkout cannot serve, with no data center behind it
+## Does nothing unless the checkout is on NFS under rootless Docker. frontends-up runs it.
+	@$(DATACENTER_SCRIPT) local-binds
 
 datacenter-trust: ## Prove the CA signs the VM's WAF, then import it in every browser store
 	@$(DATACENTER_SCRIPT) trust

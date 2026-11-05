@@ -78,7 +78,7 @@ Tailscale is off in the profile, so nothing here touches the tailnet or Cloudfla
 | `DATACENTER_ALLOW_WRITES=1` | one run | Allow VM writes with no terminal; never a VM build |
 | `DATACENTER_VERIFY_BROWSERS=1` | one run | Run the browsers with no terminal |
 | `GROOT_NO_BROWSER_RESTART=1` | one run | Say relaunch instead of doing it |
-| `GROOT_READ_BINDS=<dir>` | one run | Where containers read the roster and API docs. Set by itself on an NFS checkout under rootless Docker, whose users the server refuses |
+| `GROOT_READ_BINDS=<dir>` | one run | Where containers read the roster and API docs. Set by itself on an NFS checkout under rootless Docker, whose users the server refuses, on the local pipeline too; unset everywhere else |
 | `GROBASE_CONNECT_IP=<ip>` | a credential file | The address the relay dials, when the default route's is wrong |
 
 `~/.config/42ctl/secrets/datacenter.env` holds the pinned host key. Database dumps go to

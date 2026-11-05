@@ -5,16 +5,27 @@
 # On an NFS checkout under rootless Docker those users are subuids the NFS server refuses: the
 # bridge's node gets EACCES on the roster and nginx's worker answers 403 on /docs/ and
 # /openapi.json, while container root reads both (measured on /sgoinfre, 2026-11-05). Those
-# sources get a copy on the disk Docker runs from, and GROOT_READ_BINDS points compose at it.
+# sources get a copy on the disk Docker runs from, and GROOT_READ_BINDS points compose at it. Both
+# pipelines fill it: `binds` with the VM's roster, `local-binds` with the checkout's.
 #
-# Caveat: only nfs is detected, so another network filesystem keeps the checkout's paths, and
-# verify_roster or verify_pages then stops the run. A file deleted from the repo stays in the copy
-# until the directory is removed by hand, since the copy is only ever added to.
+# Caveat: only nfs is detected, so another network filesystem keeps the checkout's paths: on a data
+# center verify_roster or verify_pages then stops the run, and the local pipeline serves the 403
+# with nothing to stop it. A file deleted from the repo stays in the copy until the directory is
+# removed by hand, since the copy is only ever added to. A Docker daemon that does not answer reads
+# as rootful, so a make run started before it keeps the checkout's paths.
+# Caveat: the copy is as fresh as the last `make all` or `make frontends-up`. A target that starts
+# the bridge or the edge before either has run (public-up, mail-up) binds directories Docker makes
+# in the copy, which serve nothing until the next frontends-up repairs them.
 
 READ_BIND_DIRS="infrastructure/tls/api-docs apps/grobase/infra/config/openapi"
+ROSTER_FILE=tools/seeds/.agency-people.env
 
 # cmd_read_binds — the copy's directory, or nothing when the checkout's paths are readable.
 cmd_read_binds() {
+  if [ -n "${GROOT_READ_BINDS:-}" ]; then
+    printf '%s\n' "$GROOT_READ_BINDS"
+    return 0
+  fi
   case $(stat -f -c %T "$REPO" 2>/dev/null) in nfs*) ;; *) return 0 ;; esac
   case $(docker info --format '{{.SecurityOptions}}' 2>/dev/null) in *rootless*) ;; *) return 0 ;; esac
   local root
@@ -30,6 +41,16 @@ copy_read_binds() {
     cp -R "$REPO/$dir/." "$copy/$dir/" || die "could not copy $dir to $copy"
     chmod -R a+rX "$copy/$dir"
   done
+  mkdir -p "$copy/${ROSTER_FILE%/*}" || die "could not create $copy/${ROSTER_FILE%/*}"
+}
+
+# Docker makes a directory where a bind's source is missing, and the bridge keeps binding that
+# directory after the file appears, so it goes too.
+remove_docker_made_roster_dir() {
+  [ -d "$1" ] || return 0
+  rmdir -- "$1" || die "$1 is a directory holding files. Move it, then make all"
+  docker ps -aq --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+    --filter label=com.docker.compose.service=osionos-bridge | xargs -r docker rm -f >/dev/null
 }
 
 # agency_uuids — email|id for each agency account in the VM, read-only.
@@ -50,12 +71,7 @@ write_roster() {
     [ -n "${UUID_OF[${entry%%|*}]:-}" ] ||
       die "the VM has no account for ${entry%%|*}, so the people lists would be empty. From born2root: make set_seeds"
   done
-  if [ -d "$out" ]; then
-    rmdir -- "$out" || die "$out is a directory holding files. Move it, then make all"
-    # It still binds the directory it started with.
-    docker ps -aq --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
-      --filter label=com.docker.compose.service=osionos-bridge | xargs -r docker rm -f >/dev/null
-  fi
+  remove_docker_made_roster_dir "$out"
   write_agency_snapshot "${UUID_OF[owner@agency.local]}" >"$out"
   chmod a+r "$out"
 }
@@ -65,9 +81,24 @@ cmd_binds() {
   [ -n "$ALIAS" ] || die "this machine has no data center"
   local copy
   copy=$(cmd_read_binds)
-  if [ -n "$copy" ]; then
-    copy_read_binds "$copy"
-    mkdir -p "$copy/tools/seeds" || die "could not create $copy/tools/seeds"
+  [ -z "$copy" ] || copy_read_binds "$copy"
+  write_roster "${copy:-$REPO}/$ROSTER_FILE"
+}
+
+# The local pipeline's roster comes from seed_agency_people.sh, into the checkout. Without one the
+# copy still needs a file: a missing source would become a directory Docker makes. Written in
+# place: a running bridge binds the inode.
+cmd_local_binds() {
+  local copy checkout_roster=$REPO/$ROSTER_FILE out
+  copy=$(cmd_read_binds)
+  [ -n "$copy" ] || return 0
+  out=$copy/$ROSTER_FILE
+  copy_read_binds "$copy"
+  remove_docker_made_roster_dir "$out"
+  if [ -f "$checkout_roster" ]; then
+    cat -- "$checkout_roster" >"$out" || die "could not copy the roster to $out"
+  else
+    : >"$out" || die "could not write $out"
   fi
-  write_roster "${copy:-$REPO}/tools/seeds/.agency-people.env"
+  chmod a+r "$out"
 }

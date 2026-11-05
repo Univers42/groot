@@ -891,6 +891,153 @@ roster_vm() {
   [ ! -e "$ROOT/tools/seeds/.agency-people.env" ]
 }
 
+@test "read-binds: a directory already chosen wins over detection" {
+  stub stat 'echo ext2/ext3'
+  GROOT_READ_BINDS=/chosen/copy dc read-binds
+  [ "$output" = /chosen/copy ]
+}
+
+# nfs_under_rootless DOCKER_ROOT — the machine this bug needs; every other docker call is logged.
+nfs_under_rootless() {
+  stub stat 'echo nfs'
+  stub docker "echo \"docker \$*\" >>\"\$LOG\"
+case \"\$*\" in *SecurityOptions*) echo '[name=rootless]' ;; *DockerRootDir*) echo '$1' ;; *'ps -aq'*) echo bridge-id ;; esac"
+  mkdir -p "$ROOT/infrastructure/tls/api-docs" "$ROOT/apps/grobase/infra/config/openapi"
+  echo docs >"$ROOT/infrastructure/tls/api-docs/index.html"
+  echo spec >"$ROOT/apps/grobase/infra/config/openapi/grobase-public.json"
+  COPY="$(dirname "$1")/groot-read-binds"
+}
+
+@test "local-binds: off NFS it copies nothing, so a normal checkout does not change" {
+  stub stat 'echo ext2/ext3'
+  stub docker 'echo "docker $*" >>"$LOG"'
+  dc local-binds
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  ! grep -q docker "$LOG"
+}
+
+@test "local-binds: NFS under rootful Docker copies nothing" {
+  nfs_under_rootless "$BATS_TEST_TMPDIR/local/docker"
+  stub docker 'echo "[name=seccomp]"'
+  dc local-binds
+  [ "$status" -eq 0 ]
+  [ ! -e "$COPY" ]
+}
+
+@test "local-binds: an NFS checkout with no data center gets every read-bind source in the copy" {
+  nfs_under_rootless "$BATS_TEST_TMPDIR/local/docker"
+  echo 'AGENCY_PERSON_0=one' >"$ROOT/tools/seeds/.agency-people.env"
+  chmod 600 "$ROOT/tools/seeds/.agency-people.env"
+  dc local-binds
+  [ "$status" -eq 0 ]
+  [ -s "$COPY/infrastructure/tls/api-docs/index.html" ]
+  [ -s "$COPY/apps/grobase/infra/config/openapi/grobase-public.json" ]
+  cmp "$ROOT/tools/seeds/.agency-people.env" "$COPY/tools/seeds/.agency-people.env"
+  [ "$(stat() { command -p stat "$@"; }; stat -c %a "$COPY/tools/seeds/.agency-people.env")" = 644 ]
+}
+
+@test "local-binds: no roster in the checkout leaves an empty file, so Docker binds no directory" {
+  nfs_under_rootless "$BATS_TEST_TMPDIR/local/docker"
+  mkdir -p "$COPY/tools/seeds"
+  echo 'AGENCY_PERSON_0=from-the-vm' >"$COPY/tools/seeds/.agency-people.env"
+  dc local-binds
+  [ "$status" -eq 0 ]
+  [ -f "$COPY/tools/seeds/.agency-people.env" ]
+  [ ! -s "$COPY/tools/seeds/.agency-people.env" ]
+}
+
+@test "local-binds: an empty directory Docker left in the checkout is no roster" {
+  nfs_under_rootless "$BATS_TEST_TMPDIR/local/docker"
+  mkdir "$ROOT/tools/seeds/.agency-people.env"
+  dc local-binds
+  [ "$status" -eq 0 ]
+  [ -f "$COPY/tools/seeds/.agency-people.env" ]
+}
+
+@test "local-binds: a directory Docker made in the copy goes, and so does the bridge binding it" {
+  nfs_under_rootless "$BATS_TEST_TMPDIR/local/docker"
+  mkdir -p "$COPY/tools/seeds/.agency-people.env"
+  echo 'AGENCY_PERSON_0=one' >"$ROOT/tools/seeds/.agency-people.env"
+  dc local-binds
+  [ "$status" -eq 0 ]
+  [ -s "$COPY/tools/seeds/.agency-people.env" ]
+  grep -q 'docker rm -f bridge-id' "$LOG"
+}
+
+@test "local-binds: a directory chosen by hand is the one written" {
+  stub stat 'echo ext2/ext3'
+  mkdir -p "$ROOT/infrastructure/tls/api-docs" "$ROOT/apps/grobase/infra/config/openapi"
+  chosen="$BATS_TEST_TMPDIR/chosen"
+  GROOT_READ_BINDS="$chosen" dc local-binds
+  [ "$status" -eq 0 ]
+  [ -f "$chosen/tools/seeds/.agency-people.env" ]
+}
+
+@test "binds: a directory chosen by hand is the one written" {
+  roster_vm
+  mkdir -p "$ROOT/infrastructure/tls/api-docs" "$ROOT/apps/grobase/infra/config/openapi"
+  chosen="$BATS_TEST_TMPDIR/chosen"
+  GROOT_READ_BINDS="$chosen" dc binds
+  [ "$status" -eq 0 ]
+  [ -s "$chosen/tools/seeds/.agency-people.env" ]
+}
+
+@test "make all: the local pipeline copies before compose starts anything" {
+  repo
+  stub openssl 'exit 0'
+  run make -n all GROBASE_DATACENTER= SKIP_SYNC=1
+  [[ "$output" == *"datacenter.sh local-binds"* ]]
+  copied=$(grep -n 'datacenter.sh local-binds' <<<"$output" | head -n 1 | cut -d: -f1)
+  started=$(grep -n 'compose up -d\|compose up' <<<"$output" | grep -v 'apps/grobase' | head -n 1 | cut -d: -f1)
+  [ -n "$started" ]
+  [ "$copied" -lt "$started" ]
+}
+
+@test "make frontends-up: a data center never reaches local-binds, which would empty the VM's roster" {
+  repo
+  stub openssl 'exit 0'
+  run make -n frontends-up GROBASE_DATACENTER=b2b SKIP_SYNC=1
+  [[ "$output" != *"local-binds"* ]]
+}
+
+@test "make link-frontends-start: the same frontends with no data center get the copy" {
+  repo
+  stub openssl 'exit 0'
+  run make -n link-frontends-start GROBASE_DATACENTER= SKIP_SYNC=1
+  [[ "$output" == *"datacenter.sh local-binds"* ]]
+}
+
+@test "make all: a data center keeps its own binds step, which holds the VM's roster" {
+  repo
+  stub openssl 'exit 0'
+  run make -n all GROBASE_DATACENTER=b2b SKIP_SYNC=1
+  [[ "$output" == *"datacenter.sh binds"* ]]
+  [[ "$output" != *"local-binds"* ]]
+}
+
+# binds_seen_by_recipes — what a recipe's compose would read, from the real Makefile. Prints
+# "unset" when the variable is not in the recipe's environment at all.
+binds_seen_by_recipes() {
+  make --no-print-directory GROBASE_DATACENTER= \
+    --eval 'show-binds: ; @printf "[%s]\n" "$${GROOT_READ_BINDS-unset}"' show-binds
+}
+
+@test "make: recipes on the local path see no setting off NFS" {
+  repo
+  stub stat 'echo ext2/ext3'
+  run binds_seen_by_recipes
+  [ "$output" = "[unset]" ]
+}
+
+@test "make: recipes on the local path see the copy on NFS under rootless Docker" {
+  repo
+  stub stat 'echo nfs'
+  stub docker 'case "$*" in *SecurityOptions*) echo "[name=rootless]" ;; *DockerRootDir*) echo /goinfre/me/docker ;; esac'
+  run binds_seen_by_recipes
+  [ "$output" = "[/goinfre/me/groot-read-binds]" ]
+}
+
 @test "verify: API docs the edge refuses fail the run" {
   verified_stack
   stub curl 'case "$*" in */docs/*) printf 403 ;; *) printf 200 ;; esac'

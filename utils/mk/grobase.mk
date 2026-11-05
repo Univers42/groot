@@ -157,7 +157,7 @@ apply-models-baseline: ## Mark every current models/*.sql as applied WITHOUT run
 ## applied WITHOUT running it.
 	@sh scripts/apply-models.sh baseline
 
-frontends-up: submodules-pinned certs hydrawn-wasm ## Build and start only the root frontends against the running backend
+frontends-up: submodules-pinned certs hydrawn-wasm $(LOCAL_BINDS_STEP) ## Build and start only the root frontends against the running backend
 ## Usage: make frontends-up [PULL_PREBUILT=1]
 ## Build and start ONLY the root frontends against the running grobase backend. Also resurrects the
 ## IDE plane containers (runner / sandbox socket-proxy) — but ONLY when ./.env.local records them as
