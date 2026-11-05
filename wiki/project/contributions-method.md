@@ -6,7 +6,7 @@ here with the identity joins it rests on.
 
 ## The method
 
-Non-merge commits reachable from the commit groot `main` pins for each
+Non-merge commits reachable from the commit that groot's `main` pins for each
 repository, read through the root [`.mailmap`](../../.mailmap), with bots and
 AI-agent identities left out:
 
