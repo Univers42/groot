@@ -1059,6 +1059,18 @@ case \"\$*\" in *SecurityOptions*) echo '[name=rootless]' ;; *DockerRootDir*) ec
   done
 }
 
+@test "read-binds: a daemon that hangs on either question reads as rootful, within the bound" {
+  stub stat 'echo nfs'
+  stub docker 'exec sleep 30'
+  run timeout 12 bash "$ROOT/scripts/datacenter.sh" read-binds
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  stub docker 'case "$*" in *SecurityOptions*) echo "[name=rootless]" ;; *) exec sleep 30 ;; esac'
+  run timeout 12 bash "$ROOT/scripts/datacenter.sh" read-binds
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 @test "local-binds: a directory chosen by hand is the one written" {
   stub stat 'echo ext2/ext3'
   mkdir -p "$ROOT/infrastructure/tls/api-docs" "$ROOT/apps/grobase/infra/config/openapi"
