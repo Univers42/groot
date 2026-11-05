@@ -793,14 +793,12 @@ Several members work almost only in submodules, so the root alone understates th
 | `serjimen` | @DjSurgeon | | 82 | | 134 | | | | | | 2026-04-09 → 2026-11-03 |
 | `danfern3` | @danielfdez17 | | 84 | 73 | 4 | 20 | | | 1 | 10 | 2026-03-18 → 2026-10-02 |
 | `shashemi` | @SMOSTAFAH1 | 42 | 17 | 15 | 39 | 8 | | | | | 2026-09-20 → 2026-11-04 |
-| `rstancu` | @esettes | | 90 | | | | | | 2 | | 2026-03-18 → 2026-05-02 |
+| `rstancu` (former member) | @esettes | | 90 | | | | | | 2 | | 2026-03-18 → 2026-05-02 |
 
 Dates are author dates in these nine repositories only. Work that is not on a
-pinned commit does not show above: `danfern3`'s 44 root commits sit on `fix/ci`,
-open as [#165](https://github.com/Univers42/groot/pull/165), and most of their
-133 monkey-bot commits are on branches the pin does not reach. A commit count is
-not effort: one large commit and one typo fix weigh the same, and pairing and
-review do not show in it.
+pinned commit (open branches and pull requests) does not show above. A commit
+count is not effort: one large commit and one typo fix weigh the same, and
+pairing and review do not show in it.
 
 Merged pull requests per login in the project's repositories (groot, osionos, grobase,
 prismatica = opposite-osiris, osionos-mail, osionos-calendar, hydrawn, QA, monkey-bot), from
@@ -814,86 +812,37 @@ prismatica = opposite-osiris, osionos-mail, osionos-calendar, hydrawn, QA, monke
 | @DjSurgeon | 8 | prismatica 7, osionos 1 |
 | @danielfdez17 | 4 | prismatica 4 |
 
-The numbers in brackets below are the member's commits in that row of the
-[Features List](#features-list).
+### Per member
 
-### dlesieur — Dylan Lesieur
+- **`dlesieur`**, Product Owner: grobase (control plane, data plane, realtime,
+  gateway, contracts), osionos (editor, chat, collaboration, the bridge, the AI
+  service), mail, calendar, the root's infrastructure and CI.
+- **`vjan-nie`**, Project Manager: QA tooling, end-to-end tests, the wiki and
+  README, submodule pins, Docker infrastructure.
+- **`serjimen`**, frontend tech lead: the public site (opposite-osiris),
+  osionos accessibility and editor features.
+- **`danfern3`**, backend tech lead: grobase Docker images and Kubernetes
+  deployment, monkey-bot, osionos editor features.
+- **`shashemi`**, QA / quality tech lead: security fixes and SAST, the site's
+  legal pages, the TLS edge, end-to-end fixes.
 
-- **Areas:** grobase (Go control plane, Rust data plane and realtime, Kong
-  gateway, contracts and self-serve apps), osionos (editor, chat, collaboration,
-  social, profile, the bridge, the AI service), mail, calendar, the root's
-  infrastructure, TLS edge and CI; hydrawn (569 commits: `apps/web`, the engine,
-  `docs/reference`).
-- **Pull requests:** 260 merged (osionos 138, grobase 61, groot 56).
-- **Features:** the largest share of every row of the Features List except the
-  legal pages, for example the block editor (164), the database block (125),
-  chat (72) and the AI assistant (317).
-- **Challenges:** not recorded yet.
+### Challenges and lessons
 
-### danfern3 — Daniel Fernández
-
-- **Areas:** `vendor/monkey-bot` (133 commits on all branches, 10 on the pinned
-  commit: form-XSS and mutation testing, configuration); grobase Docker images
-  built from scratch, Kubernetes deployment, the playground and Makefile (March
-  2026); osionos breadcrumbs, trash, multi-line text in blocks, the markdown
-  engine and code-quality fixes; hydrawn (20 commits, `apps/web`, `apps/api`,
-  `packages/contract`, 2026-09-24: submodule clone paths, formatting); root
-  submodule pins and the `make all` bats fix, on `fix/ci`
-  ([#165](https://github.com/Univers42/groot/pull/165), open).
-- **Pull requests:** 4 merged (prismatica).
-- **Features:** block editor (29), whiteboard (20).
-- **Challenges:** not recorded yet.
-
-### serjimen — Sergio Jiménez de la Cruz
-
-- **Areas:** the public site, opposite-osiris (134 commits on the pinned commit:
-  hero animation performance, unit tests and benchmarks, security fixes, auth
-  pages); osionos accessibility fixes, page links, move and delete, shared UI
-  refactor, the node installer's self-update (#277) and database probe
-  diagnostics (#278), the changelog.
-- **Pull requests:** 8 merged (prismatica 7, osionos 1), among them the landing page in English,
-  Spanish and Arabic with right-to-left layout (prismatica #21, #22, #23, #35), the accessible
-  privacy policy and terms (#38) and a WCAG 2.2 AA audit pipeline with axe-core fixes (#39).
-- **Features:** block editor (8), legal pages (2), communities and social feed
-  (2), sign-up / sign-in (1), database block (1).
-- **Challenges:** not recorded yet.
-
-### vjan-nie — Vadim Jan Nieto
-
-- **Areas:** `vendor/QA` (38 commits: registry, migrations, hooks, CLI); root
-  end-to-end tests, the wiki and README, graph-studio tests, the hydrawn TLS
-  edge and its CORS, submodule pins; osionos whiteboard and graph-studio fixes;
-  grobase Docker infrastructure and dependency fixes; hydrawn (4 commits: engine
-  bumps, the nested-shape binding fix).
-- **Pull requests:** 72 merged (groot 45, osionos 17, prismatica 6, grobase 4).
-- **Features:** block editor (42), AI assistant (9), public API (5), whiteboard
-  (4), legal pages (3), multi-engine data API (3), database block (2), chat (1).
-- **Challenges:** not recorded yet.
-
-### shashemi — Seyed Mostafa Hashemian
-
-- **Areas:** security fixes across root, grobase and opposite-osiris (SAST
-  findings, nginx scan suppressions, IDE socket proxy hardening); the site's
-  legal pages, SEO and accessibility; root CI triggers and the models' export
-  erasure paths; osionos end-to-end fixes; hydrawn (8 commits, `apps/web`,
-  `apps/api`, `packages/contract`: trail and notes, hydrawn #1, and the
-  pen-thickness-with-zoom test, #8).
-- **Pull requests:** 57 merged (prismatica 20, groot 19, osionos 12, grobase 6).
-- **Features:** whiteboard (6), legal pages (5), real-time collaboration (2),
-  block editor (2), database block, video rooms, communities, AI assistant and
-  public API (1 each).
-- **Challenges:** not recorded yet.
-
-### Team-level challenges
-
-From the project's history:
-
-- **Migrating the data plane from TypeScript to Rust with no downtime**, behind
-  a per-request switch (`RUST_DATA_PLANE_FORWARD`).
-- **Keeping eight database adapters at parity**, enforced by a conformance battery that runs every
-  adapter against a real engine and checks it serves exactly what it advertises.
-- **Auditing our own authorisation path** and shipping a reversible mitigation for a weakness we
-  found (see [`wiki/security/03-known-weaknesses.md`](wiki/security/03-known-weaknesses.md)).
+The project met many productive problems and blockers: lack of autonomy,
+communication problems, frustration. We addressed them with dedicated meetings
+and by applying TDD and DevOps practices, toward a frictionless workflow. We
+acknowledge our technical debt openly
+([`wiki/security/03-known-weaknesses.md`](wiki/security/03-known-weaknesses.md)
+is one record of it). Several technologies and architectures were rebuilt from
+scratch when the first choice proved wrong late: the data plane moved from
+TypeScript to Rust behind a per-request switch (`RUST_DATA_PLANE_FORWARD`, on
+by default in grobase `orchestrators/compose/base/app-services.yml:96`);
+grobase's Node session, email and GDPR services were retired and their work
+moved to the Go orchestrator (`app-services.yml:133,190,448`); and osionos's
+legacy second brain was replaced by graph_render (groot `fresh-machine.yml:363`
+checks it on a live stack; the legacy one survives only behind a gate, osionos
+`ci.yml:383-388`). The project's maturity comes from that intense team
+experience, with its ups and downs.
 
 ---
 
