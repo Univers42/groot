@@ -5,9 +5,9 @@
 **A workspace where your data stays yours.** Pages, databases, chat and an AI
 assistant, running on grobase, the Backend-as-a-Service we built ourselves.
 
-| 52 points | 5 members | Our own backend | 1 command |
+| 16 points | 5 members | Our own backend | 1 command |
 |---|---|---|---|
-| 10 modules claimed, 14 required | Over 8,400 commits | Go, Rust, NestJS and Kong | `make all` runs everything |
+| 10 modules (6 Majors, 4 Minors), 14 required | Over 8,400 commits | Go, Rust, NestJS and Kong | `make all` runs everything |
 
 > Naming: *Osionos* is the project and its editor. *prismatica* is the public
 > landing (`apps/opposite-osiris`, repository
