@@ -441,6 +441,44 @@ bonus points stop at 19.
 
 W1 replaces the two Minors W2 and W3, which cannot be counted as well.
 
+### Modules of choice (free choice)
+
+| # | Module | Category | Type | Pts | Status | Evidence | Who (commits) |
+|---|---|---|---|--:|---|---|---|
+| 8 | **Module of choice:** contract-driven application factory | Free choice | Major | 2 | Partial | groot [`Modules of choice`](.github/workflows/modules-of-choice.yml) runs gates `m176` and `m177` statically. Live half (`BAAS_VERIFY_LIVE=1`) is wired in grobase Integration Tests on branch `ci/live-proof-gates-m175-m177` ([#177](https://github.com/Univers42/groot/issues/177)); pin that commit once CI is green. Demo steps in [`wiki/DEFENSE.md`](wiki/DEFENSE.md) | dlesieur 9 (provisioning), dlesieur 33 (self-serve) |
+| 9 | **Module of choice:** SSRF guard on the HTTP engine | Free choice | Minor | 1 | CI | Kept as its own minor (not folded into row 8). 30 unit tests in grobase `src/data-plane-router/crates/data-plane-pool/src/http/mod.rs`, including `ssrf_blocks_internal_and_metadata_ips` for `169.254.169.254`; demo in [`wiki/DEFENSE.md`](wiki/DEFENSE.md) | dlesieur 8 |
+
+### Justification — Module of choice (Major): contract-driven application factory
+
+- **Why this module.** It is the central idea of the project: a backend with zero
+  application-specific code, where an application is a declarative contract.
+- **Technical challenge.** From one JSON file, a generic provisioner must create an isolated
+  database, apply its schema, create roles and policies, mint scoped API keys and emit the
+  frontend's `PUBLIC_*` configuration — idempotently, on every boot. The self-serve endpoint
+  `POST /v1/tenants/me/apps` does it on demand, with a fresh `CREATE DATABASE` per application.
+- **Value.** A new application costs a contract instead of a new server. The public site and
+  vault42 are both provisioned this way in production.
+- **Why it deserves a Major.** It spans the Go control plane, the Rust data plane and the
+  database layer, and it comes with isolation proofs: gate `m177` proves self-serve creation, and
+  gate `m176` proves one application cannot read another's data (a foreign mount resolves to zero
+  rows — a 404, never a cross read). Both run in groot's
+  [`Modules of choice`](.github/workflows/modules-of-choice.yml) workflow in their static mode;
+  their live half is on grobase `ci/live-proof-gates-m175-m177` (Integration Tests,
+  `BAAS_VERIFY_LIVE=1`). Three-step demos: [`wiki/DEFENSE.md`](wiki/DEFENSE.md).
+
+### Justification — Module of choice (Minor): SSRF guard on the HTTP engine
+
+- **Why this module.** The data plane can mount a remote HTTP API as if it were a database —
+  which also means "let a user make our server fetch any URL", the classic SSRF hole.
+- **Technical challenge.** The guard blocks loopback, private (RFC 1918), link-local — including
+  the cloud metadata endpoint `169.254.169.254` — CGNAT, IPv6 ULA and link-local, IPv4-mapped
+  addresses and internal hostnames, then **pins** the connection to the validated public IP so a
+  later DNS rebind cannot redirect it inward.
+- **Value and weight.** Small and self-contained, and it shows security judgement on a feature we
+  chose to build. Kept as a separate minor from the factory major: a validator may still fold it
+  into the data plane — say that risk aloud. Demo: `cargo test -p data-plane-pool
+  ssrf_blocks_internal_and_metadata_ips` ([wiki/DEFENSE.md](wiki/DEFENSE.md)).
+
 ### Evidence
 
 For the modules above that our earlier module table also covered: the code,
