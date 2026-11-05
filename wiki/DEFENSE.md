@@ -70,6 +70,60 @@ have none, so that category and the AI-opponent module are out — and **custom 
 four-part justification in the README (why, what challenge, what value, why that weight). Our
 recommendation: the contract-driven factory as major, the SSRF guard as minor.
 
+### Demo — Major: contract-driven application factory (m176 + m177)
+
+From a clean clone with `apps/grobase` at the pin (`git submodule update --init apps/grobase`):
+
+1. **Static proof (no stack).**  
+   `bash apps/grobase/scripts/verify/m177-selfserve-apps.sh`  
+   Expect `m177 PASS` and checks naming the flag-gated mount, `EnsureDatabase`, and the slug/DSN
+   Go tests.  
+   `bash apps/grobase/scripts/verify/m176-contract-isolation-live.sh`  
+   Expect `m176 PASS` and the resolver gated on `tenant_id`.  
+   Same gates in CI: [`Modules of choice`](../.github/workflows/modules-of-choice.yml).
+
+2. **Self-serve create (live stack).** With `make all` (or grobase `make up`) and
+   `APPS_SELFSERVE_ENABLED=1` on tenant-control, a logged-in JWT:  
+   `curl -sS -X POST "$KONG_URL/v1/tenants/me/apps" -H "Authorization: Bearer $DEV_JWT" -H 'Content-Type: application/json' -d '{"name":"alpha"}'`  
+   Expect JSON with a fresh `db_id`, `api_key` and `tenant`. Create a second app (`beta`); the two
+   `db_id`s differ.
+
+3. **Cross-app isolation (live).**  
+   `curl -sS -o /dev/null -w '%{http_code}\n' "$KONG_URL/query/v1/$BETA_DB/tables" -H "apikey: $ANON_KEY" -H "X-Baas-Api-Key: $ALPHA_KEY"`  
+   Expect `404` (foreign key → zero mount rows). Own key on own `db_id` is `200`.  
+   Live CI: grobase Integration Tests runs `m177` and `m176` with `BAAS_VERIFY_LIVE=1`
+   ([#177](https://github.com/Univers42/groot/issues/177)).
+
+### Demo — Minor: SSRF guard on the HTTP engine
+
+Kept as its own minor (not folded into the major): it is a security judgement on the HTTP mount
+engine, not a factory feature. Risk to name aloud: a validator may call it "part of the data
+plane" and refuse the separate point — have the unit-test demo ready and the README justification
+open.
+
+1. **Unit proof (the claim they ask for).** From `apps/grobase`:  
+   `cargo test -p data-plane-pool ssrf_blocks_internal_and_metadata_ips -- --nocapture`  
+   Expect the test to pass while listing `169.254.169.254` among the blocked addresses
+   (`src/data-plane-router/crates/data-plane-pool/src/http/mod.rs`).
+
+2. **Same suite in CI.** grobase `CI` runs `cargo test --workspace`; the 30 HTTP SSRF tests are
+   in that job. Point at a green run on `main`.
+
+3. **What you say while it runs.** A mount whose base URL resolves to loopback, RFC 1918,
+   link-local (including cloud metadata) or an IPv4-mapped form is refused before the dial; the
+   connection is then pinned to the validated public IP so a later DNS rebind cannot walk inward.
+
+### Demo — Collab namespace isolation (m175, supports rows 2 and 10)
+
+1. `bash apps/grobase/scripts/verify/m175-collab-namespace-isolation.sh`  
+   Expect the realtime-core authorisation tests green (wildcard cannot reach `collab:` when the
+   protected list is set).
+2. Live (optional): `BAAS_VERIFY_LIVE=1 bash apps/grobase/scripts/verify/m175-collab-namespace-isolation.sh`
+   on a stack with realtime — wildcard denied on `collab:`, exact grant allowed, parity when the
+   flag is off.
+3. Product click: two browsers on one osionos page; each sees the other's cursor. Raise
+   `EDITION=realtime|prod|full` first.
+
 ---
 
 ## Code quality and teamwork
