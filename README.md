@@ -383,7 +383,9 @@ Rust data plane's own ABAC evaluator.
 
 ---
 
-## Features List
+## ✨ Features and who built them
+
+Who comes from the commits that touch each feature's code.
 
 "Who" counts the non-merge commits that touch the feature's paths (last column),
 reachable from the commit groot `main` pins for that repository, read through
@@ -412,7 +414,7 @@ A commit count is not effort, and pairing or review does not show in it.
 | Contract-driven provisioning | One JSON contract → isolated database, roles, keys and frontend `.env` | dlesieur 9 | grobase `scripts/provision-contract.sh`, `infra/config/contracts` |
 | Self-serve applications | `POST /v1/tenants/me/apps` creates a new isolated app with its own database and key, behind `APPS_SELFSERVE_ENABLED` (off unless set) | dlesieur 32 | grobase `src/control-plane/internal/tenants` |
 | Multi-engine data API | One API and one key over PostgreSQL, MySQL, MongoDB, Redis (default edition), SQLite, SQL Server (`engines` plane), HTTP and DynamoDB (opt-in build) | dlesieur 95, vjan-nie 3 | grobase `src/data-plane-router` |
-| Public API | Key-authenticated, rate-limited API behind Kong, documented with OpenAPI at `/docs/` on the `:8444` edge | dlesieur 64, vjan-nie 5, shashemi 1 | grobase `infra/docker/services/kong`, `infra/config/openapi`; groot `infrastructure/tls/nginx.conf` |
+| Public API | Key-authenticated, rate-limited API behind Kong (not claimed as a module: see [Modules and points](#-modules-and-points)) | dlesieur 64, vjan-nie 5, shashemi 1 | grobase `infra/docker/services/kong`, `infra/config/openapi`; groot `infrastructure/tls/nginx.conf` |
 
 ---
 
