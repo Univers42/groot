@@ -481,8 +481,8 @@ Risk is how likely the module is to fail in front of an evaluator:
 | U4 | Advanced permissions | Major | 2 | Local main stack, nothing to switch on (`OS scripts/bridge-account-mounts.mjs:75`): as admin, change a member's role or a page's share level; that member loses access | `OS scripts/bridge-roles.mjs:28-29` (admin, moderator, user, guest); `OS scripts/bridge-share-rules.mjs:38`; `OS scripts/bridge-page-access.mjs:217`; `OS src/features/admin-users/api.ts`; docs: [`wiki/platform/07-isolation.md`](wiki/platform/07-isolation.md) | `OS tests/bridge/bridge-page-access*` (7), `bridge-share-rules-*` (2), `bridge-mount-roles` → OS-CI Bridge tests (`ci.yml:291`). No test drives the per-role views the subject asks for | medium |
 | I2 | RAG | Major | 2 | Same switch as I3: ask a workspace question, click a citation. The large-dataset part is a recorded measurement (110 363 chunks, run on a separate eval stack, reranker off by default), not live | `OS services/osionos-ai/src/retrieval/search.ts:277,469,564`; `OS services/osionos-ai/src/retrieval/rerank.ts:16`; `G models/osionos-ai-rag-migration.sql:60,91`; docs: [M2 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m2-rag.md), `OS services/osionos-ai/eval/wiki/RESULTS-rag.md` | `OS services/osionos-ai/tests/{retrieval,aclAgreement,rerank}.test.ts` → OS-CI "AI service (tsc + suite)" (`ci.yml:314`) | high |
 | I5 | Content moderation | Minor | 1 | Same switch as I3, plus `OSIONOS_MODERATION_ACTIONS=hold` and, once its migration is applied, `OSIONOS_MODERATION_STATE=1` (`OS scripts/bridge-moderation-gate.mjs:46`): post a toxic comment; it waits in the admin console (no auto-removal, by design) | `OS scripts/bridge-moderation-gate.mjs:70`; `OS services/osionos-ai/src/moderation/l1.ts:99`; docs: [M4 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m4-moderation.md) | `OS services/osionos-ai/tests/moderation*.test.ts` (4) → OS-CI AI service (`ci.yml:314`); `OS tests/bridge/bridge-moderation*` (5) → Bridge tests (`ci.yml:291`) | medium |
-| Choice | Contract-driven app factory | Major | 2 | Local main stack, set `APPS_SELFSERVE_ENABLED` (empty by default, `GB orchestrators/compose/base/control-plane.yml:140`): sign in, `POST /v1/tenants/me/apps` twice; one app's key on the other app's database answers 4xx | `GB src/control-plane/internal/tenants/selfserve_apps.go:55-58`; `GB src/control-plane/cmd/tenant-control/mount_appsselfserve.go:26`; `GB scripts/verify/m177-selfserve-apps.sh`; docs: [`wiki/platform/06-contracts.md`](wiki/platform/06-contracts.md) | m176 static leg → GB-CI Shellcheck job (`ci.yml:192-193`); m176 and m177 → groot `modules-of-choice.yml:39-40`, static mode only | medium |
-| Choice | SSRF guard on the HTTP engine | Minor | 1 | Local main stack: mount an `http` source at `169.254.169.254` and query it; it is refused. Whether the default edition mounts the `http` engine is unverified (guess: it does not) | `GB src/data-plane-router/crates/data-plane-pool/src/dial_guard/classify.rs:90-155`; `GB …/data-plane-pool/src/http/validate.rs:83-153`; `GB …/data-plane-pool/src/http/adapter.rs:57-61` (pins the checked IP); docs: [`wiki/security/04-network.md`](wiki/security/04-network.md) | `GB …/dial_guard/classify_tests.rs` → GB-CI unit tests `rust-data-plane` (`ci.yml:1436`); "Engine conformance (http)" (`ci.yml:1531`) | medium |
+| Choice | Contract-driven app factory | Major | 2 | Local main stack, set `APPS_SELFSERVE_ENABLED` (empty by default, `GB orchestrators/compose/base/control-plane.yml:140`): sign in, `POST /v1/tenants/me/apps` twice; one app's key on the other app's database answers 4xx. Steps: [`wiki/DEFENSE.md`](wiki/DEFENSE.md) | `GB src/control-plane/internal/tenants/selfserve_apps.go:55-58`; `GB src/control-plane/cmd/tenant-control/mount_appsselfserve.go:26`; `GB scripts/verify/m177-selfserve-apps.sh`; docs: [`wiki/platform/06-contracts.md`](wiki/platform/06-contracts.md) | m176 static leg → GB-CI Shellcheck job (`ci.yml:192-193`); m176 and m177 → groot `modules-of-choice.yml:39-40`, static mode only. Their live half (`BAAS_VERIFY_LIVE=1`) is on grobase branch `ci/live-proof-gates-m175-m177`, not pinned yet ([#177](https://github.com/Univers42/groot/issues/177)) | medium |
+| Choice | SSRF guard on the HTTP engine | Minor | 1 | No stack needed, but a Rust toolchain: from `apps/grobase/src/data-plane-router`, `cargo test -p data-plane-pool ssrf_blocks_internal_and_metadata_ips -- --nocapture`; it passes while listing `169.254.169.254` as blocked. Steps: [`wiki/DEFENSE.md`](wiki/DEFENSE.md). Live alternative: mount an `http` source at `169.254.169.254`; whether the default edition mounts the `http` engine is unverified (guess: it does not) | `GB src/data-plane-router/crates/data-plane-pool/src/dial_guard/classify.rs:90-155`; `GB …/data-plane-pool/src/http/validate.rs:83-153`; `GB …/data-plane-pool/src/http/adapter.rs:57-61` (pins the checked IP); docs: [`wiki/security/04-network.md`](wiki/security/04-network.md) | `GB …/data-plane-pool/src/http/mod.rs:90` (`ssrf_blocks_internal_and_metadata_ips`, one of 30 tests in that file) and `GB …/dial_guard/classify_tests.rs` → GB-CI unit tests `rust-data-plane` (`ci.yml:1436`); "Engine conformance (http)" (`ci.yml:1531`) | medium |
 
 The codes W6, U4, U5, I2, I5 and D4 follow the subject's order within each
 category, as LESdylan's codes do. The subject is not in this repository, so
@@ -509,7 +509,9 @@ I5 (5 points), and they fail together.
 - **W1 replaces W2 and W3**: neither Minor is claimed.
 - **Modules of choice**: one Major and one Minor, 3 points, the cap. Neither is
   a catalogue module; the SSRF guard is not the cybersecurity WAF or Vault
-  module.
+  module. An evaluator may still count the SSRF guard as part of the data
+  plane rather than its own Minor: say why it is separate, with the unit-test
+  demo ready.
 - **D3 and the app factory** both live in grobase's control plane: D3 is
   claimed for splitting the backend into planes, the factory for what one
   plane does (create an isolated app on its own database). Different evidence.
@@ -563,7 +565,11 @@ GDPR are not claimed: both have runtime bugs (see
   plane and the database, and it comes with isolation gates: m177 creates two
   apps and checks one app's key cannot read the other, and m176 checks a
   foreign key resolves zero rows on another app's mount (a 404, never a cross
-  read).
+  read). Both run in their static mode in CI; their live half is on grobase
+  `ci/live-proof-gates-m175-m177` ([#177](https://github.com/Univers42/groot/issues/177)).
+  Demo steps: [`wiki/DEFENSE.md`](wiki/DEFENSE.md).
+- **Who.** dlesieur (LESdylan), the only author of the provisioner and the
+  self-serve endpoint at the pinned commit.
 
 ### Module of choice (Minor): SSRF guard on the HTTP engine
 
@@ -575,7 +581,11 @@ GDPR are not claimed: both have runtime bugs (see
   IPv6 ULA and IPv4-mapped addresses, then pins the client to the checked
   public IP so a later DNS rebind cannot redirect it inward.
 - **Value and weight.** Small, self-contained and demonstrable in seconds, and
-  it shows security judgement on a feature we chose to build.
+  it shows security judgement on a feature we chose to build. It is kept as its
+  own Minor, separate from the factory: it guards the HTTP mount engine, not
+  app creation. Demo steps: [`wiki/DEFENSE.md`](wiki/DEFENSE.md).
+- **Who.** dlesieur (LESdylan), the only author of the guard and its tests at
+  the pinned commit.
 
 ---
 
