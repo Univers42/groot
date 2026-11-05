@@ -484,7 +484,10 @@ modules are out because the project has no game.
 
 > [!NOTE]
 > A commit count is not effort: pairing, review and design do not show in it.
-> Commits concentrate on dlesieur (about 88%), so be ready to explain the split.
+> Commits concentrate on dlesieur: 86%, 5,895 of the 6,876 non-merge member
+> commits at the commits groot `main` (`948487ee`) pins, counted on 2026-11-05
+> with the [contributions method](wiki/project/contributions-method.md). Be
+> ready to explain the split.
 
 ### Per member
 
