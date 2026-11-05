@@ -23,6 +23,18 @@ ifneq ($(GROOT_READ_BINDS),)
 export GROOT_READ_BINDS
 endif
 
+# The owner's `osionos connect` listens on 127.0.0.1:4100 and talks to production. While it is down
+# that port looks free, and an edge that took it would keep it from coming back. public-up needs
+# ./.env.public, so that file marks a host that serves production, whose ports stay as they are.
+# Caveat: this covers the vault42 path only. `make all GROBASE_DATACENTER=` and `HOST_PORTS_KEEP_CLEAR=`
+# still give a stopped connector's port to Mail, and a host that serves production with no
+# ./.env.public beside its checkout would move Mail off 4100.
+ifneq ($(DATACENTER_ON),)
+ifeq ($(wildcard .env.public),)
+export HOST_PORTS_KEEP_CLEAR ?= 4100
+endif
+endif
+
 ##@ Pipeline
 datacenter-gate: ## Prove the vault can be read, or stop naming what to set
 ## Usage: make datacenter-gate

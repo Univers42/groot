@@ -27,8 +27,8 @@ make --no-print-directory -C $REMOTE_DIR health HEALTH_WAIT="\$2" \
 REMOTE
 }
 
-# published_port NAME DEFAULT — host-ports.sh moves a port another process holds, so Mail's bridge
-# leaves 4100 when an `osionos connect` to production listens there.
+# published_port NAME DEFAULT — host-ports.sh moves a port another process holds, and this path
+# keeps 4100 clear for an `osionos connect` to production, so Mail's bridge publishes elsewhere.
 published_port() { get_env "$REPO/.env.ports" "$1" 2>/dev/null || printf '%s\n' "$2"; }
 
 # Reachable is the promise for Mail and Calendar: their Google sign-in is not configured here.

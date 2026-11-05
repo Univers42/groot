@@ -407,3 +407,90 @@ MAKEFILE
   [ "$status" -eq 0 ]
   [ "$output" = "4324" ]
 }
+
+# mail_fixture — the Mail bridge's real default, beside the fixture's other names.
+mail_fixture() {
+  cat >"$ROOT/docker-compose.mail.yml" <<'COMPOSE'
+services:
+  edge:
+    ports:
+      - "127.0.0.1:${MAIL_BRIDGE_HOST_PORT:-4100}:4100"
+COMPOSE
+}
+
+# The owner's `osionos connect` listens on 127.0.0.1:4100 and talks to production (osionos
+# machineWindow.ts). While it is down that port looks free, and the edge must not take it.
+@test "without a kept-clear port, a free default is taken back: what every other host still does" {
+  mail_fixture
+  printf 'MAIL_BRIDGE_HOST_PORT=4101\n' >"$ROOT/.env.ports"
+  run bash "$REPO/scripts/host-ports.sh" resolve
+  [ "$status" -eq 0 ]
+  [ "$(port MAIL_BRIDGE_HOST_PORT)" = 4100 ]
+}
+
+@test "a kept-clear port stays free while its owner is down, on a first resolve" {
+  mail_fixture
+  HOST_PORTS_KEEP_CLEAR=4100 run bash "$REPO/scripts/host-ports.sh" resolve
+  [ "$status" -eq 0 ]
+  [ "$(port MAIL_BRIDGE_HOST_PORT)" = 4101 ]
+  [[ "$output" == *"MAIL_BRIDGE_HOST_PORT default 4100 is kept clear; using 4101"* ]]
+}
+
+@test "a moved Mail port stays put when the kept-clear port's owner stops" {
+  mail_fixture
+  printf 'MAIL_BRIDGE_HOST_PORT=4103\n' >"$ROOT/.env.ports"
+  HOST_PORTS_KEEP_CLEAR=4100 run bash "$REPO/scripts/host-ports.sh" resolve
+  [ "$status" -eq 0 ]
+  [ "$(port MAIL_BRIDGE_HOST_PORT)" = 4103 ]
+}
+
+@test "a recorded kept-clear port is left, even when our own edge publishes it" {
+  mail_fixture
+  printf 'MAIL_BRIDGE_HOST_PORT=4100\n' >"$ROOT/.env.ports"
+  our_containers '127.0.0.1:4100->4100/tcp'
+  HOST_PORTS_KEEP_CLEAR=4100 run bash "$REPO/scripts/host-ports.sh" resolve
+  [ "$status" -eq 0 ]
+  [ "$(port MAIL_BRIDGE_HOST_PORT)" = 4101 ]
+}
+
+@test "the playground reaches Mail's bridge where the edge publishes it, not the kept-clear port" {
+  grep -q 'PLAYGROUND_MAIL_BRIDGE_URL: https://127.0.0.1:${MAIL_BRIDGE_HOST_PORT:-4100}' "$REPO/docker-compose.yml"
+}
+
+@test "a caller's explicit pin still beats a kept-clear port" {
+  mail_fixture
+  HOST_PORTS_KEEP_CLEAR=4100 MAIL_BRIDGE_HOST_PORT=4100 run bash "$REPO/scripts/host-ports.sh" resolve
+  [ "$status" -eq 0 ]
+  [ "$(port MAIL_BRIDGE_HOST_PORT)" = 4100 ]
+}
+
+# resolve_through_make [ARG...] — the real make files, with no datacenter step and no listener.
+resolve_through_make() {
+  mail_fixture
+  mkdir -p "$ROOT/scripts"
+  ln -sf "$REPO/scripts/host-ports.sh" "$REPO/scripts/lib" "$ROOT/scripts/"
+  cat >"$ROOT/Makefile" <<MAKEFILE
+include $REPO/utils/mk/common.mk $REPO/utils/mk/pipeline.mk $REPO/utils/mk/datacenter.mk
+MAKEFILE
+  run bash -c 'cd "$1" && shift && GROOT_READ_BINDS=. make -s TRACK_BINOCLE_BIND_ADDR=127.0.0.1 -f Makefile frontends-up "$@"' _ "$ROOT" "$@"
+}
+
+@test "the vault42 path keeps 4100 clear for the owner's connector" {
+  resolve_through_make GROBASE_DATACENTER=b2b
+  [ "$status" -eq 0 ]
+  [ "$(port MAIL_BRIDGE_HOST_PORT)" = 4101 ]
+}
+
+@test "the local path reserves nothing" {
+  resolve_through_make GROBASE_DATACENTER=
+  [ "$status" -eq 0 ]
+  [ "$(port MAIL_BRIDGE_HOST_PORT)" = 4100 ]
+}
+
+# public-up needs ./.env.public, so that file marks a host that serves production.
+@test "a host that serves the public stack reserves nothing, even with vault42 credentials" {
+  : >"$ROOT/.env.public"
+  resolve_through_make GROBASE_DATACENTER=b2b
+  [ "$status" -eq 0 ]
+  [ "$(port MAIL_BRIDGE_HOST_PORT)" = 4100 ]
+}

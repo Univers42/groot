@@ -17,11 +17,13 @@
 # Precedence, per NAME: an explicit environment value wins and is never moved (warned about when
 # it is busy); then the default when it is free; then the value already in .env.ports (a moved
 # port stays put while its default is taken, so bookmarks and bundles keep working); then the
-# first free port in default+1 .. default+50.
+# first free port in default+1 .. default+50. A port in HOST_PORTS_KEEP_CLEAR (space-separated) is
+# never chosen by those last three steps, free or not, so a process that is only down keeps it.
 #
 # Caveat: the probe is a snapshot — a port bound between the probe and `docker compose up` still
 # collides — and it only sees this network namespace: a listener inside a rootless container's
-# own netns is invisible to `ss`, so it is not seen as busy either.
+# own netns is invisible to `ss`, so it is not seen as busy either. HOST_PORTS_KEEP_CLEAR holds a
+# port only against this resolver: an explicit NAME=port pin or an unrelated process still takes it.
 set -euo pipefail
 
 root="${HOST_PORTS_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -40,6 +42,7 @@ declare -A previous=()      # NAME -> the value already recorded in .env.ports
 declare -A chosen=()        # NAME -> the port this run picked
 declare -A pinned=()        # NAME -> 1, when the caller pinned the port in the environment
 declare -A reserved=()      # port -> 1, taken by a NAME of this run
+declare -A kept_clear=()    # port -> 1, named by HOST_PORTS_KEEP_CLEAR
 
 # ── the compose files ──────────────────────────────────────────────────────────
 # Every docker-compose*.yml at the repo root; the names are SCRAPED from them, never
@@ -266,6 +269,11 @@ cmd_resolve() {
     names+=("$name")
   done < <(sorted_names)
 
+  for port in ${HOST_PORTS_KEEP_CLEAR:-}; do
+    kept_clear[$port]=1
+    reserved[$port]=1
+  done
+
   # 1. an explicit environment value (never moved) and the defaults.
   for name in "${names[@]}"; do
     default="${defaults[$name]}"
@@ -336,6 +344,8 @@ cmd_resolve() {
       if [ -n "$holder_port" ]; then
         printf ' (also held by %s)' "$holder_port"
       fi
+    elif [ -n "${kept_clear[$default]:-}" ] && [ -z "${pinned[$name]:-}" ]; then
+      printf 'host-ports: %s default %s is kept clear; using %s' "$name" "$default" "$port"
     elif [ -n "$holder_port" ]; then
       printf 'host-ports: %s default %s is free; pinned to %s (held by %s)' "$name" "$default" "$port" "$holder_port"
     else

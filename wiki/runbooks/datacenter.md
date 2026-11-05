@@ -78,7 +78,8 @@ Tailscale is off in the profile, so nothing here touches the tailnet or Cloudfla
 | `DATACENTER_ALLOW_WRITES=1` | one run | Allow VM writes with no terminal; never a VM build |
 | `DATACENTER_VERIFY_BROWSERS=1` | one run | Run the browsers with no terminal |
 | `GROOT_NO_BROWSER_RESTART=1` | one run | Say relaunch instead of doing it |
-| `GROOT_READ_BINDS=<dir>` | one run | Where containers read the roster and API docs. Set by itself on an NFS checkout under rootless Docker, whose users the server refuses, on the local pipeline too; unset everywhere else |
+| `HOST_PORTS_KEEP_CLEAR=<ports>` | one run | Ports the resolver never picks. Defaults to 4100, for `osionos connect`, so Mail's bridge publishes on 4101 here even while that process is down. Empty keeps none; a host with `./.env.public` keeps none |
+| `GROOT_READ_BINDS=<dir>` | one run | Where containers read the roster and API docs. Set by itself on an NFS checkout under rootless Docker, whose users the server refuses |
 | `GROBASE_CONNECT_IP=<ip>` | a credential file | The address the relay dials, when the default route's is wrong |
 
 `~/.config/42ctl/secrets/datacenter.env` holds the pinned host key. Database dumps go to
