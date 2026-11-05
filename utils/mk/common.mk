@@ -129,6 +129,6 @@ GIT_COMMIT_MESSAGE ?= update
 GIT_PUSH_REMOTE ?= origin
 LOCAL_CERT_DIR ?= apps/grobase/certs
 LOCAL_CA_CERT := $(LOCAL_CERT_DIR)/track-binocle-local-ca.pem
-CERT_TRUST_MODE ?= system
+CERT_TRUST_MODE ?= auto
 CURL_HEALTH := curl --cacert $(LOCAL_CA_CERT) --retry 30 --retry-delay 2 --retry-all-errors --retry-connrefused -fsS
 

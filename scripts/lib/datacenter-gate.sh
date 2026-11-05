@@ -23,6 +23,7 @@ GATE_KEYS="FT_PASSPHRASE:VAULT42_PASSPHRASE FT_PASSWORD FT_EMAIL:FT_LOGIN_EMAIL 
 CTL_INSTALLER=https://raw.githubusercontent.com/Univers42/42ctl/main/install.sh
 # Not secrets, and held by no credential file: the prod tree is over the transport ceiling, so a
 # machine with no config.json could sign in and list it, yet not pull it.
+ADOPTED_CREDENTIALS="FT_PASSPHRASE VAULT42_PASSPHRASE FT_PASSWORD FT_EMAIL FT_LOGIN_EMAIL FT_TENANT FT_KEYSTORE_B64 FT_REGISTER_TOKEN VAULT42_REGISTER_TOKEN"
 VAULT_BLOBSTORE=https://fly.storage.tigris.dev
 VAULT_BUCKET=vault42-seeds
 
@@ -56,12 +57,35 @@ any_credential() {
   return 1
 }
 
+# `set -a; source <file>; set +a` sets these by name, from a file anywhere. groot reads the
+# environment first, but born2root reads one file ([dc] seeds_env), so that file is brought in line
+# rather than every reader changed. It is the same place the credentials live on any other machine,
+# mode 600, and an exported value replaces a stale one: it is what the operator just chose.
+# Caveat: a value holding a newline would split across lines. None of these names has one.
+adopt_environment_credentials() {
+  local file="$CTL_CFG_DIR/secrets/42admin.env" name changed="" tmp
+  for name in $ADOPTED_CREDENTIALS; do
+    [ -n "${!name:-}" ] || continue
+    [ "$(get_env "$file" "$name" 2>/dev/null)" = "${!name}" ] || changed="$changed $name"
+  done
+  [ -n "$changed" ] || return 0
+  mkdir -p "$CTL_CFG_DIR/secrets" || die "cannot create $CTL_CFG_DIR/secrets"
+  chmod 700 "$CTL_CFG_DIR/secrets"
+  tmp=$(mktemp "$file.XXXXXX") || die "cannot write in $CTL_CFG_DIR/secrets"
+  {
+    [ ! -f "$file" ] || grep -vE "^(${changed// /|})=" "$file" | sed '/^$/d'
+    for name in $changed; do printf '%s=%s\n' "$name" "${!name}"; done
+  } | sed '/^$/d' >"$tmp"
+  chmod 600 "$tmp" && mv -f "$tmp" "$file"
+  note "wrote$changed from the environment to $file, mode 600: born2root reads that file"
+}
+
 # The keystore travels in the credentials file on a new machine, and nothing else restores it
 # before a VM build: born2root's set_seeds does, but only after the build.
 ensure_keystore() {
   local keystore="$CTL_CFG_DIR/keystore.v42" encoded tmp
   [ -s "$keystore" ] && return 0
-  encoded=$(machine_value FT_KEYSTORE_B64) || die "no keystore: put it at $keystore, or FT_KEYSTORE_B64 in $CTL_CFG_DIR/secrets/42admin.env"
+  encoded=$(credential_value FT_KEYSTORE_B64) || die "no keystore: put it at $keystore, or FT_KEYSTORE_B64 in $CTL_CFG_DIR/secrets/42admin.env"
   tmp=$(mktemp "$keystore.XXXXXX") || die "cannot write in $CTL_CFG_DIR"
   base64 -d <<<"$encoded" >"$tmp" 2>/dev/null && [ -s "$tmp" ] || {
     rm -f "$tmp"
@@ -125,6 +149,7 @@ cmd_gate() {
   local missing
   [ "$(machine_value GROBASE_DATACENTER)" != local ] || return 0
   any_credential || return 0
+  adopt_environment_credentials
   missing=$(missing_credentials)
   [ -z "$missing" ] || die "vault42 credentials are incomplete, missing: ${missing% }. Set them in $CTL_CFG_DIR/secrets/42admin.env; GROBASE_DATACENTER=local in that file opts out"
   ensure_keystore

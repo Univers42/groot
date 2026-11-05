@@ -142,11 +142,11 @@ lists every root target; `make help-<target>` explains one.
 
 **Local certificate authority.** Every frontend is served with a certificate
 from the local CA `apps/grobase/certs/track-binocle-local-ca.pem`. `make all`
-asks for one `sudo` password the first time, to copy that CA into the system
-trust store (`certs-trust-local` in `utils/mk/certs.mk`), and trusts it in this
-user's Chrome, Chromium and Firefox stores without sudo
-(`scripts/certs-trust-user.sh`). `CERT_TRUST_MODE=user` trusts the browsers
-only, `skip` trusts nothing. `make certs-trust-check` prints one line per
+never asks for a `sudo` password on the host: it trusts the CA in this user's
+Chrome, Chromium and Firefox stores without sudo (`scripts/certs-trust-user.sh`),
+and in the system store too when `sudo` needs no password (`certs-trust-local` in
+`utils/mk/certs.mk`). `CERT_TRUST_MODE=system` asks once for the system store,
+`skip` trusts nothing. `make certs-trust-check` prints one line per
 store; `make certs-trust-user` fixes them. A browser reads its store at launch
 only, so relaunch it afterwards. While the CA is untrusted, the Whiteboard tab
 in osionos stays blank: the browser refuses the embedded `:3007` frame

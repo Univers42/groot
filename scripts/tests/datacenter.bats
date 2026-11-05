@@ -94,6 +94,64 @@ dc() { run bash "$ROOT/scripts/datacenter.sh" "$@"; }
   [ -z "$output" ]
 }
 
+@test "setting: credentials exported by name, with no file, are a data center" {
+  FT_PASSPHRASE=exported FT_KEYSTORE_B64=c3RvcmU= dc setting
+  [ "$status" -eq 0 ]
+  [ "$output" = b2b ]
+}
+
+@test "setting: the other spelling of the passphrase counts too" {
+  : >"$CTL_CFG_DIR/keystore.v42"
+  VAULT42_PASSPHRASE=exported dc setting
+  [ "$output" = b2b ]
+}
+
+@test "setting: a passphrase with no keystore anywhere stays local" {
+  FT_PASSPHRASE=exported dc setting
+  [ -z "$output" ]
+}
+
+@test "gate: exported credentials land in the file born2root reads, mode 600, and are never printed" {
+  stub 42ctl 'exit 0'
+  rm -f "$CTL_CFG_DIR/secrets/42admin.env"
+  FT_PASSPHRASE=p-exported FT_PASSWORD=w-exported FT_EMAIL=e@x FT_TENANT=team FT_KEYSTORE_B64=c3RvcmU= dc gate
+  file="$CTL_CFG_DIR/secrets/42admin.env"
+  [ "$(stat -c %a "$file")" = 600 ]
+  grep -qx 'FT_PASSPHRASE=p-exported' "$file"
+  grep -qx 'FT_KEYSTORE_B64=c3RvcmU=' "$file"
+  [[ "$output" != *"p-exported"* ]]
+  [[ "$output" != *"w-exported"* ]]
+  [[ "$output" == *"from the environment"* ]]
+}
+
+@test "gate: an exported value replaces a stale one and keeps the rest of the file" {
+  stub 42ctl 'exit 0'
+  printf 'FT_PASSPHRASE=old\nFT_PASSWORD=keep\nFT_EMAIL=e@x\nFT_TENANT=team\nOTHER=stays\n' >"$CTL_CFG_DIR/secrets/42admin.env"
+  : >"$CTL_CFG_DIR/keystore.v42"
+  FT_PASSPHRASE=new dc gate
+  file="$CTL_CFG_DIR/secrets/42admin.env"
+  grep -qx 'FT_PASSPHRASE=new' "$file"
+  ! grep -q 'FT_PASSPHRASE=old' "$file"
+  grep -qx 'OTHER=stays' "$file"
+  grep -qx 'FT_PASSWORD=keep' "$file"
+}
+
+@test "gate: exported values already in the file leave it untouched" {
+  stub 42ctl 'exit 0'
+  printf 'FT_PASSPHRASE=same\nFT_PASSWORD=x\nFT_EMAIL=e@x\nFT_TENANT=team\n' >"$CTL_CFG_DIR/secrets/42admin.env"
+  : >"$CTL_CFG_DIR/keystore.v42"
+  before=$(stat -c %i "$CTL_CFG_DIR/secrets/42admin.env")
+  FT_PASSPHRASE=same dc gate
+  [ "$(stat -c %i "$CTL_CFG_DIR/secrets/42admin.env")" = "$before" ]
+}
+
+@test "gate: the keystore comes back from an exported FT_KEYSTORE_B64" {
+  stub 42ctl 'exit 0'
+  rm -f "$CTL_CFG_DIR/keystore.v42"
+  FT_PASSPHRASE=p FT_PASSWORD=w FT_EMAIL=e@x FT_TENANT=team FT_KEYSTORE_B64=c3RvcmU= dc gate
+  [ "$(cat "$CTL_CFG_DIR/keystore.v42")" = store ]
+}
+
 @test "setting: vault42 credentials mean the default alias, and the passphrase is never printed" {
   vault_set
   dc setting

@@ -8,7 +8,7 @@ grobase in the VM on this host. groot starts no grobase. The decision and its co
 
 | What | Where |
 |---|---|
-| vault42 credentials and keystore | `~/.config/42ctl/secrets/*.env` (`FT_PASSPHRASE`, `FT_PASSWORD`, `FT_EMAIL`, `FT_TENANT`), `~/.config/42ctl/keystore.v42` or `FT_KEYSTORE_B64` |
+| vault42 credentials and keystore | Exported by name, as `set -a; source <file>; set +a` does, or in `~/.config/42ctl/secrets/*.env`: `FT_PASSPHRASE`, `FT_PASSWORD`, `FT_EMAIL`, `FT_TENANT`, and `~/.config/42ctl/keystore.v42` or `FT_KEYSTORE_B64`. Exported values are written to `secrets/42admin.env`, mode 600, because born2root reads that file |
 | A terminal, the first time | Only to build the VM: about 30 min and 18 GB free under `[vm] path`, with `/dev/kvm` writable |
 | A GitHub ssh key | For `git clone --recursive` |
 
