@@ -678,7 +678,7 @@ documented profile A:
 - **C**: partial. **Not claimed.** These rows are listed under [Not claimed
   yet](#not-claimed-yet).
 
-**Claimed = A and B only: 30 points against the 14 required. 8 of them are A.**
+**Claimed = A and B only: 30 points against the 14 required. 6 of them are A.**
 Paths are prefixed by repository: `G` groot, `GB` grobase (`apps/grobase`), `OS`
 osionos (`apps/osionos/app`), `OO` opposite-osiris (`apps/opposite-osiris`).
 They point at the commits pinned by groot's `main` branch. CI names a workflow
@@ -689,8 +689,8 @@ prismatica `ci.yml`.
 |---|---|---|---|--:|:--:|---|---|---|---|
 | 1 | Public API (key, rate limit, docs, ≥5 endpoints) | Web | Major | 2 | **A** | `GB infra/docker/services/kong/conf/kong.yml:221-245` (`/rest/v1`: key-auth + rate-limiting); `GB infra/config/openapi/grobase-public.json` | `GB scripts/verify/m102-gateway-query-path.sh` → GB-CI "Integration Tests" (`ci.yml:927`) | `GB infra/config/openapi/README.md` | `make all SKIP_SYNC=1` → `/rest/v1` without `apikey` answers 401, with it 200 → repeat until 429 |
 | 2 | Backend as microservices | DevOps | Major | 2 | **A** | `GB orchestrators/compose/base/*.yml` (16 files); `GB orchestrators/makes/30-planes.mk:33`; `GB src/control-plane`; `GB src/data-plane-router` | GB-CI unit suites (`ci.yml:1436`) + "Engine conformance" legs (`ci.yml:1532`) | [`wiki/platform/02-planes.md`](wiki/platform/02-planes.md) | `make -C apps/grobase planes` → `docker compose ps` → `make healthcheck` |
-| 3 | Real-time features via WebSockets | Web | Major | 2 | **A** | `GB infra/docker/services/realtime/realtime-agnostic/crates/realtime-server/src/server.rs:243` (`/ws`); `GB kong.yml:314-315` (`/realtime/v1/ws`); `OS scripts/bridge-social-core.mjs:192-201` (the bridge publishes); `OS src/services/realtime-messages/wsTransport.ts:81` (chat over the socket, on whenever a session exists) | `GB scripts/verify/m201-realtime-issuer.sh` opens `/ws` on the running realtime and expects `AUTH_OK` → GB-CI "Integration Tests" (`ci.yml:855`); m189 (`ci.yml:735`); `rust-realtime` suite and m184 (`ci.yml:1436,1479`) | [`wiki/platform/05-realtime.md`](wiki/platform/05-realtime.md) | sign in as two users in two browsers → open the same direct message in both → a message sent in one appears in the other without a reload. A second default demo: two windows on one Whiteboard board, where each stroke appears in the other (`G tests/e2e/specs/dw8-realtime.spec.ts`, `make e2e`, run by hand) |
-| 4 | Use a framework for both the frontend and backend | Web | Major | 2 | **A** | Frontend: React 19 (`OS package.json:105-106`). Backend: axum 0.7 (`GB src/data-plane-router/Cargo.toml:59`; `GB infra/docker/services/realtime/realtime-agnostic/Cargo.toml:44`) | React: OS-CI "Browser tests", Playwright against the served app in 6 shards (`ci.yml:338-339`); axum: GB-CI "Integration Tests" (`ci.yml:652-653`) runs the data plane and realtime built from the pin | [`wiki/platform/02-planes.md`](wiki/platform/02-planes.md) | `make all SKIP_SYNC=1` → `docker compose ps` lists `mini-baas-data-plane-router-rust` and `mini-baas-realtime` (`GB orchestrators/compose/base/data-plane.yml:28,178`) → open osionos at `https://localhost:3001` |
+| 3 | Real-time features via WebSockets | Web | Major | 2 | **B** | `GB infra/docker/services/realtime/realtime-agnostic/crates/realtime-server/src/server.rs:243` (`/ws`); `GB kong.yml:314-315` (`/realtime/v1/ws`); `OS scripts/bridge-social-core.mjs:192-201` (the bridge publishes); `OS src/services/realtime-messages/wsTransport.ts:81` (chat over the socket, on whenever a session exists) | `GB scripts/verify/m201-realtime-issuer.sh` → GB-CI "Integration Tests" (`ci.yml:855`): it checks the `/ws` handshake (`AUTH_OK`) on the running realtime, not delivery between two users; m189 (`ci.yml:735`); `rust-realtime` suite and m184 (`ci.yml:1436,1479`). osionos's chat browser test runs against a stub bridge (OS-CI "Browser tests (stub bridge URL)", `ci.yml:432-433`) | [`wiki/platform/05-realtime.md`](wiki/platform/05-realtime.md) | sign in as two users in two browsers → open the same direct message in both → a message sent in one appears in the other without a reload. A second default demo: two windows on one Whiteboard board, where each stroke appears in the other (`G tests/e2e/specs/dw8-realtime.spec.ts`, `make e2e`, run by hand) |
+| 4 | Use a framework for both the frontend and backend | Web | Major | 2 | **A** | Frontend: React 19 (`OS package.json:105-106`). Backend: NestJS 11, grobase's application plane (`GB src/package.json:52`; `GB src/apps/query-router/src/main.ts:30`, `NestFactory`); axum 0.7 is a supporting example (`GB src/data-plane-router/Cargo.toml:59`) | React: OS-CI "Browser tests", Playwright against the served app in 6 shards (`ci.yml:338-339`). NestJS: GB-CI "Integration Tests" builds query-router from the pin and starts it (`ci.yml:900-904`), then m213 sends `/query/v1/execute` through Kong to it (`ci.yml:917`); the `nestjs` unit suite (`ci.yml:1436`) | [`wiki/platform/02-planes.md`](wiki/platform/02-planes.md) | `make all SKIP_SYNC=1` → `docker compose ps` lists `mini-baas-query-router` (`GB orchestrators/compose/base/app-services.yml:12`, in the `devlean` edition) → open osionos at `https://localhost:3001` |
 | 5 | Allow users to interact with other users (chat, profile, friends) | Web | Major | 2 | **B** | `OS scripts/bridge-chat.mjs`; `OS scripts/bridge-account-profile.mjs`; `OS scripts/bridge-social.mjs`; `OS src/features/chat`; `OS src/features/connections` | `OS tests/canvas/chat-catch-up.test.ts` → OS-CI "quality (root)" Canvas unit tests (`ci.yml:285`); `OS tests/bridge/bridge-chat-reply-notify`, `bridge-account-profile`, `bridge-social-connections`, `bridge-connection-transitions` → Bridge tests (`ci.yml:291`). Unit tests with fakes: no CI job drives two users against a running stack | [`wiki/product/02-osionos.md`](wiki/product/02-osionos.md) | as row 3 → user A sends a friend request, user B accepts → each opens the other's profile |
 | 6 | Standard user management and authentication | User management | Major | 2 | **B** | `OS scripts/bridge-account-profile.mjs`; `OS scripts/bridge-avatar.mjs`; `OS scripts/bridge-presence.mjs`; `OS src/features/collab/model/collabPresence.ts:63` (initials when there is no avatar) | `OS tests/bridge/bridge-avatar` (upload, type and size refusal), `bridge-presence` (online status), `bridge-account-profile` → OS-CI Bridge tests (`ci.yml:291`). Unit tests with fakes | [`wiki/product/02-osionos.md`](wiki/product/02-osionos.md) | sign up on `https://localhost:4322` → upload an avatar and edit the profile → a friend sees you online |
 | 7 | Real-time collaboration | Web | Minor | 1 | **B** | `OS src/features/collab/model/{remoteCursors,collabPresence,blockSync}.ts`; `OS scripts/bridge-collab.mjs:626`; `GB …/realtime-auth/src/jwt/mod.rs:90-94` (`collab:` closed to wildcard tokens) | `OS tests/bridge/bridge-collab-*` (9) → OS-CI Bridge tests (`ci.yml:291`) | [`wiki/product/02-osionos.md`](wiki/product/02-osionos.md) | rebuild osionos with `VITE_OSIO_COLLAB_SHARED=1` (off by default) → two browsers on one page → watch the remote cursor and edit the same block from both |
@@ -714,18 +714,18 @@ No separate framework Minor is claimed beside row 4.
 
 | | Before (2026-10) | After |
 |---|--:|--:|
-| Catalogue modules claimed (rows 1–13) | 18 | 21: 8 A (rows 1–4) + 13 B (rows 5–13) |
+| Catalogue modules claimed (rows 1–13) | 18 | 21: 6 A (rows 1, 2, 4) + 15 B (rows 3, 5–13) |
 | Modules of choice (rows 14–15, cap 3) | 3 | 3, all B |
 | Artificial Intelligence modules (rows 16–19) | 10 | 6, all B |
 | **Total claimed** | **31 listed** | **30 (A + B)** |
-| Of which A | 10 | **8** |
+| Of which A | 10 | **6** |
 | Required | 14 | 14 |
 
 What moved: under the old legend ("works as-is"), six rows were A. Under one
 rule, the rows whose demonstration needs a switch or whose only evidence is
-unit-level are B: real-time collaboration (off by default), the contract factory
-and the SSRF guard. Row 3 stays A on the chat demo, which needs nothing switched
-on, and row 4 is new at A. The rows below no longer count.
+unit-level are B: WebSockets (CI checks the handshake, not delivery), real-time
+collaboration (off by default), the contract factory and the SSRF guard. Row 4
+is new at A. The rows below no longer count.
 
 ### Not claimed yet
 
