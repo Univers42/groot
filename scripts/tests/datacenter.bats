@@ -1025,6 +1025,33 @@ case \"\$*\" in *SecurityOptions*) echo '[name=rootless]' ;; *DockerRootDir*) ec
   grep -q 'docker rm -f bridge-id' "$LOG"
 }
 
+@test "local-binds: the roster is written in place, so a running bridge keeps its inode" {
+  nfs_under_rootless "$BATS_TEST_TMPDIR/local/docker"
+  mkdir -p "$COPY/tools/seeds"
+  echo 'AGENCY_PERSON_0=old' >"$COPY/tools/seeds/.agency-people.env"
+  # A second link holds the inode as a bind does; alone, a recreated file can get the same number.
+  ln "$COPY/tools/seeds/.agency-people.env" "$COPY/bound-by-the-bridge"
+  inode=$(command -p stat -c %i "$COPY/tools/seeds/.agency-people.env")
+  echo 'AGENCY_PERSON_0=new' >"$ROOT/tools/seeds/.agency-people.env"
+  dc local-binds
+  [ "$status" -eq 0 ]
+  cmp "$ROOT/tools/seeds/.agency-people.env" "$COPY/bound-by-the-bridge"
+  [ "$(command -p stat -c %i "$COPY/tools/seeds/.agency-people.env")" = "$inode" ]
+}
+
+@test "local-binds: a copy left at mode 600 ends readable, with or without a checkout roster" {
+  nfs_under_rootless "$BATS_TEST_TMPDIR/local/docker"
+  mkdir -p "$COPY/tools/seeds"
+  : >"$COPY/tools/seeds/.agency-people.env"
+  for roster in absent present; do
+    [ "$roster" = absent ] || echo 'AGENCY_PERSON_0=one' >"$ROOT/tools/seeds/.agency-people.env"
+    chmod 600 "$COPY/tools/seeds/.agency-people.env"
+    dc local-binds
+    [ "$status" -eq 0 ]
+    [ "$(command -p stat -c %a "$COPY/tools/seeds/.agency-people.env")" = 644 ]
+  done
+}
+
 @test "read-binds: the checkout itself, by . or by path, means the checkout's paths" {
   cd "$ROOT"
   for chosen in . "$ROOT" "$ROOT/"; do
