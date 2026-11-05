@@ -418,112 +418,64 @@ A commit count is not effort, and pairing or review does not show in it.
 
 ---
 
-## Modules
+## 🎯 Modules and points
 
-The subject requires **14 points** (Major = 2, Minor = 1). A module that cannot
-be demonstrated live scores zero. Every row is graded against **the local stack
-built from `main`** (`git checkout main`, `make all SKIP_SYNC=1`, which starts
-grobase's `devlean` edition; see [Defense bring-up](#defense-bring-up-pinned))
-by **one rule**, groot's own. It keeps the clause of osionos
-[`docs/ai/README.md`](https://github.com/Univers42/osionos/blob/1c1d5d849c1dc43460a194f7ee3d97e17505205c/docs/ai/README.md)
-lines 7–8 (a row is never A when its demonstration needs something switched off
-or unmeasured), but it is stricter than that file's legend, which grades a
-documented profile A:
+**10 modules, 16 points**: 6 Majors and 4 Minors. The subject asks for 14, and
+bonus points stop at 19.
 
-- **A**: the demo works on that stack with nothing switched on, and a green CI
-  job drives that path against a running service.
-- **B**: it works, but the demo needs something switched on (a flag, a profile,
-  an edition, a provider credential), or its only evidence is unit tests with
-  fakes or a run that was never repeated.
-- **C**: partial. **Not claimed.** These rows are listed under [Not claimed
-  yet](#not-claimed-yet).
+### Why we chose each module
 
-**Claimed = A and B only: 30 points against the 14 required. 6 of them are A.**
-Paths are prefixed by repository: `G` groot, `GB` grobase (`apps/grobase`), `OS`
-osionos (`apps/osionos/app`), `OO` opposite-osiris (`apps/opposite-osiris`).
-They point at the commits pinned by groot's `main` branch. CI names a workflow
-job: `GB-CI` is grobase `ci.yml`, `OS-CI` is osionos `ci.yml`, `OO-CI` is
+| Module | Points | Why |
+| --- | --- | --- |
+| W1 Frameworks | 2 | React for the editor, axum and NestJS for the services |
+| W4 Real-time | 2 | Chat, presence and live editing need a push channel |
+| W5 User interaction | 2 | Chat, profiles and contacts are the product |
+| W9 Collaboration | 1 | Live editing is the point of a shared workspace |
+| W12 Design system | 1 | One token system keeps every app consistent |
+| W13 Advanced search | 1 | Databases are the core object, so finding rows matters |
+| U1 User management | 2 | Everything hangs off a user with a profile |
+| U3 OAuth 2.0 | 1 | Sign in with Google or GitHub, no new password |
+| D3 Microservices | 2 | Each grobase plane scales and is replaced on its own |
+| I3 LLM interface | 2 | The assistant is the workspace's main AI feature |
+
+W1 replaces the two Minors W2 and W3, which cannot be counted as well.
+
+### Evidence
+
+For the modules above that our earlier module table also covered: the code,
+the tests and the CI job that runs them, and the docs. Paths are prefixed by
+repository: `G` groot, `GB` grobase (`apps/grobase`), `OS` osionos
+(`apps/osionos/app`), `OO` opposite-osiris (`apps/opposite-osiris`), at the
+commits pinned by groot's `main` branch on 2026-11-05. CI names a workflow job:
+`GB-CI` is grobase `ci.yml`, `OS-CI` is osionos `ci.yml`, `OO-CI` is
 prismatica `ci.yml`.
 
-| # | Module | Category | Type | Pts | Grade | Core files | Tests → CI job | Docs | Demo (3 steps) |
-|---|---|---|---|--:|:--:|---|---|---|---|
-| 1 | Public API (key, rate limit, docs, ≥5 endpoints) | Web | Major | 2 | **A** | `GB infra/docker/services/kong/conf/kong.yml:221-245` (`/rest/v1`: key-auth + rate-limiting); `GB infra/config/openapi/grobase-public.json` | `GB scripts/verify/m102-gateway-query-path.sh` → GB-CI "Integration Tests" (`ci.yml:927`) | `GB infra/config/openapi/README.md` | `make all SKIP_SYNC=1` → `/rest/v1` without `apikey` answers 401, with it 200 → repeat until 429 |
-| 2 | Backend as microservices | DevOps | Major | 2 | **A** | `GB orchestrators/compose/base/*.yml` (16 files); `GB orchestrators/makes/30-planes.mk:33`; `GB src/control-plane`; `GB src/data-plane-router` | GB-CI unit suites (`ci.yml:1436`) + "Engine conformance" legs (`ci.yml:1532`) | [`wiki/platform/02-planes.md`](wiki/platform/02-planes.md) | `make -C apps/grobase planes` → `docker compose ps` → `make healthcheck` |
-| 3 | Real-time features via WebSockets | Web | Major | 2 | **B** | `GB infra/docker/services/realtime/realtime-agnostic/crates/realtime-server/src/server.rs:243` (`/ws`); `GB kong.yml:314-315` (`/realtime/v1/ws`); `OS scripts/bridge-social-core.mjs:192-201` (the bridge publishes); `OS src/services/realtime-messages/wsTransport.ts:81` (chat over the socket, on whenever a session exists) | `GB scripts/verify/m201-realtime-issuer.sh` → GB-CI "Integration Tests" (`ci.yml:855`): it checks the `/ws` handshake (`AUTH_OK`) on the running realtime, not delivery between two users; m189 (`ci.yml:735`); `rust-realtime` suite and m184 (`ci.yml:1436,1479`). osionos's chat browser test runs against a stub bridge (OS-CI "Browser tests (stub bridge URL)", `ci.yml:432-433`) | [`wiki/platform/05-realtime.md`](wiki/platform/05-realtime.md) | sign in as two users in two browsers → open the same direct message in both → a message sent in one appears in the other without a reload. A second default demo: two windows on one Whiteboard board, where each stroke appears in the other (`G tests/e2e/specs/dw8-realtime.spec.ts`, `make e2e`, run by hand) |
-| 4 | Use a framework for both the frontend and backend | Web | Major | 2 | **A** | Frontend: React 19 (`OS package.json:105-106`). Backend: NestJS 11, grobase's application plane (`GB src/package.json:52`; `GB src/apps/query-router/src/main.ts:30`, `NestFactory`); axum 0.7 is a supporting example (`GB src/data-plane-router/Cargo.toml:59`) | React: OS-CI "Browser tests", Playwright against the served app in 6 shards (`ci.yml:338-339`). NestJS: GB-CI "Integration Tests" builds query-router from the pin and starts it (`ci.yml:900-904`), then m213 sends `/query/v1/execute` through Kong to it (`ci.yml:917`); the `nestjs` unit suite (`ci.yml:1436`) | [`wiki/platform/02-planes.md`](wiki/platform/02-planes.md) | `make all SKIP_SYNC=1` → `docker compose ps` lists `mini-baas-query-router` (`GB orchestrators/compose/base/app-services.yml:12`, in the `devlean` edition) → open osionos at `https://localhost:3001` |
-| 5 | Allow users to interact with other users (chat, profile, friends) | Web | Major | 2 | **B** | `OS scripts/bridge-chat.mjs`; `OS scripts/bridge-account-profile.mjs`; `OS scripts/bridge-social.mjs`; `OS src/features/chat`; `OS src/features/connections` | `OS tests/canvas/chat-catch-up.test.ts` → OS-CI "quality (root)" Canvas unit tests (`ci.yml:285`); `OS tests/bridge/bridge-chat-reply-notify`, `bridge-account-profile`, `bridge-social-connections`, `bridge-connection-transitions` → Bridge tests (`ci.yml:291`). Unit tests with fakes: no CI job drives two users against a running stack | [`wiki/product/02-osionos.md`](wiki/product/02-osionos.md) | as row 3 → user A sends a friend request, user B accepts → each opens the other's profile |
-| 6 | Standard user management and authentication | User management | Major | 2 | **B** | `OS scripts/bridge-account-profile.mjs`; `OS scripts/bridge-avatar.mjs`; `OS scripts/bridge-presence.mjs`; `OS src/features/collab/model/collabPresence.ts:63` (initials when there is no avatar) | `OS tests/bridge/bridge-avatar` (upload, type and size refusal), `bridge-presence` (online status), `bridge-account-profile` → OS-CI Bridge tests (`ci.yml:291`). Unit tests with fakes | [`wiki/product/02-osionos.md`](wiki/product/02-osionos.md) | sign up on `https://localhost:4322` → upload an avatar and edit the profile → a friend sees you online |
-| 7 | Real-time collaboration | Web | Minor | 1 | **B** | `OS src/features/collab/model/{remoteCursors,collabPresence,blockSync}.ts`; `OS scripts/bridge-collab.mjs:626`; `GB …/realtime-auth/src/jwt/mod.rs:90-94` (`collab:` closed to wildcard tokens) | `OS tests/bridge/bridge-collab-*` (9) → OS-CI Bridge tests (`ci.yml:291`) | [`wiki/product/02-osionos.md`](wiki/product/02-osionos.md) | rebuild osionos with `VITE_OSIO_COLLAB_SHARED=1` (off by default) → two browsers on one page → watch the remote cursor and edit the same block from both |
-| 8 | Advanced permissions | User management | Major | 2 | **B** | `OS scripts/bridge-roles.mjs:28-29`; `OS scripts/bridge-share-rules.mjs:38`; `OS scripts/bridge-page-access.mjs:217`; `OS src/features/admin-users/api.ts` | `OS tests/bridge/bridge-page-access*` (7), `bridge-share-rules-*` (2) → OS-CI Bridge tests | [`wiki/platform/07-isolation.md`](wiki/platform/07-isolation.md) | sign in as admin → change a member's role → that member loses access |
-| 9 | Organisation system | User management | Major | 2 | **B** | `OS scripts/bridge-workspace-teams.mjs:229`; `OS scripts/bridge-workspace-invites.mjs:134`; `OS src/features/settings/teamspaces/TeamspacesPanel.tsx` | `OS tests/bridge/bridge-workspace-*` (7) → OS-CI Bridge tests | [`wiki/platform/06-contracts.md`](wiki/platform/06-contracts.md) | create a workspace → create a teamspace → invite a user, who accepts |
-| 10 | Remote authentication with OAuth 2.0 | User management | Minor | 1 | **B** | `OO scripts/auth/oauth-providers.mjs`; `OO scripts/auth/oauth-link.mjs`; `OO src/scripts/portal-oauth.ts`; `GB orchestrators/compose/base/auth-api.yml:64-67` (GoTrue's Google provider) | `OO tests/unit/auth/oauth-providers`, `oauth-link`, `gateway-oauth-{start,link,collision}` (5) → OO-CI "Quality Gate" `pnpm test` (`ci.yml:31-32`) | `OO docs/adr/0002-oauth-link-existing-account.md` | set `GOOGLE_OAUTH_ENABLED=true`, `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` for grobase (Google provider credentials, not shipped) → `make all SKIP_SYNC=1` → "Continue with Google" on `https://localhost:4322` |
-| 11 | Health/status page, backups, disaster recovery | DevOps | Minor | 1 | **B** | `GB infra/docker/services/status-page/{server,availability}.py`; `GB orchestrators/compose/base/ops.yml`; `GB scripts/verify/m241-status-backup-recovery.sh` | m241 → GB `operational-reliability.yml:27`; m192 → GB-CI (`ci.yml:582`), **red on grobase `develop`** ([run 41870904860](https://github.com/Univers42/grobase/actions/runs/41870904860)) | [`wiki/operations/04-troubleshooting.md`](wiki/operations/04-troubleshooting.md) | bring up the `ops` plane (not in the default edition) → open the status page → stop a container, then `m241 --live` |
-| 12 | GDPR compliance | Data | Minor | 1 | **B** | `OS scripts/bridge-account-export.mjs:143`; `OS scripts/bridge-account-erasure.mjs:79`; `OS src/features/settings/ui/AccountExportSection.tsx`; `OS src/features/settings/ui/danger/AccountDangerZone.tsx` | `OS tests/bridge/bridge-account-export*` (3), `bridge-account-erasure` (1) → OS-CI Bridge tests; `G .github/workflows/models-grants.yml` | [`wiki/security/01-model.md`](wiki/security/01-model.md) | Settings › export my data → open the archive → delete the account |
-| 13 | Two-factor authentication | User management | Minor | 1 | **B** | `OS scripts/bridge-account-mfa-totp.mjs:68`; `OS scripts/bridge-account-mfa.mjs:187`; `OS scripts/bridge-account-passkeys.mjs:100`; `OS src/features/settings/profile/TwoFactorModal.tsx` | `OS tests/bridge/bridge-account-mfa-*` (5), `bridge-account-passkeys` (1) → OS-CI Bridge tests | osionos `docs/account-platform` | enable TOTP → sign out → sign in with the code |
-| 14 | **Module of choice:** contract-driven application factory | Free choice | Major | 2 | **B** | `GB src/control-plane/internal/tenants/selfserve_apps.go:55-58`; `GB src/control-plane/cmd/tenant-control/mount_appsselfserve.go:26`; `GB scripts/verify/m177-selfserve-apps.sh` | m176 → GB-CI (`ci.yml:192`, static leg, in the Shellcheck job); m176 and m177 → groot `modules-of-choice.yml:39-40`, static mode only | [`wiki/platform/06-contracts.md`](wiki/platform/06-contracts.md), [justification](#justification--module-of-choice-major-contract-driven-application-factory) | set `APPS_SELFSERVE_ENABLED` (empty by default) → OTP login, `POST /v1/tenants/me/apps` twice → one app's key reads the other: 4xx |
-| 15 | **Module of choice:** SSRF guard on the HTTP engine | Free choice | Minor | 1 | **B** | `GB src/data-plane-router/crates/data-plane-pool/src/dial_guard/classify.rs:90-155`; `GB src/data-plane-router/crates/data-plane-pool/src/http/validate.rs:83-153` | `GB …/dial_guard/classify_tests.rs` → GB-CI `rust-data-plane` + "Engine conformance (http)" | [`wiki/security/04-network.md`](wiki/security/04-network.md), [justification](#justification--module-of-choice-minor-ssrf-guard-on-the-http-engine) | mount an `http` source at `169.254.169.254` → query it → refused. Whether the default edition mounts the `http` engine is unverified (guess: it does not) |
-| 16 | Complete LLM system interface: text, streaming, error handling, rate limiting. Images exist but are **off by default** and not part of this claim | Artificial Intelligence | Major | 2 | **B** | osionos `services/osionos-ai/src/routes/runs.ts:178-324`, `src/runs/{runner,upstream,upstreamError,streamPump}.ts`, `src/rateLimit.ts:84`, `src/http.ts:108-129`; client `src/features/ai/model/runStream.ts`. All 12 hops: [`wiki/project/ai-llm-interface.md`](wiki/project/ai-llm-interface.md) | `services/osionos-ai/tests/{runs,complete,upstreamError*,runRateLimit,failover,quotaFailover}.test.ts` → OS-CI "AI service (tsc + suite)" (`ci.yml:314`); `tests/canvas/ai-{chat-store,run-dispatch,run-stream}.test.ts` → "quality (root)" Canvas unit tests (`ci.yml:285`) | [`wiki/project/ai-llm-interface.md`](wiki/project/ai-llm-interface.md), [`wiki/runbooks/osionos-ai.md`](wiki/runbooks/osionos-ai.md), [M1 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m1-images.md) | `docker compose --profile ai up -d --build` → ask a question and watch it stream → reload mid-answer (it resumes), or stop it |
-| 17 | Complete RAG on a large dataset | Artificial Intelligence | Major | 2 | **B** | osionos `services/osionos-ai/src/retrieval/search.ts:277,469,564`, `src/retrieval/rerank.ts:16`; `G models/osionos-ai-rag-migration.sql:60,91` | `services/osionos-ai/tests/{retrieval,aclAgreement,rerank}.test.ts` → OS-CI AI service | [M2 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m2-rag.md), osionos `services/osionos-ai/eval/wiki/RESULTS-rag.md` | `--profile ai` → ask a workspace question → click a citation, then show the 110 363-chunk measurement (run on a separate eval stack; the reranker is off by default) |
-| 18 | Content moderation AI | Artificial Intelligence | Minor | 1 | **B** | osionos `scripts/bridge-moderation-gate.mjs:70`; `services/osionos-ai/src/moderation/l1.ts:99` | `services/osionos-ai/tests/moderation*.test.ts` (4) → OS-CI AI service; `tests/bridge/bridge-moderation*` (5) → Bridge tests | [M4 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m4-moderation.md) | set `OSIONOS_MODERATION_ACTIONS=hold` and `OSIONOS_MODERATION_STATE=1` → post a toxic comment → it waits in the admin console (no auto-removal, by design) |
-| 19 | Voice / speech | Artificial Intelligence | Minor | 1 | **B** | osionos `services/osionos-ai/src/routes/voice.ts:104`, `src/features/voice/ui/DictationButton.tsx`, `src/features/voice/model/readAloud.ts`; `G docker-compose.yml:788-790` | `services/osionos-ai/tests/voice.test.ts` → OS-CI AI service | [M5 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m5-voice.md) | `--profile ai`, with the speech model fetched into its volume → dictate into a page → read it aloud (read-aloud voices not measured yet) |
+| Module | Core files | Tests → CI job | Docs |
+|---|---|---|---|
+| W1 Frameworks | Frontend: React 19 (`OS package.json:105-106`). Backend: NestJS 11, grobase's application plane (`GB src/package.json:52`; `GB src/apps/query-router/src/main.ts:30`, `NestFactory`); axum 0.7 is a supporting example (`GB src/data-plane-router/Cargo.toml:59`) | React: OS-CI "Browser tests", Playwright against the served app in 6 shards (`ci.yml:338-339`). NestJS: GB-CI "Integration Tests" builds query-router from the pin and starts it (`ci.yml:900-904`), then m213 sends `/query/v1/execute` through Kong to it (`ci.yml:917`); the `nestjs` unit suite (`ci.yml:1436`) | [`wiki/platform/02-planes.md`](wiki/platform/02-planes.md) |
+| W4 Real-time | `GB infra/docker/services/realtime/realtime-agnostic/crates/realtime-server/src/server.rs:243` (`/ws`); `GB kong.yml:314-315` (`/realtime/v1/ws`); `OS scripts/bridge-social-core.mjs:192-201` (the bridge publishes); `OS src/services/realtime-messages/wsTransport.ts:81` (chat over the socket, on whenever a session exists) | `GB scripts/verify/m201-realtime-issuer.sh` → GB-CI "Integration Tests" (`ci.yml:855`): it checks the `/ws` handshake (`AUTH_OK`) on the running realtime, not delivery between two users; m189 (`ci.yml:735`); `rust-realtime` suite and m184 (`ci.yml:1436,1479`). osionos's chat browser test runs against a stub bridge (OS-CI "Browser tests (stub bridge URL)", `ci.yml:432-433`) | [`wiki/platform/05-realtime.md`](wiki/platform/05-realtime.md) |
+| W5 User interaction | `OS scripts/bridge-chat.mjs`; `OS scripts/bridge-account-profile.mjs`; `OS scripts/bridge-social.mjs`; `OS src/features/chat`; `OS src/features/connections` | `OS tests/canvas/chat-catch-up.test.ts` → OS-CI "quality (root)" Canvas unit tests (`ci.yml:285`); `OS tests/bridge/bridge-chat-reply-notify`, `bridge-account-profile`, `bridge-social-connections`, `bridge-connection-transitions` → Bridge tests (`ci.yml:291`). Unit tests with fakes: no CI job drives two users against a running stack | [`wiki/product/02-osionos.md`](wiki/product/02-osionos.md) |
+| W9 Collaboration | `OS src/features/collab/model/{remoteCursors,collabPresence,blockSync}.ts`; `OS scripts/bridge-collab.mjs:626`; `GB …/realtime-auth/src/jwt/mod.rs:90-94` (`collab:` closed to wildcard tokens) | `OS tests/bridge/bridge-collab-*` (9) → OS-CI Bridge tests (`ci.yml:291`) | [`wiki/product/02-osionos.md`](wiki/product/02-osionos.md) |
+| W12 Design system | — | — | — |
+| W13 Advanced search | — | — | — |
+| U1 User management | `OS scripts/bridge-account-profile.mjs`; `OS scripts/bridge-avatar.mjs`; `OS scripts/bridge-presence.mjs`; `OS src/features/collab/model/collabPresence.ts:63` (initials when there is no avatar) | `OS tests/bridge/bridge-avatar` (upload, type and size refusal), `bridge-presence` (online status), `bridge-account-profile` → OS-CI Bridge tests (`ci.yml:291`). Unit tests with fakes | [`wiki/product/02-osionos.md`](wiki/product/02-osionos.md) |
+| U3 OAuth 2.0 | `OO scripts/auth/oauth-providers.mjs`; `OO scripts/auth/oauth-link.mjs`; `OO src/scripts/portal-oauth.ts`; `GB orchestrators/compose/base/auth-api.yml:64-67` (GoTrue's Google provider) | `OO tests/unit/auth/oauth-providers`, `oauth-link`, `gateway-oauth-{start,link,collision}` (5) → OO-CI "Quality Gate" `pnpm test` (`ci.yml:31-32`) | `OO docs/adr/0002-oauth-link-existing-account.md` |
+| D3 Microservices | `GB orchestrators/compose/base/*.yml` (16 files); `GB orchestrators/makes/30-planes.mk:33`; `GB src/control-plane`; `GB src/data-plane-router` | GB-CI unit suites (`ci.yml:1436`) + "Engine conformance" legs (`ci.yml:1532`) | [`wiki/platform/02-planes.md`](wiki/platform/02-planes.md) |
+| I3 LLM interface | osionos `services/osionos-ai/src/routes/runs.ts:178-324`, `src/runs/{runner,upstream,upstreamError,streamPump}.ts`, `src/rateLimit.ts:84`, `src/http.ts:108-129`; client `src/features/ai/model/runStream.ts`. All 12 hops: [`wiki/project/ai-llm-interface.md`](wiki/project/ai-llm-interface.md) | `services/osionos-ai/tests/{runs,complete,upstreamError*,runRateLimit,failover,quotaFailover}.test.ts` → OS-CI "AI service (tsc + suite)" (`ci.yml:314`); `tests/canvas/ai-{chat-store,run-dispatch,run-stream}.test.ts` → "quality (root)" Canvas unit tests (`ci.yml:285`) | [`wiki/project/ai-llm-interface.md`](wiki/project/ai-llm-interface.md), [`wiki/runbooks/osionos-ai.md`](wiki/runbooks/osionos-ai.md), [M1 sheet](https://github.com/Univers42/osionos/blob/develop/docs/ai/modules/m1-images.md) |
 
-No separate framework Minor is claimed beside row 4.
+### What we did not claim
 
-**Point calculation** (free choice is capped at 3,
-[`wiki/project/01-subject.md`](wiki/project/01-subject.md#points))
+A module with one failing sub-task is not claimed, and the game and blockchain
+modules are out because the project has no game.
 
-| | Before (2026-10) | After |
-|---|--:|--:|
-| Catalogue modules claimed (rows 1–13) | 18 | 21: 6 A (rows 1, 2, 4) + 15 B (rows 3, 5–13) |
-| Modules of choice (rows 14–15, cap 3) | 3 | 3, all B |
-| Artificial Intelligence modules (rows 16–19) | 10 | 6, all B |
-| **Total claimed** | **31 listed** | **30 (A + B)** |
-| Of which A | 10 | **6** |
-| Required | 14 | 14 |
+### The cheapest next points
 
-What moved: under the old legend ("works as-is"), six rows were A. Under one
-rule, the rows whose demonstration needs a switch or whose only evidence is
-unit-level are B: WebSockets (CI checks the handshake, not delivery), real-time
-collaboration (off by default), the contract factory and the SSRF guard. Row 4
-is new at A. The rows below no longer count.
-
-### Not claimed yet
-
-| Module | Was | Why it is not claimed, in one line |
-|---|---|---|
-| Monitoring with Prometheus + Grafana, DevOps, Major | 2, C | The default edition ships no observability plane, and its gate m85 runs in no workflow |
-| File upload and management, Web, Minor | 1, C | Avatars and page files upload (`OS scripts/bridge-media.mjs:160`), but no general file manager is verified, and gate m159 runs in no workflow |
-| ML recommendation system, AI, Major | 2, B | Needs 20+ real users, the offline numbers are synthetic, and the `osionos-ml` Python tests run in no CI |
-| Sentiment analysis, AI, Minor | 1, C | The model licence is undeclared |
-| Image recognition and tagging, AI, Minor | 1, C | The browser flow is unverified. Locally the VLM starts with `--profile ai` (`G docker-compose.yml:1004-1006`); `--profile ai-vlm` exists only in `docker-compose.public.yml:211-212` |
-| AI opponent, AI | — | osionos has no game |
-| Multiple languages, Accessibility | — | `i18next` is a dependency (osionos `package.json:92`), but no source file imports it and no translation resource exists |
-
-### Justification — Module of choice (Major): contract-driven application factory
-
-- **Why this module.** It is the central idea of the project: a backend with zero
-  application-specific code, where an application is a declarative contract.
-- **Technical challenge.** From one JSON file, a generic provisioner must create an isolated
-  database, apply its schema, create roles and policies, mint scoped API keys and emit the
-  frontend's `PUBLIC_*` configuration — idempotently, on every boot. The self-serve endpoint
-  `POST /v1/tenants/me/apps` does it on demand, with a fresh `CREATE DATABASE` per application.
-- **Value.** A new application costs a contract instead of a new server.
-- **Why it deserves a Major.** It spans the Go control plane, the Rust data plane and the
-  database layer, and it comes with isolation proofs: gate `m177` proves self-serve creation, and
-  gate `m176` proves one application cannot read another's data (a foreign mount resolves to zero
-  rows — a 404, never a cross read).
-
-### Justification — Module of choice (Minor): SSRF guard on the HTTP engine
-
-- **Why this module.** The data plane can mount a remote HTTP API as if it were a database —
-  which also means "let a user make our server fetch any URL", the classic SSRF hole.
-- **Technical challenge.** The guard blocks loopback, private (RFC 1918), link-local — including
-  the cloud metadata endpoint `169.254.169.254` — CGNAT, IPv6 ULA and link-local, IPv4-mapped
-  addresses and internal hostnames, then **pins** the connection to the validated public IP so a
-  later DNS rebind cannot redirect it inward.
-- **Value and weight.** Small, self-contained and demonstrable in seconds (a
-  mount pointing at `169.254.169.254` is refused), and it shows security
-  judgement on a feature we chose to build.
+1. **Public API**: add PUT and DELETE to personal tokens, serve the docs (+2)
+1. **App factory**: set the flag and record a demo (+2)
+1. **Export and import**: CSV import with stricter validation (+1)
+1. **PWA**: PNG icons, fix the offline message (+1)
+1. **2FA**: the sign-in code prompt, which also fixes the lockout (+1)
+1. **GDPR**: run the deletion, send the emails (+1)
 
 ---
 
