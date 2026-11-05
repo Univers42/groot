@@ -352,9 +352,7 @@ The "Areas in the history" column is what each member's commits touch
 | Daniel Fernández | `danfern3` | [@danielfdez17](https://github.com/danielfdez17) | Tech Lead · Developer | Architecture, stack decisions, code quality, reviews | monkey-bot (security test bot), grobase Docker and Kubernetes deployment, osionos editor fixes |
 | Sergio Jiménez de la Cruz | `serjimen` | [@DjSurgeon](https://github.com/DjSurgeon) | Developer | Frontend, secrets management, deployment | the public site (opposite-osiris), osionos accessibility and editor features |
 | Vadim Jan Nieto | `vjan-nie` | [@vjan-nie](https://github.com/vjan-nie) | Project Manager · Developer | Planning, tracking, communication, unblocking | QA tooling, end-to-end tests, documentation, Docker |
-| Seyed Mostafa Hashemian | `shashemi` | [@SMOSTAFAH1](https://github.com/SMOSTAFAH1) | Developer | TO CONFIRM by the team | security fixes and SAST, the site's legal pages, TLS edge |
-
-> TO CONFIRM by the team: `shashemi`'s responsibilities.
+| Seyed Mostafa Hashemian | `shashemi` | [@SMOSTAFAH1](https://github.com/SMOSTAFAH1) | Developer | No responsibility beyond development is recorded | security fixes and SAST, the site's legal pages, TLS edge |
 
 `rstancu` (Roxana Stancu, [@esettes](https://github.com/esettes)) is on the original roster
 ([`archive/wiki-2026-09/CONTRIBUTORS.md`](archive/wiki-2026-09/CONTRIBUTORS.md)) and committed
@@ -364,37 +362,57 @@ between 2026-03-18 and 2026-05-02; see [Who committed where](#who-committed-wher
 
 ## Project Management
 
-What the repository records:
+Part of this project was an experiment in managing a team. We ran it as if it were a demanding,
+high-output professional team, with a Scrum mindset in which every member is treated as an
+expert and anyone may change anyone's code. The aim was that **nobody is indispensable**. The
+evidence below separates what the repositories record from what is the team's own account, and
+the last part measures how far we got towards that aim.
 
-- **Task tracking:** GitHub Issues on [`Univers42/groot`](https://github.com/Univers42/groot/issues)
-  and on each submodule's repository; milestones (M1 hardening, M2 federation, M3 coherence,
-  M4 observability, M5 security, M11 external-app integration) in
-  [`archive/wiki-2026-09/todo/`](archive/wiki-2026-09/todo/).
-- **Tools:** GitHub — pull requests, Dependabot for dependency updates
-  ([`.github/dependabot.yml`](.github/dependabot.yml)), GitHub Actions for CI
-  ([`.github/workflows/`](.github/workflows/)).
-- **Branch model:** work lands on short-lived `feat/`, `fix/`, `docs/`, `test/` and `chore/`
-  branches, merged into `develop` by pull request; `develop` is merged into `main` by pull request
-  (`git log --merges --format=%s | grep 'pull request'`).
-- **Code workflow:** submodule-based monorepo — changes are committed inside a submodule first,
-  then the root records the new commit. Numbered **verification gates**
-  (`apps/grobase/scripts/verify/run-gate-battery.sh`) are the team's definition of "done":
-  grobase's CI runs named gates on pull requests and the full `--enterprise` battery, with a
-  nightly schedule (grobase `.github/workflows/ci.yml`).
+**How the tracking evolved.** Work started in February 2026: the first commits by `dlesieur`,
+`danfern3` and `vjan-nie` date from that month (`git log --reverse` across the submodules).
+Between then and the autumn the team tried GitHub Projects, Jira tickets and Notion pages
+(team account: none of the three left a trace in commit messages, and the Projects board was not
+readable with our token). The only written trace is osionos
+[`docs/DoD.md:39`](https://github.com/Univers42/osionos/blob/develop/docs/DoD.md), a
+Definition-of-Done template that asks for evidence "in your Pull Request description or your
+Trello/Jira" ticket (2026-04-11).
 
-What the team confirmed (2026-11-04), which the repository cannot show:
+**How it works now: issues, labels and pull requests on GitHub.**
 
-- **Communication channel:** Discord.
-- **Meeting rhythm:** a weekly meeting.
+| Practice | What the repositories record (2026-11-04) |
+|---|---|
+| Issues | 129 on osionos, 38 on groot, 20 on prismatica, 16 on grobase (`gh issue list --state all`). Branches and commits name them: `fix/issue-278-database-probe-diagnostics` (osionos #284), `fixes #N` in 40 commit messages across groot, grobase, osionos and prismatica |
+| Labels | Triage labels `priority: high`, `subject-blocker` and `account-platform` on groot and osionos, plus GitHub's defaults (`gh label list`) |
+| Pull requests | 144 on groot, 182 on osionos, 78 on grobase, 50 on prismatica; merged into `develop`, and `develop` promoted to `main` by a merge commit |
+| Peer review | Since 2026-09-21 (grobase, hydrawn) and up to 2026-11-04 (groot `develop`), a GitHub ruleset on each main repository requires one approving review and forbids force-pushes and branch deletion (`gh api repos/<repo>/rulesets`). CodeRabbit reviews every PR since 2026-10-23 |
+| Stacked branches | Feature chains merged one on top of another: groot #84–#87 (`feat/ide-*`), grobase #69–#70 (`feat/multidb-g1b…g1d`), the osionos `release/acct-w1` … `w9` series |
+| Commit rhythm | At least one commit on 174 of the 232 days between 2026-03-18 and 2026-11-04, across all repositories |
 
-What the repository does not record:
+**Strict CI from the start.** CI arrived within days of each repository's first commit: grobase
+`ci.yml` on 2026-03-29, osionos on 2026-04-12, groot on 2026-05-13. SonarCloud is configured in
+groot since 2026-05-04 and comments on its pull requests since #9 (2026-06-01). Security scans
+(Semgrep, Trivy, gitleaks, TruffleHog, ZAP, cargo-audit, govulncheck) run on every pull request,
+and groot rejects one-word commit subjects (`.github/workflows/commit-subjects.yml`).
 
-- **Task distribution and code review:** not recorded beyond the merged pull requests per login
-  ([Who committed where](#who-committed-where)).
+**Rituals.** Two-week sprints since the start, daily stand-ups and a weekly meeting, mostly on
+Discord (team account, confirmed 2026-11-04; Discord leaves no trace in the repositories). The
+method was Scrumban (Scrum rituals plus a Kanban board), as described in
+[`docs/dossier-project-dylan/dossier-projet.md:390-416`](https://github.com/Univers42/osionos/blob/develop/docs/dossier-project-dylan/dossier-projet.md)
+in osionos.
 
-> TO CONFIRM by the team: who attended the weekly meeting and where its decisions were written.
+**How far we got.** We publish these numbers so the claims above can be checked:
 
-> TO CONFIRM by the team: who assigned work, and who reviewed whose pull requests.
+- **Sprints.** The sprints were planned outside GitHub: no milestone and no sprint label exists
+  in any repository. Merges come in bursts: 250 of the 442 merged pull requests on the six main
+  repositories landed in two weeks (ISO weeks 43–44).
+- **Review.** The rulesets let a maintainer bypass them, and in a sample of the 40 most recent
+  merged pull requests per repository, 0–22 % carry an approval from someone other than the
+  author.
+- **Nobody indispensable.** Shared ownership is real in breadth: `vjan-nie` committed in 12 areas
+  and `shashemi` in 8, osionos has six authors with five or more commits, and prismatica's main
+  author is `serjimen`. In depth we are not there yet: `dlesieur` wrote 86 % of the 8,571 human
+  commits, and in 17 of 18 areas one author holds more than half of the commits. Commit counts
+  are not effort: one large commit and a typo fix weigh the same.
 
 ---
 
