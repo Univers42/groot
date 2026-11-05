@@ -21,18 +21,19 @@ assistant, running on grobase, the Backend-as-a-Service we built ourselves.
 
 ## Table of contents
 
-1. [Description](#description)
-2. [Instructions](#instructions)
-3. [Team Information](#team-information)
-4. [Project Management](#project-management)
-5. [Technical Stack](#technical-stack)
-6. [Database Schema](#database-schema)
-7. [Features List](#features-list)
-8. [Modules](#modules)
-9. [Individual Contributions](#individual-contributions)
-10. [Resources](#resources)
-11. [Known limitations](#known-limitations)
-12. [Further documentation](#further-documentation)
+1. [Description](#-description)
+2. [Instructions](#-instructions)
+3. [Team members and roles](#-team-members-and-roles)
+4. [Project management](#-project-management)
+5. [Technologies](#-technologies)
+6. [Database schema](#-database-schema)
+7. [Features and who built them](#-features-and-who-built-them)
+8. [Modules and points](#-modules-and-points)
+9. [Individual contributions](#-individual-contributions)
+10. [Resources](#-resources)
+11. [Known limitations](#️-known-limitations)
+12. [License](#license)
+13. [Further documentation](#further-documentation)
 
 ---
 
