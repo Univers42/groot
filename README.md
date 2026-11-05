@@ -208,72 +208,34 @@ defense covers the current five.
 
 ---
 
-## Project Management
+## 🗂 Project management
 
-Part of this project was an experiment in managing a team. We ran it as if it
-were a demanding, high-output professional team, with a Scrum mindset in which
-every member is treated as an expert and anyone may change anyone's code. The
-aim was that **nobody is indispensable**. The evidence below separates what the
-repositories record from what is the team's own account, and the last part
-measures how far we got towards that aim.
+The team talks on Discord and meets weekly. Work lands through pull requests
+into `develop`, then `main`, and a change is done when its verification gate
+passes.
 
-**How the tracking evolved.** Work started in February 2026: the first commits
-date from that month (`git log --reverse` across the submodules). Between then
-and the autumn the team tried GitHub Projects, Jira tickets and Notion pages
-(team account: none of the three left a trace in commit messages, and the
-Projects board was not readable with our token). The only written trace is
-osionos
-[`docs/DoD.md:39`](https://github.com/Univers42/osionos/blob/develop/docs/DoD.md),
-a Definition-of-Done template that asks for evidence "in your Pull Request
-description or your Trello/Jira" ticket (2026-04-11).
+### Agile
 
-**How it works now: issues, labels and pull requests on GitHub.**
+| Scrum | Lean production | Kanban |
+| --- | --- | --- |
+| The Project Manager acts as Scrum Master. | Numbered verification gates define done. | GitHub Issues and milestones track the work. |
 
-| Practice | What the repositories record (2026-11-04) |
+### How the work flows
+
+- **Branches**: short-lived `feat/`, `fix/` and `docs/`, one change each
+- **Repositories**: a change lands in its submodule first, then the root
+  records it
+- **CI**: GitHub Actions on every pull request, with Dependabot for updates
+- **Merged pull requests**: LESdylan 260, vjan-nie 72, SMOSTAFAH1 57,
+  DjSurgeon 8, danielfdez17 4
+
+### What the repositories record
+
+| Practice | Evidence (2026-11-04) |
 |---|---|
-| Issues | 129 on osionos, 38 on groot, 20 on prismatica, 16 on grobase (`gh issue list --state all`). Branches and commits name them: `fix/issue-278-database-probe-diagnostics` (osionos #284), `fixes #N` in 40 commit messages across groot, grobase, osionos and prismatica |
-| Labels | Triage labels `priority: high`, `subject-blocker` and `account-platform` on groot and osionos, plus GitHub's defaults (`gh label list`) |
-| Pull requests | 144 on groot, 182 on osionos, 78 on grobase, 50 on prismatica; merged into `develop`, and `develop` promoted to `main` by a merge commit |
-| Peer review | Since 2026-09-21 (grobase, hydrawn) and up to 2026-11-04 (groot `develop`), a GitHub ruleset on each main repository requires one approving review and forbids force-pushes and branch deletion (`gh api repos/<repo>/rulesets`). CodeRabbit reviews every PR since 2026-10-23 |
-| Stacked branches | Feature chains merged one on top of another: groot #84–#87 (`feat/ide-*`), grobase #69–#70 (`feat/multidb-g1b…g1d`), the osionos `release/acct-w1` … `w9` series |
-| Commit rhythm | At least one commit on 174 of the 232 days between 2026-03-18 and 2026-11-04, across all repositories |
-
-**Strict CI from the start.** CI arrived within days of each repository's first
-commit: grobase `ci.yml` on 2026-03-29, osionos on 2026-04-12, groot on
-2026-05-13. SonarCloud is configured in groot since 2026-05-04 and comments on
-its pull requests since #9 (2026-06-01). Security scans (Semgrep, Trivy,
-gitleaks, TruffleHog, ZAP, cargo-audit, govulncheck) run on every pull request,
-and groot rejects one-word commit subjects
-(`.github/workflows/commit-subjects.yml`).
-
-**Rituals.** Two-week sprints since the start, daily stand-ups and a weekly
-meeting, mostly on Discord (team account, confirmed 2026-11-04; Discord leaves
-no trace in the repositories). The method was Scrumban (Scrum rituals plus a
-Kanban board), as described in
-[`docs/dossier-project-dylan/dossier-projet.md:390-416`](https://github.com/Univers42/osionos/blob/develop/docs/dossier-project-dylan/dossier-projet.md)
-in osionos.
-
-**Planning and decisions.** Work is planned and decided in meetings, mostly on
-Discord, then recorded in issues, pull requests and the wiki. When a problem
-blocked the team, it got a dedicated meeting. Test-driven development and
-DevOps practices (CI on every pull request, Docker-first builds, one-command
-bring-up) were the means to a frictionless workflow.
-
-**How far we got.** We publish these numbers so the claims above can be checked:
-
-- **Sprints.** The sprints were planned outside GitHub: no milestone and no
-  sprint label exists in any repository. Merges come in bursts: 250 of the 442
-  merged pull requests on the six main repositories landed in two weeks (ISO
-  weeks 43–44).
-- **Review.** The rulesets let a maintainer bypass them, and in a sample of the
-  40 most recent merged pull requests per repository, 0–22 % carry an approval
-  from someone other than the author.
-- **Nobody indispensable.** Shared ownership is real in breadth: every active
-  member committed in at least three areas, and osionos has six authors with
-  five or more commits. In depth we are not there yet: one member wrote 86 % of
-  the 8,571 human commits, and in 17 of 18 areas one author holds more than half
-  of the commits. Commit counts are not effort: one large commit and a typo fix
-  weigh the same.
+| Issues | 129 on osionos, 38 on groot, 20 on prismatica, 16 on grobase (`gh issue list --state all`) |
+| Peer review | Since 2026-09-21 (grobase, hydrawn) and up to 2026-11-04 (groot `develop`), a GitHub ruleset on each main repository requires one approving review and forbids force-pushes and branch deletion (`gh api repos/<repo>/rulesets`). CodeRabbit reviews every pull request since 2026-10-23 |
+| Commit subjects | groot rejects one-word commit subjects (`.github/workflows/commit-subjects.yml`) |
 
 ---
 
