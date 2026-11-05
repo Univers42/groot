@@ -1025,6 +1025,40 @@ case \"\$*\" in *SecurityOptions*) echo '[name=rootless]' ;; *DockerRootDir*) ec
   grep -q 'docker rm -f bridge-id' "$LOG"
 }
 
+@test "read-binds: the checkout itself, by . or by path, means the checkout's paths" {
+  cd "$ROOT"
+  for chosen in . "$ROOT" "$ROOT/"; do
+    GROOT_READ_BINDS=$chosen dc read-binds
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+  done
+}
+
+@test "local-binds: the checkout itself is no copy to fill" {
+  stub stat 'echo ext2/ext3'
+  mkdir -p "$ROOT/infrastructure/tls/api-docs" "$ROOT/apps/grobase/infra/config/openapi"
+  echo docs >"$ROOT/infrastructure/tls/api-docs/index.html"
+  cd "$ROOT"
+  for chosen in . "$ROOT"; do
+    GROOT_READ_BINDS=$chosen dc local-binds
+    [ "$status" -eq 0 ]
+    [ -s "$ROOT/infrastructure/tls/api-docs/index.html" ]
+  done
+}
+
+@test "binds: the checkout itself takes the roster in place" {
+  roster_vm
+  mkdir -p "$ROOT/infrastructure/tls/api-docs" "$ROOT/apps/grobase/infra/config/openapi"
+  echo docs >"$ROOT/infrastructure/tls/api-docs/index.html"
+  cd "$ROOT"
+  for chosen in . "$ROOT"; do
+    rm -f "$ROOT/tools/seeds/.agency-people.env"
+    GROOT_READ_BINDS=$chosen dc binds
+    [ "$status" -eq 0 ]
+    [ -s "$ROOT/tools/seeds/.agency-people.env" ]
+  done
+}
+
 @test "local-binds: a directory chosen by hand is the one written" {
   stub stat 'echo ext2/ext3'
   mkdir -p "$ROOT/infrastructure/tls/api-docs" "$ROOT/apps/grobase/infra/config/openapi"
