@@ -87,8 +87,17 @@ wait_for() {
   return 1
 }
 
+# A VM started by an older checkout, or by a cron tick from an older clone, has no ports record or
+# a stale one, and its alias can be on a port it left. born2root reads a running VM's forwards from
+# its command line, so a start against it rewrites the record and the alias and starts nothing.
+refresh_vm_ports() {
+  qemu_running || return 0
+  born2root_make qemu_start >/dev/null || note "born2root could not record the VM's ports: the checks below say what is wrong"
+}
+
 await_vm() {
   local reason
+  refresh_vm_ports
   if ssh_answers; then
     ! autostart_dangling || ! writes_allowed || ! is_own_vm || repair_autostart
     return 0

@@ -282,6 +282,15 @@ case "$*" in -G*) printf "hostname 127.0.0.1\nport 4242\nuser d\n" ;; *localhost
   ! grep -q '^make' "$LOG"
 }
 
+@test "vm: a running VM has its ports record and alias refreshed before the alias is believed" {
+  vault_set
+  vm_says 9 'vintage=2026-11-04'
+  stub pgrep 'exit 0'
+  dc vm
+  [ "$status" -eq 0 ]
+  grep -q '^make.*qemu_start' "$LOG"
+}
+
 @test "vm: down and held stops at once, with the way out" {
   vault_set
   stub ssh 'case "$*" in -G*) printf "hostname 127.0.0.1\nport 4242\nuser d\n" ;; *) exit 255 ;; esac'
@@ -1194,6 +1203,17 @@ binds_seen_by_recipes() {
   DATACENTER_VERIFY_BROWSERS=1 dc verify
   [ "$status" -eq 1 ]
   [[ "$output" == *"skipped"* ]]
+}
+
+@test "verify: the end-to-end run gets one retry, and a spec that needed it is said out loud" {
+  verified_stack
+  mkdir -p "$ROOT/tests/e2e"
+  printf '#!/bin/sh\necho "$*" >>"%s/run-args"\necho "  1 flaky"\necho "  22 passed"\n' "$BATS_TEST_TMPDIR" >"$ROOT/tests/e2e/run.sh"
+  DATACENTER_VERIFY_BROWSERS=1 dc verify
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 spec(s) failed once"* ]]
+  grep -qx -- '--retries=1' "$BATS_TEST_TMPDIR/run-args"
+  ! grep -q 'reach.*retries' "$BATS_TEST_TMPDIR/run-args"
 }
 
 # pinned_vm — an answering VM whose grobase is at no pin; fake_own_vm decides whose it is.
