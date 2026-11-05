@@ -40,7 +40,7 @@ repository: built from osionos.
 **Kong** (`127.0.0.1:8000`) — the BaaS door. Everything going to data, realtime, storage or auth
 passes through it. → [security/04-network](../security/04-network.md)
 
-**LiveKit** (`ws://127.0.0.1:7880`) — WebRTC media server, for osionos video rooms.
+**LiveKit** (`wss://localhost:4000/livekit`, behind the TLS proxy) — WebRTC media server, for osionos video rooms.
 
 **Why it matters:** "we have eight applications" is false and lands badly. "Four products and
 four platform services" is true, and the second sentence is the more impressive one.

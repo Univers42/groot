@@ -4,7 +4,7 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
-const { resolveAppRequest, terminalCsp } = require("../desktop-app-protocol");
+const { resolveAppRequest, terminalCsp, createAppHandler } = require("../desktop-app-protocol");
 
 const rendererDir = "/opt/osionos/renderer";
 const files = new Set([
@@ -56,5 +56,39 @@ describe("terminalCsp (T4)", () => {
     assert.equal(directive("frame-src"), "frame-src 'none'");
     assert.equal(directive("frame-ancestors"), "frame-ancestors app://osionos");
     assert.doesNotMatch(policy, /https:|wss:|localhost|127\.0\.0\.1| 'unsafe-eval'/);
+  });
+});
+
+// The renderer picks the path and query of a /__baas/ request, and SonarCloud flags that as SSRF
+// (jssecurity:S5144), which is why the fetch carries a NOSONAR. This is the proof behind it: the
+// relay must keep working for every path the renderer may ask for, but never for another host.
+// Caveat: WHATWG URL stands in for the Chromium parser behind net.fetch, so a URL the two read
+// differently is not covered, and only the first hop is: net.fetch follows upstream redirects.
+describe("createAppHandler — the /__baas/ relay stays on baasTarget's origin", () => {
+  const HOSTILE = ["", "@", "/", "//", "\\", "..", "%2e%2e", "%2f", "%5c", ":", "evil.test", "%00", "%0d%0a", "%40", "?", "#"];
+  const suffixes = HOSTILE.flatMap((a) => HOSTILE.flatMap((b) => HOSTILE.map((c) => a + b + c)));
+  const relayThrough = async (baasTarget, url) => {
+    const fetched = [];
+    const net = { fetch: async (target) => { fetched.push(String(target)); return new Response("{}"); } };
+    const handler = createAppHandler({ net, rendererDir, baasTarget, rendererPolicy: "", rendererCspHeader: "content-security-policy" });
+    await handler({ url, method: "GET", headers: new Headers() });
+    return fetched.filter((target) => !target.startsWith("file:"));
+  };
+
+  for (const baasTarget of ["http://127.0.0.1:8000", "https://grobase.tailnet.ts.net"]) {
+    it(`no path of ${suffixes.length} reaches past ${baasTarget}`, async () => {
+      let relayed = 0;
+      for (const suffix of suffixes) {
+        for (const target of await relayThrough(baasTarget, `app://osionos/__baas/${suffix}`)) {
+          relayed++;
+          assert.equal(new URL(target).origin, baasTarget, `${suffix} reached ${target}`);
+        }
+      }
+      assert.ok(relayed > suffixes.length / 2, `only ${relayed} of ${suffixes.length} were relayed`);
+    });
+  }
+
+  it("hands the path and query to the router unchanged", async () => {
+    assert.deepEqual(await relayThrough("http://127.0.0.1:8000", "app://osionos/__baas/rest/v1/x?a=1&b=2"), ["http://127.0.0.1:8000/rest/v1/x?a=1&b=2"]);
   });
 });

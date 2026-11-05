@@ -88,6 +88,12 @@ pulled() {
   done
 }
 
+@test "the frontends include the Whiteboard, whatever order the makefiles load in" {
+  run make -s -C "$REPO" --eval 'show-frontends: ; @echo $(ROOT_FRONTENDS)' show-frontends
+  [ "$status" -eq 0 ]
+  [[ "$output" == *hydrawn-gateway* ]]
+}
+
 # vault-restore pulls its helpers, then stops containers via `make up`. A failing fake make
 # ends the run right there, so PULLS holds exactly the helpers it fetched up front.
 restore_until_first_stop() {

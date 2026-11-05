@@ -53,12 +53,12 @@ link 'Website' 'opposite-osiris-web' "https://localhost:${OPPOSITE_OSIRIS_HOST_P
 link 'osionos editor' '[-_]osionos-app' "https://localhost:${OSIONOS_APP_HOST_PORT:-3001}"
 link 'Mail' '[-_]mail-[0-9]' "https://localhost:${MAIL_HOST_PORT:-3002}"
 link 'Calendar' '[-_]calendar-[0-9]' "https://localhost:${CALENDAR_HOST_PORT:-3003}"
-link 'Whiteboard' 'drawnosaurus-gateway' "https://localhost:${DRAWNOSAURUS_HOST_PORT:-3007}"
+link 'Whiteboard' 'hydrawn-gateway' "https://localhost:${HYDRAWN_HOST_PORT:-${DRAWNOSAURUS_HOST_PORT:-3007}}"
 printf '\n  \033[1mAPIs & infra\033[0m\n'
 link 'osionos bridge' 'osionos-bridge' "https://localhost:${OSIONOS_BRIDGE_HOST_PORT:-4000}"
 link 'Auth gateway' 'auth-gateway' "https://localhost:${AUTH_GATEWAY_HOST_PORT:-8787}/api/auth"
-link 'grobase BaaS' 'mini-baas-kong' "http://127.0.0.1:$(hostport mini-baas-kong 8000 8000)"
-link 'LiveKit' '[-_]livekit' 'ws://127.0.0.1:7880'
+link 'grobase BaaS' 'mini-baas-kong' "https://localhost:${GROBASE_TLS_HOST_PORT:-8444}"
+link 'LiveKit' '[-_]livekit' "wss://localhost:${OSIONOS_BRIDGE_HOST_PORT:-4000}/livekit"
 link 'Mailpit inbox' 'mini-baas-mailpit' "http://localhost:$(hostport mini-baas-mailpit 8025 8025)"
 link 'Grafana' 'mini-baas-grafana' "http://localhost:$(hostport mini-baas-grafana 3000 3010)"
 # The demo password is minted per machine (never committed); a missing one is reported, not

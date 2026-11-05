@@ -341,6 +341,21 @@ jobs:
           meta=$(curl -sSk https://localhost:3001/ | grep -o '<meta name="graph-studio-base"[^>]*>')
           echo "index.html: $meta"; [ "$meta" = "<meta name=\"graph-studio-base\" content=\"/graph-studio/$pin/\" />" ]
 
+      # The public API's documentation on the real :8444 edge of the fresh stack (#178): the page,
+      # grobase's OpenAPI document byte for byte, and Kong still behind it (401 without a key).
+      - name: Prove the public API docs are served on :8444
+        if: success()
+        run: |
+          set -euo pipefail
+          got=$(curl -sSk -o "$RUNNER_TEMP/docs.html" -w '%{http_code} %{content_type}' https://localhost:8444/docs/)
+          echo "GET /docs/ → $got"; [ "${got%%;*}" = "200 text/html" ]
+          grep -q '<script src="docs.js">' "$RUNNER_TEMP/docs.html"
+          code=$(curl -sSk -o "$RUNNER_TEMP/openapi.json" -w '%{http_code}' https://localhost:8444/openapi.json)
+          echo "GET /openapi.json → $code"; [ "$code" = 200 ]
+          cmp "$RUNNER_TEMP/openapi.json" apps/grobase/infra/config/openapi/grobase-public.json
+          code=$(curl -sSk -o /dev/null -w '%{http_code}' https://localhost:8444/rest/v1/)
+          echo "GET /rest/v1/ without a key → $code"; [ "$code" = 401 ]
+
       # osionos's second brain on the live stack is graph_render's element fed by the bridge: the
       # Home graph from the rail, ?home=graph and a stored variant; Enter on a page node opens it;
       # a second user never sees the first user's pages; an index.html without the pack's meta says

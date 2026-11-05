@@ -41,10 +41,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 #   typescript → typescript-language-server --stdio
 #   python     → pyright-langserver --stdio
 #   java       → jdtls-launch (wrapper that starts Eclipse JDT LS on stdio)
+
 # Global, so a `docker exec` LSP relay finds them on PATH. Major-pinned (a dev
 # sandbox toolchain, not a project dependency under the release-age policy).
+# Exact patch pins (S8543): major-only ranges resolve differently on every rebuild.
 RUN npm install -g --ignore-scripts --no-audit --no-fund \
-      typescript@5 typescript-language-server@4 pyright@1 \
+      typescript@5.9.3 typescript-language-server@4.3.3 pyright@1.1.403 \
     && npm cache clean --force
 
 # 42 school work: valgrind and gdb for leak and crash hunts, readline's headers for
@@ -81,7 +83,9 @@ RUN ln -s /usr/local/go/bin/go /usr/local/bin/go \
 # Temurin JRE 21.0.12.1+1 (built 2026-08-19) — Eclipse JDT LS requires Java 21
 # runtime (eclipse.jdt.ls README line 45). User `java` stays 17 from default-jdk.
 # sha256: 2413149700df0f7d440500a84a8f764c535f21e5a5e87d38328b64eec2c5b500
+
 RUN curl -fsSL --proto '=https' --tlsv1.2 "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jre_x64_linux_hotspot_21.0.12.1_1.tar.gz" \
+
       -o /tmp/jre21.tar.gz \
     && echo "2413149700df0f7d440500a84a8f764c535f21e5a5e87d38328b64eec2c5b500  /tmp/jre21.tar.gz" | sha256sum -c - \
     && mkdir -p /opt/jre21 \
@@ -90,7 +94,9 @@ RUN curl -fsSL --proto '=https' --tlsv1.2 "https://github.com/adoptium/temurin21
 
 # Eclipse JDT LS 1.61.0 (built 2026-09-03; 1.62.0 is too new under the 14-day
 # release-age rule). sha256: 338e7e73d61836651ba2453919a0d34fa763eb4e7c03342092309bffb8934c64
+
 RUN curl -fsSL --proto '=https' --tlsv1.2 "https://download.eclipse.org/jdtls/milestones/1.61.0/jdt-language-server-1.61.0-202609031315.tar.gz" \
+
       -o /tmp/jdtls.tar.gz \
     && echo "338e7e73d61836651ba2453919a0d34fa763eb4e7c03342092309bffb8934c64  /tmp/jdtls.tar.gz" | sha256sum -c - \
     && mkdir -p /opt/jdtls \
@@ -108,7 +114,9 @@ RUN set -- /opt/jdtls/plugins/org.eclipse.equinox.launcher_*.jar; \
 # with no checksum let any upstream re-publish land in the image unchecked.
 ARG RUST_ANALYZER_VERSION=2026-09-28
 ARG RUST_ANALYZER_SHA256=23f711d86b5f826e22886f01d7355dc01e0f4c1357dafa29710a95b903b48c85
+
 RUN curl -fsSL --proto '=https' --tlsv1.2 "https://github.com/rust-lang/rust-analyzer/releases/download/${RUST_ANALYZER_VERSION}/rust-analyzer-x86_64-unknown-linux-gnu.gz" \
+
       -o /tmp/rust-analyzer.gz \
     && echo "${RUST_ANALYZER_SHA256}  /tmp/rust-analyzer.gz" | sha256sum -c - \
     && gunzip -c /tmp/rust-analyzer.gz > /usr/local/bin/rust-analyzer \

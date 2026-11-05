@@ -190,7 +190,7 @@ that still trusts the previous one warns exactly as if nothing were imported
    same session: sign in with the same `make demo-login` credentials, open the same board URL,
    draw — the strokes appear in window 1. The e2e smoke asserts this within 5 s
    (`tests/e2e/specs/dw8-realtime.spec.ts`).
-5. **Do not click Share.** Board editing has no per-user authorization yet; drawnosaurus is
+5. **Do not click Share.** Board editing has no per-user authorization yet; hydrawn is
    bound to `127.0.0.1:3007` for that reason (`docker-compose.yml:27-32`).
 
 ## Troubleshooting

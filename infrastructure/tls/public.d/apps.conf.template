@@ -7,7 +7,10 @@
 # the ports are inert unless the operator names the origin each answers for.
 #
 # Every response, errors included, carries the same headers (`always`). No CORS header is sent
-# and no X-Frame-Options: framing is allowed for the osionos origin only, by frame-ancestors.
+# and no X-Frame-Options: framing is allowed for the osionos origin only, by frame-ancestors, plus
+# PUBLIC_EXTRA_FRAME_ANCESTORS (space-separated https origins, empty by default; the overlay always
+# defines it, because envsubst leaves an undefined ${...} in place and nginx then refuses it).
+# `public-funnel.sh verify --pre` refuses anything but bare https origins (extra_ancestors_ok).
 # Caveat: the Host guard compares the whole "https://host[:port]" string, so a trailing dot or an
 # explicit :443 on Calendar's name is refused (444), never accepted; Funnel sends the plain name.
 
@@ -43,7 +46,7 @@ server {
   ssl_protocols TLSv1.2 TLSv1.3;
   if ($apps_host_ok = 0) { return 444; }
 
-  add_header Content-Security-Policy "default-src 'self'; script-src 'self'; connect-src 'self'; style-src 'self' $apps_style_src; base-uri 'none'; form-action 'none'; object-src 'none'; frame-ancestors ${PUBLIC_ORIGIN}:8443" always;
+  add_header Content-Security-Policy "default-src 'self'; script-src 'self'; connect-src 'self'; style-src 'self' $apps_style_src; base-uri 'none'; form-action 'none'; object-src 'none'; frame-ancestors ${PUBLIC_ORIGIN}:8443 ${PUBLIC_EXTRA_FRAME_ANCESTORS}" always;
   add_header Strict-Transport-Security "max-age=31536000" always;
   add_header X-Content-Type-Options "nosniff" always;
   add_header Referrer-Policy "no-referrer" always;

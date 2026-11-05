@@ -132,7 +132,9 @@ jobs:
         if: env.SNYK_TOKEN == ''
         run: echo "::notice::SNYK_TOKEN not configured — skipping Snyk"
 
-      - uses: snyk/actions/setup@11b673cfb4b0dc0d860a1323caa199d54950dcce # master
+
+      - uses: snyk/actions/setup@11b673cfb4b0dc0d860a1323caa199d54950dcce # master at 2026-11-04
+
         if: env.SNYK_TOKEN != ''
 
       - name: Snyk test
@@ -160,7 +162,9 @@ jobs:
           git submodule update --init apps/grobase apps/opposite-osiris apps/calendar apps/mail apps/osionos/app
 
       - name: Trivy filesystem scan
-        uses: aquasecurity/trivy-action@8f28faec26515256b6d22074d1d2a8986f4cbd87 # master
+
+        uses: aquasecurity/trivy-action@8f28faec26515256b6d22074d1d2a8986f4cbd87 # master at 2026-11-04
+
         with:
           scan-type: fs
           scan-ref: .
@@ -205,7 +209,9 @@ jobs:
       # when the build actually succeeded, so a Docker Hub outage can't red the security gate.
       - name: Trivy image scan
         if: steps.build_img.outcome == 'success'
-        uses: aquasecurity/trivy-action@8f28faec26515256b6d22074d1d2a8986f4cbd87 # master
+
+        uses: aquasecurity/trivy-action@8f28faec26515256b6d22074d1d2a8986f4cbd87 # master at 2026-11-04
+
         with:
           image-ref: mini-baas/query-router:ci
           severity: HIGH,CRITICAL
@@ -241,7 +247,9 @@ jobs:
           git submodule update --init apps/grobase apps/opposite-osiris apps/calendar apps/mail apps/osionos/app
 
       - name: TruffleHog OSS
-        uses: trufflesecurity/trufflehog@93633ac70c28603931c365b6ef530cab878f4286 # main
+
+        uses: trufflesecurity/trufflehog@93633ac70c28603931c365b6ef530cab878f4286 # main at 2026-11-04
+
         with:
           path: ./
           base: ${{ github.event.pull_request.base.sha || github.event.before }}
@@ -274,9 +282,25 @@ jobs:
         run: |
           set -euo pipefail
           VER=8.30.1
-          curl -fsSL --proto '=https' --tlsv1.2 "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz" \
-            | sudo tar -xz -C /usr/local/bin gitleaks
+          TMP=$(mktemp -d)
+          for i in 1 2 3; do
+            echo "::group::download gitleaks v${VER} (attempt $i/3)"
+            if curl --proto "=https" --tlsv1.2 -fsSL \
+              "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz" \
+              -o "$TMP/gitleaks.tgz"; then
+              echo "::endgroup::"
+              break
+            fi
+            echo "::endgroup::"
+            echo "download attempt $i failed — retry in $((i * 5))s"
+            sleep $((i * 5))
+            if [[ $i -eq 3 ]]; then echo "::error::gitleaks download failed after 3 attempts"; exit 1; fi
+          done
+          tar -tzf "$TMP/gitleaks.tgz" | head -5
+          sudo tar -xzf "$TMP/gitleaks.tgz" -C /usr/local/bin gitleaks
+          sudo chmod +x /usr/local/bin/gitleaks
           gitleaks version
+          rm -rf "$TMP"
 
       # Rooted INSIDE the submodule: grobase's allowlist names files from its own root
       # (^scripts/verify/…$), so a scan sourced from here reports apps/grobase/… paths that
@@ -397,14 +421,16 @@ jobs:
       - name: Install govulncheck
         run: |
           set -euo pipefail
-          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
-          "$(go env GOPATH)/bin/govulncheck" -version
+          # Locked by tools/govulncheck/go.sum. -mod=readonly refuses any resolve outside the sum.
+          cd tools/govulncheck
+          GOBIN="$RUNNER_TEMP/bin" go install -mod=readonly golang.org/x/vuln/cmd/govulncheck # NOSONAR S8545: go.sum lockfile in tools/govulncheck
+          "$RUNNER_TEMP/bin/govulncheck" -version
 
       - name: govulncheck (reachability-based, blocking)
         run: |
           set -euo pipefail
           cd apps/grobase/src/control-plane
-          "$(go env GOPATH)/bin/govulncheck" ./...
+          "$RUNNER_TEMP/bin/govulncheck" ./...
 
   # ── 6. DAST — ZAP baseline on main only (heavy) ────────────────────────────
   dast-zap:
