@@ -60,7 +60,7 @@ svc_container() {
 scope_pairs() {
   local pair
   for pair in $FUNNEL_MAP; do
-    if [ "$1" = all ] || [ "${pair%%:*}" = 443 ]; then printf '%s\n' "$pair"; fi
+    if [[ "$1" = all ]] || [[ "${pair%%:*}" = 443 ]]; then printf '%s\n' "$pair"; fi
   done
 }
 
@@ -72,7 +72,7 @@ reset_both() {
   if ts funnel reset; then CLOSED="main"; else rc=1; fi
   if tsa status --json >/dev/null 2>&1; then
     if tsa funnel reset; then CLOSED+="${CLOSED:+, }apps"; else rc=1; fi
-  elif [ -e "$(apps_node_dir)" ]; then
+  elif [[ -e "$(apps_node_dir)" ]]; then
     note "apps node has state in $(apps_node_dir) but nothing answers on $(apps_node_socket): its Funnel could not be reset"
     rc=1
   fi
@@ -98,14 +98,14 @@ open_apps() {
 cmd_up() {
   local scope=${1:-443} pair
   case "$scope" in 443 | all | apps) ;; *) die "usage: up [443|all|apps]" ;; esac
-  if [ "$scope" = all ] && [ -z "$(penv AUTH_TRUSTED_PROXY_HOPS || true)" ]; then
+  if [[ "$scope" = all ]] && [[ -z "$(penv AUTH_TRUSTED_PROXY_HOPS || true)" ]]; then
     die "refusing 'up all': AUTH_TRUSTED_PROXY_HOPS is unset in $ENV_FILE (measure it on 443 first)"
   fi
-  if [ "$scope" = apps ] && ! apps_configured; then
+  if [[ "$scope" = apps ]] && ! apps_configured; then
     die "refusing 'up apps': set PUBLIC_MAIL_ORIGIN and PUBLIC_CALENDAR_ORIGIN in $ENV_FILE (the apps checks need the origins)"
   fi
   run_verify pre || die "verify --pre failed: the Funnel stays closed"
-  if [ "$scope" = apps ]; then
+  if [[ "$scope" = apps ]]; then
     open_apps
     return
   fi
@@ -147,22 +147,22 @@ cmd_verify() {
 # the file got an empty key (CI's bats image, run 39148082034); od is in busybox and coreutils.
 cmd_env() {
   local key
-  [ -f "$ENV_FILE" ] || (umask 077 && cp "$REPO/.env.public.example" "$ENV_FILE")
+  [[ -f "$ENV_FILE" ]] || (umask 077 && cp "$REPO/.env.public.example" "$ENV_FILE")
   chmod 600 "$ENV_FILE"
-  if [ -z "$(penv AUTH_LINK_SIGNING_KEY || true)" ]; then
+  if [[ -z "$(penv AUTH_LINK_SIGNING_KEY || true)" ]]; then
     key="$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')"
-    [ "${#key}" -eq 64 ] || die "could not mint AUTH_LINK_SIGNING_KEY from /dev/urandom; $ENV_FILE left without it"
+    [[ "${#key}" -eq 64 ]] || die "could not mint AUTH_LINK_SIGNING_KEY from /dev/urandom; $ENV_FILE left without it"
     put_env "$ENV_FILE" AUTH_LINK_SIGNING_KEY "$key"
     note "minted AUTH_LINK_SIGNING_KEY in $ENV_FILE"
   fi
   for k in OSIONOS_ADMIN_EMAILS AUTH_TRUSTED_PROXY_HOPS; do
-    [ -n "$(penv "$k" || true)" ] || note "decide $k in $ENV_FILE"
+    [[ -n "$(penv "$k" || true)" ]] || note "decide $k in $ENV_FILE"
   done
 }
 
 main() {
   local cmd=${1:-}
-  [ $# -eq 0 ] || shift
+  [[ $# -eq 0 ]] || shift
   command -v jq >/dev/null || die "jq is required"
   case "$cmd" in
     up) cmd_up "$@" ;;

@@ -79,7 +79,7 @@ models-grants-verify: ## Prove on a throwaway DB that only service_role reaches 
 ## SKIP.
 	@sh scripts/verify/models-grants.sh
 
-account-load: ## Run 10K-user seed + query budgets on throwaway DB (baseline for P0-5/P1-1)
+account-load: ## Run 10K-user seed + latency budgets on throwaway DB (baseline for P0-5/P1-1)
 ## Spins up a throwaway grobase postgres (--network none), applies grobase init + 012 + shim +
 ## apply-models-migrations.sh, seeds 10K users + workspaces + pages + connections + feed shares,
 ## runs ANALYZE, then executes each query from scripts/verify/account-load/queries.sql RUNS times
@@ -91,3 +91,38 @@ account-load: ## Run 10K-user seed + query budgets on throwaway DB (baseline for
 
 account-load-baseline: ## Run account-load in baseline mode (reports only, exit 0)
 	@sh scripts/verify/account-load.sh --baseline
+
+##@ CI (BaaS gate — each job is one make target)
+baas-ci-go: ## Go control-plane: vet + unit tests (containerised)
+## Usage: make baas-ci-go
+## Requires apps/grobase checked out. Same command the BaaS CI workflow runs.
+	@test -d apps/grobase/src/control-plane || { echo "apps/grobase not checked out"; exit 1; }
+	docker run --rm -v "$(CURDIR)/apps/grobase/src/control-plane:/src" -w /src \
+		golang:1.25-bookworm sh -c "go vet ./... && go test ./..."
+
+baas-ci-rust-data-plane: ## Rust data-plane-router: cargo test --workspace
+## Usage: make baas-ci-rust-data-plane
+	@test -d apps/grobase/src/data-plane-router || { echo "apps/grobase not checked out"; exit 1; }
+	docker run --rm -e CARGO_NET_RETRY=10 -e CARGO_HTTP_MULTIPLEXING=false \
+		-v "$(CURDIR)/apps/grobase/src/data-plane-router:/src" -w /src \
+		rust:1-bookworm cargo test --workspace
+
+baas-ci-rust-realtime: ## Rust realtime plane: cargo test --workspace
+## Usage: make baas-ci-rust-realtime
+	@test -d apps/grobase/infra/docker/services/realtime/realtime-agnostic || { echo "apps/grobase not checked out"; exit 1; }
+	docker run --rm -e CARGO_NET_RETRY=10 -e CARGO_HTTP_MULTIPLEXING=false \
+		-v "$(CURDIR)/apps/grobase/infra/docker/services/realtime/realtime-agnostic:/src" -w /src \
+		rust:1-bookworm cargo test --workspace
+
+baas-ci-static: ## Package manifest parity + Prometheus config check
+## Usage: make baas-ci-static
+	@test -d apps/grobase || { echo "apps/grobase not checked out"; exit 1; }
+	@cd apps/grobase && \
+		diff <(jq -S . infra/config/packages/packages.json) \
+		     <(jq -S . src/control-plane/internal/packages/packages.json) \
+		&& echo "package manifest is the single source of truth"
+	@cd apps/grobase && \
+		docker run --rm --entrypoint promtool \
+			-v "$$PWD/infra/config/prometheus":/etc/prometheus \
+			prom/prometheus:v2.52.0 check config /etc/prometheus/prometheus.yml
+	@cd apps/grobase && shellcheck -S error scripts/verify/m*.sh || true
