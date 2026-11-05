@@ -53,6 +53,7 @@ link 'Website' 'opposite-osiris-web' "https://localhost:${OPPOSITE_OSIRIS_HOST_P
 link 'osionos editor' '[-_]osionos-app' "https://localhost:${OSIONOS_APP_HOST_PORT:-3001}"
 link 'Mail' '[-_]mail-[0-9]' "https://localhost:${MAIL_HOST_PORT:-3002}"
 link 'Calendar' '[-_]calendar-[0-9]' "https://localhost:${CALENDAR_HOST_PORT:-3003}"
+link 'Whiteboard' 'hydrawn-gateway' "https://localhost:${HYDRAWN_HOST_PORT:-${DRAWNOSAURUS_HOST_PORT:-3007}}"
 printf '\n  \033[1mAPIs & infra\033[0m\n'
 link 'osionos bridge' 'osionos-bridge' "https://localhost:${OSIONOS_BRIDGE_HOST_PORT:-4000}"
 link 'Auth gateway' 'auth-gateway' "https://localhost:${AUTH_GATEWAY_HOST_PORT:-8787}/api/auth"

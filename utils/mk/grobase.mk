@@ -3,12 +3,13 @@
 # Frontends the root pipeline owns. The backend (postgres/gotrue/kong/postgrest/...)
 # is the running apps/grobase stack and must NOT be re-upped from here.
 #
-# $(DRAWNOSAURUS_SERVICES) is the Whiteboard plane, default-on since T12-P1b. Referenced
-# rather than repeated — drawnosaurus.mk is included first (Makefile:45 before :49), so the
-# list has one definition. Its wasm artifact is a build INPUT for drawnosaurus-web, which is
-# why frontends-up takes drawnosaurus-wasm as a prerequisite below and not as a step inside
+# $(HYDRAWN_SERVICES) is the Whiteboard plane, default-on since T12-P1b. Referenced rather than
+# repeated, so the list has one definition, and with `=` rather than `:=`: the Makefile includes
+# *.mk sorted, hydrawn.mk comes after this file, and `:=` would drop the Whiteboard from make all
+# without a word. Its wasm artifact is a build INPUT for hydrawn-web, which is
+# why frontends-up takes hydrawn-wasm as a prerequisite below and not as a step inside
 # the recipe: `up -d --build` would otherwise build the web image against a missing pkg/.
-ROOT_FRONTENDS := osionos-bridge osionos-app auth-gateway opposite-osiris-web local-https-proxy livekit $(DRAWNOSAURUS_SERVICES)
+ROOT_FRONTENDS = osionos-bridge osionos-app auth-gateway opposite-osiris-web local-https-proxy livekit $(HYDRAWN_SERVICES)
 
 # The ROOT_FRONTENDS images this repo builds that also have a published Docker Hub tag.
 # `frontends-up PULL_PREBUILT=1` pulls these tags instead of building; an *_IMAGE already
@@ -39,7 +40,11 @@ backend-up: ## Ensure the grobase backend is up, starting it when it is down
 ## With a vault key, secrets are pulled earlier by `secrets-ensure`; with NO vault key, grobase
 ## self-generates its secrets (no-vault local mode) and `env-local-ensure` derives the root
 ## ./.env.local afterward.
-	@if docker ps -q --filter label=com.docker.compose.service=grobase-link 2>/dev/null | grep -q .; then \
+	@if [ -n '$(strip $(GROBASE_DATACENTER))' ]; then \
+		echo '[backend] this machine deploys against its data center ($(GROBASE_DATACENTER)): groot starts no grobase here (ADR 0047). make all GROBASE_DATACENTER= overrides that.' >&2; \
+		exit 1; \
+	fi; \
+	if docker ps -q --filter label=com.docker.compose.service=grobase-link 2>/dev/null | grep -q .; then \
 		echo '[backend] the grobase-link relay is running: grobase is reached elsewhere (make link-status). Refusing to start a second one under the same names; make link-down first.' >&2; \
 		exit 1; \
 	fi; \
@@ -152,7 +157,7 @@ apply-models-baseline: ## Mark every current models/*.sql as applied WITHOUT run
 ## applied WITHOUT running it.
 	@sh scripts/apply-models.sh baseline
 
-frontends-up: submodules-pinned certs drawnosaurus-wasm ## Build and start only the root frontends against the running backend
+frontends-up: submodules-pinned certs hydrawn-wasm ## Build and start only the root frontends against the running backend
 ## Usage: make frontends-up [PULL_PREBUILT=1]
 ## Build and start ONLY the root frontends against the running grobase backend. Also resurrects the
 ## IDE plane containers (runner / sandbox socket-proxy) — but ONLY when ./.env.local records them as

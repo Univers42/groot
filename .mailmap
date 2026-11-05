@@ -7,7 +7,7 @@
 #   git -C apps/grobase -c mailmap.file="$PWD/.mailmap" shortlog -sne --all
 #
 # Caveat: two author/email pairs mix two members and are resolved by inference, not by
-# proof (see the README, "Individual Contributions"). A new address a member starts
+# proof (see wiki/project/contributions-method.md). A new address a member starts
 # committing with shows up as an extra line until it is added here.
 
 # dlesieur
@@ -42,6 +42,7 @@ Seyed Mostafa Hashemian (shashemi) <smostafahashem123@gmail.com> <1.318674e+08+S
 Seyed Mostafa Hashemian (shashemi) <smostafahashem123@gmail.com> <sm.hashemian@alumnos.upm.es>
 # prismatica 93e6b65 by "La Cebolla" carries Signed-off-by: Seyed Mostafa Hashemian.
 Seyed Mostafa Hashemian (shashemi) <smostafahashem123@gmail.com> <smhashem545@gmail.com>
+Seyed Mostafa Hashemian (shashemi) <smostafahashem123@gmail.com> <SMOSTAFAH1@users.noreply.github.com>
 
 # rstancu, a member of the original team roster (archive/wiki-2026-09/CONTRIBUTORS.md), GitHub @esettes
 Roxana Stancu (rstancu) <ioanaroxana.st@gmail.com>
@@ -51,13 +52,13 @@ opencode (AI agent) <opencode@local>
 opencode (AI agent) <opencode@local> <opencode@localhost>
 opencode (AI agent) <opencode@local> <oc-run@localhost>
 
-# Space Bunny: the OpenCode agent team the owner ran on drawnosaurus (BUNNY.md, "You run a team
-# of agents"), on local addresses. An AI agent, not a member, shown as one line like opencode.
-Space Bunny (AI agent team, run by dlesieur) <bunny@local> bunny <bunny@local>
-Space Bunny (AI agent team, run by dlesieur) <bunny@local> bunny <bunny@localhost>
-Space Bunny (AI agent team, run by dlesieur) <bunny@local> Space Bunny <bunny@localhost>
-Space Bunny (AI agent team, run by dlesieur) <bunny@local> Space Bunny <bunny@drawnosaurus.local>
-Space Bunny (AI agent team, run by dlesieur) <bunny@local> builder <builder@bunny>
-Space Bunny (AI agent team, run by dlesieur) <bunny@local> builder <builder@localhost>
-Space Bunny (AI agent team, run by dlesieur) <bunny@local> builder <builder@drawnosaurus.local>
-Space Bunny (AI agent team, run by dlesieur) <bunny@local> builder <builder@local>
+# Space Bunny: an AI-agent identity on hydrawn (BUNNY.md describes a team of agents), on
+# local addresses. Who ran it is not identified. Shown as one line, like opencode.
+Space Bunny (AI agent team) <bunny@local> bunny <bunny@local>
+Space Bunny (AI agent team) <bunny@local> bunny <bunny@localhost>
+Space Bunny (AI agent team) <bunny@local> Space Bunny <bunny@localhost>
+Space Bunny (AI agent team) <bunny@local> Space Bunny <bunny@drawnosaurus.local>
+Space Bunny (AI agent team) <bunny@local> builder <builder@bunny>
+Space Bunny (AI agent team) <bunny@local> builder <builder@localhost>
+Space Bunny (AI agent team) <bunny@local> builder <builder@drawnosaurus.local>
+Space Bunny (AI agent team) <bunny@local> builder <builder@local>

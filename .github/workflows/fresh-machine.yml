@@ -91,7 +91,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: grobase + opposite-osiris + osionos app + scripts checkout (vault-restore.sh, the web/gateway Dockerfiles, the bridge image closure and the vault42 CLI are under test)
         run: |
           git config --global --add url."https://github.com/".insteadOf "git@github.com:"
@@ -160,7 +160,7 @@ jobs:
           git config --global --get-all url."https://github.com/".insteadOf
 
       - name: git clone (root only — submodules are next, explicitly)
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 1
 
@@ -270,8 +270,8 @@ jobs:
           msc=$(docker exec mini-baas-mssql sh -lc '/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -h-1 -W -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM finance.sys.tables"' 2>/dev/null | tr -d '[:space:]')
           echo "mssql finance tables = ${msc:-<none>}"; gt0 "$msc" || { echo "::error::mssql finance empty"; fail=1; }
           # 5 dynamodb (table count)
-          ddc=$(docker run --rm --network mini-baas_mini-baas -e AWS_ACCESS_KEY_ID=local -e AWS_SECRET_ACCESS_KEY=local -e AWS_DEFAULT_REGION=us-east-1 amazon/aws-cli dynamodb list-tables --endpoint-url http://mini-baas-dynamodb-local:8000 --output text --query 'length(TableNames)' 2>/dev/null | tr -d '[:space:]')
-          echo "dynamodb tables = ${ddc:-<none>}"; gt0 "$ddc" || { echo "::error::dynamodb empty"; fail=1; }
+          ddc=$(docker run --rm --network mini-baas_mini-baas -e AWS_ACCESS_KEY_ID=local -e AWS_SECRET_ACCESS_KEY=local -e AWS_DEFAULT_REGION=us-east-1 amazon/aws-cli dynamodb list-tables --endpoint-url http://mini-baas-dynamodb-local:8000 --output text --query 'length(TableNames)' 2>/dev/null | tr -d '[:space:]') # NOSONAR S5332: docker-network endpoint inside the CI runner
+          echo "dynamodb tables = ${ddc:-<none>}"; gt0 "$ddc" || { echo "::error::dynamodb empty"; fail=1; } # NOSONAR S5332: docker-network endpoint inside the CI runner
           # 6 minio (object count)
           mnc=$(docker exec mini-baas-minio sh -c 'find /data -type f -not -path "*/.minio.sys/*" 2>/dev/null | wc -l' 2>/dev/null | tr -d '[:space:]')
           echo "minio objects = ${mnc:-<none>}"; gt0 "$mnc" || { echo "::error::minio objects empty"; fail=1; }
@@ -366,7 +366,7 @@ jobs:
 
       - name: Upload the e2e results
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: e2e-test-results
           path: tests/e2e/test-results

@@ -9,7 +9,7 @@ export function boardTitle(spec: string): string {
 
 /** Types a title on the board list, creates the board and opens it. */
 export async function createAndOpenBoard(root: Page | FrameLocator, title: string): Promise<void> {
-  await root.getByRole("textbox", { name: "New board title…" }).fill(title);
+  await root.getByRole("textbox", { name: /New board title/ }).fill(title);
   await root.getByRole("button", { name: "+ New Board" }).click();
   await root.getByRole("link", { name: new RegExp(title) }).click();
   await expect(root.getByRole("application", { name: "Board canvas" })).toBeVisible();
@@ -38,7 +38,7 @@ export async function drawStroke(page: Page, board: Page | FrameLocator, region:
 
 /**
  * Fraction of `region` (canvas-relative CSS px) that differs from the canvas corner.
- * Adapted from apps/drawnosaurus/e2e/probes.ts `regionInk`, which the runner can't import.
+ * Adapted from apps/hydrawn/e2e/probes.ts `regionInk`, which the runner can't import.
  * Caveat: the corner is the background reference, so anything the app paints in the
  * top-left pixel (a vignette, a grid line) shifts every reading; the threshold of 12 per
  * channel also hides a stroke drawn in a colour within 12 of the background.

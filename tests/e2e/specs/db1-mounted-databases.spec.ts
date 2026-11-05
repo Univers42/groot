@@ -1,5 +1,5 @@
 import { DEMO_SKIP_REASON, E2E_DEMO_PASSWORD } from "../lib/env";
-import { expect, test } from "../lib/fixtures";
+import { expect, test, SELF_DATA_LIMIT } from "../lib/fixtures";
 import { bridge, bridgeStatus, listMounts, openAsDemo, rowOp } from "../lib/osionos-api";
 
 // DB1 — every database mounted on the demo account's workspaces, read the way osionos reads
@@ -20,7 +20,7 @@ test.describe("DB1 the demo account's mounted databases", () => {
 
   test("DB1 the list holds every engine, and every table of every mount answers with rows", async ({ browser, consoleGuard }) => {
     const { context, page, session } = await openAsDemo(browser);
-    consoleGuard.watch(page, "osionos demo");
+    consoleGuard.watch(page, "osionos demo", SELF_DATA_LIMIT);
     try {
       const mounts = await listMounts(page, session);
       expect([...new Set(mounts.map((m) => m.engine))].sort(), "engines in /api/databases").toEqual(ENGINES);
@@ -45,7 +45,7 @@ test.describe("DB1 the demo account's mounted databases", () => {
 
   test("DB1 the account graph draws records from every mount", async ({ browser, consoleGuard }) => {
     const { context, page, session } = await openAsDemo(browser);
-    consoleGuard.watch(page, "osionos demo");
+    consoleGuard.watch(page, "osionos demo", SELF_DATA_LIMIT);
     try {
       const mounts = await listMounts(page, session);
       const graph = await bridge(page, session, "GET", "/api/graph/data?scope=account");
@@ -60,7 +60,7 @@ test.describe("DB1 the demo account's mounted databases", () => {
 
   test("DB1 a record opens as one note, the same note every time", async ({ browser, consoleGuard }) => {
     const { context, page, session } = await openAsDemo(browser);
-    consoleGuard.watch(page, "osionos demo");
+    consoleGuard.watch(page, "osionos demo", SELF_DATA_LIMIT);
     let created: string | null = null;
     try {
       const commerce = (await listMounts(page, session)).find((m) => m.name === "pg-commerce");

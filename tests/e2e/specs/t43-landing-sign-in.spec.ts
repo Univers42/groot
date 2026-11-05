@@ -8,7 +8,7 @@ test("T43 landing loads with zero console errors and Sign in opens the form", as
   consoleGuard.watch(page, "landing");
   await page.goto(PRISMATICA_URL);
   await page.getByRole("banner").getByRole("button", { name: "Sign in", exact: true }).click();
-  const portal = page.getByRole("dialog", { name: "Prismatica workspace portal" });
+  const portal = page.locator("dialog#portal");
   await expect(portal.getByRole("textbox", { name: "Email" }), "Sign in did not open the form").toBeVisible();
   await expect(portal.getByRole("textbox", { name: "Password" })).toBeVisible();
 });

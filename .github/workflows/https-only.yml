@@ -27,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: nginx from mirror.gcr.io under its public.ecr.aws name
-        # Same reason as drawnosaurus-edge.yml: public.ecr.aws rate-limits anonymous pulls per runner IP.
+        # Same reason as hydrawn-edge.yml: public.ecr.aws rate-limits anonymous pulls per runner IP.
         run: |
           docker pull -q mirror.gcr.io/library/nginx:1.27-alpine
           docker tag mirror.gcr.io/library/nginx:1.27-alpine public.ecr.aws/docker/library/nginx:1.27-alpine

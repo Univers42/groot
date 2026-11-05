@@ -59,7 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: version
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
       - name: Check out grobase submodule
@@ -89,7 +89,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
       - name: Check out grobase submodule
@@ -99,14 +99,14 @@ jobs:
         run: |
           git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
           git submodule update --init apps/grobase
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       # Docker Hub — where the images go (public by default on push).
-      - uses: docker/login-action@v4
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4
         with:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_TOKEN }}
       # GHCR — layer-cache push only (cache-to refs in docker-bake.hcl).
-      - uses: docker/login-action@v4
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -136,7 +136,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
       - name: Check out grobase submodule
@@ -146,8 +146,8 @@ jobs:
         run: |
           git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
           git submodule update --init apps/grobase
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4
         with:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_TOKEN }}
@@ -180,7 +180,7 @@ jobs:
               > "binocle-${ed}-${VERSION}-linux-amd64.tar.gz.sha256"
           done
           sha256sum binocle-*-"${VERSION}"-linux-amd64.tar.gz > checksums.txt
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: binocle-binaries
           path: |
@@ -197,7 +197,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
       - name: Check out grobase submodule
@@ -207,7 +207,7 @@ jobs:
         run: |
           git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
           git submodule update --init apps/grobase
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: binocle-binaries
           path: release-assets/
@@ -219,7 +219,7 @@ jobs:
           sed -E 's#^VERSION="\$\{BINOCLE_VERSION:-[^}]*\}"#VERSION="${BINOCLE_VERSION:-'"$VER"'}"#' \
             apps/grobase/scripts/ci/install.sh > release-assets/install.sh
           grep '^VERSION=' release-assets/install.sh
-      - uses: softprops/action-gh-release@v3
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           name: "Grobase BaaS ${{ github.ref_name }}"
           prerelease: ${{ needs.version.outputs.prerelease == 'true' }}

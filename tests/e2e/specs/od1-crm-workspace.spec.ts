@@ -46,6 +46,15 @@ test("OD1 a new account builds a CRM workspace in the UI: created, renamed, a cu
   const { context, page } = await openOsionos(browser, "", { token: await loginOrRegister(user) });
   consoleGuard.watch(page, "osionos (CRM account)");
   const s = await osionosSession(page);
+  // The profession step opens and can close again as the profile answers, so it has no fixed place
+  // in the flow, and while it is up nothing behind it can be clicked. Answer it if it is still there.
+  await page.addLocatorHandler(
+    page.getByRole("heading", { name: "What do you do?" }),
+    async () => {
+      await page.getByRole("button", { name: /^Developer/ }).click({ timeout: 3_000 }).catch(() => undefined);
+    },
+    { noWaitAfter: true },
+  );
 
   await page.getByRole("button", { name: "More workspace options" }).click();
   await page.getByRole("button", { name: "New workspace" }).click();
@@ -54,20 +63,23 @@ test("OD1 a new account builds a CRM workspace in the UI: created, renamed, a cu
   const crmId = (await osionosSession(page)).workspaceId;
 
   await page.getByRole("complementary", { name: "Sidebar" }).getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("dialog", { name: "Settings" }).getByRole("textbox", { name: "Workspace name" }).fill(crmName);
+  const settings = page.getByRole("region", { name: "Settings", exact: true });
+  await settings.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "General", exact: true }).click();
+  await settings.getByRole("textbox", { name: "Workspace name" }).fill(crmName);
   await expect.poll(async () => (await workspaces(page, s)).find((w) => w._id === crmId)?.name, { message: "the rename reaches the bridge", timeout: 15_000 }).toBe(crmName);
-  await page.keyboard.press("Escape");
 
   const pages = ((await bridge(page, s, "GET", `/api/pages/all?workspaceId=${crmId}`)).items ?? []) as { title: string }[];
   expect(pages.map((p) => p.title).sort(), "the work kit's starter pages").toEqual([...STARTER_PAGES].sort());
 
   const known = new Set((await objectDatabases(page, s)).map((db) => db.dbKey));
+  // Settings fills the pane, so a page has to be opened again before there is a block to add to.
+  await page.getByRole("complementary", { name: "Sidebar" }).getByText("Getting Started", { exact: true }).first().click();
   // The append zone focuses a trailing empty paragraph (or makes one): the slash menu opens
   // only when the whole block ends in "/", so a click into existing text never opens it.
   await page.getByRole("main").getByRole("button", { name: "Add a block", exact: true }).click();
   await page.keyboard.type("/database");
   await page.getByRole("option", { name: "Database - Inline" }).click();
-  const grid = page.getByRole("grid", { name: /table — arrow keys to move/ });
+  const grid = page.getByRole("grid", { name: /table — arrows or Tab to move/ });
   await fillCell(page, grid.getByRole("gridcell").first(), CUSTOMERS[0]);
   await grid.getByRole("button", { name: "New", exact: true }).click();
   await fillCell(page, grid.getByRole("gridcell", { name: /^Empty/ }), CUSTOMERS[1]);

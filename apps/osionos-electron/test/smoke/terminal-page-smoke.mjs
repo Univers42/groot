@@ -16,7 +16,7 @@ async function check(name, fn) {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const assert = (ok, msg) => { if (!ok) throw new Error(msg); };
-const ps = () => execFileSync("ps", ["-eo", "pid=,ppid=,args="], { encoding: "utf8" }).trim().split("\n")
+const ps = () => execFileSync("ps", ["-eo", "pid=,ppid=,args="], { encoding: "utf8" }).trim().split("\n") // NOSONAR S4036: fixed tool name, PATH is the dev/CI image
   .map((l) => l.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/)).filter(Boolean).map(([, pid, ppid, args]) => ({ pid: +pid, ppid: +ppid, args }));
 const hostPid = () => ps().find((p) => /--type=utility/.test(p.args) && /node\.mojom\.NodeService/.test(p.args))?.pid ?? null;
 const shells = () => { const h = hostPid(); return h ? ps().filter((p) => p.ppid === h).length : 0; };

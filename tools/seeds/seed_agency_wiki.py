@@ -1192,12 +1192,12 @@ MIN_14D = 14 * 24 * 60
 events = []  # (msg_uuid, channel_key, author, text, minutes_ago)
 n_threads = len(THREADS)
 for ti, (chan, msgs) in enumerate(THREADS):
-    base = MIN_14D - int((ti + 1) * (MIN_14D - 90) / (n_threads + 1)) + rng.randint(-40, 40)
+    base = MIN_14D - int((ti + 1) * (MIN_14D - 90) / (n_threads + 1)) + rng.randint(-40, 40) # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
     offset = max(base, 75)
     for mi, (author, text) in enumerate(msgs):
         mid = uid(f"msg:{chan}:{ti}:{mi}")
         events.append((mid, chan, author, text, offset))
-        offset -= rng.randint(2, 6)
+        offset -= rng.randint(2, 6) # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
 
 # reactions: (msg uuid5 key parts, reactor, emoji)
 REACTIONS = [
@@ -1334,7 +1334,7 @@ for pkey, users in LIKES.items():
     for i, u in enumerate(users):
         chat.append(
             "INSERT INTO public.osionos_feed_likes (page_id, user_id, created_at) "
-            f"VALUES ('{pid}', '{P(u)}', now() - interval '{rng.randint(600, 9000)} minutes') "
+            f"VALUES ('{pid}', '{P(u)}', now() - interval '{rng.randint(600, 9000)} minutes') " # NOSONAR S2245: seeded RNG: reproducible demo data, not a security context
             "ON CONFLICT DO NOTHING;")
         like_count += 1
 for i, (pkey, author, text, minutes) in enumerate(COMMENTS):

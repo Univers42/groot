@@ -28,6 +28,8 @@ root="${HOST_PORTS_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 listeners_cmd="${HOST_PORTS_LISTENERS:-ss -Hltnp}"
 docker_cmd="${HOST_PORTS_DOCKER:-docker}"
 ports_file="${HOST_PORTS_FILE:-$root/.env.ports}"
+# shellcheck source=scripts/lib/host-ports-udp.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/host-ports-udp.sh"
 bind_addr="${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}"
 project="${COMPOSE_PROJECT_NAME:-track-binocle}"
 window=50
@@ -97,7 +99,12 @@ listener_table() {
 # its own ports instead of walking away from itself). Returns non-zero if docker fails.
 own_ports() {
   bash -c "$docker_cmd ps --filter label=com.docker.compose.project=$project --format '{{.Ports}}'" \
-    2>/dev/null | tr ',' '\n' | sed -n 's/.*:\([0-9][0-9]*\)->.*/\1/p' | LC_ALL=C sort -u
+    2>/dev/null | tr ',' '\n' | awk '
+      # docker prints contiguous ports as one range: 127.0.0.1:3001-3003->3001-3003/tcp.
+      match($0, /:[0-9]+(-[0-9]+)?->/) {
+        n = split(substr($0, RSTART + 1, RLENGTH - 3), ends, "-")
+        for (p = ends[1]; p <= ends[n]; p++) print p
+      }' | LC_ALL=C sort -u
 }
 
 # is_wildcard — 0 for an address that binds every interface (0.0.0.0, *, ::).
@@ -205,6 +212,7 @@ render_ports_file() {
     [[ -n "$name" ]] || continue
     content+="$name=${chosen[$name]}"$'\n'
   done < <(sorted_names)
+  [ -z "${UDP_RANGE:-}" ] || content+="LIVEKIT_UDP_PORTS=$UDP_RANGE"$'\n'
   tmp="$(mktemp "$ports_file.XXXXXX")"
   printf '%s' "$content" >"$tmp"
   if [[ -f "$ports_file" ]] && cmp -s "$tmp" "$ports_file"; then
@@ -339,6 +347,7 @@ cmd_resolve() {
     printf '\n' >&2
   done
 
+  UDP_RANGE="$(free_udp_range)"
   local before="" name
   [[ -f "$ports_file" ]] && before="$(cat "$ports_file")"
   render_ports_file

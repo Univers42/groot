@@ -18,10 +18,14 @@ export function startRestProxy({ listenPort, routes }) {
     const url = req.url || "/";
     const route = compiled.find((r) => url === r.prefix || url.startsWith(`${r.prefix}/`) || url.startsWith(`${r.prefix}?`));
     if (!route) { res.writeHead(404).end('{"error":"no route"}'); return; }
-    const path = url.slice(route.prefix.length) || "/";
-    const t = route.target;
+    // Keep the request on the route's own host: one leading slash, no scheme-relative "//host".
+    const path = `/${(url.slice(route.prefix.length) || "/").replace(/^\/+/, "")}`;
+    const t = route.target; // NOSONAR S5144: target restricted to the configured local upstream
+    // Copy own header entries only (a "__proto__" header must not reach the options object).
+    const headers = Object.fromEntries(Object.entries(req.headers).filter(([name]) => name !== "__proto__"));
+    headers.host = t.host;
     const upstream = http.request(
-      { hostname: t.hostname, port: t.port, path, method: req.method, headers: { ...req.headers, host: t.host } },
+      { hostname: t.hostname, port: t.port, path, method: req.method, headers },
       (up) => { res.writeHead(up.statusCode || 502, up.headers); up.pipe(res); },
     );
     upstream.on("error", () => { if (!res.headersSent) res.writeHead(502); res.end('{"error":"rest proxy upstream failed"}'); });
@@ -32,8 +36,9 @@ export function startRestProxy({ listenPort, routes }) {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const port = Number(process.env.REST_PROXY_PORT || 4010);
-  startRestProxy({ listenPort: port, routes: [
+  await startRestProxy({ listenPort: port, routes: [
     { prefix: "/rest/v1", target: process.env.POSTGREST_URL || "http://127.0.0.1:33001" },
     { prefix: "/auth/v1", target: process.env.GOTRUE_URL || "http://127.0.0.1:9999" },
-  ] }).then(() => console.log(`[rest-proxy] :${port} /rest/v1->postgrest /auth/v1->gotrue`));
+  ] });
+  console.log(`[rest-proxy] :${port} /rest/v1->postgrest /auth/v1->gotrue`);
 }

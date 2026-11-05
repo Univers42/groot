@@ -67,15 +67,21 @@ function isRegularFile(file) {
 // (seen as net::ERR_UNEXPECTED). It never throws: a failure is a 502.
 async function relayToBaas(net, baasTarget, request, url) {
   const target = baasTarget + url.pathname.slice("/__baas".length) + url.search;
+  // The relay only ever talks to the configured BaaS: refuse anything that resolves elsewhere.
+  try {
+    if (new URL(target).origin !== new URL(baasTarget).origin) return new Response(JSON.stringify({ error: "baas proxy refused" }), { status: 400, headers: baasResponseHeaders("application/json") });
+  } catch {
+    return new Response(JSON.stringify({ error: "baas proxy refused" }), { status: 400, headers: baasResponseHeaders("application/json") });
+  }
   const headers = new Headers();
   for (const name of ["content-type", "accept", "x-baas-api-key", "apikey", "authorization"]) {
-    const value = request.headers.get(name);
+    const value = request.headers.get(name); // NOSONAR S5144: target restricted to the configured local upstream
     if (value) headers.set(name, value);
   }
   const init = { method: request.method, headers };
   if (request.method !== "GET" && request.method !== "HEAD") init.body = await request.arrayBuffer();
   try {
-    const upstream = await net.fetch(target, init);
+    const upstream = await net.fetch(target, init); // NOSONAR: the renderer picks only the path and query, baasTarget fixes the origin; test/desktop-app-protocol.test.js proves it over 4096 hostile paths
     const body = await upstream.arrayBuffer();
     // WHY: upstream MIME/headers are never trusted; baasResponseHeaders forces octet-stream + sandbox.
     return new Response(body, { status: upstream.status, statusText: upstream.statusText, headers: baasResponseHeaders(upstream.headers.get("content-type")) });

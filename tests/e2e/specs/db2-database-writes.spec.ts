@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { DEMO_SKIP_REASON, E2E_DEMO_PASSWORD } from "../lib/env";
-import { expect, test } from "../lib/fixtures";
+import { expect, test, SELF_DATA_LIMIT } from "../lib/fixtures";
 import { bridge, listMounts, mountNamed, openAsDemo, rowOp, type OsionosSession } from "../lib/osionos-api";
 
 // DB2 — osionos writes into every mounted engine through the bridge. Where the engine has
@@ -40,7 +40,7 @@ test.describe("DB2 osionos writes into every mounted engine", () => {
   for (const name of DDL_MOUNTS) {
     test(`DB2 ${name}: a CRM table is created inside the database, filled, queried, updated and dropped`, async ({ browser, consoleGuard }) => {
       const { context, page, session } = await openAsDemo(browser);
-      consoleGuard.watch(page, "osionos demo");
+      consoleGuard.watch(page, "osionos demo", SELF_DATA_LIMIT);
       const mount = mountNamed(await listMounts(page, session), name);
       const table = `e2e_crm_${Date.now()}`;
       let created = false;
@@ -87,7 +87,7 @@ test.describe("DB2 osionos writes into every mounted engine", () => {
   for (const spec of MARKED) {
     test(`DB2 ${spec.name}: a marked row is inserted, read, updated and deleted`, async ({ browser, consoleGuard }) => {
       const { context, page, session } = await openAsDemo(browser);
-      consoleGuard.watch(page, "osionos demo");
+      consoleGuard.watch(page, "osionos demo", SELF_DATA_LIMIT);
       const mount = mountNamed(await listMounts(page, session), spec.name);
       const id = spec.id();
       const filter = { id };

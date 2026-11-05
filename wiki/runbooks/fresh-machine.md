@@ -10,7 +10,7 @@ otherwise.
 |---|---|---|
 | Docker Engine ≥ 25 + Compose v2 | healthchecks use `start_interval`; measured on Docker 29.8.2 | `docker-compose.yml:3`, [README prerequisites](../../README.md#prerequisites) |
 | RAM ≥ 8 GB | `make all` peaked at 6.25 GB used on an 8 GB VM; for a VM, `VM_RAM_MB=8192` | [measured runs](#measured-results) |
-| Disk ≥ 30 GB free for Docker | images 13.5 GB + build cache 9.5 GB + volumes 1.4 GB, measured 2026-10-01 | [README prerequisites](../../README.md#prerequisites) |
+| Disk ≥ 30 GB free for Docker | images 13.5 GB + build cache 9.5 GB (the README's 23 GB) + volumes 1.4 GB, from `docker system df` on the dev VM with the stack running, 2026-10-01 (recorded in c3a80d12). Caveat: not measured from a clean build, so a cold build may differ. `fresh-bringup.sh` warns under 10 GiB free on the Docker data root; the 2026-10-05 VM build passed with a 65 GB `/var` (91 GB disk) | [README prerequisites](../../README.md#prerequisites), `scripts/verify/fresh-bringup.sh:32-34,121-122`, [measured runs](#measured-results) |
 | Free ports | 443, 3001–3003, 3007, 4000, 4100, 4200, 4322, 4323, 7880, 7881, 8444, 8787, UDP 50000–50060, and Kong on 8000 | `docker-compose.yml`, `apps/grobase/orchestrators/compose/base/gateway.yml` |
 | One `sudo` password | `make all` copies the local CA into the system store once (`certs-trust-local`); `fresh-bringup.sh` asks for it first, with `sudo -v` | `utils/mk/certs.mk`, targets `certs-trust`, `certs-trust-local`, `scripts/verify/fresh-bringup.sh` (`check_sudo`) |
 | A GitHub SSH key | submodules use `git@github.com:` URLs | `.gitmodules` |
@@ -190,7 +190,7 @@ that still trusts the previous one warns exactly as if nothing were imported
    same session: sign in with the same `make demo-login` credentials, open the same board URL,
    draw — the strokes appear in window 1. The e2e smoke asserts this within 5 s
    (`tests/e2e/specs/dw8-realtime.spec.ts`).
-5. **Do not click Share.** Board editing has no per-user authorization yet; drawnosaurus is
+5. **Do not click Share.** Board editing has no per-user authorization yet; hydrawn is
    bound to `127.0.0.1:3007` for that reason (`docker-compose.yml:27-32`).
 
 ## Troubleshooting

@@ -59,7 +59,7 @@ its pre-rewrite refs, `--all` counts the rewritten commits twice: the README's
 | osionos, `src` | dlesieur 1239, danfern3 78, vjan-nie 77, serjimen 76, rstancu 38, shashemi 8 |
 | opposite-osiris (whole repository) | serjimen 177, dlesieur 150, shashemi 60, vjan-nie 23, danfern3 8 |
 | mail / calendar (whole repositories) | dlesieur 37 / 22 |
-| drawnosaurus (whole repository, at groot's pin `41900d75`) | dlesieur 676, danfern3 25, shashemi 9, vjan-nie 6; 111 by `bunny`, `Space Bunny` and `builder`, not mapped to a member |
+| hydrawn (whole repository, at groot's pin `41900d75`) | dlesieur 676, danfern3 25, shashemi 9, vjan-nie 6; 111 by `bunny`, `Space Bunny` and `builder`, not mapped to a member |
 | QA (whole repository) | vjan-nie 39, rstancu 2, danfern3 1, dlesieur 1 |
 | monkey-bot (whole repository) | danfern3 133, rstancu 7, dlesieur 2 |
 | Infrastructure, CI (root `infrastructure`, `.github/workflows`) | dlesieur 263 / 76, vjan-nie 20 / 14, shashemi 9 / 4, danfern3 2 / 0 |

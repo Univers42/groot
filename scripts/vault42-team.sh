@@ -67,10 +67,11 @@ if [ "$verb" = push ]; then
 	bash "$REPO/scripts/vault42-push-guard.sh" || exit 1
 	note "publishing this checkout to $ORG/$PROJECT/$ENVNAME — every teammate's next pull gets this tree"
 fi
-# A pull backup (`--backup` writes the displaced file aside as .bak) of a private file is
-# not itself `*.local`, so a push would publish it to every member — measured on the first
-# team push: .env.local.bak went out SHARED. Every .bak stays private, whatever it backs up.
-[ "$verb" = push ] && set -- "$@" --private '*.bak'
+# A pull backup (`--backup` writes the displaced file aside as .bak, vault42-pull-everything as
+# .bak-<stamp>) of a private file is not itself `*.local`, so a push would publish it to every
+# member — measured on the first team push: .env.local.bak went out SHARED. Every backup stays
+# private, whatever it backs up.
+[ "$verb" = push ] && set -- "$@" --private '*.bak*'
 # ./.env.grobase-remote is the data center's assembled .env, refreshed by `make link`: its
 # JWT_SECRET, SERVICE_ROLE_KEY and database passwords are production's, not the shared dev
 # stack's, and it carries FLY_TOKEN and PAT_DOCKER. Kept in the vault, sealed to the pusher.

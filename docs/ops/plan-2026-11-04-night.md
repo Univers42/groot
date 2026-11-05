@@ -86,7 +86,7 @@ little by little. The laptop has 8 GB RAM, so at most two agents run at a time a
      host image `hydrawn-pages-build:bfc67b6-proxy` from `~/Documents/groot-wt/hydrawn-embed/hydrawn`
      (branch feat/osionos-embed).
    - The services themselves are up: hydrawn Pages 200; the bridge /api/whiteboard/* answers 401 without
-     credentials; drawnosaurus containers healthy. The hydrawn page logs a CSP eval issue and an unnamed
+     credentials; hydrawn containers healthy. The hydrawn page logs a CSP eval issue and an unnamed
      form field.
 4. Console zero: 289 JSX form fields without id/name (codemod plus a guard test, including the
    notion-database-sys submodule). A Playwright spec walks every surface and fails on any console error,

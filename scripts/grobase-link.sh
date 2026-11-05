@@ -24,9 +24,12 @@ LINK_DIR="${GROBASE_LINK_DIR:-${XDG_RUNTIME_DIR:-/tmp}/track-binocle-link}"
 TARGET=$(setting GROBASE_TARGET auto)
 HOST_PORT=$(setting GROBASE_LINK_HOST_PORT 28000) # loopback copy of Kong for host tools; 0 disables
 REMOTE_DIR=$(setting GROBASE_REMOTE_DIR /opt/grobase)
-API_URL=$(setting GROBASE_API_URL "") # the WAF clients call; empty = derived from TARGET
-CA_FILE=$(setting GROBASE_CA_FILE "") # direct targets only: the CA signing that Kong's certificate
-IDE_SSH=$(setting GROBASE_IDE_SSH "") # direct targets only: an ssh alias used for the IDE plane forward, nothing else
+API_URL=$(setting GROBASE_API_URL "")               # the WAF clients call; empty = derived from TARGET
+CA_FILE=$(setting GROBASE_CA_FILE "")               # direct targets only: the CA signing that Kong's certificate
+IDE_SSH=$(setting GROBASE_IDE_SSH "")               # direct targets only: an ssh alias used for the IDE plane forward, nothing else
+ADMIN_SSH=$(setting GROBASE_ADMIN_SSH "")           # direct targets only: an ssh alias for bring-up, never for runtime traffic
+ADMIN_HOST_KEY=$(setting GROBASE_ADMIN_HOST_KEY "") # "<type> <base64>", the only key that alias may present
+CONNECT_IP=$(setting GROBASE_CONNECT_IP "")         # direct targets only: the address the relay dials for the URL's name
 REMOTE_ENV="${GROBASE_REMOTE_ENV:-$REPO/.env.grobase-remote}"
 CTL="$LINK_DIR/ssh.ctl"
 STATE="$LINK_DIR/state"
@@ -139,6 +142,34 @@ up_ssh() {
   note "ssh link to $1: $(wc -l <"$ROUTES") ports relayed, Kong at $kong$(forward_host_port "$kong")"
 }
 
+# The alias says where the VM is and nothing else: the master runs with -F /dev/null, so its
+# forwards (RemoteForward 9222 on b2b) and its `StrictHostKeyChecking no` do not apply, and the VM
+# must present GROBASE_ADMIN_HOST_KEY. A docker ssh:// transport would inherit both.
+open_admin_master() {
+  local host port user known="$LINK_DIR/admin_known_hosts"
+  [[ $ADMIN_SSH =~ ^[A-Za-z0-9][A-Za-z0-9._@:-]*$ ]] || die "GROBASE_ADMIN_SSH is not a plain ssh alias or user@host"
+  [ -n "$ADMIN_HOST_KEY" ] || die "GROBASE_ADMIN_SSH needs GROBASE_ADMIN_HOST_KEY, the VM's host key"
+  read -r host port user < <(ssh -G "$ADMIN_SSH" | awk '$1 == "hostname" { h = $2 } $1 == "port" { p = $2 } $1 == "user" { u = $2 } END { print h, p, u }')
+  [ -n "$user" ] || die "ssh cannot read the alias $ADMIN_SSH"
+  printf 'grobase-admin %s\n' "$ADMIN_HOST_KEY" >"$known"
+  ssh -F /dev/null -o ControlMaster=yes -o ControlPath="$CTL" -o ControlPersist=yes -o ClearAllForwardings=yes \
+    -o StreamLocalBindUnlink=yes -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 \
+    -o ServerAliveCountMax=4 -o LogLevel=ERROR -o StrictHostKeyChecking=yes -o HostKeyAlias=grobase-admin \
+    -o UserKnownHostsFile="$known" -p "$port" -l "$user" -N -f "$host" ||
+    die "no admin ssh to $ADMIN_SSH; a rebuilt VM has a new host key: remove GROBASE_ADMIN_HOST_KEY from ~/.config/42ctl/secrets/datacenter.env"
+}
+
+# Bring-up only: one forward each to the VM's docker socket and tenant-control, for the steps that
+# read or converge the VM. Kong stays on the URL, so the running stack does not depend on ssh.
+link_admin_direct() {
+  local ep
+  open_admin_master
+  forward "$LINK_DIR/docker.sock" /var/run/docker.sock
+  ep=$(remote_endpoints | awk '$1 == "tenant-control" && $2 == 3022 { print $3; exit }')
+  [ -z "$ep" ] || forward "$LINK_DIR/tenant-control-3022.sock" "$ep"
+  (link_ide_plane) || note "the IDE plane forward failed; the IDE stays unavailable"
+}
+
 up_direct() {
   url_reachable "$1" || die "$1 does not answer from a container of this daemon"
   cmd_down_ssh # only once the URL answers: a dead target must not cost the link that works
@@ -151,7 +182,7 @@ up_direct() {
   direct_routes "$1" "$(relay_cafile)" >"$ROUTES"
   note "direct link to $1: Kong over the URL; the bridge's publish route is chosen by \`env\`;"
   note "Redis and Mailpit are local stand-ins (sessions and captured mail stay on this machine)."
-  link_ide_direct "$IDE_SSH"
+  if [ -n "$ADMIN_SSH" ]; then link_admin_direct; else link_ide_direct "$IDE_SSH"; fi
 }
 
 # own_link_dir — LINK_DIR, made by and private to this user. A reboot empties XDG_RUNTIME_DIR,
@@ -219,24 +250,34 @@ cmd_status() {
   esac
 }
 
+# The target's own .env through the link's master: the only keys that grobase accepts.
+fetch_remote_env() {
+  umask 077
+  mux x "cat '$REMOTE_DIR/.env'" >"$REMOTE_ENV.tmp" || {
+    rm -f "$REMOTE_ENV.tmp"
+    die "cannot read $REMOTE_DIR/.env on $(state_get target) (GROBASE_REMOTE_DIR=<its grobase dir>)"
+  }
+  grep -q '^JWT_SECRET=.' "$REMOTE_ENV.tmp" || die "$REMOTE_DIR/.env on the remote has no JWT_SECRET"
+  mv "$REMOTE_ENV.tmp" "$REMOTE_ENV"
+}
+
 cmd_env() {
   local mode src sync=""
   mode=$(state_get mode) || true
   [ -n "$mode" ] || die "no link yet; run up first so env knows where grobase's .env is"
   case "$mode" in
   ssh)
-    umask 077
-    mux x "cat '$REMOTE_DIR/.env'" >"$REMOTE_ENV.tmp" || {
-      rm -f "$REMOTE_ENV.tmp"
-      die "cannot read $REMOTE_DIR/.env on $(state_get target) (GROBASE_REMOTE_DIR=<its grobase dir>)"
-    }
-    grep -q '^JWT_SECRET=.' "$REMOTE_ENV.tmp" || die "$REMOTE_DIR/.env on the remote has no JWT_SECRET"
-    mv "$REMOTE_ENV.tmp" "$REMOTE_ENV"
+    fetch_remote_env
     src=$REMOTE_ENV
     ;;
   direct)
-    for src in "$REMOTE_ENV" "$REPO/apps/grobase/.env"; do [ -f "$src" ] && break; done
-    [ -f "$src" ] || die "direct mode cannot fetch secrets; put that grobase's .env at $REMOTE_ENV"
+    if [ -n "$ADMIN_SSH" ]; then
+      fetch_remote_env
+      src=$REMOTE_ENV
+    else
+      for src in "$REMOTE_ENV" "$REPO/apps/grobase/.env"; do [ -f "$src" ] && break; done
+      [ -f "$src" ] || die "direct mode cannot fetch secrets; put that grobase's .env at $REMOTE_ENV"
+    fi
     ;;
   local) src="$REPO/apps/grobase/.env" ;;
   esac
@@ -269,7 +310,10 @@ cmd_docker_host() {
   case "$mode" in
   local) printf '\n' ;;
   ssh) case "$target" in ssh://*) printf '%s\n' "$target" ;; *) printf 'ssh://%s\n' "$target" ;; esac ;;
-  *) die "direct mode reaches Kong only: no daemon, no postgres; run make models-migrate where grobase runs" ;;
+  *)
+    [ -S "$LINK_DIR/docker.sock" ] || die "direct mode reaches Kong only: no daemon, no postgres; run make models-migrate where grobase runs"
+    printf 'unix://%s/docker.sock\n' "$LINK_DIR"
+    ;;
   esac
 }
 
@@ -291,6 +335,8 @@ Settings: the environment (make link KEY=value) wins, then ./.env.grobase-link (
   GROBASE_API_URL         the WAF URL clients call, https://<vm>.<tailnet>.ts.net:8443; ssh/auto need it
   GROBASE_CA_FILE         direct targets only: the PEM CA signing that Kong's certificate; empty = the relay's system store
   GROBASE_IDE_SSH         direct targets only: an ssh alias used solely for the IDE plane socket; empty = no ssh
+  GROBASE_ADMIN_SSH       direct targets only: an ssh alias for the target's .env, docker socket and tenant-control; needs GROBASE_ADMIN_HOST_KEY
+  GROBASE_CONNECT_IP      direct targets only: the address the relay dials; the certificate is still checked for the URL's name
 Environment only: GROBASE_LINK_DIR (XDG_RUNTIME_DIR/track-binocle-link), GROBASE_LINK_CONF (another settings file), GROBASE_REMOTE_ENV, B2B_DIR.
 Exit codes: 0 success, 1 failure or misuse.
 USAGE
