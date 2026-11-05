@@ -1,12 +1,12 @@
 # Module ledger
 
-> **Status:** Partial · 2026-09-15
+> **Superseded · 2026-11-05.** This whole page is history: its rows, letters,
+> legend and point totals. The current grades, one rule and the points table are
+> in the [README Modules table](../../README.md#modules).
+>
+> **Status:** Superseded · 2026-11-05 (written as Partial · 2026-09-15)
 > **Evidence:** flag states read from `deploy/fly/boot.sh`; every gate named here exists in the
 > gate index
-> **To check:** the two items in the "open" table below are worth up to 6 points between them
-> and neither has been checked. The current grades are in the
-> [README Modules table](../../README.md#modules) (2026-11-04), which supersedes this ledger's
-> letters.
 > **Sources:** `deploy/fly/boot.sh` · `apps/grobase/CLAUDE.md` §flag-gating · [01-subject](01-subject.md)
 
 Only catalogue modules count. **A module that cannot be demonstrated scores zero**, so each row
@@ -34,7 +34,8 @@ the screen does not.
 | OAuth 2.0 (User mgmt, minor) | 1 | `SSO_ENABLED`, migration `053` | `m110`, `m163` | **B** |
 | File upload (Web, minor) | 1 | storage plane, `STORAGE_BUCKET_SCOPE_ENABLED` | `m159` | **C** |
 
-Nominal total without free choice: **18**. Seven of those points are **A** (rows 1–4).
+Nominal total without free choice: **18**. Seven of those points are **A** (rows
+1–4).
 
 **The key distinction:** organisation-system's backend is already running in production, so it
 needs only a screen. The **B** rows need a flag, a migration and a gate run — but no new code.
@@ -67,10 +68,11 @@ in the project but hard to demonstrate live — better as an oral argument than 
 | Does `VaultProvider` talk to HashiCorp Vault? (credential layer, migration `060`) | 2 pts and the only cybersecurity module |
 | What are `src/apps/ai/` and `src/apps/analytics/`? | Up to 4 pts from categories written off |
 
-The AI category was first dismissed because gaming modules need a game and we have none. That
-no longer holds: the README now claims four AI modules (LLM interface, RAG, moderation, voice;
-6 points, all B), and the analytics dashboard major is still unchecked. The LLM interface is
-explained in [ai-llm-interface](ai-llm-interface.md).
+The AI category was first dismissed because gaming modules need a game and we
+have none. That no longer holds: the README now claims four AI modules (LLM
+interface, RAG, moderation, voice; 6 points, all B), and the analytics dashboard
+major is still unchecked. The LLM interface is explained in
+[ai-llm-interface](ai-llm-interface.md).
 
 ---
 
