@@ -40,6 +40,12 @@ function display_name(name) {
 	return name
 }
 
+function rule(char, width,   out, i) {
+	out = ""
+	for (i = 0; i < width; i++) out = out char
+	return out
+}
+
 # Sets parsed_name/parsed_summary/parsed_prereqs; returns 1 for a documented target line.
 function parse_target(line,   rest, marker) {
 	if (!match(line, /^[A-Za-z0-9][A-Za-z0-9_.%\/-]*/)) return 0
@@ -79,10 +85,28 @@ function print_section(title,   i, shown) {
 	shown = 0
 	for (i = 1; i <= count; i++) {
 		if (sections[i] != title) continue
-		if (!shown) printf "\n%s\n", color_wrap("1;33", title)
+		if (!shown) {
+			if (color) {
+				printf "\n"
+				printf "%s  %s\n", color_wrap("1;33", "▸"), color_wrap("1;33", title)
+				printf "%s\n", color_wrap("0;90", "  " rule("─", 56))
+			} else {
+				printf "\n%s\n", color_wrap("1;33", title)
+			}
+		}
 		shown = 1
-		printf "  %s%s  %s\n", color_wrap("1;36", display_name(names[i])), \
-			spaces(name_width - length(display_name(names[i]))), summaries[i]
+		if (color) {
+			printf "  %s  %s%s  %s\n",
+				color_wrap("1;36", display_name(names[i])),
+				spaces(name_width - length(display_name(names[i]))),
+				color_wrap("0;90", "•"),
+				summaries[i]
+		} else {
+			printf "  %s%s  %s\n",
+				color_wrap("1;36", display_name(names[i])),
+				spaces(name_width - length(display_name(names[i]))),
+				summaries[i]
+		}
 	}
 }
 
@@ -92,12 +116,55 @@ function compute_name_width(   i, len) {
 		len = length(display_name(names[i]))
 		if (len > name_width) name_width = len
 	}
-	if (name_width > 30) name_width = 30
+	if (name_width < 12) name_width = 12
+	if (name_width > 28) name_width = 28
+}
+
+function paint_gradient(line,   colors, ncolors, i, ch, idx, out) {
+	# warm → cool (osionos-like). line uses ASCII # as block placeholder
+	ncolors = split("208 214 220 226 190 154 118 82 48 44", colors, " ")
+	out = ""
+	for (i = 1; i <= length(line); i++) {
+		ch = substr(line, i, 1)
+		if (ch == "#") {
+			idx = int((i - 1) * (ncolors - 1) / (length(line) - 1)) + 1
+			if (idx < 1) idx = 1
+			if (idx > ncolors) idx = ncolors
+			out = out sprintf("%c[38;5;%sm█%c[0m", 27, colors[idx], 27)
+		} else {
+			out = out ch
+		}
+	}
+	return out
+}
+
+function print_header() {
+	printf "\n"
+	# pixel GROOT — # = full block (painted with gradient)
+	printf "  %s\n", paint_gradient("####  ###   ##   ##  ####")
+	printf "  %s\n", paint_gradient("#     #  # #  # #  #  #  ")
+	printf "  %s\n", paint_gradient("# ##  ###  #  # #  #  #  ")
+	printf "  %s\n", paint_gradient("#  #  # #  #  # #  #  #  ")
+	printf "  %s\n", paint_gradient("####  #  #  ##   ##   #  ")
+	printf "\n"
+	printf "  %s  %s  %s\n", color_wrap("38;5;245", "◆"), color_wrap("0;37", "make targets"), color_wrap("38;5;245", "◆")
+	printf "\n"
+	printf "  %s  %s\n", color_wrap("1;37", "Usage:"), color_wrap("0;37", "make <target>  [VAR=value ...]")
+	printf "  %s  %s\n", color_wrap("1;37", "Detail:"), color_wrap("0;37", "make help-<target>   e.g.  make help-all")
+	printf "  %s  %s\n", color_wrap("1;37", "Color:"), color_wrap("0;37", "auto on TTY · set NO_COLOR=1 to disable")
+}
+
+function print_footer() {
+	printf "\n"
+	printf "%s\n", color_wrap("0;90", "  ────────────────────────────────────────────────────────")
+	printf "  %s\n", color_wrap("0;37", "Tip: run  make help-<name>  for usage lines & prerequisites")
+	printf "  %s\n", color_wrap("0;37", "     e.g.  make help-all   ·  make help-link  ·  make help-clean")
+	printf "\n"
 }
 
 function print_list(   ordered, ordered_count, i, is_ordered) {
 	compute_name_width()
-	printf "%s\n", "Usage: make <target> [VAR=value ...]"
+	if (color) print_header()
 	ordered_count = split(order, ordered, "|")
 	for (i = 1; i <= ordered_count; i++) {
 		if (ordered[i] in section_seen) print_section(ordered[i])
@@ -105,16 +172,23 @@ function print_list(   ordered, ordered_count, i, is_ordered) {
 	}
 	for (i = 1; i <= section_count; i++)
 		if (!(section_titles[i] in is_ordered)) print_section(section_titles[i])
-	printf "\nmake help-<target> prints one target's usage lines.\n"
+	if (color) print_footer()
 }
 
 function print_target(   i) {
 	for (i = 1; i <= count; i++) {
 		if (names[i] != target) continue
-		printf "%s\n", color_wrap("1;36", "make " display_name(names[i]))
+		printf "\n"
+		if (color) {
+			printf "%s  %s\n", color_wrap("1;36", "▸"), color_wrap("1;36", "make " display_name(names[i]))
+			printf "%s\n", color_wrap("0;90", "  " rule("─", 48))
+		} else {
+			printf "  %s\n", color_wrap("1;36", "make " display_name(names[i]))
+		}
 		printf "  %s\n", summaries[i]
-		if (prereqs[i] != "") printf "Runs first: %s\n", prereqs[i]
+		if (prereqs[i] != "") printf "\n  %s %s\n", color_wrap("1;33", "Runs first:"), prereqs[i]
 		if (has_extended[i]) printf "\n%s\n", extended[i]
+		printf "\n"
 		return 1
 	}
 	printf "no documented target '%s' — make help lists them\n", target > "/dev/stderr"
