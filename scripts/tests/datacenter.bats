@@ -40,7 +40,7 @@ esac'
 case "$*" in *"select sha"*) cat "$LOG.applied" 2>/dev/null ;; esac'
   stub ss 'exit 0'
   stub make 'echo "make $*" >>"$LOG"'
-  stub crontab "printf '%s\\n' '# b2b-autostart baas begin' '* * * * * cd x && B2B_CONFIG=profiles/server.toml VM_PATH=$BATS_TEST_TMPDIR/vms VM_NAME=baas autostart --tick' '# b2b-autostart baas end'"
+  stub crontab "printf '%s\\n' '# b2b-autostart baas begin' '* * * * * cd / && B2B_CONFIG=profiles/server.toml VM_PATH=$BATS_TEST_TMPDIR/vms VM_NAME=baas autostart --tick' '# b2b-autostart baas end'"
   mkdir -p "$BATS_TEST_TMPDIR/vms/baas"
   : >"$BATS_TEST_TMPDIR/vms/baas/baas.qcow2"
   echo 'SELECT 1;' >"$ROOT/models/a.sql"
@@ -882,6 +882,14 @@ pinned_vm() {
   DATACENTER_ALLOW_WRITES=1 dc vm
   [[ "$output" == *"not at the pinned commit"* ]]
   grep -q '^make .*grobase .*GROBASE_ADDONS=observability engines ops studio control playground secrets mysql8 vault42' "$LOG"
+}
+
+@test "vm: an auto-start block whose checkout is gone is reinstalled from this clone" {
+  pinned_vm
+  fake_own_vm
+  stub crontab "printf '%s\\n' '# b2b-autostart baas begin' '* * * * * cd /gone/born2root && B2B_CONFIG=profiles/server.toml VM_NAME=baas VM_PATH=$BATS_TEST_TMPDIR/vms x' '# b2b-autostart baas end'"
+  DATACENTER_ALLOW_WRITES=1 dc vm
+  grep -q '^make .*autostart' "$LOG"
 }
 
 @test "vm: a repair that leaves grobase unhealthy names what is failing" {

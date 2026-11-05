@@ -49,9 +49,23 @@ refuse_backup_repository() {
     die "a backup repository exists at $dest and is newer than any seed, so a build here would not load it. Build from born2root, then make restore, or move it away"
 }
 
-# Called on every path that finds a built VM with no way to come back at login.
+# Caveat: a checkout path with a space cuts the match short, so that block reads as dangling and
+# is reinstalled from this clone (over-reports). Harmless: the block is the same but for its path.
+autostart_dir() {
+  crontab -l 2>/dev/null | sed -n '/b2b-autostart .* begin/,/b2b-autostart .* end/p' |
+    sed -En 's/^([^ ]+ +){5}cd ([^ ]+) .*/\2/p' | head -n 1
+}
+
+autostart_dangling() {
+  local dir
+  dir=$(autostart_dir)
+  [ -n "$dir" ] && [ ! -d "$dir" ]
+}
+
+# Called on every path that finds a built VM with no way to come back at login. A block whose
+# checkout was deleted is that too: cron fails on the cd every minute and nobody reads it.
 repair_autostart() {
-  [ -z "$(autostart_value VM_NAME)" ] || return 0
+  [ -n "$(autostart_value VM_NAME)" ] && ! autostart_dangling && return 0
   require_writes "installing the VM's auto-start"
   born2root_make autostart || die "make autostart failed. From born2root: make autostart"
   [ -n "$(autostart_value VM_NAME)" ] || die "make autostart finished, but the crontab has no block"

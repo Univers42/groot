@@ -89,7 +89,10 @@ wait_for() {
 
 await_vm() {
   local reason
-  ssh_answers && return 0
+  if ssh_answers; then
+    ! autostart_dangling || ! writes_allowed || ! is_own_vm || repair_autostart
+    return 0
+  fi
   if vm_absent; then
     build_vm
     return
