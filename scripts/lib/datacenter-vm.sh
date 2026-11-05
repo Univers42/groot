@@ -177,7 +177,7 @@ grobase_problem() {
     printf 'not on the local plan'
     return
   }
-  grobase_health >/dev/null 2>&1 || printf 'not healthy on its plan'
+  grobase_health "${1:-0}" >/dev/null 2>&1 || printf 'not healthy on its plan'
 }
 
 install_grobase_plan() { born2root_make grobase "GROBASE_ADDONS=$LOCAL_GROBASE_ADDONS"; }
@@ -191,7 +191,8 @@ ensure_grobase() {
   require_born2root grobase
   note "grobase is $problem in the VM: born2root installs and starts it"
   install_grobase_plan || note "make grobase failed; checking what it left"
-  problem=$(grobase_problem)
+  # What it just restarted is still starting, and a scrape target takes a pull to come up.
+  problem=$(grobase_problem 180)
   [ -z "$problem" ] || die "grobase is still $problem in the VM after make grobase. From born2root: make grobase_status"
 }
 

@@ -16,9 +16,15 @@
 DATACENTER_EMPTY_BINDS="${DATACENTER_EMPTY_BINDS:-}"
 COMPOSE_PROJECT=track-binocle
 
-# The plan is read from the VM, the one record of what it was installed with.
+# The plan is read from the VM, the one record of what it was installed with. grobase.conf holds an
+# unquoted value with spaces, so it is parsed, never sourced: sourcing runs `engines` as a command
+# and silently loses the addons. "grobase-health" only names the job in the process list.
 grobase_health() {
-  vm_ssh "$ALIAS" "bash -c '. /etc/b2b/grobase.conf && make --no-print-directory -C $REMOTE_DIR health HEALTH_WAIT=\${1:-0} PACKAGE=\"\$GROBASE_PACKAGE\" ADDONS=\"\$GROBASE_ADDONS\"' _ ${1:-0}"
+  vm_ssh "$ALIAS" "bash -s -- grobase-health ${1:-0}" <<REMOTE
+conf=/etc/b2b/grobase.conf
+make --no-print-directory -C $REMOTE_DIR health HEALTH_WAIT="\$2" \
+  PACKAGE="\$(sed -n 's/^GROBASE_PACKAGE=//p' \$conf)" ADDONS="\$(sed -n 's/^GROBASE_ADDONS=//p' \$conf)"
+REMOTE
 }
 
 # published_port NAME DEFAULT — host-ports.sh moves a port another process holds, so Mail's bridge
