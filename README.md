@@ -103,7 +103,7 @@ an editor session), **Kong** (grobase's API gateway, behind its WAF) and
 | **Linux host** | Tested on Debian 13 (trixie), the system the born2root VM installs; the CA-trust step uses `sudo` + `update-ca-certificates` | `vendor/born2root/docker/Dockerfile:14`, `vendor/born2root/generate/create_custom_iso.sh:120`; `utils/mk/certs.mk` |
 | **Docker Engine ≥ 25** + **Compose v2** | Healthchecks use `start_interval`, which needs Docker 25. Tested with Docker 29.8. | `docker-compose.yml:10` |
 | **RAM ≥ 8 GB** | Measured: the VM peaked at ~6.5 GB of 8 GB during `make all` | `wiki/runbooks/fresh-machine.md` (6266 MiB peak, v1.0.0-rc4, 2026-10-05) |
-| **Disk ≥ 30 GB free for Docker** | Measured on the dev VM with the stack running (`docker system df`, 2026-10-01): images 13.5 GB, build cache 9.5 GB, volumes 1.4 GB | measured |
+| **Free disk space for Docker** | Images, the build cache and data volumes all live in Docker's storage; no minimum is measured in the repository. `docker system df` shows the current use | — |
 | **bash, GNU Make, git, curl, openssl, ssh** | Make drives everything; curl runs the health check; openssl generates the local secrets | `utils/mk/app.mk:12-15`, `scripts/gen-local-env.sh:253` |
 | **A GitHub SSH key** | `.gitmodules` uses `git@github.com:` URLs, so the recursive clone needs SSH access to GitHub | `.gitmodules` |
 | **Google Chrome** | Current stable — the browser the project is evaluated on | [`wiki/project/01-subject.md`](wiki/project/01-subject.md) |
@@ -326,8 +326,10 @@ secret store, via the **42ctl** CLI. A machine that holds a vault identity in
 `apps/grobase/.env` is absent (`secrets-ensure`), or on demand with `make
 vault42-pull-all APPLY=1`. With the vault passphrase also present, `make all`
 deploys against the data-center VM instead (see [Defense
-bring-up](#defense-bring-up-pinned)). A new identity is created with `42ctl keys
-init` and enrolled with an invitation from the vault's operator. Details:
+bring-up](#defense-bring-up-pinned)). A new identity: `scripts/vault42-ctl.sh
+keys init`, then `scripts/vault42-ctl.sh keys enroll --org univers42`, then an
+org admin grants the project
+([`wiki/runbooks/another-device.md`](wiki/runbooks/another-device.md)). Details:
 [`DATA-MIGRATION.md`](DATA-MIGRATION.md).
 
 The vault42 CLI is wired in beside that path: the `Secrets (vault42)` section of `make help`, and
@@ -346,7 +348,7 @@ checklist: [ADR 0017](docs/adr/0017-vault42-cli-beside-the-old-path.md).
 | `make all GROBASE_EDITION=full` | Bring up every grobase plane except the playground demo UI, including extra engines and monitoring |
 | `docker compose ps` | Service status |
 | `docker compose logs -f <service>` | Follow one service's logs |
-| `docker compose down` | Stop the frontends (data is kept) |
+| `COMPOSE_PROFILES=dev docker compose down` | Stop and remove the root project's containers; named volumes stay (no `-v`). `make` sets `COMPOSE_PROFILES=dev` (`utils/mk/common.mk:45`), a plain shell does not |
 
 **Backend editions.** `make all` starts grobase in the **`devlean`** edition
 (`GROBASE_EDITION ?= devlean` in `utils/mk/grobase.mk`; listed in grobase's
@@ -656,8 +658,8 @@ A commit count is not effort, and pairing or review does not show in it.
 | Two-factor authentication and passkeys | TOTP codes and passkeys on the account | dlesieur 15 | osionos `scripts/bridge-account-mfa*`, `scripts/bridge-account-passkeys*`, `src/features/settings/profile/TwoFactorModal.tsx` |
 | AI assistant | Streaming answers, retrieval over the workspace with citations, moderation, dictation and read-aloud; started with `--profile ai` | dlesieur 317, vjan-nie 9, shashemi 1 | osionos `services/osionos-ai`, `src/features/ai` |
 | Whiteboard | Shared boards in osionos's Whiteboard tab; strokes reach every open copy of the board live | dlesieur 569, danfern3 20, shashemi 6, vjan-nie 4 | hydrawn, whole repository |
-| Mail | Read Gmail inside the workspace via Google OAuth. Opt-in: `make mail-up` and Google OAuth credentials | dlesieur 39 | `apps/mail`, whole repository |
-| Calendar | Google Calendar events via Google OAuth. Opt-in: `make calendar-up` and Google OAuth credentials | dlesieur 22 | `apps/calendar`, whole repository |
+| Mail | Read Gmail inside the workspace via Google OAuth (mail `bridge/server.mjs`). Opt-in: `make mail-up` and Google OAuth credentials | dlesieur 39 | `apps/mail`, whole repository |
+| Calendar | Google Calendar events via Google OAuth (calendar `bridge/server.mjs`). Opt-in: `make calendar-up` and Google OAuth credentials | dlesieur 22 | `apps/calendar`, whole repository |
 | Contract-driven provisioning | One JSON contract → isolated database, roles, keys and frontend `.env` | dlesieur 9 | grobase `scripts/provision-contract.sh`, `infra/config/contracts` |
 | Self-serve applications | `POST /v1/tenants/me/apps` creates a new isolated app with its own database and key, behind `APPS_SELFSERVE_ENABLED` (off unless set) | dlesieur 32 | grobase `src/control-plane/internal/tenants` |
 | Multi-engine data API | One API and one key over PostgreSQL, MySQL, MongoDB, Redis (default edition), SQLite, SQL Server (`engines` plane), HTTP and DynamoDB (opt-in build) | dlesieur 95, vjan-nie 3 | grobase `src/data-plane-router` |
