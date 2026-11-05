@@ -11,6 +11,10 @@ ifneq ($(DATACENTER_ON),)
 export GROBASE_DATACENTER
 export GROBASE_LINK_CONF ?= $(CURDIR)/.env.grobase-link.local
 export GROBASE_REMOTE_ENV ?= $(CURDIR)/.env.grobase-datacenter.local
+ifndef GROOT_READ_BINDS
+GROOT_READ_BINDS := $(shell $(DATACENTER_SCRIPT) read-binds)
+endif
+export GROOT_READ_BINDS
 endif
 
 ##@ Pipeline
@@ -45,8 +49,9 @@ datacenter-preflight: ## Check the VM, then only the writes those checks allow
 ## full, then applies. A key that does not verify stops, unless this run seeded the VM.
 	@$(DATACENTER_SCRIPT) preflight
 
-datacenter-roster: ## Write the agency roster from the accounts in the VM, read-only there
-	@$(DATACENTER_SCRIPT) roster
+datacenter-binds: ## Write the agency roster from the VM, copy what an NFS checkout cannot serve
+## Read-only in the VM. The copy exists only for an NFS checkout under rootless Docker.
+	@$(DATACENTER_SCRIPT) binds
 
 datacenter-trust: ## Prove the CA signs the VM's WAF, then import it in every browser store
 	@$(DATACENTER_SCRIPT) trust

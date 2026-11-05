@@ -37,7 +37,9 @@ verify_pages() {
   for url in "https://localhost:$(published_port MAIL_HOST_PORT 3002)/" \
     "https://localhost:$(published_port CALENDAR_HOST_PORT 3003)/" \
     "https://localhost:$(published_port MAIL_BRIDGE_HOST_PORT 4100)/health" \
-    "https://localhost:$(published_port CALENDAR_BRIDGE_HOST_PORT 4200)/health"; do
+    "https://localhost:$(published_port CALENDAR_BRIDGE_HOST_PORT 4200)/health" \
+    "https://localhost:$(published_port GROBASE_TLS_HOST_PORT 8444)/docs/" \
+    "https://localhost:$(published_port GROBASE_TLS_HOST_PORT 8444)/openapi.json"; do
     code=$(curl --noproxy '*' --cacert "$CA_CERT" -s -o /dev/null -m 15 -w '%{http_code}' "$url") || code=000
     [ "$code" = 200 ] || {
       note "$url answered $code"
@@ -111,7 +113,7 @@ cmd_verify() {
   grobase_health 180 >&2 || die "grobase in the VM is not healthy on its plan. From groot: make dc-health"
   verify_pages || die "a page does not answer 200 over verified TLS"
   verify_binds || die "a container holds a broken bind mount"
-  verify_roster || die "the bridge has no agency roster. From groot: make datacenter-roster, then recreate osionos-bridge"
+  verify_roster || die "the bridge cannot read its agency roster. From groot: make datacenter-binds, then make all"
   if verify_browsers; then
     note "verified: the plan, the pages, the mounts and the browsers"
   else

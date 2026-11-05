@@ -35,7 +35,7 @@ credentials but not all, it stops and names the missing ones.
 | Copy the CA and the WAF's leaf from the VM | `datacenter-certs` | the leaf does not chain, or the key is not its own |
 | Open the link, derive `./.env.local` | `link` | the WAF does not answer from a container |
 | Converge models and the key | `datacenter-preflight` | the dump does not read back, or the key does not verify |
-| Write the agency roster from the VM's accounts | `datacenter-roster` | the VM lacks an account |
+| Write the agency roster from the VM's accounts, copy what an NFS checkout cannot serve | `datacenter-binds` | the VM lacks an account |
 | Demo password, without force | `link-demo-login-ensure` | |
 | Prove the CA, import it in the browsers | `datacenter-trust` | the CA does not verify the WAF, or a store still lacks it |
 | Build and start the frontends | `link-frontends-start` | a build fails, or the link does not verify |
@@ -78,6 +78,7 @@ Tailscale is off in the profile, so nothing here touches the tailnet or Cloudfla
 | `DATACENTER_ALLOW_WRITES=1` | one run | Allow VM writes with no terminal; never a VM build |
 | `DATACENTER_VERIFY_BROWSERS=1` | one run | Run the browsers with no terminal |
 | `GROOT_NO_BROWSER_RESTART=1` | one run | Say relaunch instead of doing it |
+| `GROOT_READ_BINDS=<dir>` | one run | Where containers read the roster and API docs. Set by itself on an NFS checkout under rootless Docker, whose users the server refuses |
 | `GROBASE_CONNECT_IP=<ip>` | a credential file | The address the relay dials, when the default route's is wrong |
 
 `~/.config/42ctl/secrets/datacenter.env` holds the pinned host key. Database dumps go to

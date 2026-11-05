@@ -63,6 +63,8 @@ vm_ssh() { ssh -o ClearAllForwardings=yes -o BatchMode=yes -o ConnectTimeout=8 "
 . "$REPO/scripts/lib/datacenter-build.sh"
 # shellcheck source=scripts/lib/datacenter-verify.sh
 . "$REPO/scripts/lib/datacenter-verify.sh"
+# shellcheck source=scripts/lib/datacenter-binds.sh
+. "$REPO/scripts/lib/datacenter-binds.sh"
 # shellcheck source=scripts/lib/datacenter-models.sh
 . "$REPO/scripts/lib/datacenter-models.sh"
 
@@ -267,7 +269,8 @@ health)
   born2root_make health
   ;;
 verify) cmd_verify ;;
-roster) cmd_roster ;;
+binds) cmd_binds ;;
+read-binds) cmd_read_binds ;;
 browsers) cmd_browsers ;;
 dc) cmd_dc "${2:-}" ;;
 *)

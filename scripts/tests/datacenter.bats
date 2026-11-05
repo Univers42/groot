@@ -21,6 +21,7 @@ setup() {
   cp "$BATS_TEST_DIRNAME/../lib/envfile.sh" "$BATS_TEST_DIRNAME/../lib/datacenter-vm.sh" \
     "$BATS_TEST_DIRNAME/../lib/datacenter-models.sh" "$BATS_TEST_DIRNAME/../lib/datacenter-gate.sh" \
     "$BATS_TEST_DIRNAME/../lib/datacenter-build.sh" "$BATS_TEST_DIRNAME/../lib/datacenter-verify.sh" \
+    "$BATS_TEST_DIRNAME/../lib/datacenter-binds.sh" \
     "$BATS_TEST_DIRNAME/../lib/vault42-session.sh" "$ROOT/scripts/lib/"
   mkdir -p "$ROOT/tools/seeds"
   cp "$BATS_TEST_DIRNAME/../../tools/seeds/agency-roster.sh" "$ROOT/tools/seeds/"
@@ -779,7 +780,7 @@ verified_stack() {
   stub docker 'case "$1" in exec) echo 0; exit 1 ;; esac'
   dc verify
   [ "$status" -eq 1 ]
-  [[ "$output" == *"no agency roster"* ]]
+  [[ "$output" == *"cannot read its agency roster"* ]]
 }
 
 @test "verify: with no terminal the browsers say SKIP, never a pass" {
@@ -804,7 +805,7 @@ roster_vm() {
 
 @test "roster: written from the VM's accounts with the columns the bridge parses" {
   roster_vm
-  dc roster
+  dc binds
   [ "$status" -eq 0 ]
   out="$ROOT/tools/seeds/.agency-people.env"
   [ "$(grep -c '^AGENCY_PERSON_[0-9]' "$out")" = 21 ]
@@ -817,7 +818,7 @@ roster_vm() {
   out="$ROOT/tools/seeds/.agency-people.env"
   echo stale >"$out"
   inode=$(stat -c %i "$out")
-  dc roster
+  dc binds
   [ "$status" -eq 0 ]
   [ "$(stat -c %i "$out")" = "$inode" ]
   ! grep -q stale "$out"
@@ -825,7 +826,7 @@ roster_vm() {
 
 @test "roster: an account the VM lacks stops the run and leaves no partial file" {
   roster_vm e07.sullivan@agency.local
-  dc roster
+  dc binds
   [ "$status" -eq 1 ]
   [[ "$output" == *"e07.sullivan@agency.local"* ]]
   [ ! -e "$ROOT/tools/seeds/.agency-people.env" ]
@@ -836,7 +837,7 @@ roster_vm() {
   mkdir "$ROOT/tools/seeds/.agency-people.env"
   stub docker 'echo "docker $*" >>"$LOG"; case "$1" in ps) echo abc ;; esac'
   stub xargs 'echo "xargs $*" >>"$LOG"'
-  dc roster
+  dc binds
   [ "$status" -eq 0 ]
   [ -f "$ROOT/tools/seeds/.agency-people.env" ]
   grep -q 'xargs -r docker rm -f' "$LOG"
@@ -846,15 +847,62 @@ roster_vm() {
   roster_vm
   mkdir "$ROOT/tools/seeds/.agency-people.env"
   echo keep >"$ROOT/tools/seeds/.agency-people.env/kept"
-  dc roster
+  dc binds
   [ "$status" -eq 1 ]
   [ -f "$ROOT/tools/seeds/.agency-people.env/kept" ]
+}
+
+@test "read-binds: a local checkout keeps its paths, whatever Docker is" {
+  stub stat 'echo ext2/ext3'
+  stub docker 'echo "[name=rootless]"'
+  dc read-binds
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "read-binds: NFS under rootful Docker keeps its paths" {
+  stub stat 'echo nfs'
+  stub docker 'echo "[name=seccomp]"'
+  dc read-binds
+  [ -z "$output" ]
+}
+
+@test "read-binds: NFS under rootless Docker uses the disk Docker runs from" {
+  stub stat 'echo nfs'
+  stub docker 'case "$*" in *SecurityOptions*) echo "[name=rootless]" ;; *) echo /goinfre/me/docker ;; esac'
+  dc read-binds
+  [ "$output" = /goinfre/me/groot-read-binds ]
+}
+
+@test "binds: an NFS checkout gets every read-bind source in the copy" {
+  roster_vm
+  root="$BATS_TEST_TMPDIR/local/docker"
+  stub stat 'echo nfs'
+  stub docker "case \"\$*\" in *SecurityOptions*) echo '[name=rootless]' ;; *DockerRootDir*) echo '$root' ;; esac"
+  mkdir -p "$ROOT/infrastructure/tls/api-docs" "$ROOT/apps/grobase/infra/config/openapi"
+  echo docs >"$ROOT/infrastructure/tls/api-docs/index.html"
+  echo spec >"$ROOT/apps/grobase/infra/config/openapi/grobase-public.json"
+  dc binds
+  [ "$status" -eq 0 ]
+  dest="$BATS_TEST_TMPDIR/local/groot-read-binds"
+  [ -s "$dest/infrastructure/tls/api-docs/index.html" ]
+  [ -s "$dest/apps/grobase/infra/config/openapi/grobase-public.json" ]
+  [ "$(grep -c '^AGENCY_PERSON_[0-9]' "$dest/tools/seeds/.agency-people.env")" = 21 ]
+  [ ! -e "$ROOT/tools/seeds/.agency-people.env" ]
+}
+
+@test "verify: API docs the edge refuses fail the run" {
+  verified_stack
+  stub curl 'case "$*" in */docs/*) printf 403 ;; *) printf 200 ;; esac'
+  dc verify
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"/docs/ answered 403"* ]]
 }
 
 @test "roster: a VM that does not answer says so, not that an account is missing" {
   vault_set
   stub ssh 'case "$*" in -G*) printf "hostname 127.0.0.1\nport 4242\nuser d\n" ;; *) exit 255 ;; esac'
-  dc roster
+  dc binds
   [ "$status" -eq 1 ]
   [[ "$output" == *"could not read the agency accounts"* ]]
 }

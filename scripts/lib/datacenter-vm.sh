@@ -201,36 +201,6 @@ ensure_grobase() {
   die "grobase is still $problem in the VM after make grobase. From born2root: make grobase_status"
 }
 
-# agency_uuids — email|id for each agency account in the VM, read-only.
-agency_uuids() {
-  vm_ssh "$ALIAS" "docker exec mini-baas-postgres psql -U postgres -tA -c \"select email || '|' || id from auth.users where email like '%@agency.local'\"" 2>/dev/null
-}
-
-# Without this file Docker binds an empty directory, and the bridge answers every people list with
-# nothing while its health stays green. The file is written in place: a running bridge binds the
-# inode, so replacing the file would leave that bridge reading the old one.
-cmd_roster() {
-  ALIAS=$(cmd_setting)
-  [ -n "$ALIAS" ] || die "this machine has no data center"
-  # shellcheck source=tools/seeds/agency-roster.sh
-  . "$REPO/tools/seeds/agency-roster.sh"
-  local out="$REPO/tools/seeds/.agency-people.env" rows email uuid entry
-  local -A UUID_OF=()
-  rows=$(agency_uuids) || die "could not read the agency accounts in the VM"
-  while IFS='|' read -r email uuid; do [ -z "$email" ] || UUID_OF[$email]=$uuid; done <<<"$rows"
-  for entry in "${ROSTER[@]}"; do
-    [ -n "${UUID_OF[${entry%%|*}]:-}" ] ||
-      die "the VM has no account for ${entry%%|*}, so the people lists would be empty. From born2root: make set_seeds"
-  done
-  if [ -d "$out" ]; then
-    rmdir -- "$out" || die "$out is a directory holding files. Move it, then make all"
-    # It still binds the directory it started with.
-    docker ps -aq --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
-      --filter label=com.docker.compose.service=osionos-bridge | xargs -r docker rm -f >/dev/null
-  fi
-  write_agency_snapshot "${UUID_OF[owner@agency.local]}" >"$out"
-}
-
 tenant_rows() {
   vm_ssh "$ALIAS" "docker exec mini-baas-postgres psql -U postgres -tA -c 'select count(*) from public.tenants'" 2>/dev/null
 }

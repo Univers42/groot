@@ -13,7 +13,7 @@ const APPS: App[] = [
   { name: "calendar", url: CALENDAR_URL, optIn: true },
   { name: "bridge", url: `${BRIDGE_URL}/api/auth/bridge/health`, api: true },
   { name: "auth gateway", url: `${GATEWAY_URL}/api/auth/health`, api: true },
-  { name: "API docs", url: `${KONG_URL}/docs/`, api: true },
+  { name: "API docs", url: `${KONG_URL}/docs/` },
 ];
 
 const test = base.extend<{ page: Page }>({
