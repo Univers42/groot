@@ -422,13 +422,14 @@ in osionos.
 
 | Technology | Used in | Why |
 |---|---|---|
-| **Astro 6** + **Sass** | opposite-osiris | Mostly static marketing content: Astro ships near-zero JavaScript by default and pre-renders pages, which keeps the public site fast. |
+| **Astro 7** + **Sass** | prismatica (`apps/opposite-osiris`) | Mostly static marketing content: Astro ships near-zero JavaScript by default and pre-renders pages, which keeps the public site fast. |
 | **React 19** + **Vite 6** + **TypeScript** | osionos, mail, calendar | A block editor is a heavily interactive UI; React's component model fits, and Vite gives fast builds. |
-| **Tailwind CSS 4**, **Radix UI**, **lucide-react** | osionos | Utility-first styling framework plus accessible, unstyled primitives for menus and popovers. |
+| **Tailwind CSS 4**, **lucide-react** | osionos | Utility-first styling framework and an icon set. |
 | **Zustand** | osionos | Small, explicit client state store. |
-| **Zod** | osionos | Schema validation of user input on the client side. |
+| **Zod 4** | osionos | Schema validation: the diagram spec on the client, and the inputs of the AI service and the MCP server. |
 | **livekit-client** | osionos | WebRTC video rooms. |
-| **Playwright** | osionos | End-to-end browser tests. |
+| **Playwright** | osionos, groot `tests/e2e/` | End-to-end browser tests. |
+| **SvelteKit**, **Fastify**, **Rust → WebAssembly** | hydrawn | The whiteboard: a WASM drawing engine with its own API and realtime services. |
 | **Tailwind CSS 4** | mail, calendar | `src/styles.css` imports Tailwind's theme and utilities through `@tailwindcss/vite`, without preflight; the app's own rules sit on top. |
 
 ### Backend — grobase
@@ -440,43 +441,47 @@ independently — each written in the language that suits it.
 |---|---|---|---|
 | **Control plane** | **Go** | Provisioning, tenancy, identity (`POST /v1/keys/verify` turns an API key into an identity) | Long-running, concurrent I/O; a provisioner needs to be correct and readable, not fast. |
 | **Data plane** | **Rust** | Executes every query, applies per-owner scoping and ABAC locally | The hot path: predictable latency with no GC pauses, and memory safety where a bug would be a cross-tenant data leak. |
-| **Realtime plane** | **Rust** | Turns data changes into events; WebSocket subscriptions | Same reasons; pluggable event bus. |
-| **Application plane** | **TypeScript / NestJS** | Query and storage routers, schema, session, permissions, email, GDPR services | The original backend, progressively replaced by the Go and Rust planes. |
-| **Auth** | **GoTrue** + Go **auth-gateway** | Sign-up, sign-in, sessions, email OTP | Battle-tested auth server rather than a hand-rolled one. |
-| **Gateway** | **Kong** | The only public entry to the backend; key auth and rate limiting | Keeps every internal service off the public network. |
-| **Media** | **LiveKit** | WebRTC SFU for video rooms | |
+| **Realtime plane** | **Rust** | Turns data changes into events; WebSocket subscriptions (an opt-in profile, included in the `devlean` edition `make all` starts) | Same reasons; pluggable event bus. |
+| **Application plane** | **TypeScript / NestJS** | Query and storage routers, schema service, permission engine. The older session, email and GDPR services remain only under the `legacy-node` profile; the Go orchestrator does their work | The original backend, progressively replaced by the Go and Rust planes. |
+| **Auth** | **GoTrue** (grobase) + a Node **auth-gateway** (shipped by prismatica) | Sign-up, sign-in, sessions, email OTP, the hand-off to osionos | Battle-tested auth server rather than a hand-rolled one. |
+| **Gateway** | **WAF** (nginx + ModSecurity/OWASP CRS) in front of **Kong** | The WAF is the public entry; Kong behind it does key auth and rate limiting | Keeps every internal service off the public network. |
 
 ### Database
 
-- **PostgreSQL** is the primary database: the control-plane registries (tenants, roles, policies,
+- **PostgreSQL 16** is the primary database: the control-plane registries (tenants, roles, policies,
   API keys) and all application data (see [Database Schema](#database-schema)).
   **Why:** row-level security (RLS), JSONB for block content and flexible properties, strong
   transactional guarantees, and a mature ecosystem. RLS is what makes per-owner isolation
   enforceable inside the database itself, not only in application code.
-- **MySQL, MongoDB, Redis, MinIO** (object storage) run in the default edition; **SQLite, MSSQL,
-  DynamoDB** and remote **HTTP** APIs are supported through the same data-plane interface. This is a
+- **MySQL, MongoDB, Redis, MinIO** (object storage) run in the `devlean` edition that `make all`
+  starts; **SQLite**, **SQL Server** (needs the `engines` plane), **DynamoDB** (an opt-in build)
+  and remote **HTTP** APIs are supported through the same data-plane interface. This is a
   deliberate feature of the platform (one API over many engines), not a need of osionos itself.
 
 ### Other significant technologies
 
 - **Docker / Docker Compose** — every component runs in a container; one `make all`.
 - **A local certificate authority + TLS proxy** — all frontends served over trusted HTTPS locally.
+- **LiveKit** — the WebRTC SFU for video rooms, a groot compose service started by `make all`;
+  the osionos bridge mints its tokens.
 - **vault42 / 42ctl** — our own zero-knowledge secret store and CLI (separate repositories).
 - **CI security scanning** — on every pull request, [`.github/workflows/mini-baas-security.yml`](.github/workflows/mini-baas-security.yml)
-  runs Semgrep (SAST), `npm`/`pnpm audit`, Snyk (when a token is set) and Trivy; Dependabot
-  opens dependency updates. `sonar-project.properties` and `renovate.json` are present, but no
-  workflow in this repository runs them.
+  runs Semgrep (SAST), `npm`/`pnpm audit`, Snyk (when a token is set) and Trivy; Semgrep and Snyk
+  report without blocking. Dependabot opens dependency updates. SonarCloud analyses every pull
+  request through its GitHub app (`.sonarcloud.properties`), not through a workflow;
+  `renovate.json` is present but nothing runs it.
 
 ### Justification of the major choices
 
 - **Why build a BaaS instead of a single backend?** Because the same backend pieces are rebuilt
   for every project. We moved everything that varies between projects — routes, schemas, access
   rules, configuration — from code into data, so a new application is a contract, not a server.
-- **Why three languages?** Each plane has a different job. Go for boring, correct orchestration;
+- **Why three languages?** Each grobase plane has a different job (Node also runs the site's
+  auth-gateway and the osionos bridge). Go for boring, correct orchestration;
   Rust where performance and memory safety protect tenant isolation; TypeScript where it already
-  existed. The data plane was migrated from TypeScript to Rust behind a per-request switch with a
-  *shadow mode* (Rust computes and discards results for comparison), so the migration needed no
-  downtime and could be rolled back without a deployment.
+  existed. The data plane was migrated from TypeScript to Rust behind a per-request switch
+  (`RUST_DATA_PLANE_FORWARD`, on in the default compose), so the migration needed no downtime
+  and could be rolled back without a deployment.
 - **Why per-request isolation?** Scoping on every request (instead of per connection) means a
   pooled connection can never carry one user's permissions into another user's query.
 
@@ -489,9 +494,11 @@ The schema lives in two places:
 1. **Application schema** — idempotent SQL migrations in [`models/`](models/)
    (`*-migration.sql`), applied to grobase's PostgreSQL by `make all` through
    [`scripts/apply-models-migrations.sh`](scripts/apply-models-migrations.sh). That runner
-   deliberately skips the files written for the auth gateway's own database (`user.sql`,
-   `gdpr-migration.sql`, `auth-security-migration.sql`, `rls-hardening-migration.sql`, `seeds.sql`);
-   its header explains why.
+   deliberately skips seven files that target a database with an integer `users.id` (used by
+   the Electron native edition) or that later files supersede: `user.sql`, `gdpr-migration.sql`,
+   `auth-security-migration.sql`, `rls-hardening-migration.sql`, `seeds.sql`,
+   `osionos-folder-surface-migration.sql` and `osionos-wiki-surface-migration.sql`; its header
+   explains why.
 2. **Platform schema** — grobase's control-plane registries (tenants, mounts, roles, policies,
    API keys), created by grobase's own migrations, plus per-application databases created at
    runtime from each contract (e.g. `infra/config/contracts/website.schema.sql` in grobase).
@@ -539,7 +546,7 @@ erDiagram
     osionos_channels {
         uuid id PK
         uuid workspace_id FK
-        text kind "text | dm | voice | video"
+        text kind "text | dm | voice | video | group"
         text name
         boolean is_private
         jsonb abac
@@ -561,19 +568,20 @@ Other table groups, by migration file:
 | Area | Tables | Migration |
 |---|---|---|
 | Users & sessions (auth gateway DB) | `users`, `sessions`, `user_activities`, `user_tokens` | `user.sql` |
-| Auth security & GDPR (auth gateway DB) | `auth_audit_events`, `gdpr_requests`, `user_consents`, `newsletter_optins` | `auth-security-migration.sql`, `gdpr-migration.sql` |
+| Auth security & GDPR | `auth_audit_events`, `gdpr_requests`, `user_consents`, `newsletter_optins` | `auth-security-migration.sql`, `gdpr-migration.sql` (integer-id flavour); `auth-audit-events-migration.sql`, `newsletter-optin-migration.sql` (applied to grobase) |
 | Site ↔ editor bridge | `osionos_bridge_identities`, `osionos_bridge_audit_events` | `osionos-bridge-migration.sql` |
-| Social & communities | `osionos_communities`, `osionos_community_members`, `osionos_community_channels`, `osionos_connections`, `osionos_user_blocks`, `osionos_user_reports`, `osionos_feed_*` | `osionos-communities-`, `-social-`, `-feed-engagement-migration.sql` |
+| Social & communities | `osionos_communities`, `osionos_community_members`, `osionos_community_channels`, `osionos_connections`, `osionos_user_blocks`, `osionos_user_reports`, `osionos_feed_*` | `osionos-communities-`, `-social-`, `-chat-`, `-feed-engagement-migration.sql` |
 | Databases-as-blocks | `osionos_object_databases`, `osionos_workspace_databases`, `osionos_app_connections` | `osionos-object-databases-`, `-workspace-databases-`, `-app-connections-migration.sql` |
 | Publishing & sharing | `osionos_published_pages`, `osionos_share_rules`, `osionos_page_links` | `osionos-publish-`, `-share-rules-`, `-page-links-migration.sql` |
-| Tasks & notifications | `osionos_tasks`, `osionos_notifications`, `osionos_push_subscriptions` | `osionos-tasks-`, `-push-migration.sql` |
+| Tasks & notifications | `osionos_tasks`, `osionos_notifications`, `osionos_push_subscriptions` | `osionos-tasks-`, `-engagement-`, `-push-migration.sql` |
 | Mail & calendar | `mail_accounts`, `mail_messages`, `calendar_accounts`, `calendar_sources`, `calendar_event_cache` | `mail-migration.sql`, `calendar-migration.sql` |
 
 ### Platform (grobase) registries
 
 Access control is stored as data: `roles`, `user_roles` and `resource_policies` tables, evaluated
 by the SQL function `public.has_permission(...)` and mirrored by the Rust data plane's own ABAC
-evaluator. Every table generated by grobase receives an `owner_id` column automatically, which is
+evaluator. Every table created through grobase's schema API gets an `owner_id` column
+appended when the caller does not declare one (contract schemas declare it themselves), which is
 what makes one isolation rule apply to any table.
 
 **Two `users` tables.** `models/user.sql` defines `users.id` as `SERIAL` (integer): it belongs to
@@ -585,28 +593,33 @@ foreign-key clash (`scripts/apply-models-migrations.sh:27-38`).
 
 ## Features List
 
-"Who" lists the authors of the commits that touch the feature's code, largest share first, with
-the count (`scripts/contributors.sh --paths <repo> <path>...`; the paths are in the last column).
-A commit count is not effort, and pairing or review does not show in it.
+"Who" counts the non-merge commits that touch the feature's paths (last column), reachable from
+the commit groot `main` pins for that repository, read through the root [`.mailmap`](.mailmap),
+with bots and AI-agent identities left out; largest share first. How the identities are joined:
+[`wiki/project/contributions-method.md`](wiki/project/contributions-method.md). A commit count is
+not effort, and pairing or review does not show in it.
 
 | Feature | Description | Who (commits) | Paths counted |
 |---|---|---|---|
-| Sign-up / sign-in | Email and password (hashed and salted) on the public site; email OTP enabled in production with real SMTP | dlesieur 11, serjimen 1 | opposite-osiris `src/pages/auth`, `src/pages/api/auth` |
-| Site → editor handoff | After login, a one-time bridge session hands the user to osionos (`/api/auth/bridge/consume`) — no token in a query string | dlesieur 4 | osionos `scripts/bridge-auth*` |
+| Sign-up / sign-in | Email and password on the public site, stored hashed by GoTrue; an email-OTP second step is off by default (`AUTH_LOGIN_EMAIL_OTP`) | dlesieur 9, serjimen 1 | opposite-osiris `src/pages/auth`, `src/pages/api/auth` |
+| Site → editor handoff | After login, a one-time bridge session hands the user to osionos (`/api/auth/bridge/consume`) — the one-time token travels in the URL fragment and is redeemed once by `POST`, never in a query string | dlesieur 4 | osionos `scripts/bridge-auth*` |
 | Legal pages | Privacy Policy, Terms of Service, Cookie Policy, Data Rights, linked from the site | shashemi 5, vjan-nie 3, serjimen 2, dlesieur 2 | opposite-osiris `src/pages/legal` |
-| Block editor | Pages built from blocks, nested pages, templates, covers, favourites, search | dlesieur 162, vjan-nie 42, danfern3 29, serjimen 14, rstancu 9, shashemi 2 | osionos `src/features/block-editor` |
-| Database block | A block that is a database, with table / board / calendar views over any mounted data source | dlesieur 126, vjan-nie 2, serjimen 2, rstancu 2 | osionos `src/widgets/database*`, `src/features/*database*`, `src/shared/database*` |
-| Real-time collaboration | Several users editing the same space live, over the protected `collab:<spaceId>` channel | dlesieur 46, shashemi 1 | osionos `src/features/collab`, `scripts/bridge-*collab*` |
-| Chat | Workspace channels and direct messages, reactions, mentions, attachments, read receipts | dlesieur 72, vjan-nie 1 | osionos `src/features/chat`, `src/features/group-chat`, `scripts/bridge-*chat*` |
-| Video rooms | LiveKit-based video channels inside workspaces | dlesieur 13 | osionos `scripts/bridge-*livekit*`, `src/**/*livekit*`, `src/**/*Video*` |
-| Comments, sharing, publishing | Page comments, share rules, public page publishing | dlesieur 44 | osionos `src/features/comments`, `src/features/share`, `scripts/bridge-*publish*`, `scripts/bridge-*share*` |
-| Communities & social feed | Communities, connections, feed with likes, comments and shares; blocking and reporting | dlesieur 38, serjimen 2 | osionos `src/features/communities`, `src/features/connections`, `scripts/bridge-*social*`, `scripts/bridge-*feed*` |
-| Mail | Read Gmail inside the workspace via Google OAuth | dlesieur 35 | `apps/mail` |
-| Calendar | Google Calendar events via Google OAuth | dlesieur 18 | `apps/calendar` |
+| Block editor | Pages built from blocks, nested pages, templates, covers, favourites, search | dlesieur 164, vjan-nie 42, danfern3 29, rstancu 9, serjimen 8, shashemi 2 | osionos `src/features/block-editor` |
+| Database block | A block that is a database, with table, board and calendar views over any mounted data source (the views live in the `notion-database-sys` submodule, `src/components/views/`) | dlesieur 125, vjan-nie 2, rstancu 2, shashemi 1, serjimen 1 | osionos `src/widgets/database*`, `src/features/*database*`, `src/shared/database*` |
+| Real-time collaboration | Several users editing the same space live, over the protected `collab:<spaceId>` channel. Off in the default local build; `VITE_OSIO_COLLAB_SHARED=1` turns it on (osionos `src/shared/config/featureFlags.ts:73`) | dlesieur 45, shashemi 2 | osionos `src/features/collab`, `scripts/bridge-*collab*` |
+| Chat | Workspace channels and direct messages, reactions, mentions, attachments, unread markers; new messages arrive over grobase's realtime WebSocket | dlesieur 72, vjan-nie 1 | osionos `src/features/chat`, `src/features/group-chat`, `scripts/bridge-*chat*` |
+| Video rooms | LiveKit-based video channels inside workspaces | dlesieur 11, shashemi 1 | osionos `src/widgets/video-room`, `scripts/bridge-rtc*` |
+| Comments, sharing, publishing | Page comments, share rules, public page publishing | dlesieur 45 | osionos `src/features/comments`, `src/features/share`, `scripts/bridge-*publish*`, `scripts/bridge-*share*` |
+| Communities & social feed | Communities, connections, feed with likes, comments and shares; blocking and reporting | dlesieur 37, serjimen 2, shashemi 1 | osionos `src/features/communities`, `src/features/connections`, `scripts/bridge-*social*`, `scripts/bridge-*feed*` |
+| Two-factor authentication and passkeys | TOTP codes and passkeys on the account | dlesieur 15 | osionos `scripts/bridge-account-mfa*`, `scripts/bridge-account-passkeys*`, `src/features/settings/profile/TwoFactorModal.tsx` |
+| AI assistant | Streaming answers, retrieval over the workspace with citations, moderation, dictation and read-aloud; started with `--profile ai` | dlesieur 317, vjan-nie 9, shashemi 1 | osionos `services/osionos-ai`, `src/features/ai` |
+| Whiteboard | Shared boards in osionos's Whiteboard tab; strokes reach every open copy of the board live | dlesieur 569, danfern3 20, shashemi 6, vjan-nie 4 | hydrawn, whole repository |
+| Mail | Read Gmail inside the workspace via Google OAuth. Opt-in: `make mail-up` and Google OAuth credentials | dlesieur 39 | `apps/mail`, whole repository |
+| Calendar | Google Calendar events via Google OAuth. Opt-in: `make calendar-up` and Google OAuth credentials | dlesieur 22 | `apps/calendar`, whole repository |
 | Contract-driven provisioning | One JSON contract → isolated database, roles, keys and frontend `.env` | dlesieur 9 | grobase `scripts/provision-contract.sh`, `infra/config/contracts` |
-| Self-serve applications | `POST /v1/tenants/me/apps` creates a new isolated app with its own database and key | dlesieur 33 | grobase `src/control-plane/internal/tenants` |
-| Multi-engine data API | One API and one key over PostgreSQL, MySQL, MongoDB, SQLite, MSSQL, DynamoDB, Redis, HTTP | dlesieur 99, vjan-nie 3 | grobase `src/data-plane-router` |
-| Public API | Key-authenticated, rate-limited API behind Kong, documented with OpenAPI at `/docs/` | dlesieur 41, vjan-nie 1 | grobase `infra/docker/services/kong`, `infra/config/openapi` |
+| Self-serve applications | `POST /v1/tenants/me/apps` creates a new isolated app with its own database and key, behind `APPS_SELFSERVE_ENABLED` (off unless set) | dlesieur 32 | grobase `src/control-plane/internal/tenants` |
+| Multi-engine data API | One API and one key over PostgreSQL, MySQL, MongoDB, Redis (default edition), SQLite, SQL Server (`engines` plane), HTTP and DynamoDB (opt-in build) | dlesieur 95, vjan-nie 3 | grobase `src/data-plane-router` |
+| Public API | Key-authenticated, rate-limited API behind Kong, documented with OpenAPI at `/docs/` on the `:8444` edge | dlesieur 64, vjan-nie 5, shashemi 1 | grobase `infra/docker/services/kong`, `infra/config/openapi`; groot `infrastructure/tls/nginx.conf` |
 
 ---
 
