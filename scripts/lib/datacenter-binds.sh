@@ -11,8 +11,9 @@
 # Caveat: only nfs is detected, so another network filesystem keeps the checkout's paths: on a data
 # center verify_roster or verify_pages then stops the run, and the local pipeline serves the 403
 # with nothing to stop it. A file deleted from the repo stays in the copy until the directory is
-# removed by hand, since the copy is only ever added to. A Docker daemon that does not answer reads
-# as rootful, so a make run started before it keeps the checkout's paths.
+# removed by hand, since the copy is only ever added to. A Docker daemon that does not answer within
+# 5 s reads as rootful, so a make run started before it, or while it is that slow, keeps the
+# checkout's paths. The 5 s is an estimate: every make target pays it at parse time on a wedged daemon.
 # Caveat: the copy is as fresh as the last `make all` or `make frontends-up`. A target that starts
 # the bridge or the edge before either has run (public-up, mail-up) binds directories Docker makes
 # in the copy, which serve nothing until the next frontends-up repairs them.
@@ -23,13 +24,14 @@ ROSTER_FILE=tools/seeds/.agency-people.env
 # cmd_read_binds — the copy's directory, or nothing when the checkout's paths are readable.
 cmd_read_binds() {
   if [ -n "${GROOT_READ_BINDS:-}" ]; then
-    printf '%s\n' "$GROOT_READ_BINDS"
+    # . is what compose defaults to, so naming the checkout means no copy: cp refuses it onto itself.
+    [ "$(realpath -m -- "$GROOT_READ_BINDS")" = "$(realpath -m -- "$REPO")" ] || printf '%s\n' "$GROOT_READ_BINDS"
     return 0
   fi
   case $(stat -f -c %T "$REPO" 2>/dev/null) in nfs*) ;; *) return 0 ;; esac
-  case $(docker info --format '{{.SecurityOptions}}' 2>/dev/null) in *rootless*) ;; *) return 0 ;; esac
+  case $(timeout 5 docker info --format '{{.SecurityOptions}}' 2>/dev/null) in *rootless*) ;; *) return 0 ;; esac
   local root
-  root=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null)
+  root=$(timeout 5 docker info --format '{{.DockerRootDir}}' 2>/dev/null)
   [ -z "$root" ] || printf '%s/groot-read-binds\n' "${root%/*}"
 }
 

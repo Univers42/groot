@@ -10,6 +10,8 @@
 #   configure     pin the VM's host key, write the link's settings
 #   certs         copy the CA certificate and the WAF's leaf from the VM, never the CA key
 #   certs-verify  exit 0 when the leaf chains to the CA and is not about to expire
+#   chain         prove the ssh alias reaches this VM and its WAF answers with this VM's CA
+#   origins       make the VM's grobase allow every frontend origin, when one is missing
 #   preflight     check the VM, then only the writes those checks allow
 #   trust         prove the CA signs the VM's WAF, then import it in every browser store
 #   health        born2root's verdict on the platform, its reach and its forwards
@@ -43,7 +45,6 @@ STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/groot"
 DUMP_DIR="$STATE_DIR/datacenter-dumps"
 KNOWN_HOSTS="$STATE_DIR/admin_known_hosts"
 DEFAULT_ALIAS=b2b
-WAF_PORT=8443
 VAULT_FILES=".env.local apps/grobase/.env"
 PG_CTN=mini-baas-postgres
 TRUST="$REPO/scripts/certs-trust-user.sh"
@@ -67,6 +68,8 @@ vm_ssh() { ssh -o ClearAllForwardings=yes -o BatchMode=yes -o ConnectTimeout=8 "
 . "$REPO/scripts/lib/datacenter-binds.sh"
 # shellcheck source=scripts/lib/datacenter-models.sh
 . "$REPO/scripts/lib/datacenter-models.sh"
+# shellcheck source=scripts/lib/datacenter-ports.sh
+. "$REPO/scripts/lib/datacenter-ports.sh"
 
 # machine_value KEY — KEY's first value across the operator's credential files, the same files
 # scripts/lib/vault42-session.sh reads. Those files are outside the checkout, so a fresh clone
@@ -184,24 +187,26 @@ connect_ip() {
 }
 
 cmd_configure() {
-  local alias key addr
+  local alias key addr waf
   alias=$(cmd_setting)
   [ -n "$alias" ] || die "this machine has no data center (no vault42 credentials, no GROBASE_DATACENTER)"
+  require_alias_on_record "$alias"
+  waf=$(waf_port "$alias") || exit 1
   key=$(pinned_host_key "$alias") || exit 1
   addr=$(connect_ip) || exit 1
   umask 077
   mkdir -p "$STATE_DIR"
   printf 'grobase-admin %s\n' "$key" >"$KNOWN_HOSTS"
   cat >"$CONF.tmp" <<EOF
-GROBASE_TARGET=https://localhost:$WAF_PORT
-GROBASE_API_URL=https://localhost:$WAF_PORT
+GROBASE_TARGET=https://localhost:$waf
+GROBASE_API_URL=https://localhost:$waf
 GROBASE_CA_FILE=$CA_CERT
 GROBASE_CONNECT_IP=$addr
 GROBASE_ADMIN_SSH=$alias
 GROBASE_ADMIN_HOST_KEY=$key
 EOF
   mv "$CONF.tmp" "$CONF"
-  note "$alias at https://localhost:$WAF_PORT, reached from containers through $addr"
+  note "$alias at https://localhost:$waf, reached from containers through $addr"
 }
 
 cmd_preflight() {
@@ -230,9 +235,7 @@ require_browser_stores() {
 # Anchored on the WAF, because --check compares the stores to the local file: a CA minted here by
 # mistake would pass it while every browser warned.
 cmd_trust() {
-  local url="https://localhost:$WAF_PORT/" code
-  code=$(curl --noproxy '*' --cacert "$CA_CERT" -s -o /dev/null -m 10 -w '%{http_code}' "$url") || code=000
-  [ "$code" != 000 ] || die "$CA_CERT does not verify $url; repair: rm -r apps/grobase/certs, then VAULT42_REFRESH=1 make all"
+  prove_waf "$(cmd_setting)"
   require_browser_stores
   bash "$TRUST" --check "$CA_CERT" >/dev/null 2>&1 && return 0
   bash "$TRUST" "$CA_CERT" || die "the CA could not be imported in the browser stores"
@@ -261,6 +264,8 @@ vm) cmd_vm ;;
 certs) cmd_certs ;;
 certs-verify) cmd_certs_verify ;;
 configure) cmd_configure ;;
+chain) cmd_chain ;;
+origins) cmd_origins ;;
 preflight) cmd_preflight ;;
 trust) cmd_trust ;;
 health)
@@ -275,7 +280,7 @@ read-binds) cmd_read_binds ;;
 browsers) cmd_browsers ;;
 dc) cmd_dc "${2:-}" ;;
 *)
-  sed -n '6,18p' "$0" >&2
+  sed -n '6,20p' "$0" >&2
   exit 2
   ;;
 esac

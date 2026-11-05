@@ -64,7 +64,7 @@ vm_stop_reason() {
   [ -w "${B2B_KVM_DEVICE:-/dev/kvm}" ] || printf '/dev/kvm is not writable: it is granted to the session holding this seat, so the VM starts within a minute of a login here'
 }
 
-qemu_running() { pgrep -f "qemu-system.*-name $VM_NAME" >/dev/null 2>&1; }
+qemu_running() { pgrep -u "$(id -u)" -f "qemu-system.*-name $VM_NAME" >/dev/null 2>&1; }
 ssh_answers() { vm_ssh "$ALIAS" true >/dev/null 2>&1; }
 waf_running() {
   local names
@@ -87,8 +87,21 @@ wait_for() {
   return 1
 }
 
+# A VM started by an older checkout has no ports record, and its alias can be on a port it left.
+# born2root reads a running VM's forwards from its command line, so a start against it rewrites both.
+# Only then: that start waits on the VM's unlock (45 s) and clears a stop's hold.
+# Caveat: a record older than a restart by an older clone's cron tick passes here while ssh still
+# answers; prove_waf then stops the run naming the port (under-reports here, loud later).
+refresh_vm_ports() {
+  [ "$ALIAS" = "$DEFAULT_ALIAS" ] && ! serves_production && qemu_running || return 0
+  [ ! -f "$(vm_ports_file "$ALIAS")" ] || ! ssh_answers || return 0
+  note "recording the VM's ports through born2root"
+  born2root_make qemu_start >/dev/null || note "born2root could not record the VM's ports: the checks below say what is wrong"
+}
+
 await_vm() {
   local reason
+  refresh_vm_ports
   if ssh_answers; then
     ! autostart_dangling || ! writes_allowed || ! is_own_vm || repair_autostart
     return 0

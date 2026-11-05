@@ -88,8 +88,10 @@ browser_suite() {
   local log
   log=$(mktemp) || die "no temp file for the browser run"
   bash "$REPO/tests/e2e/run.sh" "$@" 2>&1 | tee "$log" >&2
-  local rc=${PIPESTATUS[0]} skipped
+  local rc=${PIPESTATUS[0]} skipped flaky
   skipped=$(sed -n 's/^ *\([0-9][0-9]*\) skipped.*/\1/p' "$log" | tail -n 1)
+  flaky=$(sed -n 's/^ *\([0-9][0-9]*\) flaky.*/\1/p' "$log" | tail -n 1)
+  [ -z "$flaky" ] || note "$flaky spec(s) failed once and passed on the retry: named in the report above"
   rm -f "$log"
   [ "$rc" = 0 ] || return 1
   [ -z "$skipped" ] || {
@@ -104,7 +106,10 @@ verify_browsers() {
     return 1
   fi
   E2E_REACH_BACKEND=1 browser_suite -c reach.config.ts || die "the front doors fail in a browser (tests/e2e/reach)"
-  browser_suite || die "the end-to-end specs fail (tests/e2e/specs)"
+  # Caveat: one retry. On first load osionos's service worker can fail a chunk while it takes over,
+  # and the app reloads once to recover, under a spec's feet (AC1, 1 of 5 runs on 2026-11-05). A real
+  # defect that fails one run in two can pass here too; the report says flaky when it does.
+  browser_suite --retries=1 || die "the end-to-end specs fail (tests/e2e/specs)"
 }
 
 cmd_verify() {

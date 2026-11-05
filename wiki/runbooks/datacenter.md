@@ -33,6 +33,8 @@ credentials but not all, it stops and names the missing ones.
 | Build an absent VM, wait for it, repair grobase, seed an empty platform | `datacenter-vm` | see below |
 | Pin the host key, write `./.env.grobase-link.local` | `datacenter-configure` | a target that is not this user's own VM has no pin |
 | Copy the CA and the WAF's leaf from the VM | `datacenter-certs` | the leaf does not chain, or the key is not its own |
+| Prove the alias and the WAF port | `datacenter-chain` | the alias is not on the port born2root recorded in `~/.config/born2root/<alias>-ports.env`, it does not answer on the pinned key, the service on the WAF port was not signed by this VM's CA, or a frontend took a port the VM forwards |
+| Allow every frontend origin | `datacenter-origins` | a running list still lacks an origin after the push. Writes only when one is missing, and only on this user's own VM |
 | Open the link, derive `./.env.local` | `link` | the WAF does not answer from a container |
 | Converge models and the key | `datacenter-preflight` | the dump does not read back, or the key does not verify |
 | Write the agency roster from the VM's accounts, copy what an NFS checkout cannot serve | `datacenter-binds` | the VM lacks an account |

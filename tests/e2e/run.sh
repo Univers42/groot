@@ -8,6 +8,11 @@ root="$(cd "$here/../.." && pwd)"
 image="${E2E_IMAGE:-groot-e2e:1.63.0}"
 # shellcheck source=scripts/lib/docker-run.sh
 . "$root/scripts/lib/docker-run.sh"
+# shellcheck source=scripts/lib/envfile.sh
+. "$root/scripts/lib/envfile.sh"
+# shellcheck source=scripts/lib/e2e-urls.sh
+. "$root/scripts/lib/e2e-urls.sh"
+e2e_export_urls "$root/.env.ports"
 ca="$(local_ca_file "$root")" || { echo "[e2e] no local CA under $root (or LOCAL_CA_FILE) — run: make certs" >&2; exit 2; }
 # The pr*/dm* specs send real mail and create accounts. They run only on a backend on this
 # daemon whose auth-gateway and GoTrue both mail Mailpit (verdict B C11, C12) and whose GoTrue
@@ -30,8 +35,6 @@ if [[ -n "$mail_refusal" ]]; then
   echo "[e2e] skipping the pr*/dm* specs: $mail_refusal" >&2
 elif [[ -z "${E2E_KONG_ANON_KEY:-}" ]]; then
   # The public anon key Kong asks of the TOTP enrolment in pr2 (not a secret: it is in every bundle).
-  # shellcheck source=scripts/lib/envfile.sh
-  . "$root/scripts/lib/envfile.sh"
   if E2E_KONG_ANON_KEY="$(get_env "$root/.env.local" KONG_PUBLIC_API_KEY)"; then
     export E2E_KONG_ANON_KEY
   else
