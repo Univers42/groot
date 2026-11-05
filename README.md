@@ -361,22 +361,24 @@ a larger edition or a feature flag — see [Modules](#modules).
 
 ## Team Information
 
-One owner per role, as the team confirmed on 2026-11-04 (the earlier working notes in
-[`wiki/project/03-team.md`](wiki/project/03-team.md) named two Product Owners and two Project Managers).
-The "Areas in the history" column is what each member's commits touch
-([Individual Contributions](#individual-contributions) has the numbers).
+All five members are developers. Roles evolved during the project; the main
+role of each is below (team answer, 2026-11-05). The "Areas in the history"
+column is what each member's commits touch ([Individual
+Contributions](#individual-contributions) has the numbers).
 
-| Member | Login | GitHub | Role(s) | Responsibilities | Areas in the history |
+| Member | Login | GitHub | Main role | Responsibilities | Areas in the history |
 |---|---|---|---|---|---|
-| Dylan Lesieur | `dlesieur` | [@LESdylan](https://github.com/LESdylan) | Product Owner · Developer | Product vision, backlog and priorities; validates completed work | grobase, osionos, mail, calendar, root infrastructure and CI |
-| Daniel Fernández | `danfern3` | [@danielfdez17](https://github.com/danielfdez17) | Tech Lead · Developer | Architecture, stack decisions, code quality, reviews | monkey-bot (security test bot), grobase Docker and Kubernetes deployment, osionos editor fixes |
-| Sergio Jiménez de la Cruz | `serjimen` | [@DjSurgeon](https://github.com/DjSurgeon) | Developer | Frontend, secrets management, deployment | the public site (opposite-osiris), osionos accessibility and editor features |
-| Vadim Jan Nieto | `vjan-nie` | [@vjan-nie](https://github.com/vjan-nie) | Project Manager · Developer | Planning, tracking, communication, unblocking | QA tooling, end-to-end tests, documentation, Docker |
-| Seyed Mostafa Hashemian | `shashemi` | [@SMOSTAFAH1](https://github.com/SMOSTAFAH1) | Developer | No responsibility beyond development is recorded | security fixes and SAST, the site's legal pages, TLS edge |
+| Dylan Lesieur | `dlesieur` | [@LESdylan](https://github.com/LESdylan) | Product Owner | Product vision and priorities | grobase, osionos, mail, calendar, root infrastructure and CI |
+| Vadim Jan Nieto | `vjan-nie` | [@vjan-nie](https://github.com/vjan-nie) | Project Manager | Planning, tracking and coordination | QA tooling, end-to-end tests, documentation, Docker |
+| Sergio Jiménez de la Cruz | `serjimen` | [@DjSurgeon](https://github.com/DjSurgeon) | Frontend tech lead | Frontend architecture and quality | the public site (opposite-osiris), osionos accessibility and editor features |
+| Daniel Fernández | `danfern3` | [@danielfdez17](https://github.com/danielfdez17) | Backend tech lead | Backend architecture and deployment | monkey-bot (security test bot), grobase Docker and Kubernetes deployment, osionos editor fixes |
+| Seyed Mostafa Hashemian | `shashemi` | [@SMOSTAFAH1](https://github.com/SMOSTAFAH1) | QA / quality tech lead | Testing and code quality; joined in the last part of the project | security fixes and SAST, the site's legal pages, TLS edge |
 
-`rstancu` (Roxana Stancu, [@esettes](https://github.com/esettes)) is on the original roster
-([`archive/wiki-2026-09/CONTRIBUTORS.md`](archive/wiki-2026-09/CONTRIBUTORS.md)) and committed
-between 2026-03-18 and 2026-05-02; see [Who committed where](#who-committed-where).
+**Former members.** The team changed along the way: `rstancu` (Roxana Stancu,
+[@esettes](https://github.com/esettes)) and Alex Caceres were temporary members
+who left. Special thanks to `rstancu`, who contributed significantly to the
+osionos frontend and the QA workflow during the first, toughest months. The
+defense covers the current five.
 
 ---
 
