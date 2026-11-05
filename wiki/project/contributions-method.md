@@ -1,6 +1,6 @@
 # How the contribution counts are made
 
-The README's [Features List](../../README.md#features-list) and [Who committed
+The README's [Features](../../README.md#-features-and-who-built-them) and [Who committed
 where](../../README.md#who-committed-where) count commits one way, described
 here with the identity joins it rests on.
 

@@ -138,6 +138,6 @@ spend 15 calls.
 
 ---
 
-See also: [README Modules](../../README.md#modules) · [02-modules](02-modules.md) ·
+See also: [README Modules](../../README.md#-modules-and-points) · [02-modules](02-modules.md) ·
 [ai-stall-diagnosis-2026-10-29](ai-stall-diagnosis-2026-10-29.md) ·
 [runbooks/osionos-ai](../runbooks/osionos-ai.md)

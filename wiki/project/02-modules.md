@@ -2,7 +2,7 @@
 
 > **Superseded · 2026-11-05.** This whole page is history: its rows, letters,
 > legend and point totals. The current grades, one rule and the points table are
-> in the [README Modules table](../../README.md#modules).
+> in the [README Modules table](../../README.md#-modules-and-points).
 >
 > **Status:** Superseded · 2026-11-05 (written as Partial · 2026-09-15)
 > **Evidence:** flag states read from `deploy/fly/boot.sh`; every gate named here exists in the
