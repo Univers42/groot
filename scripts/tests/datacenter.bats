@@ -282,13 +282,34 @@ case "$*" in -G*) printf "hostname 127.0.0.1\nport 4242\nuser d\n" ;; *localhost
   ! grep -q '^make' "$LOG"
 }
 
-@test "vm: a running VM has its ports record and alias refreshed before the alias is believed" {
+@test "vm: a running VM with no record has it written before the alias is believed" {
   vault_set
   vm_says 9 'vintage=2026-11-04'
-  stub pgrep 'exit 0'
+  stub pgrep 'echo "$*" >>"$LOG.pgrep"; exit 0'
   dc vm
   [ "$status" -eq 0 ]
   grep -q '^make.*qemu_start' "$LOG"
+  grep -q -- "-u $(id -u)" "$LOG.pgrep"
+}
+
+@test "vm: a record and an answering alias leave the VM alone" {
+  vault_set
+  vm_says 9 'vintage=2026-11-04'
+  stub pgrep 'exit 0'
+  mkdir -p "$HOME/.config/born2root"
+  printf 'SSH_HOST_PORT=4242\nWAF_HOST_PORT=8443\n' >"$HOME/.config/born2root/b2b-ports.env"
+  dc vm
+  [ "$status" -eq 0 ]
+  ! grep -q '^make.*qemu_start' "$LOG"
+}
+
+@test "vm: a host serving production never has its VM started to record ports" {
+  vault_set
+  vm_says 9 'vintage=2026-11-04'
+  stub pgrep 'exit 0'
+  : >"$ROOT/.env.public"
+  dc vm
+  ! grep -q '^make.*qemu_start' "$LOG"
 }
 
 @test "vm: down and held stops at once, with the way out" {
@@ -1602,6 +1623,15 @@ esac"
   [ "$status" -eq 0 ]
   [[ "$output" == *"https://localhost:4333"* ]]
   ! grep -q 'bash -s' "$LOG"
+}
+
+@test "origins: a value that is no port never becomes an origin" {
+  vault_set
+  printf 'OSIONOS_APP_HOST_PORT=4322,https://evil.example\n' >>"$ROOT/.env.ports"
+  dc origins
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"OSIONOS_APP_HOST_PORT in .env.ports is no port"* ]]
+  [[ "$output" != *"evil.example"* ]]
 }
 
 @test "origins: a recreate the containers did not take stops the run" {

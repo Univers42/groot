@@ -34,6 +34,9 @@ REALTIME_ALLOWED_ORIGINS
 GOTRUE_URI_ALLOW_LIST /**"
 
 vm_ports_file() { printf '%s/.config/born2root/%s-ports.env\n' "$HOME" "$1"; }
+is_port() { [[ $1 =~ ^[1-9][0-9]{0,4}$ ]] && [ "$1" -le 65535 ]; }
+# The file make all reads to know this host serves production. Its gateway is not recreated here.
+serves_production() { [ -f "$REPO/.env.public" ]; }
 
 # vm_recorded_port ALIAS NAME — the port, or nothing when there is no record. A record that holds
 # no port stops: falling back would hide a broken one behind the old default.
@@ -41,9 +44,7 @@ vm_recorded_port() {
   local file value
   file=$(vm_ports_file "$1")
   value=$(get_env "$file" "$2") || return 0
-  if [[ ! $value =~ ^[1-9][0-9]{0,4}$ ]] || [ "$value" -gt 65535 ]; then
-    die "$file holds $2=$value, which is no port. Build the record again from born2root"
-  fi
+  is_port "$value" || die "$file holds $2=$value, which is no port. Build the record again from born2root"
   printf '%s\n' "$value"
 }
 
@@ -108,6 +109,8 @@ frontend_origins() {
   local name port
   for name in $FRONTEND_PORT_NAMES; do
     port=$(get_env "$REPO/.env.ports" "$name") || die "no $name in .env.ports: make all resolves it, so run this through make"
+    # Kong splits its list on commas, so anything but a port here would be a second origin.
+    is_port "$port" || die "$name in .env.ports is no port. Remove the file and make all again"
     printf 'https://localhost:%s\n' "$port"
   done
 }
@@ -140,8 +143,9 @@ origin_changes() {
   done <<<"$ORIGIN_LISTS"
 }
 
+# Filtered in the guest: the rest of these containers' environment is secrets that stay there.
 running_origin_env() {
-  admin_ssh "docker inspect -f \"{{range .Config.Env}}{{println .}}{{end}}\" $ORIGIN_CONTAINERS"
+  admin_ssh "docker inspect -f \"{{range .Config.Env}}{{println .}}{{end}}\" $ORIGIN_CONTAINERS | grep -E '^($(awk '{ print $1 }' <<<"$ORIGIN_LISTS" | paste -sd '|'))='"
 }
 
 # Through stdin, not the command line: the guest's login shell would glob the /** of GoTrue's list.
@@ -174,10 +178,14 @@ cmd_origins() {
     note "$ALIAS is not this user's own VM, so nothing was written. Refused until its grobase allows: ${origins[*]}"
     return 0
   fi
+  if serves_production; then
+    note "this host serves production (.env.public), so its gateway was not recreated. Refused until its grobase allows: ${origins[*]}"
+    return 0
+  fi
   require_writes "allowing the frontends' origins"
   mapfile -t pairs <<<"$changes"
   note "allowing the frontends' origins in the VM: ${pairs[*]%%=*}"
-  push_origins "${pairs[@]}" || die "the VM's grobase config holds the origins, but its containers were not recreated. make all tries again"
+  push_origins "${pairs[@]}" || die "the VM's grobase config holds the origins, but kong, gotrue or realtime may be only partly recreated: read compose's output above, then make all again"
   running=$(running_origin_env) || die "cannot read the origin lists back from the VM ($ALIAS)"
   changes=$(origin_changes "$running" "${origins[@]}")
   [ -z "$changes" ] || die "the VM's containers still lack the frontends' origins in ${changes%%=*}: the setting did not reach them"
