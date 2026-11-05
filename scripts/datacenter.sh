@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 # datacenter.sh — what `make all` does on a machine with vault42 credentials: deploy the frontends
-# here against the grobase in the VM on this host, over TLS, never starting grobase from groot
+# here against the grobase in the VM on this host, over TLS, never starting grobase on the host
 # (ADR 0047). utils/mk/datacenter.mk strings these steps together.
 #
+#   gate          prove the vault can be read, or stop naming what to set
 #   setting       print the data center's ssh alias; nothing means this machine has none
 #   vault-needed  exit 0 when the vault's tree must be pulled
-#   vm            wait for the VM, have born2root start grobase in it, seed an empty platform
+#   vm            build a VM that does not exist, wait for it, have born2root start grobase, seed
 #   configure     pin the VM's host key, write the link's settings
 #   certs         copy the CA certificate and the WAF's leaf from the VM, never the CA key
 #   certs-verify  exit 0 when the leaf chains to the CA and is not about to expire
 #   preflight     check the VM, then only the writes those checks allow
 #   trust         prove the CA signs the VM's WAF, then import it in every browser store
 #   health        born2root's verdict on the platform, its reach and its forwards
+#   verify        prove the plan, the pages, the mounts and the browsers
 #   browsers      relaunch the browsers when a store changed and someone is at the terminal
 #   dc TARGET     run an allowed grobase target in the VM (datacenter-vm.sh)
 #
@@ -55,6 +57,12 @@ die() {
 vm_ssh() { ssh -o ClearAllForwardings=yes -o BatchMode=yes -o ConnectTimeout=8 "$@"; }
 # shellcheck source=scripts/lib/datacenter-vm.sh
 . "$REPO/scripts/lib/datacenter-vm.sh"
+# shellcheck source=scripts/lib/datacenter-gate.sh
+. "$REPO/scripts/lib/datacenter-gate.sh"
+# shellcheck source=scripts/lib/datacenter-build.sh
+. "$REPO/scripts/lib/datacenter-build.sh"
+# shellcheck source=scripts/lib/datacenter-verify.sh
+. "$REPO/scripts/lib/datacenter-verify.sh"
 # shellcheck source=scripts/lib/datacenter-models.sh
 . "$REPO/scripts/lib/datacenter-models.sh"
 
@@ -244,6 +252,7 @@ cmd_browsers() {
 }
 
 case "${1:-}" in
+gate) cmd_gate ;;
 setting) cmd_setting ;;
 vault-needed) cmd_vault_needed ;;
 vm) cmd_vm ;;
@@ -257,10 +266,11 @@ health)
   require_born2root health
   born2root_make health
   ;;
+verify) cmd_verify ;;
 browsers) cmd_browsers ;;
 dc) cmd_dc "${2:-}" ;;
 *)
-  sed -n '6,16p' "$0" >&2
+  sed -n '6,18p' "$0" >&2
   exit 2
   ;;
 esac

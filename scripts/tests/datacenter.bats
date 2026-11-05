@@ -19,7 +19,9 @@ setup() {
   mkdir -p "$ROOT/apps/grobase/certs" "$ROOT/vendor/born2root/setup/host" "$BATS_TEST_TMPDIR/bin"
   cp "$BATS_TEST_DIRNAME/../datacenter.sh" "$ROOT/scripts/"
   cp "$BATS_TEST_DIRNAME/../lib/envfile.sh" "$BATS_TEST_DIRNAME/../lib/datacenter-vm.sh" \
-    "$BATS_TEST_DIRNAME/../lib/datacenter-models.sh" "$ROOT/scripts/lib/"
+    "$BATS_TEST_DIRNAME/../lib/datacenter-models.sh" "$BATS_TEST_DIRNAME/../lib/datacenter-gate.sh" \
+    "$BATS_TEST_DIRNAME/../lib/datacenter-build.sh" "$BATS_TEST_DIRNAME/../lib/datacenter-verify.sh" \
+    "$BATS_TEST_DIRNAME/../lib/vault42-session.sh" "$ROOT/scripts/lib/"
   : >"$LOG"
   export LOG PATH="$BATS_TEST_TMPDIR/bin:$PATH"
   in_tree grobase-link.sh 'printf "unix:///link/docker.sock\n"'
@@ -237,24 +239,77 @@ case "$*" in -G*) printf "hostname 127.0.0.1\nport 4242\nuser d\n" ;; *localhost
   [[ "$output" != *"Stopped on purpose"* ]]
 }
 
-@test "vm: no disk stops at once and names that groot builds none; never a local grobase" {
+# no_vm — ssh refuses, no crontab, and born2root's Makefile answers for the profile's VM.
+no_vm() {
   vault_set
-  rm "$BATS_TEST_TMPDIR/vms/baas/baas.qcow2"
-  stub ssh 'case "$*" in -G*) printf "hostname 127.0.0.1\nport 4242\nuser d\n" ;; *) exit 255 ;; esac'
-  dc vm
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"groot does not build one"* ]]
-  [[ "$output" != *"GROBASE_DATACENTER="* ]]
-  ! grep -q '^make' "$LOG"
-}
-
-@test "vm: no auto-start block stops and says so" {
-  vault_set
+  rm -f "$BATS_TEST_TMPDIR/vms/baas/baas.qcow2"
   stub crontab 'exit 0'
   stub ssh 'case "$*" in -G*) printf "hostname 127.0.0.1\nport 4242\nuser d\n" ;; *) exit 255 ;; esac'
+  stub make "echo \"make \$*\" >>\"\$LOG\"
+case \"\$*\" in
+  *print-VM_NAME*) echo baas ;;
+  *print-VM_PATH*) echo '$BATS_TEST_TMPDIR/vms' ;;
+esac"
+  mkdir -p "$ROOT/vendor/born2root/setup/host"
+  printf '#!/bin/sh\necho %s/backups\n' "$BATS_TEST_TMPDIR" >"$ROOT/vendor/born2root/setup/host/backup_pull.sh"
+}
+
+@test "vm: no VM and no terminal builds nothing, whatever DATACENTER_ALLOW_WRITES says" {
+  no_vm
+  DATACENTER_ALLOW_WRITES=1 run bash "$ROOT/scripts/datacenter.sh" vm </dev/null
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"run make all at a terminal"* ]]
+  ! grep -qE '^make .* (all|secrets_pull)( |$)' "$LOG"
+}
+
+@test "vm: never a local grobase when there is no VM" {
+  no_vm
+  dc vm
+  [[ "$output" != *"GROBASE_DATACENTER="* ]]
+}
+
+@test "vm: an unreadable disk is not an absent one, so nothing is built over it" {
+  no_vm
+  stub stat 'echo "stat: cannot statx: Permission denied" >&2; exit 1'
   dc vm
   [ "$status" -eq 1 ]
-  [[ "$output" == *"no auto-start"* ]]
+  [[ "$output" == *"not provably absent"* ]]
+  [[ "$output" != *"run make all at a terminal"* ]]
+}
+
+@test "vm: an occupied VM port is not an absent VM" {
+  no_vm
+  stub ss 'echo "LISTEN 0 1 127.0.0.1:4242"'
+  dc vm
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not provably absent"* ]]
+}
+
+@test "vm: another alias is never built" {
+  no_vm
+  printf 'GROBASE_DATACENTER=dc-lan\n' >"$CTL_CFG_DIR/secrets/datacenter.env"
+  dc vm
+  [ "$status" -eq 1 ]
+  [[ "$output" != *"run make all at a terminal"* ]]
+}
+
+@test "vm: a disk without .installed stops and never installs autostart over it" {
+  no_vm
+  : >"$BATS_TEST_TMPDIR/vms/baas/baas.qcow2"
+  dc vm
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"install was interrupted"* ]]
+  ! grep -q 'autostart' "$LOG"
+}
+
+@test "vm: a built VM with no auto-start block gets one from born2root" {
+  no_vm
+  : >"$BATS_TEST_TMPDIR/vms/baas/baas.qcow2"
+  : >"$BATS_TEST_TMPDIR/vms/baas/.installed"
+  export B2B_KVM_DEVICE="$BATS_TEST_TMPDIR/kvm"
+  : >"$B2B_KVM_DEVICE"
+  DATACENTER_ALLOW_WRITES=1 dc vm
+  grep -q '^make .*autostart' "$LOG"
 }
 
 @test "vm: stopped grobase goes through born2root, with no make flags leaking in" {
@@ -269,7 +324,7 @@ esac'
   stub make 'echo "make $* flags=${MAKEFLAGS:-none}" >>"$LOG"; case " $* " in *" -n "*) ;; *grobase*) touch "$LOG.up" ;; esac'
   MAKEFLAGS=FORCE=1 DATACENTER_ALLOW_WRITES=1 dc vm
   [ "$status" -eq 0 ]
-  grep -E '^make .*grobase B2B_CONFIG=profiles/server.toml' "$LOG" | grep -v -- ' -n ' | grep -q 'flags=none'
+  grep -E '^make .*grobase .*B2B_CONFIG=profiles/server.toml' "$LOG" | grep -v -- ' -n ' | grep -q 'flags=none'
 }
 
 @test "vm: make grobase leaving no WAF stops, whatever it exited with" {
@@ -336,7 +391,7 @@ esac'
   vm_says 9 x
   dc dc up
   [ "$status" -eq 0 ]
-  grep -E '^make .*grobase B2B_CONFIG' "$LOG" | grep -qv -- ' -n '
+  grep -E '^make .*grobase .*B2B_CONFIG' "$LOG" | grep -qv -- ' -n '
   ! grep -q 'make -C /opt/grobase up' "$LOG"
 }
 
@@ -582,6 +637,172 @@ repo() {
   [[ "$output" == *"calendar-bridge"* ]]
   [[ "$output" != *"apps/grobase up"* ]]
   [[ "$output" != *"-C apps/grobase up"* ]]
+}
+
+@test "make all: local on the command line is the opt-out, as it is in a credential file" {
+  repo
+  stub openssl 'exit 0'
+  run make -n all GROBASE_DATACENTER=local SKIP_SYNC=1
+  [[ "$output" == *"apply-models-migrations.sh"* ]]
+  [[ "$output" != *"datacenter.sh configure"* ]]
+  [[ "$output" != *"datacenter.sh gate"* ]]
+}
+
+@test "make all: the gate comes first, before the sync touches a submodule" {
+  repo
+  stub openssl 'exit 0'
+  run make -n all GROBASE_DATACENTER=b2b
+  [[ "$output" == *"datacenter.sh gate"* ]]
+  gate=$(grep -n 'datacenter.sh gate' <<<"$output" | head -n 1 | cut -d: -f1)
+  sync=$(grep -n 'syncro-submodule\|SKIP_SYNC' <<<"$output" | head -n 1 | cut -d: -f1)
+  [ "$gate" -lt "$sync" ]
+}
+
+@test "gate: no credentials at all is the local pipeline" {
+  dc gate
+  [ "$status" -eq 0 ]
+}
+
+@test "gate: a machine that opted out is not checked" {
+  printf 'GROBASE_DATACENTER=local\nFT_PASSPHRASE=x\n' >"$CTL_CFG_DIR/secrets/datacenter.env"
+  dc gate
+  [ "$status" -eq 0 ]
+}
+
+@test "gate: half-set credentials stop and name each missing key, never a value" {
+  printf 'FT_PASSPHRASE=do-not-print\nFT_EMAIL=a@b\n' >"$CTL_CFG_DIR/secrets/42admin.env"
+  dc gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FT_PASSWORD"* ]]
+  [[ "$output" == *"FT_TENANT"* ]]
+  [[ "$output" != *"do-not-print"* ]]
+}
+
+# full_credentials CTL_BODY — every key set, and a 42ctl behaving as CTL_BODY says.
+full_credentials() {
+  printf 'FT_PASSPHRASE=p\nFT_PASSWORD=q\nFT_EMAIL=a@b\nFT_TENANT=t\nFT_KEYSTORE_B64=a2V5\n' >"$CTL_CFG_DIR/secrets/42admin.env"
+  stub 42ctl "$1"
+}
+
+@test "gate: restores the keystore from the credentials file, mode 600" {
+  full_credentials 'case "$*" in "auth status") echo contract ;; esac; exit 0'
+  dc gate
+  [ "$status" -eq 0 ]
+  [ "$(cat "$CTL_CFG_DIR/keystore.v42")" = key ]
+  [ "$(stat -c %a "$CTL_CFG_DIR/keystore.v42")" = 600 ]
+}
+
+@test "gate: a vault that refuses, with nothing set by hand, stops naming the files" {
+  full_credentials 'case "$*" in "auth status") echo contract ;; env*) echo refused >&2; exit 1 ;; esac; exit 0'
+  dc gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *".env.local"* ]]
+  [[ "$output" == *"apps/grobase/.env"* ]]
+}
+
+@test "gate: a vault that refuses, with the files set by hand, continues and says so" {
+  full_credentials 'case "$*" in "auth status") echo contract ;; env*) exit 1 ;; esac; exit 0'
+  mkdir -p "$ROOT/apps/grobase"
+  echo a=b >"$ROOT/.env.local"
+  echo a=b >"$ROOT/apps/grobase/.env"
+  dc gate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"cannot be built from this run"* ]]
+}
+
+# verified_stack — a VM on its plan, pages answering, no containers.
+verified_stack() {
+  vault_set
+  stub curl 'printf 200'
+  stub docker 'exit 0'
+  stub xargs 'exit 0'
+  mkdir -p "$ROOT/apps/grobase/certs" "$ROOT/tests/e2e"
+}
+
+@test "verify: a VM off its plan fails however good the pages are" {
+  verified_stack
+  stub ssh 'case "$*" in -G*) printf "hostname 127.0.0.1\nport 4242\nuser d\n" ;; *health*) exit 1 ;; esac'
+  dc verify
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not healthy on its plan"* ]]
+}
+
+@test "verify: a 404 is not a page that answers" {
+  verified_stack
+  stub curl 'printf 404'
+  dc verify
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"answered 404"* ]]
+}
+
+@test "verify: Mail's bridge is probed on the port it moved to" {
+  verified_stack
+  printf 'MAIL_BRIDGE_HOST_PORT=4101\n' >"$ROOT/.env.ports"
+  stub curl 'echo "$*" >>"$LOG"; printf 200'
+  dc verify
+  grep -q 'localhost:4101/health' "$LOG"
+}
+
+@test "verify: a file mount Docker turned into an empty directory fails" {
+  verified_stack
+  empty="$BATS_TEST_TMPDIR/agency-people.env"
+  mkdir "$empty"
+  stub docker "case \"\$1\" in ps) echo abc ;; esac"
+  stub xargs "echo '$empty'"
+  dc verify
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"empty directory"* ]]
+}
+
+@test "verify: with no terminal the browsers say SKIP, never a pass" {
+  verified_stack
+  run bash "$ROOT/scripts/datacenter.sh" verify </dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SKIP browsers"* ]]
+}
+
+@test "verify: a browser run that passes by skipping is not a pass" {
+  verified_stack
+  mkdir -p "$ROOT/tests/e2e"
+  printf '#!/bin/sh\necho "  2 skipped"\necho "  20 passed"\n' >"$ROOT/tests/e2e/run.sh"
+  DATACENTER_VERIFY_BROWSERS=1 dc verify
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"skipped"* ]]
+}
+
+# pinned_vm — an answering VM whose grobase is at no pin; fake_own_vm decides whose it is.
+pinned_vm() {
+  vault_set
+  mkdir -p "$ROOT/vendor/born2root/profiles"
+  printf 'grobase_ref = "%s"\n' "$(printf 'a%.0s' $(seq 40))" >"$ROOT/vendor/born2root/profiles/server.toml"
+  vm_says 3 2026-01-01
+}
+
+@test "vm: this machine's own VM off the pinned commit is reinstalled on the local plan" {
+  pinned_vm
+  fake_own_vm
+  DATACENTER_ALLOW_WRITES=1 dc vm
+  [[ "$output" == *"not at the pinned commit"* ]]
+  grep -q '^make .*grobase .*GROBASE_ADDONS=observability engines ops studio control playground secrets mysql8 vault42' "$LOG"
+}
+
+@test "vm: a grobase behind another alias is never reinstalled, whatever its state" {
+  pinned_vm
+  printf 'GROBASE_DATACENTER=prod-host\n' >"$CTL_CFG_DIR/secrets/datacenter.env"
+  DATACENTER_ALLOW_WRITES=1 dc vm
+  ! grep -q '^make .*grobase' "$LOG"
+}
+
+@test "vm: a loopback port this user does not own is not this user's VM" {
+  pinned_vm
+  DATACENTER_ALLOW_WRITES=1 dc vm
+  ! grep -q '^make .*grobase' "$LOG"
+}
+
+@test "plan: production's own definitions are left alone" {
+  repo
+  ! grep -qE '^dc-tunnel' vendor/born2root/profiles/server.toml
+  grep -q 'LOCAL_GROBASE_ADDONS=' scripts/lib/datacenter-vm.sh
 }
 
 @test "make backend-up: refused on a machine with a data center" {
