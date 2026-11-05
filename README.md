@@ -479,7 +479,29 @@ modules are out because the project has no game.
 
 ---
 
-## Individual Contributions
+## 🙌 Individual contributions
+
+> [!NOTE]
+> A commit count is not effort: pairing, review and design do not show in it.
+> Commits concentrate on dlesieur (about 88%), so be ready to explain the split.
+
+### Per member
+
+- **`dlesieur`**, Product Owner and developer: grobase (control plane, data
+  plane, realtime, gateway, contracts), osionos (editor, chat, collaboration,
+  the bridge, the AI service), mail, calendar, the root's infrastructure and CI.
+- **`vjan-nie`**, Project Manager and developer: the editable block logic of
+  osionos (`src/features/block-editor`: the block editor surface, its state
+  hook, the context menu, drag handles, code and Mermaid blocks, block
+  history). 42 of the 254 non-merge commits on that folder at the osionos
+  commit `main` pins (`735c40fd`), second to dlesieur's 164. Also QA tooling,
+  end-to-end tests, the wiki and README, and submodule pins.
+- **`danfern3`**, tech lead and developer: grobase Docker images and Kubernetes
+  deployment, monkey-bot, osionos editor features.
+- **`serjimen`**, developer: the public site (opposite-osiris), osionos
+  accessibility and editor features.
+- **`shashemi`**, developer: security fixes and SAST, the site's legal pages,
+  the TLS edge, end-to-end fixes.
 
 ### Who committed where
 
@@ -505,49 +527,13 @@ pinned commit (open branches and pull requests) does not show above. A commit
 count is not effort: one large commit and one typo fix weigh the same, and
 pairing and review do not show in it.
 
-Merged pull requests per login in the project's repositories (groot, osionos, grobase,
-prismatica = opposite-osiris, osionos-mail, osionos-calendar, hydrawn, QA, monkey-bot), from
-`gh search prs --owner Univers42 --author <login> --merged` on 2026-11-04:
+### Challenges the team faced
 
-| GitHub | Merged PRs | Where |
-|---|--:|---|
-| @LESdylan | 260 | osionos 138, grobase 61, groot 56, prismatica 3, osionos-mail 1, osionos-calendar 1 |
-| @vjan-nie | 72 | groot 45, osionos 17, prismatica 6, grobase 4 |
-| @SMOSTAFAH1 | 57 | prismatica 20, groot 19, osionos 12, grobase 6 |
-| @DjSurgeon | 8 | prismatica 7, osionos 1 |
-| @danielfdez17 | 4 | prismatica 4 |
-
-### Per member
-
-- **`dlesieur`**, Product Owner: grobase (control plane, data plane, realtime,
-  gateway, contracts), osionos (editor, chat, collaboration, the bridge, the AI
-  service), mail, calendar, the root's infrastructure and CI.
-- **`vjan-nie`**, Project Manager: QA tooling, end-to-end tests, the wiki and
-  README, submodule pins, Docker infrastructure.
-- **`serjimen`**, frontend tech lead: the public site (opposite-osiris),
-  osionos accessibility and editor features.
-- **`danfern3`**, backend tech lead: grobase Docker images and Kubernetes
-  deployment, monkey-bot, osionos editor features.
-- **`shashemi`**, QA / quality tech lead: security fixes and SAST, the site's
-  legal pages, the TLS edge, end-to-end fixes.
-
-### Challenges and lessons
-
-The project met many productive problems and blockers: lack of autonomy,
-communication problems, frustration. We addressed them with dedicated meetings
-and by applying TDD and DevOps practices, toward a frictionless workflow. We
-acknowledge our technical debt openly
-([`wiki/security/03-known-weaknesses.md`](wiki/security/03-known-weaknesses.md)
-is one record of it). Several technologies and architectures were rebuilt from
-scratch when the first choice proved wrong late: the data plane moved from
-TypeScript to Rust behind a per-request switch (`RUST_DATA_PLANE_FORWARD`, on
-by default in grobase `orchestrators/compose/base/app-services.yml:96`);
-grobase's Node session, email and GDPR services were retired and their work
-moved to the Go orchestrator (`app-services.yml:133,190,448`); and osionos's
-legacy second brain was replaced by graph_render (groot `fresh-machine.yml:363`
-checks it on a live stack; the legacy one survives only behind a gate, osionos
-`ci.yml:383-388`). The project's maturity comes from that intense team
-experience, with its ups and downs.
+- Moving the data plane from TypeScript to Rust with no downtime, using a
+  per-request switch and a shadow mode
+- Keeping eight database adapters at parity with a conformance battery against
+  real engines
+- Auditing our own authorisation path and shipping a reversible fix
 
 ---
 
