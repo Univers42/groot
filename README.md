@@ -239,113 +239,53 @@ passes.
 
 ---
 
-## Technical Stack
+## 🧰 Technologies
 
-### Frontend
+| Layer | Choice | Why |
+| --- | --- | --- |
+| Editor | React 19, Vite, TypeScript | Block editing is highly interactive, and Vite builds fast |
+| Public site | Astro, Sass | Static pages with almost no JavaScript |
+| Design | @osionos/ui, Tailwind 4, Radix | Our own components, accessible primitives |
+| Bridge | Node | Keeps the service key away from the browser |
+| Gateway | Kong | One entry for key checks and rate limits |
+| Services | NestJS | Storage, live queries and permissions |
+| Control plane | Go | Concurrent and readable provisioning |
+| Data, real-time | Rust, axum | Low latency, memory safety between tenants |
+| Sign-in | GoTrue | A proven auth server, not a hand-written one |
+| Storage | PostgreSQL, Redis, MinIO | Row-level security, fast state, files |
+| Delivery | Docker, nginx | One command, HTTPS everywhere |
 
-| Technology | Used in | Why |
-|---|---|---|
-| **Astro 7** + **Sass** | prismatica (`apps/opposite-osiris`) | Mostly static marketing content: Astro ships near-zero JavaScript by default and pre-renders pages, which keeps the public site fast. |
-| **React 19** + **Vite 6** + **TypeScript** | osionos, mail, calendar | A block editor is a heavily interactive UI; React's component model fits, and Vite gives fast builds. |
-| **Tailwind CSS 4**, **lucide-react** | osionos | Utility-first styling framework and an icon set. |
-| **Zustand** | osionos | Small, explicit client state store. |
-| **Zod 4** | osionos | Schema validation: the diagram spec on the client, and the inputs of the AI service and the MCP server. |
-| **livekit-client** | osionos | WebRTC video rooms. |
-| **Playwright** | osionos, groot `tests/e2e/` | End-to-end browser tests. |
-| **SvelteKit**, **Fastify**, **Rust → WebAssembly** | hydrawn | The whiteboard: a WASM drawing engine with its own API and realtime services. |
-| **Tailwind CSS 4** | mail, calendar | `src/styles.css` imports Tailwind's theme and utilities through `@tailwindcss/vite`, without preflight; the app's own rules sit on top. |
+### Why we made the big choices
 
-### Backend — grobase
-
-grobase is split into **planes** — groups of responsibilities that can be sized and replaced
-independently — each written in the language that suits it.
-
-| Plane | Technology | Role | Why this language |
-|---|---|---|---|
-| **Control plane** | **Go** | Provisioning, tenancy, identity (`POST /v1/keys/verify` turns an API key into an identity) | Long-running, concurrent I/O; a provisioner needs to be correct and readable, not fast. |
-| **Data plane** | **Rust** | Executes every query, applies per-owner scoping and ABAC locally | The hot path: predictable latency with no GC pauses, and memory safety where a bug would be a cross-tenant data leak. |
-| **Realtime plane** | **Rust** | Turns data changes into events; WebSocket subscriptions (an opt-in profile, included in the `devlean` edition `make all` starts) | Same reasons; pluggable event bus. |
-| **Application plane** | **TypeScript / NestJS** | Query and storage routers, schema service, permission engine. The older session, email and GDPR services remain only under the `legacy-node` profile; the Go orchestrator does their work | The original backend, progressively replaced by the Go and Rust planes. |
-| **Auth** | **GoTrue** (grobase) + a Node **auth-gateway** (shipped by prismatica) | Sign-up, sign-in, sessions, email OTP, the hand-off to osionos | Battle-tested auth server rather than a hand-rolled one. |
-| **Gateway** | **WAF** (nginx + ModSecurity/OWASP CRS) in front of **Kong** | The WAF is the public entry; Kong behind it does key auth and rate limiting | Keeps every internal service off the public network. |
-
-### Database
-
-- **PostgreSQL 16** is the primary database: the control-plane registries
-  (tenants, roles, policies, API keys) and all application data (see [Database
-  Schema](#database-schema)). **Why:** row-level security (RLS), JSONB for block
-  content and flexible properties, strong transactional guarantees, and a mature
-  ecosystem. RLS is what makes per-owner isolation enforceable inside the
-  database itself, not only in application code.
-- **MySQL, MongoDB, Redis, MinIO** (object storage) run in the `devlean` edition
-  that `make all` starts; **SQLite**, **SQL Server** (needs the `engines`
-  plane), **DynamoDB** (an opt-in build) and remote **HTTP** APIs are supported
-  through the same data-plane interface. This is a deliberate feature of the
-  platform (one API over many engines), not a need of osionos itself.
-
-### Other significant technologies
-
-- **Docker / Docker Compose** — every component runs in a container; one `make all`.
-- **A local certificate authority + TLS proxy** — all frontends served over trusted HTTPS locally.
-- **LiveKit** — the WebRTC SFU for video rooms, a groot compose service started
-  by `make all`; the osionos bridge mints its tokens.
-- **vault42 / 42ctl** — our own zero-knowledge secret store and CLI (separate repositories).
-- **CI security scanning** — on every pull request,
-  [`.github/workflows/mini-baas-security.yml`](.github/workflows/mini-baas-security.yml)
-  runs Semgrep (SAST), `npm`/`pnpm audit`, Snyk (when a token is set) and Trivy;
-  Semgrep and Snyk report without blocking. Dependabot opens dependency updates.
-  SonarCloud analyses every pull request through its GitHub app
-  (`.sonarcloud.properties`), not through a workflow; `renovate.json` is present
-  but nothing runs it.
-
-### Justification of the major choices
-
-- **Why build a BaaS instead of a single backend?** Because the same backend pieces are rebuilt
-  for every project. We moved everything that varies between projects — routes, schemas, access
-  rules, configuration — from code into data, so a new application is a contract, not a server.
-- **Why three languages?** Each grobase plane has a different job (Node also
-  runs the site's auth-gateway and the osionos bridge). Go for boring, correct
-  orchestration; Rust where performance and memory safety protect tenant
-  isolation; TypeScript where it already existed. The data plane was migrated
-  from TypeScript to Rust behind a per-request switch
-  (`RUST_DATA_PLANE_FORWARD`, on in the default compose), so the migration
-  needed no downtime and could be rolled back without a deployment.
-- **Why per-request isolation?** Scoping on every request (instead of per connection) means a
-  pooled connection can never carry one user's permissions into another user's query.
+- **A BaaS, not a single backend**: what varies between projects moved from
+  code into data, so an app is a contract, not a server
+- **Three backend languages**: Go for orchestration, Rust where isolation
+  matters, TypeScript where services already existed
+- **A separate bridge**: the one place that holds the service key and checks
+  every caller
+- **PostgreSQL**: one engine for tables, JSONB blocks and row-level security
 
 ---
 
-## Database Schema
+## 🗄 Database schema
 
-The schema lives in two places:
+- **Workspace**: has members, pages and channels
+- **Page**: nests under a parent, keeps its blocks as JSONB
+- **Channel**: has members and messages, with reactions
 
-1. **Application schema** — idempotent SQL migrations in [`models/`](models/)
-   (`*-migration.sql`), applied to grobase's PostgreSQL by `make all` through
-   [`scripts/apply-models-migrations.sh`](scripts/apply-models-migrations.sh).
-   That runner deliberately skips seven files that target a database with an
-   integer `users.id` (used by the Electron native edition) or that later files
-   supersede: `user.sql`, `gdpr-migration.sql`, `auth-security-migration.sql`,
-   `rls-hardening-migration.sql`, `seeds.sql`,
-   `osionos-folder-surface-migration.sql` and
-   `osionos-wiki-surface-migration.sql`; its header explains why.
-2. **Platform schema** — grobase's control-plane registries (tenants, mounts, roles, policies,
-   API keys), created by grobase's own migrations, plus per-application databases created at
-   runtime from each contract (e.g. `infra/config/contracts/website.schema.sql` in grobase).
-
-### Core application tables (osionos)
+### Full diagram of the core tables
 
 ```mermaid
 erDiagram
-    osionos_workspaces ||--o{ osionos_workspace_members : "has"
-    osionos_workspaces ||--o{ osionos_pages : "contains"
-    osionos_pages ||--o{ osionos_pages : "parent of"
-    osionos_pages ||--o{ osionos_page_comments : "has"
-    osionos_pages ||--o{ osionos_page_favorites : "favourited in"
-    osionos_workspaces ||--o{ osionos_channels : "has"
-    osionos_channels ||--o{ osionos_channel_members : "has"
-    osionos_channels ||--o{ osionos_messages : "contains"
-    osionos_messages ||--o{ osionos_message_reactions : "has"
-    osionos_messages ||--o{ osionos_message_attachments : "has"
+    osionos_workspaces ||--o{ osionos_workspace_members : has
+    osionos_workspaces ||--o{ osionos_pages : contains
+    osionos_pages ||--o{ osionos_pages : parent_of
+    osionos_pages ||--o{ osionos_page_comments : has
+    osionos_pages ||--o{ osionos_page_favorites : favourited_in
+    osionos_workspaces ||--o{ osionos_channels : has
+    osionos_channels ||--o{ osionos_channel_members : has
+    osionos_channels ||--o{ osionos_messages : contains
+    osionos_messages ||--o{ osionos_message_reactions : has
 
     osionos_workspaces {
         uuid id PK
@@ -356,9 +296,9 @@ erDiagram
         timestamptz created_at
     }
     osionos_workspace_members {
-        uuid workspace_id PK,FK
+        uuid workspace_id PK, FK
         uuid user_id PK
-        text role "owner | admin | editor | viewer"
+        text role "owner, admin, editor or viewer"
         text_array permissions
     }
     osionos_pages {
@@ -367,19 +307,37 @@ erDiagram
         uuid parent_page_id FK
         uuid owner_id
         text title
-        text visibility "private | shared | public"
+        text visibility "private, shared or public"
         jsonb properties
         jsonb content "the blocks"
         boolean is_template
+        timestamptz archived_at
+    }
+    osionos_page_comments {
+        uuid id PK
+        uuid page_id FK
+        text block_id
+        uuid author_id
+        text content
+        timestamptz resolved_at
+    }
+    osionos_page_favorites {
+        uuid user_id PK
+        uuid page_id PK, FK
     }
     osionos_channels {
         uuid id PK
         uuid workspace_id FK
-        text kind "text | dm | voice | video | group"
+        text kind "text, dm, voice or video"
         text name
         boolean is_private
         jsonb abac
         text dm_key UK
+    }
+    osionos_channel_members {
+        uuid channel_id PK, FK
+        uuid user_id PK
+        text role
     }
     osionos_messages {
         uuid id PK
@@ -390,34 +348,38 @@ erDiagram
         timestamptz edited_at
         timestamptz deleted_at
     }
+    osionos_message_reactions {
+        uuid message_id PK, FK
+        uuid user_id PK
+        text emoji PK
+    }
 ```
 
-Other table groups, by migration file:
+### All the table groups
 
-| Area | Tables | Migration |
-|---|---|---|
-| Users & sessions (auth gateway DB) | `users`, `sessions`, `user_activities`, `user_tokens` | `user.sql` |
-| Auth security & GDPR | `auth_audit_events`, `gdpr_requests`, `user_consents`, `newsletter_optins` | `auth-security-migration.sql`, `gdpr-migration.sql` (integer-id flavour); `auth-audit-events-migration.sql`, `newsletter-optin-migration.sql` (applied to grobase) |
-| Site ↔ editor bridge | `osionos_bridge_identities`, `osionos_bridge_audit_events` | `osionos-bridge-migration.sql` |
-| Social & communities | `osionos_communities`, `osionos_community_members`, `osionos_community_channels`, `osionos_connections`, `osionos_user_blocks`, `osionos_user_reports`, `osionos_feed_*` | `osionos-communities-`, `-social-`, `-chat-`, `-feed-engagement-migration.sql` |
-| Databases-as-blocks | `osionos_object_databases`, `osionos_workspace_databases`, `osionos_app_connections` | `osionos-object-databases-`, `-workspace-databases-`, `-app-connections-migration.sql` |
-| Publishing & sharing | `osionos_published_pages`, `osionos_share_rules`, `osionos_page_links` | `osionos-publish-`, `-share-rules-`, `-page-links-migration.sql` |
-| Tasks & notifications | `osionos_tasks`, `osionos_notifications`, `osionos_push_subscriptions` | `osionos-tasks-`, `-engagement-`, `-push-migration.sql` |
-| Mail & calendar | `mail_accounts`, `mail_messages`, `calendar_accounts`, `calendar_sources`, `calendar_event_cache` | `mail-migration.sql`, `calendar-migration.sql` |
+| Area | Tables |
+| --- | --- |
+| Accounts | users, sessions, user_activities, user_tokens |
+| Security, GDPR | auth_audit_events, gdpr_requests, user_consents |
+| Site to editor | osionos_bridge_identities, osionos_bridge_audit_events |
+| Social | osionos_communities, osionos_connections, osionos_user_blocks, osionos_feed_* |
+| Databases as blocks | osionos_object_databases, osionos_workspace_databases |
+| Publishing | osionos_published_pages, osionos_share_rules, osionos_page_links |
+| Tasks, notifications | osionos_tasks, osionos_notifications, osionos_push_subscriptions |
+| Mail, calendar | mail_accounts, mail_messages, calendar_accounts, calendar_event_cache |
 
-### Platform (grobase) registries
+Access rules are data too: `roles`, `user_roles` and `resource_policies`. The
+schema is in the SQL migrations under `models/`. There are two users tables:
+`users` with integer ids belongs to the auth gateway, while osionos refers to
+users by UUID.
 
-Access control is stored as data: `roles`, `user_roles` and `resource_policies`
-tables, evaluated by the SQL function `public.has_permission(...)` and mirrored
-by the Rust data plane's own ABAC evaluator. Every table created through
-grobase's schema API gets an `owner_id` column appended when the caller does not
-declare one (contract schemas declare it themselves), which is what makes one
-isolation rule apply to any table.
-
-**Two `users` tables.** `models/user.sql` defines `users.id` as `SERIAL` (integer): it belongs to
-the auth gateway's database. The osionos tables reference users by `UUID`, in grobase's
-PostgreSQL, where `make all` never applies `user.sql` — doing so fails on the uuid/integer
-foreign-key clash (`scripts/apply-models-migrations.sh:27-38`).
+`make all` applies the idempotent `models/*-migration.sql` files to grobase's
+PostgreSQL through
+[`scripts/apply-models-migrations.sh`](scripts/apply-models-migrations.sh).
+That runner skips seven files that target the integer-id `users` database or
+that later files supersede; its header names them. The access rules are
+evaluated by the SQL function `public.has_permission(...)` and mirrored by the
+Rust data plane's own ABAC evaluator.
 
 ---
 
