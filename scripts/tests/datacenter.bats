@@ -785,6 +785,51 @@ full_credentials() {
   [ "$(stat -c %a "$CTL_CFG_DIR/keystore.v42")" = 600 ]
 }
 
+# A seat with every credential but no keystore and no FT_KEYSTORE_B64 used to stop at "no keystore"
+# (2026-11-05). recover_answers ANSWER — the operator's terminal, and a 42ctl whose `keys recover`
+# writes the keystore 42ctl was pointed at.
+recover_answers() {
+  printf 'FT_PASSPHRASE=p\nFT_PASSWORD=q\nFT_EMAIL=a@b\nFT_TENANT=t\n' >"$CTL_CFG_DIR/secrets/42admin.env"
+  printf '%s\n' "$1" >"$BATS_TEST_TMPDIR/tty"
+  export VAULT42_TTY="$BATS_TEST_TMPDIR/tty"
+  stub 42ctl 'echo "ctl $*" >>"$LOG"
+case "$*" in "keys recover"*) echo recovered-key >"$FT_KEYSTORE" ;; "auth status") echo contract ;; esac; exit 0'
+}
+
+@test "setting: every credential and no keystore is a new seat, so make all plans the data center" {
+  recover_answers y
+  dc setting
+  [ "$output" = b2b ]
+}
+
+@test "gate: no keystore anywhere, a yes on the terminal: 42ctl recovers it and the run goes on" {
+  recover_answers y
+  dc gate
+  [ "$status" -eq 0 ]
+  grep -qx 'ctl keys recover --email a@b' "$LOG"
+  [ "$(cat "$CTL_CFG_DIR/keystore.v42")" = recovered-key ]
+  [[ "$output" == *"vault42 is readable"* ]]
+  [[ "$output" != *"=p"* ]]
+}
+
+@test "gate: no keystore and a no on the terminal: nothing recovered, the refusal names 42ctl" {
+  recover_answers n
+  dc gate
+  [ "$status" -eq 1 ]
+  ! grep -q 'keys recover' "$LOG"
+  [ ! -e "$CTL_CFG_DIR/keystore.v42" ]
+  [[ "$output" == *"keys recover --email"* ]]
+}
+
+@test "gate: no keystore and no terminal: the refusal names 42ctl and the credentials file" {
+  recover_answers y
+  export VAULT42_TTY="$BATS_TEST_TMPDIR/no-tty"
+  dc gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FT_KEYSTORE_B64"* ]]
+  [[ "$output" == *"keys recover"* ]]
+}
+
 @test "gate: records the object store, which only config.json holds and a new machine lacks" {
   full_credentials 'echo "ctl $*" >>"$LOG"; case "$*" in "auth status") echo contract ;; esac; exit 0'
   dc gate

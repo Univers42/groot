@@ -87,7 +87,9 @@ cmd_setting() {
   alias=$(credential_value GROBASE_DATACENTER) || alias=""
   if [ -z "$alias" ]; then
     credential_value FT_PASSPHRASE VAULT42_PASSPHRASE >/dev/null || return 0
-    [ -f "$CTL_CFG_DIR/keystore.v42" ] || credential_value FT_KEYSTORE_B64 >/dev/null || return 0
+    # Every credential and no keystore yet is a new seat: the gate fetches it with 42ctl.
+    [ -f "$CTL_CFG_DIR/keystore.v42" ] || credential_value FT_KEYSTORE_B64 >/dev/null ||
+      [ -z "$(missing_credentials)" ] || return 0
     alias=$DEFAULT_ALIAS
   fi
   [ "$alias" = local ] || printf '%s\n' "$alias"
