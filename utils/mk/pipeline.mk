@@ -6,12 +6,17 @@
 # Vault42 credentials on this machine turn `all` into the data-center deployment (datacenter.mk,
 # ADR 0047). `make all GROBASE_DATACENTER=` takes this local path anyway.
 GROBASE_DATACENTER ?= $(shell bash scripts/datacenter.sh setting)
-ifeq ($(strip $(GROBASE_DATACENTER)),)
+# `local` is the opt-out in a credential file, so it means the same on the command line.
+DATACENTER_ON := $(filter-out local,$(strip $(GROBASE_DATACENTER)))
+# The gate also runs on a machine that resolved to no data center by itself, so half-set credentials
+# stop instead of silently taking the local path. Naming the setting for one run skips it.
+ALL_GATE := $(if $(or $(DATACENTER_ON),$(filter file,$(origin GROBASE_DATACENTER))),datacenter-gate)
+ifeq ($(DATACENTER_ON),)
 ALL_STEPS := secrets-ensure certs certs-trust-local backend-up env-local-ensure restore-if-empty demo-login-ensure models-migrate live-data-ensure mounts-reencrypt frontends-up healthcheck showcase
 else
-ALL_STEPS := datacenter-secrets datacenter-vm datacenter-configure datacenter-certs link datacenter-preflight link-demo-login-ensure datacenter-trust link-frontends-start datacenter-apps link-healthcheck datacenter-health showcase datacenter-browsers
+ALL_STEPS := datacenter-secrets datacenter-vm datacenter-configure datacenter-certs link datacenter-preflight datacenter-binds link-demo-login-ensure datacenter-trust link-frontends-start datacenter-apps link-healthcheck datacenter-health datacenter-verify showcase datacenter-browsers
 endif
-all: sync-submodules-soft $(ALL_STEPS) ## Provision a fresh machine end to end: secrets, certs, backend, frontends, checks
+all: $(ALL_GATE) sync-submodules-soft $(ALL_STEPS) ## Provision a fresh machine end to end: secrets, certs, backend, frontends, checks
 ## Usage: make all [SKIP_SYNC=1] [GROBASE_EDITION=devlean|migrate|full] [PULL_PREBUILT=1]
 ## FROM-ZERO self-provisioning: sync submodules to latest → pull secrets from vault42 (or, with NO
 ## vault key, grobase self-generates them) → certs → START the grobase backend if down → derive root

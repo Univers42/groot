@@ -40,7 +40,7 @@ backend-up: ## Ensure the grobase backend is up, starting it when it is down
 ## With a vault key, secrets are pulled earlier by `secrets-ensure`; with NO vault key, grobase
 ## self-generates its secrets (no-vault local mode) and `env-local-ensure` derives the root
 ## ./.env.local afterward.
-	@if [ -n '$(strip $(GROBASE_DATACENTER))' ]; then \
+	@if [ -n '$(DATACENTER_ON)' ]; then \
 		echo '[backend] this machine deploys against its data center ($(GROBASE_DATACENTER)): groot starts no grobase here (ADR 0047). make all GROBASE_DATACENTER= overrides that.' >&2; \
 		exit 1; \
 	fi; \
