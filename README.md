@@ -864,7 +864,19 @@ From the project's history:
 
 This project was built with **heavy AI assistance**, and we state it plainly.
 
-- **Tools.** Team members used AI assistants in different forms, according to their own work.
+- **Tools.** The repositories record these:
+  - **Claude Code**, with the team's own configuration kit in groot's [`.claude`](.claude)
+    submodule (`Univers42/claude-deal-with-the-devil`: agents, rules, skills and hooks).
+  - **Gemini** in osionos (plans under `.gemini/plan/`), beside `.agents/` and an `.mcp.json`.
+  - **opencode**, an AI coding agent that committed under its own name (1 root and 5 osionos
+    commits at the pins), and the OpenCode agent team "Space Bunny" on hydrawn (68 commits at
+    the pin, hydrawn `BUNNY.md`).
+  - **GitHub Copilot** (`copilot-swe-agent`, 9 commits at prismatica's pin, and Copilot review on
+    pull requests) and **CodeRabbit** (reviews on pull requests since 2026-10-23).
+- **Commit history.** On 2026-11-04 the history of groot, osionos and grobase was rewritten to
+  remove `Co-authored-by` trailers. Since then no commit carries a co-author line, so the history
+  does not show which commits were written with an AI tool, and must not be read as AI-free
+  ([`wiki/project/contributions-method.md`](wiki/project/contributions-method.md)).
 - **Code.** AI wrote and refactored code across the stack: grobase planes and adapters, the
   frontends, SQL migrations, the Makefile pipeline and the Docker setup.
 - **Testing and verification.** AI wrote verification gates and test scripts, including the
@@ -873,29 +885,35 @@ This project was built with **heavy AI assistance**, and we state it plainly.
   path ([`wiki/security/03-known-weaknesses.md`](wiki/security/03-known-weaknesses.md)).
 - **Documentation.** The wiki and this README were drafted and distilled with AI assistance from
   the project's own design documents and code, then checked against the repository.
-- **How we kept control.** A human reviews and merges every pull request; nothing reaches
-  `develop` or `main` by an agent alone. A change is accepted only when its verification gate
-  passes. Every member must be able to explain the AI-assisted code in their area.
+- **How we kept control.** A human merges every pull request; nothing reaches `develop` or
+  `main` by an agent alone. Approval by a second member is required by the rulesets but thin in
+  practice (see [Project Management](#project-management)). A change is accepted only when its
+  verification gate passes. Every member must be able to explain the AI-assisted code in their
+  area.
 
 ---
 
 ## Known limitations
 
 - **No game.** All gaming-dependent modules are out of scope.
-- **Expressiveness is narrow by design.** grobase has no place for custom server logic; business
-  rules must be expressed as policies, schema constraints or database triggers.
+- **Expressiveness is narrow by design.** grobase has no per-application server code; business
+  rules are expressed as policies, schema constraints, database triggers, or functions in the
+  flag-gated functions plane.
 - **Documented security weaknesses.** Known and declared in
   [`wiki/security/03-known-weaknesses.md`](wiki/security/03-known-weaknesses.md).
-- **Several features are behind flags that are off by default** — see the confidence column in
+- **Several features are behind flags that are off by default** — see the Grade column in
   [Modules](#modules).
-- **No interface translation.** The language setting in osionos is a stub (see [Modules](#modules)).
+- **No interface translation in osionos.** `i18next` is declared but no translation resource is
+  loaded (see [Modules](#modules)). The prismatica site itself ships English, Spanish and Arabic.
 - **Whiteboard editing is loopback-only and has no per-user authorization yet** (see
   [Demo](#demo)).
 
 ## License
 
-There is no `LICENSE` file at the repository root. grobase carries its own licence files inside
-its submodule (`apps/grobase/LICENSE`, `apps/grobase/LICENSING.md`).
+- There is no `LICENSE` file at the repository root.
+- grobase is open-core under the GNU AGPL v3 (`apps/grobase/LICENSE`); `apps/grobase/LICENSING.md`
+  maps which parts carry which licence.
+- osionos, opposite-osiris (prismatica), hydrawn, mail and calendar carry no licence file.
 
 ---
 
@@ -908,3 +926,4 @@ its submodule (`apps/grobase/LICENSE`, `apps/grobase/LICENSING.md`).
 - [`wiki/security/`](wiki/security/) — security model, proofs, known weaknesses, network
 - [`DATA-MIGRATION.md`](DATA-MIGRATION.md) — fresh-machine and migration runbook
 - `apps/grobase/CLAUDE.md` — grobase's own authoritative technical document (inside the submodule)
+- [Prismatica docs](https://prismatica-beta.vercel.app/docs/) — the landing's documentation site
