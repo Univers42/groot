@@ -21,8 +21,8 @@ services:
       - ./infrastructure/tls/bridge-livekit.conf:/etc/nginx/track-binocle.d/bridge-livekit.conf:ro
       - ./apps/grobase/certs:/etc/track-binocle/certs:ro
       # The public API docs on :8444 (/docs/ and /openapi.json in nginx.conf).
-      - ./infrastructure/tls/api-docs:/usr/share/track-binocle/api-docs:ro
-      - ./apps/grobase/infra/config/openapi:/usr/share/track-binocle/openapi:ro
+      - ${GROOT_READ_BINDS:-.}/infrastructure/tls/api-docs:/usr/share/track-binocle/api-docs:ro
+      - ${GROOT_READ_BINDS:-.}/apps/grobase/infra/config/openapi:/usr/share/track-binocle/openapi:ro
     ports:
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${OPPOSITE_OSIRIS_HOST_PORT:-4322}:4322"
       - "${TRACK_BINOCLE_BIND_ADDR:-127.0.0.1}:${OSIONOS_APP_HOST_PORT:-3001}:3001"
@@ -176,7 +176,7 @@ services:
     expose:
       - "4000"
     volumes:
-      - ./tools/seeds/.agency-people.env:/seeds/.agency-people.env:ro
+      - ${GROOT_READ_BINDS:-.}/tools/seeds/.agency-people.env:/seeds/.agency-people.env:ro
     networks:
       - default
       - mini-baas
@@ -1459,7 +1459,7 @@ services:
       PLAYGROUND_APP_URL: https://127.0.0.1:3001
       PLAYGROUND_BRIDGE_URL: https://127.0.0.1:4000
       PLAYGROUND_MAIL_URL: https://127.0.0.1:3002
-      PLAYGROUND_MAIL_BRIDGE_URL: https://127.0.0.1:4100
+      PLAYGROUND_MAIL_BRIDGE_URL: https://127.0.0.1:${MAIL_BRIDGE_HOST_PORT:-4100}
       PLAYGROUND_CALENDAR_URL: https://127.0.0.1:3003
       PLAYGROUND_CALENDAR_BRIDGE_URL: https://127.0.0.1:4200
       NODE_EXTRA_CA_CERTS: /certs/track-binocle-local-ca.pem
@@ -1520,7 +1520,7 @@ services:
     volumes:
       - ./apps/osionos/app:/app
       - ./apps/grobase/certs:/certs:ro
-      - ./tools/seeds/.agency-people.env:/seeds/.agency-people.env:ro
+      - ${GROOT_READ_BINDS:-.}/tools/seeds/.agency-people.env:/seeds/.agency-people.env:ro
       - osionos-browser-test-node-modules:/app/node_modules
       - osionos-browser-test-pnpm-store:/pnpm/store
     entrypoint:

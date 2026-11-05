@@ -117,3 +117,37 @@ is not "every hop is HTTPS".
   to the operator list: every campus peer arrives the same way through the `0.0.0.0:8443` forward.
 - The realtime triggers come back on every grobase `up` (`012_realtime_triggers_all_tables.sql`). A run
   clears them from a terminal; the lasting fix is in grobase.
+
+## Amendment, 2026-11-05: groot builds a VM that does not exist
+
+The owner reversed "groot never starts or builds the VM": `make all` in a fresh clone, with vault42
+credentials as the only input, must end with everything running. Devil ruled PROCEED-WITH-CONDITIONS.
+
+- **A gate runs first.** `datacenter-gate` proves the vault can be read, before the submodule sync. Some
+  credentials but not all stop the run instead of taking the local path. `GROBASE_DATACENTER=local` is
+  the opt-out on the command line too.
+- **Credentials stay on-demand.** The owner asked for them in the global environment; this keeps them
+  per step, because docker builds run under make's environment. Each step reads the files.
+- **"Absent" is four negatives:** the default alias, the disk's `stat` says ENOENT (an expired Kerberos
+  ticket on the NFS gives EACCES, and `[ ! -f ]` cannot tell them apart), the nearest parent lists, and
+  ports 4242 and 8443 are free with no QEMU running. Anything less waits or stops.
+- **A build needs a real terminal.** `DATACENTER_ALLOW_WRITES` does not unlock it, because POST /rebuild
+  inherits that environment. A flock stops two builds.
+- **A disk without `.installed` stops**, and never gets `make autostart`.
+- **A backup repository stops a build.** Seeds are older than it, and `set_seeds --auto` would skip.
+- **born2root's exit status is not the verdict.** It exits 0 when grobase, the seed or autostart failed,
+  so groot reads first boot, the plan and the crontab itself.
+- **Hand-set files never build a VM.** They only let a run continue against one that exists.
+- **`make all` proves itself.** `datacenter-verify` fails on anything less than the whole plan healthy, a
+  page that is not 200, a broken bind mount, or a browser run that fails or skips. With no terminal the
+  browsers print SKIP.
+
+- **Production stays out of it.** The local plan, every service that is not retired, is
+  `LOCAL_GROBASE_ADDONS` in groot, so grobase's `max` and born2root's server profile mean what they
+  meant. cloudflared is dropped by a per-build `FEATURES`. Reinstalling or repairing grobase needs the
+  default alias and a loopback port held by this user's own QEMU; any other alias is only read.
+- **Mail and Calendar are proved reachable and embedded in osionos**, not signed in to Google. No
+  Google client is set for them here, and the owner dropped that from this work.
+
+The rest of this ADR stands, `BAAS_LUKS_PASSPHRASE` staying out of the vault included: a first build
+mints one, and the secrets file is its only copy on this machine.

@@ -40,7 +40,7 @@ backend-up: ## Ensure the grobase backend is up, starting it when it is down
 ## With a vault key, secrets are pulled earlier by `secrets-ensure`; with NO vault key, grobase
 ## self-generates its secrets (no-vault local mode) and `env-local-ensure` derives the root
 ## ./.env.local afterward.
-	@if [ -n '$(strip $(GROBASE_DATACENTER))' ]; then \
+	@if [ -n '$(DATACENTER_ON)' ]; then \
 		echo '[backend] this machine deploys against its data center ($(GROBASE_DATACENTER)): groot starts no grobase here (ADR 0047). make all GROBASE_DATACENTER= overrides that.' >&2; \
 		exit 1; \
 	fi; \
@@ -157,7 +157,7 @@ apply-models-baseline: ## Mark every current models/*.sql as applied WITHOUT run
 ## applied WITHOUT running it.
 	@sh scripts/apply-models.sh baseline
 
-frontends-up: submodules-pinned certs hydrawn-wasm ## Build and start only the root frontends against the running backend
+frontends-up: submodules-pinned certs hydrawn-wasm $(LOCAL_BINDS_STEP) ## Build and start only the root frontends against the running backend
 ## Usage: make frontends-up [PULL_PREBUILT=1]
 ## Build and start ONLY the root frontends against the running grobase backend. Also resurrects the
 ## IDE plane containers (runner / sandbox socket-proxy) — but ONLY when ./.env.local records them as

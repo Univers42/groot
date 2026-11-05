@@ -95,6 +95,13 @@ body_of() { sed '1,/^$/d' <<<"$1"; }
   [ "$(status_of "$(edge /docs/docs.css)")" = 200 ]
 }
 
+@test "/docs/ serves its stylesheet and script as what they are, or nosniff refuses them" {
+  run docker exec "$CURL" curl -sk -o /dev/null -w "%{content_type}" https://edge:8444/docs/docs.css
+  [ "$output" = text/css ]
+  run docker exec "$CURL" curl -sk -o /dev/null -w "%{content_type}" https://edge:8444/docs/docs.js
+  [ "$output" = text/javascript ]
+}
+
 @test "the page loads nothing from another origin" {
   run grep -rnE '(src|href)="(https?:)?//' "$BATS_TEST_DIRNAME/../../infrastructure/tls/api-docs"
   [ "$status" -eq 1 ]
