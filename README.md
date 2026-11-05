@@ -537,75 +537,81 @@ pairing and review do not show in it.
 
 ---
 
-## Resources
-
-### References
-
-- Docker Compose — <https://docs.docker.com/compose/>
-- PostgreSQL row-level security — <https://www.postgresql.org/docs/current/ddl-rowsecurity.html>
-- Kong Gateway — <https://docs.konghq.com/gateway/latest/>
-- Supabase Auth (GoTrue) — <https://github.com/supabase/auth>
-- The Go Programming Language documentation — <https://go.dev/doc/>
-- The Rust Programming Language — <https://doc.rust-lang.org/book/>
-- NestJS — <https://docs.nestjs.com/>
-- Astro — <https://docs.astro.build/>
-- React — <https://react.dev/> · Vite — <https://vite.dev/> · Tailwind CSS — <https://tailwindcss.com/docs>
-- LiveKit — <https://docs.livekit.io/>
-- NIST SP 800-162, *Guide to Attribute Based Access Control* — <https://csrc.nist.gov/pubs/sp/800/162/final>
-- OWASP SSRF Prevention Cheat Sheet — <https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html>
-- OWASP Top 10 — <https://owasp.org/www-project-top-ten/>
-- GDPR, full text — <https://gdpr-info.eu/>
+## 📚 Resources
 
 ### How AI was used
 
-This project was built with **heavy AI assistance**, and we state it plainly.
-
-- **Tools and tasks.** Every member used a variety of AI tools (chat
-  assistants, coding agents, review bots) across code, tests, reviews and
-  documentation.
-- **What the repositories record.** Claude Code with the team's kit in groot's
+- **Code**: AI assistants wrote and refactored code across the stack
+- **Tests**: verification gates and test scripts, run against the live stack
+- **Review**: AI-assisted pull request review and a security review
+- **Documentation**: drafted from the code, then checked against the repository
+- **Agents in the history**: `opencode` (6 commits) and Space Bunny on hydrawn
+  (111 commits)
+- **Control**: a human merges every change, and each member must be able to
+  explain the code in their area
+- **Tools the repositories record**: Claude Code with the team's kit in groot's
   [`.claude`](.claude) submodule; Gemini (`.gemini/`) and the opencode agent in
   osionos; an OpenCode agent team on hydrawn (`BUNNY.md`); GitHub Copilot and
-  CodeRabbit on pull requests.
-- **Commit history.** On 2026-11-04 the history of groot, osionos and grobase
+  CodeRabbit on pull requests
+- **Commit trailers**: on 2026-11-04 the history of groot, osionos and grobase
   was rewritten to remove `Co-authored-by` trailers. Since then no commit
   carries a co-author line, so the history does not show which commits were
   written with an AI tool, and must not be read as AI-free
-  ([`wiki/project/contributions-method.md`](wiki/project/contributions-method.md)).
-- **How we kept control.** A human merges every pull request; nothing reaches
-  `develop` or `main` by an agent alone. Approval by a second member is required
-  by the rulesets but thin in practice (see [Project
-  Management](#project-management)). A change is accepted only when its
-  verification gate passes. Every member must be able to explain the AI-assisted
-  code in their area.
+  ([`wiki/project/contributions-method.md`](wiki/project/contributions-method.md))
+
+### References
+
+- [Docker Compose](https://docs.docker.com/compose/), [PostgreSQL row-level security](https://www.postgresql.org/docs/current/ddl-rowsecurity.html), [Kong Gateway](https://docs.konghq.com/gateway/latest/)
+- [React](https://react.dev/), [Vite](https://vite.dev/), [Tailwind CSS](https://tailwindcss.com/docs), [Astro](https://docs.astro.build/), [NestJS](https://docs.nestjs.com/)
+- [The Go documentation](https://go.dev/doc/), [The Rust Programming Language](https://doc.rust-lang.org/book/), [LiveKit](https://docs.livekit.io/)
+- [OWASP Top 10](https://owasp.org/www-project-top-ten/), [NIST guide to ABAC](https://csrc.nist.gov/pubs/sp/800/162/final), [GDPR full text](https://gdpr-info.eu/)
+- L. Lamport, "Time, Clocks, and the Ordering of Events in a Distributed System", 1978
+- [Supabase Auth (GoTrue)](https://github.com/supabase/auth)
 
 ---
 
-## Known limitations
+## ⚠️ Known limitations
 
-- **No game.** All gaming-dependent modules are out of scope.
-- **Expressiveness is narrow by design.** grobase has no per-application server
-  code; business rules are expressed as policies, schema constraints, database
-  triggers, or functions in the flag-gated functions plane.
-- **Documented security weaknesses.** Known and declared in
-  [`wiki/security/03-known-weaknesses.md`](wiki/security/03-known-weaknesses.md).
-- **Several features are behind flags that are off by default** — see the Grade
-  column in [Modules](#modules).
-- **No interface translation in osionos.** `i18next` is declared but no
-  translation resource is loaded (see [Modules](#modules)). The prismatica site
-  itself ships English, Spanish and Arabic.
-- **Whiteboard editing is loopback-only and has no per-user authorization yet** (see
-  [Demo](#demo)).
+> [!CAUTION]
+> **Do not enrol two-step verification on a real account.** The app has no
+> sign-in prompt for the code, so the account locks itself out.
+
+### What does not work yet
+
+- **No game**, so every game module is out
+- **Only the landing page is translated**: the app is English only
+- **Collaboration is per block**: last write wins, not CRDT
+- **The whiteboard** has no per-user authorization; its editing is
+  loopback-only for that reason (hydrawn is bound to `127.0.0.1:3007`)
+- **Expressiveness is narrow by design**: grobase has no per-application
+  server code; business rules are policies, schema constraints, database
+  triggers, or functions in the flag-gated functions plane
+- **Documented security weaknesses**: declared in
+  [`wiki/security/03-known-weaknesses.md`](wiki/security/03-known-weaknesses.md)
+
+### Bugs to fix
+
+- Blocked users can keep writing in an open direct message
+- Port 8880 serves the API over plain HTTP where the stack runs
+- The Privacy Policy promises a deletion the code never performs
+- Demo passwords in `src/data/seedUsers.json` ship in the client bundle
+- Page saves fail past about 330 blocks, because of a WAF limit
+- 148 root commits have a one-word subject
 
 ---
 
 ## License
 
-- There is no `LICENSE` file at the repository root.
-- grobase is open-core under the GNU AGPL v3 (`apps/grobase/LICENSE`);
-  `apps/grobase/LICENSING.md` maps which parts carry which licence.
-- osionos, opposite-osiris (prismatica), hydrawn, mail and calendar carry no
-  licence file.
+Osionos Project License: copyright (c) 2026 Osionos contributors, all rights
+reserved. Contributors and persons the copyright holders explicitly authorize
+may access, inspect, run and contribute to the software to evaluate, develop,
+maintain and improve the project; no other use is granted. The full text is in
+[`LICENSE`](LICENSE).
+
+grobase (`apps/grobase`, a submodule) carries its own licence: open-core under
+the GNU AGPL v3 (`apps/grobase/LICENSE`), with `apps/grobase/LICENSING.md`
+mapping which parts carry which licence. osionos, opposite-osiris, hydrawn,
+mail and calendar have no licence file of their own.
 
 ---
 
@@ -618,5 +624,5 @@ This project was built with **heavy AI assistance**, and we state it plainly.
 - [`wiki/security/`](wiki/security/) — security model, proofs, known weaknesses, network
 - [`DATA-MIGRATION.md`](DATA-MIGRATION.md) — fresh-machine and migration runbook
 - `apps/grobase/CLAUDE.md` — grobase's own authoritative technical document (inside the submodule)
-- [Prismatica docs](https://prismatica-beta.vercel.app/docs/) — the landing's
-  documentation site
+- [prismatica docs](https://prismatica-beta.vercel.app/docs/) — the public
+  landing's documentation site
