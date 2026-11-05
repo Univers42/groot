@@ -34,10 +34,12 @@ rewritten commit twice.
 
 At the pins, on 2026-11-05:
 
-- `Space Bunny` (also `bunny` and `builder`): the OpenCode agent team `dlesieur`
-  ran on hydrawn (hydrawn `BUNNY.md`). 68 hydrawn commits.
-- `opencode`: an AI coding agent committing under its own name. 1 root and 5
-  osionos commits.
+- `Space Bunny` (also `bunny` and `builder`): an AI-agent identity. Its
+  addresses are local (for example `bunny@local`, `builder@bunny`,
+  `bunny@drawnosaurus.local`) and hydrawn `BUNNY.md` describes a team of agents.
+  Who ran it is not identified. 68 hydrawn commits.
+- `opencode`: an AI-agent identity committing under its own name. Who ran it is
+  not identified. 1 root and 5 osionos commits.
 - Bots: `dependabot[bot]` 8 root; `coderabbitai[bot]` 3 root and 4 osionos;
   `Grok CI Bot` 2 root; `copilot-swe-agent[bot]` 9 opposite-osiris.
 
@@ -53,7 +55,7 @@ The evidence for each join is in [`.mailmap`](../../.mailmap).
   ([`archive/wiki-2026-09/CONTRIBUTORS.md`](../../archive/wiki-2026-09/CONTRIBUTORS.md)).
   The osionos commits (2026-04-10 → 2026-05-02) touch mostly the Playwright
   browser tests (`tests/browser`), their CI job and committed build assets.
-  `rstancu` is not in the current team table.
+  `rstancu` is a former member (README, Team Information).
 - `La Cebolla <smhashem545@…>` is **`shashemi`**: opposite-osiris commit
   `93e6b65` carries `Signed-off-by: Seyed Mostafa Hashemian`.
 - `SMOSTAFAH1 <SMOSTAFAH1@users.noreply.github.com>` is **`shashemi`**: it is
@@ -69,11 +71,13 @@ The evidence for each join is in [`.mailmap`](../../.mailmap).
   - `dlesieur <daniel17dev@…>` (5 commits, 2026-03-20/21) goes to `danfern3`:
     they sit inside `danielfdez17`'s own Docker and Kubernetes series of the
     same two days.
-- `opencode` and `Space Bunny` are AI agents, shown under their own names and
-  left out of the member counts (list above).
-- `qwO-Owp` (born2root, 2026-10-08/09) and `Alex Caceres` (vendor/scripts,
-  2026-01-26) are tied to no member by any address, sign-off or pull request.
-  Neither repository is counted.
+- `opencode` and `Space Bunny` are AI-agent identities, shown under their own
+  names and left out of the member counts (list above).
+- `qwO-Owp` (born2root, 2026-10-08/09) is unidentified: no address, sign-off or
+  pull request ties it to anyone.
+- `Alex Caceres` (vendor/scripts, 2026-01-26) is a former member (team answer,
+  2026-11-05).
+- Neither born2root nor vendor/scripts is counted.
 - On 2026-11-04 the history of groot, osionos and grobase was rewritten to
   remove `Co-authored-by` trailers; trees, authors, dates and subjects are
   unchanged, and every commit from the first rewritten one onward has a new SHA.

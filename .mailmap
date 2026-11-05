@@ -52,13 +52,13 @@ opencode (AI agent) <opencode@local>
 opencode (AI agent) <opencode@local> <opencode@localhost>
 opencode (AI agent) <opencode@local> <oc-run@localhost>
 
-# Space Bunny: the OpenCode agent team the owner ran on hydrawn (BUNNY.md, "You run a team
-# of agents"), on local addresses. An AI agent, not a member, shown as one line like opencode.
-Space Bunny (AI agent team, run by dlesieur) <bunny@local> bunny <bunny@local>
-Space Bunny (AI agent team, run by dlesieur) <bunny@local> bunny <bunny@localhost>
-Space Bunny (AI agent team, run by dlesieur) <bunny@local> Space Bunny <bunny@localhost>
-Space Bunny (AI agent team, run by dlesieur) <bunny@local> Space Bunny <bunny@drawnosaurus.local>
-Space Bunny (AI agent team, run by dlesieur) <bunny@local> builder <builder@bunny>
-Space Bunny (AI agent team, run by dlesieur) <bunny@local> builder <builder@localhost>
-Space Bunny (AI agent team, run by dlesieur) <bunny@local> builder <builder@drawnosaurus.local>
-Space Bunny (AI agent team, run by dlesieur) <bunny@local> builder <builder@local>
+# Space Bunny: an AI-agent identity on hydrawn (BUNNY.md describes a team of agents), on
+# local addresses. Who ran it is not identified. Shown as one line, like opencode.
+Space Bunny (AI agent team) <bunny@local> bunny <bunny@local>
+Space Bunny (AI agent team) <bunny@local> bunny <bunny@localhost>
+Space Bunny (AI agent team) <bunny@local> Space Bunny <bunny@localhost>
+Space Bunny (AI agent team) <bunny@local> Space Bunny <bunny@drawnosaurus.local>
+Space Bunny (AI agent team) <bunny@local> builder <builder@bunny>
+Space Bunny (AI agent team) <bunny@local> builder <builder@localhost>
+Space Bunny (AI agent team) <bunny@local> builder <builder@drawnosaurus.local>
+Space Bunny (AI agent team) <bunny@local> builder <builder@local>
