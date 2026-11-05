@@ -1,12 +1,18 @@
 *This project has been created as part of the 42 curriculum by dlesieur, serjimen, danfern3, vjan-nie, shashemi.*
 
-# Track Binocle — ft_transcendence
+# Prismatica — ft_transcendence
 
-**Track Binocle** is a collaborative workspace built on top of our own self-hostable
-Backend-as-a-Service. Users sign up on a public site, land in **osionos** — a Notion-style block
-editor with real-time collaboration, chat and video rooms — and can connect their Gmail and
-Google Calendar. Every one of those apps is served by **grobase**, a generic backend that the team
-wrote in Go, Rust and TypeScript, and which contains no application-specific code.
+**Prismatica** is a collaborative workspace built on our own self-hostable Backend-as-a-Service.
+Users sign up on the public **prismatica** site, land in **osionos** — a Notion-style block editor
+with real-time collaboration, chat and video rooms — and can connect their Gmail and Google
+Calendar. Every one of those apps is served by **grobase**, a generic backend that the team wrote
+in Go, Rust and TypeScript, with no per-application server code.
+
+> Naming: *Prismatica* is the project; *osionos* is the workspace app; *prismatica*
+> (`apps/opposite-osiris`, repository [`Univers42/prismatica`](https://github.com/Univers42/prismatica))
+> is the marketing landing. Infrastructure identifiers keep the old codename `track-binocle`
+> (the compose project, image names, `TRACK_BINOCLE_*` variables, `*.track-binocle.test` hosts,
+> the local CA file): renaming them would break scripts and issued certificates.
 
 ---
 
@@ -38,40 +44,46 @@ code** — and to prove it by building a real product on it.
 
 The project therefore has two halves:
 
-- **grobase** (roughly 70% of the work) — a Backend-as-a-Service. An application is declared in a
-  JSON *contract* (its database, isolation strategy, roles, permissions and API keys); a generic
-  provisioner creates everything from that file. Routes carry no domain logic: a request names the
-  table it targets, and access rules are stored as data, not code.
-- **The products** that run on it — a marketing and authentication site, the osionos editor, and
-  mail and calendar integrations.
+- **grobase** — a Backend-as-a-Service (about 290,000 lines of Go, Rust and TypeScript at its
+  pin, roughly a third of the code the team wrote; lines include tests). An application is
+  declared in a JSON *contract* (its database, isolation strategy, roles, permissions and API
+  keys); a generic provisioner creates everything from that file. Routes carry no domain
+  logic: a request names the table it targets, and access rules are stored as data, not code.
+- **The products** that run on it — the prismatica landing and sign-in site, the osionos
+  workspace, the hydrawn whiteboard, and mail and calendar integrations.
 
 ### Overview
 
 | Product | Tech | What it is |
 |---|---|---|
-| **opposite-osiris** | Astro | Public site: landing page, sign-up / sign-in, legal pages. The entry point. |
+| **prismatica** (`apps/opposite-osiris`) | Astro | Public site: landing page, docs, sign-up / sign-in, legal pages. The entry point. |
 | **osionos** | React + Vite | The block editor: pages, databases-as-blocks, real-time collaboration, chat, video rooms. **The flagship.** |
 | **mail** | React + Vite | Gmail integration over Google OAuth |
 | **calendar** | React + Vite | Google Calendar integration over Google OAuth |
+| **hydrawn** | SvelteKit + Fastify + Rust/WASM | Collaborative whiteboard, embedded in osionos |
 
-These four products are supported by four platform services (not applications in their own
-right): the **auth-gateway** (Go, sessions), the **osionos-bridge** (turns a site session into an
-editor session), **Kong** (the single API gateway in front of grobase) and **LiveKit** (the WebRTC
-media server for video rooms).
+These products are supported by platform services (not applications in their own right): the
+**auth-gateway** (Node, shipped by the prismatica repository: sessions and sign-in), the
+**osionos-bridge** (Node: turns a site session into an editor session), **Kong** (grobase's API
+gateway, behind its WAF) and **LiveKit** (the WebRTC media server for video rooms).
 
 ### Key features
 
 - **Contract-driven backend.** A whole application — database, isolation, roles, keys, frontend
   configuration — is one JSON file. `POST /v1/tenants/me/apps` creates a new isolated application
-  with its own database and scoped API key.
-- **Per-request owner isolation.** The Rust data plane scopes every query to its owner on every
-  request; permissions are rows (ABAC/RBAC), not `if` statements.
-- **One API over many databases.** PostgreSQL, MySQL, MongoDB, Redis, SQLite, MSSQL, DynamoDB and
-  even remote HTTP APIs are queried through the same envelope and the same API key.
+  with its own database and scoped API key (mounted only when `APPS_SELFSERVE_ENABLED` is on).
+- **Per-request owner isolation.** The Rust data plane scopes queries to their owner on each
+  request, not by connection-pool state; permissions are rows (RBAC, plus flag-gated ABAC
+  conditions), not `if` statements.
+- **One API over many databases.** PostgreSQL, MySQL (MariaDB image), MongoDB, Redis, SQLite,
+  SQL Server and even remote HTTP APIs are queried through the same envelope and the same API
+  key. DynamoDB is an opt-in build, left out of the default one
+  ([`wiki/platform/08-engines.md`](wiki/platform/08-engines.md)).
 - **Collaborative editor.** Block-based pages, a database block with table / board / calendar
   views, real-time co-editing, channels and direct messages, video rooms.
-- **Single-command deployment.** `make all` builds and starts the whole stack in Docker, serves
-  every frontend over trusted local HTTPS, and health-checks it.
+- **Single-command deployment.** `make all SKIP_SYNC=1` builds the pinned commits in Docker,
+  starts the backend and the frontends over local HTTPS with a trusted CA, and health-checks
+  them (`utils/mk/pipeline.mk:10`).
 
 ---
 
@@ -81,14 +93,14 @@ media server for video rooms).
 
 | Requirement | Detail | Source |
 |---|---|---|
-| **Linux host** | Tested on Debian 13; the CA-trust step uses `sudo` + `update-ca-certificates` | `utils/mk/certs.mk` |
+| **Linux host** | Tested on Debian 13 (trixie), the system the born2root VM installs; the CA-trust step uses `sudo` + `update-ca-certificates` | `vendor/born2root/docker/Dockerfile:14`, `vendor/born2root/generate/create_custom_iso.sh:120`; `utils/mk/certs.mk` |
 | **Docker Engine ≥ 25** + **Compose v2** | Healthchecks use `start_interval`, which needs Docker 25. Tested with Docker 29.8. | `docker-compose.yml:10` |
-| **RAM ≥ 8 GB** | Measured: the VM peaked at ~6.5 GB of 8 GB during `make all` | measured, 2026-09-30 |
+| **RAM ≥ 8 GB** | Measured: the VM peaked at ~6.5 GB of 8 GB during `make all` | `wiki/runbooks/fresh-machine.md` (6266 MiB peak, v1.0.0-rc4, 2026-10-05) |
 | **Disk ≥ 30 GB free for Docker** | Measured on the dev VM with the stack running (`docker system df`, 2026-10-01): images 13.5 GB, build cache 9.5 GB, volumes 1.4 GB | measured |
-| **GNU Make, git, curl, openssl** | Make drives everything; curl runs the health check; openssl generates the local secrets | `utils/mk/app.mk`, `scripts/gen-local-env.sh:68` |
+| **bash, GNU Make, git, curl, openssl, ssh** | Make drives everything; curl runs the health check; openssl generates the local secrets | `utils/mk/app.mk:12-15`, `scripts/gen-local-env.sh:253` |
 | **A GitHub SSH key** | `.gitmodules` uses `git@github.com:` URLs, so the recursive clone needs SSH access to GitHub | `.gitmodules` |
-| **Google Chrome** | Current stable — the browser the project is evaluated on | |
-| `certutil` (optional) | Imports the local CA into the browsers' NSS stores. Absent, `make certs-trust-user` unpacks `libnss3-tools` into `~/.cache/born2root/nss` without root; if that fails it warns and exits 0, and the CA is imported by hand (see [Access](#access-and-the-local-ca)) | `scripts/certs-trust-user.sh` |
+| **Google Chrome** | Current stable — the browser the project is evaluated on | [`wiki/project/01-subject.md`](wiki/project/01-subject.md) |
+| `certutil` (optional) | Imports the local CA into the browsers' NSS stores. Absent, `make certs-trust-user` unpacks `libnss3-tools` into `~/.cache/born2root/nss` without root (Debian only: it needs `apt-get` and `dpkg-deb`, bounded at 120 s); if that fails it warns and exits 0, and the CA is imported by hand (see [Access](#access-and-the-local-ca)) | `scripts/certs-trust-user.sh` |
 
 **Nothing else is installed on the host** — no Node, npm, Go or Cargo. Everything builds and runs
 in containers.
@@ -101,24 +113,24 @@ sudo, `CERT_TRUST_MODE=user` trusts the browsers only and `skip` trusts nothing 
 **Ports bound on the host** (from `docker-compose.yml`, all on `127.0.0.1` except inside a
 QEMU/VirtualBox NAT VM, where `infrastructure/scripts/detect-bind-addr.sh` binds `0.0.0.0` so the
 host can reach the guest): 443, 3001, 3002, 3003, 3007 (always loopback), 4000, 4100, 4200, 4322,
-4323 and 7880 (always loopback: plain HTTP), 7881, 8444, 8787 and UDP 50000–50060. grobase adds Kong on `127.0.0.1:8000`
-(literal loopback in its `orchestrators/compose/base/gateway.yml`).
+4323 and 7880 (always loopback: plain HTTP), 7881, 8444, 8446 (always loopback: the IDE edge),
+8787 and UDP 50000–50060. A busy port moves to the next free one (`scripts/host-ports.sh`).
+grobase adds Kong on `127.0.0.1:8000` (literal loopback in its
+`orchestrators/compose/base/gateway.yml:56`; its WAF is the public entry).
 
 ### Defense bring-up (pinned)
 
-This is the path rehearsed on a clean machine. It checks out the release tag and does **not**
-follow submodule branch tips (`SKIP_SYNC=1`, see `sync-submodules-soft` in
-`utils/mk/pipeline.mk`).
+This is the path rehearsed on a clean machine, and the stack the [Modules](#modules) are graded
+on. It builds `main` and the submodule commits `main` pins, and does **not** follow submodule
+branch tips (`SKIP_SYNC=1`, see `sync-submodules-soft` in `utils/mk/pipeline.mk`).
 
 ```bash
 git clone --recursive git@github.com:Univers42/groot.git
 cd groot
-git checkout "$(git describe --tags --abbrev=0 origin/main)"
+git checkout main
 git submodule update --init --recursive
 make all SKIP_SYNC=1
 ```
-
-The `git checkout` line checks out the latest release tag on `main`; `git tag -l 'v*'` lists them.
 
 Requirements, the VM + host-browser case, the verify script (`scripts/verify/fresh-bringup.sh`) and
 troubleshooting: [`wiki/runbooks/fresh-machine.md`](wiki/runbooks/fresh-machine.md).
@@ -132,13 +144,16 @@ demo rows to the app's API key (`make link-live-data-ensure`) and trusts the
 local CA in this user's browser stores (`make certs-trust-user`, no sudo). Both end with
 `make link-verify`: one request per grobase service from inside every frontend, the TLS edge,
 then the browser stores — [`wiki/runbooks/grobase-link.md`](wiki/runbooks/grobase-link.md).
-To serve the frontends to the internet through this host's Tailscale Funnel (443 first, then
-8443 and 10000), `make public-env` and `make public-up`; `make public-down` closes it:
+To serve the frontends to the internet through this host's Tailscale Funnel (443; add 8443 and
+10000 with `PUBLIC_PORTS=all`), `make public-env` and `make public-up`; `make public-down`
+closes it:
 [`wiki/runbooks/public-funnel.md`](wiki/runbooks/public-funnel.md).
 `make roundtrip` then proves persistence (account, sign-in, editor hand-off, a page, the rows
 in postgres) and `make link-e2e` runs the Playwright smoke through the link.
 
-Measured time from a cold machine: **9–17 minutes**.
+Measured time from a cold machine: **9–17 minutes** (8m55s on a fresh VM, 16m44s on a laptop,
+2026-09-30, [`wiki/STATUS.md`](wiki/STATUS.md); later runs in
+[`wiki/runbooks/fresh-machine.md`](wiki/runbooks/fresh-machine.md)).
 
 No `.env` needs to be written by hand. With no vault key present, grobase generates its own
 secrets into `apps/grobase/.env`, and `env-local-ensure` derives the root `./.env.local` from it,
@@ -148,7 +163,11 @@ including random `OSIONOS_*` secrets and the demo account's `DEMO_LOGIN_PASSWORD
 
 `make all` runs, in order (`utils/mk/pipeline.mk`): submodule sync → secrets →
 local TLS certificates → trust the local CA → grobase backend → derive `.env.local` → restore
-data if the engines are empty → set the demo account's password → SQL migrations → frontends → health check → URL list.
+data if the engines are empty → set the demo account's password → SQL migrations → live-data key
+and owner fix → mount re-encryption → frontends → health check → URL list. On a machine that
+holds vault42 credentials, `make all` deploys against the data-center VM instead and starts no
+local grobase (ADR 0047, [`wiki/runbooks/datacenter.md`](wiki/runbooks/datacenter.md));
+`make all GROBASE_DATACENTER=` forces the local path.
 
 ### Development bring-up
 
@@ -159,7 +178,8 @@ make all
 
 Without `SKIP_SYNC=1`, `make all` first fast-forwards every submodule to the tip of its tracked
 branch (`sync-submodules-soft`), so you build the newest code rather than the pinned commits.
-It skips dirty submodules and never blocks the pipeline.
+It skips dirty submodules, and leaves at its recorded commit any submodule whose branch tip does
+not contain that commit; it never blocks the pipeline.
 
 The exception is any submodule that `.gitmodules` marks `update = none`, today `apps/graph_render`. Its
 gitlink is the build input, so neither mode moves it:
@@ -201,7 +221,7 @@ are in [ADR 0016](docs/adr/0016-self-documenting-pruned-root-make.md).
 
 | Service | URL |
 |---|---|
-| opposite-osiris (start here) | `https://localhost:4322` |
+| prismatica site (start here) | `https://localhost:4322` |
 | osionos editor | `https://localhost:3001` |
 | Whiteboard (hydrawn) | `https://localhost:3007` |
 | mail (opt-in) | `https://localhost:3002` |
@@ -226,8 +246,9 @@ store (one `sudo`) and every browser store this user owns, through `scripts/cert
 and the flatpak locations. It matches old copies by the CA's subject, not by nickname, replaces
 them, and adds the current file as "Track Binocle Local Development CA".
 
-- `make certs-trust-check` prints one line per store (`ok|FAIL <kind> <path>  current|stale|missing`)
-  and exits 1 if any store is not current. Without `certutil` it fails.
+- `make certs-trust-check` prints one line per store
+  (`ok|FAIL <kind> <path>  current|stale|missing|untrusted`) and exits 1 if any store is not
+  current. Without `certutil` it fails.
 - `make certs-trust-user` fixes the stores without sudo; it mints the CA first only if it is missing.
 - `CERT_TRUST_MODE=system|user|skip` (or `TRACK_BINOCLE_CERT_TRUST`) picks what `certs-trust-local`
   does: system store plus browsers (default), browsers only, or nothing.
@@ -239,20 +260,11 @@ osionos stays blank**, because the embedded `:3007` iframe is refused silently. 
 warning while `curl --cacert` succeeds:
 
 - **The CA was regenerated.** `make certs` on a fresh tree mints a new CA, and a store still holding
-  an older copy does not trust it. On 2026-10-08 the CA was regenerated at 17:06 and 7 stores were
-  stale and 1 missing:
-
-  ```text
-  $ make certs-trust-check
-  FAIL chrome   /home/dlesieur/.pki/nssdb  stale
-  FAIL chrome   /home/dlesieur/snap/chromium/current/.pki/nssdb  stale
-  FAIL firefox  /home/dlesieur/snap/firefox/common/.mozilla/firefox/pqdn9c63.default-release-1  stale
-  FAIL firefox  /home/dlesieur/.var/app/org.mozilla.firefox/config/mozilla/firefox/2vgnvz7b.default  missing
-  [certs] 8 browser store(s) do not hold the current CA; run: make certs-trust-user, then relaunch the browser
-  ```
+  an older copy does not trust it. `make certs-trust-check` then reports those stores `stale`, and
+  `make certs-trust-user` replaces the old copy.
 
 - **A snap refresh.** Snap Chromium's `HOME` is the revision directory behind
-  `~/snap/chromium/current`, so a new revision (3507 to 3551 overnight) starts without the store.
+  `~/snap/chromium/current`, so a new revision starts without the store.
   `make certs-trust-check` reports it missing; `make certs-trust-user` recreates it.
 
 Flatpak Firefox profiles can exist without the flatpak installed; they are imported too, harmlessly.
@@ -273,7 +285,7 @@ certificates → Authorities → Import, or run `make certs-trust`.
 
 Honest limitations of this demo: board editing is **loopback-only** and has **no per-user
 authorization yet** — hydrawn is bound to `127.0.0.1:3007` for exactly that reason
-(`docker-compose.yml:27-32`). We make **no end-to-end-encryption claim**: traffic is TLS to the
+(`docker-compose.yml:35-40`). We make **no end-to-end-encryption claim**: traffic is TLS to the
 local proxy, nothing more.
 
 ### Environment configuration
@@ -285,14 +297,18 @@ local proxy, nothing more.
   - `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` — default to a local dev value; video rooms still work.
   - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` in `apps/mail/.env.local` and
     `apps/calendar/.env.local` — without them, the mail and calendar OAuth flows are disabled.
-  - `SONAR_TOK`, `FLY_API_TOKEN`, `DOCKER_PAT` — CI and operations only.
+  - `SONAR_TOK`, `FLY_API_TOKEN`, `DOCKER_PAT` — operator tooling only (a local SonarCloud scan,
+    the Fly deploy, a Docker Hub login); CI uses its own repository secrets.
 
 ### Team setup (with the vault)
 
 Inside the team, secrets are shared through **vault42**, our zero-knowledge secret store, via the
-**42ctl** CLI. A machine that holds a vault identity in `~/.config/42ctl/` pulls the whole `.env`
-tree automatically during `make all` (or with `make vault42-pull-all APPLY=1`). A new identity is
-created with `42ctl keys init` and enrolled with an invitation from the vault's operator.
+**42ctl** CLI. A machine that holds a vault identity in `~/.config/42ctl/` pulls the `.env`
+tree during `make all` when `apps/grobase/.env` is absent (`secrets-ensure`), or on demand with
+`make vault42-pull-all APPLY=1`. With the vault passphrase also present, `make all` deploys
+against the data-center VM instead (see [Defense bring-up](#defense-bring-up-pinned)). A new
+identity is created with `42ctl keys init` and enrolled with an invitation from the vault's
+operator.
 Details: [`DATA-MIGRATION.md`](DATA-MIGRATION.md).
 
 The vault42 CLI is wired in beside that path: the `Secrets (vault42)` section of `make help`, and
@@ -303,23 +319,23 @@ checklist: [ADR 0017](docs/adr/0017-vault42-cli-beside-the-old-path.md).
 
 | Command | What it does |
 |---|---|
-| `make all` | Full lifecycle: certs → backend → frontends → health check → URLs |
+| `make all` | Full lifecycle: secrets → certs → backend → env → data → migrations → frontends → health check → URLs |
 | `make healthcheck` | Probe backend, site, editor, bridge, auth gateway and whiteboard |
 | `make showcase` | Print the URL list for what is actually running |
-| `make pulls` | Update all submodules |
+| `make pulls` | Fetch and pull the root repository and every submodule |
 | `make -C apps/grobase editions` | List the available backend shapes |
-| `make all GROBASE_EDITION=full` | Bring up everything, including extra engines and monitoring |
+| `make all GROBASE_EDITION=full` | Bring up every grobase plane except the playground demo UI, including extra engines and monitoring |
 | `docker compose ps` | Service status |
 | `docker compose logs -f <service>` | Follow one service's logs |
 | `docker compose down` | Stop the frontends (data is kept) |
 
 **Backend editions.** `make all` starts grobase in the **`devlean`** edition
 (`GROBASE_EDITION ?= devlean` in `utils/mk/grobase.mk`; listed in grobase's
-`orchestrators/makes/00-config.mk:68`): the core engines (PostgreSQL, MySQL, MongoDB, Redis,
+`orchestrators/makes/00-config.mk:148-154`): the core engines (PostgreSQL, MySQL, MongoDB, Redis,
 MinIO), the full application / control / data planes and realtime — without the heavy extra
 engines and without the monitoring stack. `GROBASE_EDITION=migrate` adds every snapshot engine;
-`GROBASE_EDITION=full` turns everything on. Some module demonstrations need a larger edition or a
-feature flag — see [Modules](#modules).
+`GROBASE_EDITION=full` turns on every plane except the playground demo. Some module
+demonstrations need a larger edition or a feature flag — see [Modules](#modules).
 
 ---
 
