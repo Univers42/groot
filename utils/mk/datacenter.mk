@@ -45,6 +45,9 @@ datacenter-preflight: ## Check the VM, then only the writes those checks allow
 ## full, then applies. A key that does not verify stops, unless this run seeded the VM.
 	@$(DATACENTER_SCRIPT) preflight
 
+datacenter-roster: ## Write the agency roster from the accounts in the VM, read-only there
+	@$(DATACENTER_SCRIPT) roster
+
 datacenter-trust: ## Prove the CA signs the VM's WAF, then import it in every browser store
 	@$(DATACENTER_SCRIPT) trust
 

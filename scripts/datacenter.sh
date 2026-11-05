@@ -267,6 +267,7 @@ health)
   born2root_make health
   ;;
 verify) cmd_verify ;;
+roster) cmd_roster ;;
 browsers) cmd_browsers ;;
 dc) cmd_dc "${2:-}" ;;
 *)

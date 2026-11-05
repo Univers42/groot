@@ -35,6 +35,7 @@ credentials but not all, it stops and names the missing ones.
 | Copy the CA and the WAF's leaf from the VM | `datacenter-certs` | the leaf does not chain, or the key is not its own |
 | Open the link, derive `./.env.local` | `link` | the WAF does not answer from a container |
 | Converge models and the key | `datacenter-preflight` | the dump does not read back, or the key does not verify |
+| Write the agency roster from the VM's accounts | `datacenter-roster` | the VM lacks an account |
 | Demo password, without force | `link-demo-login-ensure` | |
 | Prove the CA, import it in the browsers | `datacenter-trust` | the CA does not verify the WAF, or a store still lacks it |
 | Build and start the frontends | `link-frontends-start` | a build fails, or the link does not verify |
@@ -94,6 +95,7 @@ Tailscale is off in the profile, so nothing here touches the tailnet or Cloudfla
 | `/dev/kvm is not writable` | Nobody holds this seat's session | Log in at the seat |
 | `has no make <target>` | groot's born2root pin is behind | Move the pin |
 | `holds N tenants and no record of a seed` | Rows of unknown origin | If they are expendable, from born2root: `make set_seeds FORCE=1` |
+| `the VM has no account for` | Its seed lacks the agency people, so people lists would be empty | From born2root: `make set_seeds` |
 | `the VM is still not converged` | A long reader kept a table past the 2 s lock budget, such as an hourly backup | `make all` again |
 | `the app's key or the rows it owns need a repair` | They drifted after this seed was converged | Read ADR 0003, then `make link-live-data-ensure` |
 | `Firefox is installed but has no profile` | It never started | Start it once, then `make all` |

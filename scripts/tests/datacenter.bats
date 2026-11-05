@@ -22,6 +22,8 @@ setup() {
     "$BATS_TEST_DIRNAME/../lib/datacenter-models.sh" "$BATS_TEST_DIRNAME/../lib/datacenter-gate.sh" \
     "$BATS_TEST_DIRNAME/../lib/datacenter-build.sh" "$BATS_TEST_DIRNAME/../lib/datacenter-verify.sh" \
     "$BATS_TEST_DIRNAME/../lib/vault42-session.sh" "$ROOT/scripts/lib/"
+  mkdir -p "$ROOT/tools/seeds"
+  cp "$BATS_TEST_DIRNAME/../../tools/seeds/agency-roster.sh" "$ROOT/tools/seeds/"
   : >"$LOG"
   export LOG PATH="$BATS_TEST_TMPDIR/bin:$PATH"
   in_tree grobase-link.sh 'printf "unix:///link/docker.sock\n"'
@@ -721,7 +723,7 @@ full_credentials() {
 verified_stack() {
   vault_set
   stub curl 'printf 200'
-  stub docker 'exit 0'
+  stub docker 'case "$1" in exec) echo 21 ;; esac'
   stub xargs 'exit 0'
   mkdir -p "$ROOT/apps/grobase/certs" "$ROOT/tests/e2e"
 }
@@ -761,11 +763,100 @@ verified_stack() {
   [[ "$output" == *"empty directory"* ]]
 }
 
+@test "verify: an empty file mount fails, since touching the path proves nothing" {
+  verified_stack
+  empty="$BATS_TEST_TMPDIR/agency-people.env"
+  : >"$empty"
+  stub docker "case \"\$1\" in ps) echo abc ;; esac"
+  stub xargs "echo '$empty'"
+  dc verify
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"empty file"* ]]
+}
+
+@test "verify: a bridge that cannot read the roster fails however green its health is" {
+  verified_stack
+  stub docker 'case "$1" in exec) echo 0; exit 1 ;; esac'
+  dc verify
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no agency roster"* ]]
+}
+
 @test "verify: with no terminal the browsers say SKIP, never a pass" {
   verified_stack
   run bash "$ROOT/scripts/datacenter.sh" verify </dev/null
   [ "$status" -eq 0 ]
   [[ "$output" == *"SKIP browsers"* ]]
+  [[ "$output" == *"The browsers did not run"* ]]
+  [[ "$output" != *"and the browsers"* ]]
+}
+
+# roster_vm [MISSING] — a VM with every agency account, less the one named.
+roster_vm() {
+  vault_set
+  . "$ROOT/tools/seeds/agency-roster.sh"
+  : >"$BATS_TEST_TMPDIR/accounts"
+  for entry in "${ROSTER[@]}"; do
+    [ "${entry%%|*}" = "${1:-}" ] || echo "${entry%%|*}|id-${entry%%@*}" >>"$BATS_TEST_TMPDIR/accounts"
+  done
+  stub ssh "case \"\$*\" in -G*) printf 'hostname 127.0.0.1\\nport 4242\\nuser d\\n' ;; *auth.users*) cat '$BATS_TEST_TMPDIR/accounts' ;; esac"
+}
+
+@test "roster: written from the VM's accounts with the columns the bridge parses" {
+  roster_vm
+  dc roster
+  [ "$status" -eq 0 ]
+  out="$ROOT/tools/seeds/.agency-people.env"
+  [ "$(grep -c '^AGENCY_PERSON_[0-9]' "$out")" = 21 ]
+  grep -q '^AGENCY_OWNER_UUID=id-owner$' "$out"
+  grep -q '^AGENCY_PERSON_0=id-owner|owner@agency.local|Helena Voss|director|command|5|EU|owner$' "$out"
+}
+
+@test "roster: rewritten in place, so a running bridge keeps seeing the file" {
+  roster_vm
+  out="$ROOT/tools/seeds/.agency-people.env"
+  echo stale >"$out"
+  inode=$(stat -c %i "$out")
+  dc roster
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %i "$out")" = "$inode" ]
+  ! grep -q stale "$out"
+}
+
+@test "roster: an account the VM lacks stops the run and leaves no partial file" {
+  roster_vm e07.sullivan@agency.local
+  dc roster
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"e07.sullivan@agency.local"* ]]
+  [ ! -e "$ROOT/tools/seeds/.agency-people.env" ]
+}
+
+@test "roster: the directory Docker left is replaced and the bridge bound to it recreated" {
+  roster_vm
+  mkdir "$ROOT/tools/seeds/.agency-people.env"
+  stub docker 'echo "docker $*" >>"$LOG"; case "$1" in ps) echo abc ;; esac'
+  stub xargs 'echo "xargs $*" >>"$LOG"'
+  dc roster
+  [ "$status" -eq 0 ]
+  [ -f "$ROOT/tools/seeds/.agency-people.env" ]
+  grep -q 'xargs -r docker rm -f' "$LOG"
+}
+
+@test "roster: a directory holding files is never removed" {
+  roster_vm
+  mkdir "$ROOT/tools/seeds/.agency-people.env"
+  echo keep >"$ROOT/tools/seeds/.agency-people.env/kept"
+  dc roster
+  [ "$status" -eq 1 ]
+  [ -f "$ROOT/tools/seeds/.agency-people.env/kept" ]
+}
+
+@test "roster: a VM that does not answer says so, not that an account is missing" {
+  vault_set
+  stub ssh 'case "$*" in -G*) printf "hostname 127.0.0.1\nport 4242\nuser d\n" ;; *) exit 255 ;; esac'
+  dc roster
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"could not read the agency accounts"* ]]
 }
 
 @test "verify: a browser run that passes by skipping is not a pass" {
@@ -791,6 +882,23 @@ pinned_vm() {
   DATACENTER_ALLOW_WRITES=1 dc vm
   [[ "$output" == *"not at the pinned commit"* ]]
   grep -q '^make .*grobase .*GROBASE_ADDONS=observability engines ops studio control playground secrets mysql8 vault42' "$LOG"
+}
+
+@test "vm: a repair that leaves grobase unhealthy names what is failing" {
+  pinned_vm
+  fake_own_vm
+  stub ssh 'case "$*" in
+  -G*) printf "hostname 127.0.0.1\nport 4242\nuser dlesieur\n" ;;
+  *"docker ps"*) echo mini-baas-waf ;;
+  *rev-parse*) printf "a%.0s" $(seq 40) ;;
+  *grobase.conf*) ;;
+  *public.tenants*) echo 3 ;;
+  *seeds.last*) echo 2026-01-01 ;;
+esac
+case "$*" in *grobase-health*) echo "  ✗ scrape targets DOWN: vault:8200"; exit 1 ;; esac'
+  DATACENTER_ALLOW_WRITES=1 dc vm
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"scrape targets DOWN: vault:8200"* ]]
 }
 
 @test "vm: a grobase behind another alias is never reinstalled, whatever its state" {

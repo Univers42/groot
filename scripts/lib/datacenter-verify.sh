@@ -64,9 +64,21 @@ verify_binds() {
     elif [ -d "$source" ] && [ -z "$(ls -A -- "$source" 2>/dev/null)" ]; then
       note "bind mount source is an empty directory, so a file may be missing: $source"
       bad=1
+    elif [ -f "$source" ] && [ ! -s "$source" ]; then
+      note "bind mount source is an empty file: $source"
+      bad=1
     fi
   done < <(bind_sources)
   return "$bad"
+}
+
+# The mount is checked from inside: a bridge started before the file existed binds a directory.
+verify_roster() {
+  local bridge people
+  bridge=$(docker ps -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+    --filter label=com.docker.compose.service=osionos-bridge)
+  people=$(docker exec "$bridge" grep -c '^AGENCY_PERSON_[0-9]' /seeds/.agency-people.env 2>/dev/null) || people=0
+  [ "$people" -gt 0 ]
 }
 
 # browser_suite ARGS — a run that fails, or that passes by skipping, is not a pass.
@@ -87,7 +99,7 @@ browser_suite() {
 verify_browsers() {
   if [ ! -t 0 ] && [ "${DATACENTER_VERIFY_BROWSERS:-0}" != 1 ]; then
     note "SKIP browsers: no terminal, so nothing proved the pages in a real browser"
-    return 0
+    return 1
   fi
   E2E_REACH_BACKEND=1 browser_suite -c reach.config.ts || die "the front doors fail in a browser (tests/e2e/reach)"
   browser_suite || die "the end-to-end specs fail (tests/e2e/specs)"
@@ -99,6 +111,10 @@ cmd_verify() {
   grobase_health 180 >&2 || die "grobase in the VM is not healthy on its plan. From groot: make dc-health"
   verify_pages || die "a page does not answer 200 over verified TLS"
   verify_binds || die "a container holds a broken bind mount"
-  verify_browsers
-  note "verified: the plan, the pages, the mounts and the browsers"
+  verify_roster || die "the bridge has no agency roster. From groot: make datacenter-roster, then recreate osionos-bridge"
+  if verify_browsers; then
+    note "verified: the plan, the pages, the mounts and the browsers"
+  else
+    note "verified: the plan, the pages and the mounts. The browsers did not run"
+  fi
 }
