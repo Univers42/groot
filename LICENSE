@@ -1,0 +1,48 @@
+Osionos Project License
+
+Copyright (c) 2026 Osionos contributors.
+
+All rights reserved.
+
+This repository and all of its contents, including but not limited to source code,
+configuration files, scripts, documentation, assets, examples, schemas, database
+migrations, Docker files, and related materials, are the exclusive property of the
+copyright holders and are protected by copyright law and other applicable
+intellectual property laws.
+
+Permission is granted only to the contributors to this project and to persons
+explicitly authorized by the copyright holders to access, inspect, run, and
+contribute to the software for the limited purpose of evaluating, developing,
+maintaining, and improving the project itself.
+
+No permission is granted for any other use. In particular, and without limiting
+this restriction, you may not:
+
+- copy, reproduce, or redistribute this software or any part of it;
+- create derivative works or modified versions for your own benefit;
+- sell, license, sublicense, transfer, or otherwise commercialize the software;
+- publish, distribute, or share the software outside the project without the prior
+  written permission of the copyright holders;
+- use the software or any of its materials for private, personal, or commercial
+  advantage outside the scope of project participation and authorization.
+
+The project is intended to be developed collaboratively for the benefit of the
+community. Community members may participate in the project by contributing code,
+ideas, tests, bug fixes, documentation, and other improvements, but no person or
+entity may copy, repurpose, or redistribute the software for their own benefit
+without express written authorization from the copyright holders.
+
+Any contribution made to this repository is accepted only for inclusion in the
+project under these terms. Unless otherwise agreed in writing, contributors keep
+ownership of their original work, while agreeing that their contribution may be
+used, modified, and improved as part of the project under the same restrictions.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT HOLDERS
+OR CONTRIBUTORS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+For permission to use this software outside the limited scope described above,
+please contact the copyright holders in writing.
