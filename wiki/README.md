@@ -85,9 +85,13 @@ zero per-project server code.
 | Page | What it answers |
 |---|---|
 | [01-subject](project/01-subject.md) | What ft_transcendence asks for |
-| [02-modules](project/02-modules.md) | Module ledger: points, flags, evidence |
+| [02-modules](project/02-modules.md) | Module ledger, superseded by the README Modules table |
 | [03-team](project/03-team.md) | Roles and contributions |
+| [contributions-method](project/contributions-method.md) | How the README's commit counts are made, and the identity joins behind them |
 | [04-glossary](project/04-glossary.md) | Project vocabulary |
+| [ai-llm-interface](project/ai-llm-interface.md) | The LLM interface: one question through twelve hops, and the tests behind each claim |
+| [ai-audit-2026-10-28](project/ai-audit-2026-10-28.md) | Superseded 2026-11-04: the AI modules against the old pin |
+| [ai-stall-diagnosis-2026-10-29](project/ai-stall-diagnosis-2026-10-29.md) | Why the assistant could stop after a few questions (diagnosis only) |
 
 ---
 
