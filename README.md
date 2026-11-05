@@ -219,7 +219,7 @@ passes.
 
 | Scrum | Lean production | Kanban |
 | --- | --- | --- |
-| The Project Manager acts as Scrum Master. | Numbered verification gates define done. | GitHub Issues and milestones track the work. |
+| The Project Manager acts as Scrum Master. | Numbered verification gates define done. | GitHub Issues and labels track the work. |
 
 ### How the work flows
 
