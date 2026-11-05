@@ -270,6 +270,7 @@ health)
   ;;
 verify) cmd_verify ;;
 binds) cmd_binds ;;
+local-binds) cmd_local_binds ;;
 read-binds) cmd_read_binds ;;
 browsers) cmd_browsers ;;
 dc) cmd_dc "${2:-}" ;;
