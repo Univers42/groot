@@ -74,6 +74,8 @@ build_vm() {
   # and the state below is the verdict.
   # -dc-tunnel here, not in the profile: production builds from it and keeps cloudflared.
   FIRST_BOOT_TIMEOUT=$FIRST_BOOT_LIMIT born2root_make all "FEATURES=$(born2root_value FEATURES) -dc-tunnel" || note "make all in born2root failed; checking what it left"
+  [ -f "$VM_PATH/$VM_NAME/$VM_NAME.qcow2" ] ||
+    die "born2root stopped before it created a VM disk: its error is above. make all again starts over"
   ssh_answers || die "born2root finished, but ssh $ALIAS does not answer. See $VM_PATH/$VM_NAME/serial.log"
   wait_for "the VM's first boot" "$FIRST_BOOT_LIMIT" first_boot_finished ||
     die "the VM's first boot did not finish. In the VM: tail /etc/b2b/features.status"
