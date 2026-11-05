@@ -7,6 +7,7 @@
 #   vault readable                  go on
 #   no credentials at all           the local pipeline (CI, a clean evaluation machine)
 #   some credentials, not all       stop: a half-set machine must not silently go local
+#   no keystore, no FT_KEYSTORE_B64 42ctl keys recover, from a terminal only (emailed code)
 #   unreadable, hand-set files here go on, and a VM can no longer be built from this run
 #   unreadable, nothing here        stop, naming the files and keys to set by hand
 #
@@ -80,12 +81,19 @@ adopt_environment_credentials() {
   note "wrote$changed from the environment to $file, mode 600: born2root reads that file"
 }
 
-# The keystore travels in the credentials file on a new machine, and nothing else restores it
-# before a VM build: born2root's set_seeds does, but only after the build.
+# The keystore travels in the credentials file on a new machine; failing that, 42ctl fetches the
+# escrowed one (emailed code, so a terminal only). Nothing else restores it before a VM build:
+# born2root's set_seeds does, but only after the build.
 ensure_keystore() {
   local keystore="$CTL_CFG_DIR/keystore.v42" encoded tmp
   [ -s "$keystore" ] && return 0
-  encoded=$(credential_value FT_KEYSTORE_B64) || die "no keystore: put it at $keystore, or FT_KEYSTORE_B64 in $CTL_CFG_DIR/secrets/42admin.env"
+  if ! encoded=$(credential_value FT_KEYSTORE_B64); then
+    in_session recover_keystore ||
+      die "no keystore: put it at $keystore, FT_KEYSTORE_B64 in $CTL_CFG_DIR/secrets/42admin.env, or run 42ctl keys recover --email <you> from a terminal"
+    [ -s "$keystore" ] || die "42ctl keys recover wrote no keystore at $keystore"
+    note "restored the keystore with 42ctl keys recover"
+    return 0
+  fi
   tmp=$(mktemp "$keystore.XXXXXX") || die "cannot write in $CTL_CFG_DIR"
   base64 -d <<<"$encoded" >"$tmp" 2>/dev/null && [ -s "$tmp" ] || {
     rm -f "$tmp"
@@ -111,16 +119,14 @@ ensure_ctl() {
   printf '%s\n' "$ctl"
 }
 
-# vault_readable — a subshell because vault42-session.sh brings its own note and die. Never
-# rebind_contract or recover_keystore: both move an identity, and each takes its own "y".
-vault_readable() {
-  local ctl
-  ctl=$(ensure_ctl) || {
+# in_session FUNCTION — runs a vault42-session.sh function against this machine's 42ctl (CTL, the
+# name that library reads), in a subshell because the library brings its own note and die.
+in_session() {
+  CTL=$(ensure_ctl) || {
     note "42ctl is not installed and its installer failed"
     return 1
   }
   (
-    CTL=$ctl
     LOG_TAG=gate
     TTY_DEV="${VAULT42_TTY:-/dev/tty}"
     export FT_CONFIG="${FT_CONFIG:-$CTL_CFG_DIR/config.json}"
@@ -129,14 +135,22 @@ vault_readable() {
     . "$REPO/scripts/lib/vault42-session.sh"
     load_credentials
     [ -z "${FT_PASSPHRASE:-}" ] || export FT_PASSPHRASE
-    "$CTL" config endpoint --blobstore "$VAULT_BLOBSTORE" --bucket "$VAULT_BUCKET" --region auto >/dev/null ||
-      die "42ctl could not record the object store"
-    ensure_session
-    unlock_probe || exit 1
-    "$CTL" env files --org "${VAULT42_ORG:-univers42}" --project "${VAULT42_PROJECT:-groot}" \
-      --env "${VAULT42_ENV:-prod}" >/dev/null
+    "$1"
   )
 }
+
+# Never rebind_contract or recover_keystore here: both move an identity, and each takes its own
+# "y". A missing keystore was already fetched by ensure_keystore, behind its own question.
+vault_probe() {
+  "$CTL" config endpoint --blobstore "$VAULT_BLOBSTORE" --bucket "$VAULT_BUCKET" --region auto >/dev/null ||
+    die "42ctl could not record the object store"
+  ensure_session
+  unlock_probe || exit 1
+  "$CTL" env files --org "${VAULT42_ORG:-univers42}" --project "${VAULT42_PROJECT:-groot}" \
+    --env "${VAULT42_ENV:-prod}" >/dev/null
+}
+
+vault_readable() { in_session vault_probe; }
 
 hand_set_files_present() {
   local file
