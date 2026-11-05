@@ -457,11 +457,25 @@ COMPOSE
   grep -q 'PLAYGROUND_MAIL_BRIDGE_URL: https://127.0.0.1:${MAIL_BRIDGE_HOST_PORT:-4100}' "$REPO/docker-compose.yml"
 }
 
-@test "a caller's explicit pin still beats a kept-clear port" {
+# Three runs: from the second on the pin equals the recorded value, which is where it used to be
+# taken for make's own export and moved.
+@test "a caller's explicit pin still beats a kept-clear port, on every resolve" {
   mail_fixture
-  HOST_PORTS_KEEP_CLEAR=4100 MAIL_BRIDGE_HOST_PORT=4100 run bash "$REPO/scripts/host-ports.sh" resolve
-  [ "$status" -eq 0 ]
-  [ "$(port MAIL_BRIDGE_HOST_PORT)" = 4100 ]
+  for attempt in 1 2 3; do
+    HOST_PORTS_KEEP_CLEAR=4100 MAIL_BRIDGE_HOST_PORT=4100 run bash "$REPO/scripts/host-ports.sh" resolve
+    [ "$status" -eq 0 ]
+    [ "$(port MAIL_BRIDGE_HOST_PORT)" = 4100 ]
+  done
+}
+
+@test "a caller's pin on a held port stays pinned on every resolve" {
+  mail_fixture
+  listeners 'LISTEN 0 4096 127.0.0.1:4100 0.0.0.0:* users:(("osionos",pid=1,fd=1))'
+  for attempt in 1 2 3; do
+    MAIL_BRIDGE_HOST_PORT=4100 run bash "$REPO/scripts/host-ports.sh" resolve
+    [ "$status" -eq 0 ]
+    [ "$(port MAIL_BRIDGE_HOST_PORT)" = 4100 ]
+  done
 }
 
 # resolve_through_make [ARG...] — the real make files, with no datacenter step and no listener.
@@ -471,8 +485,10 @@ resolve_through_make() {
   ln -sf "$REPO/scripts/host-ports.sh" "$REPO/scripts/lib" "$ROOT/scripts/"
   cat >"$ROOT/Makefile" <<MAKEFILE
 include $REPO/utils/mk/common.mk $REPO/utils/mk/pipeline.mk $REPO/utils/mk/datacenter.mk
+outer:
+	@\$(MAKE) --no-print-directory -f Makefile frontends-up
 MAKEFILE
-  run bash -c 'cd "$1" && shift && GROOT_READ_BINDS=. make -s TRACK_BINOCLE_BIND_ADDR=127.0.0.1 -f Makefile frontends-up "$@"' _ "$ROOT" "$@"
+  run bash -c 'cd "$1" && shift && GROOT_READ_BINDS=. timeout 30 make -s TRACK_BINOCLE_BIND_ADDR=127.0.0.1 -f Makefile "${MAKE_GOAL:-frontends-up}" "$@"' _ "$ROOT" "$@"
 }
 
 @test "the vault42 path keeps 4100 clear for the owner's connector" {
@@ -491,6 +507,47 @@ MAKEFILE
 @test "a host that serves the public stack reserves nothing, even with vault42 credentials" {
   : >"$ROOT/.env.public"
   resolve_through_make GROBASE_DATACENTER=b2b
+  [ "$status" -eq 0 ]
+  [ "$(port MAIL_BRIDGE_HOST_PORT)" = 4100 ]
+}
+
+# `timeout` in resolve_through_make turns the old loop into status 124. It needed the pin to equal
+# the record, so these run with no record, with the moved one, and with the pin in place.
+@test "make: a pin on the kept-clear port settles and is kept, whatever the record holds" {
+  for recorded in '' 4101 4100; do
+    rm -f "$ROOT/.env.ports"
+    [ -z "$recorded" ] || printf 'MAIL_BRIDGE_HOST_PORT=%s\n' "$recorded" >"$ROOT/.env.ports"
+    MAIL_BRIDGE_HOST_PORT=4100 resolve_through_make GROBASE_DATACENTER=b2b
+    [ "$status" -eq 0 ]
+    [ "$(port MAIL_BRIDGE_HOST_PORT)" = 4100 ]
+  done
+}
+
+@test "make: a pin on a held port settles and is kept" {
+  listeners 'LISTEN 0 4096 127.0.0.1:4100 0.0.0.0:* users:(("osionos",pid=1,fd=1))'
+  printf 'MAIL_BRIDGE_HOST_PORT=4100\n' >"$ROOT/.env.ports"
+  MAIL_BRIDGE_HOST_PORT=4100 resolve_through_make GROBASE_DATACENTER=
+  [ "$status" -eq 0 ]
+  [ "$(port MAIL_BRIDGE_HOST_PORT)" = 4100 ]
+}
+
+@test "make: a pin reaches a sub-make as a pin, and settles there" {
+  printf 'MAIL_BRIDGE_HOST_PORT=4100\n' >"$ROOT/.env.ports"
+  MAKE_GOAL=outer MAIL_BRIDGE_HOST_PORT=4100 resolve_through_make GROBASE_DATACENTER=b2b
+  [ "$status" -eq 0 ]
+  [ "$(port MAIL_BRIDGE_HOST_PORT)" = 4100 ]
+}
+
+@test "make: what a sub-make inherits from .env.ports is no pin, so a held port still moves" {
+  listeners 'LISTEN 0 4096 127.0.0.1:4101 0.0.0.0:* users:(("other",pid=1,fd=1))'
+  printf 'MAIL_BRIDGE_HOST_PORT=4101\n' >"$ROOT/.env.ports"
+  MAKE_GOAL=outer resolve_through_make GROBASE_DATACENTER=b2b
+  [ "$status" -eq 0 ]
+  [ "$(port MAIL_BRIDGE_HOST_PORT)" = 4102 ]
+}
+
+@test "make: HOST_PORTS_KEEP_CLEAR= set empty keeps nothing clear on the vault42 path" {
+  HOST_PORTS_KEEP_CLEAR= resolve_through_make GROBASE_DATACENTER=b2b
   [ "$status" -eq 0 ]
   [ "$(port MAIL_BRIDGE_HOST_PORT)" = 4100 ]
 }

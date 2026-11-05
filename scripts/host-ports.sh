@@ -14,16 +14,20 @@
 #            consumer reads — and infrastructure/tls/host-ports.d/osionos-origin.conf
 #            (git-ignored), the osionos origin the tracked nginx.conf includes.
 #
-# Precedence, per NAME: an explicit environment value wins and is never moved (warned about when
-# it is busy); then the default when it is free; then the value already in .env.ports (a moved
+# Precedence, per NAME: a pin wins and is never moved (warned about when it is busy); then the
+# default when it is free; then the value already in .env.ports (a moved
 # port stays put while its default is taken, so bookmarks and bundles keep working); then the
 # first free port in default+1 .. default+50. A port in HOST_PORTS_KEEP_CLEAR (space-separated) is
 # never chosen by those last three steps, free or not, so a process that is only down keeps it.
+# A pin is a NAME that HOST_PORTS_PINNED lists when make runs this, because make exports .env.ports
+# into every recipe and only it can tell those from a caller's choice. Run by hand, HOST_PORTS_PINNED
+# is unset and every NAME in the environment is a pin.
 #
 # Caveat: the probe is a snapshot — a port bound between the probe and `docker compose up` still
 # collides — and it only sees this network namespace: a listener inside a rootless container's
 # own netns is invisible to `ss`, so it is not seen as busy either. HOST_PORTS_KEEP_CLEAR holds a
-# port only against this resolver: an explicit NAME=port pin or an unrelated process still takes it.
+# port only against this resolver: a pin or an unrelated process still takes it. A shell that
+# sourced .env.ports with `set -a` and runs this by hand pins all of it, so nothing moves.
 set -euo pipefail
 
 root="${HOST_PORTS_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -157,6 +161,15 @@ port_free() {
   ! holder_of "$port" >/dev/null
 }
 
+# is_pinned NAME — 0 when a caller chose NAME's port.
+is_pinned() {
+  [ -n "${HOST_PORTS_PINNED+set}" ] || return 0
+  case " $HOST_PORTS_PINNED " in
+  *" $1 "*) return 0 ;;
+  *) return 1 ;;
+  esac
+}
+
 # ── the commands ───────────────────────────────────────────────────────────────
 cmd_list() {
   scrape
@@ -274,7 +287,7 @@ cmd_resolve() {
     reserved[$port]=1
   done
 
-  # 1. an explicit environment value (never moved) and the defaults.
+  # 1. a pin (never moved) and the defaults.
   for name in "${names[@]}"; do
     default="${defaults[$name]}"
     env_value="${!name-}"
@@ -285,8 +298,7 @@ cmd_resolve() {
       fi
       env_value=$((10#$env_value))
     fi
-    file_value="${previous[$name]:-}"
-    if [ -n "$env_value" ] && [ "$env_value" != "$file_value" ]; then
+    if [ -n "$env_value" ] && is_pinned "$name"; then
       chosen[$name]="$env_value"
       pinned[$name]=1
       reserved[$env_value]=1
