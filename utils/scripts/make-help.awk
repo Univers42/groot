@@ -124,7 +124,7 @@ function print_header() {
 	printf "\n"
 	printf "%s\n", color_wrap("1;32", "  ╭──────────────────────────────────────────────────────╮")
 	printf "%s\n", color_wrap("1;32", "  │                                                      │")
-	printf "%s\n", color_wrap("1;32", "  │   🌳  groot  ·  make targets                         │")
+	printf "%s\n", color_wrap("1;32", "  \u2502     ████████████  G R O O T  ████████████  •  make targets     \u2502")
 	printf "%s\n", color_wrap("1;32", "  │                                                      │")
 	printf "%s\n", color_wrap("1;32", "  ╰──────────────────────────────────────────────────────╯")
 	printf "\n"
@@ -162,7 +162,7 @@ function print_target(   i) {
 			printf "%s  %s\n", color_wrap("1;36", "▸"), color_wrap("1;36", "make " display_name(names[i]))
 			printf "%s\n", color_wrap("0;90", "  " rule("─", 48))
 		} else {
-			printf "  %s\n", display_name(names[i])
+			printf "  %s\n", color_wrap("1;36", "make " display_name(names[i]))
 		}
 		printf "  %s\n", summaries[i]
 		if (prereqs[i] != "") printf "\n  %s %s\n", color_wrap("1;33", "Runs first:"), prereqs[i]
