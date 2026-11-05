@@ -731,28 +731,27 @@ count.
 
 ### Who committed where
 
-Commits per member reachable from the commit groot pins for each repository, one line per person,
-read through the root [`.mailmap`](.mailmap) (counted on 2026-11-04 at root `01654173`):
-
-```sh
-git -C <repo> -c mailmap.file="$PWD/.mailmap" shortlog -sn <pinned sha>   # pins: git ls-tree HEAD apps vendor
-```
+Non-merge commits per member reachable from the commit groot `main` pins for each repository,
+read through the root [`.mailmap`](.mailmap), bots and AI-agent identities left out (counted on
+2026-11-05 at `main` = `0bef3cb3`). The command, the identity joins and what is left out:
+[`wiki/project/contributions-method.md`](wiki/project/contributions-method.md).
 
 Several members work almost only in submodules, so the root alone understates them.
 
 | Member | GitHub | root | osionos | grobase | opposite-osiris | hydrawn | mail | calendar | QA | monkey-bot | First → last commit |
 |---|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|
-| `dlesieur` | @LESdylan | 1577 | 3375 | 1569 | 126 | 676 | 42 | 27 | 1 | 2 | 2026-05-10 → 2026-11-04 |
-| `danfern3` | @danielfdez17 | | 94 | 74 | 8 | 25 | | | 1 | 10 | 2026-03-24 → 2026-10-02 |
-| `serjimen` | @DjSurgeon | | 81 | | 160 | | | | | | 2026-04-11 → 2026-10-29 |
-| `vjan-nie` | @vjan-nie | 173 | 141 | 49 | 23 | 6 | | | 39 | | 2026-03-19 → 2026-11-01 |
-| `shashemi` | @SMOSTAFAH1 | 59 | 18 | 18 | 59 | 9 | | | | | 2026-09-20 → 2026-11-02 |
-| `rstancu` | @esettes | | 104 | | | | | | 2 | | 2026-03-18 → 2026-05-02 |
+| `dlesieur` | @LESdylan | 1394 | 2469 | 1279 | 103 | 569 | 39 | 22 | 1 | 2 | 2026-04-05 → 2026-11-05 |
+| `vjan-nie` | @vjan-nie | 136 | 119 | 29 | 12 | 4 | | | 38 | | 2026-03-19 → 2026-11-04 |
+| `serjimen` | @DjSurgeon | | 82 | | 134 | | | | | | 2026-04-09 → 2026-11-03 |
+| `danfern3` | @danielfdez17 | | 84 | 73 | 4 | 20 | | | 1 | 10 | 2026-03-18 → 2026-10-02 |
+| `shashemi` | @SMOSTAFAH1 | 42 | 17 | 15 | 39 | 8 | | | | | 2026-09-20 → 2026-11-04 |
+| `rstancu` | @esettes | | 90 | | | | | | 2 | | 2026-03-18 → 2026-05-02 |
 
-Work that is not on a pinned commit does not show above: `danfern3`'s 44 root commits sit on
-`fix/ci`, open as [#165](https://github.com/Univers42/groot/pull/165), and most of their 133
-monkey-bot commits are on branches the pin does not reach. A commit count is not effort: one
-large commit and one typo fix weigh the same, and pairing and review do not show in it.
+Dates are author dates in these nine repositories only. Work that is not on a pinned commit does
+not show above: `danfern3`'s 44 root commits sit on `fix/ci`, open as
+[#165](https://github.com/Univers42/groot/pull/165), and most of their 133 monkey-bot commits are
+on branches the pin does not reach. A commit count is not effort: one large commit and one typo
+fix weigh the same, and pairing and review do not show in it.
 
 Merged pull requests per login in the project's repositories (groot, osionos, grobase,
 prismatica = opposite-osiris, osionos-mail, osionos-calendar, hydrawn, QA, monkey-bot), from
@@ -766,60 +765,19 @@ prismatica = opposite-osiris, osionos-mail, osionos-calendar, hydrawn, QA, monke
 | @DjSurgeon | 8 | prismatica 7, osionos 1 |
 | @danielfdez17 | 4 | prismatica 4 |
 
-The Who columns of the [Features List](#features-list) and [Modules](#modules) were counted
-on 2026-11-04, before the history rewrite of that day, with `scripts/contributors.sh --paths`
-(all branches). Until the pre-rewrite refs are deleted from a clone, `--all` counts each of those
-commits twice; count from the pinned commit as above instead.
-
-How the identities were joined (the evidence is in [`.mailmap`](.mailmap)):
-
-- Each member committed under several addresses, including GitHub's `noreply` ones; `.mailmap`
-  joins them. A commit count is not effort: one large commit and one typo fix weigh the same.
-- `settes <ioanaroxana.st@…>` is **`rstancu`** (Roxana Stancu): the address belongs to GitHub
-  account [@esettes](https://github.com/esettes), listed for `rstancu` on the original roster
-  ([`archive/wiki-2026-09/CONTRIBUTORS.md`](archive/wiki-2026-09/CONTRIBUTORS.md)). The 104
-  osionos commits (2026-04-10 → 2026-05-02) touch mostly the Playwright browser tests
-  (`tests/browser`), their CI job and committed build assets. `rstancu` is not in the current
-  team table.
-
-  > TO CONFIRM by the team: `rstancu`'s status in the team, and whether that work counts for
-  > this evaluation.
-- `La Cebolla <smhashem545@…>` is **`shashemi`**: opposite-osiris commit `93e6b65` carries
-  `Signed-off-by: Seyed Mostafa Hashemian`.
-- Two groups of grobase commits pair one member's name with another's address. They are
-  attributed by inference:
-  - `LESdylan <vjannieto@…>` (3 commits on grobase's pinned commit, 5 on all branches,
-    2026-09-21 → 2026-11-02) goes to `dlesieur`: the author name
-    is `LESdylan`, and `b4c1d33f` landed through grobase PR #89, opened by `LESdylan`.
-  - `dlesieur <daniel17dev@…>` (5 commits, 2026-03-20/21) goes to `danfern3`: they sit inside
-    `danielfdez17`'s own Docker and Kubernetes series of the same two days.
-
-  > TO CONFIRM by the team: both attributions above.
-- `opencode` (6 commits: 1 root, 5 osionos) is an AI coding agent committing under its own name.
-- `bunny`, `Space Bunny` and `builder` (111 hydrawn commits, 2026-09-27/28, addresses on
-  `local`, `localhost` and `drawnosaurus.local`) are not mapped: no address, sign-off or pull
-  request ties them to a member.
-
-  > TO CONFIRM by the team: which member ran `opencode`, and who committed as `bunny`,
-  > `Space Bunny` and `builder` in hydrawn.
-- Bots (`dependabot`, `coderabbitai`, `copilot-swe-agent`) are left as they are.
-- On 2026-11-04 the history of groot, osionos and grobase was rewritten to remove
-  `Co-authored-by` trailers; trees and subjects are unchanged, and every commit from the first rewritten one onward has a new SHA. 148 root commits on `main` have a one-word subject
-  (147 `dlesieur`, 1 `vjan-nie`, 2026-05-01 → 2026-10-09); the
-  [`Commit subjects`](.github/workflows/commit-subjects.yml) check refuses new ones.
+The numbers in brackets below are the member's commits in that row of the
+[Features List](#features-list).
 
 ### dlesieur — Dylan Lesieur
 
 - **Areas:** grobase (Go control plane, Rust data plane and realtime, Kong gateway, contracts
-  and self-serve apps), osionos (editor, chat, collaboration, social, profile, the bridge), mail,
-  calendar, the root's infrastructure, TLS edge and CI; hydrawn (676 commits: `apps/web`,
-  the engine, `docs/reference`).
+  and self-serve apps), osionos (editor, chat, collaboration, social, profile, the bridge, the AI
+  service), mail, calendar, the root's infrastructure, TLS edge and CI; hydrawn (569 commits:
+  `apps/web`, the engine, `docs/reference`).
 - **Pull requests:** 260 merged (osionos 138, grobase 61, groot 56).
-- **Features and modules:** most rows of the [Features List](#features-list) and every claimed
-  module row, as the Who columns show.
-- **Challenges:** not recorded.
-
-  > TO CONFIRM by the team: the challenges this member met.
+- **Features:** the largest share of every row of the Features List except the legal pages, for
+  example the block editor (164), the database block (125), chat (72) and the AI assistant (317).
+- **Challenges:** not recorded yet.
 
 ### danfern3 — Daniel Fernández
 
@@ -827,63 +785,55 @@ How the identities were joined (the evidence is in [`.mailmap`](.mailmap)):
   and mutation testing, configuration);
   grobase Docker images built from scratch, Kubernetes deployment, the playground and Makefile
   (March 2026); osionos breadcrumbs, trash, multi-line text in blocks, the markdown engine and
-  code-quality fixes; hydrawn (25 commits, `apps/web`, `apps/api`, `packages/contract`,
+  code-quality fixes; hydrawn (20 commits, `apps/web`, `apps/api`, `packages/contract`,
   2026-09-24: submodule clone paths, formatting); root submodule pins and the `make all` bats fix,
   on `fix/ci` ([#165](https://github.com/Univers42/groot/pull/165), open).
 - **Pull requests:** 4 merged (prismatica).
-- **Features and modules:** block editor (29 commits), frameworks, frontend half (row 6, 78), OAuth
-  (row 5, 1).
-- **Challenges:** not recorded.
-
-  > TO CONFIRM by the team: the challenges this member met.
+- **Features:** block editor (29), whiteboard (20).
+- **Challenges:** not recorded yet.
 
 ### serjimen — Sergio Jiménez de la Cruz
 
-- **Areas:** the public site, opposite-osiris (160 commits on the pinned commit: hero animation
+- **Areas:** the public site, opposite-osiris (134 commits on the pinned commit: hero animation
   performance, unit tests and benchmarks, security fixes, auth pages); osionos accessibility fixes, page links,
   move and delete, shared UI refactor, the node installer's self-update (#277) and database probe
   diagnostics (#278), the changelog.
 - **Pull requests:** 8 merged (prismatica 7, osionos 1), among them the landing page in English,
   Spanish and Arabic with right-to-left layout (prismatica #21, #22, #23, #35), the accessible
   privacy policy and terms (#38) and a WCAG 2.2 AA audit pipeline with axe-core fixes (#39).
-- **Features and modules:** sign-in pages (1), legal pages (2), block editor (14), connections
-  (2), frameworks, frontend half (row 6, 76).
-- **Challenges:** not recorded.
-
-  > TO CONFIRM by the team: the challenges this member met.
+- **Features:** block editor (8), legal pages (2), communities and social feed (2), sign-up /
+  sign-in (1), database block (1).
+- **Challenges:** not recorded yet.
 
 ### vjan-nie — Vadim Jan Nieto
 
-- **Areas:** `vendor/QA` (39 commits: registry, migrations, hooks, CLI); root end-to-end tests,
+- **Areas:** `vendor/QA` (38 commits: registry, migrations, hooks, CLI); root end-to-end tests,
   the wiki and README, graph-studio tests, the hydrawn TLS edge and its CORS, submodule
   pins; osionos whiteboard and graph-studio fixes; grobase Docker infrastructure and dependency
-  fixes; hydrawn (6 commits: engine bumps, the nested-shape binding fix).
+  fixes; hydrawn (4 commits: engine bumps, the nested-shape binding fix).
 - **Pull requests:** 72 merged (groot 45, osionos 17, prismatica 6, grobase 4).
-- **Features and modules:** block editor (42), legal pages (3), real-time (row 2, 5),
-  frameworks, frontend half (row 6, 77).
-- **Challenges:** not recorded.
-
-  > TO CONFIRM by the team: the challenges this member met.
+- **Features:** block editor (42), AI assistant (9), public API (5), whiteboard (4), legal pages
+  (3), multi-engine data API (3), database block (2), chat (1).
+- **Challenges:** not recorded yet.
 
 ### shashemi — Seyed Mostafa Hashemian
 
 - **Areas:** security fixes across root, grobase and opposite-osiris (SAST findings, nginx scan
   suppressions, IDE socket proxy hardening); the site's legal pages, SEO and accessibility; root
-  CI triggers and the models' export erasure paths; osionos end-to-end fixes; hydrawn (9
+  CI triggers and the models' export erasure paths; osionos end-to-end fixes; hydrawn (8
   commits, `apps/web`, `apps/api`, `packages/contract`: trail and notes, hydrawn #1, and the
   pen-thickness-with-zoom test, #8).
 - **Pull requests:** 57 merged (prismatica 20, groot 19, osionos 12, grobase 6).
-- **Features and modules:** legal pages (5), collaboration (row 10, 1), real-time (row 2, 1).
-- **Challenges:** not recorded.
-
-  > TO CONFIRM by the team: the challenges this member met.
+- **Features:** whiteboard (6), legal pages (5), real-time collaboration (2), block editor (2),
+  database block, video rooms, communities, AI assistant and public API (1 each).
+- **Challenges:** not recorded yet.
 
 ### Team-level challenges
 
 From the project's history:
 
-- **Migrating the data plane from TypeScript to Rust with no downtime**, using a per-request
-  switch and a shadow mode that compared both implementations under real traffic.
+- **Migrating the data plane from TypeScript to Rust with no downtime**, behind a per-request
+  switch (`RUST_DATA_PLANE_FORWARD`).
 - **Keeping eight database adapters at parity**, enforced by a conformance battery that runs every
   adapter against a real engine and checks it serves exactly what it advertises.
 - **Auditing our own authorisation path** and shipping a reversible mitigation for a weakness we

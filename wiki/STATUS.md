@@ -43,6 +43,7 @@ Update this table whenever a page's status block changes. It is the working list
 | project/02-modules | Partial | Two open checks worth ~6 points; grades superseded by the README Modules table (2026-11-04) |
 | project/03-team | **Template** | Facts not held anywhere; fill with the team |
 | project/04-glossary | Verified | — |
+| project/contributions-method | Verified · 2026-11-05 | Counts age with every new pin; recount with the command on the page |
 | project/ai-llm-interface | Partial | nginx buffering/timeouts untested; #275 not in groot's pin yet |
 | project/ai-audit-2026-10-28 | Superseded | Pin facts replaced by the README Modules table, 2026-11-04 |
 | project/ai-stall-diagnosis-2026-10-29 | Diagnosis only | Hypotheses not tested live |

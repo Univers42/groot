@@ -1,0 +1,72 @@
+# How the contribution counts are made
+
+The README's [Features List](../../README.md#features-list) and
+[Who committed where](../../README.md#who-committed-where) count commits one way, described here
+with the identity joins it rests on.
+
+## The method
+
+Non-merge commits reachable from the commit groot `main` pins for each repository, read through
+the root [`.mailmap`](../../.mailmap), with bots and AI-agent identities left out:
+
+```sh
+pin=$(git ls-tree origin/main apps/osionos/app | awk '{print $3}')   # root: origin/main itself
+git -C apps/osionos/app -c mailmap.file="$PWD/.mailmap" \
+  log --no-merges --format='%aN' "$pin" -- <paths> |
+  grep -viE 'bot|AI agent' | sort | uniq -c | sort -rn
+```
+
+Counted on 2026-11-05, groot `main` = `0bef3cb3`. Repositories: groot, osionos, grobase,
+opposite-osiris (prismatica), hydrawn, mail, calendar, QA, monkey-bot.
+
+Caveat: a commit count is not effort. One large commit and one typo fix weigh the same; pairing,
+review and work committed by someone else do not show; a commit that touches several features
+counts once for each. Work that is not on a pinned commit (an open branch, an unmerged pull
+request) is not counted.
+
+`scripts/contributors.sh` counts all refs (`--all`), not the pins. Until a clone drops the refs
+from before the 2026-11-04 history rewrite, `--all` counts each rewritten commit twice.
+
+## Left out of the counts
+
+At the pins, on 2026-11-05:
+
+| Identity | Kind | Commits |
+|---|---|---|
+| `Space Bunny` (`bunny`, `Space Bunny`, `builder`) | the OpenCode agent team `dlesieur` ran on hydrawn (hydrawn `BUNNY.md`) | 68 hydrawn |
+| `opencode` | AI coding agent committing under its own name | 1 root, 5 osionos |
+| `dependabot[bot]`, `coderabbitai[bot]`, `copilot-swe-agent[bot]`, `Grok CI Bot` | bots | 8 + 3 + 2 root (dependabot, coderabbit, Grok), 4 osionos (coderabbit), 9 opposite-osiris (copilot) |
+
+## How the identities are joined
+
+The evidence for each join is in [`.mailmap`](../../.mailmap).
+
+- Each member committed under several addresses, including GitHub's `noreply` ones; `.mailmap`
+  joins them.
+- `settes <ioanaroxana.st@…>` is **`rstancu`** (Roxana Stancu): the address belongs to GitHub
+  account [@esettes](https://github.com/esettes), listed for `rstancu` on the original roster
+  ([`archive/wiki-2026-09/CONTRIBUTORS.md`](../../archive/wiki-2026-09/CONTRIBUTORS.md)). The
+  osionos commits (2026-04-10 → 2026-05-02) touch mostly the Playwright browser tests
+  (`tests/browser`), their CI job and committed build assets. `rstancu` is not in the current
+  team table.
+- `La Cebolla <smhashem545@…>` is **`shashemi`**: opposite-osiris commit `93e6b65` carries
+  `Signed-off-by: Seyed Mostafa Hashemian`.
+- `SMOSTAFAH1 <SMOSTAFAH1@users.noreply.github.com>` is **`shashemi`**: it is the GitHub login
+  [@SMOSTAFAH1](https://github.com/SMOSTAFAH1) of the team table, without the numeric id
+  `.mailmap` already maps (2 osionos commits at the pin).
+- Two groups of grobase commits pair one member's name with another's address. They are
+  attributed by inference, not by proof:
+  - `LESdylan <vjannieto@…>` (3 commits on grobase's pinned commit, 5 on all branches,
+    2026-09-21 → 2026-11-02) goes to `dlesieur`: the author name is `LESdylan`, and `b4c1d33f`
+    landed through grobase PR #89, opened by `LESdylan`.
+  - `dlesieur <daniel17dev@…>` (5 commits, 2026-03-20/21) goes to `danfern3`: they sit inside
+    `danielfdez17`'s own Docker and Kubernetes series of the same two days.
+- `opencode` and `Space Bunny` are AI agents, shown under their own names and left out of the
+  member counts (table above).
+- `qwO-Owp` (born2root, 2026-10-08/09) and `Alex Caceres` (vendor/scripts, 2026-01-26) are tied
+  to no member by any address, sign-off or pull request. Neither repository is counted.
+- On 2026-11-04 the history of groot, osionos and grobase was rewritten to remove
+  `Co-authored-by` trailers; trees, authors, dates and subjects are unchanged, and every commit
+  from the first rewritten one onward has a new SHA. 148 root commits on `main` have a one-word
+  subject (147 `dlesieur`, 1 `vjan-nie`, 2026-05-01 → 2026-10-09); the
+  [`Commit subjects`](../../.github/workflows/commit-subjects.yml) check refuses new ones.
