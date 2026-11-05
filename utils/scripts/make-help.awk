@@ -120,13 +120,34 @@ function compute_name_width(   i, len) {
 	if (name_width > 28) name_width = 28
 }
 
+function paint_gradient(line,   colors, ncolors, i, ch, idx, out) {
+	# warm → cool (osionos-like). line uses ASCII # as block placeholder
+	ncolors = split("208 214 220 226 190 154 118 82 48 44", colors, " ")
+	out = ""
+	for (i = 1; i <= length(line); i++) {
+		ch = substr(line, i, 1)
+		if (ch == "#") {
+			idx = int((i - 1) * (ncolors - 1) / (length(line) - 1)) + 1
+			if (idx < 1) idx = 1
+			if (idx > ncolors) idx = ncolors
+			out = out sprintf("%c[38;5;%sm█%c[0m", 27, colors[idx], 27)
+		} else {
+			out = out ch
+		}
+	}
+	return out
+}
+
 function print_header() {
 	printf "\n"
-	printf "%s\n", color_wrap("1;32", "  ╭──────────────────────────────────────────────────────╮")
-	printf "%s\n", color_wrap("1;32", "  │                                                      │")
-	printf "%s\n", color_wrap("1;32", "  │     ████████████  G R O O T  ████████████  •  make targets     │")
-	printf "%s\n", color_wrap("1;32", "  │                                                      │")
-	printf "%s\n", color_wrap("1;32", "  ╰──────────────────────────────────────────────────────╯")
+	# pixel GROOT — # = full block (painted with gradient)
+	printf "  %s\n", paint_gradient("####  ###   ##   ##  ####")
+	printf "  %s\n", paint_gradient("#     #  # #  # #  #  #  ")
+	printf "  %s\n", paint_gradient("# ##  ###  #  # #  #  #  ")
+	printf "  %s\n", paint_gradient("#  #  # #  #  # #  #  #  ")
+	printf "  %s\n", paint_gradient("####  #  #  ##   ##   #  ")
+	printf "\n"
+	printf "  %s  %s  %s\n", color_wrap("38;5;245", "◆"), color_wrap("0;37", "make targets"), color_wrap("38;5;245", "◆")
 	printf "\n"
 	printf "  %s  %s\n", color_wrap("1;37", "Usage:"), color_wrap("0;37", "make <target>  [VAR=value ...]")
 	printf "  %s  %s\n", color_wrap("1;37", "Detail:"), color_wrap("0;37", "make help-<target>   e.g.  make help-all")
