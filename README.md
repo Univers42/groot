@@ -1,18 +1,18 @@
 *This project has been created as part of the 42 curriculum by dlesieur, serjimen, danfern3, vjan-nie, shashemi.*
 
-# Prismatica — ft_transcendence
+# Osionos
 
-**Prismatica** is a collaborative workspace built on our own self-hostable
-Backend-as-a-Service. Users sign up on the public **prismatica** site, land in
-**osionos** — a Notion-style block editor with real-time collaboration, chat and
-video rooms — and can connect their Gmail and Google Calendar. Every one of
-those apps is served by **grobase**, a generic backend that the team wrote in
-Go, Rust and TypeScript, with no per-application server code.
+**A workspace where your data stays yours.** Pages, databases, chat and an AI
+assistant, running on grobase, the Backend-as-a-Service we built ourselves.
 
-> Naming: *Prismatica* is the project; *osionos* is the workspace app;
-> *prismatica* (`apps/opposite-osiris`, repository
-> [`Univers42/prismatica`](https://github.com/Univers42/prismatica)) is the
-> marketing landing. Infrastructure identifiers keep the old codename
+| 52 points | 5 members | Our own backend | 1 command |
+|---|---|---|---|
+| 10 modules claimed, 14 required | Over 8,400 commits | Go, Rust, NestJS and Kong | `make all` runs everything |
+
+> Naming: *Osionos* is the project and its editor. *prismatica* is the public
+> landing (`apps/opposite-osiris`, repository
+> [`Univers42/prismatica`](https://github.com/Univers42/prismatica)), the
+> "Public site" below. Infrastructure identifiers keep the old codename
 > `track-binocle` (the compose project, image names, `TRACK_BINOCLE_*`
 > variables, `*.track-binocle.test` hosts, the local CA file): renaming them
 > would break scripts and issued certificates.
@@ -36,61 +36,57 @@ Go, Rust and TypeScript, with no per-application server code.
 
 ---
 
-## Description
+## 📖 Description
 
-### Goal
+### osionos
 
-Almost every web project rebuilds the same backend before it can start on the product:
-authentication, user management, CRUD, access control, file upload, email, logs. Our goal was to
-turn that repeated work into infrastructure — **one backend, any frontend, zero per-project server
-code** — and to prove it by building a real product on it.
+The editor: pages built from blocks, database blocks, chat, live collaboration
+and an AI assistant.
 
-The project therefore has two halves:
+*React 19, Vite, TypeScript*
 
-- **grobase** — a Backend-as-a-Service (about 290,000 lines of Go, Rust and
-  TypeScript at its pin, roughly a third of the code the team wrote; lines
-  include tests). An application is declared in a JSON *contract* (its database,
-  isolation strategy, roles, permissions and API keys); a generic provisioner
-  creates everything from that file. Routes carry no domain logic: a request
-  names the table it targets, and access rules are stored as data, not code.
-- **The products** that run on it — the prismatica landing and sign-in site, the
-  osionos workspace, the hydrawn whiteboard, and mail and calendar integrations.
+### grobase
 
-### Overview
+Our backend: sign-in, data, real-time and storage, with no osionos-specific
+code inside.
 
-| Product | Tech | What it is |
-|---|---|---|
-| **prismatica** (`apps/opposite-osiris`) | Astro | Public site: landing page, docs, sign-up / sign-in, legal pages. The entry point. |
-| **osionos** | React + Vite | The block editor: pages, databases-as-blocks, real-time collaboration, chat, video rooms. **The flagship.** |
-| **mail** | React + Vite | Gmail integration over Google OAuth |
-| **calendar** | React + Vite | Google Calendar integration over Google OAuth |
-| **hydrawn** | SvelteKit + Fastify + Rust/WASM | Collaborative whiteboard, embedded in osionos |
+*Go, Rust, NestJS, Kong*
 
-These products are supported by platform services (not applications in their own
-right): the **auth-gateway** (Node, shipped by the prismatica repository:
-sessions and sign-in), the **osionos-bridge** (Node: turns a site session into
-an editor session), **Kong** (grobase's API gateway, behind its WAF) and
-**LiveKit** (the WebRTC media server for video rooms).
+### Public site
+
+Where users start: the landing page in three languages, sign-up and the legal
+pages.
+
+*Astro, Sass*
+
+### Why we built it
+
+Most web projects rebuild the same backend before they reach the product. We
+built that backend once as grobase, then built a real product on it: a
+workspace whose data lives in a backend the team hosts, not in a third-party
+service.
 
 ### Key features
 
-- **Contract-driven backend.** A whole application — database, isolation, roles,
-  keys, frontend configuration — is one JSON file. `POST /v1/tenants/me/apps`
-  creates a new isolated application with its own database and scoped API key
-  (mounted only when `APPS_SELFSERVE_ENABLED` is on).
-- **Per-request owner isolation.** The Rust data plane scopes queries to their
-  owner on each request, not by connection-pool state; permissions are rows
-  (RBAC, plus flag-gated ABAC conditions), not `if` statements.
-- **One API over many databases.** PostgreSQL, MySQL (MariaDB image), MongoDB,
-  Redis, SQLite, SQL Server and even remote HTTP APIs are queried through the
-  same envelope and the same API key. DynamoDB is an opt-in build, left out of
-  the default one
-  ([`wiki/platform/08-engines.md`](wiki/platform/08-engines.md)).
-- **Collaborative editor.** Block-based pages, a database block with table / board / calendar
-  views, real-time co-editing, channels and direct messages, video rooms.
-- **Single-command deployment.** `make all SKIP_SYNC=1` builds the pinned
-  commits in Docker, starts the backend and the frontends over local HTTPS with
-  a trusted CA, and health-checks them (`utils/mk/pipeline.mk:10`).
+- **Block editor**: nested pages, templates, comments, sharing and publishing
+- **Database blocks**: table, board and calendar views, with search, filters,
+  sort and paging
+- **Live collaboration**: several people on one page, with presence
+- **Chat and people**: channels, direct messages, profiles and contacts
+- **AI assistant**: streamed answers from a language model
+- **Design system**: `@osionos/ui`, 20+ components and generated palettes
+
+### All the applications
+
+| Application | Built with | Role |
+| --- | --- | --- |
+| osionos | React, Vite | The editor, the subject of this page |
+| opposite-osiris | Astro, Sass | Public site, sign-up, legal pages |
+| osionos bridge | Node | Trust boundary: holds the service key, calls the backend |
+| auth-gateway | Node | Sessions and OAuth, hands the user to osionos |
+| grobase | Go, Rust, NestJS, Kong | The backend |
+| mail, calendar | React, Vite | Opt-in Gmail and Google Calendar apps |
+| hydrawn | Own engine | The whiteboard |
 
 ---
 
@@ -908,6 +904,8 @@ This project was built with **heavy AI assistance**, and we state it plainly.
   itself ships English, Spanish and Arabic.
 - **Whiteboard editing is loopback-only and has no per-user authorization yet** (see
   [Demo](#demo)).
+
+---
 
 ## License
 
