@@ -2,17 +2,20 @@
 
 # Prismatica — ft_transcendence
 
-**Prismatica** is a collaborative workspace built on our own self-hostable Backend-as-a-Service.
-Users sign up on the public **prismatica** site, land in **osionos** — a Notion-style block editor
-with real-time collaboration, chat and video rooms — and can connect their Gmail and Google
-Calendar. Every one of those apps is served by **grobase**, a generic backend that the team wrote
-in Go, Rust and TypeScript, with no per-application server code.
+**Prismatica** is a collaborative workspace built on our own self-hostable
+Backend-as-a-Service. Users sign up on the public **prismatica** site, land in
+**osionos** — a Notion-style block editor with real-time collaboration, chat and
+video rooms — and can connect their Gmail and Google Calendar. Every one of
+those apps is served by **grobase**, a generic backend that the team wrote in
+Go, Rust and TypeScript, with no per-application server code.
 
-> Naming: *Prismatica* is the project; *osionos* is the workspace app; *prismatica*
-> (`apps/opposite-osiris`, repository [`Univers42/prismatica`](https://github.com/Univers42/prismatica))
-> is the marketing landing. Infrastructure identifiers keep the old codename `track-binocle`
-> (the compose project, image names, `TRACK_BINOCLE_*` variables, `*.track-binocle.test` hosts,
-> the local CA file): renaming them would break scripts and issued certificates.
+> Naming: *Prismatica* is the project; *osionos* is the workspace app;
+> *prismatica* (`apps/opposite-osiris`, repository
+> [`Univers42/prismatica`](https://github.com/Univers42/prismatica)) is the
+> marketing landing. Infrastructure identifiers keep the old codename
+> `track-binocle` (the compose project, image names, `TRACK_BINOCLE_*`
+> variables, `*.track-binocle.test` hosts, the local CA file): renaming them
+> would break scripts and issued certificates.
 
 ---
 
@@ -44,13 +47,14 @@ code** — and to prove it by building a real product on it.
 
 The project therefore has two halves:
 
-- **grobase** — a Backend-as-a-Service (about 290,000 lines of Go, Rust and TypeScript at its
-  pin, roughly a third of the code the team wrote; lines include tests). An application is
-  declared in a JSON *contract* (its database, isolation strategy, roles, permissions and API
-  keys); a generic provisioner creates everything from that file. Routes carry no domain
-  logic: a request names the table it targets, and access rules are stored as data, not code.
-- **The products** that run on it — the prismatica landing and sign-in site, the osionos
-  workspace, the hydrawn whiteboard, and mail and calendar integrations.
+- **grobase** — a Backend-as-a-Service (about 290,000 lines of Go, Rust and
+  TypeScript at its pin, roughly a third of the code the team wrote; lines
+  include tests). An application is declared in a JSON *contract* (its database,
+  isolation strategy, roles, permissions and API keys); a generic provisioner
+  creates everything from that file. Routes carry no domain logic: a request
+  names the table it targets, and access rules are stored as data, not code.
+- **The products** that run on it — the prismatica landing and sign-in site, the
+  osionos workspace, the hydrawn whiteboard, and mail and calendar integrations.
 
 ### Overview
 
@@ -62,28 +66,31 @@ The project therefore has two halves:
 | **calendar** | React + Vite | Google Calendar integration over Google OAuth |
 | **hydrawn** | SvelteKit + Fastify + Rust/WASM | Collaborative whiteboard, embedded in osionos |
 
-These products are supported by platform services (not applications in their own right): the
-**auth-gateway** (Node, shipped by the prismatica repository: sessions and sign-in), the
-**osionos-bridge** (Node: turns a site session into an editor session), **Kong** (grobase's API
-gateway, behind its WAF) and **LiveKit** (the WebRTC media server for video rooms).
+These products are supported by platform services (not applications in their own
+right): the **auth-gateway** (Node, shipped by the prismatica repository:
+sessions and sign-in), the **osionos-bridge** (Node: turns a site session into
+an editor session), **Kong** (grobase's API gateway, behind its WAF) and
+**LiveKit** (the WebRTC media server for video rooms).
 
 ### Key features
 
-- **Contract-driven backend.** A whole application — database, isolation, roles, keys, frontend
-  configuration — is one JSON file. `POST /v1/tenants/me/apps` creates a new isolated application
-  with its own database and scoped API key (mounted only when `APPS_SELFSERVE_ENABLED` is on).
-- **Per-request owner isolation.** The Rust data plane scopes queries to their owner on each
-  request, not by connection-pool state; permissions are rows (RBAC, plus flag-gated ABAC
-  conditions), not `if` statements.
-- **One API over many databases.** PostgreSQL, MySQL (MariaDB image), MongoDB, Redis, SQLite,
-  SQL Server and even remote HTTP APIs are queried through the same envelope and the same API
-  key. DynamoDB is an opt-in build, left out of the default one
+- **Contract-driven backend.** A whole application — database, isolation, roles,
+  keys, frontend configuration — is one JSON file. `POST /v1/tenants/me/apps`
+  creates a new isolated application with its own database and scoped API key
+  (mounted only when `APPS_SELFSERVE_ENABLED` is on).
+- **Per-request owner isolation.** The Rust data plane scopes queries to their
+  owner on each request, not by connection-pool state; permissions are rows
+  (RBAC, plus flag-gated ABAC conditions), not `if` statements.
+- **One API over many databases.** PostgreSQL, MySQL (MariaDB image), MongoDB,
+  Redis, SQLite, SQL Server and even remote HTTP APIs are queried through the
+  same envelope and the same API key. DynamoDB is an opt-in build, left out of
+  the default one
   ([`wiki/platform/08-engines.md`](wiki/platform/08-engines.md)).
 - **Collaborative editor.** Block-based pages, a database block with table / board / calendar
   views, real-time co-editing, channels and direct messages, video rooms.
-- **Single-command deployment.** `make all SKIP_SYNC=1` builds the pinned commits in Docker,
-  starts the backend and the frontends over local HTTPS with a trusted CA, and health-checks
-  them (`utils/mk/pipeline.mk:10`).
+- **Single-command deployment.** `make all SKIP_SYNC=1` builds the pinned
+  commits in Docker, starts the backend and the frontends over local HTTPS with
+  a trusted CA, and health-checks them (`utils/mk/pipeline.mk:10`).
 
 ---
 
@@ -110,19 +117,22 @@ trust store. This is intended (`certs-trust-local` in `utils/mk/certs.mk`). With
 sudo, `CERT_TRUST_MODE=user` trusts the browsers only and `skip` trusts nothing (see
 [Access](#access-and-the-local-ca)).
 
-**Ports bound on the host** (from `docker-compose.yml`, all on `127.0.0.1` except inside a
-QEMU/VirtualBox NAT VM, where `infrastructure/scripts/detect-bind-addr.sh` binds `0.0.0.0` so the
-host can reach the guest): 443, 3001, 3002, 3003, 3007 (always loopback), 4000, 4100, 4200, 4322,
-4323 and 7880 (always loopback: plain HTTP), 7881, 8444, 8446 (always loopback: the IDE edge),
-8787 and UDP 50000–50060. A busy port moves to the next free one (`scripts/host-ports.sh`).
-grobase adds Kong on `127.0.0.1:8000` (literal loopback in its
+**Ports bound on the host** (from `docker-compose.yml`, all on `127.0.0.1`
+except inside a QEMU/VirtualBox NAT VM, where
+`infrastructure/scripts/detect-bind-addr.sh` binds `0.0.0.0` so the host can
+reach the guest): 443, 3001, 3002, 3003, 3007 (always loopback), 4000, 4100,
+4200, 4322, 4323 and 7880 (always loopback: plain HTTP), 7881, 8444, 8446
+(always loopback: the IDE edge), 8787 and UDP 50000–50060. A busy port moves to
+the next free one (`scripts/host-ports.sh`). grobase adds Kong on
+`127.0.0.1:8000` (literal loopback in its
 `orchestrators/compose/base/gateway.yml:56`; its WAF is the public entry).
 
 ### Defense bring-up (pinned)
 
-This is the path rehearsed on a clean machine, and the stack the [Modules](#modules) are graded
-on. It builds `main` and the submodule commits `main` pins, and does **not** follow submodule
-branch tips (`SKIP_SYNC=1`, see `sync-submodules-soft` in `utils/mk/pipeline.mk`).
+This is the path rehearsed on a clean machine, and the stack the
+[Modules](#modules) are graded on. It builds `main` and the submodule commits
+`main` pins, and does **not** follow submodule branch tips (`SKIP_SYNC=1`, see
+`sync-submodules-soft` in `utils/mk/pipeline.mk`).
 
 ```bash
 git clone --recursive git@github.com:Univers42/groot.git
@@ -135,24 +145,27 @@ make all SKIP_SYNC=1
 Requirements, the VM + host-browser case, the verify script (`scripts/verify/fresh-bringup.sh`) and
 troubleshooting: [`wiki/runbooks/fresh-machine.md`](wiki/runbooks/fresh-machine.md).
 
-grobase on another machine (the born2root VM, a LAN box, a VPS, a Kong URL) with the frontends
-here, no sudo: put the kind of connection in `./.env.grobase-link` (`GROBASE_TARGET=ssh://b2b`;
-`.env.grobase-link.example` lists the kinds), then `make link` and `make link-frontends-up`. The
-latter also applies `models/*.sql` to that grobase (`make link-models-migrate`), sets the demo
-account's password there (`make link-demo-login-ensure`; `make demo-login` prints it), hands the
+grobase on another machine (the born2root VM, a LAN box, a VPS, a Kong URL) with
+the frontends here, no sudo: put the kind of connection in `./.env.grobase-link`
+(`GROBASE_TARGET=ssh://b2b`; `.env.grobase-link.example` lists the kinds), then
+`make link` and `make link-frontends-up`. The latter also applies `models/*.sql`
+to that grobase (`make link-models-migrate`), sets the demo account's password
+there (`make link-demo-login-ensure`; `make demo-login` prints it), hands the
 demo rows to the app's API key (`make link-live-data-ensure`) and trusts the
-local CA in this user's browser stores (`make certs-trust-user`, no sudo). Both end with
-`make link-verify`: one request per grobase service from inside every frontend, the TLS edge,
-then the browser stores — [`wiki/runbooks/grobase-link.md`](wiki/runbooks/grobase-link.md).
-To serve the frontends to the internet through this host's Tailscale Funnel (443; add 8443 and
-10000 with `PUBLIC_PORTS=all`), `make public-env` and `make public-up`; `make public-down`
-closes it:
-[`wiki/runbooks/public-funnel.md`](wiki/runbooks/public-funnel.md).
-`make roundtrip` then proves persistence (account, sign-in, editor hand-off, a page, the rows
-in postgres) and `make link-e2e` runs the Playwright smoke through the link.
+local CA in this user's browser stores (`make certs-trust-user`, no sudo). Both
+end with `make link-verify`: one request per grobase service from inside every
+frontend, the TLS edge, then the browser stores —
+[`wiki/runbooks/grobase-link.md`](wiki/runbooks/grobase-link.md). To serve the
+frontends to the internet through this host's Tailscale Funnel (443; add 8443
+and 10000 with `PUBLIC_PORTS=all`), `make public-env` and `make public-up`;
+`make public-down` closes it:
+[`wiki/runbooks/public-funnel.md`](wiki/runbooks/public-funnel.md). `make
+roundtrip` then proves persistence (account, sign-in, editor hand-off, a page,
+the rows in postgres) and `make link-e2e` runs the Playwright smoke through the
+link.
 
-Measured time from a cold machine: **9–17 minutes** (8m55s on a fresh VM, 16m44s on a laptop,
-2026-09-30, [`wiki/STATUS.md`](wiki/STATUS.md); later runs in
+Measured time from a cold machine: **9–17 minutes** (8m55s on a fresh VM, 16m44s
+on a laptop, 2026-09-30, [`wiki/STATUS.md`](wiki/STATUS.md); later runs in
 [`wiki/runbooks/fresh-machine.md`](wiki/runbooks/fresh-machine.md)).
 
 No `.env` needs to be written by hand. With no vault key present, grobase generates its own
@@ -162,12 +175,14 @@ including random `OSIONOS_*` secrets and the demo account's `DEMO_LOGIN_PASSWORD
 `make all`, which says so by name.
 
 `make all` runs, in order (`utils/mk/pipeline.mk`): submodule sync → secrets →
-local TLS certificates → trust the local CA → grobase backend → derive `.env.local` → restore
-data if the engines are empty → set the demo account's password → SQL migrations → live-data key
-and owner fix → mount re-encryption → frontends → health check → URL list. On a machine that
-holds vault42 credentials, `make all` deploys against the data-center VM instead and starts no
-local grobase (ADR 0047, [`wiki/runbooks/datacenter.md`](wiki/runbooks/datacenter.md));
-`make all GROBASE_DATACENTER=` forces the local path.
+local TLS certificates → trust the local CA → grobase backend → derive
+`.env.local` → restore data if the engines are empty → set the demo account's
+password → SQL migrations → live-data key and owner fix → mount re-encryption →
+frontends → health check → URL list. On a machine that holds vault42
+credentials, `make all` deploys against the data-center VM instead and starts no
+local grobase (ADR 0047,
+[`wiki/runbooks/datacenter.md`](wiki/runbooks/datacenter.md)); `make all
+GROBASE_DATACENTER=` forces the local path.
 
 ### Development bring-up
 
@@ -176,10 +191,11 @@ git checkout develop
 make all
 ```
 
-Without `SKIP_SYNC=1`, `make all` first fast-forwards every submodule to the tip of its tracked
-branch (`sync-submodules-soft`), so you build the newest code rather than the pinned commits.
-It skips dirty submodules, and leaves at its recorded commit any submodule whose branch tip does
-not contain that commit; it never blocks the pipeline.
+Without `SKIP_SYNC=1`, `make all` first fast-forwards every submodule to the tip
+of its tracked branch (`sync-submodules-soft`), so you build the newest code
+rather than the pinned commits. It skips dirty submodules, and leaves at its
+recorded commit any submodule whose branch tip does not contain that commit; it
+never blocks the pipeline.
 
 The exception is any submodule that `.gitmodules` marks `update = none`, today `apps/graph_render`. Its
 gitlink is the build input, so neither mode moves it:
@@ -246,9 +262,9 @@ store (one `sudo`) and every browser store this user owns, through `scripts/cert
 and the flatpak locations. It matches old copies by the CA's subject, not by nickname, replaces
 them, and adds the current file as "Track Binocle Local Development CA".
 
-- `make certs-trust-check` prints one line per store
-  (`ok|FAIL <kind> <path>  current|stale|missing|untrusted`) and exits 1 if any store is not
-  current. Without `certutil` it fails.
+- `make certs-trust-check` prints one line per store (`ok|FAIL <kind> <path>
+  current|stale|missing|untrusted`) and exits 1 if any store is not current.
+  Without `certutil` it fails.
 - `make certs-trust-user` fixes the stores without sudo; it mints the CA first only if it is missing.
 - `CERT_TRUST_MODE=system|user|skip` (or `TRACK_BINOCLE_CERT_TRUST`) picks what `certs-trust-local`
   does: system store plus browsers (default), browsers only, or nothing.
@@ -259,9 +275,10 @@ If the CA is not trusted, the browser shows a warning on each port, and the **Wh
 osionos stays blank**, because the embedded `:3007` iframe is refused silently. Two causes of a
 warning while `curl --cacert` succeeds:
 
-- **The CA was regenerated.** `make certs` on a fresh tree mints a new CA, and a store still holding
-  an older copy does not trust it. `make certs-trust-check` then reports those stores `stale`, and
-  `make certs-trust-user` replaces the old copy.
+- **The CA was regenerated.** `make certs` on a fresh tree mints a new CA, and a
+  store still holding an older copy does not trust it. `make certs-trust-check`
+  then reports those stores `stale`, and `make certs-trust-user` replaces the
+  old copy.
 
 - **A snap refresh.** Snap Chromium's `HOME` is the revision directory behind
   `~/snap/chromium/current`, so a new revision starts without the store.
@@ -283,10 +300,10 @@ certificates → Authorities → Import, or run `make certs-trust`.
 3. Open the same board URL in a second window and draw: the strokes appear live in the other
    window (the e2e smoke asserts within 5 s — `tests/e2e/specs/dw8-realtime.spec.ts`).
 
-Honest limitations of this demo: board editing is **loopback-only** and has **no per-user
-authorization yet** — hydrawn is bound to `127.0.0.1:3007` for exactly that reason
-(`docker-compose.yml:35-40`). We make **no end-to-end-encryption claim**: traffic is TLS to the
-local proxy, nothing more.
+Honest limitations of this demo: board editing is **loopback-only** and has **no
+per-user authorization yet** — hydrawn is bound to `127.0.0.1:3007` for exactly
+that reason (`docker-compose.yml:35-40`). We make **no end-to-end-encryption
+claim**: traffic is TLS to the local proxy, nothing more.
 
 ### Environment configuration
 
@@ -297,19 +314,21 @@ local proxy, nothing more.
   - `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` — default to a local dev value; video rooms still work.
   - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` in `apps/mail/.env.local` and
     `apps/calendar/.env.local` — without them, the mail and calendar OAuth flows are disabled.
-  - `SONAR_TOK`, `FLY_API_TOKEN`, `DOCKER_PAT` — operator tooling only (a local SonarCloud scan,
-    the Fly deploy, a Docker Hub login); CI uses its own repository secrets.
+  - `SONAR_TOK`, `FLY_API_TOKEN`, `DOCKER_PAT` — operator tooling only (a local
+    SonarCloud scan, the Fly deploy, a Docker Hub login); CI uses its own
+    repository secrets.
 
 ### Team setup (with the vault)
 
-Inside the team, secrets are shared through **vault42**, our zero-knowledge secret store, via the
-**42ctl** CLI. A machine that holds a vault identity in `~/.config/42ctl/` pulls the `.env`
-tree during `make all` when `apps/grobase/.env` is absent (`secrets-ensure`), or on demand with
-`make vault42-pull-all APPLY=1`. With the vault passphrase also present, `make all` deploys
-against the data-center VM instead (see [Defense bring-up](#defense-bring-up-pinned)). A new
-identity is created with `42ctl keys init` and enrolled with an invitation from the vault's
-operator.
-Details: [`DATA-MIGRATION.md`](DATA-MIGRATION.md).
+Inside the team, secrets are shared through **vault42**, our zero-knowledge
+secret store, via the **42ctl** CLI. A machine that holds a vault identity in
+`~/.config/42ctl/` pulls the `.env` tree during `make all` when
+`apps/grobase/.env` is absent (`secrets-ensure`), or on demand with `make
+vault42-pull-all APPLY=1`. With the vault passphrase also present, `make all`
+deploys against the data-center VM instead (see [Defense
+bring-up](#defense-bring-up-pinned)). A new identity is created with `42ctl keys
+init` and enrolled with an invitation from the vault's operator. Details:
+[`DATA-MIGRATION.md`](DATA-MIGRATION.md).
 
 The vault42 CLI is wired in beside that path: the `Secrets (vault42)` section of `make help`, and
 [`vendor/scripts/vault42/README.md`](vendor/scripts/vault42/README.md). Status and retirement
@@ -331,11 +350,12 @@ checklist: [ADR 0017](docs/adr/0017-vault42-cli-beside-the-old-path.md).
 
 **Backend editions.** `make all` starts grobase in the **`devlean`** edition
 (`GROBASE_EDITION ?= devlean` in `utils/mk/grobase.mk`; listed in grobase's
-`orchestrators/makes/00-config.mk:148-154`): the core engines (PostgreSQL, MySQL, MongoDB, Redis,
-MinIO), the full application / control / data planes and realtime — without the heavy extra
-engines and without the monitoring stack. `GROBASE_EDITION=migrate` adds every snapshot engine;
-`GROBASE_EDITION=full` turns on every plane except the playground demo. Some module
-demonstrations need a larger edition or a feature flag — see [Modules](#modules).
+`orchestrators/makes/00-config.mk:148-154`): the core engines (PostgreSQL,
+MySQL, MongoDB, Redis, MinIO), the full application / control / data planes and
+realtime — without the heavy extra engines and without the monitoring stack.
+`GROBASE_EDITION=migrate` adds every snapshot engine; `GROBASE_EDITION=full`
+turns on every plane except the playground demo. Some module demonstrations need
+a larger edition or a feature flag — see [Modules](#modules).
 
 ---
 
@@ -362,20 +382,22 @@ between 2026-03-18 and 2026-05-02; see [Who committed where](#who-committed-wher
 
 ## Project Management
 
-Part of this project was an experiment in managing a team. We ran it as if it were a demanding,
-high-output professional team, with a Scrum mindset in which every member is treated as an
-expert and anyone may change anyone's code. The aim was that **nobody is indispensable**. The
-evidence below separates what the repositories record from what is the team's own account, and
-the last part measures how far we got towards that aim.
+Part of this project was an experiment in managing a team. We ran it as if it
+were a demanding, high-output professional team, with a Scrum mindset in which
+every member is treated as an expert and anyone may change anyone's code. The
+aim was that **nobody is indispensable**. The evidence below separates what the
+repositories record from what is the team's own account, and the last part
+measures how far we got towards that aim.
 
-**How the tracking evolved.** Work started in February 2026: the first commits by `dlesieur`,
-`danfern3` and `vjan-nie` date from that month (`git log --reverse` across the submodules).
-Between then and the autumn the team tried GitHub Projects, Jira tickets and Notion pages
-(team account: none of the three left a trace in commit messages, and the Projects board was not
-readable with our token). The only written trace is osionos
-[`docs/DoD.md:39`](https://github.com/Univers42/osionos/blob/develop/docs/DoD.md), a
-Definition-of-Done template that asks for evidence "in your Pull Request description or your
-Trello/Jira" ticket (2026-04-11).
+**How the tracking evolved.** Work started in February 2026: the first commits
+by `dlesieur`, `danfern3` and `vjan-nie` date from that month (`git log
+--reverse` across the submodules). Between then and the autumn the team tried
+GitHub Projects, Jira tickets and Notion pages (team account: none of the three
+left a trace in commit messages, and the Projects board was not readable with
+our token). The only written trace is osionos
+[`docs/DoD.md:39`](https://github.com/Univers42/osionos/blob/develop/docs/DoD.md),
+a Definition-of-Done template that asks for evidence "in your Pull Request
+description or your Trello/Jira" ticket (2026-04-11).
 
 **How it works now: issues, labels and pull requests on GitHub.**
 
@@ -388,31 +410,36 @@ Trello/Jira" ticket (2026-04-11).
 | Stacked branches | Feature chains merged one on top of another: groot #84–#87 (`feat/ide-*`), grobase #69–#70 (`feat/multidb-g1b…g1d`), the osionos `release/acct-w1` … `w9` series |
 | Commit rhythm | At least one commit on 174 of the 232 days between 2026-03-18 and 2026-11-04, across all repositories |
 
-**Strict CI from the start.** CI arrived within days of each repository's first commit: grobase
-`ci.yml` on 2026-03-29, osionos on 2026-04-12, groot on 2026-05-13. SonarCloud is configured in
-groot since 2026-05-04 and comments on its pull requests since #9 (2026-06-01). Security scans
-(Semgrep, Trivy, gitleaks, TruffleHog, ZAP, cargo-audit, govulncheck) run on every pull request,
-and groot rejects one-word commit subjects (`.github/workflows/commit-subjects.yml`).
+**Strict CI from the start.** CI arrived within days of each repository's first
+commit: grobase `ci.yml` on 2026-03-29, osionos on 2026-04-12, groot on
+2026-05-13. SonarCloud is configured in groot since 2026-05-04 and comments on
+its pull requests since #9 (2026-06-01). Security scans (Semgrep, Trivy,
+gitleaks, TruffleHog, ZAP, cargo-audit, govulncheck) run on every pull request,
+and groot rejects one-word commit subjects
+(`.github/workflows/commit-subjects.yml`).
 
-**Rituals.** Two-week sprints since the start, daily stand-ups and a weekly meeting, mostly on
-Discord (team account, confirmed 2026-11-04; Discord leaves no trace in the repositories). The
-method was Scrumban (Scrum rituals plus a Kanban board), as described in
+**Rituals.** Two-week sprints since the start, daily stand-ups and a weekly
+meeting, mostly on Discord (team account, confirmed 2026-11-04; Discord leaves
+no trace in the repositories). The method was Scrumban (Scrum rituals plus a
+Kanban board), as described in
 [`docs/dossier-project-dylan/dossier-projet.md:390-416`](https://github.com/Univers42/osionos/blob/develop/docs/dossier-project-dylan/dossier-projet.md)
 in osionos.
 
 **How far we got.** We publish these numbers so the claims above can be checked:
 
-- **Sprints.** The sprints were planned outside GitHub: no milestone and no sprint label exists
-  in any repository. Merges come in bursts: 250 of the 442 merged pull requests on the six main
-  repositories landed in two weeks (ISO weeks 43–44).
-- **Review.** The rulesets let a maintainer bypass them, and in a sample of the 40 most recent
-  merged pull requests per repository, 0–22 % carry an approval from someone other than the
-  author.
-- **Nobody indispensable.** Shared ownership is real in breadth: `vjan-nie` committed in 12 areas
-  and `shashemi` in 8, osionos has six authors with five or more commits, and prismatica's main
-  author is `serjimen`. In depth we are not there yet: `dlesieur` wrote 86 % of the 8,571 human
-  commits, and in 17 of 18 areas one author holds more than half of the commits. Commit counts
-  are not effort: one large commit and a typo fix weigh the same.
+- **Sprints.** The sprints were planned outside GitHub: no milestone and no
+  sprint label exists in any repository. Merges come in bursts: 250 of the 442
+  merged pull requests on the six main repositories landed in two weeks (ISO
+  weeks 43–44).
+- **Review.** The rulesets let a maintainer bypass them, and in a sample of the
+  40 most recent merged pull requests per repository, 0–22 % carry an approval
+  from someone other than the author.
+- **Nobody indispensable.** Shared ownership is real in breadth: `vjan-nie`
+  committed in 12 areas and `shashemi` in 8, osionos has six authors with five
+  or more commits, and prismatica's main author is `serjimen`. In depth we are
+  not there yet: `dlesieur` wrote 86 % of the 8,571 human commits, and in 17 of
+  18 areas one author holds more than half of the commits. Commit counts are not
+  effort: one large commit and a typo fix weigh the same.
 
 ---
 
@@ -448,40 +475,45 @@ independently — each written in the language that suits it.
 
 ### Database
 
-- **PostgreSQL 16** is the primary database: the control-plane registries (tenants, roles, policies,
-  API keys) and all application data (see [Database Schema](#database-schema)).
-  **Why:** row-level security (RLS), JSONB for block content and flexible properties, strong
-  transactional guarantees, and a mature ecosystem. RLS is what makes per-owner isolation
-  enforceable inside the database itself, not only in application code.
-- **MySQL, MongoDB, Redis, MinIO** (object storage) run in the `devlean` edition that `make all`
-  starts; **SQLite**, **SQL Server** (needs the `engines` plane), **DynamoDB** (an opt-in build)
-  and remote **HTTP** APIs are supported through the same data-plane interface. This is a
-  deliberate feature of the platform (one API over many engines), not a need of osionos itself.
+- **PostgreSQL 16** is the primary database: the control-plane registries
+  (tenants, roles, policies, API keys) and all application data (see [Database
+  Schema](#database-schema)). **Why:** row-level security (RLS), JSONB for block
+  content and flexible properties, strong transactional guarantees, and a mature
+  ecosystem. RLS is what makes per-owner isolation enforceable inside the
+  database itself, not only in application code.
+- **MySQL, MongoDB, Redis, MinIO** (object storage) run in the `devlean` edition
+  that `make all` starts; **SQLite**, **SQL Server** (needs the `engines`
+  plane), **DynamoDB** (an opt-in build) and remote **HTTP** APIs are supported
+  through the same data-plane interface. This is a deliberate feature of the
+  platform (one API over many engines), not a need of osionos itself.
 
 ### Other significant technologies
 
 - **Docker / Docker Compose** — every component runs in a container; one `make all`.
 - **A local certificate authority + TLS proxy** — all frontends served over trusted HTTPS locally.
-- **LiveKit** — the WebRTC SFU for video rooms, a groot compose service started by `make all`;
-  the osionos bridge mints its tokens.
+- **LiveKit** — the WebRTC SFU for video rooms, a groot compose service started
+  by `make all`; the osionos bridge mints its tokens.
 - **vault42 / 42ctl** — our own zero-knowledge secret store and CLI (separate repositories).
-- **CI security scanning** — on every pull request, [`.github/workflows/mini-baas-security.yml`](.github/workflows/mini-baas-security.yml)
-  runs Semgrep (SAST), `npm`/`pnpm audit`, Snyk (when a token is set) and Trivy; Semgrep and Snyk
-  report without blocking. Dependabot opens dependency updates. SonarCloud analyses every pull
-  request through its GitHub app (`.sonarcloud.properties`), not through a workflow;
-  `renovate.json` is present but nothing runs it.
+- **CI security scanning** — on every pull request,
+  [`.github/workflows/mini-baas-security.yml`](.github/workflows/mini-baas-security.yml)
+  runs Semgrep (SAST), `npm`/`pnpm audit`, Snyk (when a token is set) and Trivy;
+  Semgrep and Snyk report without blocking. Dependabot opens dependency updates.
+  SonarCloud analyses every pull request through its GitHub app
+  (`.sonarcloud.properties`), not through a workflow; `renovate.json` is present
+  but nothing runs it.
 
 ### Justification of the major choices
 
 - **Why build a BaaS instead of a single backend?** Because the same backend pieces are rebuilt
   for every project. We moved everything that varies between projects — routes, schemas, access
   rules, configuration — from code into data, so a new application is a contract, not a server.
-- **Why three languages?** Each grobase plane has a different job (Node also runs the site's
-  auth-gateway and the osionos bridge). Go for boring, correct orchestration;
-  Rust where performance and memory safety protect tenant isolation; TypeScript where it already
-  existed. The data plane was migrated from TypeScript to Rust behind a per-request switch
-  (`RUST_DATA_PLANE_FORWARD`, on in the default compose), so the migration needed no downtime
-  and could be rolled back without a deployment.
+- **Why three languages?** Each grobase plane has a different job (Node also
+  runs the site's auth-gateway and the osionos bridge). Go for boring, correct
+  orchestration; Rust where performance and memory safety protect tenant
+  isolation; TypeScript where it already existed. The data plane was migrated
+  from TypeScript to Rust behind a per-request switch
+  (`RUST_DATA_PLANE_FORWARD`, on in the default compose), so the migration
+  needed no downtime and could be rolled back without a deployment.
 - **Why per-request isolation?** Scoping on every request (instead of per connection) means a
   pooled connection can never carry one user's permissions into another user's query.
 
@@ -493,12 +525,13 @@ The schema lives in two places:
 
 1. **Application schema** — idempotent SQL migrations in [`models/`](models/)
    (`*-migration.sql`), applied to grobase's PostgreSQL by `make all` through
-   [`scripts/apply-models-migrations.sh`](scripts/apply-models-migrations.sh). That runner
-   deliberately skips seven files that target a database with an integer `users.id` (used by
-   the Electron native edition) or that later files supersede: `user.sql`, `gdpr-migration.sql`,
-   `auth-security-migration.sql`, `rls-hardening-migration.sql`, `seeds.sql`,
-   `osionos-folder-surface-migration.sql` and `osionos-wiki-surface-migration.sql`; its header
-   explains why.
+   [`scripts/apply-models-migrations.sh`](scripts/apply-models-migrations.sh).
+   That runner deliberately skips seven files that target a database with an
+   integer `users.id` (used by the Electron native edition) or that later files
+   supersede: `user.sql`, `gdpr-migration.sql`, `auth-security-migration.sql`,
+   `rls-hardening-migration.sql`, `seeds.sql`,
+   `osionos-folder-surface-migration.sql` and
+   `osionos-wiki-surface-migration.sql`; its header explains why.
 2. **Platform schema** — grobase's control-plane registries (tenants, mounts, roles, policies,
    API keys), created by grobase's own migrations, plus per-application databases created at
    runtime from each contract (e.g. `infra/config/contracts/website.schema.sql` in grobase).
@@ -578,11 +611,12 @@ Other table groups, by migration file:
 
 ### Platform (grobase) registries
 
-Access control is stored as data: `roles`, `user_roles` and `resource_policies` tables, evaluated
-by the SQL function `public.has_permission(...)` and mirrored by the Rust data plane's own ABAC
-evaluator. Every table created through grobase's schema API gets an `owner_id` column
-appended when the caller does not declare one (contract schemas declare it themselves), which is
-what makes one isolation rule apply to any table.
+Access control is stored as data: `roles`, `user_roles` and `resource_policies`
+tables, evaluated by the SQL function `public.has_permission(...)` and mirrored
+by the Rust data plane's own ABAC evaluator. Every table created through
+grobase's schema API gets an `owner_id` column appended when the caller does not
+declare one (contract schemas declare it themselves), which is what makes one
+isolation rule apply to any table.
 
 **Two `users` tables.** `models/user.sql` defines `users.id` as `SERIAL` (integer): it belongs to
 the auth gateway's database. The osionos tables reference users by `UUID`, in grobase's
@@ -593,11 +627,12 @@ foreign-key clash (`scripts/apply-models-migrations.sh:27-38`).
 
 ## Features List
 
-"Who" counts the non-merge commits that touch the feature's paths (last column), reachable from
-the commit groot `main` pins for that repository, read through the root [`.mailmap`](.mailmap),
-with bots and AI-agent identities left out; largest share first. How the identities are joined:
-[`wiki/project/contributions-method.md`](wiki/project/contributions-method.md). A commit count is
-not effort, and pairing or review does not show in it.
+"Who" counts the non-merge commits that touch the feature's paths (last column),
+reachable from the commit groot `main` pins for that repository, read through
+the root [`.mailmap`](.mailmap), with bots and AI-agent identities left out;
+largest share first. How the identities are joined:
+[`wiki/project/contributions-method.md`](wiki/project/contributions-method.md).
+A commit count is not effort, and pairing or review does not show in it.
 
 | Feature | Description | Who (commits) | Paths counted |
 |---|---|---|---|
@@ -625,27 +660,30 @@ not effort, and pairing or review does not show in it.
 
 ## Modules
 
-The subject requires **14 points** (Major = 2, Minor = 1). A module that cannot be demonstrated
-live scores zero. Every row is graded against **the local stack built from `main`**
-(`git checkout main`, `make all SKIP_SYNC=1`, which starts grobase's `devlean` edition; see
-[Defense bring-up](#defense-bring-up-pinned)) by **one rule**, groot's own. It keeps the
-clause of osionos
+The subject requires **14 points** (Major = 2, Minor = 1). A module that cannot
+be demonstrated live scores zero. Every row is graded against **the local stack
+built from `main`** (`git checkout main`, `make all SKIP_SYNC=1`, which starts
+grobase's `devlean` edition; see [Defense bring-up](#defense-bring-up-pinned))
+by **one rule**, groot's own. It keeps the clause of osionos
 [`docs/ai/README.md`](https://github.com/Univers42/osionos/blob/1c1d5d849c1dc43460a194f7ee3d97e17505205c/docs/ai/README.md)
-lines 7–8 (a row is never A when its demonstration needs something switched off or unmeasured),
-but it is stricter than that file's legend, which grades a documented profile A:
+lines 7–8 (a row is never A when its demonstration needs something switched off
+or unmeasured), but it is stricter than that file's legend, which grades a
+documented profile A:
 
-- **A**: the demo works on that stack with nothing switched on, and a green CI job drives that
-  path against a running service.
-- **B**: it works, but the demo needs something switched on (a flag, a profile, an edition, a
-  provider credential), or its only evidence is unit tests with fakes or a run that was never
-  repeated.
-- **C**: partial. **Not claimed.** These rows are listed under [Not claimed yet](#not-claimed-yet).
+- **A**: the demo works on that stack with nothing switched on, and a green CI
+  job drives that path against a running service.
+- **B**: it works, but the demo needs something switched on (a flag, a profile,
+  an edition, a provider credential), or its only evidence is unit tests with
+  fakes or a run that was never repeated.
+- **C**: partial. **Not claimed.** These rows are listed under [Not claimed
+  yet](#not-claimed-yet).
 
 **Claimed = A and B only: 30 points against the 14 required. 8 of them are A.**
-Paths are prefixed by repository: `G` groot, `GB` grobase (`apps/grobase`), `OS` osionos
-(`apps/osionos/app`), `OO` opposite-osiris (`apps/opposite-osiris`). They point at the commits
-pinned by groot's `main` branch. CI names a workflow job: `GB-CI` is grobase `ci.yml`, `OS-CI`
-is osionos `ci.yml`, `OO-CI` is prismatica `ci.yml`.
+Paths are prefixed by repository: `G` groot, `GB` grobase (`apps/grobase`), `OS`
+osionos (`apps/osionos/app`), `OO` opposite-osiris (`apps/opposite-osiris`).
+They point at the commits pinned by groot's `main` branch. CI names a workflow
+job: `GB-CI` is grobase `ci.yml`, `OS-CI` is osionos `ci.yml`, `OO-CI` is
+prismatica `ci.yml`.
 
 | # | Module | Category | Type | Pts | Grade | Core files | Tests → CI job | Docs | Demo (3 steps) |
 |---|---|---|---|--:|:--:|---|---|---|---|
@@ -671,7 +709,8 @@ is osionos `ci.yml`, `OO-CI` is prismatica `ci.yml`.
 
 No separate framework Minor is claimed beside row 4.
 
-**Point calculation** (free choice is capped at 3, [`wiki/project/01-subject.md`](wiki/project/01-subject.md#points))
+**Point calculation** (free choice is capped at 3,
+[`wiki/project/01-subject.md`](wiki/project/01-subject.md#points))
 
 | | Before (2026-10) | After |
 |---|--:|--:|
@@ -682,11 +721,11 @@ No separate framework Minor is claimed beside row 4.
 | Of which A | 10 | **8** |
 | Required | 14 | 14 |
 
-What moved: under the old legend ("works as-is"), six rows were A. Under one rule, the rows
-whose demonstration needs a switch or whose only evidence is unit-level are B: real-time
-collaboration (off by default), the contract factory and the SSRF guard. Row 3 stays A on the
-chat demo, which needs nothing switched on, and row 4 is new at A. The rows below no longer
-count.
+What moved: under the old legend ("works as-is"), six rows were A. Under one
+rule, the rows whose demonstration needs a switch or whose only evidence is
+unit-level are B: real-time collaboration (off by default), the contract factory
+and the SSRF guard. Row 3 stays A on the chat demo, which needs nothing switched
+on, and row 4 is new at A. The rows below no longer count.
 
 ### Not claimed yet
 
@@ -722,8 +761,9 @@ count.
   the cloud metadata endpoint `169.254.169.254` — CGNAT, IPv6 ULA and link-local, IPv4-mapped
   addresses and internal hostnames, then **pins** the connection to the validated public IP so a
   later DNS rebind cannot redirect it inward.
-- **Value and weight.** Small, self-contained and demonstrable in seconds (a mount pointing at
-  `169.254.169.254` is refused), and it shows security judgement on a feature we chose to build.
+- **Value and weight.** Small, self-contained and demonstrable in seconds (a
+  mount pointing at `169.254.169.254` is refused), and it shows security
+  judgement on a feature we chose to build.
 
 ---
 
@@ -731,9 +771,10 @@ count.
 
 ### Who committed where
 
-Non-merge commits per member reachable from the commit groot `main` pins for each repository,
-read through the root [`.mailmap`](.mailmap), bots and AI-agent identities left out (counted on
-2026-11-05 at `main` = `0bef3cb3`). The command, the identity joins and what is left out:
+Non-merge commits per member reachable from the commit groot `main` pins for
+each repository, read through the root [`.mailmap`](.mailmap), bots and AI-agent
+identities left out (counted on 2026-11-05 at `main` = `0bef3cb3`). The command,
+the identity joins and what is left out:
 [`wiki/project/contributions-method.md`](wiki/project/contributions-method.md).
 
 Several members work almost only in submodules, so the root alone understates them.
@@ -747,11 +788,12 @@ Several members work almost only in submodules, so the root alone understates th
 | `shashemi` | @SMOSTAFAH1 | 42 | 17 | 15 | 39 | 8 | | | | | 2026-09-20 → 2026-11-04 |
 | `rstancu` | @esettes | | 90 | | | | | | 2 | | 2026-03-18 → 2026-05-02 |
 
-Dates are author dates in these nine repositories only. Work that is not on a pinned commit does
-not show above: `danfern3`'s 44 root commits sit on `fix/ci`, open as
-[#165](https://github.com/Univers42/groot/pull/165), and most of their 133 monkey-bot commits are
-on branches the pin does not reach. A commit count is not effort: one large commit and one typo
-fix weigh the same, and pairing and review do not show in it.
+Dates are author dates in these nine repositories only. Work that is not on a
+pinned commit does not show above: `danfern3`'s 44 root commits sit on `fix/ci`,
+open as [#165](https://github.com/Univers42/groot/pull/165), and most of their
+133 monkey-bot commits are on branches the pin does not reach. A commit count is
+not effort: one large commit and one typo fix weigh the same, and pairing and
+review do not show in it.
 
 Merged pull requests per login in the project's repositories (groot, osionos, grobase,
 prismatica = opposite-osiris, osionos-mail, osionos-calendar, hydrawn, QA, monkey-bot), from
@@ -770,70 +812,77 @@ The numbers in brackets below are the member's commits in that row of the
 
 ### dlesieur — Dylan Lesieur
 
-- **Areas:** grobase (Go control plane, Rust data plane and realtime, Kong gateway, contracts
-  and self-serve apps), osionos (editor, chat, collaboration, social, profile, the bridge, the AI
-  service), mail, calendar, the root's infrastructure, TLS edge and CI; hydrawn (569 commits:
-  `apps/web`, the engine, `docs/reference`).
+- **Areas:** grobase (Go control plane, Rust data plane and realtime, Kong
+  gateway, contracts and self-serve apps), osionos (editor, chat, collaboration,
+  social, profile, the bridge, the AI service), mail, calendar, the root's
+  infrastructure, TLS edge and CI; hydrawn (569 commits: `apps/web`, the engine,
+  `docs/reference`).
 - **Pull requests:** 260 merged (osionos 138, grobase 61, groot 56).
-- **Features:** the largest share of every row of the Features List except the legal pages, for
-  example the block editor (164), the database block (125), chat (72) and the AI assistant (317).
+- **Features:** the largest share of every row of the Features List except the
+  legal pages, for example the block editor (164), the database block (125),
+  chat (72) and the AI assistant (317).
 - **Challenges:** not recorded yet.
 
 ### danfern3 — Daniel Fernández
 
-- **Areas:** `vendor/monkey-bot` (133 commits on all branches, 10 on the pinned commit: form-XSS
-  and mutation testing, configuration);
-  grobase Docker images built from scratch, Kubernetes deployment, the playground and Makefile
-  (March 2026); osionos breadcrumbs, trash, multi-line text in blocks, the markdown engine and
-  code-quality fixes; hydrawn (20 commits, `apps/web`, `apps/api`, `packages/contract`,
-  2026-09-24: submodule clone paths, formatting); root submodule pins and the `make all` bats fix,
-  on `fix/ci` ([#165](https://github.com/Univers42/groot/pull/165), open).
+- **Areas:** `vendor/monkey-bot` (133 commits on all branches, 10 on the pinned
+  commit: form-XSS and mutation testing, configuration); grobase Docker images
+  built from scratch, Kubernetes deployment, the playground and Makefile (March
+  2026); osionos breadcrumbs, trash, multi-line text in blocks, the markdown
+  engine and code-quality fixes; hydrawn (20 commits, `apps/web`, `apps/api`,
+  `packages/contract`, 2026-09-24: submodule clone paths, formatting); root
+  submodule pins and the `make all` bats fix, on `fix/ci`
+  ([#165](https://github.com/Univers42/groot/pull/165), open).
 - **Pull requests:** 4 merged (prismatica).
 - **Features:** block editor (29), whiteboard (20).
 - **Challenges:** not recorded yet.
 
 ### serjimen — Sergio Jiménez de la Cruz
 
-- **Areas:** the public site, opposite-osiris (134 commits on the pinned commit: hero animation
-  performance, unit tests and benchmarks, security fixes, auth pages); osionos accessibility fixes, page links,
-  move and delete, shared UI refactor, the node installer's self-update (#277) and database probe
+- **Areas:** the public site, opposite-osiris (134 commits on the pinned commit:
+  hero animation performance, unit tests and benchmarks, security fixes, auth
+  pages); osionos accessibility fixes, page links, move and delete, shared UI
+  refactor, the node installer's self-update (#277) and database probe
   diagnostics (#278), the changelog.
 - **Pull requests:** 8 merged (prismatica 7, osionos 1), among them the landing page in English,
   Spanish and Arabic with right-to-left layout (prismatica #21, #22, #23, #35), the accessible
   privacy policy and terms (#38) and a WCAG 2.2 AA audit pipeline with axe-core fixes (#39).
-- **Features:** block editor (8), legal pages (2), communities and social feed (2), sign-up /
-  sign-in (1), database block (1).
+- **Features:** block editor (8), legal pages (2), communities and social feed
+  (2), sign-up / sign-in (1), database block (1).
 - **Challenges:** not recorded yet.
 
 ### vjan-nie — Vadim Jan Nieto
 
-- **Areas:** `vendor/QA` (38 commits: registry, migrations, hooks, CLI); root end-to-end tests,
-  the wiki and README, graph-studio tests, the hydrawn TLS edge and its CORS, submodule
-  pins; osionos whiteboard and graph-studio fixes; grobase Docker infrastructure and dependency
-  fixes; hydrawn (4 commits: engine bumps, the nested-shape binding fix).
+- **Areas:** `vendor/QA` (38 commits: registry, migrations, hooks, CLI); root
+  end-to-end tests, the wiki and README, graph-studio tests, the hydrawn TLS
+  edge and its CORS, submodule pins; osionos whiteboard and graph-studio fixes;
+  grobase Docker infrastructure and dependency fixes; hydrawn (4 commits: engine
+  bumps, the nested-shape binding fix).
 - **Pull requests:** 72 merged (groot 45, osionos 17, prismatica 6, grobase 4).
-- **Features:** block editor (42), AI assistant (9), public API (5), whiteboard (4), legal pages
-  (3), multi-engine data API (3), database block (2), chat (1).
+- **Features:** block editor (42), AI assistant (9), public API (5), whiteboard
+  (4), legal pages (3), multi-engine data API (3), database block (2), chat (1).
 - **Challenges:** not recorded yet.
 
 ### shashemi — Seyed Mostafa Hashemian
 
-- **Areas:** security fixes across root, grobase and opposite-osiris (SAST findings, nginx scan
-  suppressions, IDE socket proxy hardening); the site's legal pages, SEO and accessibility; root
-  CI triggers and the models' export erasure paths; osionos end-to-end fixes; hydrawn (8
-  commits, `apps/web`, `apps/api`, `packages/contract`: trail and notes, hydrawn #1, and the
+- **Areas:** security fixes across root, grobase and opposite-osiris (SAST
+  findings, nginx scan suppressions, IDE socket proxy hardening); the site's
+  legal pages, SEO and accessibility; root CI triggers and the models' export
+  erasure paths; osionos end-to-end fixes; hydrawn (8 commits, `apps/web`,
+  `apps/api`, `packages/contract`: trail and notes, hydrawn #1, and the
   pen-thickness-with-zoom test, #8).
 - **Pull requests:** 57 merged (prismatica 20, groot 19, osionos 12, grobase 6).
-- **Features:** whiteboard (6), legal pages (5), real-time collaboration (2), block editor (2),
-  database block, video rooms, communities, AI assistant and public API (1 each).
+- **Features:** whiteboard (6), legal pages (5), real-time collaboration (2),
+  block editor (2), database block, video rooms, communities, AI assistant and
+  public API (1 each).
 - **Challenges:** not recorded yet.
 
 ### Team-level challenges
 
 From the project's history:
 
-- **Migrating the data plane from TypeScript to Rust with no downtime**, behind a per-request
-  switch (`RUST_DATA_PLANE_FORWARD`).
+- **Migrating the data plane from TypeScript to Rust with no downtime**, behind
+  a per-request switch (`RUST_DATA_PLANE_FORWARD`).
 - **Keeping eight database adapters at parity**, enforced by a conformance battery that runs every
   adapter against a real engine and checks it serves exactly what it advertises.
 - **Auditing our own authorisation path** and shipping a reversible mitigation for a weakness we
@@ -865,17 +914,21 @@ From the project's history:
 This project was built with **heavy AI assistance**, and we state it plainly.
 
 - **Tools.** The repositories record these:
-  - **Claude Code**, with the team's own configuration kit in groot's [`.claude`](.claude)
-    submodule (`Univers42/claude-deal-with-the-devil`: agents, rules, skills and hooks).
-  - **Gemini** in osionos (plans under `.gemini/plan/`), beside `.agents/` and an `.mcp.json`.
-  - **opencode**, an AI coding agent that committed under its own name (1 root and 5 osionos
-    commits at the pins), and the OpenCode agent team "Space Bunny" on hydrawn (68 commits at
-    the pin, hydrawn `BUNNY.md`).
-  - **GitHub Copilot** (`copilot-swe-agent`, 9 commits at prismatica's pin, and Copilot review on
-    pull requests) and **CodeRabbit** (reviews on pull requests since 2026-10-23).
-- **Commit history.** On 2026-11-04 the history of groot, osionos and grobase was rewritten to
-  remove `Co-authored-by` trailers. Since then no commit carries a co-author line, so the history
-  does not show which commits were written with an AI tool, and must not be read as AI-free
+  - **Claude Code**, with the team's own configuration kit in groot's
+    [`.claude`](.claude) submodule (`Univers42/claude-deal-with-the-devil`:
+    agents, rules, skills and hooks).
+  - **Gemini** in osionos (plans under `.gemini/plan/`), beside `.agents/` and
+    an `.mcp.json`.
+  - **opencode**, an AI coding agent that committed under its own name (1 root
+    and 5 osionos commits at the pins), and the OpenCode agent team "Space
+    Bunny" on hydrawn (68 commits at the pin, hydrawn `BUNNY.md`).
+  - **GitHub Copilot** (`copilot-swe-agent`, 9 commits at prismatica's pin, and
+    Copilot review on pull requests) and **CodeRabbit** (reviews on pull
+    requests since 2026-10-23).
+- **Commit history.** On 2026-11-04 the history of groot, osionos and grobase
+  was rewritten to remove `Co-authored-by` trailers. Since then no commit
+  carries a co-author line, so the history does not show which commits were
+  written with an AI tool, and must not be read as AI-free
   ([`wiki/project/contributions-method.md`](wiki/project/contributions-method.md)).
 - **Code.** AI wrote and refactored code across the stack: grobase planes and adapters, the
   frontends, SQL migrations, the Makefile pipeline and the Docker setup.
@@ -885,35 +938,38 @@ This project was built with **heavy AI assistance**, and we state it plainly.
   path ([`wiki/security/03-known-weaknesses.md`](wiki/security/03-known-weaknesses.md)).
 - **Documentation.** The wiki and this README were drafted and distilled with AI assistance from
   the project's own design documents and code, then checked against the repository.
-- **How we kept control.** A human merges every pull request; nothing reaches `develop` or
-  `main` by an agent alone. Approval by a second member is required by the rulesets but thin in
-  practice (see [Project Management](#project-management)). A change is accepted only when its
-  verification gate passes. Every member must be able to explain the AI-assisted code in their
-  area.
+- **How we kept control.** A human merges every pull request; nothing reaches
+  `develop` or `main` by an agent alone. Approval by a second member is required
+  by the rulesets but thin in practice (see [Project
+  Management](#project-management)). A change is accepted only when its
+  verification gate passes. Every member must be able to explain the AI-assisted
+  code in their area.
 
 ---
 
 ## Known limitations
 
 - **No game.** All gaming-dependent modules are out of scope.
-- **Expressiveness is narrow by design.** grobase has no per-application server code; business
-  rules are expressed as policies, schema constraints, database triggers, or functions in the
-  flag-gated functions plane.
+- **Expressiveness is narrow by design.** grobase has no per-application server
+  code; business rules are expressed as policies, schema constraints, database
+  triggers, or functions in the flag-gated functions plane.
 - **Documented security weaknesses.** Known and declared in
   [`wiki/security/03-known-weaknesses.md`](wiki/security/03-known-weaknesses.md).
-- **Several features are behind flags that are off by default** — see the Grade column in
-  [Modules](#modules).
-- **No interface translation in osionos.** `i18next` is declared but no translation resource is
-  loaded (see [Modules](#modules)). The prismatica site itself ships English, Spanish and Arabic.
+- **Several features are behind flags that are off by default** — see the Grade
+  column in [Modules](#modules).
+- **No interface translation in osionos.** `i18next` is declared but no
+  translation resource is loaded (see [Modules](#modules)). The prismatica site
+  itself ships English, Spanish and Arabic.
 - **Whiteboard editing is loopback-only and has no per-user authorization yet** (see
   [Demo](#demo)).
 
 ## License
 
 - There is no `LICENSE` file at the repository root.
-- grobase is open-core under the GNU AGPL v3 (`apps/grobase/LICENSE`); `apps/grobase/LICENSING.md`
-  maps which parts carry which licence.
-- osionos, opposite-osiris (prismatica), hydrawn, mail and calendar carry no licence file.
+- grobase is open-core under the GNU AGPL v3 (`apps/grobase/LICENSE`);
+  `apps/grobase/LICENSING.md` maps which parts carry which licence.
+- osionos, opposite-osiris (prismatica), hydrawn, mail and calendar carry no
+  licence file.
 
 ---
 
@@ -926,4 +982,5 @@ This project was built with **heavy AI assistance**, and we state it plainly.
 - [`wiki/security/`](wiki/security/) — security model, proofs, known weaknesses, network
 - [`DATA-MIGRATION.md`](DATA-MIGRATION.md) — fresh-machine and migration runbook
 - `apps/grobase/CLAUDE.md` — grobase's own authoritative technical document (inside the submodule)
-- [Prismatica docs](https://prismatica-beta.vercel.app/docs/) — the landing's documentation site
+- [Prismatica docs](https://prismatica-beta.vercel.app/docs/) — the landing's
+  documentation site
