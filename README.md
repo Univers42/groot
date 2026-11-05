@@ -100,7 +100,7 @@ an editor session), **Kong** (grobase's API gateway, behind its WAF) and
 
 | Requirement | Detail | Source |
 |---|---|---|
-| **Linux host** | Tested on Debian 13 (trixie), the system the born2root VM installs; the CA-trust step uses `sudo` + `update-ca-certificates` | `vendor/born2root/docker/Dockerfile:14`, `vendor/born2root/generate/create_custom_iso.sh:120`; `utils/mk/certs.mk` |
+| **Linux host** | Tested on Debian 13 (trixie), the system the born2root VM installs; the CA-trust step uses `update-ca-certificates` when `sudo` needs no password | `vendor/born2root/docker/Dockerfile:14`, `vendor/born2root/generate/create_custom_iso.sh:120`; `utils/mk/certs.mk` |
 | **Docker Engine ≥ 25** + **Compose v2** | Healthchecks use `start_interval`, which needs Docker 25. Tested with Docker 29.8. | `docker-compose.yml:10` |
 | **RAM ≥ 8 GB** | Measured: the VM peaked at ~6.5 GB of 8 GB during `make all` | `wiki/runbooks/fresh-machine.md` (6266 MiB peak, v1.0.0-rc4, 2026-10-05) |
 | **Free disk space for Docker** | Images, the build cache and data volumes all live in Docker's storage; no minimum is measured in the repository. `docker system df` shows the current use | — |
@@ -112,9 +112,10 @@ an editor session), **Kong** (grobase's API gateway, behind its WAF) and
 **Nothing else is installed on the host** — no Node, npm, Go or Cargo. Everything builds and runs
 in containers.
 
-`make all` asks for **one `sudo` password** the first time: it copies the local CA into the system
-trust store. This is intended (`certs-trust-local` in `utils/mk/certs.mk`). Without
-sudo, `CERT_TRUST_MODE=user` trusts the browsers only and `skip` trusts nothing (see
+`make all` never asks for a `sudo` password on the host. The only sudo the stack needs is inside the
+VM, and born2root drives it. It trusts the local CA in your browser stores, and also in the system
+store when `sudo` works without a password (`certs-trust-local` in `utils/mk/certs.mk`).
+`CERT_TRUST_MODE=system` asks once for the system store, `skip` trusts nothing (see
 [Access](#access-and-the-local-ca)).
 
 **Ports bound on the host** (from `docker-compose.yml`, all on `127.0.0.1`
@@ -256,7 +257,7 @@ handed outside the backend).
 
 Every frontend is served with a certificate from the local CA
 `apps/grobase/certs/track-binocle-local-ca.pem`. `make all` trusts it in two places: the system
-store (one `sudo`) and every browser store this user owns, through `scripts/certs-trust-user.sh`
+store (only when `sudo` needs no password) and every browser store this user owns, through `scripts/certs-trust-user.sh`
 (no sudo). That script covers Chrome and Chromium (`~/.pki/nssdb`, snap Chromium's
 `~/snap/chromium/current/.pki/nssdb`) and every Firefox profile under `~/.mozilla/firefox`, the snap
 and the flatpak locations. It matches old copies by the CA's subject, not by nickname, replaces
@@ -266,8 +267,8 @@ them, and adds the current file as "Track Binocle Local Development CA".
   current|stale|missing|untrusted`) and exits 1 if any store is not current.
   Without `certutil` it fails.
 - `make certs-trust-user` fixes the stores without sudo; it mints the CA first only if it is missing.
-- `CERT_TRUST_MODE=system|user|skip` (or `TRACK_BINOCLE_CERT_TRUST`) picks what `certs-trust-local`
-  does: system store plus browsers (default), browsers only, or nothing.
+- `CERT_TRUST_MODE=auto|system|user|skip` (or `TRACK_BINOCLE_CERT_TRUST`) picks what `certs-trust-local`
+  does: never prompt (default), system store plus browsers with one prompt, browsers only, or nothing.
 - **Relaunch the browser afterwards.** A browser reads its store at launch only; the script never
   restarts one. `vendor/born2root/setup/host/restart_browsers.sh` does it with session restore.
 

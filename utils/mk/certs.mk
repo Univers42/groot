@@ -13,9 +13,9 @@
 # Certificate generation and trust targets.
 # Generation is delegated to the standalone apps/grobase stack (it owns the CA +
 # localhost cert under apps/grobase/certs). Trust has two halves: the system store
-# (one sudo, inline below, for curl/Electron/system-trust clients) and this user's
+# (inline below, for curl/Electron/system-trust clients) and this user's
 # browser stores (scripts/certs-trust-user.sh: Chrome's NSS db and every Firefox
-# profile, no sudo). Both no-op with a message when sudo/certutil are missing.
+# profile, no sudo). scripts/cert-trust-mode.sh keeps make all from ever prompting on the host.
 ##@ Certificates
 # A CA certificate without its key is deliberate (ADR 0047): the generator would delete it and mint
 # a new CA, which no browser here trusts and the VM's WAF does not chain to.
@@ -69,15 +69,15 @@ certs-trust-check: ## Check each browser store holds the current local CA; exit 
 	@bash scripts/certs-trust-user.sh --check '$(LOCAL_CA_CERT)'
 
 certs-trust-local: certs ## Trust the grobase CA for dev browsers and system clients; skipped in CI
-## Usage: make certs-trust-local [CERT_TRUST_MODE=system|user|skip]
+## Usage: make certs-trust-local [CERT_TRUST_MODE=auto|system|user|skip]
 ## Trust the grobase CA for developer browsers and system-trust clients; skipped in CI.
-## CERT_TRUST_MODE / TRACK_BINOCLE_CERT_TRUST = system (default, one sudo + browsers) | user
-## (browsers only, no sudo) | skip.
+## CERT_TRUST_MODE / TRACK_BINOCLE_CERT_TRUST = auto (default, never prompts: system if sudo needs
+## no password, else user) | system (one sudo + browsers) | user (browsers only, no sudo) | skip.
 	@if [[ "$${CI:-}" == 'true' || "$${GITHUB_ACTIONS:-}" == 'true' || "$${TRACK_BINOCLE_SKIP_CERT_TRUST:-}" == '1' ]]; then \
 		echo '[certs] skipping browser trust import in CI/noninteractive mode'; \
-	elif [[ "$${TRACK_BINOCLE_CERT_TRUST:-$(CERT_TRUST_MODE)}" == 'skip' ]]; then \
+	elif trust_mode=$$(bash scripts/cert-trust-mode.sh "$${TRACK_BINOCLE_CERT_TRUST:-$(CERT_TRUST_MODE)}"); [[ "$$trust_mode" == 'skip' ]]; then \
 		echo '[certs] skipping local CA trust import because TRACK_BINOCLE_CERT_TRUST=skip'; \
-	elif [[ "$${TRACK_BINOCLE_CERT_TRUST:-$(CERT_TRUST_MODE)}" == 'user' ]]; then \
+	elif [[ "$$trust_mode" == 'user' ]]; then \
 		bash scripts/certs-trust-user.sh '$(LOCAL_CA_CERT)'; \
 	else \
 		$(TRUST_LOCAL_CA); \

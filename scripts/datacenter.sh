@@ -81,10 +81,10 @@ machine_value() {
 
 cmd_setting() {
   local alias
-  alias=$(machine_value GROBASE_DATACENTER) || alias=""
+  alias=$(credential_value GROBASE_DATACENTER) || alias=""
   if [ -z "$alias" ]; then
-    { machine_value FT_PASSPHRASE || machine_value VAULT42_PASSPHRASE; } >/dev/null || return 0
-    [ -f "$CTL_CFG_DIR/keystore.v42" ] || machine_value FT_KEYSTORE_B64 >/dev/null || return 0
+    credential_value FT_PASSPHRASE VAULT42_PASSPHRASE >/dev/null || return 0
+    [ -f "$CTL_CFG_DIR/keystore.v42" ] || credential_value FT_KEYSTORE_B64 >/dev/null || return 0
     alias=$DEFAULT_ALIAS
   fi
   [ "$alias" = local ] || printf '%s\n' "$alias"
