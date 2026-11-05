@@ -62,6 +62,17 @@ datacenter-configure: ## Pin the VM's host key, write the link's settings
 datacenter-certs: ## Copy the CA certificate and the WAF's leaf from the VM, never the CA key
 	@$(DATACENTER_SCRIPT) certs
 
+datacenter-chain: ## Prove the ssh alias reaches this VM and its WAF answers with this VM's CA
+## Reads the ports born2root recorded in ~/.config/born2root/<alias>-ports.env. With no record, the
+## old default is used only once a certificate this VM's CA signed proves it. Reads only.
+	@$(DATACENTER_SCRIPT) chain
+
+datacenter-origins: ## Make the VM's grobase allow every frontend origin in .env.ports
+## Usage: make datacenter-origins [DATACENTER_ALLOW_WRITES=1]
+## Writes and recreates Kong, GoTrue and realtime only when a running list lacks an origin, and only
+## on this user's own VM. Another alias is read and named, never written.
+	@$(DATACENTER_SCRIPT) origins
+
 datacenter-preflight: ## Check the VM, then only the writes those checks allow
 ## Armed realtime triggers run realtime-cdc-off alone. A models change takes a dump, reads it back in
 ## full, then applies. A key that does not verify stops, unless this run seeded the VM.

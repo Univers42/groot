@@ -12,6 +12,7 @@ setup() {
   export GROBASE_LINK_DIR="$BATS_TEST_TMPDIR/link"
   export GROBASE_LINK_CONF="$ROOT/.env.grobase-link.local"
   export XDG_STATE_HOME="$BATS_TEST_TMPDIR/state"
+  export HOME="$BATS_TEST_TMPDIR/home"
   export DATACENTER_WAIT_SCALE=0
   export B2B_BOOT_ID_FILE="$BATS_TEST_TMPDIR/boot_id"
   echo boot-1 >"$B2B_BOOT_ID_FILE"
@@ -21,7 +22,8 @@ setup() {
   cp "$BATS_TEST_DIRNAME/../lib/envfile.sh" "$BATS_TEST_DIRNAME/../lib/datacenter-vm.sh" \
     "$BATS_TEST_DIRNAME/../lib/datacenter-models.sh" "$BATS_TEST_DIRNAME/../lib/datacenter-gate.sh" \
     "$BATS_TEST_DIRNAME/../lib/datacenter-build.sh" "$BATS_TEST_DIRNAME/../lib/datacenter-verify.sh" \
-    "$BATS_TEST_DIRNAME/../lib/datacenter-binds.sh" \
+    "$BATS_TEST_DIRNAME/../lib/datacenter-binds.sh" "$BATS_TEST_DIRNAME/../lib/datacenter-ports.sh" \
+    "$BATS_TEST_DIRNAME/../lib/datacenter-origins-guest.sh" \
     "$BATS_TEST_DIRNAME/../lib/vault42-session.sh" "$ROOT/scripts/lib/"
   mkdir -p "$ROOT/tools/seeds"
   cp "$BATS_TEST_DIRNAME/../../tools/seeds/agency-roster.sh" "$ROOT/tools/seeds/"
@@ -1262,4 +1264,288 @@ case "$*" in *grobase-health*) echo "  ✗ scrape targets DOWN: vault:8200"; exi
 
 @test "dev-rebuild-server: the Update button's make all runs with no terminal on stdin" {
   grep -q 'stdin=subprocess.DEVNULL' "$BATS_TEST_DIRNAME/../dev-rebuild-server.py"
+}
+
+# record_ports SSH WAF — what born2root writes for the alias once it has chosen its forwards.
+record_ports() {
+  mkdir -p "$HOME/.config/born2root"
+  printf 'SSH_HOST_PORT=%s\nWAF_HOST_PORT=%s\n' "$1" "$2" >"$HOME/.config/born2root/b2b-ports.env"
+  chmod 600 "$HOME/.config/born2root/b2b-ports.env"
+}
+
+# frontends_on SITE APP — the .env.ports the resolver leaves, with those two ports chosen.
+frontends_on() {
+  cat >"$ROOT/.env.ports" <<EOF
+OPPOSITE_OSIRIS_HOST_PORT=$1
+OSIONOS_APP_HOST_PORT=$2
+MAIL_HOST_PORT=3002
+MAIL_BRIDGE_HOST_PORT=4101
+CALENDAR_HOST_PORT=3003
+DRAWNOSAURUS_HOST_PORT=3007
+AUTH_GATEWAY_HOST_PORT=8787
+EOF
+}
+
+# vm_origins KONG REALTIME GOTRUE — a VM whose containers run with those lists and whose /opt/grobase
+# holds them too. The stubbed ssh runs what groot pipes for real against that tree, and a stubbed
+# compose makes the running lists follow .env, unless FROZEN is set: a recreate that took nothing.
+vm_origins() {
+  OPT="$BATS_TEST_TMPDIR/opt"
+  mkdir -p "$OPT"
+  printf 'KONG_CORS_ORIGIN_DEV_LIST=%s\nREALTIME_ALLOWED_ORIGINS=%s\nGOTRUE_URI_ALLOW_LIST=%s\nKEPT=1\n' "$1" "$2" "$3" >"$OPT/.env"
+  cp "$OPT/.env" "$OPT/.env.local"
+  cp "$OPT/.env" "$LOG.running"
+  stub ssh "echo \"ssh \$*\" >>\"\$LOG\"
+case \"\$*\" in
+  -G*) printf 'hostname 127.0.0.1\\nport 4242\\nuser dlesieur\\n' ;;
+  *'bash -s'*) GROBASE_DIR='$OPT' bash -s ;;
+  *'docker inspect'*) cat \"\$LOG.running\" ;;
+esac"
+  stub docker "echo \"docker \$*\" >>\"\$LOG\"
+case \"\$*\" in
+  *config_files*) echo base.yml,extra.yml ;;
+  *working_dir*) echo /opt/grobase ;;
+  *compose.project*) echo mini-baas ;;
+  compose*)
+    echo \"compose-files \$COMPOSE_FILE\" >>\"\$LOG\"
+    [ -n \"\${FROZEN:-}\" ] || cp '$OPT/.env' \"\$LOG.running\"
+    ;;
+esac"
+}
+
+@test "configure: a moved WAF port reaches GROBASE_TARGET and GROBASE_API_URL" {
+  vault_set
+  fake_own_vm
+  stub ip 'echo "1.1.1.1 via 10.0.0.1 dev eth0 src 10.12.19.4 uid 1000"'
+  record_ports 4242 9443
+  dc configure
+  [ "$status" -eq 0 ]
+  grep -qx 'GROBASE_TARGET=https://localhost:9443' "$GROBASE_LINK_CONF"
+  grep -qx 'GROBASE_API_URL=https://localhost:9443' "$GROBASE_LINK_CONF"
+  ! grep -q 8443 "$GROBASE_LINK_CONF"
+}
+
+@test "configure: an ssh alias on another port than the record stops before pinning its key" {
+  vault_set
+  fake_own_vm
+  record_ports 4250 8443
+  dc configure
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"4242"* ]]
+  [[ "$output" == *"4250"* ]]
+  [ ! -f "$GROBASE_LINK_CONF" ]
+  ! grep -q ssh_host_ed25519 "$LOG"
+}
+
+@test "configure: a record that holds no port stops, rather than falling back" {
+  vault_set
+  fake_own_vm
+  record_ports 4242 nonsense
+  dc configure
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"WAF_HOST_PORT"* ]]
+  [ ! -f "$GROBASE_LINK_CONF" ]
+}
+
+@test "chain: the WAF is proved at the recorded port, over the pinned ssh path" {
+  vault_set
+  record_ports 4242 9443
+  stub curl 'echo "$*" >>"$LOG"; printf 401'
+  dc chain
+  [ "$status" -eq 0 ]
+  grep -q 'https://localhost:9443/' "$LOG"
+  grep -q -- '--cacert .*track-binocle-local-ca.pem' "$LOG"
+  grep -q 'HostKeyAlias=grobase-admin' "$LOG"
+  ! grep -q 8443 "$LOG"
+}
+
+@test "chain: a missing record falls back to the old port and proves it" {
+  vault_set
+  stub curl 'echo "$*" >>"$LOG"; printf 401'
+  dc chain
+  [ "$status" -eq 0 ]
+  grep -q 'https://localhost:8443/' "$LOG"
+}
+
+@test "chain: a missing record with another service on the old port fails, naming the record" {
+  vault_set
+  stub curl 'printf 000; exit 60'
+  dc chain
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"does not verify https://localhost:8443/"* ]]
+  [[ "$output" == *"born2root/b2b-ports.env"* ]]
+}
+
+@test "chain: a recorded port held by a service this VM's CA did not sign fails" {
+  vault_set
+  record_ports 4242 9443
+  stub curl 'printf 000; exit 60'
+  dc chain
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"does not verify https://localhost:9443/"* ]]
+}
+
+@test "chain: a service that speaks no TLS on the port is an error, not a pass" {
+  vault_set
+  record_ports 4242 9443
+  stub curl 'printf 000; exit 35'
+  dc chain
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"9443"* ]]
+  [[ "$output" == *"not this VM's WAF"* ]]
+}
+
+@test "chain: nothing on the recorded port says so" {
+  vault_set
+  record_ports 4242 9443
+  stub curl 'printf 000; exit 7'
+  dc chain
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"nothing answers on https://localhost:9443/"* ]]
+}
+
+@test "chain: an alias on another port than the record fails before the WAF is asked" {
+  vault_set
+  record_ports 4250 8443
+  stub curl 'echo curl >>"$LOG"; printf 401'
+  dc chain
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"4250"* ]]
+  ! grep -qx curl "$LOG"
+}
+
+@test "chain: an alias that does not answer on the pinned key fails naming it" {
+  vault_set
+  stub ssh 'case "$*" in -G*) printf "hostname 127.0.0.1\nport 4242\nuser d\n" ;; *) exit 255 ;; esac'
+  stub curl 'printf 401'
+  dc chain
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"b2b"* ]]
+  [[ "$output" == *"pinned"* ]]
+}
+
+@test "chain: a frontend resolved onto the VM's port before the VM started stops the run" {
+  vault_set
+  record_ports 4242 8444
+  frontends_on 4322 3001
+  echo 'GROBASE_TLS_HOST_PORT=8444' >>"$ROOT/.env.ports"
+  stub curl 'printf 401'
+  dc chain
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"GROBASE_TLS_HOST_PORT"* ]]
+  [[ "$output" == *"8444"* ]]
+}
+
+@test "origins: a moved frontend lands in all three lists, and what was listed stays" {
+  vault_set
+  fake_own_vm
+  frontends_on 4333 3011
+  vm_origins http://localhost:5180 https://osionos.pages.dev,https://localhost:3001 'https://localhost:5173/**'
+  DATACENTER_ALLOW_WRITES=1 dc origins
+  [ "$status" -eq 0 ]
+  for file in .env .env.local; do
+    grep -qx 'KONG_CORS_ORIGIN_DEV_LIST=http://localhost:5180,.*https://localhost:3011.*' "$OPT/$file"
+    grep -qx 'REALTIME_ALLOWED_ORIGINS=https://osionos.pages.dev,https://localhost:3001,.*https://localhost:4333.*' "$OPT/$file"
+    grep -qx 'GOTRUE_URI_ALLOW_LIST=https://localhost:5173/\*\*,.*https://localhost:3011/\*\*.*' "$OPT/$file"
+    grep -qx 'KEPT=1' "$OPT/$file"
+  done
+  grep -q 'compose -p mini-baas --project-directory /opt/grobase up -d .*--no-deps kong gotrue realtime' "$LOG"
+  grep -qx 'compose-files base.yml,extra.yml' "$LOG"
+}
+
+@test "origins: lists that already name every frontend are not written, nothing restarts" {
+  vault_set
+  fake_own_vm
+  frontends_on 4322 3001
+  all=https://localhost:4322,https://localhost:3001,https://localhost:3002,https://localhost:3003,https://localhost:3007,https://localhost:8787
+  vm_origins "$all" "$all" "$(printf '%s' "$all" | sed 's|,|/**,|g')/**"
+  before=$(cat "$OPT/.env")
+  dc origins
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OPT/.env")" = "$before" ]
+  ! grep -q 'bash -s' "$LOG"
+  ! grep -q 'docker compose' "$LOG"
+}
+
+@test "origins: a second run after a push changes nothing" {
+  vault_set
+  fake_own_vm
+  frontends_on 4333 3011
+  vm_origins http://localhost:5180 https://x.example 'https://localhost:5173/**'
+  DATACENTER_ALLOW_WRITES=1 dc origins
+  [ "$status" -eq 0 ]
+  : >"$LOG"
+  dc origins
+  [ "$status" -eq 0 ]
+  ! grep -q 'bash -s' "$LOG"
+}
+
+@test "origins: an empty realtime list checks nothing, so it is not narrowed to a list" {
+  vault_set
+  fake_own_vm
+  frontends_on 4333 3011
+  vm_origins http://localhost:5180 '' 'https://localhost:5173/**'
+  DATACENTER_ALLOW_WRITES=1 dc origins
+  [ "$status" -eq 0 ]
+  grep -qx 'REALTIME_ALLOWED_ORIGINS=' "$OPT/.env"
+}
+
+@test "origins: with no terminal a change is refused and nothing is written" {
+  vault_set
+  fake_own_vm
+  frontends_on 4333 3011
+  vm_origins http://localhost:5180 https://x.example 'https://localhost:5173/**'
+  dc origins </dev/null
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Nothing was written"* ]]
+  ! grep -q 'bash -s' "$LOG"
+}
+
+@test "origins: another alias is read and never written, and the missing origins are named" {
+  printf 'GROBASE_DATACENTER=prod-dc\n' >"$CTL_CFG_DIR/secrets/datacenter.env"
+  frontends_on 4333 3011
+  vm_origins http://localhost:5180 https://x.example 'https://localhost:5173/**'
+  DATACENTER_ALLOW_WRITES=1 dc origins
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"https://localhost:4333"* ]]
+  ! grep -q 'bash -s' "$LOG"
+}
+
+@test "origins: a recreate the containers did not take stops the run" {
+  vault_set
+  fake_own_vm
+  frontends_on 4333 3011
+  vm_origins http://localhost:5180 https://x.example 'https://localhost:5173/**'
+  FROZEN=1 DATACENTER_ALLOW_WRITES=1 dc origins
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"KONG_CORS_ORIGIN_DEV_LIST"* ]]
+}
+
+@test "origins: no .env.ports stops rather than pushing defaults" {
+  vault_set
+  fake_own_vm
+  vm_origins http://localhost:5180 https://x.example 'https://localhost:5173/**'
+  DATACENTER_ALLOW_WRITES=1 dc origins
+  [ "$status" -eq 1 ]
+  [[ "$output" == *".env.ports"* ]]
+  ! grep -q 'bash -s' "$LOG"
+}
+
+@test "origins: every published port is either a page origin or named as not one" {
+  repo="$BATS_TEST_DIRNAME/../.."
+  pages=$(sed -n 's/^FRONTEND_PORT_NAMES="\(.*\)"$/\1/p' "$repo/scripts/lib/datacenter-ports.sh")
+  [ -n "$pages" ]
+  others="GROBASE_LINK_HOST_PORT GROBASE_TLS_HOST_PORT LIVEKIT_HOST_PORT LIVEKIT_TCP_HOST_PORT MAIL_BRIDGE_HOST_PORT
+    CALENDAR_BRIDGE_HOST_PORT OSIONOS_BRIDGE_HOST_PORT OSIONOS_IDE_HOST_PORT OPPOSITE_OSIRIS_WEB_HOST_PORT"
+  known=$(echo $pages $others)
+  for name in $(grep -hoE '\$\{[A-Z0-9_]+_HOST_PORT:-[0-9]+\}' "$repo"/docker-compose*.yml | sed -e 's/^\${//' -e 's/:-.*//' | sort -u); do
+    [[ " $known " == *" $name "* ]] || {
+      echo "$name is neither a page origin nor named as not one"
+      false
+    }
+  done
+}
+
+@test "make all: the chain and the origins come before the link and the frontends" {
+  grep -q 'datacenter-certs datacenter-chain datacenter-origins link ' "$BATS_TEST_DIRNAME/../../utils/mk/pipeline.mk"
 }
