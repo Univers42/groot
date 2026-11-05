@@ -160,8 +160,6 @@ relay_cafile() {
 # half-closes the connection when the request ends, and Funnel answers a half-closed request 502
 # (measured 2026-10-15; curl on the same IP got 401), so the write side stays open and -t10
 # waits for the answer.
-# Caveat: one request decides; a target restarting at that moment answers 000 or 502, and the
-# caller then keeps its pre-probe values until the next `make link`.
 capability_status() {
   local host port body="" line
   read -r host port < <(url_hostport "$1")
@@ -175,6 +173,24 @@ capability_status() {
   *) printf '000\n' ;;
   esac
 }
+# capability_answer URL METHOD PATH -> capability_status, asked until the target says something.
+# Kong recreated just before `make link` (datacenter-origins, an install) answers 502 through the WAF
+# for a few seconds. One request then blanked the mount route without a word, and every mounted
+# database answered 403 from the WAF (2026-11-05, make all on a VM that had just taken new origins).
+# Caveat: 15 tries, 2 s apart, is a guess at a restart, not a measurement. A target down for longer
+# keeps the pre-probe values, and publish_env says so.
+capability_answer() {
+  local status try
+  for ((try = 1; try <= ${CAPABILITY_TRIES:-15}; try++)); do
+    status=$(capability_status "$@")
+    case "$status" in
+    000 | 502 | 503 | 504) sleep "${CAPABILITY_PAUSE:-2}" ;;
+    *) break ;;
+    esac
+  done
+  printf '%s\n' "$status"
+}
+
 # publish_env MODE ENV_LOCAL [TARGET] — where the bridge publishes realtime events and reaches
 # query-router. ssh and local reach the realtime gateway by name (empty = docker-compose.yml's
 # default); direct mode has only the edge, whose /realtime/v1/publish admits the service_role
@@ -188,20 +204,25 @@ capability_status() {
 # Any other answer keeps the values written before the probes existed. ssh and local never
 # write OSIONOS_TENANT_MOUNTS_URL; they only clear one a direct link left.
 publish_env() {
-  local url="" key="" query="" registry="" mounts="" keepalive=""
+  local url="" key="" query="" registry="" mounts="" keepalive="" mounts_status
   if [ "$1" = direct ]; then
     url=http://mini-baas-kong:8000/realtime
     keepalive=1
     key=$(get_env "$2" SERVICE_ROLE_KEY) || key=""
-    if [ "$(capability_status "$3" POST /realtime/v1/publish)" = 403 ]; then
+    if [ "$(capability_answer "$3" POST /realtime/v1/publish)" = 403 ]; then
       url=ws://mini-baas-kong:8000/realtime/v1/ws
       key=""
       note "direct: $3 refuses /realtime/v1/publish without credentials; the bridge publishes over /realtime/v1/ws"
     fi
-    if [ "$(capability_status "$3" GET /v1/tenants/me/mounts)" = 401 ]; then
+    mounts_status=$(capability_answer "$3" GET /v1/tenants/me/mounts)
+    case "$mounts_status" in
+    401)
       mounts=http://mini-baas-kong:8000/v1/tenants/me/mounts
       note "direct: $3 serves /v1/tenants/me/mounts; the bridge lists mounts there with its tenant key"
-    fi
+      ;;
+    404) ;;
+    *) note "direct: $3 gave no definite answer on /v1/tenants/me/mounts ($mounts_status): mounted databases may be refused. make link asks again" ;;
+    esac
   fi
   if [ "$1" != local ]; then
     query=http://mini-baas-kong:8000/query/v1

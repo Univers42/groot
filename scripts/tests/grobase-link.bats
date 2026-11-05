@@ -10,6 +10,7 @@
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../grobase-link.sh"
   export GROBASE_LINK_DIR="$BATS_TEST_TMPDIR/link"
+  export CAPABILITY_PAUSE=0
   # Point the settings file away from the repo's real ./.env.grobase-link: a test must not
   # inherit this machine's target.
   export GROBASE_LINK_CONF="$BATS_TEST_TMPDIR/absent.env"
@@ -289,6 +290,26 @@ esac"
   [ "$status" -eq 0 ]
   grep -qx 'REALTIME_PUBLISH_URL=http://mini-baas-kong:8000/realtime' "$env_local"
   grep -qx 'REALTIME_PUBLISH_APIKEY=svc-1' "$env_local"
+  grep -qx 'OSIONOS_TENANT_MOUNTS_URL=' "$env_local"
+}
+
+@test "publish_env direct: a target still restarting is asked again, so the mount route is not lost" {
+  probe_stub
+  stub docker "req=\$(cat); n=\$(cat '$BATS_TEST_TMPDIR/n' 2>/dev/null || echo 0); n=\$((n + 1)); echo \$n >'$BATS_TEST_TMPDIR/n'
+case \"\$req\" in
+'GET /v1/tenants/me/mounts '*) if [ \$n -gt 3 ]; then printf 'HTTP/1.1 401 X\r\n\r\n'; else printf 'HTTP/1.1 502 X\r\n\r\n'; fi ;;
+*) printf 'HTTP/1.1 401 X\r\n\r\n' ;;
+esac"
+  helper "publish_env direct '$env_local' https://baas.example.ts.net"
+  [ "$status" -eq 0 ]
+  grep -qx 'OSIONOS_TENANT_MOUNTS_URL=http://mini-baas-kong:8000/v1/tenants/me/mounts' "$env_local"
+}
+
+@test "publish_env direct: a target that never settles is said out loud" {
+  probe_stub
+  MOUNTS_STATUS=502 PUBLISH_STATUS=401 helper "publish_env direct '$env_local' https://baas.example.ts.net"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no definite answer"* ]]
   grep -qx 'OSIONOS_TENANT_MOUNTS_URL=' "$env_local"
 }
 
