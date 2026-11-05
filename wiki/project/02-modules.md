@@ -1,12 +1,12 @@
 # Module ledger
 
-> **Status:** Partial · 2026-09-15
+> **Superseded · 2026-11-05.** This whole page is history: its rows, letters, legend and
+> point totals. The current grades, one rule and the points table are in the
+> [README Modules table](../../README.md#modules).
+>
+> **Status:** Superseded · 2026-11-05 (written as Partial · 2026-09-15)
 > **Evidence:** flag states read from `deploy/fly/boot.sh`; every gate named here exists in the
 > gate index
-> **To check:** the two items in the "open" table below are worth up to 6 points between them
-> and neither has been checked. The current grades are in the
-> [README Modules table](../../README.md#modules) (2026-11-04), which supersedes this ledger's
-> letters.
 > **Sources:** `deploy/fly/boot.sh` · `apps/grobase/CLAUDE.md` §flag-gating · [01-subject](01-subject.md)
 
 Only catalogue modules count. **A module that cannot be demonstrated scores zero**, so each row

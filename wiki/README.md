@@ -85,7 +85,7 @@ zero per-project server code.
 | Page | What it answers |
 |---|---|
 | [01-subject](project/01-subject.md) | What ft_transcendence asks for |
-| [02-modules](project/02-modules.md) | Module ledger: points, flags, evidence |
+| [02-modules](project/02-modules.md) | Module ledger, superseded by the README Modules table |
 | [03-team](project/03-team.md) | Roles and contributions |
 | [contributions-method](project/contributions-method.md) | How the README's commit counts are made, and the identity joins behind them |
 | [04-glossary](project/04-glossary.md) | Project vocabulary |

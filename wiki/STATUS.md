@@ -40,7 +40,7 @@ Update this table whenever a page's status block changes. It is the working list
 | product/03-opposite-osiris | Partial | **Privacy Policy / ToS existence unverified** |
 | product/04-repos | Partial | What is actually inside the delivered perimeter |
 | project/01-subject | Unverified by nature | Source is private; re-check on each subject version |
-| project/02-modules | Partial | Two open checks worth ~6 points; grades superseded by the README Modules table (2026-11-04) |
+| project/02-modules | Superseded | Whole ledger replaced by the README Modules table (2026-11-05) |
 | project/03-team | **Template** | Facts not held anywhere; fill with the team |
 | project/04-glossary | Verified | — |
 | project/contributions-method | Verified · 2026-11-05 | Counts age with every new pin; recount with the command on the page |
