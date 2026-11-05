@@ -394,10 +394,11 @@ repositories record from what is the team's own account, and the last part
 measures how far we got towards that aim.
 
 **How the tracking evolved.** Work started in February 2026: the first commits
-date from that month (`git log --reverse` across the submodules). Between then and the autumn the team tried
-GitHub Projects, Jira tickets and Notion pages (team account: none of the three
-left a trace in commit messages, and the Projects board was not readable with
-our token). The only written trace is osionos
+date from that month (`git log --reverse` across the submodules). Between then
+and the autumn the team tried GitHub Projects, Jira tickets and Notion pages
+(team account: none of the three left a trace in commit messages, and the
+Projects board was not readable with our token). The only written trace is
+osionos
 [`docs/DoD.md:39`](https://github.com/Univers42/osionos/blob/develop/docs/DoD.md),
 a Definition-of-Done template that asks for evidence "in your Pull Request
 description or your Trello/Jira" ticket (2026-04-11).
