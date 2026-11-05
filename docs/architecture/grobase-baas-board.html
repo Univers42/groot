@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Grobase BaaS Architecture</title>
+    <script type="module">
+      import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+      mermaid.initialize({
+        startOnLoad: true,
+        theme: 'base',
+        themeVariables: {
+          primaryColor: '#0f172a',
+          primaryTextColor: '#e2e8f0',
+          primaryBorderColor: '#38bdf8',
+          lineColor: '#94a3b8',
+          secondaryColor: '#111827',
+          tertiaryColor: '#0b1220',
+          fontFamily: 'Inter, sans-serif'
+        },
+        flowchart: { useMaxWidth: true, htmlLabels: true, curve: 'basis' },
+      });
+    </script>
+    <style>
+      :root {
+        --bg: #020817;
+        --panel: #0f172a;
+        --panel-2: #111827;
+        --muted: #94a3b8;
+        --line: #334155;
+        --text: #e2e8f0;
+        --cyan: #22d3ee;
+        --blue: #60a5fa;
+        --green: #34d399;
+        --amber: #fbbf24;
+        --red: #f87171;
+        --violet: #a78bfa;
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: radial-gradient(circle at top, #0f172a 0%, #020817 45%, #020617 100%);
+        color: var(--text);
+        font-family: Inter, "Segoe UI", sans-serif;
+      }
+
+      .wrap {
+        max-width: 1500px;
+        margin: 0 auto;
+        padding: 32px 20px 48px;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: clamp(28px, 3vw, 44px);
+        letter-spacing: -0.04em;
+      }
+
+      .subtitle {
+        margin: 0 0 24px;
+        color: var(--muted);
+        font-size: 16px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 1.2fr 0.8fr;
+        gap: 22px;
+      }
+
+      .card {
+        background: rgba(15, 23, 42, 0.92);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+      }
+
+      .diagram {
+        padding: 18px;
+        min-height: 900px;
+      }
+
+      .side {
+        padding: 20px;
+      }
+
+      .side h2 {
+        margin: 0 0 14px;
+        font-size: 20px;
+      }
+
+      .chip {
+        display: inline-block;
+        padding: 6px 10px;
+        font-size: 12px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        color: var(--muted);
+        margin-right: 8px;
+        margin-bottom: 8px;
+      }
+
+      .routes {
+        margin-top: 18px;
+        display: grid;
+        gap: 10px;
+      }
+
+      .route {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: rgba(15, 23, 42, 0.75);
+        padding: 10px 12px;
+      }
+
+      .route strong {
+        color: var(--cyan);
+      }
+
+      .route span {
+        color: var(--muted);
+      }
+
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 16px;
+      }
+
+      .dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        display: inline-block;
+      }
+
+      .label {
+        margin-right: 12px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      @media (max-width: 1000px) {
+        .grid { grid-template-columns: 1fr; }
+        .diagram { min-height: 700px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Grobase BaaS runtime architecture</h1>
+      <p class="subtitle">Multi-plane backend platform: edge → auth → application → control → data → realtime → storage</p>
+
+      <div class="grid">
+        <div class="card diagram">
+          <div class="mermaid">
+flowchart TB
+    U[Users / Browser / SDK / CLI]
+
+    subgraph EDGE["Public edge"]
+      WAF["waf\nnginx + TLS\n:80 / :443"]
+      KONG["kong\nAPI gateway\n:8000"]
+    end
+
+    subgraph AUTH["Identity layer"]
+      GOTRUE["gotrue\nauth + JWT issuer\n:9999"]
+      MAILPIT["mailpit\ndev SMTP\n:8025"]
+    end
+
+    subgraph API["API + app layers"]
+      PGREST["postgrest\nREST + GraphQL\n:3000"]
+      QR["query-router\nTS app plane"]
+      PE["permission-engine\nPDP"]
+      SR["storage-router\nobject access"]
+      DPR["data-plane-router\nRust execution\n:4011"]
+      RT["realtime\nWebSocket / event bus"]
+    end
+
+    subgraph CTRL["Control plane"]
+      TC["tenant-control\nGo control plane\n:3022"]
+      AR["adapter-registry"]
+      ORCH["orchestrator\n:3026"]
+      WD["webhook-dispatcher\n:3025"]
+      SCHED["function-scheduler\n:3027"]
+      FN["functions-runtime\n:3060"]
+    end
+
+    subgraph DATA["Databases + storage"]
+      PG[("postgres\n:5432")]
+      REDIS[("redis\n:6379")]
+      MONGO[("mongo\n:27017")]
+      MINIO[("minio\n:9000 / :9001")]
+      TRINO["trino\n:8080"]
+    end
+
+    subgraph OBS["Observability"]
+      PROM["prometheus\n:9090"]
+      GRAF["grafana\n:3000"]
+    end
+
+    U --> WAF --> KONG
+
+    KONG -->|GET/POST /auth/v1| GOTRUE
+    KONG -->|GET/POST/PUT/PATCH/DELETE /rest/v1| PGREST
+    KONG -->|POST /graphql/v1| PGREST
+    KONG -->|GET/POST/PUT/PATCH/DELETE /query| QR
+    KONG -->|GET/POST/PUT/PATCH/DELETE /data| DPR
+    KONG -->|WS /realtime/v1/ws| RT
+    KONG -->|GET/POST/PUT/PATCH/DELETE /storage/v1| SR
+    KONG -->|GET/POST /admin/v1| TC
+    KONG -->|GET/POST /admin/v1| AR
+    KONG -->|GET/POST /admin/v1| WD
+    KONG -->|GET/POST /admin/v1| SCHED
+    KONG -->|GET/POST /sql| TRINO
+
+    QR --> PE
+    QR --> DPR
+    DPR --> TC
+    DPR --> PG
+    DPR --> REDIS
+    DPR --> MONGO
+    DPR --> MINIO
+
+    PGREST --> PG
+    GOTRUE --> PG
+    GOTRUE --> MAILPIT
+    SR --> MINIO
+    ORCH --> PG
+    ORCH --> RT
+    WD --> FN
+    FN --> REDIS
+    RT --> PG
+    RT --> MONGO
+    PROM --> GRAF
+          </div>
+        </div>
+
+        <div class="card side">
+          <h2>Service map</h2>
+
+          <div class="chip">waf</div>
+          <div class="chip">kong</div>
+          <div class="chip">gotrue</div>
+          <div class="chip">postgrest</div>
+          <div class="chip">query-router</div>
+          <div class="chip">data-plane-router</div>
+          <div class="chip">tenant-control</div>
+          <div class="chip">orchestrator</div>
+          <div class="chip">realtime</div>
+          <div class="chip">postgres</div>
+          <div class="chip">mongo</div>
+          <div class="chip">redis</div>
+          <div class="chip">minio</div>
+          <div class="chip">trino</div>
+
+          <div class="routes">
+            <div class="route"><strong>/auth/v1</strong><br/><span>GoTrue login / session / OAuth</span></div>
+            <div class="route"><strong>/rest/v1</strong><br/><span>PostgREST CRUD access to Postgres</span></div>
+            <div class="route"><strong>/graphql/v1</strong><br/><span>GraphQL API facade</span></div>
+            <div class="route"><strong>/query</strong><br/><span>Request orchestration / filtering / app logic</span></div>
+            <div class="route"><strong>/data</strong><br/><span>Rust execution layer</span></div>
+            <div class="route"><strong>/realtime/v1/ws</strong><br/><span>Realtime event stream</span></div>
+            <div class="route"><strong>/storage/v1</strong><br/><span>Signed object uploads and retrieval</span></div>
+            <div class="route"><strong>/admin/v1</strong><br/><span>Control-plane and management surface</span></div>
+            <div class="route"><strong>/sql</strong><br/><span>Federated SQL via Trino</span></div>
+          </div>
+
+          <div class="legend">
+            <div class="label"><span class="dot" style="background: var(--cyan);"></span> edge</div>
+            <div class="label"><span class="dot" style="background: var(--blue);"></span> app/API</div>
+            <div class="label"><span class="dot" style="background: var(--green);"></span> control</div>
+            <div class="label"><span class="dot" style="background: var(--violet);"></span> data</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
