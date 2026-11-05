@@ -392,8 +392,7 @@ repositories record from what is the team's own account, and the last part
 measures how far we got towards that aim.
 
 **How the tracking evolved.** Work started in February 2026: the first commits
-by `dlesieur`, `danfern3` and `vjan-nie` date from that month (`git log
---reverse` across the submodules). Between then and the autumn the team tried
+date from that month (`git log --reverse` across the submodules). Between then and the autumn the team tried
 GitHub Projects, Jira tickets and Notion pages (team account: none of the three
 left a trace in commit messages, and the Projects board was not readable with
 our token). The only written trace is osionos
@@ -427,6 +426,12 @@ Kanban board), as described in
 [`docs/dossier-project-dylan/dossier-projet.md:390-416`](https://github.com/Univers42/osionos/blob/develop/docs/dossier-project-dylan/dossier-projet.md)
 in osionos.
 
+**Planning and decisions.** Work is planned and decided in meetings, mostly on
+Discord, then recorded in issues, pull requests and the wiki. When a problem
+blocked the team, it got a dedicated meeting. Test-driven development and
+DevOps practices (CI on every pull request, Docker-first builds, one-command
+bring-up) were the means to a frictionless workflow.
+
 **How far we got.** We publish these numbers so the claims above can be checked:
 
 - **Sprints.** The sprints were planned outside GitHub: no milestone and no
@@ -436,12 +441,12 @@ in osionos.
 - **Review.** The rulesets let a maintainer bypass them, and in a sample of the
   40 most recent merged pull requests per repository, 0–22 % carry an approval
   from someone other than the author.
-- **Nobody indispensable.** Shared ownership is real in breadth: `vjan-nie`
-  committed in 12 areas and `shashemi` in 8, osionos has six authors with five
-  or more commits, and prismatica's main author is `serjimen`. In depth we are
-  not there yet: `dlesieur` wrote 86 % of the 8,571 human commits, and in 17 of
-  18 areas one author holds more than half of the commits. Commit counts are not
-  effort: one large commit and a typo fix weigh the same.
+- **Nobody indispensable.** Shared ownership is real in breadth: every active
+  member committed in at least three areas, and osionos has six authors with
+  five or more commits. In depth we are not there yet: one member wrote 86 % of
+  the 8,571 human commits, and in 17 of 18 areas one author holds more than half
+  of the commits. Commit counts are not effort: one large commit and a typo fix
+  weigh the same.
 
 ---
 
