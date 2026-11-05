@@ -692,6 +692,13 @@ full_credentials() {
   [ "$(stat -c %a "$CTL_CFG_DIR/keystore.v42")" = 600 ]
 }
 
+@test "gate: records the object store, which only config.json holds and a new machine lacks" {
+  full_credentials 'echo "ctl $*" >>"$LOG"; case "$*" in "auth status") echo contract ;; esac; exit 0'
+  dc gate
+  [ "$status" -eq 0 ]
+  grep -q "ctl config endpoint --blobstore https://fly.storage.tigris.dev --bucket vault42-seeds" "$LOG"
+}
+
 @test "gate: a vault that refuses, with nothing set by hand, stops naming the files" {
   full_credentials 'case "$*" in "auth status") echo contract ;; env*) echo refused >&2; exit 1 ;; esac; exit 0'
   dc gate

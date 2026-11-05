@@ -21,6 +21,10 @@
 
 GATE_KEYS="FT_PASSPHRASE:VAULT42_PASSPHRASE FT_PASSWORD FT_EMAIL:FT_LOGIN_EMAIL FT_TENANT"
 CTL_INSTALLER=https://raw.githubusercontent.com/Univers42/42ctl/main/install.sh
+# Not secrets, and held by no credential file: the prod tree is over the transport ceiling, so a
+# machine with no config.json could sign in and list it, yet not pull it.
+VAULT_BLOBSTORE=https://fly.storage.tigris.dev
+VAULT_BUCKET=vault42-seeds
 
 # credential_value NAME [ALIAS] — from the environment first, as vault42-session.sh reads it.
 credential_value() {
@@ -101,6 +105,8 @@ vault_readable() {
     . "$REPO/scripts/lib/vault42-session.sh"
     load_credentials
     [ -z "${FT_PASSPHRASE:-}" ] || export FT_PASSPHRASE
+    "$CTL" config endpoint --blobstore "$VAULT_BLOBSTORE" --bucket "$VAULT_BUCKET" --region auto >/dev/null ||
+      die "42ctl could not record the object store"
     ensure_session
     unlock_probe || exit 1
     "$CTL" env files --org "${VAULT42_ORG:-univers42}" --project "${VAULT42_PROJECT:-groot}" \
