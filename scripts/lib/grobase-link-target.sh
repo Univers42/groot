@@ -87,10 +87,17 @@ kong_addr() {
 # The relay reads "<listen port> <socat address>" per line, one socat per line. Redis and
 # Mailpit go to stand-in containers on THIS machine (grobase-link-redis and
 # grobase-link-mailpit; another unit adds them), so sessions and captured mail stay local.
+# shut-down: on the client's EOF the relay sends the first TCP FIN, so the TIME_WAIT stays on
+# this side and our kernel does not hand that source port out again for 60 s. Without it the far
+# end closed first; tailscale serve's netstack then silently drops a SYN that reuses a port still
+# in its TIME_WAIT, and 6/1500 requests stalled 8 s+ (pcap, 2026-11-06: 8/8 stalls reused a port
+# < 60 s after a far-end close). docs/adr/0049 has the measurement.
+# Caveat: only flows the client ends are fixed; a flow the VM ends first (Connection: close,
+# a server-closed WebSocket) still leaves the TIME_WAIT there and can still stall.
 direct_routes() {
   local addr
   addr=$(kong_addr "$1" "$2")
-  printf '%s\n' "8000 $addr" \
+  printf '%s\n' "8000 $addr,shut-down" \
     '6379 TCP:grobase-link-redis:6379' \
     '8025 TCP:grobase-link-mailpit:8025' \
     '1025 TCP:grobase-link-mailpit:1025'

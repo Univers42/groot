@@ -225,7 +225,7 @@ resolve_target() { run env GROBASE_TARGET="$1" bash -c "source '$SCRIPT' && reso
 @test "direct_routes: Kong over the URL, Redis and Mailpit to the local stand-ins" {
   stub getent 'echo "100.94.119.97 STREAM h"'
   helper 'direct_routes https://100.94.119.97:8443 /link/ca.pem'
-  [ "$output" = $'8000 OPENSSL:100.94.119.97:8443,verify=1,cafile=/link/ca.pem,commonname=100.94.119.97,snihost=100.94.119.97\n6379 TCP:grobase-link-redis:6379\n8025 TCP:grobase-link-mailpit:8025\n1025 TCP:grobase-link-mailpit:1025' ]
+  [ "$output" = $'8000 OPENSSL:100.94.119.97:8443,verify=1,cafile=/link/ca.pem,commonname=100.94.119.97,snihost=100.94.119.97,shut-down\n6379 TCP:grobase-link-redis:6379\n8025 TCP:grobase-link-mailpit:8025\n1025 TCP:grobase-link-mailpit:1025' ]
 }
 
 @test "up direct: GROBASE_CA_FILE is copied 644 into LINK_DIR and the relay verifies with it" {
