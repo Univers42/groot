@@ -26,6 +26,9 @@ is_alias() { [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9._@:-]*$ ]]; }
 is_url() { [[ $1 =~ ^https?://[A-Za-z0-9._-]+(:[0-9]{1,5})?(/.*)?$ ]]; }
 is_ssh_url() { [[ $1 =~ ^ssh://([A-Za-z0-9._-]+@)?[A-Za-z0-9._-]+(:[0-9]{1,5})?$ ]]; }
 is_ipv4() { [[ $1 =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; }
+is_https_url() { [[ $1 == https://* ]] && is_url "$1"; }
+is_pem() { [ -r "$1" ] && grep -q 'BEGIN CERTIFICATE' "$1"; }
+is_port() { [[ $1 =~ ^[0-9]{1,5}$ ]] && [ "$1" -le 65535 ]; }
 
 # check KEY VALUE — exit 1 with the reason when VALUE cannot mean KEY. Empty clears a key.
 check() {
@@ -34,10 +37,10 @@ check() {
   case "$1" in
   GROBASE_TARGET) [[ $2 == auto || $2 == local ]] || is_ssh_url "$2" || is_url "$2" || is_alias "$2" ||
     die "GROBASE_TARGET=$2: want auto, local, ssh://[user@]host[:port], http(s)://host[:port] or an ssh alias" ;;
-  GROBASE_API_URL) [[ $2 == https://* ]] && is_url "$2" || die "GROBASE_API_URL=$2: want https://host[:port], the WAF clients call" ;;
-  GROBASE_CA_FILE) [ -r "$2" ] && grep -q 'BEGIN CERTIFICATE' "$2" || die "GROBASE_CA_FILE=$2: not a readable PEM certificate" ;;
+  GROBASE_API_URL) is_https_url "$2" || die "GROBASE_API_URL=$2: want https://host[:port], the WAF clients call" ;;
+  GROBASE_CA_FILE) is_pem "$2" || die "GROBASE_CA_FILE=$2: not a readable PEM certificate" ;;
   GROBASE_REMOTE_DIR) [[ $2 == /* ]] || die "GROBASE_REMOTE_DIR=$2: want an absolute path on that machine" ;;
-  GROBASE_LINK_HOST_PORT) [[ $2 =~ ^[0-9]{1,5}$ ]] && [ "$2" -le 65535 ] || die "GROBASE_LINK_HOST_PORT=$2: want 0-65535" ;;
+  GROBASE_LINK_HOST_PORT) is_port "$2" || die "GROBASE_LINK_HOST_PORT=$2: want 0-65535" ;;
   GROBASE_IDE_SSH | GROBASE_ADMIN_SSH) is_alias "$2" || die "$1=$2: want an ssh alias or user@host, not starting with -" ;;
   GROBASE_CONNECT_IP) is_ipv4 "$2" || die "GROBASE_CONNECT_IP=$2: want an IPv4 address" ;;
   *) die "$1 is not a link setting; known: $KEYS" ;;
