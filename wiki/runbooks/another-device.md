@@ -356,11 +356,11 @@ has `192.168.1.132 grobase.track-binocle.test`.
 
 ```sh
 cd ~/groot
-cp .env.grobase-link.example .env.grobase-link
+make link-set GROBASE_TARGET=ssh://b2b GROBASE_API_URL=https://127.0.0.1:8443   # N1; other rows below
 ```
 
-Then set its keys for the network the device is on. Edit the file by its keys, never by
-pasting values from an env file.
+`make link-set` with no key asks instead, offering the aliases and VMs it finds. It checks each
+value's shape, writes only the keys given, then probes the paths (`make link-paths`).
 
 | Network | `GROBASE_TARGET` | `GROBASE_CA_FILE` | `GROBASE_API_URL` (informational: `scripts/grobase-link.sh api-url`) |
 |---|---|---|---|

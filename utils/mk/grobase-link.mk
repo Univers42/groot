@@ -182,6 +182,15 @@ link-e2e: link-healthcheck ## Run the Playwright smoke against the frontends ser
 ## stack must already be up (link-frontends-up). Empty E2E_SPECS runs the suite.
 	@bash tests/e2e/run.sh $(E2E_SPECS)
 
+# Only keys given on make's command line are written: an exported shell variable is not a request.
+LINK_SET_KEYS = GROBASE_TARGET GROBASE_API_URL GROBASE_CA_FILE GROBASE_REMOTE_DIR GROBASE_LINK_HOST_PORT GROBASE_IDE_SSH GROBASE_ADMIN_SSH GROBASE_CONNECT_IP
+link-set: ## Say where grobase is (local, VM, LAN, cloud URL), check it, probe it
+## Usage: make link-set [GROBASE_TARGET=ssh://b2b GROBASE_API_URL=https://<vm>.<tailnet>.ts.net:8443 ...]
+## Writes the given keys to the file `make link` reads (./.env.grobase-link, or .env.grobase-link.local on a
+## vault42 host) after checking each one's shape, then runs link-paths on the result. With no key on a
+## terminal it asks, offering this daemon's grobase, the ssh aliases and the born2root VMs it finds.
+	@bash scripts/grobase-link-set.sh $(foreach k,$(LINK_SET_KEYS),$(if $(filter command line,$(origin $(k))),'$(k)=$($(k))'))
+
 link-paths: ## List the ways this device reaches the grobase data center
 ## Usage: make link-paths [PATHS="url|ssh-target ..."]
 ## Checks each WAF URL (TLS verified against GROBASE_CA_FILE) and each ssh target (grobase's Kong

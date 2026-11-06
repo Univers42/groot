@@ -29,6 +29,12 @@ a bare host to let the script find out. It is read in this order, first hit wins
 1. The environment, which is also where `make link GROBASE_TARGET=…` puts it — one run.
 2. `./.env.grobase-link` at the repo root — this machine's standing choice. Git-ignored
    (`.gitignore:5`); `.env.grobase-link.example` documents every key; `KEY=value`, no quotes.
+   `make link-set` writes it (`scripts/grobase-link-set.sh`): with no key on a terminal it asks,
+   numbering this daemon's grobase, the `~/.ssh/config` aliases and the born2root VMs it finds;
+   `make link-set GROBASE_TARGET=ssh://dev@vm.lan:2222 GROBASE_API_URL=https://vm.lan:8443`
+   sets keys directly. Each value's shape is checked before the file is touched, then
+   `grobase-paths.sh` probes the result (exit 1 when a path does not answer, after the write).
+   The checks are shape only: a well-formed address of the wrong machine passes them.
 3. The default: `auto`.
 
 `bash scripts/grobase-link.sh conf [KEY]` prints what the next `make link` will use, and the
