@@ -19,7 +19,9 @@ services:
     networks: [beta, track-binocle_default]
     depends_on: [app]
   # The beta's own tailnet node, https://baas-beta.tail10f2ea.ts.net (tailnet only, no Funnel). The key
-  # is read once at first start; after that the node's state in ts-state keeps it logged in.
+  # is read once at first start; after that the node's state in ts-state keeps it logged in. Mint it
+  # tagged (tag:b2b) and NOT ephemeral: nothing here logs a dropped node back in, unlike baas's
+  # autostart, so an ephemeral beta node offline past the tailnet's grace is gone for good.
   ts:
     image: tailscale/tailscale:stable
     container_name: osionos-beta-ts
