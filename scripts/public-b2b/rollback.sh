@@ -22,10 +22,10 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 . "$root/scripts/public-b2b/lib.sh"
 
 before_json=${1:-}
-if [ -z "$before_json" ]; then
+if [[ -z "$before_json" ]]; then
 	before_json=$("${B2B[@]}" "ls -t $REMOTE_DIR/serve-before-*.json 2>/dev/null | head -1" || true)
 fi
-[ -n "$before_json" ] || fail "no saved serve config under $REMOTE_DIR: pass the path explicitly"
+[[ -n "$before_json" ]] || fail "no saved serve config under $REMOTE_DIR: pass the path explicitly"
 "${B2B[@]}" "test -s '$before_json'" || fail "$before_json is missing or empty on the VM"
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 now_json=$REMOTE_DIR/serve-rollback-$stamp.json
@@ -45,7 +45,7 @@ if ! "${B2B[@]}" "set -o pipefail; ${down[*]} 2>&1 | tail -6"; then
 	fail "compose down failed: remove the containers labelled com.docker.compose.project=$PROJECT by hand"
 fi
 left=$("${B2B[@]}" "docker ps -aq --filter label=com.docker.compose.project=$PROJECT | wc -l")
-[ "$left" = 0 ] || fail "$left container(s) of $PROJECT remain"
+[[ "$left" = 0 ]] || fail "$left container(s) of $PROJECT remain"
 echo "  ok   no $PROJECT container left (volume ${PROJECT}_public-redis-data kept)"
 echo "  mini-baas for the human to compare with the deploy output: $("${B2B[@]}" "docker compose -p mini-baas ps -a -q | wc -l") containers, waf $("${B2B[@]}" "docker inspect mini-baas-waf --format '{{.State.StartedAt}}'")"
 

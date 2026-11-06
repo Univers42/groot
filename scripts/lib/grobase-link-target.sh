@@ -14,7 +14,7 @@
 # costs 5 s, and the first match wins, not the nearest. Ponytail: a bare host is tried as
 # ssh, then http://host:8000, then https://host, so a Kong on another port needs the URL.
 
-# One-off ssh with the user's config but none of its forwards; "$@" = [-p port] dest cmd.
+# One-off ssh with the user's config but none of its forwards; "$@" = [[-p port]] dest cmd.
 ssh_once() { ssh -o ClearAllForwardings=yes -o BatchMode=yes -o ConnectTimeout=5 -o LogLevel=ERROR "$@"; }
 local_has_grobase() { docker ps --format '{{.Names}}' 2>/dev/null | grep -qx mini-baas-kong; }
 # ssh://[user@]host[:port] -> "dest" or "dest -p port" (also accepts alias, user@host, host).
@@ -47,7 +47,7 @@ resolve_ipv4() { # HOST -> its first IPv4 address, or HOST itself when getent kn
 # EXPLICIT when set, else TARGET's own URL, else the loopback WAF; exit 1 when it has none.
 api_url() {
   local url=${2:-}
-  if [ -z "$url" ]; then
+  if [[ -z "$url" ]]; then
     case "$1" in
     http://* | https://*) url=$1 ;;
     local) url=https://127.0.0.1:8443 ;;
@@ -101,9 +101,9 @@ ssh_candidates() {
   awk 'tolower($1) == "host" { for (i = 2; i <= NF; i++) if ($i !~ /[*?!]/) print $i }' ~/.ssh/config 2>/dev/null
   local marker port
   for marker in "$REPO"/vendor/born2root/disk_images/.vm_path.* ${B2B_DIR:+"$B2B_DIR"/disk_images/.vm_path.*}; do
-    [ -f "$marker" ] || continue
+    [[ -f "$marker" ]] || continue
     port=$(awk -F= '$1 == "ssh" { print $2 }' "$(cat "$marker")/${marker##*.vm_path.}/ports.env" 2>/dev/null)
-    [ -n "$port" ] && printf 'ssh://%s@127.0.0.1:%s\n' "$USER" "$port"
+    [[ -n "$port" ]] && printf 'ssh://%s@127.0.0.1:%s\n' "$USER" "$port"
   done
 }
 
@@ -125,7 +125,7 @@ resolve_auto() {
     return
   fi
   while read -r c; do
-    [ -n "$c" ] || continue
+    [[ -n "$c" ]] || continue
     note "probing $c"
     if remote_has_grobase "$c"; then
       printf 'ssh %s\n' "$c"
@@ -148,7 +148,7 @@ resolve_host() { # a bare host or alias: ssh first, then Kong's plain port, then
 # relay_cafile -> the CA file the relay verifies Kong with, as the relay sees it: the copy up
 # installs in LINK_DIR (/link in the relay) when GROBASE_CA_FILE is set, else the system store.
 relay_cafile() {
-  if [ -n "$CA_FILE" ]; then
+  if [[ -n "$CA_FILE" ]]; then
     printf '/link/ca.pem\n'
   else
     printf '/etc/ssl/certs/ca-certificates.crt\n'
@@ -163,7 +163,7 @@ relay_cafile() {
 capability_status() {
   local host port body="" line
   read -r host port < <(url_hostport "$1")
-  [ "$2" != POST ] || body='{}'
+  [[ "$2" != POST ]] || body='{}'
   line=$(printf '%s %s HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s' \
     "$2" "$3" "$host" "${#body}" "$body" |
     docker run --rm -i -v "$LINK_DIR:/link:ro" "$SOCAT_IMG" -T10 -t10 - "$(kong_addr "$1" "$(relay_cafile)"),shut-none,connect-timeout=5" 2>/dev/null |
@@ -205,11 +205,11 @@ capability_answer() {
 # write OSIONOS_TENANT_MOUNTS_URL; they only clear one a direct link left.
 publish_env() {
   local url="" key="" query="" registry="" mounts="" keepalive="" mounts_status
-  if [ "$1" = direct ]; then
+  if [[ "$1" = direct ]]; then
     url=http://mini-baas-kong:8000/realtime
     keepalive=1
     key=$(get_env "$2" SERVICE_ROLE_KEY) || key=""
-    if [ "$(capability_answer "$3" POST /realtime/v1/publish)" = 403 ]; then
+    if [[ "$(capability_answer "$3" POST /realtime/v1/publish)" = 403 ]]; then
       url=ws://mini-baas-kong:8000/realtime/v1/ws
       key=""
       note "direct: $3 refuses /realtime/v1/publish without credentials; the bridge publishes over /realtime/v1/ws"
@@ -224,7 +224,7 @@ publish_env() {
     *) note "direct: $3 gave no definite answer on /v1/tenants/me/mounts ($mounts_status): mounted databases may be refused. make link asks again" ;;
     esac
   fi
-  if [ "$1" != local ]; then
+  if [[ "$1" != local ]]; then
     query=http://mini-baas-kong:8000/query/v1
     registry=http://mini-baas-kong:8000/admin/v1
   fi
@@ -232,12 +232,12 @@ publish_env() {
   put_env "$2" REALTIME_PUBLISH_APIKEY "$key"
   put_env "$2" OSIONOS_QUERY_ROUTER_URL "$query"
   put_env "$2" OSIONOS_ADAPTER_REGISTRY_URL "$registry"
-  if [ "$1" = direct ] || get_env "$2" OSIONOS_TENANT_MOUNTS_URL >/dev/null; then
+  if [[ "$1" = direct ]] || get_env "$2" OSIONOS_TENANT_MOUNTS_URL >/dev/null; then
     put_env "$2" OSIONOS_TENANT_MOUNTS_URL "$mounts"
   fi
   # Kept-alive pool: a workspace open after 40 s idle 488 -> 313 ms median (2026-10-18, 8
   # workspaces, interleaved); measured on the direct link only, so ssh/local never turn it on.
-  if [ "$1" = direct ] || get_env "$2" OSIONOS_BAAS_KEEPALIVE >/dev/null; then
+  if [[ "$1" = direct ]] || get_env "$2" OSIONOS_BAAS_KEEPALIVE >/dev/null; then
     put_env "$2" OSIONOS_BAAS_KEEPALIVE "$keepalive"
   fi
 }
@@ -299,7 +299,7 @@ rt_token_ensure() {
   local secret_src="$2"
   local secret cur out bad="" kind exp token
   secret=$(get_env "$secret_src" JWT_SECRET) || return 0
-  [ -n "$secret" ] || return 0
+  [[ -n "$secret" ]] || return 0
   cur=$(get_env "$env_local" VITE_BAAS_REALTIME_TOKEN || true)
   out=$(RT_JWT_SECRET="$secret" RT_TOKEN="$cur" \
     docker run --rm --network none -e RT_JWT_SECRET -e RT_TOKEN node:22-alpine node -e "$RT_TOKEN_JS") || {
@@ -310,19 +310,19 @@ rt_token_ensure() {
   set -- $out
   kind=${1:-}
   case $kind in
-  kept) [ "$#" -eq 2 ] || bad=1 ;;
-  minted) [ "$#" -eq 3 ] || bad=1 ;;
+  kept) [[ "$#" -eq 2 ]] || bad=1 ;;
+  minted) [[ "$#" -eq 3 ]] || bad=1 ;;
   *) bad=1 ;;
   esac
   exp=${2:-}
   case $exp in
   '' | *[!0-9]*) bad=1 ;;
   esac
-  if [ -n "$bad" ]; then
+  if [[ -n "$bad" ]]; then
     note "warning: the realtime token could not be refreshed; the live views fall back to 15 s polling"
     return 0
   fi
-  if [ "$kind" = kept ]; then
+  if [[ "$kind" = kept ]]; then
     note "realtime token valid until $(date -d "@$exp" +%F)"
   else
     token=${3:-}

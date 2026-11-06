@@ -40,7 +40,7 @@ RT_SQL=$(cat "$REPO/scripts/verify/account-roundtrip.sql")
 rt_line() { printf '%-4s %s  %s\n' "$1" "$2" "$3"; }
 report() {
   rt_line "$@"
-  [ "$1" != FAIL ] || FAILED=1
+  [[ "$1" != FAIL ]] || FAILED=1
 }
 # A failed HTTP step stops the run: every later step needs what this one produced.
 fail() {
@@ -89,7 +89,7 @@ edge_port() { # <container port> <compose variable> <result variable>
   hp=$(docker compose -f "$REPO/docker-compose.yml" port "$EDGE_SERVICE" "$1" 2>/dev/null | head -n1) || true
   port=${hp##*:}
   addr=${hp%:*}
-  [ -n "$port" ] || port=${!2:-$1}
+  [[ -n "$port" ]] || port=${!2:-$1}
   case $addr in '' | 0.0.0.0 | :: | '[::]') addr=127.0.0.1 ;; esac
   RESOLVE+=(--resolve "localhost:$port:$addr")
   printf -v "$3" '%s' "$port"
@@ -102,8 +102,8 @@ edge_port() { # <container port> <compose variable> <result variable>
 request() { # <method> <url> [body file] [header file]
   local args=(-sS -m 20 --cacert "$LINK_CA" "${RESOLVE[@]}" -b "$TMP/jar" -c "$TMP/jar"
     -o "$TMP/resp" -w '%{http_code}' -X "$1")
-  [ -z "${3:-}" ] || args+=(-H 'content-type: application/json' --data-binary "@$3")
-  [ -z "${4:-}" ] || args+=(-H "@$4")
+  [[ -z "${3:-}" ]] || args+=(-H 'content-type: application/json' --data-binary "@$3")
+  [[ -z "${4:-}" ]] || args+=(-H "@$4")
   : >"$TMP/resp"
   curl "${args[@]}" "$2" 2>"$TMP/curl.err" || true
 }
@@ -124,14 +124,14 @@ step_edge() {
   BRIDGE="https://localhost:$BRIDGE_PORT"
   url="$SITE/api/auth/health"
   code=$(request GET "$url")
-  if [ "$code" = 404 ]; then
+  if [[ "$code" = 404 ]]; then
     url="$SITE/api/auth/availability"
     code=$(request GET "$url")
   fi
-  [ "$code" = 200 ] || fail edge "$url answers HTTP $code ($(said)): is the stack up? make link-frontends-up"
+  [[ "$code" = 200 ]] || fail edge "$url answers HTTP $code ($(said)): is the stack up? make link-frontends-up"
   url="$BRIDGE/api/auth/bridge/health"
   code=$(request GET "$url")
-  [ "$code" = 200 ] || fail edge "$url answers HTTP $code ($(said)): is the stack up? make link-frontends-up"
+  [[ "$code" = 200 ]] || fail edge "$url answers HTTP $code ($(said)): is the stack up? make link-frontends-up"
   report ok edge "$SITE (site + auth gateway) and $BRIDGE (osionos bridge) over TLS, CA ${LINK_CA#"$REPO"/}"
 }
 
@@ -140,11 +140,11 @@ step_edge() {
 step_availability() {
   local code
   code=$(request GET "$SITE/api/auth/availability?email=${EMAIL/@/%40}&username=$HANDLE")
-  if [ "$code" = 404 ]; then
+  if [[ "$code" = 404 ]]; then
     report SKIP availability "this gateway has no /api/auth/availability (prismatica main checks it inside register)"
     return 0
   fi
-  if ! { [ "$code" = 200 ] && jq -e '.email.available and .username.available' "$TMP/resp" >/dev/null; }; then
+  if ! { [[ "$code" = 200 ]] && jq -e '.email.available and .username.available' "$TMP/resp" >/dev/null; }; then
     fail availability "HTTP $code $(said)"
   fi
   report ok availability "HTTP 200, email and username $HANDLE are free"
@@ -156,7 +156,7 @@ step_register() {
   RT_PW=$PASSWORD jq -n --arg email "$EMAIL" --arg user "$HANDLE" '{email: $email, password: $ENV.RT_PW,
     turnstileToken: "localhost-turnstile-token", profile: {username: $user, confirmPassword: $ENV.RT_PW}}' >"$TMP/body"
   code=$(request POST "$SITE/api/auth/register" "$TMP/body")
-  [ "$code" = 200 ] || fail register "HTTP $code $(said)"
+  [[ "$code" = 200 ]] || fail register "HTTP $code $(said)"
   report ok register "HTTP 200 $(said)"
 }
 
@@ -167,7 +167,7 @@ step_login() {
   RT_PW=$PASSWORD jq -n --arg email "$EMAIL" \
     '{email: $email, password: $ENV.RT_PW, turnstileToken: "localhost-turnstile-token"}' >"$TMP/body"
   code=$(request POST "$SITE/api/auth/login" "$TMP/body")
-  [ "$code" = 200 ] || fail login "HTTP $code $(said)"
+  [[ "$code" = 200 ]] || fail login "HTTP $code $(said)"
   jq -er '(.access_token // .session.access_token) | strings | "Authorization: Bearer " + .' "$TMP/resp" >"$TMP/site-auth" 2>/dev/null ||
     fail login "HTTP 200 without an access_token"
   USER_ID=$(jq -r '.user.id // .session.user.id // empty' "$TMP/resp")
@@ -181,7 +181,7 @@ step_login() {
 step_session() {
   local code
   code=$(request POST "$SITE/api/auth/osionos-session" "$TMP/empty" "$TMP/site-auth")
-  [ "$code" = 200 ] || fail osionos-session "HTTP $code $(said)"
+  [[ "$code" = 200 ]] || fail osionos-session "HTTP $code $(said)"
   jq -e '{token: (.redirectUrl | capture("#bridge_token=(?<t>[A-Za-z0-9_-]+)").t)}' "$TMP/resp" >"$TMP/handoff" 2>/dev/null ||
     fail osionos-session "HTTP 200 without a #bridge_token redirect"
   report ok osionos-session "HTTP 200, redirect to $(jq -r '.redirectUrl | sub("#.*"; "")' "$TMP/resp")#bridge_token=(not shown)"
@@ -192,12 +192,12 @@ step_session() {
 step_consume() {
   local code
   code=$(request POST "$BRIDGE/api/auth/bridge/consume" "$TMP/handoff")
-  [ "$code" = 200 ] || fail bridge-consume "HTTP $code $(said)"
+  [[ "$code" = 200 ]] || fail bridge-consume "HTTP $code $(said)"
   jq -er '.session.accessToken | select(startswith("osionos_v1.")) | "Authorization: Bearer " + .' \
     "$TMP/resp" >"$TMP/app-auth" 2>/dev/null || fail bridge-consume "HTTP 200 without an osionos_v1. app token"
   WORKSPACE_ID=$(jq -r '.session.privateWorkspaces[0]._id // empty' "$TMP/resp")
-  [ -n "$WORKSPACE_ID" ] || fail bridge-consume "HTTP 200 without a private workspace"
-  [ "$(jq -r '.session.userId' "$TMP/resp")" = "$USER_ID" ] || fail bridge-consume "the app session is for another user"
+  [[ -n "$WORKSPACE_ID" ]] || fail bridge-consume "HTTP 200 without a private workspace"
+  [[ "$(jq -r '.session.userId' "$TMP/resp")" = "$USER_ID" ]] || fail bridge-consume "the app session is for another user"
   report ok bridge-consume "HTTP 200, osionos_v1. app token (not shown), user $USER_ID, workspace $WORKSPACE_ID"
 }
 
@@ -207,7 +207,7 @@ step_consume() {
 step_workspaces() {
   local code
   code=$(request GET "$BRIDGE/api/workspaces" "" "$TMP/app-auth")
-  [ "$code" = 200 ] || fail workspaces "HTTP $code $(said)"
+  [[ "$code" = 200 ]] || fail workspaces "HTTP $code $(said)"
   jq -er --arg id "$WORKSPACE_ID" 'first(.[] | select(._id == $id and .createdAt != null))
     | "\(.name) role=\(.role)"' "$TMP/resp" >"$TMP/ws" 2>/dev/null ||
     fail workspaces "HTTP 200, but $WORKSPACE_ID has no grobase row: see 'BaaS persistence skipped' in the bridge log"
@@ -219,9 +219,9 @@ step_page_write() {
   jq -n --arg ws "$WORKSPACE_ID" --arg title "$TITLE" --arg text "$MARKER" '{workspaceId: $ws, title: $title,
     icon: "R", content: [{id: ("block-" + $title | gsub(" "; "-")), type: "paragraph", content: $text}]}' >"$TMP/body"
   code=$(request POST "$BRIDGE/api/pages" "$TMP/body" "$TMP/app-auth")
-  [ "$code" = 201 ] || fail page-write "HTTP $code $(said)"
+  [[ "$code" = 201 ]] || fail page-write "HTTP $code $(said)"
   PAGE_ID=$(jq -r '._id // empty' "$TMP/resp")
-  [ -n "$PAGE_ID" ] || fail page-write "HTTP 201 without a page id"
+  [[ -n "$PAGE_ID" ]] || fail page-write "HTTP 201 without a page id"
   report ok page-write "HTTP 201, page $PAGE_ID \"$TITLE\" in workspace $WORKSPACE_ID"
 }
 
@@ -229,7 +229,7 @@ step_page_write() {
 step_page_read() {
   local code
   code=$(request GET "$BRIDGE/api/pages/$PAGE_ID" "" "$TMP/app-auth")
-  if [ "$code" = 200 ] && jq -e --arg t "$TITLE" --arg m "$MARKER" \
+  if [[ "$code" = 200 ]] && jq -e --arg t "$TITLE" --arg m "$MARKER" \
     '.title == $t and any(.content[]?; .content == $m)' "$TMP/resp" >/dev/null; then
     report ok page-read "HTTP 200, title and paragraph read back through the bridge"
   else
@@ -249,13 +249,13 @@ step_db() {
   ssh) via="over ssh to $(state_get target 2>/dev/null || printf 'no target (make link)')" ;;
   *) fail db "link mode '$DB_MODE' is none of local, ssh, direct" ;;
   esac
-  [ "${#PSQL[@]}" -gt 0 ] || fail db "$DB_MODE link, $via"
+  [[ "${#PSQL[@]}" -gt 0 ]] || fail db "$DB_MODE link, $via"
   report ok db-link "$DB_MODE link: docker exec $RT_PG psql $via"
   timeout "$RT_DB_TIMEOUT" "${PSQL[@]}" <<<"$RT_SQL" >"$TMP/db" 2>"$TMP/db.err" ||
     fail db "psql through the $DB_MODE link failed: $(head -n1 "$TMP/db.err")"
-  [ "$(grep -c . "$TMP/db")" = 6 ] || fail db "expected 6 rows, got: $(head -c 160 "$TMP/db")"
+  [[ "$(grep -c . "$TMP/db")" = 6 ]] || fail db "expected 6 rows, got: $(head -c 160 "$TMP/db")"
   while IFS='|' read -r step verdict detail; do
-    [ "$verdict" = ok ] || verdict=FAIL
+    [[ "$verdict" = ok ]] || verdict=FAIL
     report "$verdict" "$step" "$detail"
   done <"$TMP/db"
 }
@@ -275,7 +275,7 @@ main() {
   for tool in curl jq timeout; do need "$tool"; done
   DB_MODE=$(bash "$RT_LINK_SH" mode 2>/dev/null) || DB_MODE=local
   case $DB_MODE in local) need docker ;; ssh) need ssh ;; esac
-  [ -f "$LINK_CA" ] || fail preflight "no CA at $LINK_CA (make certs)"
+  [[ -f "$LINK_CA" ]] || fail preflight "no CA at $LINK_CA (make certs)"
   TMP=$(mktemp -d)
   trap 'rm -rf "$TMP"' EXIT
   : >"$TMP/jar"
@@ -292,5 +292,5 @@ main() {
   exit "$FAILED"
 }
 
-[ "${BASH_SOURCE[0]}" = "$0" ] || return 0 # sourced by scripts/tests/account-roundtrip.bats
+[[ "${BASH_SOURCE[0]}" = "$0" ]] || return 0 # sourced by scripts/tests/account-roundtrip.bats
 main "$@"

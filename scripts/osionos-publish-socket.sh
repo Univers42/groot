@@ -28,15 +28,15 @@ ssh_user=${PUBLISH_SSH_USER:-$(id -un)}
 
 read_host_key() { # validate HOST_KEY_FILE (exit 2: unset, unreadable, not exactly one valid key) and print "<type> <key>"
 	local keytype='' keydata='' _
-	[ -n "${HOST_KEY_FILE:-}" ] || {
+	[[ -n "${HOST_KEY_FILE:-}" ]] || {
 		echo "[publish-socket] HOST_KEY_FILE is unset: the VM's ssh host public key line has to be pinned by the operator, over a trusted step" >&2
 		exit 2
 	}
-	[ -r "$HOST_KEY_FILE" ] || {
+	[[ -r "$HOST_KEY_FILE" ]] || {
 		echo "[publish-socket] HOST_KEY_FILE=$HOST_KEY_FILE is not a readable file" >&2
 		exit 2
 	}
-	if [ "$(grep -c '[^[:space:]]' "$HOST_KEY_FILE")" -ne 1 ]; then
+	if [[ "$(grep -c '[^[:space:]]' "$HOST_KEY_FILE")" -ne 1 ]]; then
 		echo "[publish-socket] HOST_KEY_FILE must hold exactly one host key line" >&2
 		exit 2
 	fi
@@ -48,7 +48,7 @@ read_host_key() { # validate HOST_KEY_FILE (exit 2: unset, unreadable, not exact
 		exit 2
 		;;
 	esac
-	[ -n "$keydata" ] || {
+	[[ -n "$keydata" ]] || {
 		echo "[publish-socket] HOST_KEY_FILE has a key type but no key" >&2
 		exit 2
 	}
@@ -90,7 +90,7 @@ install_unit() {
 	pinned=$(read_host_key)
 	require_plain
 	# bytes, not characters: a multibyte XDG_STATE_HOME is longer than ${#sock} says
-	if [ "$(printf %s "$sock" | wc -c)" -gt 100 ]; then
+	if [[ "$(printf %s "$sock" | wc -c)" -gt 100 ]]; then
 		echo "[publish-socket] $sock is longer than 100 bytes: a unix socket path has to fit 108" >&2
 		exit 1
 	fi
@@ -98,7 +98,7 @@ install_unit() {
 	chmod 700 "$state" "$sockdir"
 	printf 'b2b-publish %s\n' "$pinned" >"$known_hosts"
 	chmod 600 "$known_hosts"
-	[ -f "$identity" ] || {
+	[[ -f "$identity" ]] || {
 		echo "[publish-socket] no identity file at $identity (PUBLISH_SSH_IDENTITY=<file>)" >&2
 		exit 1
 	}
@@ -110,7 +110,7 @@ install_unit() {
 
 remove_unit() {
 	# only an absent unit is skipped: any other disable/stop failure must not report "off"
-	if [ -e "$unitdir/$unit" ]; then
+	if [[ -e "$unitdir/$unit" ]]; then
 		systemctl --user disable --now "$unit" >/dev/null
 	fi
 	rm -f "$unitdir/$unit"
@@ -123,7 +123,7 @@ print_status() {
 	local active
 	active=$(systemctl --user is-active "$unit" 2>/dev/null) || true
 	echo "[publish-socket] unit: ${active:-unknown}"
-	if [ -e "$sock" ]; then
+	if [[ -e "$sock" ]]; then
 		echo "[publish-socket] socket: $sock exists"
 	else
 		echo "[publish-socket] socket: $sock missing"

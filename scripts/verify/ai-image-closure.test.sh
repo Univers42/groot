@@ -59,7 +59,7 @@ EOF
 
 out="$("$SCRIPT" "$SVC" "$SVC/Dockerfile" 2>&1)"
 code=$?
-if [ "$code" -eq 1 ]; then pass "fixture: exit 1"; else fail "fixture: exit $code, expected 1"; fi
+if [[ "$code" -eq 1 ]]; then pass "fixture: exit 1"; else fail "fixture: exit $code, expected 1"; fi
 if grep -qF "MISSING z.mjs" <<<"$out"; then
 	pass "fixture: MISSING z.mjs (transitive: a.ts -> x -> y -> z)"
 else
@@ -86,7 +86,7 @@ COPY scripts/x.mjs scripts/y.mjs scripts/z.mjs scripts/d.mjs ./scripts/
 EOF
 out="$("$SCRIPT" "$SVC" "$SVC/Dockerfile.all" 2>&1)"
 code=$?
-if [ "$code" -eq 0 ] && grep -qF "PASS" <<<"$out"; then
+if [[ "$code" -eq 0 ]] && grep -qF "PASS" <<<"$out"; then
 	pass "fixture: z.mjs copied -> exit 0 and PASS"
 else
 	fail "fixture: z.mjs copied -> exit $code, no PASS"
@@ -95,22 +95,22 @@ fi
 # The osionos app checkout the image is built from.
 app_dir=""
 for candidate in "${OSIONOS:-}" "$REPO/apps/osionos/app"; do
-	if [ -n "$candidate" ] && [ -d "$candidate/services/osionos-ai/src" ]; then
+	if [[ -n "$candidate" ]] && [[ -d "$candidate/services/osionos-ai/src" ]]; then
 		app_dir="$(cd "$candidate" && pwd)"
 		break
 	fi
 done
 
-if [ -z "$app_dir" ]; then
+if [[ -z "$app_dir" ]]; then
 	skipped="$skipped real-tree"; echo "SKIPPED: the real tree (the osionos app checkout was not found — set OSIONOS=/path/to/osionos)"
 else
 	echo "-- real tree: $app_dir"
 	out="$("$SCRIPT" "$app_dir" 2>&1)"
 	code=$?
-	if [ "$code" -eq 0 ]; then pass "real tree: exit 0"; else fail "real tree: exit $code, expected 0"; fi
+	if [[ "$code" -eq 0 ]]; then pass "real tree: exit 0"; else fail "real tree: exit $code, expected 0"; fi
 	if grep -qF "PASS" <<<"$out"; then pass "real tree: PASS"; else fail "real tree: PASS is missing"; fi
 	count="$(grep -c '^ok ' <<<"$out")"
-	if [ "$count" -eq 6 ]; then pass "real tree: 6 ok lines"; else fail "real tree: $count ok lines, expected 6"; fi
+	if [[ "$count" -eq 6 ]]; then pass "real tree: 6 ok lines"; else fail "real tree: $count ok lines, expected 6"; fi
 	for name in bridge-baas-body.mjs bridge-graph-edges.mjs bridge-live-workspaces.mjs \
 		bridge-page-read.mjs bridge-session-cutoff.mjs bridge-session-token.mjs; do
 		if grep -qF "ok $name" <<<"$out"; then
@@ -130,7 +130,7 @@ else
 	sed 's| scripts/bridge-graph-edges.mjs||' "$DOCKERFILE" > "$TMP/no-graph.Dockerfile"
 	out="$("$SCRIPT" "$app_dir" "$TMP/no-graph.Dockerfile" 2>&1)"
 	code=$?
-	if [ "$code" -eq 1 ] && grep -qF "MISSING bridge-graph-edges.mjs" <<<"$out" &&
+	if [[ "$code" -eq 1 ]] && grep -qF "MISSING bridge-graph-edges.mjs" <<<"$out" &&
 		grep -qF "FAIL: 1 script(s)" <<<"$out"; then
 		pass "bite: bridge-graph-edges.mjs out of the COPY line -> MISSING, FAIL: 1, exit 1"
 	else
@@ -140,7 +140,7 @@ else
 	sed 's| scripts/bridge-baas-body.mjs||' "$DOCKERFILE" > "$TMP/no-body.Dockerfile"
 	out="$("$SCRIPT" "$app_dir" "$TMP/no-body.Dockerfile" 2>&1)"
 	code=$?
-	if [ "$code" -eq 1 ] && grep -qF "MISSING bridge-baas-body.mjs" <<<"$out"; then
+	if [[ "$code" -eq 1 ]] && grep -qF "MISSING bridge-baas-body.mjs" <<<"$out"; then
 		pass "bite: bridge-baas-body.mjs out of the COPY line -> MISSING (transitive), exit 1"
 	else
 		fail "bite: bridge-baas-body.mjs out of the COPY line -> exit $code, no MISSING"
@@ -157,7 +157,7 @@ else
 	skipped="$skipped shellcheck"; echo "SKIPPED: shellcheck is not installed"
 fi
 
-if [ "$status" -ne 0 ]; then echo "FAIL: a check failed"
-elif [ -n "$skipped" ]; then echo "PASS: every check that ran passed; SKIPPED:$skipped"
+if [[ "$status" -ne 0 ]]; then echo "FAIL: a check failed"
+elif [[ -n "$skipped" ]]; then echo "PASS: every check that ran passed; SKIPPED:$skipped"
 else echo "PASS: all the checks passed"; fi
 exit "$status"
