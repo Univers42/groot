@@ -23,7 +23,7 @@ setting() {
 LINK_DIR="${GROBASE_LINK_DIR:-${XDG_RUNTIME_DIR:-/tmp}/track-binocle-link}"
 TARGET=$(setting GROBASE_TARGET auto)
 HOST_PORT=$(setting GROBASE_LINK_HOST_PORT 28000) # loopback copy of Kong for host tools; 0 disables
-REMOTE_DIR=$(setting GROBASE_REMOTE_DIR /opt/grobase)
+REMOTE_DIR=$(setting GROBASE_REMOTE_DIR "") # empty = asked of the target (remote_grobase_dir)
 API_URL=$(setting GROBASE_API_URL "")               # the WAF clients call; empty = derived from TARGET
 CA_FILE=$(setting GROBASE_CA_FILE "")               # direct targets only: the CA signing that Kong's certificate
 IDE_SSH=$(setting GROBASE_IDE_SSH "")               # direct targets only: an ssh alias used for the IDE plane forward, nothing else
@@ -54,6 +54,8 @@ state_set() { printf 'mode=%s\ntarget=%s\n' "$1" "$2" >"$STATE"; }
 mux() { ssh -F /dev/null -S "$CTL" -o BatchMode=yes -o LogLevel=ERROR "$@"; }
 # shellcheck source=scripts/lib/grobase-link-target.sh
 . "$REPO/scripts/lib/grobase-link-target.sh"
+# shellcheck source=scripts/lib/grobase-remote-dir.sh
+. "$REPO/scripts/lib/grobase-remote-dir.sh"
 # shellcheck source=scripts/lib/grobase-link-verify.sh
 . "$REPO/scripts/lib/grobase-link-verify.sh"
 # shellcheck source=scripts/lib/grobase-link-ide.sh
@@ -253,6 +255,7 @@ cmd_status() {
 # The target's own .env through the link's master: the only keys that grobase accepts.
 fetch_remote_env() {
   umask 077
+  [ -n "$REMOTE_DIR" ] || REMOTE_DIR=$(remote_grobase_dir mux x)
   mux x "cat '$REMOTE_DIR/.env'" >"$REMOTE_ENV.tmp" || {
     rm -f "$REMOTE_ENV.tmp"
     die "cannot read $REMOTE_DIR/.env on $(state_get target) (GROBASE_REMOTE_DIR=<its grobase dir>)"
@@ -331,7 +334,7 @@ usage: grobase-link.sh up|down|status|env|verify|mode|conf [KEY]|api-url|docker-
   api-url  print the HTTPS URL of the grobase API (the WAF) for clients
 Settings: the environment (make link KEY=value) wins, then ./.env.grobase-link (KEY=value, git-ignored; .env.grobase-link.example documents it), then the default.
   GROBASE_TARGET          auto | local | ssh://[user@]host[:port] | <ssh alias|user@host|host> | http(s)://host[:port]  -- the scheme is the kind of connection
-  GROBASE_LINK_HOST_PORT  28000 (0 = none)        GROBASE_REMOTE_DIR  /opt/grobase
+  GROBASE_LINK_HOST_PORT  28000 (0 = none)        GROBASE_REMOTE_DIR  ssh: where its Kong was started (else /opt/grobase)
   GROBASE_API_URL         the WAF URL clients call, https://<vm>.<tailnet>.ts.net:8443; ssh/auto need it
   GROBASE_CA_FILE         direct targets only: the PEM CA signing that Kong's certificate; empty = the relay's system store
   GROBASE_IDE_SSH         direct targets only: an ssh alias used solely for the IDE plane socket; empty = no ssh

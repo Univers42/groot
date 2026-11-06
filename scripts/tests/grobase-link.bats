@@ -89,7 +89,7 @@ resolve_target() { run env GROBASE_TARGET="$1" bash -c "source '$SCRIPT' && reso
   [ "$output" = auto ]
   run bash "$SCRIPT" conf
   [ "$status" -eq 0 ]
-  [ "$output" = $'GROBASE_TARGET=auto\nGROBASE_LINK_HOST_PORT=28000\nGROBASE_REMOTE_DIR=/opt/grobase\nGROBASE_API_URL=\nGROBASE_CA_FILE=' ]
+  [ "$output" = $'GROBASE_TARGET=auto\nGROBASE_LINK_HOST_PORT=28000\nGROBASE_REMOTE_DIR=\nGROBASE_API_URL=\nGROBASE_CA_FILE=' ]
 }
 
 @test "conf: GROBASE_CA_FILE — the environment beats the file, the file beats empty" {

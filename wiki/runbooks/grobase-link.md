@@ -310,7 +310,7 @@ when it moves that port.
 |---|---|---|
 | `GROBASE_TARGET` | `auto` | `local` · `ssh://[user@]host[:port]` · `<alias \| user@host \| host>` · `http(s)://host[:port]` |
 | `GROBASE_LINK_HOST_PORT` | `28000` | Kong copy on `127.0.0.1` for host tools and `link-healthcheck`; `0` disables |
-| `GROBASE_REMOTE_DIR` | `/opt/grobase` | Where the remote grobase's `.env` is (ssh mode, `env` verb) |
+| `GROBASE_REMOTE_DIR` | empty: the directory the target's `mini-baas-kong` was started from, else `/opt/grobase` | Where the remote grobase's `.env` is (ssh mode, `env` verb) |
 | `GROBASE_LINK_DIR` (env only) | `$XDG_RUNTIME_DIR/track-binocle-link` | Sockets, routes and state; `0700`; bind-mounted into the relay as `/link` |
 | `GROBASE_LINK_CONF` (env only) | `./.env.grobase-link` | The settings file |
 | `LINK_VHOST_HTTPS_PORT` (make only) | `9443` under rootless Docker, else `443` | Rootless cannot bind below `ip_unprivileged_port_start` (`grobase-link.mk:16-18`) |
