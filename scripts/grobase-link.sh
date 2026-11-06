@@ -50,7 +50,9 @@ die() {
   exit 1
 }
 state_get() { get_env "$STATE" "$1"; }
-state_set() { printf 'mode=%s\ntarget=%s\n' "$1" "$2" >"$STATE"; }
+# The dial address travels with the target: LINK_DIR is per user, not per checkout, so another
+# checkout's GROBASE_CONNECT_IP (derived for its own target) must not redirect this link's probes.
+state_set() { printf 'mode=%s\ntarget=%s\nconnect_ip=%s\n' "$1" "$2" "${CONNECT_IP:-}" >"$STATE"; }
 mux() { ssh -F /dev/null -S "$CTL" -o BatchMode=yes -o LogLevel=ERROR "$@"; }
 # shellcheck source=scripts/lib/grobase-link-target.sh
 . "$REPO/scripts/lib/grobase-link-target.sh"
@@ -246,6 +248,7 @@ cmd_status() {
     [ "$code" != 000 ]
     ;;
   direct)
+    ! grep -q '^connect_ip=' "$STATE" || CONNECT_IP=$(state_get connect_ip || true)
     url_reachable "$target" || die "direct: $target no longer answers from a container"
     note "direct: $target answers from a container"
     ;;

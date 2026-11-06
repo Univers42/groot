@@ -111,6 +111,16 @@ resolve_target() { run env GROBASE_TARGET="$1" bash -c "source '$SCRIPT' && reso
   [ "$output" = $'ssh://alice@box:2222\nssh' ]
 }
 
+@test "status: a direct link dials the address it was opened with, not another checkout's" {
+  mkdir -p "$GROBASE_LINK_DIR" && printf 'mode=direct\ntarget=https://k\nconnect_ip=\n' >"$GROBASE_LINK_DIR/state"
+  printf 'GROBASE_CONNECT_IP=10.9.9.9\n' >"$GROBASE_LINK_CONF"
+  stub getent 'echo "10.1.1.1 k"'
+  stub docker 'echo "$*" >"$BATS_TEST_TMPDIR/dialed"'
+  run bash "$SCRIPT" status
+  [ "$status" -eq 0 ]
+  grep -q 'OPENSSL:10.1.1.1:443' "$BATS_TEST_TMPDIR/dialed"
+}
+
 @test "mode and status: exit 1 with no link; mode prints the recorded mode once set" {
   run bash "$SCRIPT" mode
   [ "$status" -eq 1 ]
