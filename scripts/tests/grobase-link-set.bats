@@ -39,7 +39,7 @@ set_link() { run bash "$ROOT/scripts/grobase-link-set.sh" "$@" </dev/null; }
   printf 'GROBASE_TARGET=local\n' >"$GROBASE_LINK_CONF"
   for bad in GROBASE_TARGET=ftp://x GROBASE_API_URL=http://plain.example GROBASE_IDE_SSH=-oProxyCommand=x \
     GROBASE_CONNECT_IP=vm.lan GROBASE_LINK_HOST_PORT=70000 GROBASE_REMOTE_DIR=relative GROBASE_CA_FILE=/nope.pem \
-    GROBASE_PASSWORD=x 'GROBASE_TARGET=ssh://h;id'; do
+    GROBASE_PASSWORD=x 'GROBASE_TARGET=ssh://h;id' "GROBASE_REMOTE_DIR=/opt/g"$'\n'"GROBASE_TARGET=local"; do
     set_link GROBASE_TARGET=ssh://ok "$bad"
     [ "$status" -eq 1 ] || { echo "accepted: $bad" && false; }
   done

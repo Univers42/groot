@@ -30,6 +30,7 @@ is_ipv4() { [[ $1 =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; }
 # check KEY VALUE — exit 1 with the reason when VALUE cannot mean KEY. Empty clears a key.
 check() {
   [ -n "$2" ] || return 0
+  [[ $2 != *[[:cntrl:]]* ]] || die "$1: a control character (a newline would write a second key)"
   case "$1" in
   GROBASE_TARGET) [[ $2 == auto || $2 == local ]] || is_ssh_url "$2" || is_url "$2" || is_alias "$2" ||
     die "GROBASE_TARGET=$2: want auto, local, ssh://[user@]host[:port], http(s)://host[:port] or an ssh alias" ;;
