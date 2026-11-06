@@ -145,14 +145,6 @@ cmd_certs() {
   mv -f "$INCOMING/key" "$LEAF_KEY"
 }
 
-own_vm_listens() {
-  local pid
-  pid=$(ss -ltnpH "sport = :$1" 2>/dev/null | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -n 1)
-  [ -n "$pid" ] && [ -O "/proc/$pid" ] || return 1
-  case "$(cat "/proc/$pid/comm" 2>/dev/null)" in qemu-system* | VBoxHeadless*) return 0 ;; esac
-  return 1
-}
-
 # pinned_host_key ALIAS — this user's own VM is read every run and the pin follows it, because a
 # rebuild changes the key. Anything else keeps what the machine file holds.
 pinned_host_key() {
@@ -160,7 +152,7 @@ pinned_host_key() {
   pinned=$(machine_value GROBASE_ADMIN_HOST_KEY) || pinned=""
   endpoint=$(ssh -G "$1" | awk '$1 == "hostname" { h = $2 } $1 == "port" { p = $2 } END { print h, p }')
   case "$endpoint" in
-  127.* | "localhost "*) own_vm_listens "${endpoint##* }" || endpoint="" ;;
+  127.* | "localhost "*) own_vm_listens "${endpoint% *}" "${endpoint##* }" || endpoint="" ;;
   *) endpoint="" ;;
   esac
   if [ -z "$endpoint" ]; then
@@ -171,7 +163,7 @@ pinned_host_key() {
   key=$(vm_ssh "$1" 'cat /etc/ssh/ssh_host_ed25519_key.pub' | awk '{ print $1, $2 }')
   [[ $key =~ ^ssh-ed25519\ [A-Za-z0-9+/=]+$ ]] || die "the VM gave no ed25519 host key"
   if [ "$key" != "$pinned" ]; then
-    put_env "$MACHINE_FILE" GROBASE_ADMIN_HOST_KEY "$key"
+    put_env "$MACHINE_FILE" GROBASE_ADMIN_HOST_KEY "$key" || die "cannot write $MACHINE_FILE"
     note "pinned the VM's host key in ${MACHINE_FILE#"$HOME"/}"
   fi
   printf '%s\n' "$key"

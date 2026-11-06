@@ -59,9 +59,10 @@ get_env() {
 	printf '%s\n' "$_ge_val"
 }
 
+# put_env FILE KEY VALUE — a missing file, and its missing directories, are created private.
 put_env() {
 	_pe_file="$1"
-	[ -f "$_pe_file" ] || (umask 077 && : >"$_pe_file")
+	[ -f "$_pe_file" ] || (umask 077 && mkdir -p "$(dirname "$_pe_file")" && : >"$_pe_file") || return 1
 	_pe_mode="$(stat -c %a "$_pe_file" 2>/dev/null || echo 600)"
 	_pe_tmp="$(mktemp "$_pe_file.XXXXXX")" || return 1
 	if ENVFILE_KEY="$2" ENVFILE_VAL="$3" awk "$_PE_AWK" "$_pe_file" >"$_pe_tmp" &&
