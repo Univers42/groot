@@ -42,6 +42,7 @@ esac'
   stub docker 'echo "docker $*" >>"$LOG"
 case "$*" in *"select sha"*) cat "$LOG.applied" 2>/dev/null ;; esac'
   stub ss 'exit 0'
+  stub pgrep 'exit 1'
   stub make 'echo "make $*" >>"$LOG"'
   stub crontab "printf '%s\\n' '# b2b-autostart baas begin' '* * * * * cd / && B2B_CONFIG=profiles/server.toml VM_PATH=$BATS_TEST_TMPDIR/vms VM_NAME=baas autostart --tick' '# b2b-autostart baas end'"
   mkdir -p "$BATS_TEST_TMPDIR/vms/baas"
@@ -261,6 +262,47 @@ case "$*" in -G*) printf "hostname 127.0.0.1\nport 4242\nuser d\n" ;; *localhost
   [ "$status" -eq 1 ]
   [[ "$output" == *"GROBASE_ADMIN_HOST_KEY"* ]]
   [ ! -e "$GROBASE_LINK_CONF" ]
+}
+
+# hidden_vm FORWARD — this user's QEMU declaring FORWARD whose socket ss cannot name, as a
+# non-dumpable KVM build shows it even to its owner.
+hidden_vm() {
+  stub qemu-system-x86 'sleep 30'
+  qemu-system-x86 -netdev "user,id=net0,$1" >/dev/null 2>&1 3>&- &
+  VM_PID=$!
+  stub pgrep "echo $VM_PID"
+  stub ss "echo 'LISTEN 0 1 127.0.0.1:4242 0.0.0.0:*'"
+}
+
+@test "configure: a QEMU that hides its sockets is still this user's own VM by its forward" {
+  vault_set
+  hidden_vm hostfwd=tcp:127.0.0.1:4242-:4242
+  stub ip 'echo "1.1.1.1 dev eth0 src 10.12.19.4"'
+  dc configure
+  [ "$status" -eq 0 ]
+  grep -qx 'GROBASE_ADMIN_HOST_KEY=ssh-ed25519 AAAAhostkey' "$GROBASE_LINK_CONF"
+}
+
+@test "configure: a hidden QEMU forwarding another port proves nothing" {
+  vault_set
+  hidden_vm hostfwd=tcp:127.0.0.1:2222-:22
+  stub ip 'echo "1.1.1.1 dev eth0 src 10.12.19.4"'
+  dc configure
+  [ "$status" -eq 1 ]
+  [ ! -e "$GROBASE_LINK_CONF" ]
+}
+
+@test "configure: a LAN relay on the same port is passed over for the VM on the alias's address" {
+  vault_set
+  fake_own_vm
+  stub socat 'sleep 30'
+  socat >/dev/null 2>&1 3>&- &
+  RELAY_PID=$!
+  stub ss "printf '%s\\n' 'LISTEN 0 5 192.168.1.132:4242 0.0.0.0:* users:((\"socat\",pid=$RELAY_PID,fd=5))' 'LISTEN 0 1 127.0.0.1:4242 0.0.0.0:* users:((\"qemu-system-x86\",pid=$VM_PID,fd=21))'"
+  stub ip 'echo "1.1.1.1 dev eth0 src 10.12.19.4"'
+  dc configure
+  kill "$RELAY_PID" 2>/dev/null || true
+  [ "$status" -eq 0 ]
 }
 
 @test "configure: a rebuilt VM's new key replaces the pin by itself" {
