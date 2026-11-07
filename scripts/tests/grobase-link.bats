@@ -10,6 +10,7 @@
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../grobase-link.sh"
   export GROBASE_LINK_DIR="$BATS_TEST_TMPDIR/link"
+  export CAPABILITY_PAUSE=0
   # Point the settings file away from the repo's real ./.env.grobase-link: a test must not
   # inherit this machine's target.
   export GROBASE_LINK_CONF="$BATS_TEST_TMPDIR/absent.env"
@@ -88,7 +89,7 @@ resolve_target() { run env GROBASE_TARGET="$1" bash -c "source '$SCRIPT' && reso
   [ "$output" = auto ]
   run bash "$SCRIPT" conf
   [ "$status" -eq 0 ]
-  [ "$output" = $'GROBASE_TARGET=auto\nGROBASE_LINK_HOST_PORT=28000\nGROBASE_REMOTE_DIR=/opt/grobase\nGROBASE_API_URL=\nGROBASE_CA_FILE=' ]
+  [ "$output" = $'GROBASE_TARGET=auto\nGROBASE_LINK_HOST_PORT=28000\nGROBASE_REMOTE_DIR=\nGROBASE_API_URL=\nGROBASE_CA_FILE=' ]
 }
 
 @test "conf: GROBASE_CA_FILE — the environment beats the file, the file beats empty" {
@@ -108,6 +109,16 @@ resolve_target() { run env GROBASE_TARGET="$1" bash -c "source '$SCRIPT' && reso
 @test "state: set then get round-trips a target that contains ':' and '@'" {
   helper 'mkdir -p "$LINK_DIR"; state_set ssh ssh://alice@box:2222; state_get target; state_get mode'
   [ "$output" = $'ssh://alice@box:2222\nssh' ]
+}
+
+@test "status: a direct link dials the address it was opened with, not another checkout's" {
+  mkdir -p "$GROBASE_LINK_DIR" && printf 'mode=direct\ntarget=https://k\nconnect_ip=\n' >"$GROBASE_LINK_DIR/state"
+  printf 'GROBASE_CONNECT_IP=10.9.9.9\n' >"$GROBASE_LINK_CONF"
+  stub getent 'echo "10.1.1.1 k"'
+  stub docker 'echo "$*" >"$BATS_TEST_TMPDIR/dialed"'
+  run bash "$SCRIPT" status
+  [ "$status" -eq 0 ]
+  grep -q 'OPENSSL:10.1.1.1:443' "$BATS_TEST_TMPDIR/dialed"
 }
 
 @test "mode and status: exit 1 with no link; mode prints the recorded mode once set" {
@@ -214,7 +225,7 @@ resolve_target() { run env GROBASE_TARGET="$1" bash -c "source '$SCRIPT' && reso
 @test "direct_routes: Kong over the URL, Redis and Mailpit to the local stand-ins" {
   stub getent 'echo "100.94.119.97 STREAM h"'
   helper 'direct_routes https://100.94.119.97:8443 /link/ca.pem'
-  [ "$output" = $'8000 OPENSSL:100.94.119.97:8443,verify=1,cafile=/link/ca.pem,commonname=100.94.119.97,snihost=100.94.119.97\n6379 TCP:grobase-link-redis:6379\n8025 TCP:grobase-link-mailpit:8025\n1025 TCP:grobase-link-mailpit:1025' ]
+  [ "$output" = $'8000 OPENSSL:100.94.119.97:8443,verify=1,cafile=/link/ca.pem,commonname=100.94.119.97,snihost=100.94.119.97,shut-down\n6379 TCP:grobase-link-redis:6379\n8025 TCP:grobase-link-mailpit:8025\n1025 TCP:grobase-link-mailpit:1025' ]
 }
 
 @test "up direct: GROBASE_CA_FILE is copied 644 into LINK_DIR and the relay verifies with it" {
@@ -289,6 +300,26 @@ esac"
   [ "$status" -eq 0 ]
   grep -qx 'REALTIME_PUBLISH_URL=http://mini-baas-kong:8000/realtime' "$env_local"
   grep -qx 'REALTIME_PUBLISH_APIKEY=svc-1' "$env_local"
+  grep -qx 'OSIONOS_TENANT_MOUNTS_URL=' "$env_local"
+}
+
+@test "publish_env direct: a target still restarting is asked again, so the mount route is not lost" {
+  probe_stub
+  stub docker "req=\$(cat); n=\$(cat '$BATS_TEST_TMPDIR/n' 2>/dev/null || echo 0); n=\$((n + 1)); echo \$n >'$BATS_TEST_TMPDIR/n'
+case \"\$req\" in
+'GET /v1/tenants/me/mounts '*) if [ \$n -gt 3 ]; then printf 'HTTP/1.1 401 X\r\n\r\n'; else printf 'HTTP/1.1 502 X\r\n\r\n'; fi ;;
+*) printf 'HTTP/1.1 401 X\r\n\r\n' ;;
+esac"
+  helper "publish_env direct '$env_local' https://baas.example.ts.net"
+  [ "$status" -eq 0 ]
+  grep -qx 'OSIONOS_TENANT_MOUNTS_URL=http://mini-baas-kong:8000/v1/tenants/me/mounts' "$env_local"
+}
+
+@test "publish_env direct: a target that never settles is said out loud" {
+  probe_stub
+  MOUNTS_STATUS=502 PUBLISH_STATUS=401 helper "publish_env direct '$env_local' https://baas.example.ts.net"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no definite answer"* ]]
   grep -qx 'OSIONOS_TENANT_MOUNTS_URL=' "$env_local"
 }
 

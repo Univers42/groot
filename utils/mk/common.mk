@@ -71,13 +71,19 @@ BOOL ?= false
 # environment precedence over --env-file — the exported values reach every compose call
 # without touching one. The resolver never rewrites the file when its content would not
 # change: a touched mtime would restart the whole run for nothing.
-# Capture explicit environment overrides BEFORE including .env.ports. GNU Make normally
-# lets makefile assignments replace environment variables, so the included file would otherwise
-# silently discard e.g. OSIONOS_APP_HOST_PORT=4324 make link. Values written by the resolver
-# are still used when the caller did not supply an environment override. Command-line Make
-# variables already have higher precedence and need no special handling.
-HOST_PORT_NAMES_BEFORE_INCLUDE := $(if $(wildcard .env.ports),$(shell sed -n 's/^\([A-Z][A-Z0-9_]*\)=.*/\1/p' .env.ports))
-HOST_PORT_ENV_NAMES := $(foreach name,$(HOST_PORT_NAMES_BEFORE_INCLUDE),$(if $(filter environment,$(origin $(name))),$(name)))
+# HOST_PORTS_PINNED names the ports a caller chose, read BEFORE .env.ports is included. Below the
+# top level make's own exports read as environment too, so the top level's answer is inherited: the
+# resolver and this file would otherwise take them for choices and fight over the record, each
+# make restarting the next (MAIL_BRIDGE_HOST_PORT=4100 on a kept-clear port, 356 resolves in 15 s).
+ifeq ($(MAKELEVEL),0)
+HOST_PORTS_PINNED := $(foreach name,$(filter %_HOST_PORT,$(.VARIABLES)),$(if $(filter environment command,$(firstword $(origin $(name)))),$(name)))
+endif
+export HOST_PORTS_PINNED
+# Capture the overrides from the environment. GNU Make normally lets makefile assignments replace
+# environment variables, so the included file would otherwise silently discard e.g.
+# OSIONOS_APP_HOST_PORT=4324 make link. Values written by the resolver are still used when the
+# caller did not supply an override. Command-line Make variables already have higher precedence.
+HOST_PORT_ENV_NAMES := $(foreach name,$(HOST_PORTS_PINNED),$(if $(filter environment,$(origin $(name))),$(name)))
 $(foreach name,$(HOST_PORT_ENV_NAMES),$(eval HOST_PORT_ENV_VALUE_$(name) := $($(name))))
 -include .env.ports
 $(foreach name,$(HOST_PORT_ENV_NAMES),$(eval $(name) := $(HOST_PORT_ENV_VALUE_$(name))))
@@ -129,6 +135,6 @@ GIT_COMMIT_MESSAGE ?= update
 GIT_PUSH_REMOTE ?= origin
 LOCAL_CERT_DIR ?= apps/grobase/certs
 LOCAL_CA_CERT := $(LOCAL_CERT_DIR)/track-binocle-local-ca.pem
-CERT_TRUST_MODE ?= system
+CERT_TRUST_MODE ?= auto
 CURL_HEALTH := curl --cacert $(LOCAL_CA_CERT) --retry 30 --retry-delay 2 --retry-all-errors --retry-connrefused -fsS
 

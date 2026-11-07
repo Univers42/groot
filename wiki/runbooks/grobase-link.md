@@ -29,6 +29,12 @@ a bare host to let the script find out. It is read in this order, first hit wins
 1. The environment, which is also where `make link GROBASE_TARGET=…` puts it — one run.
 2. `./.env.grobase-link` at the repo root — this machine's standing choice. Git-ignored
    (`.gitignore:5`); `.env.grobase-link.example` documents every key; `KEY=value`, no quotes.
+   `make link-set` writes it (`scripts/grobase-link-set.sh`): with no key on a terminal it asks,
+   numbering this daemon's grobase, the `~/.ssh/config` aliases and the born2root VMs it finds;
+   `make link-set GROBASE_TARGET=ssh://dev@vm.lan:2222 GROBASE_API_URL=https://vm.lan:8443`
+   sets keys directly. Each value's shape is checked before the file is touched, then
+   `grobase-paths.sh` probes the result (exit 1 when a path does not answer, after the write).
+   The checks are shape only: a well-formed address of the wrong machine passes them.
 3. The default: `auto`.
 
 `bash scripts/grobase-link.sh conf [KEY]` prints what the next `make link` will use, and the
@@ -310,7 +316,7 @@ when it moves that port.
 |---|---|---|
 | `GROBASE_TARGET` | `auto` | `local` · `ssh://[user@]host[:port]` · `<alias \| user@host \| host>` · `http(s)://host[:port]` |
 | `GROBASE_LINK_HOST_PORT` | `28000` | Kong copy on `127.0.0.1` for host tools and `link-healthcheck`; `0` disables |
-| `GROBASE_REMOTE_DIR` | `/opt/grobase` | Where the remote grobase's `.env` is (ssh mode, `env` verb) |
+| `GROBASE_REMOTE_DIR` | empty: the directory the target's `mini-baas-kong` was started from, else `/opt/grobase` | Where the remote grobase's `.env` is (ssh mode, `env` verb) |
 | `GROBASE_LINK_DIR` (env only) | `$XDG_RUNTIME_DIR/track-binocle-link` | Sockets, routes and state; `0700`; bind-mounted into the relay as `/link` |
 | `GROBASE_LINK_CONF` (env only) | `./.env.grobase-link` | The settings file |
 | `LINK_VHOST_HTTPS_PORT` (make only) | `9443` under rootless Docker, else `443` | Rootless cannot bind below `ip_unprivileged_port_start` (`grobase-link.mk:16-18`) |

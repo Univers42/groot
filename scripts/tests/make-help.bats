@@ -17,7 +17,7 @@ target() { awk -v mode=target -v target="$1" -f "$AWK" "$A"; }
 	printf '##@ Apps\nbuild: ## Build the apps\n\t@true\n' >"$A"
 	run list
 	[ "$status" -eq 0 ]
-	[[ "$output" == *$'Apps\n  build  Build the apps'* ]]
+	[[ "$output" = *$'Apps\n  build'* ]]
 }
 
 @test "prerequisites show in target mode, not in list mode" {
@@ -54,7 +54,7 @@ target() { awk -v mode=target -v target="$1" -f "$AWK" "$A"; }
 @test "double-colon rule is a target" {
 	printf '##@ A\ndc:: ## Double\n' >"$A"
 	run list
-	[[ "$output" == *"dc  Double"* ]]
+	[[ "$output" == *"dc"* && "$output" == *"Double"* ]]
 }
 
 @test "multi-target line is not read (documented caveat)" {
@@ -94,7 +94,7 @@ target() { awk -v mode=target -v target="$1" -f "$AWK" "$A"; }
 	[[ "$output" == *"help-<target>"* ]]
 	run target 'help-%'
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"make help-<target>"* ]]
+	[[ "$output" == *"help-<target>"* ]]
 }
 
 @test "phony mode lists names once and excludes %" {

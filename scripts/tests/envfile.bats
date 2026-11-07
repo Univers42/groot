@@ -32,6 +32,12 @@ setup() {
   [ "$(stat -c %a "$F")" = "640" ]
 }
 
+@test "creates a missing file's missing directories private" {
+  put_env "$BATS_TEST_TMPDIR/new/secrets/m.env" K v
+  [ "$(cat "$BATS_TEST_TMPDIR/new/secrets/m.env")" = "K=v" ]
+  [ "$(stat -c %a "$BATS_TEST_TMPDIR/new/secrets")" = "700" ]
+}
+
 @test "creates a missing file as 0600" {
   rm "$F"
   put_env "$F" A x

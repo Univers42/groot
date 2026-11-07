@@ -90,7 +90,7 @@ From a clean clone with `apps/grobase` at the pin (`git submodule update --init 
 
 3. **Cross-app isolation (live).**  
    `curl -sS -o /dev/null -w '%{http_code}\n' "$KONG_URL/query/v1/$BETA_DB/tables" -H "apikey: $ANON_KEY" -H "X-Baas-Api-Key: $ALPHA_KEY"`  
-   Expect `404` (foreign key → zero mount rows). Own key on own `db_id` is `200`.  
+   Expect a `4xx` (foreign key → zero mount rows → 404). Own key on own `db_id` is `200`.  
    Live CI: grobase Integration Tests runs `m177` and `m176` with `BAAS_VERIFY_LIVE=1`
    ([#177](https://github.com/Univers42/groot/issues/177)).
 

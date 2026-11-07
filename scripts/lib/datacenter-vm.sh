@@ -64,7 +64,7 @@ vm_stop_reason() {
   [ -w "${B2B_KVM_DEVICE:-/dev/kvm}" ] || printf '/dev/kvm is not writable: it is granted to the session holding this seat, so the VM starts within a minute of a login here'
 }
 
-qemu_running() { pgrep -f "qemu-system.*-name $VM_NAME" >/dev/null 2>&1; }
+qemu_running() { pgrep -u "$(id -u)" -f "qemu-system.*-name $VM_NAME" >/dev/null 2>&1; }
 ssh_answers() { vm_ssh "$ALIAS" true >/dev/null 2>&1; }
 waf_running() {
   local names
@@ -87,8 +87,21 @@ wait_for() {
   return 1
 }
 
+# A VM started by an older checkout has no ports record, and its alias can be on a port it left.
+# born2root reads a running VM's forwards from its command line, so a start against it rewrites both.
+# Only then: that start waits on the VM's unlock (45 s) and clears a stop's hold.
+# Caveat: a record older than a restart by an older clone's cron tick passes here while ssh still
+# answers; prove_waf then stops the run naming the port (under-reports here, loud later).
+refresh_vm_ports() {
+  [ "$ALIAS" = "$DEFAULT_ALIAS" ] && ! serves_production && qemu_running || return 0
+  [ ! -f "$(vm_ports_file "$ALIAS")" ] || ! ssh_answers || return 0
+  note "recording the VM's ports through born2root"
+  born2root_make qemu_start >/dev/null || note "born2root could not record the VM's ports: the checks below say what is wrong"
+}
+
 await_vm() {
   local reason
+  refresh_vm_ports
   if ssh_answers; then
     ! autostart_dangling || ! writes_allowed || ! is_own_vm || repair_autostart
     return 0
@@ -156,9 +169,32 @@ is_own_vm() {
   [ "$ALIAS" = "$DEFAULT_ALIAS" ] || return 1
   endpoint=$(ssh -G "$ALIAS" | awk '$1 == "hostname" { h = $2 } $1 == "port" { p = $2 } END { print h, p }')
   case "$endpoint" in
-  127.* | "localhost "*) own_vm_listens "${endpoint##* }" ;;
+  127.* | "localhost "*) own_vm_listens "${endpoint% *}" "${endpoint##* }" ;;
   *) return 1 ;;
   esac
+}
+
+# own_vm_listens HOST PORT — a VM process of this user serves HOST:PORT. The socket's owner proves
+# it where ss can name one, on that exact address: a LAN relay on the same port is not the VM. A
+# non-dumpable QEMU (KVM builds, hardened ptrace) hides its sockets even from its owner, so its own
+# command line declaring that forward is the second proof.
+# Caveat: the second proof reads QEMU's argv, not the socket: a forward the argv declares but that
+# another process of this user holds passes. VirtualBox forwards are not in argv: only ss proves those.
+own_vm_listens() {
+  local host=$1 pid
+  [ "$host" != localhost ] || host=127.0.0.1
+  pid=$(ss -ltnpH "sport = :$2" 2>/dev/null | awk -v a="$host:$2" '$4 == a' | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -n 1)
+  [ -z "$pid" ] || ! is_vm_process "$pid" || return 0
+  for pid in $(pgrep -u "$(id -u)" '^qemu-system' 2>/dev/null); do
+    tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | grep -qE "hostfwd=tcp:(${host//./\\.}|0\\.0\\.0\\.0)?:$2-" && return 0
+  done
+  return 1
+}
+
+is_vm_process() {
+  [ -O "/proc/$1" ] || return 1
+  case "$(cat "/proc/$1/comm" 2>/dev/null)" in qemu-system* | VBoxHeadless*) return 0 ;; esac
+  return 1
 }
 
 # grobase_problem — what is wrong with the grobase in the VM, or nothing.

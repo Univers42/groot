@@ -356,11 +356,11 @@ has `192.168.1.132 grobase.track-binocle.test`.
 
 ```sh
 cd ~/groot
-cp .env.grobase-link.example .env.grobase-link
+make link-set GROBASE_TARGET=ssh://b2b GROBASE_API_URL=https://127.0.0.1:8443   # N1; other rows below
 ```
 
-Then set its keys for the network the device is on. Edit the file by its keys, never by
-pasting values from an env file.
+`make link-set` with no key asks instead, offering the aliases and VMs it finds. It checks each
+value's shape, writes only the keys given, then probes the paths (`make link-paths`).
 
 | Network | `GROBASE_TARGET` | `GROBASE_CA_FILE` | `GROBASE_API_URL` (informational: `scripts/grobase-link.sh api-url`) |
 |---|---|---|---|
@@ -483,7 +483,7 @@ branch and stop: the human merges it (develop, then main).
 | N2/N3 port checks time out from a wifi device, but work from the host | the wifi isolates its clients | N4 or N6 |
 | `doctor` TLS FAIL showing two fingerprints | a pinned context (`dc-lan`) and the leaf was re-issued | re-check §5, then `grobase context pin dc-lan` |
 | `make link`: `... does not answer from a container of this daemon` | the relay's container cannot reach that URL: a hosts-file name, or userspace Tailscale | the IP form, or ssh mode |
-| `make link`: `cannot read /opt/grobase/.env` | ssh works but the path differs | `GROBASE_REMOTE_DIR=<grobase dir on the VM>` |
+| `make link`: `cannot read /opt/grobase/.env` | ssh works, but that grobase's Kong is down or was not started by compose, so its directory could not be asked | `GROBASE_REMOTE_DIR=<grobase dir on the VM>` |
 | `direct mode cannot fetch secrets` | no `./.env.grobase-remote` | one ssh-mode `make link` first (N2/N4), or the owner's vault pull |
 | vault42: `no manifest for project groot` | a personal pull (`VAULT42_ORG` or `VAULT42_ENV` blank), or the project is not granted | leave both at their defaults; ask an org admin for the grant |
 | vault42: `HTTP 401`, or `auth status` "logged in" but `auth me` 401 | the server expired the session | `scripts/vault42-ctl.sh auth login --password --email <you>` |

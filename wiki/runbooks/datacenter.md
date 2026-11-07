@@ -8,7 +8,7 @@ grobase in the VM on this host. groot starts no grobase. The decision and its co
 
 | What | Where |
 |---|---|
-| vault42 credentials and keystore | `~/.config/42ctl/secrets/*.env` (`FT_PASSPHRASE`, `FT_PASSWORD`, `FT_EMAIL`, `FT_TENANT`), `~/.config/42ctl/keystore.v42` or `FT_KEYSTORE_B64` |
+| vault42 credentials and keystore | Exported by name, as `set -a; source <file>; set +a` does, or in `~/.config/42ctl/secrets/*.env`: `FT_PASSPHRASE`, `FT_PASSWORD`, `FT_EMAIL`, `FT_TENANT`, and `~/.config/42ctl/keystore.v42` or `FT_KEYSTORE_B64`. Exported values are written to `secrets/42admin.env`, mode 600, because born2root reads that file |
 | A terminal, the first time | Only to build the VM: about 30 min and 18 GB free under `[vm] path`, with `/dev/kvm` writable |
 | A GitHub ssh key | For `git clone --recursive` |
 
@@ -33,6 +33,8 @@ credentials but not all, it stops and names the missing ones.
 | Build an absent VM, wait for it, repair grobase, seed an empty platform | `datacenter-vm` | see below |
 | Pin the host key, write `./.env.grobase-link.local` | `datacenter-configure` | a target that is not this user's own VM has no pin |
 | Copy the CA and the WAF's leaf from the VM | `datacenter-certs` | the leaf does not chain, or the key is not its own |
+| Prove the alias and the WAF port | `datacenter-chain` | the alias is not on the port born2root recorded in `~/.config/born2root/<alias>-ports.env`, it does not answer on the pinned key, the service on the WAF port was not signed by this VM's CA, or a frontend took a port the VM forwards |
+| Allow every frontend origin | `datacenter-origins` | a running list still lacks an origin after the push. Writes only when one is missing, and only on this user's own VM |
 | Open the link, derive `./.env.local` | `link` | the WAF does not answer from a container |
 | Converge models and the key | `datacenter-preflight` | the dump does not read back, or the key does not verify |
 | Write the agency roster from the VM's accounts, copy what an NFS checkout cannot serve | `datacenter-binds` | the VM lacks an account |

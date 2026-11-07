@@ -4,11 +4,15 @@ Copyright (c) 2026 Osionos contributors.
 
 All rights reserved.
 
-This repository and all of its contents, including but not limited to source code,
+This repository's own files, including but not limited to source code,
 configuration files, scripts, documentation, assets, examples, schemas, database
 migrations, Docker files, and related materials, are the exclusive property of the
 copyright holders and are protected by copyright law and other applicable
 intellectual property laws.
+
+This license does not cover the git submodules listed in .gitmodules (under apps/,
+vendor/ and .claude/). Each submodule keeps its own license; for example,
+apps/grobase is licensed under the GNU Affero General Public License v3.0.
 
 Permission is granted only to the contributors to this project and to persons
 explicitly authorized by the copyright holders to access, inspect, run, and

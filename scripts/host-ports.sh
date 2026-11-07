@@ -14,16 +14,20 @@
 #            consumer reads — and infrastructure/tls/host-ports.d/osionos-origin.conf
 #            (git-ignored), the osionos origin the tracked nginx.conf includes.
 #
-# Precedence, per NAME: an explicit environment value wins and is never moved (warned about when
-# it is busy); then the default when it is free; then the value already in .env.ports (a moved
+# Precedence, per NAME: a pin wins and is never moved (warned about when it is busy); then the
+# default when it is free; then the value already in .env.ports (a moved
 # port stays put while its default is taken, so bookmarks and bundles keep working); then the
 # first free port in default+1 .. default+50. A port in HOST_PORTS_KEEP_CLEAR (space-separated) is
 # never chosen by those last three steps, free or not, so a process that is only down keeps it.
+# A pin is a NAME that HOST_PORTS_PINNED lists when make runs this, because make exports .env.ports
+# into every recipe and only it can tell those from a caller's choice. Run by hand, HOST_PORTS_PINNED
+# is unset and every NAME in the environment is a pin.
 #
 # Caveat: the probe is a snapshot — a port bound between the probe and `docker compose up` still
 # collides — and it only sees this network namespace: a listener inside a rootless container's
 # own netns is invisible to `ss`, so it is not seen as busy either. HOST_PORTS_KEEP_CLEAR holds a
-# port only against this resolver: an explicit NAME=port pin or an unrelated process still takes it.
+# port only against this resolver: a pin or an unrelated process still takes it. A shell that
+# sourced .env.ports with `set -a` and runs this by hand pins all of it, so nothing moves.
 set -euo pipefail
 
 root="${HOST_PORTS_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -50,7 +54,7 @@ declare -A kept_clear=()    # port -> 1, named by HOST_PORTS_KEEP_CLEAR
 compose_files() {
   local f
   for f in "$root"/docker-compose*.yml; do
-    [ -f "$f" ] || continue
+    [[ -f "$f" ]] || continue
     printf '%s\n' "${f#"$root"/}"
   done
 }
@@ -61,10 +65,10 @@ scrape() {
   local file line name def
   for file in $(compose_files); do
     while IFS= read -r line; do
-      [ -n "$line" ] || continue
+      [[ -n "$line" ]] || continue
       name="${line%%=*}"
       def="${line#*=}"
-      if [ -n "${defaults[$name]:-}" ] && [ "${defaults[$name]}" != "$def" ]; then
+      if [[ -n "${defaults[$name]:-}" ]] && [[ "${defaults[$name]}" != "$def" ]]; then
         printf 'host-ports: %s has two defaults — %s in %s, %s in %s. Fix the compose files.\n' \
           "$name" "${defaults[$name]}" "${default_files[$name]}" "$def" "$file" >&2
         exit 2
@@ -122,7 +126,7 @@ is_wildcard() {
 addr_conflicts() {
   is_wildcard "$1" && return 0
   is_wildcard "$bind_addr" && return 0
-  [ "$1" = "$bind_addr" ]
+  [[ "$1" = "$bind_addr" ]]
 }
 
 # holder_of PORT — the name of the process holding PORT at the bind address, or
@@ -130,9 +134,9 @@ addr_conflicts() {
 holder_of() {
   local port="$1" addr listen_port proc
   while IFS=$'\t' read -r addr listen_port proc; do
-    [ "$listen_port" = "$port" ] || continue
+    [[ "$listen_port" = "$port" ]] || continue
     addr_conflicts "$addr" || continue
-    [ -n "$proc" ] || proc="another process"
+    [[ -n "$proc" ]] || proc="another process"
     printf '%s\n' "$proc"
     return 0
   done < <(printf '%s\n' "$LISTENER_TABLE")
@@ -143,8 +147,8 @@ holder_of() {
 is_own_port() {
   local port="$1" p
   while read -r p; do
-    [ -n "$p" ] || continue
-    [ "$p" = "$port" ] && return 0
+    [[ -n "$p" ]] || continue
+    [[ "$p" = "$port" ]] && return 0
   done < <(printf '%s\n' "$OWN_PORTS")
   return 1
 }
@@ -157,12 +161,21 @@ port_free() {
   ! holder_of "$port" >/dev/null
 }
 
+# is_pinned NAME — 0 when a caller chose NAME's port.
+is_pinned() {
+  [ -n "${HOST_PORTS_PINNED+set}" ] || return 0
+  case " $HOST_PORTS_PINNED " in
+  *" $1 "*) return 0 ;;
+  *) return 1 ;;
+  esac
+}
+
 # ── the commands ───────────────────────────────────────────────────────────────
 cmd_list() {
   scrape
   local name
   while read -r name; do
-    [ -n "$name" ] || continue
+    [[ -n "$name" ]] || continue
     printf '%s=%s\n' "$name" "${defaults[$name]}"
   done < <(sorted_names)
 }
@@ -170,7 +183,7 @@ cmd_list() {
 # read_previous — the values already recorded in .env.ports.
 read_previous() {
   local key value
-  [ -f "$ports_file" ] || return 0
+  [[ -f "$ports_file" ]] || return 0
   while IFS='=' read -r key value; do
     case "$key" in
     '' | '#'*) continue ;;
@@ -212,13 +225,13 @@ render_ports_file() {
 # The host ports this clone publishes; re-run the resolver after any change.
 "
   while read -r name; do
-    [ -n "$name" ] || continue
+    [[ -n "$name" ]] || continue
     content+="$name=${chosen[$name]}"$'\n'
   done < <(sorted_names)
   [ -z "${UDP_RANGE:-}" ] || content+="LIVEKIT_UDP_PORTS=$UDP_RANGE"$'\n'
   tmp="$(mktemp "$ports_file.XXXXXX")"
   printf '%s' "$content" >"$tmp"
-  if [ -f "$ports_file" ] && cmp -s "$tmp" "$ports_file"; then
+  if [[ -f "$ports_file" ]] && cmp -s "$tmp" "$ports_file"; then
     rm -f "$tmp"
     return 0
   fi
@@ -231,7 +244,7 @@ render_ports_file() {
 # it (one code path). It never writes any tracked file.
 render_origin_override() {
   local port="${chosen[OSIONOS_APP_HOST_PORT]:-}"
-  [ -n "$port" ] || return 0
+  [[ -n "$port" ]] || return 0
   local out="$root/infrastructure/tls/host-ports.d/osionos-origin.conf"
   local tmp content
   content="# Generated by scripts/host-ports.sh resolve — do not edit by hand.
@@ -239,7 +252,7 @@ set \$osionos_origin https://localhost:$port;
 "
   tmp="$(mktemp "$out.XXXXXX")"
   printf '%s' "$content" >"$tmp"
-  if [ -f "$out" ] && cmp -s "$tmp" "$out"; then
+  if [[ -f "$out" ]] && cmp -s "$tmp" "$out"; then
     rm -f "$tmp"
     return 0
   fi
@@ -259,13 +272,13 @@ cmd_resolve() {
   own_ports_status=$?
   set -e
   OWN_PORTS="$own_ports_out"
-  if [ $own_ports_status -ne 0 ]; then
+  if [[ $own_ports_status -ne 0 ]]; then
     printf 'host-ports: cannot list this project'\''s containers (%s ps failed); a running groot'\''s own ports look busy\n' "$docker_cmd" >&2
   fi
 
   local names=() name default env_value file_value port holder holder_port
   while read -r name; do
-    [ -n "$name" ] || continue
+    [[ -n "$name" ]] || continue
     names+=("$name")
   done < <(sorted_names)
 
@@ -274,25 +287,24 @@ cmd_resolve() {
     reserved[$port]=1
   done
 
-  # 1. an explicit environment value (never moved) and the defaults.
+  # 1. a pin (never moved) and the defaults.
   for name in "${names[@]}"; do
     default="${defaults[$name]}"
     env_value="${!name-}"
-    if [ -n "$env_value" ]; then
+    if [[ -n "$env_value" ]]; then
       if ! [[ "$env_value" =~ ^[0-9]{1,5}$ ]] || (( 10#$env_value < 1 || 10#$env_value > 65535 )); then
         printf 'host-ports: %s must be an integer port from 1 through 65535\n' "$name" >&2
         exit 2
       fi
       env_value=$((10#$env_value))
     fi
-    file_value="${previous[$name]:-}"
-    if [ -n "$env_value" ] && [ "$env_value" != "$file_value" ]; then
+    if [[ -n "$env_value" ]] && is_pinned "$name"; then
       chosen[$name]="$env_value"
       pinned[$name]=1
       reserved[$env_value]=1
       continue
     fi
-    if [ -z "${reserved[$default]:-}" ] && port_free "$default"; then
+    if [[ -z "${reserved[$default]:-}" ]] && port_free "$default"; then
       chosen[$name]="$default"
       reserved[$default]=1
     fi
@@ -300,10 +312,10 @@ cmd_resolve() {
 
   # 2. the value already recorded, while it is free (a moved port stays put).
   for name in "${names[@]}"; do
-    [ -n "${chosen[$name]:-}" ] && continue
+    [[ -n "${chosen[$name]:-}" ]] && continue
     file_value="${previous[$name]:-}"
-    [ -n "$file_value" ] || continue
-    if [ -z "${reserved[$file_value]:-}" ] && port_free "$file_value"; then
+    [[ -n "$file_value" ]] || continue
+    if [[ -z "${reserved[$file_value]:-}" ]] && port_free "$file_value"; then
       chosen[$name]="$file_value"
       reserved[$file_value]=1
     fi
@@ -311,18 +323,18 @@ cmd_resolve() {
 
   # 3. the window above the default.
   for name in "${names[@]}"; do
-    [ -n "${chosen[$name]:-}" ] && continue
+    [[ -n "${chosen[$name]:-}" ]] && continue
     default="${defaults[$name]}"
     port=$((default + 1))
-    while [ "$port" -le $((default + window)) ]; do
-      if [ -z "${reserved[$port]:-}" ] && port_free "$port"; then
+    while [[ "$port" -le $((default + window)) ]]; do
+      if [[ -z "${reserved[$port]:-}" ]] && port_free "$port"; then
         chosen[$name]="$port"
         reserved[$port]=1
         break
       fi
       port=$((port + 1))
     done
-    if [ -z "${chosen[$name]:-}" ]; then
+    if [[ -z "${chosen[$name]:-}" ]]; then
       holder="$(holder_of "$default" || true)"
       printf 'host-ports: %s default %s is held by %s, and no free port in %s..%s. Free one, or pin %s=<port>.\n' \
         "$name" "$default" "${holder:-another process}" "$((default + 1))" "$((default + window))" "$name" >&2
@@ -336,22 +348,22 @@ cmd_resolve() {
     port="${chosen[$name]}"
     holder="$(holder_of "$default" || true)"
     holder_port="$(holder_of "$port" || true)"
-    if [ "$port" = "$default" ] && [ -z "${pinned[$name]:-}" ]; then
+    if [[ "$port" = "$default" ]] && [[ -z "${pinned[$name]:-}" ]]; then
       continue
     fi
-    if [ -n "$holder" ]; then
+    if [[ -n "$holder" ]]; then
       printf 'host-ports: %s default %s is held by %s; using %s' "$name" "$default" "$holder" "$port"
-      if [ -n "$holder_port" ]; then
+      if [[ -n "$holder_port" ]]; then
         printf ' (also held by %s)' "$holder_port"
       fi
     elif [ -n "${kept_clear[$default]:-}" ] && [ -z "${pinned[$name]:-}" ]; then
       printf 'host-ports: %s default %s is kept clear; using %s' "$name" "$default" "$port"
-    elif [ -n "$holder_port" ]; then
+    elif [[ -n "$holder_port" ]]; then
       printf 'host-ports: %s default %s is free; pinned to %s (held by %s)' "$name" "$default" "$port" "$holder_port"
     else
       printf 'host-ports: %s default %s is free; pinned to %s' "$name" "$default" "$port"
     fi
-    if [ "$name" = "OSIONOS_APP_HOST_PORT" ]; then
+    if [[ "$name" = "OSIONOS_APP_HOST_PORT" ]]; then
       printf '; add https://localhost:%s to grobase'\''s allowed origins (born2root: make grobase_cors)' "$port"
     fi
     printf '\n' >&2
@@ -359,25 +371,25 @@ cmd_resolve() {
 
   UDP_RANGE="$(free_udp_range)"
   local before="" name
-  [ -f "$ports_file" ] && before="$(cat "$ports_file")"
+  [[ -f "$ports_file" ]] && before="$(cat "$ports_file")"
   render_ports_file
   render_origin_override
 
   # A moved port that a build arg bakes in needs the image rebuilt.
   local changed=() service
   while read -r name; do
-    [ -n "$name" ] || continue
+    [[ -n "$name" ]] || continue
     file_value="${previous[$name]:-}"
-    [ "$file_value" = "${chosen[$name]}" ] && continue
+    [[ "$file_value" = "${chosen[$name]}" ]] && continue
     changed+=("$name")
   done < <(sorted_names)
-  if [ "${#changed[@]}" -gt 0 ] && [ "$before" != "$(cat "$ports_file")" ]; then
+  if [[ "${#changed[@]}" -gt 0 ]] && [[ "$before" != "$(cat "$ports_file")" ]]; then
     # For each changed NAME, find the services that bake it; print one line per service
     # listing the specific NAMEs that service uses.
     declare -A service_changed_names=()
     for name in "${changed[@]}"; do
       while read -r service; do
-        [ -n "$service" ] || continue
+        [[ -n "$service" ]] || continue
         service_changed_names["$service"]+=" $name"
       done < <(build_arg_users "$name")
     done

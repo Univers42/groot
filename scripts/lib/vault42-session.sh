@@ -108,13 +108,22 @@ rebind_contract() {
 	sign_in
 }
 
+# A missing keystore is the new-machine case (the datacenter gate): nothing to keep, and the
+# question says fetch rather than replace. `keys recover` needs a `keys escrow` done earlier on a
+# machine that holds the identity; without one the server refuses and this names that step.
 recover_keystore() {
+	local ask="replace $FT_KEYSTORE with your escrowed identity (emailed code; the old one is kept)?"
+	local refused="keystore still locked: fix FT_PASSPHRASE, or run $CTL keys recover --email <you>"
+	if [ ! -f "$FT_KEYSTORE" ]; then
+		ask="no keystore at $FT_KEYSTORE: fetch your escrowed identity with 42ctl (emailed code)?"
+		refused="no keystore at $FT_KEYSTORE — on a new machine: $CTL keys recover --email <you>"
+	fi
 	[ -n "${FT_LOGIN_EMAIL:-}" ] || die "set FT_LOGIN_EMAIL, then: $CTL keys recover --email <you>"
-	confirm "replace $FT_KEYSTORE with your escrowed identity (emailed code; the old one is kept)?" ||
-		die "keystore still locked: fix FT_PASSPHRASE, or run $CTL keys recover --email <you>"
-	cp -p "$FT_KEYSTORE" "$FT_KEYSTORE.bak-$(date +%Y%m%d-%H%M%S)"
-	"$CTL" keys recover --email "$FT_LOGIN_EMAIL" <"$TTY_DEV" || die "keys recover failed — see the error above"
-	"$CTL" auth whoami >/dev/null || die "the recovered keystore does not open with this passphrase either"
+	confirm "$ask" || die "$refused"
+	[ ! -f "$FT_KEYSTORE" ] || cp -p "$FT_KEYSTORE" "$FT_KEYSTORE.bak-$(date +%Y%m%d-%H%M%S)"
+	"$CTL" keys recover --email "$FT_LOGIN_EMAIL" <"$TTY_DEV" ||
+		die "keys recover failed — see the error above. No escrow yet: on a machine that has the keystore, $CTL keys escrow --email $FT_LOGIN_EMAIL"
+	"$CTL" auth whoami >/dev/null || die "the recovered keystore does not open with this passphrase"
 }
 
 ask_passphrase() {

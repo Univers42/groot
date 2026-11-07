@@ -16,8 +16,8 @@ vendor
 src
 tests
 # The scripts/ directory holds a hundred-odd modules; the service's closure is
-# twelve of them, and the gate of the image prompt a thirteenth. They are re-included
-# one by one, so the closure is visible in both files
+# twelve of them, and the gate of the image prompt a thirteenth. They are
+# re-included one by one, so the closure is visible in both files
 # (scripts/tests/bridge-image-closure.bats checks it).
 scripts/*
 !scripts/bridge-session-token.mjs
@@ -25,13 +25,13 @@ scripts/*
 !scripts/bridge-baas-body.mjs
 !scripts/bridge-session-revocations.mjs
 !scripts/bridge-session-tracker.mjs
+!scripts/bridge-access-generation.mjs
 !scripts/bridge-roles.mjs
 !scripts/bridge-page-read.mjs
-!scripts/bridge-live-workspaces.mjs
-!scripts/bridge-graph-edges.mjs
 !scripts/bridge-page-access.mjs
 !scripts/bridge-share-rules.mjs
-!scripts/bridge-access-generation.mjs
+!scripts/bridge-live-workspaces.mjs
+!scripts/bridge-graph-edges.mjs
 !scripts/bridge-moderation.mjs
 # The lists of the L0 gate: the module reads them next to itself, at import.
 !scripts/moderation-lists/
