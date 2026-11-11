@@ -248,7 +248,7 @@ jobs:
 
       - name: TruffleHog OSS
 
-        uses: trufflesecurity/trufflehog@93633ac70c28603931c365b6ef530cab878f4286 # main at 2026-11-04
+        uses: trufflesecurity/trufflehog@188766766fd81cde66e5500b0db0379235637134 # main at 2026-11-04
 
         with:
           path: ./
