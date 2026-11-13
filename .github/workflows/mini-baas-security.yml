@@ -163,7 +163,7 @@ jobs:
 
       - name: Trivy filesystem scan
 
-        uses: aquasecurity/trivy-action@8f28faec26515256b6d22074d1d2a8986f4cbd87 # master at 2026-11-04
+        uses: aquasecurity/trivy-action@38b337fff0a2f984d5be173c99e3f633438167ec # master at 2026-11-04
 
         with:
           scan-type: fs
@@ -210,7 +210,7 @@ jobs:
       - name: Trivy image scan
         if: steps.build_img.outcome == 'success'
 
-        uses: aquasecurity/trivy-action@8f28faec26515256b6d22074d1d2a8986f4cbd87 # master at 2026-11-04
+        uses: aquasecurity/trivy-action@38b337fff0a2f984d5be173c99e3f633438167ec # master at 2026-11-04
 
         with:
           image-ref: mini-baas/query-router:ci
@@ -248,7 +248,7 @@ jobs:
 
       - name: TruffleHog OSS
 
-        uses: trufflesecurity/trufflehog@93633ac70c28603931c365b6ef530cab878f4286 # main at 2026-11-04
+        uses: trufflesecurity/trufflehog@188766766fd81cde66e5500b0db0379235637134 # main at 2026-11-04
 
         with:
           path: ./
