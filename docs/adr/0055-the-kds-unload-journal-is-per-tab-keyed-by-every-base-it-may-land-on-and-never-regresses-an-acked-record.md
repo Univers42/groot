@@ -3,6 +3,7 @@
 - Status: accepted. Design J as worded is BLOCKED. Corrected J is PROCEED-WITH-CONDITIONS J-C1 to J-C9.
   Re-ruled 2026-11-17 on 2caf348fb (below): J-C1 to J-C4, J-C6 and J-C8 are met, and J-C5 is met in code. The merge to develop is PROCEED-WITH-CONDITIONS JM1 and JM2, with live still suspended. J-C1's base list is amended, and J-C10 is added before live.
   Re-ruled 2026-11-17 on a00b62265 (RC9 boundary, below): live promotion is BLOCKED by a pre-existing inline-embed fill that inflates the first-session journal past the cap at a 600,000-character edit. The adapter-side fix F1 is PROCEED-WITH-CONDITIONS F-C1 to F-C9.
+  Noted 2026-11-17 on fc0d7b408 (F1 built): landing on develop is PROCEED-WITH-CONDITIONS FL1 to FL3, F-C8 clause 3 corrected; the RC9 live BLOCK lifts once FL1 to FL3 hold.
 - Date: 2026-11-17
 - Deciders: devil (ruling), osionos main session / builder (live with it)
 
@@ -375,10 +376,92 @@ Verdict:
 8. **F-C8, gates.**
    - The full canvas suite, typecheck and lint pass with 0 warnings.
    - In the devil-r8 harness, R8-1 to R8-4, the RC2 tests and the JA to JP mutation table hold as recorded above.
-   - N1b and N1c stay the only accepted failures.
+   - N1b, N1c and test 16 "N2" of `devil-p1-2b` (no journal wired) stay the only failures; the journal-wired N2, T1 in `devil-j-dev`, passes. (Corrected 2026-11-17; the first wording omitted test 16, see the note on fc0d7b408.)
 9. **F-C9, the register.** ADR 0052 is updated once F1 lands:
    - the pre-F1 boundary (553k, L4) is marked closed;
    - F1's residual (an explicit 8 equal to the inline default) is named;
    - the leaked 8s on live copies are named and left in place.
 
 Live promotion still also waits for ADR 0054 C7 and the conditions already listed above.
+
+### Note 2026-11-17 on fc0d7b408: F1 built (cc5145417, 7520d20c3, fc0d7b408)
+
+The F1 commits are on osionos `fix/kds-template-reload` (`fc0d7b408`, not pushed). The worktree was read only; the devil's probes ran on copies.
+
+**Verdict:**
+- **Landing `fc0d7b408` on osionos develop: PROCEED-WITH-CONDITIONS FL1 to FL3.**
+- F-C1 to F-C8 are met, with F-C8 as corrected below. F-C9 is the ADR 0052 block applied on landing (FL3).
+- Once FL1 to FL3 hold, the RC9 BLOCK on live promotion is lifted. Live promotion still waits for ADR 0054 C7 and the live suspension.
+
+**F-C8, corrected.** Clause 3 now reads: "N1b, N1c and test 16 'N2' of `devil-p1-2b` stay the only failures in the devil's harness, and the journal-wired N2 (T1 in `devil-j-dev`) passes."
+- Why the change: test 16 runs in the devil's own tabs, which wire no journal. It is the no-journal baseline, and it was recorded as an expected failure at 2caf348fb, at 38c38cf36 and in the A2 section above ("only N1b, N1c and N2 fail").
+- Clause 3 as first worded contradicted that record. The mistake is the devil's.
+- N2 needs no fix of its own: the journal closes it, and T1 is the test that proves it.
+
+**Evidence the devil verified:**
+- **The devil's harness, on the builder's logs** (`/mnt/storage/dlesieur/scratch/rc9-f1/devil/`):
+  - `base-a00b62265.log` and `head.log` both show `# pass 104 # fail 3`, failing the same tests: 15 (N1b), 16 (N2) and 20 (N1c).
+  - In `head.log`, line 739 reads `ok 100 - T1 (N2) … the journal keeps b-2 on the server`.
+- **JA to JP on head** (`summary.txt`): the same table as at 38c38cf36. JO still survives, as it did there.
+- **Gates, rerun by the devil on its own copy of the fc0d7b408 tree** (`/mnt/storage/dlesieur/scratch/devil-rc9/gate-head-*.log`):
+  - typecheck rc=0 and lint rc=0;
+  - canvas 5627/5627, against 5614/5614 on a00b62265.
+- **The RC9-F1 build is fc0d7b408.**
+  - `diff -rq` between `rc9-f1/src/src` and the worktree's `src` is empty.
+  - `dist/index.html` was written at 11:58:26, after the commit at 11:57:03.
+- **RC9-F1 results** (`rc9-f1/out/`):
+  - First-session table: 50 cells, 740 runs, 0 lost, 0 reverts. The 12 harness errors were topped up.
+  - Regression table: 8 cells, 160/160 on the server, 0 reverts.
+  - `pad-journals.md`: 600,230 to 600,232 and 900,229 to 900,232 characters, 0 over the bound. The seed's 447k is gone from the journal.
+- **Mutants** (`mutants/summary-fix.txt`): m1, m2 and m3 are RED, as F-C3 requires, and so is m4.
+- **Browser inline arm** (`leak/leak.json`): `limited: 0` after the mount, after the full page and after the reload; 46 views.
+- **The unbound call:**
+  - `7520d20c3` alone throws `Cannot read properties of undefined (reading 'options')` from `persistState`, called by the host's `flush` (`rc9-f1/logs/diag-f1-err.log`).
+  - `templateUse` fails 10/10 there (`e2e-templateUse-x10.log`) and passes 10/10 on `fc0d7b408` (`e2e-templateUse-x10-fix.log`).
+- **The devil's attack probes**, `devil-rc9/devil-f1-attack.test.ts`, run by `./runf1.sh head|base`:
+
+| Probe | a00b62265 | fc0d7b408 |
+|---|---|---|
+| A1: an inline embed turns a table into a board | board stored with `loadLimit` 8 | the same: board stored with 8 |
+| A2: a capped embed (3) duplicates a view stored at 100 | source 3, copy 3 | source 100, copy without a Limit |
+| A3: two mounts. A full page sets Limit 25, then a stale inline embed edits the sort | 25, then 8 | the same: 25, then 8 |
+| A4: the cap half. The embed shows 3 over a view stored at 100; the user picks 3, then 2 | 3, then 2 | 100, then 2 |
+| A5: the host re-creates every view with equal values but new references | 19 views filled; 10 databases journaled | 0 filled; journal `null` |
+| A6: a sort edit in an inline embed | sort kept, `loadLimit` 8 written | sort kept, no Limit |
+| A7: persist with no previous state (fill 8 + cap 3) | 19 views at 3 | only the explicit `v-crm-table=100` |
+
+**Ruling on the cap half of the residual: accepted under F-C3 and F-C9.**
+- The `withoutProjectedLimits` Caveat is exact. Its two halves are one case: the user re-selects the Limit the embed already shows (A4: shown 3).
+- In a capped embed, every value at or above the cap renders as the cap. So inside the embed the dropped pick changes nothing visible.
+- The difference shows only on a full page, and picking the Limit there writes it.
+- On a00b62265 the same embed wrote 3 over every paged view of the account (A7).
+- F-C3's own cases persist: 25, 0 and 2 (A4).
+- The duplicate case (A2) belongs to the same family: a copy made inside an embed, whose Limit equals the projection, is stored without a Limit. On a00b62265 it got the cap. These are view settings, never rows.
+
+**Ruling on the `unprojectView` identity rule: sound.**
+- `sameFields` only chooses between two unprojected objects: the stored view, or the restored copy. So no projection can slip through it.
+- A real edit is swallowed only when every top-level field and every `settings` field is reference-identical to the stored view. That requires a nested field mutated in place, which this code base rules out:
+  - The engine's view edits spread and never mutate (`viewSlice.ts:47-60`, `propertyVisibility.ts:22-29`; the page splices act on copies, `pageSlice.ts:200,221`).
+  - Outside production builds, the loaded state is deep-frozen (`knownDatabaseState.ts:666-669`), so an in-place write throws.
+  - A host that re-creates a view with equal values writes nothing and journals nothing (A5).
+- Projections do slip through the two gates before that rule:
+  - **A1, non-paged type.** `unprojectView` returns any view whose current type is not paged.
+  - **A3, stale store.** It compares with the store's current Limit, not the one the embed loaded.
+- Both are pre-existing: each reproduces byte for byte on a00b62265. They are registered as R10 and are not a condition.
+- A follow-up would close both without a new ruling, if probes A1 and A3 turn and F-C1 to F-C5 stay green:
+  - keep the store's Limit when the view's Limit is unchanged against the baseline view `previous[viewId]`;
+  - also unproject when the stored view's type is paged.
+
+**Ruling on the no-previous-state branch: correct, and unreachable from the host.**
+- The only production caller is `object_database.tsx:551`, and it always passes the window's baseline.
+- On that branch, A7 writes no projection.
+- Like a00b62265's `replaceState(state)`, it replaces the whole state, including dropping views the caller left out. That behaviour is unchanged by F1.
+
+**Conditions:**
+1. **FL1, one unit.** `cc5145417..fc0d7b408` reach develop together, by fast-forward or by one merge.
+   - `7520d20c3` is never a branch tip, a cherry-pick or a revert target on its own.
+   - Reverting F1 reverts `fc0d7b408` and `7520d20c3` together.
+2. **FL2, the unbound shape stays tested.** Every test in `known-database-embed-limit-write.test.ts` keeps calling `persistState` destructured (`persistAsHost`). If `persistState` turns back into a method that reads `this`, they go RED.
+3. **FL3, the register.** The F-C9 block (devil record `/mnt/storage/dlesieur/scratch/devil-rc9/fc9-adr0052-block.md`) is applied to ADR 0052 in the groot commit that records F1 on develop.
+
+Correction to "Gap in the record" above: the A2 section does record RC2, RC8, RC9 and the harness failures. RC1, RC3 to RC7 and RC10 remain unwritten.
