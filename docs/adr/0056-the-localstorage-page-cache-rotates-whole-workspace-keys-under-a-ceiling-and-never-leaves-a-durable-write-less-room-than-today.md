@@ -10,6 +10,11 @@
   - L5 is PROCEED-WITH-CONDITIONS R1.
   - L3a is not ruled here.
   - L3b, L3c, L4 journal reaping and L4 pruning are rung 0.
+  - L1a landing, 2026-11-17 (section at the end), on `feat/page-cache-rotation` 4ebe37b74:
+    - develop is PROCEED-WITH-CONDITIONS LL1 to LL7;
+    - live after P1 is PROCEED-WITH-CONDITIONS LL8 to LL11;
+    - LL12 follows the switch;
+    - L5 as built is PROCEED for develop.
 - Date: 2026-11-17
 - Deciders: devil (ruling); osionos main session and builder (live with it)
 
@@ -125,7 +130,7 @@ The page cache is a cache: whole workspace keys, rotated least-recently-used fir
   3. This tab's active workspace, last.
 
   With a missing or corrupt index, use storage order with the active workspace last. Ties break by key order.
-- **LB5. Room parity.** A refused durable write evicts in LB4 order until it fits. If it still does not fit, every candidate is removed, which is exactly today's end state (P3a and P3b). ADR 0054 C7 (at least 64 characters free after eviction) and ADR 0055 J-C5 then keep their meaning. The P3a fixture passes unchanged under L1a.
+- **LB5. Room parity.** A refused durable write evicts in LB4 order until it fits. If it still does not fit, every candidate is removed, which is exactly today's end state (P3a and P3b). ADR 0054 C7 (at least 64 characters free after eviction) and ADR 0055 J-C5 then keep their meaning. Every candidate here includes any key L1a itself writes, such as its index. The P3a fixture passes under L1a only with this tab's active workspace declared; the L1a landing section corrects this sentence (LL1, LL2).
 - **LB6. At most three `setItem` attempts per guarded write:** as is, after a targeted eviction sized by `storedLength`, and after evicting everything. Measured at about 2.3 M characters, one `setItem` costs 4.8 ms p50 in Chromium (ADR 0055), and this path runs at pagehide.
 - **LB7. Ratchet.** Once a durable write needed room in a session, the family's total stays at or below what was left after that eviction, for the rest of the session. Today's switch-off is the special case where nothing was left.
   The plan's "never disabled" without this refills the 344,898 characters freed on the live profile. The uncaught auth writes then throw, which is F4.
@@ -382,3 +387,206 @@ This section covers `git diff 30ea874d3..3267dbdd9 -- src/`. Develop is at `3267
   - Right before the swap, `docker image inspect track-binocle/osionos-web:main-4b6e8fdf-site` succeeds. `write_rollback` (`:49-60`) depends on that image.
 - **LV5, amended.** On the served bundle, the grep is for `be kept across a reload`, without the apostrophe, because the minifier may re-quote the string. The bundle must also show `main-<new8>`, and it must lack the P1 string chosen before the switch.
 - **LV6.** It passes on my candidate. Re-run it with the real cherry-picks against `origin/develop` before develop reaches main.
+
+## L1a landing, 2026-11-17
+
+This section rules on landing L1a and L5 as built. The subject is osionos worktree `osionos-l1a`, branch `feat/page-cache-rotation`, HEAD `4ebe37b74b3b2ff6447dbc661ea671645024919e` on base `fcff64db5`. The branch is to be rebased onto develop `63c376994` and onto `fix/kds-retire-tombstone` (ADR 0054 C7).
+
+The worktree was read only. Every probe ran on a copy, in docker: `/mnt/storage/dlesieur/scratch/devil-l1a/run.sh`, with image `osionos-p1-fix-playground:latest`. Paths are relative to the osionos repo unless they start with `/`.
+
+### The plan's best case
+
+- One module, `src/store/page-cache/`, replaces `evictPageCaches`, `writeWorkspaceCache` and the session switch-off. It has 7 files; the largest is 109 lines.
+- `pageStore.helpers.ts` goes from 914 to 853 lines.
+- The gates are green: typecheck rc 0, lint rc 0, and the canvas suite at 5,739/5,739 (`/mnt/storage/dlesieur/scratch/l1a/logs/head-eng-*.log`).
+- 26 mutants are killed, at least one per condition: LB1 to LB17, R1 and L5 (`…/logs/mutants/summary.log` and `summary2.log`).
+- The node bench ran 5 times per side (`…/logs/bench-before-{1..5}` and `bench-after-perf-{1..5}`):
+
+  | Case | Base `fcff64db5` | HEAD |
+  |---|---|---|
+  | `savePagesCache` enqueue | 4.4 ns | 4.4 ns |
+  | 8k flush, median | 1.50–1.53 ms | 1.51–1.57 ms |
+  | 8k flush, p95 | 2.07–2.16 ms | 2.13–2.23 ms |
+  | Boot load, median | 3.04–3.07 ms | 3.07–3.11 ms |
+  | Boot load, p95 | 3.54–3.74 ms | 3.59–3.70 ms |
+  | 10k flush | a write | a skip (1,087,330 is over the ceiling) |
+
+### What the probes found
+
+| Probe | HEAD `4ebe37b74` | Base `fcff64db5` |
+|---|---|---|
+| **Q1** (`probes/devil-l1a-room.test.ts:49`). Two caches are written through `persistWorkspaceCaches`, the quota is set to the space used, and a journal is written that fits exactly once every cache is gone. | **FAIL.** The index `osio:page-cache-index.v1` (77 characters) stays through both attempts. Result: `stored=false attempts=2`, with only the durable keys left. | SKIP, since base has no index. |
+| **Q2** (`:65`). Five caches, then three durable writes of 1,500 characters each on a full origin. | `results=[true,true,true] attempts=[2,2,2] cachesLeft=2 free=1816` | `attempts=[2,1,1] cachesLeft=0 free=6143` |
+| **S1** (`probes/devil-l1a-stored-length.test.ts:16`). `storedLength` against the per-character rule, on 20,000 random strings with boundary and surrogate code units. | Passes. | Not applicable. |
+| **S2** (`:38`). 869,455 characters, best of 5 batches of 20. | Latin-1 only: 0.000 ms. One wide character: 1.292 ms. One icon per 100 characters: 1.305 ms. A global-regex count of the same text: 0.261 ms and 0.709 ms. | Not applicable. |
+| **P3a** (the devil-ls probe, with no active workspace declared). | Fails: `ws-other` is kept. | Passes. |
+| **P3b** | Passes. | Passes. |
+
+The logs are `/mnt/storage/dlesieur/scratch/devil-l1a/out/head-probes.log` and `out/base-probes.log`. The base arm ran on `/mnt/storage/dlesieur/scratch/l1a/devil-base`, a tree identical to `fcff64db5`.
+
+### Conflict 1: LB5's "until it fits" against P3a
+
+- **LB5's targeted eviction is the requirement.** P3a's assertion that `ws-other` is gone described today's evict-everything behaviour, not the rule.
+  - My sentence in LB5, "The P3a fixture passes unchanged under L1a", was wrong. It holds only when this tab's active workspace is declared, which is the builder's variant (`tests/canvas/page-cache-wiring.test.ts:118-127`).
+  - With no declared workspace and no index, LB4 falls back to storage order. `ws-active` was seeded first and is large enough on its own, so the write fits and `ws-other` stays. That is "until it fits".
+  - This case only arises before `trackActiveWorkspace` has fired, in early boot (the lease, the outbox ledger). There, no key fares worse than under today's evict-all, so storage order is accepted.
+- **The defect is elsewhere: the last attempt does not see today's end state (Q1).**
+  - L1a adds one key outside the family, the usage index. `makeRoomAndRetry` (`src/store/page-cache/roomMaker.ts:79-91`) never removes it before an attempt. `keepRoomForSession` rewrites it afterwards (`:108`).
+  - The last attempt is also skipped when the targeted pass already took every candidate (`:85`, `evicted.length < order.length`).
+  - So a durable write that fits today once every cache is gone can be refused. In Q1 the margin is 77 characters. The index grows by about 40 characters per workspace key.
+- **What each consumer needs:**
+  - **LB5, room parity.** The final attempt runs with every family key gone and every key L1a itself writes gone. This is LL1.
+  - **ADR 0055 J-C5.** "Refused after page-cache eviction" must keep meaning "does not fit with every cache gone". Otherwise J-C5 suppresses a pagehide push that is sent today, and the last edit before a close is lost. This needs LL1 and the full-origin cell in LL8.
+  - **ADR 0054 C7.** The flag `"1"` is covered once LL1 holds. So is the in-place tombstone, which is a shrink and never refused (M1). The C7.3 ported tests must stay green, with their assertions unedited, on the rebased head (LL5).
+- **The cost of targeting (Q2).** Every later durable write on a full origin pays one more refused `setItem`: `[2,2,2]` against `[2,1,1]`. This happens because L1a keeps caches that today are all gone.
+  - It stays within LB6 (three attempts), and the number of cache keys and LB7 bound it.
+  - It lands on the pagehide path, so LL8 measures it.
+
+### Conflict 2: which call LB15's 1 ms binds
+
+- **The 1 ms binds `savePagesCache()`, the synchronous enqueue at every call site.** It measures 4.4 ns on both sides, so it is met.
+- **It does not bind the deferred flush.** PS1's 1 ms flush target came with PS1's shard format (26–31 ms per typing pause at 10k pages), and LB2 and LB3 forbid that format. The flush is bound by "not slower" instead.
+- **"Not slower" means a pairwise median within +3 %.** That is the noise floor (`agents/benchmarker.md`). It applies to the synchronous boot load and to the flush, in ABBA order, with at least 5 rounds per side.
+- **The node bench understates the flush.**
+  - `tests/bench/page-cache-flush.bench.ts` uses `generatedTree`, whose titles are ASCII.
+  - One character above 0xFF anywhere in an 870k value sends `storedLength` to its loop. Real pages carry such characters: the 📄 icon and the em dash in `src/widgets/database-view/model/homeDemoSeed.ts:108`, and the 📄 in `wikiSeedPages.ts:44`.
+  - With one, the loop costs about 1.3 ms (S2). The realistic flush is then close to the builder's pre-fast-path median of 2.23–2.32 ms, against base's 1.50–1.53 ms. This is LL3.
+- **When the measurements are due.**
+  - The node bench with a realistic fixture is due before develop (LL3). It is cheap, and it decides which counter `storedLength` uses.
+  - The prod-build ABBA is due before live (LL9). The costs it adds exist only in a browser: one index `setItem` per flush, a `getItem` of every cache key in the boot rotation task, and the extra refused `setItem` on a full origin. Develop is one revert away.
+
+### The deviations
+
+| Deviation | Ruling |
+|---|---|
+| L5's console global is installed in production, and no test fails if the `src/app/main.tsx:75` call is removed. | **Accepted.** <br>• It adds no capability: any same-origin script can already read `localStorage`. <br>• The report holds names and `storedLength` only (R1; the mutant `R1-value-in-report` is killed). <br>• The mutant `L5-global-not-installed` empties `installStorageReport` (`report.ts:74-75`); it does not remove the call. <br>• LB16's unknown has no other way out of the live profile, so the call is a live gate (LL10). |
+| The regex fast path in `storedLength` (`roomMaker.ts:24,33`). | **Accepted as exact.** <br>• S1 covers 20,000 random strings. <br>• The builder's boundary and surrogate tests cover the edges (`tests/canvas/page-cache-room-maker.test.ts:62-77`). <br>• Two mutants are killed. <br>• The speed it was added for holds only for Latin-1 values (Conflict 2, LL3). |
+| The index key's own size is not counted. | **Accepted for LB7 and LB8.** LB3 puts the index outside the family, and it is about 40 characters per workspace against a 1,000,000 ceiling. <br>**Not accepted for LB5:** see LL1. <br>A further problem: a refused index write removes the index (`usageIndex.ts:54-60`). Every later flush then measures every cache key with `getItem` until an index write succeeds. LB8 rules out that per-flush scan, and it happens precisely on a full origin. See LL4. |
+| LB4's tier 1 is empty. | **Accepted.** No registered non-page cache exists, and LB1 allows tier 1 to be empty. A later non-page cache registers there. |
+| LB17's test fails only under a mutant. | **Accepted.** <br>• Base meets LB17 by construction, because its first eviction switches the cache off. A test that passes on base is therefore correct. <br>• The test refills the origin between runs (`hydrateFillingTheOrigin`). It expects evictions `[["ws-a"],[],[],[]]` and lease attempts `[2,1,1,1]`. <br>• The mutant `LB17-lease-bypasses-room-maker` is killed. |
+| `pageStore.helpers.ts` is 853 lines, with a re-export of `setItemEvictingPageCaches` and `PAGE_OUTBOX_KEY` (`:26-27`). | **Not a gate.** <br>• The file was 914 lines on base, and this change shrinks it. <br>• 7 source files import the re-exported names through it. 3 of them are `knownDatabase*.ts` files, which are C7.7 paths. <br>• Moving them now would re-fire C7.7 on the tombstone branch. <br>• This is the follow-up LL12 (b). |
+
+### Verdicts
+
+| Item | Develop | Live, after P1 |
+|---|---|---|
+| L1a: rotation, room-maker and index | **PROCEED-WITH-CONDITIONS** LL1 to LL7. | **PROCEED-WITH-CONDITIONS** LL8 to LL11, once the develop conditions hold. LL12 follows the switch. |
+| L5: the report and its global | **PROCEED** as built (R1 is met). | **PROCEED-WITH-CONDITIONS** LL10. |
+| Conflict 1 | LB5 stands. The P3a assertion is amended (LL2), and index parity is LL1. | Covered by the full-origin cell in LL8. |
+| Conflict 2 | The 1 ms binds the enqueue, which meets it. The flush is bound by +3 % (LL3). | The prod-build ABBA is a live gate (LL9). |
+
+### Conditions
+
+Before develop:
+
+1. **LL1. Index parity.**
+   - When the targeted attempt is refused, the next attempt runs with these keys removed:
+     - every remaining family candidate;
+     - `osio:page-cache-index.v1`;
+     - any other key L1a itself writes.
+   - This attempt runs even when the targeted pass already took every candidate.
+   - `keepRoomForSession` rewrites the index from what was kept, as it does now.
+   - There are still at most three `setItem` attempts (LB6).
+   - Done when:
+     - Q1 is ported into the builder suite with its assertion unedited, and passes;
+     - a mutant that keeps the index through the last attempt is killed.
+2. **LL2. P3a is amended, not deleted.**
+   - The case with no declared workspace stays in the builder suite. In it:
+     - the write is stored;
+     - every durable key is byte-identical;
+     - `ws-active` is gone;
+     - `ws-other` is **kept**, which proves "until it fits".
+   - P3b and the declared variant (`page-cache-wiring.test.ts:118`) stay as they are.
+   - LB5's sentence is corrected in this ADR.
+3. **LL3. A realistic flush bench.**
+   - `tests/bench/page-cache-flush.bench.ts` gains a fixture with one character above 0xFF in each page, such as the seeds' 📄 icon. The bench runs base against HEAD on it and records the median and p95.
+   - If HEAD's median is more than 3 % over base, `storedLength` takes a cheaper counter that returns the same number:
+     - the global-regex count measured 0.26–0.71 ms, against 1.29–1.31 ms for the loop (S2);
+     - the new counter must pass S1 and the builder's LB14 tests unchanged.
+   - The units do not change. These all count in `storedLength`:
+     - the LB7 allowance;
+     - the LB8 ceiling;
+     - the J-C5 cap, because `knownDatabaseJournal.ts` imports the same function.
+   - The bench comment states the realistic numbers, not only the Latin-1 ones.
+4. **LL4. The refused-index state.**
+   - A test pins how the flush behaves while the index write is refused.
+   - The `Caveat:` in `cacheWriter.ts` names this state: each flush measures every cache key until an index write succeeds.
+   - LL9 measures its cost. If it is more than 3 % over base, the measured sizes are kept in this tab's session while the index is refused.
+5. **LL5. The rebase keeps C7 intact.** On the rebased head (develop `63c376994` plus `fix/kds-retire-tombstone`):
+   - the C7.3 ported tests are green, with their assertions unedited;
+   - the C7-common op sequence and `storage-write-guard.test.ts` are green;
+   - Q1, Q2 and P3b are re-run;
+   - the 26 mutants are re-run, and all are still killed.
+6. **LL6. Gates.** Typecheck, lint with `--max-warnings 0` and the full canvas suite are green on the rebased head. They run under a timeout, and the logs are kept.
+7. **LL7. A `Caveat:` in `usageIndex.ts`.** It says that the index sits outside LB7 and LB8, and that the room-maker removes it before its last attempt (LL1).
+
+Before live, after P1 and after LL1 to LL7:
+
+8. **LL8. The re-run that C7.7 requires.**
+   - C7.7 fires for two reasons:
+     - the definition of `setItemEvictingPageCaches` is replaced;
+     - `knownDatabaseJournal.ts` changed: it now imports `storedLength`.
+   - Every run uses:
+     - the real app build of the exact live candidate sha;
+     - local docker, with no live URL;
+     - Chromium 147 and stock Firefox 158;
+     - N ≥ 20 per cell.
+   - Every cell must show 0 lost and 0 reverts.
+   - The cells:
+     - **RC9 first-session, all 28** (`/mnt/storage/dlesieur/scratch/rc9/matrix-first.sh`):
+       - offline × {seed-title, seed-row, template-row, template-title, new-db};
+       - online × {server-title, new-db};
+       - each × {Chromium, Firefox} × {nav, close}.
+     - **J-C7 close, 6** (`/mnt/storage/dlesieur/scratch/jc7/matrix.sh`): {Chromium, Firefox} × close × journal size {small, near 950k, over 1.2M}.
+     - **New: full origin, 4.** {Chromium, Firefox} × {close, nav}, with the journal near the cap.
+       - None of the 34 cells above fills the origin, so none of them reaches the code that changed.
+       - After boot, the origin is filled to refusal with at least 3 workspace cache keys.
+       - A run counts only if its log shows all three of these:
+         - the journal's first `setItem` refused;
+         - at least one cache key evicted and at least one kept, which proves the targeted path;
+         - the last edit on the server after the reload.
+       - The pagehide duration of each run is recorded.
+   - Any later change to a C7.7 path or to `src/store/page-cache/` re-fires the whole set.
+9. **LL9. The prod-build ABBA, run by the benchmarker.**
+   - Chromium and Firefox, at least 5 rounds per side. The base is the build of the P1 live image.
+   - The bounds:
+     - the `savePagesCache` enqueue p95 is at most 1 ms at 10k pages;
+     - the synchronous boot load's median is within +3 %;
+     - the realistic flush (LL3's fixture) has its median within +3 %;
+     - the flush with the index refused (LL4) has its median within +3 %;
+     - the boot rotation task (`rotation.ts:72`) takes at most 50 ms on a profile whose family is over the ceiling, which is the shape of the live profile.
+   - Going over any bound means stop and re-rule. A bound is never waived.
+10. **LL10. L5 in the real build.**
+    - A Playwright test on the real build (Chromium and Firefox, local docker) asserts:
+      - `__osionosStorageReport` is a function;
+      - its output lists a planted key's name and size, and not its planted value.
+    - Before the switch, the served bundle contains `__osionosStorageReport`.
+11. **LL11. The rollback target.**
+    - The rollback image is the P1 live image (after P1, before L1a). It is never a pre-P1 image, which would reopen S1.
+    - A rollback leaves `osio:page-cache-index.v1` orphaned. Base ignores it because it reads only the `osio:pages:` prefix (base `pageStore.helpers.ts:23,420`), and never removes it.
+    - This is registered as R-L1a1. It costs about 40 characters per workspace.
+
+After the switch:
+
+12. **LL12.**
+    - **(a)** Within 24 hours, the user runs `__osionosStorageReport()` once on the profile they use. Only names and sizes go into ADR 0052.
+      - If the active workspace alone is at or over 1,000,000, LB9 means it is never cached and boots from the server every session.
+      - In that case, LB8's ceiling is re-ruled before anything else lands on this path.
+    - **(b)** A follow-up, not a gate. Once the tombstone has landed and C7.7's re-run has passed:
+      - the 7 importers move to `@/store/page-cache/*`;
+      - the re-export at `pageStore.helpers.ts:26-27` goes.
+      
+      That move re-fires C7.7, so it rides with the next re-run and is never done alone.
+
+### Risk
+
+| Axis | Score | Why |
+|---|---|---|
+| Blast radius | 4 | Every guarded durable write goes through the room-maker: the outbox, pending pages, the KDS journal, the C7 flag, the ledger and the lease. |
+| Reversibility | 2 | Develop is one revert. Live rolls back to the P1 image, leaving only the orphaned index (R-L1a1). |
+| Cost on failure | **4 (worst)** | A durable write refused while today's end state would fit means a lost edit at pagehide, because J-C5 drops the push. Q1 shows this on HEAD. |
+| Confidence | 3 | The fake storage charges `key.length + value.length`, for ASCII only. Engine accounting, the cost of `getItem` and `setItem` in a browser, and the Chromium quota stay unmeasured until LL8 and LL9. |
+
+**Registered residual R-L1a1:** the orphaned index after a rollback.
+
+Q2's extra refused `setItem` per durable write on a full origin is not registered as a residual; LL8 measures it.
