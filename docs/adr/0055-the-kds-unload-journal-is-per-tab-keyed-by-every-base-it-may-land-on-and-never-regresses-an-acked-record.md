@@ -269,3 +269,29 @@ Before live, unchanged: J-C7, the measurement half of J-C5, and J-C9, extended. 
 - the prune-delay residual above.
 
 ADR 0054's C5 and C7 still apply. J-C10 is satisfied.
+
+## Re-rule 2026-11-17 on a00b62265: the first-session window (R8), A2
+
+osionos develop went red on 38c38cf36: `tests/e2e/functional/templateUse.spec.mjs:52-80` lost a row title typed less than about 3 s before a reload (CI run 44037496549, shard 6/6). Its cause is R8 (ADR 0052): an empty store gave the journal no base. The devil ruled options R (revert), A, B, C, D and E; it ruled A2 PROCEED-WITH-CONDITIONS (RC1–RC10) and blocked the rest. D and E are recorded in `.out-of-scope/`.
+
+### Decision (A2)
+
+- **Seed at readiness.** An empty store with no legacy text, in a session that was not abandoned, stores `serializeKnownDatabaseState(seedSnapshot(), new Set())` under `migrated:<tabId>`, with record `{}`, and records it as loaded. The redo rule covers an abandoned seed put, as it covers a migration (`knownDatabaseDurableCopy.ts`).
+- **J-C2, one case changed.** When a base holds neither a slice nor a record entry for a database (a hydrate added it after the copy was read), that database is journaled only if its live copy is dirty against the push record. Every other case is unchanged. Plain A (seed write without this rule) put a large account's first-session journal over the cap, so J-C5 sent no pagehide push where 38c38cf36 sent one; the probe proved it.
+
+### What changes for a user
+
+- **I7 flag earlier.** The `osionos.kds.idb` flag is set at a new browser's first readiness, not at its second IndexedDB session, so a later fallback session in that browser is pull-only.
+- **Wiki seed dates freeze at the first stored copy.** The wiki seed pages (ms1–ms6, wiki-f01–f26) are dated from `new Date()` (`wikiSeedPages.ts:25`) and nothing re-anchors them on load. Any browser that saved anything already had them frozen at its first save; since A2 that includes the first load of a browser that never saved. A re-anchor (`rebaseWikiSeedDates`, modelled on `rebaseHomeDemoDates`) is a separate unit and not a precondition for live.
+
+### Evidence (a00b62265, branch `fix/kds-template-reload`)
+
+- Canvas 5614/5614; typecheck and lint rc=0; `templateUse.spec.mjs` unchanged and 10/10 with `--repeat-each=10 --retries=0`; `knownDatabaseFlushSchedule.ts` unchanged.
+- The devil's harness: only N1b, N1c and N2 fail (as at 38c38cf36); D6c and R8-1 to R8-4 pass.
+- RC2: (a) restore equality under a frozen `Date`; (c) the stored seed text equals the single producer call exactly. The five omission mutants (noWiki, noHome, noGrades, jsonOnly, emptyState) are equivalent for every read path, because each path merges the stored text over the seed before reading it; RC2(c) kills them anyway, with changedPage and tombstone.
+- RC8, fresh-profile cold readiness with the seed write, N=20, production build: Chromium 147 p50 19.6 ms, p95 25.1 ms; Firefox 158 p50 31.0 ms, p95 365.0 ms; 0/20 over the 3 s budget in each.
+- Evidence: `/mnt/storage/dlesieur/scratch/p1-r8-a2/`, `/mnt/storage/dlesieur/scratch/devil-r8/`.
+
+### Conditions
+
+Before live, added to J-C7: RC9, a J-C7 re-run on the fix commit with first-session cells (fresh profile, edit less than 1 s before leaving, with no bridge and online, navigation and close, N≥20 per cell): 0 losses, 0 reverts. ADR 0054's live suspension, C5 and C7 still bind.
