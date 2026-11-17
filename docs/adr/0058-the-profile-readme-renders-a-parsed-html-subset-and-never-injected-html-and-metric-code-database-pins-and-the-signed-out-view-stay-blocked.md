@@ -259,3 +259,7 @@ Cause: the fixture carries its own fences at lines 33 (```` ```c ````) and 50 (`
 - README `button` blocks run in the viewer's session and were not ruled here: a `security` review before U4 ships.
 - The round-trip measurement rebuilt the line-98 template by hand; the U4-1 canvas test replaces it with the real
   serializer.
+
+## 2026-11-17: U7 contract re-ruling
+
+The architect contract for U7 was ruled. The verdicts and conditions (MC, MA, MB, MD, ME) are ADR 0059.
