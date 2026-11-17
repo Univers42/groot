@@ -2,6 +2,7 @@
 
 - Status: accepted. Design J as worded is BLOCKED. Corrected J is PROCEED-WITH-CONDITIONS J-C1 to J-C9.
   Re-ruled 2026-11-17 on 2caf348fb (below): J-C1 to J-C4, J-C6 and J-C8 are met, and J-C5 is met in code. The merge to develop is PROCEED-WITH-CONDITIONS JM1 and JM2, with live still suspended. J-C1's base list is amended, and J-C10 is added before live.
+  Re-ruled 2026-11-17 on a00b62265 (RC9 boundary, below): live promotion is BLOCKED by a pre-existing inline-embed fill that inflates the first-session journal past the cap at a 600,000-character edit. The adapter-side fix F1 is PROCEED-WITH-CONDITIONS F-C1 to F-C9.
 - Date: 2026-11-17
 - Deciders: devil (ruling), osionos main session / builder (live with it)
 
@@ -295,3 +296,89 @@ osionos develop went red on 38c38cf36: `tests/e2e/functional/templateUse.spec.mj
 ### Conditions
 
 Before live, added to J-C7: RC9, a J-C7 re-run on the fix commit with first-session cells (fresh profile, edit less than 1 s before leaving, with no bridge and online, navigation and close, N≥20 per cell): 0 losses, 0 reverts. ADR 0054's live suspension, C5 and C7 still bind.
+
+## Re-rule 2026-11-17 on a00b62265 (RC9 boundary: the inline-embed fill in the first-session journal)
+
+The osionos worktree osionos-p1-fix (`fix/kds-template-reload`, HEAD a00b62265) was read only. Its `src/` was not modified; the probes ran on a copy. Harness: `/mnt/storage/dlesieur/scratch/devil-rc9/`, two runners:
+- `./run.sh tests/canvas/devil-rc9-leak.test.ts`: the canvas runner in docker, on a copy of the worktree. Log: `leak.log`.
+- `./leak.sh`: the RC9 production build `rc9/dist`, Chromium 1.59.1, `--network none`. Results: `leak-e2e.log` and `leak.json`.
+
+Gap in the record: the R8 ruling's RC1 to RC10 were never written into this ADR. The devil's memory `osionos-kds-r8-verdict.md` holds them only as a summary. This section rules on the RC9 outcome. It does not restate RC1 to RC10.
+
+Verdict:
+- **Live promotion of P1: BLOCK.**
+- **The root fix F1 below: PROCEED-WITH-CONDITIONS F-C1 to F-C9.** Live promotion is re-ruled once these conditions are met.
+- RC9's required cells are accepted as measured:
+  - 160/160 regression cells kept;
+  - first-session cells: 564 OK, 0 lost, 0 reverts;
+  - `rc9/out/summary-first.md`, `summary-regression.md`.
+
+### Evidence
+
+- **RC9 boundary, verified in `rc9/out/summary-first.md`.** These are the online server-title cells in the first session.
+  - Padded to 500,000: 80/80 kept, and the Chromium nav journal is 946,546 to 946,549 characters.
+  - Padded to 600,000: 41/80 lost (Chromium nav 20, Firefox close 20, Chromium close 1, Firefox nav 0), with no journal set and no unload push.
+  - A seed-only edit journals 8,134 characters (`chromium-nav-offline-seed-title`).
+- **The cause, corrected.** The engine's save of a user edit does not do this. The host's own post-load persist does, and no user edit is involved:
+  1. `loadAdapterState` sets the loaded state together with `activeDbmsSource: 'adapter'` in one `setState` (`object_database.tsx:590-597`, engine submodule 77892faa).
+  2. The persistence subscriber treats any such change as an edit (`:552-557`). Its baseline is the store before the load, which on a first mount holds the engine store's initial empty maps (`useDatabaseStore.ts:45-47`). After 150 ms it calls `persistState(projected, empty)` (`:541-546`).
+  3. `KnownDatabaseAdapter.persistState` (`knownDatabaseState.ts:385-399`) runs `mergeChangedRecords`, which compares by reference (`:451`). Against an empty baseline, every view of the projection is written into `useKnownDatabaseStateStore`.
+  4. For an inline embed, that projection is `applyAdapterOptions` (`:424-442`): it gives every table, list and timeline view of the whole state a `loadLimit`.
+- **The cause, proved:**
+  - L3 (control): a full-page mount writes 0 views.
+  - L1: an inline mount fills 19 of the 45 seed views, across all 10 seed databases. A later full-page mount then reads `resolvePageSize(8)` = 8 rows per page instead of 50 (`viewPagerMath.ts:15-20`).
+  - L2: an embed with `recordLimit` 3 overwrites an explicit user Limit of 100 on an unrelated database (`v-crm-table`) with 3 (`:436`).
+  - e2e (`leak.json`): a fresh profile inserts one new inline database and edits no seed database. The IndexedDB copy `…:1` then holds `loadLimit: 8` on 19 views in 10 databases. The control profile (full page only) holds 0.
+  - The seed `db-tasks` has 8 rows, so the row cap cannot show on it. L1 shows it for any database with more than 8 rows.
+- **Pre-existing, independent of P1.**
+  - `applyAdapterOptions` dates from c98affa1b (2026-07-09), an ancestor of P1.
+  - The engine pin is 77892faa both before P1 (ce74ab157) and at a00b62265.
+  - The P1 diff does not touch `applyAdapterOptions`, `persistState` or `mergeChangedRecords`.
+  - The legacy writer serialized and pushed the same store (`ce74ab157:knownDatabaseState.ts:184-212`). Its push excludes only the seed databases, so user databases with a filled view were pushed: the 8 reached the server and every other device. It is live today. The data is view settings only: no row is lost.
+- **Amplification beyond 447k (L4, new).** A database added by a hydrate holds no base entry and has a record equal to its server hash, so A2 counts it clean (`knownDatabaseJournal.ts:79-82`).
+  - Once an inline mount fills its view, it is dirty. Hydrate → `notifyStateReplaced` (`knownDatabaseState.ts:590-594`) → the embed reloads → the projection runs again.
+  - L4 measured this with the real `buildUnloadJournal`. Before the mount: `null`. After it: 11 slices, 683,197 characters, made of the seed's 446,788 plus the whole 236,409-character hydrated database.
+  - So the first-session headroom is not 553k. It is 1,000,000 − 447k − every hydrated database whose server copy lacks the fill.
+  - The window closes only after the first commit resolves and its record catch-up lands (`knownDatabaseJournal.ts:150-153`, `knownDatabaseCommitLedger.ts:68`).
+  - UNKNOWN: how many live server databases already carry the fill (from the live legacy push) and how many do not.
+- **Legacy comparison.** Pre-P1, the pagehide flush writes the whole state synchronously to localStorage (quota 5,242,879 characters, page caches evicted) and pushes it.
+  - A 600k account's whole state is about 1.05M characters, which fits. So a 600k first-session edit is kept on legacy and lost on P1.
+  - **This is a regression.** It belongs to R4's class (over the cap), with the threshold lowered by a pre-existing bug.
+
+### Ranking of the fix candidates
+
+| | Behaviour change | Loss paths | Ruling |
+|---|---|---|---|
+| **F1** (adapter-side root fix) | The known adapter's write path stops persisting its own projection. A view whose only difference from the store is the projection is not written. When the user edits a view, its stored `loadLimit` is kept unless the user changed the Limit. The default stays render-time only. | It closes the boundary loss (the journal is back to the 8k seed-only size, plus the edited databases) and L4's amplification. It also closes the live setting corruption (L1, L2), and does nothing to K1–K12, I1–I13, J-C1–J-C10 or RC1–RC10: the journal, bases and readiness are untouched. It opens one residual: an explicit Limit equal to the inline default (8), set on an inline view that had none, is indistinguishable from the fill. A view setting, never a row. | **PROCEED-WITH-CONDITIONS, first** |
+| F0 (host-side: the engine stops persisting its own load) | `useAdapterStatePersistence` ignores the change that `loadAdapterState` makes. | It drops the database, view and starter row that `withRequestedDatabase` creates inside the load (`requestedDatabase.ts:13-34`): a new inline database would not persist. It changes the contract for every adapter (the guard at `sysDatabaseState.ts:240-242` assumes it, but it is dead today). The blast radius is the shared engine. | **BLOCK** for this unit; it needs its own ruling |
+| F2 (journal skips differences in view settings only) | The diff ignores views. | A user's own view edit in the unload window is pushed at pagehide while its commit is lost. The reload pushes the older stored view back over it: N2 for views, the revert class J exists to close. It leaves the setting corruption live. | **BLOCK**; `.out-of-scope/kds-journal-view-settings-only-exclusion.md` |
+| F3 (seed base after the projection) | Readiness stores the projected seed. | Which fill applies depends on which embeds mount (8, `recordCap`, or none). A session without an inline embed then differs on all 10 seed databases: the same 447k, inverted. It does not cover L4 (no base holds a hydrated database). It breaks RC2(b) and RC2(c) (exact stored text = `serialize(seedSnapshot(), new Set())`). It writes the bug into the durable copy. | **BLOCK**; `.out-of-scope/kds-projected-seed-base.md` |
+| F4 (accept and register only) | None. | It rests on an UNKNOWN: the share of live server databases without the fill bounds L4. It also leaves a live setting corruption whose fix is local and cheap. | **BLOCK** as the only route. After F1 lands, the residual from F1 is registered in ADR 0052. |
+
+### Conditions F-C1 to F-C9 (F1; acceptance criteria for the builder)
+
+1. **F-C1, no projection is written.** The ported L1 test: after an inline mount (`defaultLoadLimit` 8) and the host's post-load persist replayed with an empty baseline, 0 store views gain or change `loadLimit`, and a full-page `v-tasks-table` resolves to 50. In the e2e inline arm (`devil-rc9/leak.sh`), the IndexedDB copy has `limited: 0`.
+2. **F-C2, the cap is never written.** The ported L2 test: with `recordCap` 3, an explicit 100 on `v-crm-table` stays 100 in the store, and no view without a Limit gains one.
+3. **F-C3, explicit choices still persist.** In an inline embed:
+   - Limit 25 persists as 25, and "All" persists as 0, in both the store and a full-page load. This is the "Limit that didn't persist" fix at `knownDatabaseState.ts:433-435`.
+   - A sort or filter edit on the embed's view persists the sort, and the stored `loadLimit` stays absent.
+   - Each of these mutations must turn a test RED: (m1) skipping only the empty-baseline persist; (m2) stripping every `loadLimit` from writes; (m3) un-projecting the fill but not the cap.
+4. **F-C4, a new inline database still persists.** After `/database` inline, the store and IndexedDB hold its database, view and starter row (`withRequestedDatabase`). Both the e2e inline arm (46 views) and a canvas test show it.
+5. **F-C5, no amplification.** The ported L4 test: after an inline mount, the journal against the seed base is `null`, and a clean hydrated database is not journaled.
+6. **F-C6, scope.**
+   - The engine submodule (`src/shared/notion-database-sys`) is unchanged; F0 is not shipped.
+   - Existing stored or server `loadLimit: 8` values are not scrubbed, because they cannot be told apart from an explicit 8. A cleanup needs its own ruling.
+   - `applyAdapterOptions`' read-side projection stays.
+7. **F-C7, RC9 re-run on the F1 build.**
+   - The 8 regression cells and the 28 first-session cells: 0 lost and 0 reverts.
+   - `pad.sh 600000 20` and `pad.sh 900000 20` on all 4 browser/scenario pairs: 0 lost, 0 reverts, and every journal ≤ pad + 20,000 characters.
+8. **F-C8, gates.**
+   - The full canvas suite, typecheck and lint pass with 0 warnings.
+   - In the devil-r8 harness, R8-1 to R8-4, the RC2 tests and the JA to JP mutation table hold as recorded above.
+   - N1b and N1c stay the only accepted failures.
+9. **F-C9, the register.** ADR 0052 is updated once F1 lands:
+   - the pre-F1 boundary (553k, L4) is marked closed;
+   - F1's residual (an explicit 8 equal to the inline default) is named;
+   - the leaked 8s on live copies are named and left in place.
+
+Live promotion still also waits for ADR 0054 C7 and the conditions already listed above.

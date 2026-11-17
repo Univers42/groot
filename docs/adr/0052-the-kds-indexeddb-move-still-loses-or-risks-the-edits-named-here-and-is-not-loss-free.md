@@ -1,6 +1,6 @@
 # 0052. The KDS IndexedDB move still loses or risks the edits named here, and is not loss-free
 
-- Status: accepted as a residual register. It does not lift any condition. Live promotion of osionos develop stays suspended until J-C7 ([ADR 0055](0055-the-kds-unload-journal-is-per-tab-keyed-by-every-base-it-may-land-on-and-never-regresses-an-acked-record.md)) and C7 ([ADR 0054](0054-the-kds-indexeddb-writer-reaches-develop-only-after-its-coverage-fixes-and-is-not-promoted-live-before-pagehide-survival-is-measured.md)) pass. R7 is fixed (J-C10, osionos `38c38cf36`), confirmed by the devil's re-rule of 2026-11-17 recorded in ADR 0055; osionos develop was fast-forwarded to `38c38cf36` on 2026-11-17.
+- Status: accepted as a residual register. It does not lift any condition. Live promotion of osionos develop stays suspended until J-C7 ([ADR 0055](0055-the-kds-unload-journal-is-per-tab-keyed-by-every-base-it-may-land-on-and-never-regresses-an-acked-record.md)) and C7 ([ADR 0054](0054-the-kds-indexeddb-writer-reaches-develop-only-after-its-coverage-fixes-and-is-not-promoted-live-before-pagehide-survival-is-measured.md)) pass. R7 is fixed (J-C10, osionos `38c38cf36`), confirmed by the devil's re-rule of 2026-11-17 recorded in ADR 0055; osionos develop was fast-forwarded to `38c38cf36` on 2026-11-17. On 2026-11-17 the devil's re-rule on a00b62265 (ADR 0055) also blocks live promotion until F1 lands under F-C1 to F-C9 and the RC9 re-run (F-C7) passes; see R9.
 - Date: 2026-11-17
 - Deciders: devil (rulings in 0054 and 0055), osionos main session / builder (live with it)
 
@@ -54,8 +54,15 @@ Harness `/mnt/storage/dlesieur/scratch/devil-j-ls/`, one synchronous `localStora
 | R6 | Two live tabs overwrite each other's whole-state commits. P1 already does this. | loss |
 | N2′ | The post-commit live push sends an edit made during the commit await (`knownDatabasePersistence.ts:102`). | revert risk |
 | R8 | First-session window. When the store held no copy at readiness (a new browser, cleared site data, or IndexedDB eviction), readiness writes nothing (`knownDatabaseDurableCopy.ts:161`), so the session has no base until its first commit resolves. That commit waits for a 1 s debounce that every edit restarts (`knownDatabaseFlushSchedule.ts:16,58`), then an idle period of up to 2 s. Steady editing therefore keeps the window open for the whole burst, not for 1 s. At pagehide the unload commit is the only base and equals the live state, so no journal is written (`knownDatabaseJournal.ts:89,147-148`; outcome "unneeded" at `:164`) and the push is still sent (`:184`, `knownDatabasePersistence.ts:111`). That commit is lost on navigation (I10). Online, the edit survives only if the non-keepalive pagehide push lands. Offline, without a bridge, or in a seed database (never pushed), it is lost. Reproduced end to end: `tests/e2e/functional/templateUse.spec.mjs:52-80` (use a template, type a row title, reload within about 3 s) fails on 38c38cf36 and passes on 4b6e8fdf2 (CI run 44037496549, shard 6/6). In the canvas suite, D6c, `zz-r8-first-session-reload.test.ts`, and devil-r8 R8-1 and R8-4 fail at 38c38cf36. The pre-P1 localStorage writer stored synchronously and did not lose this edit, so R8 is a regression against legacy. The earlier sentence "P1 without a journal behaves the same" compared P1 only with itself. Closed on develop by a00b62265 (A2, ADR 0055 re-rule 2026-11-17); live waits for RC9. | loss |
+| R9 | First-session inflation over the cap, measured on a00b62265 by RC9. An inline embed's mount writes `loadLimit` 8 into every table, list and timeline view of the whole store. No user edit is involved; the host's own post-load persist does it, against an empty baseline (ADR 0055, re-rule on a00b62265). All 10 seed databases then differ from the seed base, which adds about 447,000 characters to the journal, plus every hydrated database whose server copy lacks the fill (L4: one 236,409-character database made a 683,197-character journal). A first-session edit of 600,000 characters is lost in 41 of 80 runs; at 500,000 it is 0 of 80. Legacy keeps it, so this is a regression from legacy in R4's class. It is open until the first commit resolves and its record catch-up lands. Not fixed: F1 is ruled and has not landed. | loss |
 
 R1 to R6 and N2′ are the residuals of corrected J as ranked in 0055 (alternatives considered). N2′ is not closed by the journal.
+
+### R9's cause outside P1: the inline fill is live today
+
+The fill is not a P1 bug. `applyAdapterOptions` dates from c98affa1b (2026-07-09). The legacy writer pushes every non-seed database, so a user database whose view was filled reached the server: on every device, a full-page view shows 8 rows per page instead of 50. An embed with `recordLimit` N also overwrites an explicit Limit on unrelated databases with N (probe L2). It affects view settings, never rows. F1 stops new writes. F-C6 deliberately leaves the existing stored or server 8s in place, because they cannot be told apart from a user's explicit 8; a scrub needs its own ruling. F1's own residual: an explicit Limit of 8, set on an inline view that had none, is not persisted.
+
+Observed and not ruled: the sys adapter's "No baseline, no diff" guard (`sysDatabaseState.ts:240-242`) is dead, because the host always passes a baseline (the empty initial store on the first load).
 
 ### R7, deletes in the unload window
 
@@ -89,7 +96,8 @@ The migration itself is also one way (0054): migrated tabs have no legacy keys, 
 
 ## What P1 does not do
 
-- It does not make the unload edit loss-free. R2, R3, R4 and R6 lose edits. N2′, R1 and R5 can revert one.
+- It does not make the unload edit loss-free. R2, R3, R4, R6 and R9 lose edits.
+- Until F1 lands, it does not keep a first-session edit that legacy keeps (R9: 600,000 characters, 41 of 80 runs lost). N2′, R1 and R5 can revert one.
 - It does not close N1b or N1c. ADR 0054 C7 measures their precondition on each browser profile before live.
 - It does not queue edits made before readiness.
 - It does not journal over the cap, and it does not push at pagehide over the cap.
@@ -99,6 +107,7 @@ The migration itself is also one way (0054): migrated tabs have no legacy keys, 
 ## Consequences
 
 - Live promotion of osionos develop stays suspended in writing until J-C7 (real app build, Chromium 147 and stock Firefox 158, N≥20 per cell, last edit on the server after reload, 0 reverts) and ADR 0054 C7 (at least 64 characters free per profile) pass. Merging to develop is allowed only with that suspension.
+- Live promotion also waits for F1 under F-C1 to F-C9, including the RC9 re-run at 600,000 and 900,000 characters (F-C7; ADR 0055, re-rule on a00b62265). J-C7's required cells passed in RC9.
 - No document, release note or status line may say "no data loss" or "0 at risk" for this move. The residuals above are the accurate statement.
 - Removing the journal later restores today's N2 and does not touch the stored copy.
 - Caveat for the numbers: I10 and the journal harness are docker-driven (Playwright, stock Firefox over WebDriver BiDi), not a user's Ctrl+W, and N=20 bounds a rate only to about ±15 %.
