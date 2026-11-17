@@ -72,9 +72,7 @@ placeholder can no longer win a union, and until hydrate retries.
 - (a) G1 ships web-only after A1–A6. Rollback is the previous web tag. G1 only narrows the delete set, so a
   rollback restores today's exposure and loses nothing.
 - (b) S1 stays out until L1–L8 are met and re-ruled. The toast stays on the overflowing account. That is
-  visible and costs no data. The refused write also arms the unload guard, so every reload of that account
-  asks "leave page?" (Firefox 158 probe, 2026-11-16: toast from the first full load, a `beforeunload`
-  dialog on each reload after it, no edits made).
+  visible and costs no data.
 - Open, separate ruling: an in-session account switch (`src/features/auth/model/useUserStore.ts:582`, `src/app/App.tsx:236-240`) resets the
   baseline but not the KDS store. B's hydrate can then auto-repair A's databases into B's account
   (`objectDatabaseBridgeSync.ts:228-229`). This was read in the code but not reproduced, and it is
