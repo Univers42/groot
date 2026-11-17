@@ -227,3 +227,79 @@ L1a may be built before L0 is live. On the live profile it changes nothing until
 **Who is on the hook.**
 - The builder meets LB1 to LB16, A1 to A6, S1 to S3 and R1 before any merge.
 - The coordinator supplies the active-workspace and Chromium measurements before the ceiling is tuned.
+
+## Landing ruling, 2026-11-17: S1–S3 and A1–A4 (osionos `fix/auth-storage-full`)
+
+The commits are `d5ec93204` (S1–S3) and `30ea874d3` (A1–A4), on top of `fc0d7b408`. They change `useUserStore.ts` and `sessionRefresh.ts` and add four test files.
+
+**Evidence.** Probes are in `/mnt/storage/dlesieur/scratch/devil-auth-sf/` (`run.sh head|base|mainpatch`).
+- **Branch head:** the 9 auth canvas files, DS1–DS4 and the builder's stall probe pass 105/105 (`out-head.txt`).
+- **Pre-fix base `fc0d7b408`:** DB1 passes 1/1 (`out-base.txt`). It is a characterisation test: it asserts the observed pre-fix outcome (both ticks throw `QuotaExceededError`, `first` is sent twice, no notice, the session stays in memory).
+- **`origin/main` (4b6e8fdf2) plus `git diff fc0d7b408 30ea874d3`:**
+  - the patch applies cleanly, and 104/104 pass (`out-mainpatch.txt`);
+  - the two touched files, `pnpm-lock.yaml`, `package.json` and all 8 submodule gitlinks are identical between `origin/main` and `fc0d7b408`;
+  - `origin/main` does not contain P1 (`38c38cf36`).
+- **The builder's reported gates match the logs:**
+  - typecheck rc 0, lint rc 0, canvas 5645/5645;
+  - auth e2e: 25 passed and 1 skipped, plus `sign-out-everywhere` 1 passed;
+  - six mutants red.
+- **`gates_rc=1` is not a gate failure.** It is the last `grep "^not ok"` in `gates.sh` finding nothing under `pipefail`.
+
+**Corrections to this ADR.**
+- **F4 as written is wrong.** DB1 shows the real pre-fix outcome when the record write is refused:
+  - the next tick resends the rotated-out token, and the bridge revokes the whole family;
+  - the local sign-out then throws on the same refused record write (`threw:QuotaExceededError` twice);
+  - so the tab keeps a dead session with no notice, and resends the reused token on every tick.
+
+  Live behaves this way today.
+- **A3 as written was incomplete.** "The next run adopts it with one `rotate` call" holds for the run right after. It says nothing about a published pair whose own access token is due, which is the stall below.
+
+**Rulings on the findings.**
+
+| # | Finding | Ruling |
+|---|---|---|
+| 1 | **Stall.** The record is refused and the result is published, so every later run adopts the same pair and never rotates. DS1: `["refreshed","adopted","adopted","adopted"]`, one rotate call. | **Registered residual, not a landing gate.** <br>• Strictly better than live in the same state: the session lasts until the published access token expires (1 h at the default `OSIONOS_APP_SESSION_TTL_SECONDS`), the A4 notice is shown, and the family stays alive on the server. <br>• It heals itself once the record fits (DS2: `[…,"adopted","refreshed"]`, the head `n1` is rotated, never `first`). <br>• If the result is refused too, it falls back to a notified sign-out (DS3). <br>• **The coordinator's candidate (`prev` = the disk token) alone is a no-op.** In DS1 `publishedPrev` already equals the disk token `osb_rt.u1-first.sig`. The fix is ST1 below, and it needs its own ruling. |
+| 2 | The `pagehide` listener now reached from the user store, and the test's no-op `addEventListener` | **Accepted.** <br>• No runtime change in the browser: `App.tsx` and 18 other modules already import `pageStore.helpers`. <br>• `pageStore.helpers.ts:367` is the only module-level `pagehide` registration. The others are registered at runtime: `knownDatabaseUnload.ts:30` inside a function, `syncLedgerPersist.ts:221` lazily, `usePageSync.ts:269` in an effect. So the order of the listeners is unchanged. <br>• No import cycle: `pageAccess` imports only types plus `share/types` and `appMeta`, which import nothing at runtime. <br>• The fake-window edit is a fix to the test environment. |
+| 3 | Context, workspaces and personas writes refused after making room are dropped without a notice; the lease write uses a bare `setItem` | **Residual under A5, which stays open.** <br>• Before the fix these writes threw, and the sign-in or sign-out aborted. <br>• In bridge mode the record also carries the persona and the workspace lists, and its refusal raises the A4 notice. <br>• The lease: condition AL1. |
+| 4 | A refused record rewrite at sign-out | **Condition LV1 before live.** <br>• DS4: with the rewrite refused, the account's refresh token stays on disk, the tab shows the user as signed out, a reload restores the session, and the notice wrongly says "Browser storage is full / can't be kept". <br>• A shrinking write should never hit the quota in Firefox or Chromium (they account by delta), but that is browser-source knowledge and was not measured here. S2 must hold either way. |
+| 5 | The sticky notice is never withdrawn | **Accepted residual.** <br>• It over-warns, which is the safe direction. <br>• It comes back after a dismissal only when a write is refused again: once per rotation, or once per tick during the stall. |
+| 6 | Tab B keeps its session in memory after tab A signs out | **Existed before the fix; registered.** <br>• After the fix, B writes neither a result nor a record (S3 test; `savePersistedWorkspaces` skips records that are absent, `useUserStore.ts:132`), so S2 holds on disk. <br>• Dropping B's session when the record disappears is a separate security unit. |
+| 7 | `useUserStore.ts` is 908 lines (it was 890) | **Existing violation, registered.** <br>• The extraction is a separate refactor commit. It is never mixed into this fix. |
+| — | Found while reading: when `unchanged()` is false (a step-up mid-flight), the result is still published, and other tabs adopt the old family's pair. | **Existed before the fix** (`writeJson` was unconditional). Registered. |
+
+**Develop: PROCEED-WITH-CONDITIONS.**
+- **AL1. The lease write.** Either it goes through the injected writer, with a test, or the `sessionRefresh.ts` header Caveat gains one line.
+  - The line says that on a full origin the lease write is dropped, so the both-rotate window grows from milliseconds to one refresh round trip (at most `REFRESH_TIMEOUT_MS`, 8 s).
+  - It also says the failure is closed: a reuse sign-out.
+  - `devil caveat --strict` passes.
+- **AL2. No probe or devil file is committed.** `git diff --stat fc0d7b408..<head>` lists only the 7 files above, plus AL1 and LV1 if they land here.
+- **AL3. Gates on the final head.** Typecheck rc 0, lint rc 0, the full canvas suite, and the 9 auth files. The evidence cites the rc line of each gate, not `gates_rc`. If `origin/develop` has moved past `fc0d7b408`, they are re-run after the merge.
+
+**Live without P1: PROCEED-WITH-CONDITIONS.** The build is a cherry-pick onto the live base. Promoting develop is not allowed, because P1 is still suspended on C7.
+- **LV1. DS4 inverted.** With the bridge-session key refused, `dropLocalSession('u1')` leaves no key that holds u1's refresh token. Every notice shown is true.
+  - One fail-safe way: remove the record key when its rewrite is refused on a sign-out. The other accounts then become memory-only, and the A4 notice becomes true for them.
+- **LV2. The live base is read at promotion time.** It is the source commit recorded on the running web image, not taken from memory.
+  - The build is that commit plus `d5ec93204`, `30ea874d3`, AL1 and LV1, and nothing else.
+  - `git log <base>..<build>` shows no P1 commit.
+  - `git diff --stat` touches only `useUserStore.ts`, `sessionRefresh.ts` and `tests/canvas/`.
+  - If the base is not `4b6e8fdf2`, the apply check and the 9 auth files are re-run on it.
+- **LV3. Full gates on that build tree.**
+  - Typecheck, lint and the full canvas suite.
+  - Auth e2e: bridge-stub 25 passed with only the known skip at `rememberComputer.spec.mjs:30`, plus `sign-out-everywhere`.
+  - The production image build, run locally, because those CI jobs run only on develop and main.
+- **LV4. Before the switch.** The build commit is reachable on `origin`. A rollback tag of the current live web image is recorded. The deploy runs under the standing go.
+- **LV5. After the switch.**
+  - The served bundle contains `Your sign-in can't be kept across a reload`.
+  - It lacks a string unique to the P1 diff, chosen by the builder before the switch.
+- **LV6. Before develop reaches main.** `git merge-tree` shows that the cherry-picks and the originals merge without conflict.
+
+**ST1, the stall fix, a follow-up that needs its own ruling.** It touches the auth chain and concurrency.
+- **The property to build.** The head of the chain is the published pair when its `prev` equals the refresh token on disk; otherwise it is the disk token.
+  - `currentTokens` and `readTokens` return the head, so the `unchanged()` guard compares heads.
+  - A due head is rotated.
+  - A rotation from a head that is not the disk token publishes `prev` = the disk token.
+- **The tests:**
+  - in the DS1 setup over 4 due ticks, the bridge receives 4 distinct refresh tokens, each exactly once;
+  - a second store on the same storage, between two ticks, adopts and does not rotate;
+  - a reload, as a fresh module on the same storage, resolves to the latest published pair;
+  - DS2 and DS3 still pass.
