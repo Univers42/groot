@@ -35,8 +35,7 @@ and an 8k `generatedTree`, in ABBA order against fcff64db5 with 5 rounds per sid
 
 - **Setup.**
   - The bench is `/mnt/storage/dlesieur/scratch/devil-l1a/ll9/core.js`, run once per engine, in docker with `--cpus=2`.
-  - The engines are node 22.23.5, Chromium 147.0.7727.15 headless, and Playwright's Firefox 148, which is **not**
-    stock 158.
+  - The engines are node 22.23.5, Chromium 147.0.7727.15 headless, and Playwright's Firefox 148, which is **not** stock 158.
   - The pages were cross-origin isolated, giving a 5 µs timer in Chromium and 20 µs in Firefox.
   - Each fixture is a synthetic page tree, not `generatedTree`. Its page count was chosen so that storedLength is
     958–959k, just under the 1,000,000 ceiling.
@@ -281,3 +280,21 @@ The run-regex's cost grows with the number of wide runs, at about 16–23 ns per
 | Reversibility | 1 | A one-function change on an unpushed branch. Live is gated by FB3 to FB5 and LL8. |
 | Cost on failure | **3 (worst)** | A slower flush in idle time and a later keepalive at pagehide. A miscount would mis-size the evictions, which is why FB1 requires the counter to be exact. |
 | Confidence | 3 | One run per engine on synthetic pages, on a shared machine. Stock Firefox 158 and the prod build are unmeasured until FB3. |
+
+## Re-ruled 2026-11-18: FB1 reads a paired median
+
+**PROCEED-WITH-CONDITIONS FB7 to FB9.** FB1's 1.1 × is now the median of per-pair ratios (`tests/bench/harness.ts:142,170`),
+not the ratio of two row medians. Rows run at one of two speeds: at 199ca6487 the devil's run read loop 396.49 µs against
+counter 699.07 µs (1.76 ×) and paired 1.004 ×; the builder's 13 runs read 0.50–2.03 ×, failing a correct counter and able
+to pass one twice as slow. The paired median catches any cost per run: the FB6 mutant read 6.069 × (its p95 of 4.53 ms also
+broke the 3 ms budget), and 1 ns per run adds +31–63 % on F-dense. It passes a constant slowdown under about 9 % (it reads
+1.001–1.010 ×), a slowdown shared by both sides (Node, V8), and any bias of its fixed order (case first): unmeasured.
+- **FB7 (develop).** The Caveat at `harness.ts:166-167` names only a pair-straddling slowdown. It also names the fixed order
+  (or alternates which side runs first), the shared slowdown, and F-dense's run density, which `fixture()` does not assert.
+- **FB8 (before live).** CI runs two benches only (`.github/workflows/ci.yml:299-301`): a revert to the run-regex passes CI.
+  CI kills that mutant: this bench in `ci.yml:301`, green on a runner, or a loose paired-ratio test on F-dense in `tests/canvas`.
+- **FB9 (live, with FB3).** Each side's min–max of the flush medians is reported; a side wider than 0.5 ms makes FB3 UNKNOWN.
+- **R-FB3.** The two speeds are unexplained. On this hybrid i5-13600KF the slow mode showed with 97–100 % of samples on a
+  P-core, so SMT-sibling contention is the untested lead. Whole-flush medians do not show it (5 rounds a side: F-dense base
+  1.65–1.78 ms, HEAD 2.37–2.49 ms). An efficiency core may pay about twice FB3's increment.
+- **R-FB4.** `tests/` is outside eslint and tsc (`scripts/docker-run.sh:67`), before L1a too; CI still runs the gate's logic.
