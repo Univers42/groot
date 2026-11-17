@@ -21,8 +21,9 @@ remove `osionos.knownDatabaseState.v1` first to free about 4.6 M characters, ret
 ## Prior requests
 
 - 2026-11-17 (KDS→IDB P1, C2 re-rule): candidate raised by the main session, rejected.
+- 2026-11-17 (ADR 0054 C7 re-rule): the cookie named under "Reopen when" was probed and blocked. A Chromium crash persists the removal before the cookie (`.out-of-scope/kds-migration-flag-in-a-cookie.md`). The in-place tombstone retires the state key without ever removing it first, so this candidate stays rejected.
 
 ## Reopen when
 
-The flag can be stored somewhere a full localStorage cannot block, for example a cookie, so that a fallback load is pull-only without the legacy keys.
+A retirement marker can be stored where a full localStorage cannot block it, and is on disk no later than the key removal, so that a fallback load is pull-only without the legacy keys. A cookie fails the second half. The in-place tombstone of ADR 0054's C7 re-rule meets both, and it makes this candidate unnecessary.
 Alternatively, the redo rule no longer treats a legacy copy as newer only because it is unretired.
