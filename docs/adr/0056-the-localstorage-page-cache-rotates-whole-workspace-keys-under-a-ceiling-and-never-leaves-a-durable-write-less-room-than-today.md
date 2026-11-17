@@ -303,3 +303,82 @@ The commits are `d5ec93204` (S1–S3) and `30ea874d3` (A1–A4), on top of `fc0d
   - a second store on the same storage, between two ticks, adopts and does not rotate;
   - a reload, as a fresh module on the same storage, resolves to the latest published pair;
   - DS2 and DS3 still pass.
+
+## Landing re-check, 2026-11-17: LV1 `89ef8ab25` and AL1 `3267dbdd9`, and the live cherry-pick
+
+This section covers `git diff 30ea874d3..3267dbdd9 -- src/`. Develop is at `3267dbdd9`. The gate logs under `/mnt/storage/dlesieur/scratch/auth-sf/logs/c4-*` show:
+- typecheck rc 0 and lint rc 0;
+- canvas 5649/5649;
+- the 9 auth files 104/104;
+- bridge-stub rc 0 and `sign-out-everywhere` rc 0.
+
+`c4-devil-ds4.log` shows 3/4. The one failure is the old DS4, which asserted the state before LV1. That failure is expected.
+
+**Evidence.** Everything is in `/mnt/storage/dlesieur/scratch/devil-auth-sf/`.
+- **`run.sh head`** (`3267dbdd9`) **and `run.sh cherry`** (the live candidate below): the 9 auth files plus my probes pass **111/111** on each tree.
+- **DS4, inverted by LV1:** `{"recordStays":false,"keysHoldingU1":[],"u2OnDisk":false,"u2Live":true,"titles":["Browser storage is full"]}`.
+- **DQ1:** with the fake origin exactly full, a sign-out with u2 remaining rewrites the smaller map, and the fallback never runs: `{"bridgeRemovals":0,"u2OnDisk":"osb_rt.u2-first.sig"}`.
+- **DQ2a, the LV1 double failure:**
+  `{"keyOnDisk":false,"outA":"refreshed","published":null,"outC":"signed_out","calls":[T1,T1],"signedOut":["refresh_token_reused"]}`.
+  Tab A rotates u2 and publishes nothing. Tab C, a second tab of u2, resends the replaced token, and the server revokes the family.
+- **DQ2b, the control (the A4 state, record kept):** `{"outA":"refreshed","publishedPrev":T1,"outC":"adopted","calls":[T1]}`.
+- **M1, `browser/quota.mjs`** (Playwright 1.59.1, Docker, `--network none`). The origin is filled to 5,242,877 characters, so a new 16-character key is refused.
+
+  | Write on the full origin | Chromium 147 | Firefox 148 | WebKit 26.4 |
+  |---|---|---|---|
+  | same size, other text | ok | ok | ok |
+  | shrink by 1 | ok | ok | ok |
+  | shrink to half | ok | ok | ok |
+  | remove, then a smaller set | ok | ok | ok |
+  | grow past the original | `QuotaExceededError` | `QuotaExceededError` | `QuotaExceededError` |
+
+  None of the three refuses a write that does not grow on quota grounds. My previous ruling marked this as unmeasured; it is now measured.
+- **M2:** tab A runs `removeItem` then `setItem` 3,000 times while tab B polls the key.
+
+  | Engine | Reads of the gap | Polls | `null` storage events |
+  |---|---|---|---|
+  | Chromium | 3,820 | 4.86 M | 3,000 |
+  | WebKit | 215 | 0.95 M | 3,000 |
+  | Firefox | 0 | 0.54 M | 3,000 |
+
+  So another tab can read the key as absent between the two calls in Chromium and WebKit.
+- **The live candidate** was built in a shared scratch clone: `4b6e8fdf2` plus `d5ec93204`, `30ea874d3`, `89ef8ab25` and `3267dbdd9`.
+  - The cherry-pick has rc 0. The tree is `96644623b4495e21c3bd2ebff15c991ca1c57bbc`.
+  - It changes 7 files: `sessionRefresh.ts`, `useUserStore.ts` and 5 under `tests/canvas/`.
+  - Both source files are byte-identical to develop `3267dbdd9`.
+  - P1 `38c38cf36` is not an ancestor.
+  - The submodule gitlinks are identical to `3267dbdd9`.
+  - `git merge-tree --write-tree <candidate> 3267dbdd9` has rc 0.
+- **A trap: the shared osionos repo's local `main` is `32bd04385`** (2026-10-19). It and `origin/main` are not ancestors of each other: there are 1,083 commits on one side and 3,652 on the other.
+
+| # | Question | Ruling |
+|---|---|---|
+| 1 | LV1 as built (`useUserStore.ts:226-240`), and whether remove-then-rewrite opens a new path | **LV1 is met** (DS4 inverted, and the builder's three LV1 tests). <br>• **The gap is real** (M2, Chromium and WebKit). Another tab whose refresh of a remaining account lands in the gap gets `adopt` returning false, so nothing is published and `persistRefreshed` skips. A's rewrite then puts the old token back, `adoptStoredTokens` copies it into B's memory, and the next due refresh resends it: the family is revoked. <br>• **Losing another tab's write** after A read the map is the old last-writer-wins problem every map rewrite already has (`:128-143`, `:221-223`). LV1 does not widen it: the read and both writes run in one synchronous task. <br>• **The branch runs only if a strictly smaller write is refused.** No measured engine does that on quota (M1), and DQ1 never reaches it, so the path needs a refusal that has nothing to do with quota. **Registered residual R-LV1a**, and condition LC1. Not a live gate. |
+| 2 | After the LV1 double failure, the remaining account is in memory only, and its refresh is not published | **A distinct loss path, not the A4 residual.** <br>• In A4 the record stays with the old token, so `adopt` reports it kept, the result is published, and the second tab adopts without sending anything (DQ2b). <br>• Here the record is gone, so S3 reads the state as a sign-out, publishes nothing, and the second tab resends the replaced token (DQ2a). <br>• It is reachable only through the LV1 fallback. That needs the strictly smaller rewrite refused (unreachable on quota, M1), and then the rewrite of a value smaller than the one just removed refused as well. <br>• When it does happen, it fails closed: the account is signed out with a notice. No token is left on disk and no data is lost. <br>• **Registered residual R-LV1b. No live condition.** <br>• Re-rule if a sign-out rewrite can ever grow the map, or if the S3 check changes. The fix would be a sign-out marker for S3 instead of "the record is absent". |
+| 3 | AL1: the lease goes through `writeShared` and `setItemEvictingPageCaches` | **Acceptable now.** <br>• The room-maker's first eviction switches the page cache off for the session (`pageStore.helpers.ts:286-291`, `:336`). The lease therefore adds at most the single eviction per session that the A3 result write already causes on a full origin. <br>• **Under L1a the lease is not exempt from LB7.** It is a fresh key every run (`releaseLease` removes it, `sessionRefresh.ts:217-219`). Exempting it would make every hourly refresh on a full origin evict a workspace key again and spend up to three `setItem` attempts (LB6). <br>• **Condition LB17** is added to L1a. |
+
+**New conditions.**
+- **LC1. Develop follow-up, not a live gate.** The comment on the LV1 fallback (`useUserStore.ts:236-237`) becomes a `Caveat:`. It names:
+  - the non-atomic pair: the gap is visible in Chromium and WebKit (M2);
+  - the consequence for another account, whose refresh is unpublished and gets resent (DQ2a);
+  - that the branch needs a refusal of a smaller write, which no measured engine makes on quota (M1).
+
+  Done when the comment says this and the repo's caveat check passes.
+- **LB17. Added to L1a.** The lease and the result use the LB14 room-maker and count for LB7.
+  - Test: on a full origin with several workspace keys, four refresh runs evict only during the first.
+
+**LV2–LV6 for this plan.**
+- **LV1 and AL1 to AL3: met.**
+- **LV2, amended.**
+  - The base is `origin/main` `4b6e8fdf2`, matching the running image `main-4b6e8fdf-site`. It is never the local `main` ref.
+  - The result's tree must equal `96644623b4495e21c3bd2ebff15c991ca1c57bbc`. If it does not, stop and diff.
+  - Right before the push:
+    - `git ls-remote origin refs/heads/main` still reads `4b6e8fdf2`;
+    - `git merge-base --is-ancestor 4b6e8fdf2 <candidate>` is true;
+    - the push is `git push origin <candidate>:refs/heads/main`, without `--force`.
+- **LV3. Unchanged.** My 111/111 on the candidate does not replace the full gates, the e2e runs or the production image build.
+- **LV4, amended.** The order is: push, then main CI green, then `STAGE=build`, then `STAGE=swap`.
+  - `deploy-web-main.sh:24-25` refuses to build unless `origin/main` equals `NEW`.
+  - Right before the swap, `docker image inspect track-binocle/osionos-web:main-4b6e8fdf-site` succeeds. `write_rollback` (`:49-60`) depends on that image.
+- **LV5, amended.** On the served bundle, the grep is for `be kept across a reload`, without the apostrophe, because the minifier may re-quote the string. The bundle must also show `main-<new8>`, and it must lack the P1 string chosen before the switch.
+- **LV6.** It passes on my candidate. Re-run it with the real cherry-picks against `origin/develop` before develop reaches main.
