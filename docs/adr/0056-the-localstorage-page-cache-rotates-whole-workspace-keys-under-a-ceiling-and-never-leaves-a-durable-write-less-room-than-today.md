@@ -590,3 +590,6 @@ After the switch:
 **Registered residual R-L1a1:** the orphaned index after a rollback.
 
 Q2's extra refused `setItem` per durable write on a full origin is not registered as a residual; LL8 measures it.
+
+**Re-ruled 2026-11-17 by ADR 0060:** LL3 is FB1 (an exact counter with a flat cost) plus FB2 (four fixtures). LL4's threshold and LL9's flush bounds become 1.5 ms of median increment per non-Latin-1 flush (FB3, FB4); +3 % still binds the boot load and the Latin-1 flush.
+LL8 and LL10 are unchanged. Options (a) a per-page cached size, (b) the shipped run-regex under an absolute bound and (c) an upper bound first are BLOCKED: `0060-the-page-cache-flush-counts-wide-characters-in-one-flat-pass-and-is-bound-by-1-5-ms-not-by-3-percent.md`.
