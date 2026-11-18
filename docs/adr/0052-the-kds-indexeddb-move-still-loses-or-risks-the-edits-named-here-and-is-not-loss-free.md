@@ -174,3 +174,62 @@ Open. Run them in this order. O1–O4 run now on 891d7fc52's tree; O5–O9 need 
   - the numbers are docker-driven, about ±15 % at N = 20;
   - R11 is closed by F-A.
   - The note never says "no data loss".
+
+## O1 re-rule, 2026-11-18: closing O1 on M′ (devil; the suspension is NOT lifted)
+
+M is osionos develop `e963abc83`, with tree `be127dd8` (`git rev-parse e963abc83^{tree}`). O2–O4 hold for that tree. Re-running `o2tally.py` gives 140 clean trials, every one `docs=2`, 0 lost, 0 reverts.
+
+O1 is BLOCK. A5's "agent conversations" clause has no test, and the three gates have not been run. O1 closes with a test-only commit on develop on top of M, called M′. A `src/` change does not close it.
+
+Verdict: PROCEED-WITH-CONDITIONS, Q1–Q8.
+
+- **Q1. The test** goes in `tests/canvas/storage-write-guard.test.ts`, the A5 source scan. It reads the source of `AgentConversationPage.tsx` and asserts three things:
+  - there is exactly one `noticingWriter('Agent conversations', setItemEvictingPageCaches)`, bound to `writeAgentThreads` (:131);
+  - `writeThread`'s only write is `writeAgentThreads(AGENT_THREADS_STORAGE_KEY, …)` (:138-142);
+  - an effect calls `writeThread(pageId, messages)` (:333-335).
+- **Why that is enough.** The behaviour is that of the two primitives, in the same composition already tested on chat (`storage-full-stores.test.ts:67,:76`) and in `storage-full-notice.test.ts:36,:44`.
+- **Q1, Caveat and RED.**
+  - The file's Caveat gains one point: the wiring is checked as text.
+  - RED: two temporary local mutations each make the test fail: the writer swapped for the default `trySetItem`, and the label changed. The output is saved. The mutations are never committed, and `git status --porcelain` is empty afterwards.
+- **Q2. M′ is M plus test files.** `git diff --name-only M M′` lists only `tests/canvas/` paths. Main fast-forwards to M′ with no `--force`. At push time, `git merge-base --is-ancestor origin/main M′` returns rc 0.
+- **Q3. Identical builds must be measured, not assumed.**
+  - `tests/` is a build input. `src/app/styles/global.css:1` imports Tailwind with no `source()`, and only :19 and :21 exclude paths. So v4's automatic detection scans the project root, tests included. A new token in a test can add a CSS rule and change every hashed name downstream.
+  - Build M and M′ from clean worktrees (the proof rule above) in each evidence configuration:
+    - O2's rc9 offline build (`p1-cand/rc9/logs/build.cmd`);
+    - O3's `--mode test`;
+    - O4's `entry-prod-cfg.sh`.
+  - The bar: the sorted `sha256sum` of every file under `dist/` is byte-identical between M and M′ in all three. Then O2–O4 count for M′ with no re-run.
+  - **If they differ:** build M again in that configuration.
+    - If M reproduces itself, edit the test's string literals until M′ matches, or re-run O2–O4 on M′ at their original N.
+    - If M does not reproduce itself, return for a re-rule. A normalised comparison needs its own ruling.
+- **Q4. O1's three gates on M′,** run one after another and alone: typecheck, lint, full canvas. Each is cited by its own rc line. If a wall-clock canvas test fails under load, re-run it alone and cite both runs.
+- **Q5. O5 and O6.**
+  - This entry is the re-rule O5 asks for, and it covers only Q2's test files. Any other commit past M needs its own ruling before live. That includes R-BR5 (0061 PR8) and the refactor declined below.
+  - O6 is unchanged on M′. The C7.7 paths are all under `src/` (0054 C7.7), so the stat still prints the 2-file line.
+- **Q6. O7 runs on M′'s exact sha.** CI run 44236277704 on M does not count. The node-pages publish (BR13d) is M′'s.
+- **Q7. The first-database gesture, before O8.** This is a new finding.
+  - The RC9 setup gesture is: new page, `/database`, Database - Inline, then click the first row cell. The harness waits 15 s for that cell (`first.mjs:204,288-297`; it calls this "the first KDS mutation").
+  - On every P1 build measured, the cell never appeared in 19 of 414 new-db trials (rc9 6/171, rc9-f1 11/180, p1-cand 2/63), on both Chromium and Firefox. The editor textbox was also missing in 3 more trials.
+  - Cells that create no database had 0 setup failures in 1,200 trials. No pre-P1 arm exists.
+  - **Measure:** the gesture alone, on stock Firefox 158 with the same flags, N ≥ 100 per arm. The parent arm is main 0333d7966's tree; the candidate is M′. At each failure, save the database block's row count at 15 s and at 60 s, and the console.
+  - **BLOCK live** in either case:
+    - an M′ failure whose database has no row cell even at 60 s;
+    - the parent arm shows 0 failures and M′ shows ≥ 3.
+  - Otherwise O9 records both rates as a residual.
+- **Q8. The O2 top-ups are accepted.**
+  - The 3 excluded trials (nav-online s20, close-online s19, nav-offline s13) failed before any value was typed (`editAt` is null in each record), so loss cannot be judged in them. One top-up each meets N ≥ 20.
+  - No positive control for the preloadError listener is needed. Every reload boots an app document. The counter (`first.mjs:89`) read exactly 2 in every clean trial, so it is shown to fire. ELSEWHERE is another origin (:44) and is never counted. A reload would read ≥ 3 and be excluded.
+  - A preloadError that does not reload can only make a trial read as lost, which is the safe direction. O9 states that the preloadError count itself is unproven on Firefox 158.
+
+Declined:
+- **A, the refactor before live.**
+  - It adds no behaviour over Q1, and it changes a shipped chunk after O2–O4 were measured.
+  - Its transfer rule is unproven: the `[A-Za-z0-9_-]{8}\.js` normaliser also matches names that are not hashes and skips `.css`, and only O4's configuration was to be compared, while O2's build was deleted.
+  - The file is 580 lines (the limit is 300), so the extraction is welcome as its own unit after live.
+- **B:** a `src/` change whose build effect is unmeasured. Nobody has checked whether Rollup keeps an unused export of a dynamic-import target (`lazyViews.tsx:28-29`).
+- **C:** not a canvas test, Chromium-only in CI, flake rate unknown.
+- **D:** a new dependency and a lockfile change.
+
+Found for 0056's register, not a P1 gate: when an agent-conversation write is refused, switching agent pages reloads the thread from storage (`loadMessages` :165, called at :322). The refused messages are therefore lost within the session, not only "across a reload" as the notice says (`noticingWrite.ts:44`).
+
+Risk: blast radius 2, reversibility 4 (main fast-forwards to M′ and publishes), cost 3, confidence 3 (Q3 and Q7 unmeasured). The worst axis is reversibility.
