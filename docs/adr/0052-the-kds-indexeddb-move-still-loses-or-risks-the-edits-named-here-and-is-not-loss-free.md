@@ -233,3 +233,45 @@ Declined:
 Found for 0056's register, not a P1 gate: when an agent-conversation write is refused, switching agent pages reloads the thread from storage (`loadMessages` :165, called at :322). The refused messages are therefore lost within the session, not only "across a reload" as the notice says (`noticingWrite.ts:44`).
 
 Risk: blast radius 2, reversibility 4 (main fast-forwards to M′ and publishes), cost 3, confidence 3 (Q3 and Q7 unmeasured). The worst axis is reversibility.
+
+## Q7 re-rule, 2026-11-18: the 21 misses requested no database (devil; O7 and O8 stay held)
+
+Q7's first BLOCK case fired on its letter: 21 failures, none with a row cell at 60 s (parent 7/150, M′ `6de257335` 14/150, `p1-cand/q7/tally.txt`). Its premise, a database created without rows, did not hold:
+- 6 database blocks at 15 s and 60 s in 21/21 failures, 7 at the end of 279/279 successes (`jq` over `q7/out/{parent,candidate}.jsonl`);
+- `/database` still typed, 0 page or console errors (`q7/patterns.txt`).
+
+The harness clicks a point read while the menu is still filtering (`q7/gesture.mjs:137`). In the diagnostic run all 9 misses had their mousedown outside the menu, 2–11 ms after the locate, while the entry moved from y≈55–201 to y≈310 (`q7/diag-tally.txt`). Four menu files are identical on both arms (`git diff --quiet 0333d7966 6de257335`, rc 0).
+
+The harness reading leaves two things open:
+- **The closed-menu class is uneven.** Counted run: parent 2/150, M′ 12/150, Fisher two-sided p = 0.011. Diagnostic run: 4/100 vs 5/100; both runs: 6/250 vs 17/250, p = 0.031. A stale point lands outside only when the list re-lays out after the locate, so a slower filter gives more misses. Per-arm latency was never measured. In the diagnostic run the list was not final at locate in 8/100 vs 7/100 trials, which shows no lag there.
+- **The open-menu class** (parent 5, M′ 2, p = 0.45) never recurred in 200 diagnostic trials. Its mechanism is unknown.
+
+Verdict: PROCEED-WITH-CONDITIONS on option A, sharpened. Q7's BLOCK now applies to picked trials only. O7 and O8 stay held until Q7a–Q7g hold. Q7 now gates O7 too: after O7 main cannot go back without `--force` (BR13c), and the publish is one way (BR13d).
+
+- **Q7a. The gesture waits for the list.** Click only when the Inline entry's rect and the menu's labels are unchanged over 2 consecutive animation frames and the text reads `/database`. Read the point in that frame.
+- **Q7b. A pick marker the app cannot write.** Harness capture listeners on `document` record every `mousedown` and `click` target. A trial is picked when a `click` reaches the Database - Inline entry.
+  - The recents key is not the marker. `recordSlashUse` writes through `noticingWriter("Recent commands")` (`slashRecents.ts:46-49`), which is storage-full code. A refused write would turn a real failure into an excluded miss.
+  - Record the recents key and the block count on every trial, successes included.
+- **Q7c. One run serves Q7d and Q7e.** N ≥ 150 per arm, stock Firefox 158, same flags, alternating blocks of 10. The gesture starts as soon as New page is clickable, with no idle wait, as in the uneven run.
+  - Record the load average, and the IDB flag at load and at the first keystroke. M′ needs ≥ 100 trials with the flag set before the first keystroke.
+  - The M′ arm serves `q3/dist-rc9-mp` or a build shown byte-identical to it.
+- **Q7d. BLOCK live, on picked trials only,** in either case:
+  - a picked M′ trial with no new database block, or with no row cell at 60 s;
+  - the parent has 0 picked trials without a row cell at 15 s, and M′ has ≥ 3.
+- **Q7e. Latency per arm, in the same trials.** t_key is the final `e` keydown (a capture listener, `performance.now()`). t_list is the first animation frame showing the final entries. Report the median and p95 of t_list − t_key per arm, judging M′ on flag-set trials. Report first `/` to final list as context.
+  - BLOCK live, and re-rule, if M′'s median exceeds the parent's by more than 16 ms, or its p95 by more than 33 ms. That would be a P1 input-lag regression right after boot.
+- **Q7f. An unpicked trial is classified by its targets, never assumed.**
+  - A mousedown outside the menu, or inside it but off the entry, is a harness miss, reported per arm with both targets.
+  - No mousedown recorded, or a click on the entry with no pick, is a failure under Q7d.
+  - M′ ≥ 3 misses of one class with the parent at 0 is re-ruled. This settles the open-menu class.
+- **Q7g. Q1–Q4 stand.**
+  - Q3: the first M prod build died with rc 137 and wrote 1 file. The rebuild matches M′ over 661 files (`cmp prod-m2.sha256 prod-mp.sha256`), as do rc9 and test. A killed build has no output to compare.
+  - Q4: `q4/seq-gates.out` is copied session output, not a direct log. CI run 44241787542 on M′'s sha re-ran all three gates: success, 18 jobs, 0 failed.
+
+Declined:
+- **B, accept now.** It ships on the one reading that could hide a P1 cost: the uneven class at p = 0.011, with latency unmeasured.
+- **C, hold P1 for a menu fix.** The shift is live today on main 0333d7966, with byte-identical files. Holding P1 shields no one from it. Q7e covers the only way P1 could worsen it.
+
+Found, a separate osionos unit, not a P1 gate and not an O9 residual: **the slash menu moves under the pointer.** The panel is pinned by its bottom edge and grows upward (`slashMenuPlacement.ts:56-63`). When the list shrinks, an entry jumps about 255 px. A mousedown outside closes the menu with no pick (`SlashCommandMenu.tsx:124-130`), leaving `/database` typed. The fix must keep one fact true: a click on a visible entry picks that entry, whatever the typing pace. Unmeasured: whether a shifted click can land on another entry and insert the wrong block. File it as an osionos issue under `features/slash-commands`. It needs no devil gate unless the fix touches storage.
+
+Risk: blast radius 2, reversibility 4 (O7 is held), cost 2, confidence 4 (latency unmeasured, open-menu mechanism unknown). The worst axis is confidence.
