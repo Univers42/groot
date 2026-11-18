@@ -7,6 +7,8 @@
     - Branch B: P1 went live first. H sits on M′, and P1's evidence is untouched (LP19).
   - Path (b), the pin on develop past M′, live with P1: declined.
   - The three builder deviations from 0062 CK: upheld (V1 to V3).
+  - LP6 re-rule, 2026-11-18 (end of this file): abGuard compared e5253d2 with itself. A split rerun stands in under
+    PROCEED-WITH-CONDITIONS LP20 to LP24. LP9 is met. The develop push is not bound by LP6.
 - Date: 2026-11-18
 - Deciders: devil (ruling); builder (H, the gates, the merge into develop); coordinator (push, deploy, groot pin, 0052
   bookkeeping)
@@ -278,3 +280,126 @@ What each path costs P1's evidence (the coordinator's question):
 - 0062 L-1 is ruled here, and 0062's CK-1 and CK-4 wording is corrected (V1, V2).
 - If LP4, LP5 or LP6 finds a difference, H is BLOCKED. The rider is then the defect, and the cherry-pick fallback
   comes back for a ruling.
+
+## Re-ruled 2026-11-18: LP6 was vacuous, and a split rerun stands in under LP20 to LP24
+
+**PROCEED-WITH-CONDITIONS LP20 to LP24.** H′ (`2e86a75ad`) reaches main only after LP20 to LP22 hold. LP6's abGuard
+bullet is replaced for H′. Its emphasis-runs bullet stands as met. LP9 is met. The develop push is not bound by LP6.
+
+| Item | Verdict | Axes | Worst |
+| --- | --- | --- | --- |
+| LP6 by the split runner, H′ to main | PwC LP20–LP24 | 3 / 2 / 2 / 3 | confidence: one real A/B run, no positive control yet |
+| Develop push (H′ first, tip pin 08301d0) | not bound by LP6 | — | — |
+| LP9, one added selector | met | — | — |
+
+### The finding is real
+
+- Read from the code, exact. `bench/benchmarks.cjs:31` names a bundle `<entry>.<pid>.cjs`, and the tree's root is not in
+  the name. `:33` skips the build when that file exists. `abGuard.cjs:37-46` runs both sides in one process, and
+  `createBenchmarkScenarios(root)` (`:227-233`) passes `root` only to `loadModule`. So in every round, in either order,
+  the second side requires the first side's bundles.
+- The builder's artifacts agree. `lp6-vacuity.log` lists 6 bundles. 4 of them hold `failedOpenersCache` and
+  `bracketCache`, and no 674dd65 source file holds either.
+- The defect came in with rider `3d39f46` on 2026-11-10 (`git log -S'process.pid' -- bench/benchmarks.cjs`). Before it,
+  `buildSync` ran on every call, so abGuard compared two trees.
+- Docker runs node as PID 1, and `lp6-bundle-cache.txt` shows `*.1.cjs`. A cache dir that outlives a container is
+  reused by the next run, whatever its tree. The test loader has the same key
+  (`tests/support/loadMarkengine.cjs:34-36`).
+- So every abGuard number on a tree that holds `3d39f46` compares HEAD with HEAD. That covers STEP1's 0.974–1.060
+  (Context, "The bench did not compare against live"): it compared nothing. It also covers the first LP6 run's
+  0.967–1.042.
+
+### What stands as evidence
+
+- `scratch/h-pin/lp6/ab-split.cjs` is abGuard's design with the cache emptied before each side. `clearCache()` empties
+  the dir `loadModule` writes to (`benchmarks.cjs:19`), and `side()` calls it first.
+  - Its reference parser bundle `82be184b…` has no `failedOpenersCache`. Head's `9f3ea457…` has it.
+  - Every best ratio is ≥ 0.984, at load 4.25–4.80, pinned to cpuset 12-19 (E-cores, no SMT sibling).
+  - It is one run, labelled a diagnosis. It fingerprints one of the six bundles and prints best ratios only. Nothing
+    shows that it can fail.
+- Five benches run 1d7496f's code: parse inline mixed 10K, parse inline 50 variables, applyInlineFormatting, and both
+  inline typing rows. They use the parser, inlineFormatting, inlineTextEditing and inlineDocument bundles. The other
+  five benches run bundles with neither cache (`markdown_ts`, `inlineEditorDom`: 0 and 0).
+- This supports the result but does not gate it. 1d7496f's own CI, run 42831990166 (a push, on a tree without
+  3d39f46), passed the bench guard against `923924c` with the old loader, so that A/B was real.
+- emphasis-runs loads one tree (`loadMarkengine.cjs:53-57`) against an absolute bound. It is not an A/B. Its 3/3 in
+  `lp6-emphasis-runs.log` stands.
+
+### Conditions (builder, before LP11)
+
+- LP20. **One gating split run** with the same runner, plus:
+  - A fresh container with its own name, `--network none` and a timeout. The cache dir is asserted empty before the
+    first side.
+  - For each side in each round: the sha256 of all six bundles, and per bundle the count of `failedOpenersCache` and
+    `bracketCache`.
+    - Head: > 0 in the parser, inlineFormatting, inlineTextEditing and inlineDocument bundles.
+    - Reference: 0 in all six.
+    - Any other count makes the run vacuous, and LP6 is not met.
+  - The reference sha is printed in full (`674dd65de726…`). Rounds 2, `benchTimeMs` 2000, `benchWarmupMs` 400 and
+    tolerance 10 all come from e5253d2's `reference.json`. Only `ref` changes.
+  - The order alternates by round, head first in round 1. Every per-round ratio is printed, not only the best.
+  - cpuset 12-19, recorded. `uptime` is saved before and after. The 1-minute load is ≤ 8 at the start.
+  - A run whose closing load exceeds 12 is invalid, whatever its result, and one run replaces it.
+- LP21. **Bar.**
+  - Every bench's best ratio is ≥ 0.90 in LP20's run and in `lp6-diag-split.log`. The diagnosis already meets it at
+    0.984, so there are two runs in two containers.
+  - A failure in LP20 is not re-run. H′ is BLOCKED and comes back here.
+  - Every per-round ratio below 0.90 is named in RESULT.md. Caveat: best-of-2 discards a regression that shows in one
+    order only.
+- LP22. **Positive control.**
+  - Same runner, but head is a mutant of e5253d2. Each call to `getFailedOpeners` (`parserInlineMatchers.ts:517`) and
+    `findClosingBracket` (`parserInlineUtils.ts:43`) also walks `text` once, into a module-level sink, and the log
+    names the change.
+  - Bar: the mutant's head bundles hold the marker, and at least 1 of the five cache-carrying benches drops below
+    0.90. If none does, the benches do not reach 1d7496f's code and LP6 is not met.
+  - Save the mutant diff. It is scratch and never committed.
+- LP23. **Register, not a gate.**
+  - `bench:ci` is SKIP for perf on every engine tree that holds 3d39f46. It runs in engine
+    `.github/workflows/ci.yml:47-48` and osionos `ci.yml:271-277`. The trees include ca5dbee, e5253d2 (run
+    44245031852), 08301d0 and every U3 commit rebased onto them. A green there is not a perf result.
+  - LP10 stays as written. LP20–LP22 carry H′'s perf evidence.
+  - 0062 is untouched, because no condition there rests on abGuard. PO-1's engine CI was a release check. PO-2's U3-6
+    bench is `bench/html-subset-linear.test.cjs`: one tree, through `loadMarkengine.cjs:53-57`, a 200 KB/50 KB ratio.
+    The 08301d0 push stands.
+  - 0060 is untouched. The FB benches use osionos `tests/bench/harness.ts`. That file imports only `./clock.ts` (`:13`
+    at 5e7d884a5) and imports nothing at 199ca6487.
+  - U3 commits on trees without 3d39f46 ran real A/Bs. One is `3727285`, whose abGuard failed at 0.895 and 0.900. Their
+    rebased twins (`8a2df6d`) have no real A/B.
+- LP24. **The engine cache fix is its own unit.**
+  - It may follow H′. It lands on engine main before any engine gitlink past e5253d2 reaches osionos main. Until it
+    does, such a move carries an LP20–LP22 run against the pin that is live then.
+  - Bar: the bundle key includes the tree, or the bundles build in memory as `probe/lp4-diff.cjs:21` and
+    `probe/lp5-fuzz.cjs:15` do. No bundle is reused across processes. `loadMarkengine.cjs:34-36` gets the same fix.
+  - A test proves that abGuard bundles the reference from its own source: for a ref whose source differs, the two
+    digests differ.
+  - An injected slowdown fails the fixed guard. `reference.json`'s note claims this, but the claim predates 3d39f46.
+
+### Develop
+
+- Agreed: LP6 binds H′'s push to main (LP11). It does not bind the develop push. Develop is beta, and a commit reverts
+  it. Its tip pin 08301d0 was ruled by 0062 on evidence this defect does not touch (LP23).
+- The develop push is not LP10 evidence. CI on develop's tip is not CI on H′'s sha.
+
+### LP9's added selector
+
+- LP9 covers additions: "every added selector is traced to a string in an engine file". `.bg-white` is traced to
+  `tests/callout-kind.test.cjs:32`, so LP9 is met.
+- No pixel changes. In both builds the eager `.bg-white{background-color:var(--color-white)}` is byte-identical to the
+  rule in the lazy `database-overrides-7b8sj-IQ.css`.
+  - In both builds the only JS that emits the class is the DatabaseBlock chunk, and that chunk maps the same lazy
+    CSS. This was checked by `grep -l` over `scratch/h-pin/lp8/dist-base` and `dist-h2`.
+  - A callout cannot emit a bare `bg-white`. A word kind gives `md-callout-<kind>`, and any other kind gives no class.
+- Register: `global.css:19,21` exclude only the vendored database and hydrawn-board, so engine `tests/` fixtures feed
+  the eager stylesheet. Every pin move runs LP9. Adding `@source not` for the engine's tests is a separate host unit.
+
+### UNKNOWN and SKIP
+
+- SKIP: this re-rule ran no bench. It read the code, the builder's logs and builds, and two `gh` queries (runs
+  42831990166 and 44245031852).
+- UNKNOWN: whether the ten engine benches stand in for the host's typing path. Q7e (0052) measures the host on P1's
+  candidate. H′ in branch B is measured only by LP3–LP10 and LP20–LP22.
+- UNKNOWN: the memory that 1d7496f's caches hold. They keep up to 4 texts, with a bracket map per text
+  (`parserInlineUtils.ts:40-61`). A single 1 MB paragraph of `[]` keeps about 500,000 map entries until four other
+  texts are parsed. LP20 measures throughput only.
+- UNKNOWN: whether a U3 gate reused a bundle across trees under PID 1. `scratch/u3/nm-eng/.cache` is empty today,
+  but the gates' cache mounts were not audited.
