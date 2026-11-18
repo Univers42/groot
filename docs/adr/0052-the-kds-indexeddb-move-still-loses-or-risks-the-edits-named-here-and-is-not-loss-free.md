@@ -275,3 +275,15 @@ Declined:
 Found, a separate osionos unit, not a P1 gate and not an O9 residual: **the slash menu moves under the pointer.** The panel is pinned by its bottom edge and grows upward (`slashMenuPlacement.ts:56-63`). When the list shrinks, an entry jumps about 255 px. A mousedown outside closes the menu with no pick (`SlashCommandMenu.tsx:124-130`), leaving `/database` typed. The fix must keep one fact true: a click on a visible entry picks that entry, whatever the typing pace. Unmeasured: whether a shifted click can land on another entry and insert the wrong block. File it as an osionos issue under `features/slash-commands`. It needs no devil gate unless the fix touches storage.
 
 Risk: blast radius 2, reversibility 4 (O7 is held), cost 2, confidence 4 (latency unmeasured, open-menu mechanism unknown). The worst axis is confidence.
+
+## 2026-11-18: the L-1 pin hotfix and P1's candidate (ADR 0063)
+
+- ADR 0063 puts the callout-kind fix on osionos main as H: the live base plus the engine gitlink `e5253d2`. H deploys
+  once its own gates hold (LP1–LP10) and never waits for P1.
+- **Branch B, P1 live first.** H sits on M′ and develop fast-forwards to it. Nothing in this checklist changes.
+- **Branch A, H live first.**
+  - Develop takes H by a real merge, M″. `git diff M′ M″` is the gitlink line only (0063 LP16).
+  - Q2's target becomes M″, or a later candidate that contains it.
+  - Q3's transfer covered M→M′ only. O2–O4 run again on M″ at their original N, unless a transfer is ruled first.
+  - Q4 and Q6 run on the candidate's sha.
+  - Q7's gating arms are H's tree and the candidate. A Q7c run on M′ becomes diagnosis (0063 LP17).

@@ -5,7 +5,7 @@
   - D2, nesting cap: PROCEED-WITH-CONDITIONS NC-1 to NC-3. The value is 32. Past the cap the source stays as text.
   - D3, host tests EP5 and EP21: PROCEED-WITH-CONDITIONS TD-1 to TD-7. This is a contract change. The tooDeep path stays.
   - Push order: PROCEED-WITH-CONDITIONS PO-1 to PO-5.
-  - Not ruled: closing the sink that is live on osionos main (L-1).
+  - Not ruled here: closing the sink that is live on osionos main (L-1). Ruled 2026-11-18 in ADR 0063.
 - Date: 2026-11-18
 - Deciders: devil (ruling); builder (engine `fix/callout-kind` and `feat/html-subset`, host worktree `osionos-u3`); coordinator (push order)
 
@@ -83,14 +83,15 @@ Logs are in `/mnt/storage/dlesieur/scratch/u3/logs/`.
 ## 2. D1: callout kind (option b)
 
 - CK-1. **One predicate in one place.** A single exported function decides whether a kind is a word. It uses the
-  container grammar `[A-Za-z][A-Za-z0-9_-]*` (`parser.ts:150`). The container parser and both renderers call it. No
-  second copy of the regex exists.
+  container grammar `[A-Za-z][A-Za-z0-9_-]*` (`parser.ts:150`). Both renderers call it, and the container opener is
+  built from the same pattern source (ADR 0063 V2). No second copy of the regex exists.
 - CK-2. **A non-word kind adds no class.** The class list is `md-callout` alone. There is no fixed
   `md-callout-custom`: nothing styles it (see Context), so it would be a public class with no consumer.
 - CK-3. **Both renderers emit the same class list for every kind,** callouts and containers alike (`html.ts:147,179`,
   `react.tsx:285,389`). The parity suites stay green.
 - CK-4. **A word kind renders byte for byte as on engine main.** This branch adds no lowercasing and no other
-  normalisation: `[!NOTE]` still gives `md-callout-NOTE`.
+  normalisation. Main already lowercases at parse (`parserBlockQuote.ts:116`), so `[!NOTE]` gives
+  `md-callout-note` (example corrected by ADR 0063 V1).
 - CK-5. **No author text enters the HTML string without `esc()`.** The class attribute value goes through `esc()`
   even though the predicate already limits it.
 - CK-6. **No new attribute carries the kind:** no `data-kind`, no `title`, no `aria-*` built from it. Every attribute
@@ -212,6 +213,7 @@ The coordinator's order is upheld:
   - A standalone host pin bump from `674dd65` to step 1's sha on osionos main also brings in `1d7496f`, `055639b`
     and `3d39f46` (`git log 674dd65..ca5dbee84`). Their effect on the host is unmeasured.
   - That bump needs its own ruling (Q5). Request it right after PO-1, not after U3.
+  - Ruled 2026-11-18: ADR 0063, a pin-only hotfix on osionos main, PROCEED-WITH-CONDITIONS LP1 to LP19.
 - L-2. **The host's copy of the engine has the same sink**
   (`src/shared/notion-database-sys/src/lib/markdown/renderers/html.ts:93`, `react.tsx:149`).
   - Nothing calls it today: only `parseInlineMarkdown`, `parseMarkdownToBlocks` and `detectBlockType` are imported
@@ -254,7 +256,7 @@ The coordinator's order is upheld:
 ## Consequences
 
 - The engine push order is binding: PO-1, then PO-2, then PO-4.
-- The clipboard sink on osionos main stays open until L-1 is ruled and shipped.
+- The clipboard sink on osionos main stays open until ADR 0063 LP13 holds.
 - A callout with a non-word kind loses its kind class in both renderers. No stylesheet uses such a class.
 - A document nested deeper than 32 levels shows its innermost part as source text.
 - tooDeep becomes rare. When it fires for a reason other than depth, its message misleads (L-5).
