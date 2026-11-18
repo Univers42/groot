@@ -263,3 +263,8 @@ Cause: the fixture carries its own fences at lines 33 (```` ```c ````) and 50 (`
 ## 2026-11-17: U7 contract re-ruling
 
 The architect contract for U7 was ruled. The verdicts and conditions (MC, MA, MB, MD, ME) are ADR 0059.
+
+## 2026-11-18: U3 push decisions
+
+The callout kind, the nesting cap and the two host tests EP5 and EP21 were ruled before any push of the engine. The
+verdicts and conditions (CK, NC, TD, PO) are ADR 0062. The callout sink is live on osionos main (0062 L-1).
