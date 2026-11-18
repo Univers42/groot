@@ -195,3 +195,59 @@ The object-database effect acts only for the latest account id.
 | Confidence | 3 | 3 | The mechanism is reproduced, and the reset path is read in code. The live rate, the skipped-switch consequence and the empty-record K10 are unmeasured. |
 
 Worst axis: reversibility of the unfixed defect (5). That is why F-A goes live alone and first.
+
+## Re-ruled 2026-11-18: BR7 on 891d7fc52 (PROCEED-WITH-CONDITIONS BR7a–BR7f)
+
+BR7 as written asks Firefox and WebKit to show a push. No tree shows one: the production harness is blind there on the parent too (logs under `scratch/c7-e2e/`).
+
+- **BR7a. For develop, BR7 reads as follows.** F-A is no worse than its parent on every engine. The sync starts on all three engines, and pushes on Chromium. Met on 891d7fc52:
+  - **Push code is untouched.** The diff is `App.tsx`, `objectDbAccountSync.ts` and their test. F-A reaches the push only through `startObjectDatabaseSync`. Hydrate pushes at `objectDatabaseBridgeSync.ts:194`.
+  - **The sync starts on Firefox and WebKit.**
+    - The patched callback is reached with `reset=false` (`out-fa5fw`): Firefox 50, WebKit 20. Its next statement is the start.
+    - 0 boot resets; the switch resets 5/5 on each engine.
+    - GET on every load: 20/20 on each tree and engine (`out-oc-*`).
+  - **Chromium pushes.** refusedDatabaseSave's `posts.length > 0` passes 27/30 on F-A.
+  - **Failures match the parent.** Firefox: 11 failing tests, the same set (`out-fa8f` vs `out-fp7f`). With the service worker blocked: 5/5 refusedDatabaseSave failures at `app.mjs:52` on all four arms.
+- **BR7b. A Firefox and WebKit push is shown before F-A goes live, and again before P1 goes live.**
+  - Run in BR10 on the build tree and on the base, and in BR14 on P1's candidate and its parent.
+  - The probe:
+    - production build, `serviceWorkers: 'block'`, one `goto` per fresh profile, no legacy pair;
+    - edit one cell through the UI;
+    - count POST `/api/object-databases` whose body carries the edited value;
+    - count `vite:preloadError` events and aborted navigations.
+  - Size: N ≥ 10 clean runs per engine per arm, plus a Chromium control. A run with any preloadError or aborted navigation is excluded and reported.
+  - Outcomes:
+    - the Chromium control has a run with 0 matching POSTs: the probe is vacuous, UNKNOWN, and nothing goes live;
+    - on any engine, fewer F-A runs than base runs show a matching POST: BLOCK;
+    - both arms show 0: F-A may go live (no worse), and P1 live is blocked on Firefox and WebKit until a push is shown.
+- **BR7c. The two flakes stay as residual R-BR4.** Both are test-locator defects, at the same rate on both trees, and fail before any sync assertion:
+  - handleAlignment:88: 17/30 vs 16/30. All 33/33 failures are `.osionos-page [data-database-title]` `.first()` resolving to a hidden Rename button.
+  - refusedDatabaseSave: 3/30 vs 3/30. All 6/6 are `databaseHelpers.mjs:30-31` `.first()` resolving to the hidden `sys:my-tasks` home-dashboard block.
+  - 0 failures at the push assertion (`:42`).
+
+  In BR10, parity means the same failure locations, not the same rate. Every failure sits at those two lines, and refusedDatabaseSave passes ≥ 20/30 per arm.
+
+  The locator fix is its own test-only unit. It never rides in the F-A cherry-pick (BR9).
+- **BR7d. BR10's e2e evidence, on main+F-A and main.**
+  - Chromium production harness:
+    - the full bridge-stub suite, with the two flaky specs ×30 under BR7c;
+    - BR5's Chromium arm and BR6.
+  - Firefox:
+    - the full suite, failing set identical to the base;
+    - start evidence on (a)–(c), N ≥ 5, with 0 boot resets on the `removeItem` observer and a GET per load;
+    - BR7b.
+  - WebKit: start evidence and BR7b only.
+  - Not run: the full WebKit suite. It joins R-BR5.
+- **BR7e. Fact 7 needs no fix before P1 goes live.**
+  - It is already live and affects both trees.
+  - A preloadError reload is a pagehide followed by a boot, the same event as F5 during boot. P1's unload path already has to survive that (`knownDatabaseUnload.ts:30`).
+  - KDS itself arrives through the dynamic import (`App.tsx:236`). An import cancelled before it evaluates holds no KDS state.
+
+  Condition: P1's Firefox and WebKit live evidence (C7, LL8, the journal) uses one `goto` and counts preloadErrors. Only clean runs count toward N.
+- **BR7f. R-BR5, its own unit.**
+  - On Firefox and WebKit, a navigation during boot cancels lazy imports. `vite:preloadError` then fires, and `main.tsx:49-56` swaps the navigation for a reload, at most once per 10 s per tab.
+  - Measured: Firefox 15 preloadErrors, WebKit 5, Chromium 0 (`out-diag2`).
+  - User impact: the Prismatica handoff (`App.tsx:328`) or OAuth (`connectionsOAuth.ts:46`, `useAiConnections.ts:137`) can bounce once.
+  - Test impact: the production e2e on Firefox and WebKit is blind, and CI runs Chromium on the dev server only. The dev server has no preload helper: Vite emits the event only from `buildImportAnalysisPlugin`.
+
+Risk: blast 2, reversibility 2, cost 3, confidence 3. Worst: the push on Firefox and WebKit is unknown on every tree, so it is the confidence axis. BR7b closes it before anything goes live.
