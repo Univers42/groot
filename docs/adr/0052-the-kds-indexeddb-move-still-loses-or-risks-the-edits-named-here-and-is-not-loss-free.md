@@ -118,3 +118,59 @@ The migration itself is also one way (0054): migrated tabs have no legacy keys, 
 - Caveat for the numbers: I10 and the journal harness are docker-driven (Playwright, stock Firefox over WebDriver BiDi), not a user's Ctrl+W, and N=20 bounds a rate only to about ±15 %.
 - Closed 2026-11-17: the devil's ruling on `38c38cf36` (R7) is recorded in ADR 0055 and reflected above.
 - Note of 2026-11-17 (C7, suspension NOT lifted). The tombstone is osionos develop `fdb2b6162..628f5de19`, CI green on `628f5de19`. C7.1 to C7.6: `gates.sh c7-review-628f5de19` gives typecheck rc=0, lint rc=0, test-canvas rc=0 (5687 of 5687, canvas tests C7-N1b, C7-N1c, C7-CAND, C7-prefix, C7-common, C7-tomb-no-copy, C7-short-state, C7-old-reader); `kdsRetireTombstone.spec.mjs` passes 3 of 3 on Chromium 147 and Firefox in the main session's run and 30 of 30 on Chromium, Firefox and WebKit in the builder's, and fails 9 of 9 at load 1 before the fix; mutants Ma, Mc, Md, Me, Mg are killed and Mb is equivalent. C7.7: `git diff --stat fc0d7b408 628f5de19` over the C7.7 paths lists only the tombstone in `knownDatabaseDurableCopy.ts` and the 63c376994 write-notice change in `pageStore.helpers.ts` (the room-making definition is unchanged), so J-C7 and RC9 on fc0d7b408 stay valid. C7.8 is this register. Live promotion stays suspended: ADR 0057 BR14 requires the promoted commit to contain the boot-race fix F-A, and a later dated note here lifts the suspension once BR1 to BR8 are met.
+
+## P1 live checklist, 2026-11-18 (devil; the suspension is NOT lifted)
+
+The candidate is M, ADR 0057 BR13c's merge of main into develop with `git diff develop M` empty. Evidence on a build of 891d7fc52's tree counts for M only when `git rev-parse M^{tree}` = `be127dd815c28474e8c37ba95060164a12858a4b`. That hash covers the 8 gitlinks and `pnpm-lock.yaml`, which is unchanged since 4b6e8fdf2. M still needs its own CI run and BR12. The harness builds a directory, not a commit. A run counts only on a detached worktree at 891d7fc52 with `git status --porcelain` empty and every `git submodule status` line starting with a space, both saved in the out dir. An export such as `c7-e2e/t-fa` counts only with a file-for-file `git hash-object` match against `git ls-tree -r`.
+
+Met (pointer only):
+- C7.1–C7.8: the note of 2026-11-17 above, CI green on 628f5de19. J-C7 and RC9 on fc0d7b408: ADR 0055, fc0d7b408 note (RC9-F1 740 runs, 0 lost, 0 reverts).
+- C7.7 on 891d7fc52, run over the C7.7 paths (0054:219-226): `git diff --stat fc0d7b408 891d7fc52` = `knownDatabaseDurableCopy.ts` 41 and `pageStore.helpers.ts` 22, "2 files changed, 48 insertions(+), 15 deletions(-)". The room-maker body is unchanged (`pageStore.helpers.ts:315`). `git diff --stat 628f5de19 891d7fc52` = F-A's 3 files.
+- FL1–FL3: the F1 commits are ancestors of develop and no remote tip sits at 7520d20c3; `persistAsHost` 7× in `known-database-embed-limit-write.test.ts`; groot 637ee597. C5/J-C9 hold through C7.8 (this register); J-C10 through 38c38cf36 (0055).
+- BR14 ancestry: develop's tip 891d7fc52 is F-A. BR13a today: `git cherry -v origin/develop origin/main` = 5 `-`, 0 `+`, and `git rev-list --merges 4b6e8fdf2..origin/main` = 0. BR13b today: 10 main paths, 2 differ (`useUserStore.ts`, `tests/canvas/user-store-fixtures.ts`, 31+/15−), develop the superset.
+- BR7e, journal, Firefox, J-C7 and online server-title cells: recounted in `devil-br10/recount-rc9f1.txt`. Every J-C7 Firefox cell has 22 `GET /api/object-databases` for 20 trials (setup, first boot, one per trial). Every server-title cell has 41 for 20. No trial shows a surplus boot.
+- LL8 does not apply. `git ls-tree -r --name-only origin/develop -- src/store/page-cache` = 0 files. `knownDatabaseJournal.ts` has 0 diff lines fc0d7b408..891d7fc52 and defines `storedLength` itself (:104). Both of LL8's triggers are L1a's (0056 LL8). It fires again if L1a or any page-cache path joins.
+- R-BR6 binds no item. `navigator.onLine` is read only by `useConnectivityNotices.ts`, `WorkbenchStatusBar.tsx:140` and `usePageSync.ts:280-281`. `connectivityAwareFetch` (`connectivity.ts:22-35`) gates nothing. No KDS code reads it.
+
+Open. Run them in this order. O1–O4 run now on 891d7fc52's tree; O5–O9 need F-A live (main CI green with connectivity :58/:84 under BR7g, the F-A deploy, and BR9/BR11/BR12 on it).
+- **O1. ADR 0056 A5/A6** (b7a5e1264..63c376994, carried by M). There is no record of a check: a grep of docs/adr and devil memory finds only design text; A1–A4 were met at 0056:376.
+  - The builder maps each A5 and A6 clause to its canvas test.
+  - Then run `gates.sh` on the tree: typecheck, lint, full canvas. Cite each gate's rc line.
+  - BLOCK: a clause with no test, or any rc ≠ 0.
+- **O2. BR7e, the remaining Firefox journal cells (RC9-F1).**
+  - (a) online-new-db (37/38 GETs per 20, plus top-ups): a per-trial GET count from the bridge jsonl. A trial above its expected boots is excluded.
+  - (b) Offline close cells: no preloadError can occur, because the leave is `page.close` and no booting document navigates (`run.mjs`). Ruled clean.
+  - (c) The 5 offline nav cells have no bridge log, and `run.mjs:231` records `pageerror` only. Re-run them with a `vite:preloadError` listener in the init script (as `push.spec.mjs:44`), using the `rc9-f1` production offline build and stock Firefox 158.
+  - Bar: N ≥ 20 clean per cell, 0 lost, 0 reverts. BLOCK: any loss or revert in a clean run, or < 20 clean.
+- **O3. C7.5 on Firefox and WebKit.** `kdsRetireTombstone.spec.mjs` loads 4 times plus a reload by design (:113-140) and counts no preloadError. A reload between loads changes what the negative assertion at :136 sees.
+  - Run `REPEAT=10 bash /mnt/storage/dlesieur/scratch/c7-e2e/run-x.sh c75 chromium,firefox,webkit <counting copy under probes-fal> <tree> test`. The counting copy logs `vite:preloadError`; it is a scratch copy, never a repo edit. `--mode test` is acceptable because its assertions read storage and stub POSTs, not auth.
+  - Bar: N ≥ 10 clean per engine, 0 failures in clean runs. BLOCK otherwise.
+- **O4. BR7j(i), the BR7b push probe with the live flags.**
+  - Run `PW_CONFIG=/cfg/pw-sw-block.config.ts REPEAT=12 bash run-x.sh br7j chromium,firefox,webkit tests/e2e/bridge-stub/probe/push.spec.mjs <tree> prod`. The `prod` argument selects `entry-prod-cfg.sh` (`VITE_REQUIRE_BRIDGE_SESSION=true`, `VITE_ALLOW_OFFLINE_MODE=false`, `NODE_ENV=production`).
+  - The existing 12/12 on 891d7fc52 was a `--mode test` build (`out-p-fa/build.log`).
+  - Bar: ≥ 10 clean runs per engine (0 preloadError, 0 aborted, 1 navigation), each with a matching POST.
+  - BLOCK in any of these cases:
+    - a Chromium control run with 0 matching POSTs (the probe is vacuous);
+    - after a miss, the parent arm (main 0333d7966's tree, same flags) shows more pushing runs than the candidate;
+    - both arms show 0 on an engine.
+- **O5. Build M after a fresh `ls-remote`.** Re-check BR13a and BR13b; any new main commit is ruled first. Then check `git diff origin/develop M` is empty and `git rev-parse M^{tree}` = the hash above.
+  - BLOCK: a tree mismatch (re-run O1–O4 on M), or develop past 891d7fc52 (a new unit, re-ruled).
+- **O6. BR14 and C7.7 on M.** All three must hold:
+  - `git merge-base --is-ancestor 891d7fc52 M` returns rc 0;
+  - the C7.7 `git diff --stat fc0d7b408 M` prints exactly the 2-file line above;
+  - `git ls-tree -r --name-only M -- src/store/page-cache` is empty.
+  - Any other output fires J-C7/RC9 again (N ≥ 20), and LL8 too for page-cache.
+- **O7. CI green on M's exact sha**, `test-bridge-stub` included. Main then fast-forwards to M with no `--force` (BR13c). That push publishes a `node-pages` release, which cannot be undone (BR13d).
+- **O8. Deploy M.** Re-verify the target and run BR12 (the served index chunk equals the local build of M).
+  - Rollback is forward only (K7 (A)): a new build of a commit that contains 1edca24b9 and F-A. Never below 1edca24b9, never a pre-P1 image once P1 is live.
+  - The image tagged before the switch is the F-A image, which is pre-P1. Once M has served any request, that image is forensic only and is labelled "not a rollback target".
+- **O9. The dated lift note in this ADR** records O1–O8 and states to the user the residuals they accept:
+  - R1–R6, R8, R9 and N2′; R10 (a)–(d) and F-C6;
+  - N1b/N1c are closed only for an origin with ≥ 20 characters of legacy text; R-C7a and R-C7b remain;
+  - no queue before readiness; no journal or pagehide push over the 1,000,000-character cap;
+  - a budget-abandoned or pre-P1 tab can overwrite the marker;
+  - the migration is one way, including `migrated:<tabId>`;
+  - the journal is unmeasured on WebKit (J-C7 ran on Chromium and Firefox only);
+  - the numbers are docker-driven, about ±15 % at N = 20;
+  - R11 is closed by F-A.
+  - The note never says "no data loss".

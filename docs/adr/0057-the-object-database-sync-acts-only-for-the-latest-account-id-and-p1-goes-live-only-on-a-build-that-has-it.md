@@ -296,11 +296,10 @@ Met: typecheck, lint, canvas 5539/5539; BR3 13/13; BR4 3/3; BR5 Chromium 0/200 b
   - Caveat: +3 misses a regression under ~10 % at a shared location (binomial SD ≈ 2.7 at p = 0.5).
 - **BR7i. Still binding before the main push:** BR9 (the base read from the running web image), BR11 and BR12.
 - **BR7j. P1.** 891d7fc52 contains P1 and pushed 12/12 on Firefox and WebKit, as did 628f5de19. So the "never pushes there" branch is gone. Still missing:
-  - (i) BR7b on the real P1 candidate, which needs the C7 tombstone and so is not 891d7fc52:
-    - a live-flag build (`entry-prod-cfg.sh`);
+  - (i) BR7b on a live-flag build (`entry-prod-cfg.sh`) of 891d7fc52's tree. Corrected 2026-11-18: 891d7fc52 already holds the tombstone (`git merge-base --is-ancestor` succeeds for fdb2b6162, 4a4efed82 and 628f5de19). The candidate is BR13c's merge M. A run on 891d7fc52's tree counts for M only when `git rev-parse M^{tree}` equals `891d7fc52^{tree}` (be127dd81). The 12/12 above was a `--mode test` build (`out-p-fa/build.log`: "building for test"). Checklist: ADR 0052, "P1 live checklist, 2026-11-18".
     - N ≥ 10 clean runs per engine, plus a Chromium control;
     - the parent arm only if a run misses.
-  - (ii) BR7e: C7, LL8 and the journal on Firefox and WebKit.
+  - (ii) BR7e: C7 and the journal on Firefox and WebKit. LL8 does not apply without L1a.
   - (iii) BR14's ancestry and C7.7 checks.
 
 Risk:
