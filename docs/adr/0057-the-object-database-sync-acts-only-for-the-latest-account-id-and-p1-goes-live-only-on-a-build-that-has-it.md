@@ -251,3 +251,58 @@ BR7 as written asks Firefox and WebKit to show a push. No tree shows one: the pr
   - Test impact: the production e2e on Firefox and WebKit is blind, and CI runs Chromium on the dev server only. The dev server has no preload helper: Vite emits the event only from `buildImportAnalysisPlugin`.
 
 Risk: blast 2, reversibility 2, cost 3, confidence 3. Worst: the push on Firefox and WebKit is unknown on every tree, so it is the confidence axis. BR7b closes it before anything goes live.
+
+## Re-ruled 2026-11-18: BR10 on 0333d7966 (PROCEED-WITH-CONDITIONS BR10a, BR13a–BR13d, BR7g–BR7j)
+
+0333d7966 is main 9d9520959 plus the F-A cherry-pick: patch-id 65fb2c9daa62, the same as 891d7fc52's. `git log 9d9520959..` shows only F-A, in 3 files.
+
+Met: typecheck, lint, canvas 5539/5539; BR3 13/13; BR4 3/3; BR5 Chromium 0/200 boot resets vs 75/200; BR6 0 reverted lines vs 10; BR7b 12/12 per engine per arm, Chromium control positive.
+
+- **BR10a. Each arm ran its own tree.** Checked by this ruling, because the full-suite and ×30 runs reused symlinked dists (`br7b.sh`, `br7d.sh`): main+F-A → `dist-l-smoke`, main → `dist-p-main`.
+  - Every trace serves one index-chunk pair per arm: `hzb01WLo`/`BvSk039g` vs `CKY6RiEm`/`DXIH1oCj`. These are the chunks listed in `out-l-smoke/build.log` and `out-p-main/build.log`.
+  - The two builds emit the same 638 (name, size) pairs except the entry chunk: 859.55 vs 859.62 kB. The develop pair 891d7fc52/628f5de19 differs the same way: 860.78 vs 860.86 kB.
+  - `t-fal`/`t-main` equal `git archive` of 0333d7966/9d9520959 outside submodules, and differ only in F-A's files.
+  - Caveat: a fingerprint at 0.01 kB. The l-smoke command is unlogged (`t-fal` mtime 01:11, build 01:12). BR12 checks the live build itself.
+- **BR7b for F-A is met on a `--mode test` build.**
+  - Its flags gate the boot (`userStore.helpers.ts:37-38`), not the push (`objectDatabaseBridgeSync.ts:67-69`).
+  - The live-flag boot on Firefox and WebKit is `out-b-fw-*`: 0 boot resets and a GET per load.
+- **Item 1. BR13 gates develop→main, not F-A live.** Restated as follows, and met now:
+  - Merging the cherry-pick adds no conflict beyond the base's: the same two files in `mergetree.out` and `mergetree-base.out`, neither in F-A's diff.
+  - `git cherry -v origin/develop 0333d7966` marks 5/5 commits `-`.
+
+  Merging main into develop with develop's tree is PwC. Patch-ids hide what that merge drops:
+  - a main hunk develop later changed or reverted;
+  - a `+` commit, or a merge commit (git cherry skips merges);
+  - a commit landing after the check.
+
+  Conditions:
+  - **BR13a.** No `+` from git cherry. `git rev-list --merges <mb>..main` is empty, or each merge is ruled.
+  - **BR13b.** In `git diff develop main -- $(git diff --name-only <mb> main)`, every main-side hunk is ruled superseded. A gitlink needs `--is-ancestor` inside the submodule.
+    - Today: 7 paths, 2 differ, 31 lines.
+    - Develop is a superset: `noticingWriter` wraps the same `setItemEvictingPageCaches`, and `QuotaStorage` moved with the same members.
+  - **BR13c.** `git diff develop <merge>` is empty, gates and CI run on the merge, and main fast-forwards with no `--force` after a fresh `ls-remote`. A main that moved fails the push.
+  - **BR13d.** A push to main publishes the `node-pages` release (`node-pages.yml:4-6`) and carries all 51 develop commits. Main advances only when every develop unit is cleared for live, and P1 is not.
+- **Item 2. BR7g. The parity bar is: the build's failing set ⊆ the base's, with the same spec:line and assertion message.**
+  - Met: {connectivity:61, :90, handleAlignment:88} on both arms; settingsDeveloperAuthorizedApps:67 fails on main only.
+  - The connectivity cause is not needed for F-A:
+    - it fails at boot, before any cut;
+    - "Offline" is only `navigator.onLine` (`connectivity.ts:46,57`);
+    - the messages are identical;
+    - F-A has no connectivity code.
+  - But :58 is the offline-edit push, and this harness never reached it. Condition: main CI's `test-bridge-stub` job (`ci.yml:432`, runs on main) on 0333d7966 passes connectivity :58 and :84. A retry pass is reported as flaky.
+  - **R-BR6.** This harness's connectivity results back no claim, P1 offline included, until `navigator.onLine` under `--network none` is shown.
+- **Item 3. BR7h. BR7c's bar is amended.** Every build failure location also fails on the base, with a count ≤ the base's + 3 of 30. A build-only location blocks. The push assertion has 0 failures, and refusedDatabaseSave passes ≥ 20/30.
+  - Met, build vs base: handleAlignment:88 12 vs 15; :101 1 vs 1 (handle offset, no F-A layout code); `databaseHelpers.mjs:31` 2 vs 5; refusedDatabaseSave passes 28/30 vs 25/30.
+  - Caveat: +3 misses a regression under ~10 % at a shared location (binomial SD ≈ 2.7 at p = 0.5).
+- **BR7i. Still binding before the main push:** BR9 (the base read from the running web image), BR11 and BR12.
+- **BR7j. P1.** 891d7fc52 contains P1 and pushed 12/12 on Firefox and WebKit, as did 628f5de19. So the "never pushes there" branch is gone. Still missing:
+  - (i) BR7b on the real P1 candidate, which needs the C7 tombstone and so is not 891d7fc52:
+    - a live-flag build (`entry-prod-cfg.sh`);
+    - N ≥ 10 clean runs per engine, plus a Chromium control;
+    - the parent arm only if a run misses.
+  - (ii) BR7e: C7, LL8 and the journal on Firefox and WebKit.
+  - (iii) BR14's ancestry and C7.7 checks.
+
+Risk:
+- F-A to main: blast 2, reversibility 2 (a revert commit and an image rollback; node-pages rolls forward), cost 3, confidence 2. Worst: cost.
+- develop→main: blast 4, reversibility 4, cost 4, confidence 3. That is why BR13d holds main.
