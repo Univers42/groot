@@ -63,7 +63,8 @@ fixture_dockerfile() {
 }
 
 @test "PH2: only the beta updater turns on the profile page" {
-  run git -C "$REPO" grep -l 'VITE_OSIO_PROFILE_PAGE=1' -- . ':!scripts/tests/build-args.bats'
+  # CI runs bats as root on a runner-owned checkout: git refuses it as dubious ownership unless trusted here.
+  run git -c safe.directory="$REPO" -C "$REPO" grep -l 'VITE_OSIO_PROFILE_PAGE=1' -- . ':!scripts/tests/build-args.bats'
   [ "$output" = infrastructure/beta/update.sh ]
 }
 
