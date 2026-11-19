@@ -14,12 +14,21 @@
 #                                a later line of that stage naming `$NAME`/`${NAME}`, or any later
 #                                RUN, whose environment Docker fills with the stage's ARGs (which
 #                                is how `RUN npm run build` hands VITE_* to vite).
+#   script_build_args FILE       print NAME for every `--build-arg NAME=…` in a shell script
+#                                (the beta updater builds with plain `docker build`).
+#   osio_flags_off_env_file DOCKERFILE
+#                                print each `ARG VITE_OSIO_*` that has a non-empty default or is
+#                                not written as `NAME=%s` into .env.production.local: a VITE_OSIO
+#                                flag reaches import.meta.env only through that file, and a flag
+#                                with a default would be on in every live build (groot ADR 0067 PH2).
 #
 # Caveat: compose files are read by indentation (services at 2 spaces, build keys at 6, args at
 #   8, the layout every groot compose file uses), not by a YAML parser: a list-form `args:`, a
 #   flow mapping or an anchor-merged build block is not seen, so an arg can be MISSED (silent).
 #   On the Dockerfile side, any later RUN counts as a use, so an ARG declared before a RUN that
 #   never reads it passes (silent); a stage ending in the declaration is reported.
+#   osio_flags_off_env_file reads every `RUN printf` line as the env-file write, so a flag written
+#   by a printf to some other file passes (silent); a multi-line ARG default is not seen.
 
 compose_build_args() {
 	local first_dir
@@ -68,4 +77,18 @@ dropped_build_args() {
 			declared && ($1 == "RUN" || $0 ~ ("\\$\\{?" a "([^A-Za-z0-9_]|$)")) { used = 1 }
 			END { exit !used }' "$dockerfile" || printf '%s\n' "$arg"
 	done
+}
+
+script_build_args() {
+	grep -oE -- '--build-arg [A-Za-z_][A-Za-z0-9_]*=' "$1" | sed 's/^--build-arg //; s/=$//' | sort -u
+}
+
+osio_flags_off_env_file() {
+	awk '
+		$1 == "ARG" && $2 ~ /^VITE_OSIO_/ { split($2, kv, "="); flags[kv[1]] = kv[2] }
+		/\.env\.production\.local/ || /^RUN printf / { text = text $0 }
+		END {
+			for (name in flags)
+				if (flags[name] != "" || index(text, name "=%s") == 0) print name
+		}' "$1" | sort
 }

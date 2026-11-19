@@ -42,6 +42,7 @@ timeout 2700 nice -n 10 ionice -c3 docker build -q \
   --build-arg VITE_PAGE_ACTION_SYNC_ENABLED=true \
   --build-arg VITE_OSIO_COLLAB_SHARED=1 --build-arg VITE_OSIO_COLLAB_FASTSEND=1 \
   --build-arg VITE_OSIO_LAYOUT_MODES=1 \
+  --build-arg VITE_OSIO_PROFILE_PAGE=1 \
   --build-arg VITE_APP_VERSION="beta-$sha" \
   -t "osionos-beta/web:$sha" . >/dev/null
 

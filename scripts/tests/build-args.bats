@@ -47,6 +47,26 @@ fixture_dockerfile() {
   assert_none_dropped osionos-app
 }
 
+@test "beta: app.Dockerfile hands every build arg the beta updater passes to the vite build" {
+  local args
+  mapfile -t args < <(script_build_args "$REPO/infrastructure/beta/update.sh")
+  [ "${#args[@]}" -gt 10 ]
+  run dropped_build_args "$REPO/infrastructure/docker/osionos/app.Dockerfile" "${args[@]}"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ] || { echo "the beta passes, app.Dockerfile drops: $output" >&2; false; }
+}
+
+@test "osionos-app: every VITE_OSIO flag defaults off and reaches .env.production.local" {
+  run osio_flags_off_env_file "$REPO/infrastructure/docker/osionos/app.Dockerfile"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ] || { echo "VITE_OSIO flags with a default or missing from the env file: $output" >&2; false; }
+}
+
+@test "PH2: only the beta updater turns on the profile page" {
+  run git -C "$REPO" grep -l 'VITE_OSIO_PROFILE_PAGE=1' -- . ':!scripts/tests/build-args.bats'
+  [ "$output" = infrastructure/beta/update.sh ]
+}
+
 @test "opposite-osiris-web: its Dockerfile hands every compose build arg to the build" {
   assert_none_dropped opposite-osiris-web
 }
@@ -106,4 +126,23 @@ fixture_dockerfile() {
   run dropped_build_args "$FIXTURE_DOCKERFILE" VITE_A
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+@test "negative control: a VITE_OSIO flag left out of the env file, or on by default, is named" {
+  fixture_dockerfile 'FROM node\nARG VITE_OSIO_A=\nARG VITE_OSIO_B=\nARG VITE_OSIO_C=1\nRUN printf %s "VITE_OSIO_A=%s\\nVITE_OSIO_C=%s\\n" > .env.production.local\n'
+  run osio_flags_off_env_file "$FIXTURE_DOCKERFILE"
+  [ "$output" = "$(printf 'VITE_OSIO_B\nVITE_OSIO_C')" ]
+}
+
+@test "twin: the same flags all written and all empty are not named" {
+  fixture_dockerfile 'FROM node\nARG VITE_OSIO_A=\nARG VITE_OSIO_B=\nARG VITE_OSIO_C=\nRUN printf %s "VITE_OSIO_A=%s\\nVITE_OSIO_B=%s\\nVITE_OSIO_C=%s\\n" > .env.production.local\n'
+  run osio_flags_off_env_file "$FIXTURE_DOCKERFILE"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "script_build_args: lists each --build-arg name once" {
+  printf 'docker build \\\n  --build-arg A=1 --build-arg B= \\\n  --build-arg A=2 .\n' >"$BATS_TEST_TMPDIR/u.sh"
+  run script_build_args "$BATS_TEST_TMPDIR/u.sh"
+  [ "$output" = "$(printf 'A\nB')" ]
 }
