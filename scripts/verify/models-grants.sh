@@ -121,6 +121,11 @@
 #   p2_1 the README pointer (P2-1-a, models/osionos-account-readme-migration.sql):
 #   p2_1_readme_fk readme_page_id is a UUID with a foreign key to osionos_pages
 #   that sets NULL on delete ·
+#   cs the page cover size columns (PS31, ADR 0067 CS5, models/osionos-page-cover-size-migration.sql;
+#   scripts/verify/models-grants/cover-size.sh): cs_columns integer/text, nullable, no default ·
+#   cs_validated both CHECKs validated · cs_height_low/_high/cs_width_wide refused with 23514,
+#   cs_null_ok/cs_values_ok accepted (rolled back) · cs_replay the file twice, then a runner pass
+#   cs_constraint_count exactly two CHECKs on the columns after the replay ·
 #   standalone the account foundation file applied alone leaves no realtime
 #   trigger on the sessions table or on the audit table, no anon/authenticated
 #   privilege and exactly the nine column grants — what the ledger runner
@@ -184,6 +189,8 @@ GROBASE_INIT="${REPO}/apps/grobase/scripts/migrations/postgresql/001_initial_sch
 GROBASE_REALTIME="${REPO}/apps/grobase/scripts/migrations/postgresql/012_realtime_triggers_all_tables.sql"
 IMAGE="${GROBASE_PG_IMAGE:-ghcr.io/univers42/grobase-postgres:latest}"
 MODELS_DIR="${MODELS_DIR:-${REPO}/models}"
+# shellcheck source=scripts/verify/models-grants/cover-size.sh
+. "${FIX}/cover-size.sh"
 READY_TIMEOUT=60
 PG_USER=postgres
 PG_DB=postgres
@@ -796,6 +803,7 @@ run_checks() {
 	probe "$1" K6 anon "INSERT INTO public.osionos_sessions (id, user_id, expires_at, auth_method) VALUES (gen_random_uuid(), gen_random_uuid(), now() + interval '1 hour', 'password')"
 	check_svc "$1" k5 account_isolation_own
 	check_count "$1" k6 account_isolation_forged
+	check_cover_size "$1"
 	check_idempotent "$1"
 	check_standalone "$1"
 }
