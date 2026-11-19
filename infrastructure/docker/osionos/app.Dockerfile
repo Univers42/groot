@@ -98,6 +98,8 @@ ARG VITE_OSIO_COLLAB_SHARED=
 # Fast-send block puts (one throttled put per block instead of the 250 ms draft commit).
 # Default off; on- and off-clients interoperate.
 ARG VITE_OSIO_COLLAB_FASTSEND=
+# Container modes on column lists (osionos ADR 0064 PS10). Default off; the beta turns it on.
+ARG VITE_OSIO_LAYOUT_MODES=
 # Giphy search key (GIPHY_API in .env.local). Public beta-style key, client-side
 # by design; empty = the GIF picker shows a "not configured" toast.
 ARG VITE_GIPHY_API_KEY=
@@ -146,8 +148,8 @@ ENV VITE_API_URL=$VITE_API_URL \
 # liveRealtimeUrl()/resolveLiveRealtimeToken() get a non-empty VITE_BAAS_URL +
 # valid token and the chat WebSocket actually connects. Feature flags resolve
 # against that same object (@osionos/feature-flags), so a VITE_OSIO_* flag goes here too.
-RUN printf 'VITE_BAAS_URL=%s\nVITE_BAAS_REALTIME_TOKEN=%s\nVITE_CHAT_WS=%s\nVITE_GIPHY_API_KEY=%s\nVITE_OSIO_COLLAB_SHARED=%s\nVITE_OSIO_COLLAB_FASTSEND=%s\n' \
-      "$VITE_BAAS_URL" "$VITE_BAAS_REALTIME_TOKEN" "$VITE_CHAT_WS" "$VITE_GIPHY_API_KEY" "$VITE_OSIO_COLLAB_SHARED" "$VITE_OSIO_COLLAB_FASTSEND" > .env.production.local
+RUN printf 'VITE_BAAS_URL=%s\nVITE_BAAS_REALTIME_TOKEN=%s\nVITE_CHAT_WS=%s\nVITE_GIPHY_API_KEY=%s\nVITE_OSIO_COLLAB_SHARED=%s\nVITE_OSIO_COLLAB_FASTSEND=%s\nVITE_OSIO_LAYOUT_MODES=%s\n' \
+      "$VITE_BAAS_URL" "$VITE_BAAS_REALTIME_TOKEN" "$VITE_CHAT_WS" "$VITE_GIPHY_API_KEY" "$VITE_OSIO_COLLAB_SHARED" "$VITE_OSIO_COLLAB_FASTSEND" "$VITE_OSIO_LAYOUT_MODES" > .env.production.local
 
 # Build, then strip source maps from the shipped image (they tripled its size
 # and leak source; keep them only in local builds) and precompress static
