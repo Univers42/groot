@@ -342,3 +342,45 @@ T2-8f require; it is not the O9 lift note.
 
 What is not known: whether the cpus-1.75 emulation matches CI load beyond the two calibrated points (the
 2.0→1.0 scaling was superlinear). This note makes no claim about data loss; the residuals above stand.
+
+## 2026-11-20: O9, the lift note (P1 serves; the residuals below stand)
+
+P1 serves live since 2026-11-20T03:58:17Z, on the user's go of 2026-11-20 ~04:50 CET. This note records
+O1–O8 by pointer and states the residuals the user accepts. It makes no claim that edits cannot be lost.
+
+What serves: osionos T₂ `0e10ff567` (test-only child of M′ `6de257335`), image
+`track-binocle/osionos-web:main-0e10ff56-site` (`fc9998f3e249`), container `track-binocle-osionos-app-1`.
+Main's tip is past it: `1712b964` (osionos PR #322, merged 2026-11-20T02:43Z) is not served and is not
+covered by this ruling.
+
+O1–O8:
+- O1: the Q1 test on M′; three gates by CI run 44241787542 on M′ (Q4, Q7g).
+- O2–O4: hold on M's tree `be127dd8` (O1 re-rule); Q3's byte-identical builds carry them to M′, and
+  O8c's identity rule carries them to T and T₂.
+- O5/O6: Q5 (M′ is M plus `tests/canvas/` paths only).
+- Q7: `p1-cand/q7b/RESULT.md`, 150/150 picked per arm, 0 without a row cell at 15 s; t_list − t_key
+  median/p95 parent 12/27 ms, M′ 13/27 ms. Neither Q7d nor Q7e fired.
+- O7: main fast-forwarded to M′ on 2026-11-18, then to T₂ at 2026-11-20T02:40:01Z (`ba24e781e..0e10ff567`);
+  main CI run 44662421104 green on attempt 1, never rerun (T2-14, above).
+- O8: `logs/o8-build.out` and `logs/o8-swap.out` under `/mnt/storage/dlesieur/scratch/integ/`. Before:
+  `index-C-WY8B6h.js` (main-0333d796). After: `index-B0X1NVwb.js` (main-0e10ff56), equal to the image's
+  `/usr/share/nginx/html/index.html` (BR12); healthy, 0 restarts.
+- Rollback is forward only (K7 (A)). `deploy/logs/rollback-web-0333d796.sh` carries a line saying the
+  pre-P1 image is forensic only and not a rollback target.
+
+Residuals the user accepts:
+- R1–R6, R8, R9 and N2′ (register above); R10 (a)–(d) and F-C6.
+- N1b/N1c are closed only for an origin with ≥ 20 characters of legacy text; R-C7a and R-C7b remain.
+- No queue before readiness. No journal or pagehide push over the 1,000,000-character cap.
+- A budget-abandoned or pre-P1 tab can overwrite the marker.
+- The migration is one way, `migrated:<tabId>` included.
+- The journal is unmeasured on WebKit (J-C7 ran on Chromium and Firefox only).
+- The numbers are docker-driven, about ±15 % at N = 20.
+- The preloadError count is unproven on Firefox 158 (Q8).
+- Q7's misses: before Q7a the harness missed 6/250 (parent) vs 17/250 (M′) closed-menu picks, p = 0.031.
+  With the stable-click gesture both arms picked 150/150. The open-menu class's mechanism is unknown.
+- Whether P1 lengthens the lag between a new page's title and `activePage` is unmeasured.
+- CI's true rate for the O8c double failure is unknown (retries=1 hides single failures).
+- Flaky in T₂'s green run: `whiteboardInProcess.spec.mjs:100`. The T2-14 residuals above, the 3 VOID
+  cpus-2.0 runs included, stand.
+- R11 is closed by F-A.
