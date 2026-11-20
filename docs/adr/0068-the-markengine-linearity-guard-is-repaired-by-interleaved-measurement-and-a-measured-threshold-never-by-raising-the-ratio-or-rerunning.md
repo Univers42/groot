@@ -39,3 +39,8 @@ must fail. Conditions B1-B9 and the pin-bump rules are in
   timeout is not a mutant result. The guard fails fast: each first render runs in a worker thread that is
   terminated at a deadline. The metric is repaired before any threshold moves (R4c, fastest-of-k
   calibration), and T ≤ 7. An engine branch may be pushed for the 5 fresh CI runs; that is not a landing.
+- Re-ruled 2026-11-20 on R5 (devil, `DEVIL-ME-BENCH-R5-VERDICT.md`): R4c failed R6 (5.72 > 5.5) and R7
+  (39.86 ms), and the candidate read 15.99 on a linear shape under bench:ci. No wall-clock ratio gates
+  linearity. The lift is a deterministic step counter (D1–D14) with a census tripwire. Interim: the
+  guard runs as its own CI job (I1–I7, osionos develop 1619dce78, first run 44687495414 green on attempt
+  1); demoting the ratio before D is raising it.
