@@ -140,6 +140,8 @@ BG1–BG21 below bind. Re-rule if:
 ### Review
 
 - **BG20.** A `security` agent pass on BG3, BG14 and BG8 before anything reaches live.
+  - Review of BG3 (osionos `feat/bg3-image-source`, 2026-11-20). The MEDIUM finding is fixed in f68625e15: a value now comes back resolved (`..` and `%2e` segments applied), not as typed, so it cannot pass the uploads-prefix check and then name another owner's path.
+  - One LOW finding is still open for the BG14 pass. A relative `/api/media/uploads/…` value resolves against the app origin, but the bridge serves the bytes. Owner checks in BG14 must therefore read the resolved pathname and never compare origins.
 - **BG21.** These residuals predate this design and are handed to `security`, not fixed in this unit:
   - the F4 bypass in the profile banner and avatar;
   - F8 `LayoutBlockReadOnly.tsx:66` raw `background`, which already reaches README visitors through `layoutCells`;
