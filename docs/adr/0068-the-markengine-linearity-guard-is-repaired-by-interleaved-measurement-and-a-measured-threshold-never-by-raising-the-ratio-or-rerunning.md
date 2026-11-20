@@ -35,3 +35,7 @@ must fail. Conditions B1-B9 and the pin-bump rules are in
 - The guard's threshold now cites runs (local under load, idle, and 5 fresh CI runs) plus a mutant result.
 - The pin bump may land on develop alone only if it is gitlink-only, bench/-only in the engine, and reachable on GitHub.
 - Reverse this only by re-measuring. A new red is read from the per-pair spread, never re-run.
+- Re-ruled 2026-11-20 (devil, `DEVIL-ME-BENCH-RERULE-VERDICT.md`): BLOCK on landing until R1–R12. A job
+  timeout is not a mutant result. The guard fails fast: each first render runs in a worker thread that is
+  terminated at a deadline. The metric is repaired before any threshold moves (R4c, fastest-of-k
+  calibration), and T ≤ 7. An engine branch may be pushed for the 5 fresh CI runs; that is not a landing.
