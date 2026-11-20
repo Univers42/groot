@@ -287,3 +287,58 @@ Risk: blast radius 2, reversibility 4 (O7 is held), cost 2, confidence 4 (latenc
   - Q3's transfer covered M→M′ only. O2–O4 run again on M″ at their original N, unless a transfer is ruled first.
   - Q4 and Q6 run on the candidate's sha.
   - Q7's gating arms are H's tree and the candidate. A Q7c run on M′ becomes diagnosis (0063 LP17).
+
+## 2026-11-18: the O8 CI precondition (devil; the suspension is NOT lifted)
+
+CI run 44298918175 (main push of M′ `6de257335`) is red at shard 2, `columnLeadAlignment.spec.mjs:132`, twice:
+`TypeError … reading 'id'` at `seedColumns`. Run 44241787542 (develop push, same sha, same 18 jobs) is green.
+
+The cause is the test. Its `waitForFunction` predicate is `async`, and playwright-core 1.59.1 tests the returned
+Promise for truthiness (`frames.js:1267`), so the wait never waited. The same failure hit CI on 2026-10-28
+(run 40760007763, a tree with neither P1 nor F-A). The title writes by `pageId` (`PageHeader.tsx:117`), and
+`activePage` is the active tab's mirror (`layoutSync.ts:33-37`). The bug class has 3 sites
+(columnLeadAlignment:40, wideBlocks:19, themeAuthority:47).
+
+Verdicts:
+- (a) accept the develop run: BLOCK.
+- (b) as worded: BLOCK (an identity bar the version string makes false, and a name 0063 already owns).
+- (c) re-run: BLOCK.
+- (d) a test-only commit T on main: PROCEED-WITH-CONDITIONS, O8c-1 to O8c-11.
+
+T is M′'s child, carries the 3 synchronous waits and nothing else, and must be green on its own main push run.
+T is what serves; M′'s image is superseded, never served. Q3's identity carries O2–O4 and Q7 to T. Q1, Q5 and Q8
+stand. Q4 and Q6 move to T's sha. 0063 branch B's base becomes T.
+
+Residuals added to O9:
+- Whether P1 lengthens the lag between a new page's title and `activePage` is unmeasured. Nothing writes
+  through `activePage` in that window.
+- CI's true rate for this failure is unknown: retries=1 hides single failures; in 2026-11-02..18 the double failure shows in 1 of 171 runs, M′'s main push.
+- Every flaky spec:line from T's run.
+
+Risk: blast radius 2, reversibility 4 (the main push and `node-pages` publish), cost 2, confidence 2.
+The worst axis is reversibility.
+
+## 2026-11-20: T₂ on main, the T2-14 residuals (devil; the suspension is NOT lifted)
+
+T₂ `0e10ff567` (test-only; T's dist unchanged) was pushed to osionos main at 2026-11-20T02:40:01Z,
+`ba24e781e..0e10ff567`, fast-forward. Main CI run 44662421104 is green on attempt 1 and was never rerun
+(O8c-7, T2-14). O8, serving it live, still waits for the user's go. This section records what T2-14 and
+T2-8f require; it is not the O9 lift note.
+
+- **Flaky in the green run:** `whiteboardInProcess.spec.mjs:100` (stub bridge), passed on its retry. None of
+  blockResize, handleAlignment or unreachableMount was flaky.
+- **1440-reload cases in CI:** maximum 17.9 s; none above 40 s.
+- **The 3 cpus-1 timeouts** (local (e) runs, `cpus: 1.0`, `TEST_WORKERS=2`, shard 41.3 min = 2.65× CI):
+  database_inline crossed the 60 s timeout in 3 of 3 runs; whiteboard and embed crossed it in run 3. The load
+  was a quarter of CI's cores (a coordinator error); the timeouts measure the emulation, not T₂.
+- **The 3 VOID cpus-2.0 runs (T2-8f):** shard 1084.90 / 1084.72 / 1071.89 s, all below the 1124 s floor;
+  1440-reload medians 23.73 / 24.11 / 22.81 s, max 29.692 s; 0 failures. Never counted.
+- **The 3 counted cpus-1.75 runs:** shard 1262.3 / 1310.9 / 1340.9 s; reload median 27.70 / 30.30 / 30.53 s,
+  max 36.40 / 35.76 / 35.26 s (all ≤ 45 s); 0 failed, 0 VOID.
+- **`/quote`** (blockCreation): 0 failures in the counted runs. It failed once at `cpus: 1.0` (run 3,
+  "Expected quote, Received paragraph": Enter pressed before the menu resolved), outside T₂'s diff.
+- **a11yAudit dark slash menu 4.44:1** (`#9a968b` on `#33302b`, the highlighted row): a real AA miss when a
+  row is highlighted at audit time. Ticketed on develop: Univers42/osionos#331. Not a T₂ gate.
+
+What is not known: whether the cpus-1.75 emulation matches CI load beyond the two calibrated points (the
+2.0→1.0 scaling was superlinear). This note makes no claim about data loss; the residuals above stand.
