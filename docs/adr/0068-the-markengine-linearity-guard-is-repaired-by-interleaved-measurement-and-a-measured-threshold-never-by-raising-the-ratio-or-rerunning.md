@@ -49,3 +49,11 @@ must fail. Conditions B1-B9 and the pin-bump rules are in
   3 %; the measurement changes (D4a–D4j): pinned to one fast core, load ≤ 3.0 per pair, an A/A calibration
   of 30 pairs within ±1.0 % first, then one 30-pair run whose per-case median is ≤ +3.0 %. No rerun on a
   result; one more fix commit gets one more attempt, then D is blocked and Z1 follows.
+- Re-ruled 2026-11-21 on the D4 voids (devil, `/mnt/storage/dlesieur/scratch/me-d/D4-LIFT.md`, D4L1–D4L12):
+  the load ≤ 3.0 gate voided three runs on host-wide load the bench cores never saw. It is replaced by a
+  per-core gate (foreign time on the pinned cores ≤ 5 % per pair) and an in-run A/A arm (A, A′, B over all
+  six orders). Fit: every A/A median within ±1.00 %; pass: every B-vs-A median ≤ +3.00 %. Run 1 of
+  ebb3358 read PASS: worst +2.84 % (A/A −0.10 %), median of 30 pinned interleaved pairs, 0 pairs
+  discarded; worst A/A +0.85 %. Harness `d4-abc.sh`/`.cjs`, sha256 in `logs/d4l-harness-freeze.sha256`;
+  log `logs/d4l-ebb3358-run1.log`. D14 is unchanged and no push is granted by this lift. See
+  [`load-average-as-bench-fitness`](../../.out-of-scope/load-average-as-bench-fitness.md).
