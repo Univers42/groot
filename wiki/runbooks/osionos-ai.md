@@ -48,6 +48,21 @@ a cold volume. A warm volume starts in seconds. The image tag is pinned to a rel
 at least 7 days old when this was written (`b11580`, 2026-10-13) — a fresh `docker compose pull`
 never runs an unreviewed binary.
 
+## Dev only: the local model on the AMD GPU
+
+`docker-compose.gpu.yml` swaps `osionos-ai-llm` to the Vulkan image (digest pin), passes only
+`/dev/dri/renderD128` (+ group `render`, gid 993) and adds a dev provider `local`
+(`local-qwen3-4b`, rank 99, `dataUse: no-train`) to the pool of `osionos-ai`:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile ai up -d osionos-ai-llm osionos-ai
+```
+
+Never in public: the public overlay does not name it and `scripts/verify/ai-gpu-override.sh` and
+`ai-public-providers.sh` fail if a public provider points at a compose host. The card is shared with
+the desktop: `-c 6144` costs 3370 MiB of VRAM (`scripts/ai-gpu-vram.sh <container>`), so the
+desktop must stay under about 4.1 GiB; above that the model spills instead of refusing.
+
 ## Pointing at something else
 
 Every value below is `${NAME:-default}` in `docker-compose.yml`, so `.env.local` overrides it:

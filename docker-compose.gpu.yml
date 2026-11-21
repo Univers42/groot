@@ -1,0 +1,57 @@
+# docker-compose.gpu.yml — DEV ONLY, opt-in: run osionos-ai-llm on the AMD GPU
+# through Vulkan (more-free-ai FC1-FC8, ADR DRAFT-more-free-ai-ruling).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile ai up osionos-ai-llm
+#
+# Never named by docker-compose.public.yml or the Makefile (FC7): the local model
+# is a dev convenience on a card the desktop shares. The default render without
+# this file is unchanged (scripts/verify/ai-gpu-override.sh).
+#
+# - Image pinned by digest (FC2), the Vulkan twin of the CPU image's b11580.
+# - Only the render node renderD128 + group render (gid 993, `getent group render`):
+#   never card1, the display node (FC3).
+# - `-c 6144`: the real run prompt (<= 2.9k tokens: system + tools + 8 sources) plus 1024
+#   answer tokens fits with history headroom; 3370 MiB of VRAM measured (FC4).
+# - restart on-failure:3, never unless-stopped: a load failure cannot loop on the
+#   GPU of a desktop (FC5). No `ports`: reached only over the compose network (FC8).
+#
+# Caveat: gid 993 and renderD128 are this host's; another host needs its own numbers.
+# Without a GPU the container fails to start (3 retries) instead of falling back.
+services:
+  osionos-ai-llm:
+    image: ghcr.io/ggml-org/llama.cpp:server-vulkan-b11580@sha256:ee2ecb9c3a4d6fa00b918b133fd7a2828195593688eeaef6e6516ef833f88f09
+    devices:
+      - /dev/dri/renderD128:/dev/dri/renderD128
+    group_add:
+      - "993"
+    command:
+      [
+        "-hf",
+        "unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M",
+        "--alias",
+        "qwen3-4b",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8080",
+        "-c",
+        "6144",
+        "-ngl",
+        "99",
+        "-np",
+        "1",
+        "-fa",
+        "on",
+        "-t",
+        "8",
+        "--jinja",
+      ]
+    restart: on-failure:3
+
+  # The dev `local` provider (rank 99: last resort of the pool). The host must be
+  # allowed explicitly: a provider baseUrl on a compose-internal name is refused
+  # outside this dev switch, and public mode never reads it (FC7).
+  osionos-ai:
+    environment:
+      OSIONOS_AI_DEV_ENDPOINT_HOSTS: osionos-ai-llm
+      OSIONOS_AI_PLATFORM_PROVIDERS: '${OSIONOS_AI_PLATFORM_PROVIDERS:-[{"id":"local","baseUrl":"http://osionos-ai-llm:8080/v1","wire":"openai-compatible","models":[{"id":"local-qwen3-4b","label":"Qwen3 4B (local GPU)","upstreamId":"qwen3-4b","dataUse":"no-train","rank":99,"inputMicroUsdPerMTok":0,"outputMicroUsdPerMTok":0}]}]}'
