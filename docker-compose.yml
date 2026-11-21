@@ -405,7 +405,7 @@ services:
       # production (src/config.ts refuses to start without it).
       OSIONOS_AI_BRIDGE_URL: http://osionos-bridge:4000
       # The platform allowlist: ONE model, the local one, free.
-      OSIONOS_AI_PLATFORM_MODELS: '${OSIONOS_AI_PLATFORM_MODELS:-[{"id":"qwen3-4b","label":"Qwen3 4B (local)","inputMicroUsdPerMTok":0,"outputMicroUsdPerMTok":0,"default":true}]}'
+      OSIONOS_AI_PLATFORM_MODELS: '${OSIONOS_AI_PLATFORM_MODELS:-[{"id":"qwen3-4b","label":"Qwen3 4B (local)","inputMicroUsdPerMTok":0,"outputMicroUsdPerMTok":0,"default":true,"dataUse":"no-train"}]}'
       # The speech-to-text server of the dictation: INTERNAL, on the network
       # that only it and this service join. Without it the dictation answers
       # 503 voice_unavailable — the assistant works, the dictation does not.
