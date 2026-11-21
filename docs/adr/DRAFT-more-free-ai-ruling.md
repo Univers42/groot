@@ -137,9 +137,13 @@ The provider ids are the ones the design names (`docs/superpowers/specs/2026-11-
 
 | Provider | Charge evidence, date (FA10) | Data-use policy URL, date (FA24) | Multi-user production terms URL, date (FA29) |
 |---|---|---|---|
-| openrouter | | | |
+| openrouter | `GET /api/v1/key` on the live public key, 2026-11-21T03:47Z: usage 0, `is_free_tier` true | <https://openrouter.ai/docs/features/provider-routing>, read 2026-11-21: `data_collection: "deny"` = "use only providers which do not collect user data"; wire check 2026-11-21T03:47Z (16-token chat, deny on): 200 for `openrouter/free`, `baidu/ernie-5.5-flash-preview:free`, `recursive/flint-v1.0:free`, `dots-studio/dots-3-note-preview:free`; 404 "No endpoints found matching your data policy" for every `nvidia/nemotron-*:free` | |
 | groq | | | |
 | gemini | | | |
 | nvidia | | | |
 | cloudflare | | | |
 | opencode | | | |
+
+**Public default, recorded 2026-11-21 (FA23–FA25, ledger R39 C1).** The public list's default is `openrouter/free`, with `baidu/ernie-5.5-flash-preview:free` and `recursive/flint-v1.0:free` behind it. All three carry `"dataUse":"no-train"`, and every call sends `data_collection: "deny"` (FA25). Nemotron leaves the public list: no endpoint of it accepts deny. The `openrouter` row above has the FA24 column only. Its FA29 cell stays empty, so the row is not complete and `openrouter` is not added to `OSIONOS_AI_PUBLIC_PLATFORM_PROVIDERS`. The default reaches OpenRouter through the existing upstream (R-C10).
+
+Caveat: the label covers the upstream providers only. The OpenRouter docs read on 2026-11-21 do not say what OpenRouter itself keeps of a prompt ("This setting has no bearing on OpenRouter's own policies"). `openrouter/free` picks its provider per call, so a deny-compatible answer today does not pin which provider answers tomorrow. Deny still filters each call.
