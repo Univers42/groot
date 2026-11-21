@@ -57,3 +57,19 @@ must fail. Conditions B1-B9 and the pin-bump rules are in
   discarded; worst A/A +0.85 %. Harness `d4-abc.sh`/`.cjs`, sha256 in `logs/d4l-harness-freeze.sha256`;
   log `logs/d4l-ebb3358-run1.log`. D14 is unchanged and no push is granted by this lift. See
   [`load-average-as-bench-fitness`](../../.out-of-scope/load-average-as-bench-fitness.md).
+- Re-ruled 2026-11-21 on R6 (devil, `/mnt/storage/dlesieur/scratch/me-d/D-RERULE-R6.md`, C1–C13):
+  PROCEED-WITH-CONDITIONS on the engine main fast-forward to 9ff30b1, then the osionos pin bump. Engine CI
+  was green on 9ff30b1 on attempt 1 (C1). The census mutants M2/M3 at the tip read rc 1 and M0 rc 0 (C2). The
+  D5 probe printed `D5: 0 entries expose the counter` (C3). Engine main moved b6dc3fd → 9ff30b1 as a
+  fast-forward with no force (C4). A seeded fuzz (seed 20261121, 200,000 documents of 0–2 KB × plain and
+  html-subset modes) gave 0 throws, 0 `RangeError` and only non-negative step totals (C5). It samples
+  inputs: a negative count that needs long-range structure can still slip past it. The pre-bump branch
+  run 44921243970 was green on attempt 1, with an empty STEPS diff and a 255.5 ms max first render (C7).
+  The pin is not measurably slower: worst +2.84 % (A/A −0.10 %), median of 30 pinned interleaved pairs,
+  measured at ebb3358, bundle-identical to 9ff30b1. The bump landed on osionos develop as c3de93e8d,
+  gitlink-only on the tip accb80ef3 (C8–C10); develop run 44927655273 was green on attempt 1, guard and
+  all six browser shards (C11). Two residuals are out of D scope and tracked on their
+  own: the pre-existing quadratic email regex
+  ([markdown-engine#9](https://github.com/Univers42/markdown-engine/issues/9)) and a bare-add production
+  `countSteps` that needs its own D4 A/B
+  ([markdown-engine#10](https://github.com/Univers42/markdown-engine/issues/10)).
