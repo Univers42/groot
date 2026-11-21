@@ -23,7 +23,8 @@ cd "$REPO"
 DIGEST='ghcr.io/ggml-org/llama.cpp:server-vulkan-b11580@sha256:ee2ecb9c3a4d6fa00b918b133fd7a2828195593688eeaef6e6516ef833f88f09'
 status=0
 n=0
-fail() { echo "FAIL: $1"; status=1; }
+failed=0
+fail() { echo "FAIL: $1"; status=1; failed=$((failed + 1)); }
 check() { # check <label> <json> <jq expression that prints true>
 	n=$((n + 1))
 	[ "$(printf '%s' "$2" | jq -r "$3")" = "true" ] || fail "$1"
@@ -67,6 +68,10 @@ fi
 n=$((n + 1))
 if grep -q 'docker-compose.gpu' docker-compose.public.yml Makefile 2>/dev/null; then fail "FC7 the public overlay or Makefile names the gpu file"; fi
 
-echo "ai-gpu-override: $n checks run"
-[ "$status" -eq 0 ] || echo "ai-gpu-override: FAILED"
+# "N checks run" reads as a pass, so it is printed only when every check passed.
+if [ "$status" -eq 0 ]; then
+	echo "ai-gpu-override: $n checks run"
+else
+	echo "ai-gpu-override: FAILED ($failed of $n checks)"
+fi
 exit "$status"
