@@ -35,12 +35,20 @@ service `services/osionos-ai`.
 ## Decision
 
 1. Undo on a `partial` approval claims the row with one conditional UPDATE, `partial → executing` with
-   `decided_at = now()`. In a `finally`, it restores `partial` through `recordOutcome`. A loser gets a 409
-   and makes no bridge call (Q1, Q3, Q4, Q5).
+   `decided_at = now()`. In a `finally`, it restores `partial` through `recordOutcome`. A loser makes no
+   bridge call (Q1, Q3, Q4, Q5). The 409 codes:
+   - a losing undo gets `approval_busy`, and so does an undo on a row that is already `executing`
+     (before this fix that answer was `approval_not_built`; no osionos client calls `/undo`);
+   - a losing resume keeps `approval_not_partial`;
+   - an undo whose claim the sweeper took gets `approval_swept`, with the counts still in the body.
 2. Undo on `executed` stays unclaimed. ADR 0070 governs it (Q2).
-3. Undo runs under `buildBudgetMs`, the same as a build pass, and reports the pages it did not reach (Q6).
-   Config refuses a budget that could outrun the sweeper (Q7).
-4. `executePlan` POSTs a child only under a parent whose status is exactly `done` (Q8).
+3. Undo runs under `buildBudgetMs`, the same as a build pass. It starts a page only while a full bridge
+   timeout is left, so no archive request runs on a shortened timeout. The answer gains an additive
+   `remaining` field: the built pages the budget did not reach (Q6). Config refuses a budget that could
+   outrun the sweeper (Q7).
+4. `executePlan` POSTs a child only under a parent whose status is exactly `done` (Q8). A `pending` parent
+   defers the child to the next pass, which retries the parent first. `undone` fails the child with "its
+   parent was undone". `failed`, `skipped` or a missing row fails it with "its parent was not created".
 5. Deterministic tests cover resume-held/undo, undo-held/resume and undo/undo. Revert mutants fail them.
    The service gate and the root bridge suite pass twice (Q9–Q11).
 
@@ -74,7 +82,13 @@ The full conditions are in the verdict at `/mnt/storage/dlesieur/scratch/osionos
   `approvals.ts:157-162`).
 - A network loss of 3 × 90 s (`db.ts:46`) can still outrun the sweeper window. This was accepted, and it is
   the same for resume.
-- Resume's `recordOutcome` replaces `result` and drops undo's `undone` count. Nothing renders that count.
+- Resume's `recordOutcome` replaces `result` and drops undo's `undone` count, and an undo split by the
+  budget keeps only its last pass's count. Nothing renders that count.
+- After an undo, the undone items count as pending in `executePlan`. Each later resume answers `partial`,
+  fails the orphaned children and spends a daily build unit. This belongs to the open question below.
+- Undo has no lost-answer probe, unlike `executePlan`. If the bridge archives a page and the answer is
+  lost within the full timeout, the item stays `done` while its page is archived, and a later resume can
+  build its children under it. The full-timeout rule (Decision 3) only stops the budget from causing this.
 - Open, unruled:
   - Should undo of a partial approval also cancel its pending items?
   - Should the bridge refuse to nest under an archived parent?
