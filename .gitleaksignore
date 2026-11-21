@@ -55,6 +55,7 @@ apps/osionos/app/tests/bridge/ide-server.test.mjs:generic-api-key:62
 apps/osionos/app/tests/bridge/ide-ws-half-close.test.mjs:generic-api-key:41
 apps/osionos/app/tests/bridge/ide-exec-parse.test.mjs:generic-api-key:34
 apps/osionos/app/tests/bridge/ide-exec-parse.test.mjs:generic-api-key:45
+scripts/tests/revoke-automation-sessions.bats:generic-api-key:65
 
 # Doc examples: $VAR placeholders in curl lines, sample CLI output of local dev engines (archive),
 # SonarCloud issue ids, a public CI badge token
