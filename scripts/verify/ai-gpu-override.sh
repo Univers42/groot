@@ -4,7 +4,8 @@
 #
 # FC1: the default render (no docker-compose.gpu.yml) holds no Vulkan image and
 # no /dev/dri device, a render without -f picks the same llm image as the
-# explicit base render, and neither COMPOSE_FILE nor .env names the gpu file.
+# explicit base render and holds no vulkan/dri either (override file,
+# COMPOSE_FILE), and .env does not name the gpu file.
 # There is no byte-compare against an older commit: it broke on any legitimate
 # edit of docker-compose.yml and aborted on shallow clones without history.
 # FC2/FC3/FC5/FC8: the gpu render pins the image by digest, passes only
@@ -42,9 +43,11 @@ now_json=$(render docker-compose.yml)
 n=$((n + 1))
 if printf '%s' "$now_json" | grep -q 'server-vulkan\|/dev/dri'; then fail "FC1 default render names a vulkan image or /dev/dri"; fi
 llm_image='.services["osionos-ai-llm"].image'
-auto_image=$(docker compose --env-file /dev/null --profile ai --profile dev config --format json | jq -r "$llm_image")
+auto_json=$(docker compose --env-file /dev/null --profile ai --profile dev config --format json)
 n=$((n + 1))
-[ "$auto_image" = "$(printf '%s' "$now_json" | jq -r "$llm_image")" ] || fail "FC1 a render without -f does not pick the base llm image"
+[ "$(printf '%s' "$auto_json" | jq -r "$llm_image")" = "$(printf '%s' "$now_json" | jq -r "$llm_image")" ] || fail "FC1 a render without -f does not pick the base llm image"
+n=$((n + 1))
+if printf '%s' "$auto_json" | grep -q 'server-vulkan\|/dev/dri'; then fail "FC1 auto-picked render (override file, COMPOSE_FILE) names a vulkan image or /dev/dri"; fi
 n=$((n + 1))
 if grep -qs 'docker-compose.gpu' .env .env.example; then fail "FC1 .env names the gpu file"; fi
 
