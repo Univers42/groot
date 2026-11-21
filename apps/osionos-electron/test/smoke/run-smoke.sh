@@ -53,4 +53,16 @@ mkfifo "$fifo_dir/pw"
 printf '%s' "$pw" >"$fifo_dir/pw" &
 exec 3<"$fifo_dir/pw"
 export E_DIR HERE REPO IMG OUT DEMO_LOGIN_EMAIL ENTRY MACHINE_FOLDER
-"$REPO/.claude/tools/watch.sh" $LIMITS -- sh "$HERE/docker-run.sh"
+# SMOKE_API_URL: the bridge the app signed in to. Set, the run's own sign-ins (Electron from its
+# start minute, plus tool user agents) are revoked afterwards, so the account's session list
+# keeps only the owner's devices. Unset, the sign-in stays until it expires.
+started="$(date -u +%Y-%m-%dT%H:%M)"
+rc=0
+"$REPO/.claude/tools/watch.sh" $LIMITS -- sh "$HERE/docker-run.sh" || rc=$?
+if [ -n "${SMOKE_API_URL:-}" ]; then
+	bash "$REPO/scripts/revoke-automation-sessions.sh" --api "$SMOKE_API_URL" \
+		--env-file "${SMOKE_ENV_FILE:-$REPO/.env.local}" --since "$started" --apply || rc=${rc:-1}
+else
+	echo "note: SMOKE_API_URL unset — this run's session stays signed in (scripts/revoke-automation-sessions.sh)"
+fi
+exit "$rc"
