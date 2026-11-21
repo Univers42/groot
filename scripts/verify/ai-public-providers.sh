@@ -20,7 +20,7 @@ render() {
 	OSIONOS_AI_PLATFORM_PROVIDERS='[{"id":"env-local-leak","baseUrl":"https://leak.invalid/v1","wire":"openai-compatible","models":[]}]' \
 	PUBLIC_ORIGIN=https://verify.invalid AUTH_LINK_SIGNING_KEY=verify-only AUTH_TRUSTED_PROXY_HOPS=1 \
 	OSIONOS_ADMIN_EMAILS=none \
-	OSIONOS_AI_PUBLIC_DATABASE_URL=postgres://osionos_ai@mini-baas-postgres:5432/db \
+	OSIONOS_AI_PUBLIC_MCP_HOST=api.verify.invalid OSIONOS_AI_PUBLIC_DATABASE_URL=postgres://osionos_ai@mini-baas-postgres:5432/db \
 	OSML_PUBLIC_DATABASE_URL=postgres://osml_job@mini-baas-postgres:5432/db \
 	OSIONOS_AI_PUBLIC_UPSTREAM_API_KEY=verify-only OSIONOS_AI_PUBLIC_KEK=verify-only \
 	OSIONOS_AI_PUBLIC_PLATFORM_MODELS='[{"id":"m:free","label":"m","inputMicroUsdPerMTok":0,"outputMicroUsdPerMTok":0,"default":true}]' \

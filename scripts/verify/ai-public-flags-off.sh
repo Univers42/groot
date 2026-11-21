@@ -1,6 +1,7 @@
 #!/bin/sh
 # ai-public-flags-off.sh — release R-C4..R-C6, R-C5, R-C11: the public overlay
-# starts only the six AI services, forces every public-risky flag off, caps
+# starts only the six AI services, forces every public-risky flag off (PAT is the
+# one deliberate "on": read-only MCP, host-pinned, FB4), caps
 # memory, publishes no port and never points at the dev osionos-ai-db.
 #
 # Renders the compose config (no container starts) with every flag exported as
@@ -8,7 +9,7 @@
 # asserts on the JSON.
 # The variables the overlay requires get throwaway values.
 # Caveat: it proves the RENDERED config, not the code: only the names it exports
-# (OSIONOS_AI_PAT, _IMAGES, _STT_URL, _MCP_CLIENT, _WEB, the bridge's OSIONOS_MODERATION_ACTIONS) are
+# (OSIONOS_AI_PAT, _MCP_ALLOWED_*, _IMAGES, _STT_URL, _MCP_CLIENT, _WEB, the bridge's OSIONOS_MODERATION_ACTIONS) are
 # covered; a flag the code reads under another name is not.
 set -eu
 
@@ -18,7 +19,7 @@ cd "$REPO"
 json=$(
 	OSIONOS_AI_IMAGES=on OSIONOS_AI_PAT=on OSIONOS_AI_BUILDERS=on OSIONOS_AI_MCP_CLIENT=on OSIONOS_AI_WEB=on OSIONOS_AI_SUMMARY=on OSIONOS_AI_RESEARCH=on OSIONOS_AI_STT_URL=https://x OSIONOS_AI_VLM_URL=https://vlm.invalid \
 	OSIONOS_MODERATION_ACTIONS=hold \
-	PUBLIC_ORIGIN=https://verify.invalid \
+	PUBLIC_ORIGIN=https://verify.invalid OSIONOS_AI_PUBLIC_MCP_HOST=api.verify.invalid \
 	AUTH_LINK_SIGNING_KEY=verify-only \
 	AUTH_TRUSTED_PROXY_HOPS=1 \
 	OSIONOS_ADMIN_EMAILS=none \
@@ -46,7 +47,10 @@ check() { # check <label> <jq expression that prints true>
 svc='.services["osionos-ai"]'
 check "osionos-ai OSIONOS_AI_IMAGES is empty" "$svc.environment.OSIONOS_AI_IMAGES == \"\""
 check "osionos-ai OSIONOS_AI_BUILDERS is empty" "$svc.environment.OSIONOS_AI_BUILDERS == \"\""
-check "osionos-ai OSIONOS_AI_PAT is empty" "$svc.environment.OSIONOS_AI_PAT == \"\""
+# FB4/FB5: PAT is on in public (read scope only, enforced in the service), pinned to the API host, no Origin.
+check "osionos-ai OSIONOS_AI_PAT is on" "$svc.environment.OSIONOS_AI_PAT == \"on\""
+check "osionos-ai MCP allowed hosts is the pinned public host" "$svc.environment.OSIONOS_AI_MCP_ALLOWED_HOSTS == \"api.verify.invalid\""
+check "osionos-ai MCP allowed origins is empty" "$svc.environment.OSIONOS_AI_MCP_ALLOWED_ORIGINS == \"\""
 check "osionos-ai OSIONOS_AI_STT_URL is empty" "$svc.environment.OSIONOS_AI_STT_URL == \"\""
 check "osionos-ai OSIONOS_AI_VLM_URL is empty" "$svc.environment.OSIONOS_AI_VLM_URL == \"\""
 check "osionos-ai OSIONOS_AI_MCP_CLIENT is empty" "$svc.environment.OSIONOS_AI_MCP_CLIENT == \"\""

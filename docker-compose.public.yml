@@ -130,7 +130,12 @@ services:
       OSIONOS_AI_DATABASE_URL: ${OSIONOS_AI_PUBLIC_DATABASE_URL:?set OSIONOS_AI_PUBLIC_DATABASE_URL in .env.public (the live grobase DB, role osionos_ai)}
       OSIONOS_ALLOWED_ORIGIN: ${PUBLIC_ORIGIN}:8443
       OSIONOS_AI_IMAGES: ""
-      OSIONOS_AI_PAT: ""
+      # Remote MCP read access (B2, FB4-FB5): personal access tokens on, `read` scope only
+      # (public mode refuses write_approval). The Host pin is the bare host of the public API
+      # origin; no Origin is allowed, so a browser page cannot reach the route.
+      OSIONOS_AI_PAT: "on"
+      OSIONOS_AI_MCP_ALLOWED_HOSTS: ${OSIONOS_AI_PUBLIC_MCP_HOST:?set OSIONOS_AI_PUBLIC_MCP_HOST in .env.public (the bare host of PUBLIC_ORIGIN, no scheme or port)}
+      OSIONOS_AI_MCP_ALLOWED_ORIGINS: ""
       # Builder tool (P6 C163) stays off in public until P6a-3 and P6b merge.
       OSIONOS_AI_BUILDERS: ""
       OSIONOS_AI_STT_URL: ""

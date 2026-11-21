@@ -1,12 +1,12 @@
 #!/bin/sh
-# ai-locked-routes-cors.sh — release R-C4: the public edge keeps /api/ai/access-tokens and
-# /api/ai/mcp at 404, but the app's own origin can READ the access-tokens 404 (and its preflight),
-# so the panel says "off" and not "could not reach the server". MCP gets no CORS at all (C118).
+# ai-locked-routes-cors.sh — release R-C4, as changed by FB4: the public edge no longer answers
+# /api/ai/access-tokens and /api/ai/mcp with 404; it proxies them to the AI service and adds no
+# CORS header of its own (MCP gets none at all, C118). The :4000 buckets still apply (h-j).
 #
 # Starts a throwaway nginx (same image as local-https-proxy, --network none, no published port),
 # with the repo's nginx.conf and public.d files at the public overlay's paths.
-# Stubbed: a self-signed cert generated here for localhost.pem; no upstream exists (the locked
-# routes answer from nginx itself, so none is contacted). PUBLIC_ORIGIN=https://example.invalid.
+# Stubbed: a self-signed cert generated here for localhost.pem; no upstream exists (a proxied route
+# answers 502). PUBLIC_ORIGIN=https://example.invalid.
 # Caveat: proves the proxy's answers for these two routes only, over HTTPS on :4000 inside the
 # container; it does not prove the live Funnel or that a browser accepts the headers.
 set -eu
@@ -51,37 +51,21 @@ fail() { echo "FAIL: $1"; status=1; }
 # req <method> <path> <origin> -> "<code>\n<headers lowercased>"
 req() {
 	docker exec "$NAME" curl -sk -o /dev/null -D - -w 'code:%{http_code}\n' -X "$1" \
-		-H "Origin: $3" -H 'Access-Control-Request-Method: GET' "https://127.0.0.1:4000$2" | tr 'A-Z' 'a-z'
+		-H "Origin: $3" -H 'Access-Control-Request-Method: GET' "https://127.0.0.1:4000$2" | tr '[:upper:]' '[:lower:]'
 }
 code() { printf '%s' "$1" | sed -n 's/^code://p'; }
 acao() { printf '%s' "$1" | sed -n 's/^access-control-allow-origin: *//p' | tr -d '\r'; }
 
 if docker exec "$NAME" nginx -t >/dev/null 2>&1; then pass "a nginx -t rc 0"; else fail "a nginx -t rc 0"; fi
 
-r=$(req GET /api/ai/access-tokens "$GOOD")
-if [ "$(code "$r")" = 404 ] && [ "$(acao "$r")" = "$GOOD" ]; then pass "b GET good origin: 404 + ACAO"; else fail "b GET good origin: 404 + ACAO ($(code "$r") '$(acao "$r")')"; fi
-
-r=$(req OPTIONS /api/ai/access-tokens "$GOOD")
-if [ "$(code "$r")" = 204 ] && [ "$(acao "$r")" = "$GOOD" ] \
-	&& printf '%s' "$r" | grep -q '^access-control-allow-methods: get, post, delete, options' \
-	&& printf '%s' "$r" | grep -q '^access-control-allow-headers: authorization, content-type'; then
-	pass "c OPTIONS good origin: 204 + ACAO + methods + headers"
-else fail "c OPTIONS good origin: 204 + ACAO + methods + headers ($(code "$r") '$(acao "$r")')"; fi
-
-r=$(req GET /api/ai/access-tokens https://evil.invalid)
-if [ "$(code "$r")" = 404 ] && [ -z "$(acao "$r")" ]; then pass "d GET evil origin: 404, no ACAO"; else fail "d GET evil origin: 404, no ACAO ($(code "$r") '$(acao "$r")')"; fi
-
-r=$(req GET /api/ai/access-tokens/abc "$GOOD")
-if [ "$(code "$r")" = 404 ] && [ "$(acao "$r")" = "$GOOD" ]; then pass "e sub-path: 404 + ACAO"; else fail "e sub-path: 404 + ACAO ($(code "$r") '$(acao "$r")')"; fi
-
-for m in GET OPTIONS; do
-	r=$(req "$m" /api/ai/mcp "$GOOD")
-	if [ -z "$(acao "$r")" ] && [ -n "$(code "$r")" ] && [ "$(code "$r")" != 000 ]; then pass "f $m /api/ai/mcp: no ACAO ($(code "$r"))"; else fail "f $m /api/ai/mcp: no ACAO ($(code "$r") '$(acao "$r")')"; fi
+# b-d: since FB4 the edge no longer answers these routes itself: they are proxied to the AI service
+# (no upstream here, so 502), and the edge adds no ACAO of its own (the service owns CORS; MCP has none, C118).
+for path in /api/ai/access-tokens /api/ai/access-tokens/abc /api/ai/mcp; do
+	for m in GET OPTIONS; do
+		r=$(req "$m" "$path" "$GOOD")
+		if [ "$(code "$r")" != 404 ] && [ "$(code "$r")" != 000 ] && [ -z "$(acao "$r")" ]; then pass "b $m $path: proxied, no edge ACAO ($(code "$r"))"; else fail "b $m $path: proxied, no edge ACAO ($(code "$r") '$(acao "$r")')"; fi
+	done
 done
-
-# g: the beta app (its own origin, same bridge) reads the locked 404 too, so its panel says "off".
-r=$(req GET /api/ai/access-tokens "$BETA")
-if [ "$(code "$r")" = 404 ] && [ "$(acao "$r")" = "$BETA" ]; then pass "g GET beta origin: 404 + ACAO"; else fail "g GET beta origin: 404 + ACAO ($(code "$r") '$(acao "$r")')"; fi
 
 # h/i: the bucket guards the model calls. A read (GET) or a preflight never calls a model, and a
 # page load fires more than the burst of them, so they are never refused; a burst of POSTs still is.
