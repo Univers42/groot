@@ -67,6 +67,14 @@ for path in /api/ai/access-tokens /api/ai/access-tokens/abc /api/ai/mcp; do
 	done
 done
 
+# I-4: the MCP client routes (C288) stay refused at the edge; only the read route /api/ai/mcp is proxied.
+for path in /api/ai/mcp-servers /api/ai/mcp-servers/x; do
+	r=$(req GET "$path" "$GOOD")
+	if [ "$(code "$r")" = 404 ]; then pass "k GET $path: 404"; else fail "k GET $path: 404 (got $(code "$r"))"; fi
+done
+r=$(req GET /api/ai/mcp "$GOOD")
+if [ "$(code "$r")" != 404 ]; then pass "k GET /api/ai/mcp still proxied ($(code "$r"))"; else fail "k GET /api/ai/mcp is refused with 404"; fi
+
 # h/i: the bucket guards the model calls. A read (GET) or a preflight never calls a model, and a
 # page load fires more than the burst of them, so they are never refused; a burst of POSTs still is.
 # No upstream runs here, so an unrefused request answers 502: only 429 counts as refused.

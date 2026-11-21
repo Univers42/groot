@@ -134,7 +134,7 @@ services:
       # (public mode refuses write_approval). The Host pin is the bare host of the public API
       # origin; no Origin is allowed, so a browser page cannot reach the route.
       OSIONOS_AI_PAT: "on"
-      OSIONOS_AI_MCP_ALLOWED_HOSTS: ${OSIONOS_AI_PUBLIC_MCP_HOST:?set OSIONOS_AI_PUBLIC_MCP_HOST in .env.public (the bare host of PUBLIC_ORIGIN, no scheme or port)}
+      OSIONOS_AI_MCP_ALLOWED_HOSTS: ${OSIONOS_AI_PUBLIC_MCP_HOST:-}
       OSIONOS_AI_MCP_ALLOWED_ORIGINS: ""
       # Builder tool (P6 C163) stays off in public until P6a-3 and P6b merge.
       OSIONOS_AI_BUILDERS: ""
