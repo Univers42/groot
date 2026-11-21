@@ -44,3 +44,8 @@ must fail. Conditions B1-B9 and the pin-bump rules are in
   linearity. The lift is a deterministic step counter (D1–D14) with a census tripwire. Interim: the
   guard runs as its own CI job (I1–I7, osionos develop 1619dce78, first run 44687495414 green on attempt
   1); demoting the ratio before D is raising it.
+- Re-ruled 2026-11-21 on D4 (devil, `/mnt/storage/dlesieur/scratch/me-d/D4-RERULE.md`): engine ebb3358 read
+  +2.39 / +4.59 / +1.59 % on `parse inline mixed 10K chars`, inside the machine's own noise. The limit stays
+  3 %; the measurement changes (D4a–D4j): pinned to one fast core, load ≤ 3.0 per pair, an A/A calibration
+  of 30 pairs within ±1.0 % first, then one 30-pair run whose per-case median is ≤ +3.0 %. No rerun on a
+  result; one more fix commit gets one more attempt, then D is blocked and Z1 follows.
