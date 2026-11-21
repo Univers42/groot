@@ -1,25 +1,25 @@
 #!/bin/sh
-# ai-gpu-override.sh — FC1, FC2, FC3, FC5, FC8: the dev GPU override of
+# ai-gpu-override.sh - FC1, FC2, FC3, FC5, FC8: the dev GPU override of
 # osionos-ai-llm is opt-in, pinned, narrow and unpublished.
 #
-# FC1: the default render (no docker-compose.gpu.yml) is byte-identical to the
-# default render at the commit before the gpu file was added, and holds no
-# Vulkan image and no /dev/dri device. FC2/FC3/FC5/FC8: the gpu render pins the
-# image by digest, passes only renderD128 + group 993, restarts on-failure:3,
-# publishes nothing. FC7: the public overlay never names the gpu file.
+# FC1: the default render (no docker-compose.gpu.yml) holds no Vulkan image and
+# no /dev/dri device, a render without -f picks the same llm image as the
+# explicit base render, and neither COMPOSE_FILE nor .env names the gpu file.
+# There is no byte-compare against an older commit: it broke on any legitimate
+# edit of docker-compose.yml and aborted on shallow clones without history.
+# FC2/FC3/FC5/FC8: the gpu render pins the image by digest, passes only
+# renderD128 + group 993, restarts on-failure:3, publishes nothing. FC7: the
+# public overlay never names the gpu file.
 #
-# Caveat: it proves the RENDERED config of docker-compose.yml, not a running
-# container, and only for throwaway env values; a host env var that changes the
-# default render makes the compare fail loudly (over-reporting), never pass.
-# Before the gpu file is committed the baseline is HEAD's docker-compose.yml.
+# Caveat: it proves the RENDERED config, not a running container, and only for
+# throwaway env values; a COMPOSE_FILE exported in the caller shell is ignored
+# by the -f renders and only caught by the text greps below.
 set -eu
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO"
 
 DIGEST='ghcr.io/ggml-org/llama.cpp:server-vulkan-b11580@sha256:ee2ecb9c3a4d6fa00b918b133fd7a2828195593688eeaef6e6516ef833f88f09'
-BASE_COPY="$REPO/.ai-gpu-base-compose.yml"
-trap 'rm -f "$BASE_COPY"' EXIT
 status=0
 n=0
 fail() { echo "FAIL: $1"; status=1; }
@@ -38,16 +38,15 @@ render() { # render <compose file> [second compose file]
 
 [ -f docker-compose.gpu.yml ] || { echo "FAIL: docker-compose.gpu.yml does not exist"; exit 1; }
 
-added=$(git log --diff-filter=A --format=%H -- docker-compose.gpu.yml | tail -1)
-baseline=${added:+$added^}
-baseline=${baseline:-HEAD}
-git show "$baseline:docker-compose.yml" >"$BASE_COPY"
-base_json=$(render "$BASE_COPY" | jq -S 'del(.name)')
-now_json=$(render docker-compose.yml | jq -S 'del(.name)')
-n=$((n + 1))
-[ "$base_json" = "$now_json" ] || fail "FC1 default render differs from the render at $baseline"
+now_json=$(render docker-compose.yml)
 n=$((n + 1))
 if printf '%s' "$now_json" | grep -q 'server-vulkan\|/dev/dri'; then fail "FC1 default render names a vulkan image or /dev/dri"; fi
+llm_image='.services["osionos-ai-llm"].image'
+auto_image=$(docker compose --env-file /dev/null --profile ai --profile dev config --format json | jq -r "$llm_image")
+n=$((n + 1))
+[ "$auto_image" = "$(printf '%s' "$now_json" | jq -r "$llm_image")" ] || fail "FC1 a render without -f does not pick the base llm image"
+n=$((n + 1))
+if grep -qs 'docker-compose.gpu' .env .env.example; then fail "FC1 .env names the gpu file"; fi
 
 gpu=$(render docker-compose.yml docker-compose.gpu.yml)
 svc='.services["osionos-ai-llm"]'
@@ -65,5 +64,6 @@ fi
 n=$((n + 1))
 if grep -q 'docker-compose.gpu' docker-compose.public.yml Makefile 2>/dev/null; then fail "FC7 the public overlay or Makefile names the gpu file"; fi
 
-[ "$status" -eq 0 ] && echo "ai-gpu-override: $n checks passed"
+echo "ai-gpu-override: $n checks run"
+[ "$status" -eq 0 ] || echo "ai-gpu-override: FAILED"
 exit "$status"
