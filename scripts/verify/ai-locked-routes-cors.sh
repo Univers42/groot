@@ -3,10 +3,12 @@
 # /api/ai/access-tokens and /api/ai/mcp with 404; it proxies them to the AI service and adds no
 # CORS header of its own (MCP gets none at all, C118). The :4000 buckets still apply (h-j).
 #
-# Starts a throwaway nginx (same image as local-https-proxy, --network none, no published port),
-# with the repo's nginx.conf and public.d files at the public overlay's paths.
-# Stubbed: a self-signed cert generated here for localhost.pem; no upstream exists (a proxied route
-# answers 502). PUBLIC_ORIGIN=https://example.invalid.
+# Starts a throwaway nginx (same image as local-https-proxy, no published port) on a throwaway
+# --internal network, with the repo's nginx.conf and public.d files at the public overlay's paths.
+# Stubbed: a self-signed cert generated here for localhost.pem; the AI service is a stub nginx
+# aliased osionos-ai that answers 401 with no CORS header, like the service to a caller with no
+# session, so "proxied" means the stub's 401 reached the client, never a 502 from a dead upstream.
+# PUBLIC_ORIGIN=https://example.invalid.
 # Caveat: proves the proxy's answers for these two routes only, over HTTPS on :4000 inside the
 # container; it does not prove the live Funnel or that a browser accepts the headers.
 set -eu
@@ -14,18 +16,28 @@ set -eu
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 IMAGE="${AI_EDGE_TEST_IMAGE:-public.ecr.aws/docker/library/nginx:1.27-alpine}"
 NAME=ai-edge-test
+STUB=ai-edge-test-ai
+NET=ai-edge-test-net
 GOOD=https://example.invalid:8443
 BETA=https://beta.example.invalid
 TLS="$REPO/infrastructure/tls"
 tmp=$(mktemp -d)
-trap 'docker rm -f "$NAME" >/dev/null 2>&1 || true; rm -rf "$tmp"' EXIT
+trap 'docker rm -f "$NAME" "$STUB" >/dev/null 2>&1 || true; docker network rm "$NET" >/dev/null 2>&1 || true; rm -rf "$tmp"' EXIT
 
 timeout 60 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost \
 	-keyout "$tmp/localhost-key.pem" -out "$tmp/localhost.pem" >/dev/null 2>&1
 chmod 644 "$tmp"/*.pem
 
-docker rm -f "$NAME" >/dev/null 2>&1 || true
-docker run -d --rm --name "$NAME" --network none \
+printf '%s\n' 'events {}' \
+	"http { server { listen 4300; location / { return 401 '{\"ok\":false,\"code\":\"unauthorized\"}'; } } }" >"$tmp/stub.conf"
+chmod 644 "$tmp/stub.conf"
+
+docker rm -f "$NAME" "$STUB" >/dev/null 2>&1 || true
+docker network rm "$NET" >/dev/null 2>&1 || true
+docker network create --internal "$NET" >/dev/null
+docker run -d --rm --name "$STUB" --network "$NET" --network-alias osionos-ai \
+	-v "$tmp/stub.conf:/etc/nginx/nginx.conf:ro" "$IMAGE" >/dev/null
+docker run -d --rm --name "$NAME" --network "$NET" \
 	-e NGINX_ENVSUBST_FILTER=PUBLIC_ -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx/track-binocle.d \
 	-e PUBLIC_ORIGIN=https://example.invalid -e PUBLIC_MAIL_ORIGIN= -e PUBLIC_CALENDAR_ORIGIN= -e PUBLIC_EXTRA_FRAME_ANCESTORS= -e PUBLIC_BETA_ORIGIN="$BETA" \
 	-v "$TLS/nginx.conf:/etc/nginx/nginx.conf:ro" \
@@ -59,11 +71,13 @@ acao() { printf '%s' "$1" | sed -n 's/^access-control-allow-origin: *//p' | tr -
 if docker exec "$NAME" nginx -t >/dev/null 2>&1; then pass "a nginx -t rc 0"; else fail "a nginx -t rc 0"; fi
 
 # b-d: since FB4 the edge no longer answers these routes itself: they are proxied to the AI service
-# (no upstream here, so 502), and the edge adds no ACAO of its own (the service owns CORS; MCP has none, C118).
+# (the stub's 401), and the edge adds no ACAO of its own (the service owns CORS; MCP has none, C118).
+# "Unlocked" is the set the service answers, 200/401/403: a 502 or 404 is the edge, not the service.
+unlocked() { case "$1" in 200 | 401 | 403) return 0 ;; *) return 1 ;; esac; }
 for path in /api/ai/access-tokens /api/ai/access-tokens/abc /api/ai/mcp; do
 	for m in GET OPTIONS; do
 		r=$(req "$m" "$path" "$GOOD")
-		if [ "$(code "$r")" != 404 ] && [ "$(code "$r")" != 000 ] && [ -z "$(acao "$r")" ]; then pass "b $m $path: proxied, no edge ACAO ($(code "$r"))"; else fail "b $m $path: proxied, no edge ACAO ($(code "$r") '$(acao "$r")')"; fi
+		if unlocked "$(code "$r")" && [ -z "$(acao "$r")" ]; then pass "b $m $path: proxied, no edge ACAO ($(code "$r"))"; else fail "b $m $path: proxied, no edge ACAO ($(code "$r") '$(acao "$r")')"; fi
 	done
 done
 
@@ -73,13 +87,12 @@ for path in /api/ai/mcp-servers /api/ai/mcp-servers/x; do
 	if [ "$(code "$r")" = 404 ]; then pass "k GET $path: 404"; else fail "k GET $path: 404 (got $(code "$r"))"; fi
 done
 r=$(req GET /api/ai/mcp "$GOOD")
-if [ "$(code "$r")" != 404 ]; then pass "k GET /api/ai/mcp still proxied ($(code "$r"))"; else fail "k GET /api/ai/mcp is refused with 404"; fi
+if unlocked "$(code "$r")"; then pass "k GET /api/ai/mcp still proxied ($(code "$r"))"; else fail "k GET /api/ai/mcp not proxied (got $(code "$r"))"; fi
 
 # h/i: the bucket guards the model calls. A read (GET) or a preflight never calls a model, and a
 # page load fires more than the burst of them, so they are never refused; a burst of POSTs still is.
-# No upstream runs here, so an unrefused request answers 502: only 429 counts as refused.
-# In parallel, so the bucket cannot refill between them; --max-time because the upstream name
-# never resolves under --network none (a refusal is answered before any lookup).
+# An unrefused request answers the stub's 401: only 429 counts as refused.
+# In parallel, so the bucket cannot refill between them; --max-time bounds a stuck request.
 burst() { docker exec "$NAME" sh -c "for i in \$(seq 1 ${2:-30}); do curl -sk --max-time 3 -o /dev/null -w '%{http_code}\n' -X $1 https://127.0.0.1:4000/api/ai/providers & done; wait" | grep -c '^429$' || true; }
 n=$(burst GET); if [ "$n" = 0 ]; then pass "h 30 GETs at once: none refused"; else fail "h 30 GETs at once: $n refused with 429"; fi
 n=$(burst OPTIONS); if [ "$n" = 0 ]; then pass "h 30 preflights at once: none refused"; else fail "h 30 preflights at once: $n refused with 429"; fi
