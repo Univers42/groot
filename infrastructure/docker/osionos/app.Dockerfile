@@ -259,9 +259,9 @@ rc=$?
 exit 0
 SH
 
-# ^~ outranks the regex asset location and keeps `location /` (the SPA fallback) out: a missing
-# pack file is a 404, never index.html, which would reach WebAssembly.compile as HTML. The path
-# is versioned by commit, so every file under it is immutable.
+# ^~ outranks the regex asset location and keeps `location /` (the SPA fallback) out: a missing pack
+# file is a 404, never index.html (WebAssembly.compile would get HTML); immutable, versioned by commit.
+# No CSP here (osionos#314 D314-4): scripts and wasm, never a document, and the policy variable exists only in osionos pins with S1.
 COPY <<'NGINX' /etc/nginx/graph-studio.conf
 location ^~ /graph-studio/ {
   expires 1y;
