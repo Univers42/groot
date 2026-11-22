@@ -1071,7 +1071,7 @@ p4_activity_maintain_lock_timeout() {
 # Caveat: the order check is textual (position of each name in the ORDERED_LAST line), not a run.
 p4_activity_registry_reapply() {
 	ac_bad=0
-	for ac_i in 1 2; do
+	for _ in 1 2; do
 		apply "${MODELS_DIR}/osionos-account-erasure-migration.sql" || ac_bad=1
 	done
 	ac_rows="$(printf "SELECT count(*) FROM public.osionos_account_data_map WHERE table_name = 'osionos_activity_events' AND column_name = 'user_id' AND erase = 'delete';\n" | psql_rows)"
