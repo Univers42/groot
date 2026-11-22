@@ -175,6 +175,86 @@ LABEL org.opencontainers.image.source="https://github.com/univers42/osionos"
 COPY docker/services/node/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/build /usr/share/nginx/html
 
+# Inline, not COPYed from osionos: the beta builds osionos develop with this Dockerfile, and a file
+# an older osionos pin lacks would fail that build (devil ruling 313, D313-2).
+COPY --chmod=755 <<'SH' /docker-entrypoint.d/40-keep-assets.sh
+#!/bin/sh
+# osionos#313: a deploy replaces this image, and with it every chunk a tab still open on the
+# previous build lazy-loads next (about 630 of 1092 asset files are renamed per build). This keeps
+# the last KEEP builds' /assets in the volume mounted at /var/lib/osionos-kept; osionos's nginx.conf
+# (location @kept) serves /var/lib/osionos-kept/assets for a file this build lacks.
+# It runs before nginx listens, and a failing entrypoint script aborts nginx: every path exits 0.
+# A file is copied whole into .incoming (same volume, so the rename is atomic; outside /assets/,
+# so no URL reaches it), then renamed in without overwriting. A build is the sha256 of its sorted
+# file list, so a restart of the same build is not a new one.
+# Caveat: a tab open across more than KEEP deploys still gets a 404, then the ADR 0061 reload.
+#   The build id is the file list, so two builds with identical lists count as one build.
+#   A volume that is not mounted means no grace at all (read-only or under 1 GiB free too):
+#   one log line, nothing kept.
+KEPT=/var/lib/osionos-kept
+SRC=/usr/share/nginx/html/assets
+KEEP=5
+MIN_FREE_KB=1048576
+
+log() { echo "$0: $*"; }
+
+# Prints why the volume can't be used; prints nothing when it can.
+unusable() {
+  awk -v d="$KEPT" '$2 == d { found = 1 } END { exit !found }' /proc/mounts \
+    || { echo "skipped: $KEPT is not a mounted volume"; return; }
+  free=$(df -Pk "$KEPT" | awk 'NR == 2 { print $4 }')
+  [ "${free:-0}" -ge "$MIN_FREE_KB" ] || { echo "skipped: ${free:-?} KiB free on $KEPT, under 1 GiB"; return; }
+  rm -rf "$KEPT/.incoming" 2>/dev/null
+  { mkdir -p "$KEPT/assets" "$KEPT/builds" && mkdir "$KEPT/.incoming"; } 2>/dev/null \
+    || echo "skipped: $KEPT is not writable"
+}
+
+# Copies the files of list $1 the volume lacks: whole into .incoming, then renamed in.
+copy_missing() {
+  while read -r name; do
+    [ -e "$KEPT/assets/$name" ] || echo "$name"
+  done <"$1" >"$WORK/missing"
+  [ -s "$WORK/missing" ] || return 0
+  (cd "$SRC" && xargs cp -p -t "$KEPT/.incoming" <"$WORK/missing")
+  (cd "$KEPT/.incoming" && xargs mv -n -t "$KEPT/assets" <"$WORK/missing")
+}
+
+# Moves build $1 to the end of history (a restart leaves it unchanged) and keeps the last KEEP.
+record() {
+  touch "$KEPT/history"
+  if [ ! -f "$KEPT/builds/$1" ]; then
+    cp "$WORK/list" "$KEPT/builds/.$1" && mv "$KEPT/builds/.$1" "$KEPT/builds/$1"
+  fi
+  { grep -vx "$1" "$KEPT/history" || true; echo "$1"; } | tail -n "$KEEP" >"$KEPT/.history"
+  mv "$KEPT/.history" "$KEPT/history"
+}
+
+# Deletes every kept file no build in history lists; this build's own files always stay.
+prune() {
+  ls -A "$KEPT/builds" | grep -vxF -f "$KEPT/history" | (cd "$KEPT/builds" && xargs -r rm -f)
+  (cd "$KEPT/builds" && xargs cat <"$KEPT/history") | cat - "$WORK/list" | LC_ALL=C sort -u >"$WORK/keep"
+  ls -A "$KEPT/assets" | LC_ALL=C sort >"$WORK/have"
+  comm -23 "$WORK/have" "$WORK/keep" | (cd "$KEPT/assets" && xargs -r rm -f)
+}
+
+main() {
+  why=$(unusable)
+  [ -z "$why" ] || { log "$why"; return 0; }
+  WORK=$(mktemp -d)
+  (cd "$SRC" && find . -maxdepth 1 -type f | sed 's|^\./||' | LC_ALL=C sort) >"$WORK/list"
+  id=$(sha256sum <"$WORK/list" | cut -c1-64)
+  copy_missing "$WORK/list"
+  record "$id"
+  prune
+  log "kept build $(echo "$id" | cut -c1-12): $(wc -l <"$WORK/list") files, $(wc -l <"$KEPT/history") builds in $KEPT"
+  rm -rf "$KEPT/.incoming" "$WORK"
+}
+
+(set -e; main)
+[ "$?" -eq 0 ] || log "skipped: keeping the assets failed; nginx starts without them"
+exit 0
+SH
+
 # ^~ outranks the regex asset location and keeps `location /` (the SPA fallback) out: a missing
 # pack file is a 404, never index.html, which would reach WebAssembly.compile as HTML. The path
 # is versioned by commit, so every file under it is immutable.
