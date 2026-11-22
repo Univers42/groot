@@ -455,6 +455,10 @@ services:
       # inert without OSIONOS_AI_WEB; the public overlay forces it empty.
       OSIONOS_AI_RESEARCH: ${OSIONOS_AI_RESEARCH:-}
       OSIONOS_AI_RESEARCH_PLATFORM_DAILY: ${OSIONOS_AI_RESEARCH_PLATFORM_DAILY:-}
+      # Assistant modes (AM18): off unless OSIONOS_AI_MODES is exactly `on`, and then
+      # only for the uuids in OSIONOS_AI_MODES_USERS (comma-separated); public forces both empty.
+      OSIONOS_AI_MODES: ${OSIONOS_AI_MODES:-}
+      OSIONOS_AI_MODES_USERS: ${OSIONOS_AI_MODES_USERS:-}
     expose:
       - "4300"
     # The two classifiers of the output check, read-only: the service loads

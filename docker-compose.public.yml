@@ -153,6 +153,9 @@ services:
       # Research stays off in public: it needs web on, and the eval of 12 steps
       # against 5 has not been shown (research C416, C417).
       OSIONOS_AI_RESEARCH: ""
+      # Assistant modes stay off in public (AM18): no flag, no allowlist.
+      OSIONOS_AI_MODES: ""
+      OSIONOS_AI_MODES_USERS: ""
       # The platform connection on public: OpenRouter's free models only (R-C10), the key and
       # the list from .env.public, never .env.local, so the dev stack keeps its local model.
       OSIONOS_AI_UPSTREAM_BASE_URL: https://openrouter.ai/api/v1
