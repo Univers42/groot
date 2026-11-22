@@ -131,6 +131,12 @@ ALTER TABLE auth_audit_events ADD CONSTRAINT auth_audit_events_event_type_check 
     'resend_turnstile_failed',
     'signup_refused_allowlist',
     'signup_refused_exempt',
+    'sudo_password_failed',
+    'sudo_password_grant_timeout',
+    'sudo_password_locked',
+    'sudo_password_lockout_triggered',
+    'sudo_password_session_revoke_failed',
+    'sudo_password_verified',
     'verification_resend_link_failed',
     'webauthn_challenge_started'
   ));
