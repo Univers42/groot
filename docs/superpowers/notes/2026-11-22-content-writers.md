@@ -106,7 +106,9 @@ unrelated one; recreate it deliberately.
 
 Before that recreate, probe that the live database has the `version` column and its trigger
 (models/osionos-page-version-migration.sql). Without the column, `fetchPageVersionRow`
-(bridge-api.mjs:4544) fails every unversioned content PATCH. UNKNOWN: not probed here.
+(bridge-api.mjs:4544) fails every unversioned content PATCH. Probed 2026-11-22 21:35Z (read-only,
+`information_schema.columns` + `pg_trigger` on the VM `mini-baas-postgres`): `public.osionos_pages.version`
+is `bigint` and `osionos_pages_version_trg` exists.
 
 Caveat: this is a text-pattern inventory (`git grep -n`). A writer that builds its URL or
 table name dynamically, or that reaches `osionos_pages` through a path not containing
