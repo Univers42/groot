@@ -13,7 +13,13 @@
 -- Caveat: every conversation that exists when this runs is stamped tainted with
 -- reason 'legacy' (the constant default below, then dropped), so an old
 -- conversation can never auto-write. That over-taints by design: its earlier
--- reads were never tracked. The escape is a new conversation.
+-- reads were never tracked. The escape is a new conversation. Under psql
+-- autocommit a conversation inserted between the two ALTERs is stamped legacy
+-- too (over-taint, the safe direction).
+--
+-- Release gate: apply this file live BEFORE promoting an osionos-ai image that
+-- names turn_id or decided_by; on the old schema every run insert and approval
+-- read fails with 42703. The old image on the new schema is safe (additive).
 --
 -- Idempotent and lock-safe: ADD COLUMN IF NOT EXISTS, constraints added once
 -- (NOT VALID, then VALIDATE), bounded by the lock_timeout. Never rewrites an
