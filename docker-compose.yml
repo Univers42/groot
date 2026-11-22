@@ -336,6 +336,11 @@ services:
         VITE_AI_URL: ${VITE_AI_URL:-}
     expose:
       - "80"
+    # The last five builds' /assets, for tabs still open on them (osionos#313): the image's
+    # 40-keep-assets.sh fills it at start, nginx falls back to it. This deployment's own; the
+    # beta has its own (infrastructure/beta/compose.yml), or its churn would prune this one.
+    volumes:
+      - osionos-kept-assets:/var/lib/osionos-kept
     depends_on:
       osionos-bridge:
         condition: service_healthy
@@ -1860,6 +1865,7 @@ services:
 
 volumes:
   osionos-ide-ledger:
+  osionos-kept-assets:
   # Pinned to the names they were created under, before the whiteboard was renamed from
   # drawnosaurus to hydrawn: the default (<project>_<key>) would now be a new, empty volume,
   # and the live boards would be left behind in the old one.

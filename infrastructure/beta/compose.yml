@@ -7,6 +7,8 @@ services:
     container_name: osionos-beta-app
     labels: { osionos.beta: "1" }
     restart: unless-stopped
+    # Its own kept builds (osionos#313), never production's: develop churn would prune that one.
+    volumes: ["osionos-beta-kept-assets:/var/lib/osionos-kept"]
     networks: [beta]
   edge:
     image: public.ecr.aws/docker/library/nginx:1.27-alpine
@@ -36,6 +38,8 @@ services:
     volumes: ["./ts-state:/var/lib/tailscale", "./ts-serve.json:/config/serve.json:ro"]
     networks: [beta]
     depends_on: [edge]
+volumes:
+  osionos-beta-kept-assets: {}
 networks:
   beta: {}
   track-binocle_default: { external: true }
