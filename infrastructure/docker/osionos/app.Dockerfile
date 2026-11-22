@@ -180,21 +180,21 @@ COPY --from=builder /app/build /usr/share/nginx/html
 COPY --chmod=755 <<'SH' /docker-entrypoint.d/40-keep-assets.sh
 #!/bin/sh
 # osionos#313: a deploy replaces this image, and with it every chunk a tab still open on the
-# previous build lazy-loads next (about 630 of 1092 asset files are renamed per build). This keeps
-# the last KEEP builds' /assets in the volume mounted at /var/lib/osionos-kept; osionos's nginx.conf
-# (location @kept) serves /var/lib/osionos-kept/assets for a file this build lacks.
-# It runs before nginx listens, and a failing entrypoint script aborts nginx: every path exits 0.
-# A file is copied whole into .incoming (same volume, so the rename is atomic; outside /assets/,
-# so no URL reaches it), then renamed in without overwriting. A build is the sha256 of its sorted
-# file list, so a restart of the same build is not a new one.
+# previous build lazy-loads next. At start this keeps the last KEEP builds' /assets in the volume
+# at /var/lib/osionos-kept; osionos's nginx.conf (@kept) serves /var/lib/osionos-kept/assets for a
+# file this build lacks. A failing entrypoint script aborts nginx, so the start path exits 0.
+# A file is copied whole into .incoming (same volume: the rename is atomic; outside /assets/: no
+# URL reaches it), then renamed in without overwriting. A build is the sha256 of its sorted file
+# list. Operators: --purge empties the kept builds, --seed keeps the assets tar read from stdin
+# (docs/ops/plan-2026-11-01-production-web-from-main.md, "Kept builds"); both exit non-zero on failure.
 # Caveat: a tab open across more than KEEP deploys still gets a 404, then the ADR 0061 reload.
 #   The build id is the file list, so two builds with identical lists count as one build.
-#   A volume that is not mounted means no grace at all (read-only or under 1 GiB free too):
-#   one log line, nothing kept.
+#   A volume that is not mounted (or read-only, or under 1 GiB free) means no grace: one log line.
 KEPT=/var/lib/osionos-kept
 SRC=/usr/share/nginx/html/assets
 KEEP=5
 MIN_FREE_KB=1048576
+MODE=${1:-start}
 
 log() { echo "$0: $*"; }
 
@@ -239,7 +239,9 @@ prune() {
 
 main() {
   why=$(unusable)
-  [ -z "$why" ] || { log "$why"; return 0; }
+  [ -z "$why" ] || { log "$why"; [ "$MODE" = start ]; return; }
+  [ "$MODE" != --purge ] || { rm -rf "$KEPT/assets" "$KEPT/builds" "$KEPT/history"; mkdir "$KEPT/assets" "$KEPT/builds"; }
+  [ "$MODE" != --seed ] || { SRC=$(mktemp -d); tar -x -C "$SRC"; SRC=$SRC/assets; }
   WORK=$(mktemp -d)
   (cd "$SRC" && find . -maxdepth 1 -type f | sed 's|^\./||' | LC_ALL=C sort) >"$WORK/list"
   id=$(sha256sum <"$WORK/list" | cut -c1-64)
@@ -251,7 +253,9 @@ main() {
 }
 
 (set -e; main)
-[ "$?" -eq 0 ] || log "skipped: keeping the assets failed; nginx starts without them"
+rc=$?
+[ "$rc" -eq 0 ] || log "failed (rc $rc); nothing more kept"
+[ "$MODE" = start ] || exit "$rc"
 exit 0
 SH
 
