@@ -59,5 +59,5 @@ Each rejected option has a `.out-of-scope/` file with the fact that would reopen
   | WebKit | 45 / 104 / 19, timed out at 2400 s | same |
 
   Every failure is a non-CSP spec. The same specs fail with no policy served (`nocsp-*.log`). WebKit is SKIP-grade, not a pass: with no policy it cannot reach six surfaces either. D314-13 is therefore not met.
-- groot S2 is on branch `fix/314-edge-csp` (bats red then green, rollback scripts rehearsed with `--network none`). It is held per D314-7.
-- Live: nothing changed.
+- groot S2 landed as 33859a6c and went live on both edges on 2026-11-22 at about 19:06Z, after S1 served on beta (D314-7). Headers now: one `frame-ancestors` on each host, the Report-Only policy on beta, one `X-Frame-Options`. The edges mount their conf read-only, so `scripts/rollback/edge-conf-revert.sh` writes the bind-mount source (63d10f8a). Saved confs: `/mnt/storage/dlesieur/scratch/me-d/edge-backup-2026-11-22/`.
+- Live: the web image is unchanged (no S1 on :8443 yet); S3 is held as above.
