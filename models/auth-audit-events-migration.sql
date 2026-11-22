@@ -164,7 +164,13 @@ ALTER TABLE public.auth_audit_events ADD CONSTRAINT auth_audit_events_event_type
     'mfa_totp_enroll_started',
     'mfa_totp_verified',
     'webauthn_challenge_started',
-    'ip_shift_detected'
+    'ip_shift_detected',
+    'sudo_password_verified',
+    'sudo_password_failed',
+    'sudo_password_locked',
+    'sudo_password_session_revoke_failed',
+    'sudo_password_lockout_triggered',
+    'sudo_password_grant_timeout'
   ));
 
 COMMENT ON TABLE public.auth_audit_events IS 'security_monitoring: sensitive authentication events, failed logins, password recovery, token refreshes, MFA hooks and IP shifts; retain for 13 months unless a documented legal hold applies.';
