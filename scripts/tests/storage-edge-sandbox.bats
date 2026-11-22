@@ -103,5 +103,5 @@ assert_framing_kept() {
 @test "negative control: / carries no sandbox" {
   out=$(edge /)
   [ -n "$out" ]
-  [ -z "$(header content-security-policy "$out" | grep sandbox)" ]
+  if header content-security-policy "$out" | grep -q sandbox; then return 1; fi
 }
