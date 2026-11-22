@@ -90,7 +90,7 @@ current() { docker ps -q --filter "name=^$TAG-" | head -1; }
 # GET $1 from the running container, gzip accepted; prints the status line and headers, lowercased.
 fetch() {
   docker exec "$(current)" curl -sS -o /dev/null -D - -H 'Accept-Encoding: gzip' "http://127.0.0.1$1" |
-    tr -d '\r' | tr 'A-Z' 'a-z'
+    tr -d '\r' | tr '[:upper:]' '[:lower:]'
 }
 
 status_of() { fetch "$1" | awk 'NR == 1 { print $2 }'; }

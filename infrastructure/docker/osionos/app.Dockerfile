@@ -197,6 +197,7 @@ MIN_FREE_KB=1048576
 MODE=${1:-start}
 
 log() { echo "$0: $*"; }
+names() { (cd "$1" && shift && find . -mindepth 1 -maxdepth 1 "$@" | sed 's|^\./||'); }
 
 # Prints why the volume can't be used; prints nothing when it can.
 unusable() {
@@ -204,8 +205,7 @@ unusable() {
     || { echo "skipped: $KEPT is not a mounted volume"; return; }
   free=$(df -Pk "$KEPT" | awk 'NR == 2 { print $4 }')
   [ "${free:-0}" -ge "$MIN_FREE_KB" ] || { echo "skipped: ${free:-?} KiB free on $KEPT, under 1 GiB"; return; }
-  rm -rf "$KEPT/.incoming" 2>/dev/null
-  { mkdir -p "$KEPT/assets" "$KEPT/builds" && mkdir "$KEPT/.incoming"; } 2>/dev/null \
+  { rm -rf "$KEPT/.incoming" && mkdir -p "$KEPT/assets" "$KEPT/builds" && mkdir "$KEPT/.incoming"; } 2>/dev/null \
     || echo "skipped: $KEPT is not writable"
 }
 
@@ -231,9 +231,9 @@ record() {
 
 # Deletes every kept file no build in history lists; this build's own files always stay.
 prune() {
-  ls -A "$KEPT/builds" | grep -vxF -f "$KEPT/history" | (cd "$KEPT/builds" && xargs -r rm -f)
+  names "$KEPT/builds" | grep -vxF -f "$KEPT/history" | (cd "$KEPT/builds" && xargs -r rm -f)
   (cd "$KEPT/builds" && xargs cat <"$KEPT/history") | cat - "$WORK/list" | LC_ALL=C sort -u >"$WORK/keep"
-  ls -A "$KEPT/assets" | LC_ALL=C sort >"$WORK/have"
+  names "$KEPT/assets" | LC_ALL=C sort >"$WORK/have"
   comm -23 "$WORK/have" "$WORK/keep" | (cd "$KEPT/assets" && xargs -r rm -f)
 }
 
@@ -243,7 +243,7 @@ main() {
   [ "$MODE" != --purge ] || { rm -rf "$KEPT/assets" "$KEPT/builds" "$KEPT/history"; mkdir "$KEPT/assets" "$KEPT/builds"; }
   [ "$MODE" != --seed ] || { SRC=$(mktemp -d); tar -x -C "$SRC"; SRC=$SRC/assets; }
   WORK=$(mktemp -d)
-  (cd "$SRC" && find . -maxdepth 1 -type f | sed 's|^\./||' | LC_ALL=C sort) >"$WORK/list"
+  names "$SRC" -type f | LC_ALL=C sort >"$WORK/list"
   id=$(sha256sum <"$WORK/list" | cut -c1-64)
   copy_missing "$WORK/list"
   record "$id"
