@@ -180,3 +180,36 @@ assert_serves_own_build() {
   run docker run --rm -v "$VOL:$KEPT:ro" --entrypoint find "$NGINX_IMAGE" "$KEPT" -name only-z.js
   [ -z "$output" ]
 }
+
+# D313-13: after a security or storage-format deploy, old tabs must not keep running old code.
+@test "--purge drops every earlier build, keeps the running one, and fails loudly without a volume" {
+  deploy a
+  deploy b
+  run docker exec "$(current)" "$SCRIPT_PATH" --purge
+  [ "$status" -eq 0 ]
+  [ "$(status_of /assets/only-a.js)" = 404 ]
+  deploy c
+  [ "$(status_of /assets/only-b.js)" = 200 ]
+  docker rm -f "$(current)" >/dev/null
+  start_build a bare
+  run docker exec "$(current)" "$SCRIPT_PATH" --purge
+  [ "$status" -ne 0 ]
+}
+
+# D313-12: the first fixed image finds an empty volume; seeding it from the running pre-fix
+# container's assets before the swap keeps that build's chunks too.
+@test "--seed keeps the assets tar read from stdin as one more build" {
+  start_build a old
+  docker cp "$TAG-old:/usr/share/nginx/html/assets" - >"$BATS_TEST_TMPDIR/seed.tar"
+  docker create -i --name "$TAG-seed" -v "$VOL:$KEPT" "$NGINX_IMAGE" "$SCRIPT_PATH" --seed >/dev/null
+  docker cp "$FIX/keep.sh" "$TAG-seed:$SCRIPT_PATH"
+  run docker start -ai "$TAG-seed" <"$BATS_TEST_TMPDIR/seed.tar"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  deploy b
+  [ "$(status_of /assets/only-a.js)" = 200 ]
+  for build in c d e; do deploy "$build"; done
+  [ "$(status_of /assets/only-a.js)" = 200 ]
+  deploy f
+  [ "$(status_of /assets/only-a.js)" = 404 ]
+}
