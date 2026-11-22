@@ -106,16 +106,29 @@ async function createMissing(token, existing) {
 	}
 }
 
+// A content PATCH names the version it was made against: a bridge with OSIONOS_PAGE_STRICT_VERSION
+// refuses one that does not (409) when the content changes. The create answer carries it; a page
+// listed from an earlier run does not, so that one is read.
+async function versionOf(token, id, stored) {
+	if (Number.isSafeInteger(stored.contentVersion)) return stored.contentVersion;
+	const { status, data } = await call('GET', `/api/pages/${id}`, { token });
+	if (status !== 200 || !Number.isSafeInteger(data?.contentVersion)) throw new Error(`reading the version of ${id} answered HTTP ${status}`);
+	return data.contentVersion;
+}
+
 async function resolveLinks(token, existing) {
 	let patched = 0;
 	for (const page of pages) {
 		const stored = existing.get(page.seed_key);
 		if (!stored || !hasSeedReference(stored)) continue;
 		await writeWindowWait();
-		const body = resolvePage(stored, manifest.pages);
-		const { status } = await call('PATCH', `/api/pages/${manifest.pages[page.seed_key]}`, { token, body });
+		const id = manifest.pages[page.seed_key];
+		const baseVersion = await versionOf(token, id, stored);
+		const body = { ...resolvePage(stored, manifest.pages), baseVersion };
+		const { status } = await call('PATCH', `/api/pages/${id}`, { token, body });
 		if (status !== 200) throw new Error(`linking ${page.seed_key} answered HTTP ${status}`);
-		existing.set(page.seed_key, { ...stored, ...body });
+		const { baseVersion: _sent, ...written } = body;
+		existing.set(page.seed_key, { ...stored, ...written });
 		patched += 1;
 		await sleep(PACE_MS);
 	}
