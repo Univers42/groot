@@ -38,6 +38,11 @@ with the production accounts. Prismatica's handoff only ever targets production 
   `docker exec osionos-beta-edge nginx -s reload`. Realtime then answers the handshake with 101, as
   production's :8443 does (measured 2026-11-03); before osionos #280 the edge stripped its Upgrade.
 
+- Kept builds (osionos#313): `app` keeps the last 5 builds' `/assets` in the volume
+  `osionos-beta_osionos-beta-kept-assets`. `update.sh` runs the host copy of `compose.yml`: copy
+  `infrastructure/beta/compose.yml` to `/mnt/storage/dlesieur/osionos-beta/compose.yml` before the
+  volume applies. Purge: `docker exec osionos-beta-app /docker-entrypoint.d/40-keep-assets.sh --purge`
+  (when and why: `docs/ops/plan-2026-11-01-production-web-from-main.md`, "Kept builds").
 - Logs: `journalctl --user -u osionos-beta -n 50` (host). Force a rebuild: `update.sh --force`.
 - Kill switch (B10): on the host `BETA_SHA=$(cat deployed) docker compose -f compose.yml down`
   (the tailnet node goes with it).

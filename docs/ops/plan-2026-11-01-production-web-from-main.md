@@ -30,6 +30,37 @@ overlays in `~/Documents/groot-wt/deploy/` on the host. The owner needs the in-p
 6. Verify: `:8443` serves the new bundle; login as the working account; workspaces, assistant
    (AI routes 200), and Terminal → New Terminal shows the in-place frame (no second window) up
    to the step-up. The owner finishes the step-up and types in the shell.
+7. A security hotfix or a storage-format change only: purge the kept builds right after step 5
+   (see "Kept builds"), so no open tab keeps running the code the deploy replaces.
+
+## Kept builds (osionos#313)
+
+The web container keeps the last 5 builds' `/assets` in the volume
+`track-binocle_osionos-kept-assets`, so a tab still on an earlier build loads its chunks after a
+deploy. The script is `/docker-entrypoint.d/40-keep-assets.sh` in the web image (app.Dockerfile).
+
+- Purge (D313-13), after a security hotfix or a storage-format deploy: an open tab otherwise
+  runs the replaced code for up to 5 more deploys. It keeps only the running build:
+
+  ```sh
+  docker exec track-binocle-osionos-app-1 /docker-entrypoint.d/40-keep-assets.sh --purge
+  ```
+
+- Seed (D313-12), once, before the first switch to an image that has the script: the volume is
+  empty then, so the running build's chunks would vanish. A live action: it needs the owner's go.
+  `<new image>` is the image about to go live; the first run creates the volume, and compose then
+  warns that it "already exists but was not created by Docker Compose" and uses it.
+
+  ```sh
+  docker cp track-binocle-osionos-app-1:/usr/share/nginx/html/assets - |
+    docker run -i --rm --network none -v track-binocle_osionos-kept-assets:/var/lib/osionos-kept \
+      <new image> /docker-entrypoint.d/40-keep-assets.sh --seed
+  ```
+
+- Check after a deploy (D313-15): one chunk only the previous build had answers 200 with
+  `Cache-Control: public, immutable`: `curl -sI https://<web>/assets/<old chunk>`.
+- Both operator modes exit non-zero on failure; the start path never fails (a missing, read-only or
+  under-1-GiB volume logs one `skipped:` line and serves without grace).
 
 ## Rollback
 
