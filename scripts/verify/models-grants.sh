@@ -58,6 +58,10 @@
 #   thread up to the trigger; and it returns zero rows to an outsider, a non-member of a
 #   private channel, in a dm or voice channel, or for someone else's or a deleted trigger,
 #   while anon and authenticated may not execute it (42501)
+#   ap1 the channel auto-post opt-in (osionos-chat-ai-autopost-migration.sql), in
+#   scripts/verify/models-grants/chat-autopost-checks.sql: ai_autopost is boolean NOT NULL
+#   DEFAULT false, a NULL is refused (23502), service_role may set it, anon and
+#   authenticated may not (42501)
 #
 #   The account plane (models/osionos-account-foundation-migration.sql, ADR 0028),
 #   in scripts/verify/models-grants/account-checks.sql, piped after checks.sql into
@@ -627,7 +631,7 @@ run_checks() {
 	# A checks.sql error is echoed, then read back anyway: a missing row is a FAIL.
 	# checks.sql and account-checks.sql go into ONE psql: one stream, so the two
 	# isolation rows stay last, and one transaction for the k5/k6 GUCs.
-	if ! cat "${FIX}/checks.sql" "${FIX}/account-checks.sql" |
+	if ! cat "${FIX}/checks.sql" "${FIX}/chat-autopost-checks.sql" "${FIX}/account-checks.sql" |
 		psql_rows >"${WORK}/checks-$1.out" 2>"${WORK}/checks-$1.err"; then
 		note "the check files did not run to completion"
 		sed 's/^/  | /' "${WORK}/checks-$1.err" >&2
@@ -698,6 +702,7 @@ run_checks() {
 	check_count "$1" ta1 thread_answers_schema
 	check_count "$1" ta2 thread_answers_context
 	check_count "$1" ta3 thread_answers_acl
+	check_count "$1" ap1 chat_ai_autopost
 	check_count "$1" k1 account_role_reach
 	check_count "$1" k2 account_plane_rls
 	check_count "$1" k3 account_plane_expected
