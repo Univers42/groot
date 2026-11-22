@@ -26,6 +26,8 @@ on:
       - "infrastructure/**"
       - "utils/**"
       - "scripts/**"
+      # scripts/tests/auth-audit-event-types.bats reads models/auth-security-migration.sql
+      - "models/**"
       - "tests/host-ports/**"
       - "tests/osionos-publish-socket/**"
       - "docker-compose.publish-socket.yml"
@@ -47,6 +49,8 @@ on:
       - "infrastructure/**"
       - "utils/**"
       - "scripts/**"
+      # scripts/tests/auth-audit-event-types.bats reads models/auth-security-migration.sql
+      - "models/**"
       - "tests/host-ports/**"
       - "tests/osionos-publish-socket/**"
       - "docker-compose.publish-socket.yml"
