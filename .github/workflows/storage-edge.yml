@@ -1,8 +1,9 @@
-name: storage edge sandbox (:3001)
+name: edge headers (:3001, :3010)
 
 # Runs the real infrastructure/tls/nginx.conf in the image compose runs it in, in front of a
 # stub osionos-app + Kong, and checks that /storage/v1/* on the app origin is sent with
-# CSP sandbox + nosniff while every response keeps the anti-framing headers (ruling SG-9).
+# CSP sandbox + nosniff while every response keeps the anti-framing headers (ruling SG-9). It also
+# runs the beta edge and checks one CSP per answer and no script MIME on storage (osionos#314).
 # The fresh-machine bats job skips this file (no docker there), so this job is its gate.
 # Seconds, no secrets, no stack.
 
@@ -12,12 +13,18 @@ on:
     paths:
       - ".github/workflows/storage-edge.yml"
       - "infrastructure/tls/nginx.conf"
+      - "infrastructure/beta/edge.conf"
       - "scripts/tests/storage-edge-sandbox.bats"
+      - "scripts/tests/edge-csp-ownership.bats"
+      - "scripts/tests/edge-storage-mime.bats"
   pull_request:
     paths:
       - ".github/workflows/storage-edge.yml"
       - "infrastructure/tls/nginx.conf"
+      - "infrastructure/beta/edge.conf"
       - "scripts/tests/storage-edge-sandbox.bats"
+      - "scripts/tests/edge-csp-ownership.bats"
+      - "scripts/tests/edge-storage-mime.bats"
   workflow_dispatch:
 
 concurrency:
@@ -41,9 +48,9 @@ jobs:
           docker tag mirror.gcr.io/library/nginx:1.27-alpine public.ecr.aws/docker/library/nginx:1.27-alpine
       - name: install bats
         run: sudo apt-get update -qq && sudo apt-get install -y -qq bats
-      - name: bats scripts/tests/storage-edge-sandbox.bats (no skips allowed)
+      - name: bats edge files (no skips allowed)
         # explicit `shell: bash` adds -o pipefail: without it, tee's exit status hides a bats failure
         shell: bash
         run: |
-          bats scripts/tests/storage-edge-sandbox.bats | tee "$RUNNER_TEMP/bats.log"
-          if grep -q '# skip' "$RUNNER_TEMP/bats.log"; then echo "::error::a storage-edge test was skipped"; exit 1; fi
+          bats scripts/tests/storage-edge-sandbox.bats scripts/tests/edge-csp-ownership.bats scripts/tests/edge-storage-mime.bats | tee "$RUNNER_TEMP/bats.log"
+          if grep -q '# skip' "$RUNNER_TEMP/bats.log"; then echo "::error::an edge test was skipped"; exit 1; fi
