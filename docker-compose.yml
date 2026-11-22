@@ -103,6 +103,9 @@ services:
       AUTH_GATEWAY_URL: ${AUTH_GATEWAY_URL:-http://auth-gateway:8787}
       OSIONOS_BRIDGE_PERSISTENCE: ${OSIONOS_BRIDGE_PERSISTENCE:-auto}
       OSIONOS_BRIDGE_REQUIRE_BAAS: ${OSIONOS_BRIDGE_REQUIRE_BAAS:-false}
+      # AM16: a content PATCH without baseVersion is refused (409) when it differs from the stored page,
+      # so an unversioned editor flush cannot overwrite an auto-applied AI edit. See docs/superpowers/notes/2026-11-22-content-writers.md.
+      OSIONOS_PAGE_STRICT_VERSION: ${OSIONOS_PAGE_STRICT_VERSION:-1}
       # P0-4 session/account-plane state is shared with the auth-gateway, which
       # already uses this Redis. Blank falls back to the bridge's bounded
       # in-memory store (the desktop/local case).
