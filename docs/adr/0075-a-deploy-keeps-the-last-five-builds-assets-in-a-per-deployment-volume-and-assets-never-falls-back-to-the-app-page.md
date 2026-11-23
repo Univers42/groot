@@ -1,8 +1,9 @@
 # 0075. A deploy keeps the last five builds' assets in a per-deployment volume, and `/assets/` never falls back to the app page
 
 - Status: accepted. PROCEED-WITH-CONDITIONS D313-1–D313-15 (osionos#313). On groot develop 0167a00d
-  and osionos develop 483c5b0f4. Not live: D313-15 (the deploy) and D313-12 (the seed before the
-  first fixed swap) wait for the operator.
+  and osionos develop 483c5b0f4. Live 2026-11-23 (web d2db4373 rebuilt with groot 7ebe3935's
+  app.Dockerfile): D313-12 seeded 1158 files before the swap; D313-15 a chunk only the previous
+  build had answers 200 `public, immutable`.
 - Date: 2026-11-22
 - Deciders: devil (ruling); osionos web operator (live with it)
 
