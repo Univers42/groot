@@ -23,8 +23,13 @@ expect() { # expect <label> <wanted> <got>
 }
 
 expect "GET /api/ai/health is 200" 200 "$(code "$BRIDGE/api/ai/health")"
-expect "GET /api/ai/access-tokens is 404" 404 "$(code "$BRIDGE/api/ai/access-tokens")"
-expect "POST /api/ai/access-tokens is 404" 404 "$(code -X POST -H 'content-type: application/json' -d '{}' "$BRIDGE/api/ai/access-tokens")"
+# Access tokens shipped behind auth: an anonymous call is 401 (route live) or 404 (route off).
+# Either proves the surface is closed to a visitor; a 2xx would not.
+anon() { # anon <label> <got>
+	case "$2" in 401|404) echo "PASS $1 ($2)" ;; *) echo "FAIL $1 (wanted 401 or 404, got $2)"; status=1 ;; esac
+}
+anon "GET /api/ai/access-tokens is closed without a session" "$(code "$BRIDGE/api/ai/access-tokens")"
+anon "POST /api/ai/access-tokens is closed without a session" "$(code -X POST -H 'content-type: application/json' -d '{}' "$BRIDGE/api/ai/access-tokens")"
 expect "POST /api/ai/images is 404 (images off)" 404 "$(code -X POST -H 'content-type: application/json' -d '{}' "$BRIDGE/api/ai/images")"
 
 hdrs=$(curl -s -o /dev/null -m 10 -D - -H 'Origin: https://evil.example' "$BRIDGE/api/ai/health" 2>/dev/null || true)
@@ -36,14 +41,16 @@ elif [ -z "$acao" ]; then echo "PASS foreign Origin gets no access-control-allow
 elif printf '%s' "$acao" | grep -qiE 'evil\.example|\*'; then echo "FAIL foreign Origin is allowed: $acao"; status=1
 else echo "PASS foreign Origin is not allowed (fixed $(printf '%s' "$acao" | tr -d '\r'))"; fi
 
-# A burst of 30 within the burst window: the zone allows 2 r/s + burst 10.
+# A burst of 30 writes: the metered zone allows 2 r/s + burst 10 (http-limits.conf). GETs use
+# the read zone (20 r/s, burst 80), so a GET burst cannot trip it. An anonymous POST to health
+# is a 404 from the service and never reaches a model (measured 2026-11-23: 11 x 404, 19 x 429).
 n429=0
 i=0
 while [ "$i" -lt 30 ]; do
-	[ "$(code "$BRIDGE/api/ai/health")" = 429 ] && n429=$((n429 + 1))
+	[ "$(code -X POST -H 'content-type: application/json' -d '{}' "$BRIDGE/api/ai/health")" = 429 ] && n429=$((n429 + 1))
 	i=$((i + 1))
 done
-if [ "$n429" -ge 1 ]; then echo "PASS burst of 30 got $n429 x 429"; else echo "FAIL burst of 30 got no 429"; status=1; fi
+if [ "$n429" -ge 1 ]; then echo "PASS write burst of 30 got $n429 x 429"; else echo "FAIL write burst of 30 got no 429"; status=1; fi
 
 expect "app $APP answers 200" 200 "$(code "$APP/")"
 
