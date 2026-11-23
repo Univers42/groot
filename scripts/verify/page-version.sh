@@ -20,14 +20,20 @@
 #   c5  p_after_block_id puts the blocks right after that top-level block; an
 #       unknown id appends at the end; a non-array / id-less / empty input
 #       raises.
-#   c6  re-running the whole migration is a no-op (no drift in the column, the
-#       trigger, the function, the ACL or the stored versions).
-#   c7  anon and authenticated cannot execute the function; service_role can.
+#   c6  re-running both migrations is a no-op (no drift in the column, the
+#       triggers, the functions, the ACLs, the stored versions or tombstones).
+#   c7  anon and authenticated cannot execute the function; service_role can;
+#       neither of them holds a privilege on the keys or the tombstone table.
 #   c8  U1 + U4 through a throwaway PostgREST: a conditional PATCH answers
 #       200 [] with Prefer: return=representation and 204 with return=minimal;
 #       POST /rpc/osionos_page_append works for the service role.
 #   c9  the revert proof: drop the content predicate from the trigger (bump on
 #       EVERY update) and c1 FAILS; the trigger is then restored.
+#   c10 osionos #344: a page id deleted at version 2 and created again reads
+#       version 3, and a stale `… where version = 0` touches 0 rows — after a
+#       PostgREST DELETE, a workspace cascade and the erase's DELETE statement
+#       (not the erase function: see checks-tombstone.sh). A payload version is
+#       ignored; a create racing an uncommitted delete fails with 40001.
 #
 # ISOLATION
 #   Throwaway containers only, on a network this script creates and removes:
@@ -41,8 +47,9 @@
 #   runner against the grobase stack, which needs the apps/grobase submodule
 #   (not initialised here). This script reuses their roles fixture
 #   (scripts/verify/models-grants/roles.sql) and applies the same migrations
-#   the runner applies FIRST (bridge, page-search) plus the file under test
-#   and the service-role-only sweep that closes the osionos_* relations.
+#   the runner applies FIRST (bridge, page-search) plus the files under test
+#   (page-version, page-version-tombstone) and the service-role-only sweep
+#   that closes the osionos_* relations.
 #
 # Usage:  sh scripts/verify/page-version.sh [--keep]
 #           --keep   leave the containers and the network up afterwards
@@ -165,6 +172,8 @@ apply_fixture() {
 	apply "${MODELS}/osionos-bridge-migration.sql" || exit 1
 	apply "${MODELS}/osionos-page-search-migration.sql" || exit 1
 	apply "${MODELS}/osionos-page-version-migration.sql" || exit 1
+	# The runner's alphabetical pass reaches it right after the file above.
+	apply "${MODELS}/osionos-page-version-tombstone-migration.sql" || exit 1
 	# The sweep the runner runs LAST (ORDERED_LAST): it must reach the new
 	# osionos_page_append_keys table.
 	apply "${MODELS}/osionos-service-role-only-migration.sql" || exit 1
@@ -206,6 +215,8 @@ version_of() {
 . "${DIR}/page-version/checks-migration.sh"
 # shellcheck source=page-version/checks-rest.sh
 . "${DIR}/page-version/checks-rest.sh"
+# shellcheck source=page-version/checks-tombstone.sh
+. "${DIR}/page-version/checks-tombstone.sh"
 
 # --- main --------------------------------------------------------------------
 
@@ -213,7 +224,7 @@ main() {
 	start_pg
 	note "postgres up (${PG_CTN}, image ${PG_IMAGE})"
 	apply_fixture
-	note "fixture applied (roles, bridge, page-search, page-version, service-role-only)"
+	note "fixture applied (roles, bridge, page-search, page-version, page-version-tombstone, service-role-only)"
 	seed
 
 	# A check prints its own PASS/FAIL lines and returns 0 when it holds; the
@@ -262,6 +273,11 @@ main() {
 		pass c9 "revert proof"
 	else
 		fail c9 "revert proof"
+	fi
+	if check_recreate_version; then
+		pass c10 "re-created id keeps its version"
+	else
+		fail c10 "re-created id keeps its version"
 	fi
 
 	printf 'RESULT: %s passed, %s failed\n' "${passed}" "${failed}"

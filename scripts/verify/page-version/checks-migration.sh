@@ -22,16 +22,25 @@ SELECT 'priv|' || rolname || '|' || has_function_privilege(rolname, 'public.osio
 SELECT 'tblpriv|' || rolname || '|' || has_table_privilege(rolname, 'public.osionos_page_append_keys', 'SELECT,INSERT,UPDATE,DELETE')
   FROM pg_roles WHERE rolname IN ('anon','authenticated','service_role') ORDER BY rolname;
 SELECT 'rows|' || id || '|' || version FROM public.osionos_pages ORDER BY id;
+SELECT 'tfunc|' || proname || '|' || prosecdef || '|' || md5(prosrc) FROM pg_proc
+ WHERE pronamespace = 'public'::regnamespace AND proname LIKE 'osionos\\_page\\_version\\_%' ORDER BY proname;
+SELECT 'tpriv|' || rolname || '|' || has_table_privilege(rolname, 'public.osionos_page_version_tombstones', 'SELECT,INSERT,UPDATE,DELETE')
+  FROM pg_roles WHERE rolname IN ('anon','authenticated','service_role') ORDER BY rolname;
+SELECT 'tpolicy|' || policyname || '|' || cmd || '|' || array_to_string(roles, ',') FROM pg_policies
+ WHERE schemaname = 'public' AND tablename = 'osionos_page_version_tombstones' ORDER BY policyname;
+SELECT 'tomb|' || page_id || '|' || version FROM public.osionos_page_version_tombstones ORDER BY page_id;
 "
 }
 
 check_idempotent_apply() {
 	snapshot >"${WORK}/snap1.out"
-	apply "${MODELS}/osionos-page-version-migration.sql" || return 1
-	apply "${MODELS}/osionos-page-version-migration.sql" || return 1
+	for f in osionos-page-version-migration.sql osionos-page-version-tombstone-migration.sql \
+		osionos-page-version-migration.sql osionos-page-version-tombstone-migration.sql; do
+		apply "${MODELS}/${f}" || return 1
+	done
 	snapshot >"${WORK}/snap2.out"
 	if diff -u "${WORK}/snap1.out" "${WORK}/snap2.out" >"${WORK}/snap.diff" 2>&1; then
-		printf 'PASS c6 idempotent-apply  re-running the migration twice changed no column, trigger, function, ACL or stored version\n'
+		printf 'PASS c6 idempotent-apply  re-running both migrations twice changed no column, trigger, function, ACL, stored version or tombstone (%s snapshot lines)\n' "$(wc -l <"${WORK}/snap2.out")"
 	else
 		printf 'FAIL c6 idempotent-apply  the re-run drifted:\n'
 		sed 's/^/  | /' "${WORK}/snap.diff" >&2
@@ -88,6 +97,13 @@ check_acl() {
 		printf 'PASS c7 keys-table        anon and authenticated hold no privilege on osionos_page_append_keys\n'
 	else
 		printf 'FAIL c7 keys-table        %s role(s) still hold a privilege on the keys table\n' "${tbl}"
+		return 1
+	fi
+	tomb="$(q "SELECT count(*) FROM pg_roles r WHERE r.rolname IN ('anon','authenticated') AND has_table_privilege(r.rolname, 'public.osionos_page_version_tombstones', 'SELECT,INSERT,UPDATE,DELETE')")"
+	if [ "${tomb}" = "0" ]; then
+		printf 'PASS c7 tombstone-table   anon and authenticated hold no privilege on osionos_page_version_tombstones\n'
+	else
+		printf 'FAIL c7 tombstone-table   %s role(s) hold a privilege on the tombstone table\n' "${tomb}"
 		return 1
 	fi
 	return 0
