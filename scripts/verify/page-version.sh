@@ -77,6 +77,9 @@ NET="ai-pv-net"
 PV_SUBNET="${PV_SUBNET:-10.88.7.0/24}"
 PG_CTN="ai-pv-pg"
 PGRST_CTN="ai-pv-pgrst"
+# Minted per run: c8 signs its tokens with it. b7023066 dropped the fixed value
+# without a replacement, and c8 then died on an unbound variable.
+JWT_SECRET="$(openssl rand -hex 32)"
 KEEP=0
 [ "${1:-}" = "--keep" ] && KEEP=1
 
