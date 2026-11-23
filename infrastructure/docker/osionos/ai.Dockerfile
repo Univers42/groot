@@ -69,6 +69,10 @@ COPY services/osionos-ai/src ./services/osionos-ai/src
 # and the gate of the image prompt. scripts/tests/bridge-image-closure.bats checks
 # this list against the closure, so a new import fails CI, not the container.
 COPY scripts/bridge-session-token.mjs scripts/bridge-session-cutoff.mjs scripts/bridge-baas-body.mjs scripts/bridge-session-revocations.mjs scripts/bridge-session-tracker.mjs scripts/bridge-access-generation.mjs scripts/bridge-roles.mjs scripts/bridge-page-read.mjs scripts/bridge-page-access.mjs scripts/bridge-share-rules.mjs scripts/bridge-live-workspaces.mjs scripts/bridge-graph-edges.mjs scripts/bridge-moderation.mjs ./scripts/
+# bridge-session-cutoff and bridge-session-revocations import it once the pin carries the
+# 5xx scrub (osionos develop, 2026-11-23). The character class keeps the build working on
+# a pin that predates the module: a wildcard that matches nothing copies nothing.
+COPY scripts/bridge-error-sentence[s].mjs ./scripts/
 # The lists of the L0 gate: the module reads them next to itself, at import.
 COPY scripts/moderation-lists ./scripts/moderation-lists
 
