@@ -365,12 +365,14 @@ specs per mode, the consumer filter, the verdicts, the exit codes) are
    `127.0.0.1`) or, when nothing is published, the container IP on its first network
    (`remote_endpoints`, `:57-68`).
 3. **One unix socket per port.** For each row of `SSH_ROUTES` (relay 8000 → the WAF's :80, i.e.
-   VM `127.0.0.1:8880`; redis 6379; mailpit 8025 and 1025; realtime 4000) a `-L $LINK_DIR/<svc>-<port>.sock:<ip:port>`
+   VM `127.0.0.1:8880`; redis 6379; mailpit 8025 and 1025) a `-L $LINK_DIR/<svc>-<port>.sock:<ip:port>`
    forward (`up_ssh`). Kong is reached through the WAF so the link's writes cross CRS like the
    public edge's (ruling LM-4); a VM that does not publish the WAF's :80 is refused before any
-   forward is cancelled, never answered with Kong's own :8000. Realtime 4000 is relayed as it
-   was. Any other missing service is reported and its name refuses connections instead of
-   pointing at something else. tenant-control 3022 gets one more socket,
+   forward is cancelled, never answered with Kong's own :8000. Realtime :4000 is not relayed: its
+   `/v1/publish` took an unauthenticated POST (LM-6), so the name refuses connections and the
+   bridge publishes on `http://mini-baas-kong:8000/realtime` with the service key (`publish_env`).
+   Any other missing service is reported and its name refuses connections instead of pointing at
+   something else. tenant-control 3022 gets one more socket,
    `tenant-control-3022.sock`, in no route: only host scripts use it
    (`make link-live-data-ensure`), no frontend can name it.
 4. **The relay.** `alpine/socat:1.8.0.1` reads `/link/routes` (`<port> <socat address>`) and

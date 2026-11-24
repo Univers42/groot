@@ -47,12 +47,13 @@ SERVICES="8000 kong 8000 mini-baas-kong http
 4000 realtime 4000 mini-baas-realtime http"
 # ssh mode's relay: <relay port> <VM service> <container port>. Kong is reached through the WAF's
 # plaintext port (VM 127.0.0.1:8880, CRS on), so the link's writes cross the rules the public edge's
-# do (ruling LM-4, 2026-11-23); before, 8000 went to Kong's own port, around them.
+# do (ruling LM-4, 2026-11-23); before, 8000 went to Kong's own port, around them. Realtime :4000
+# is not relayed: its /v1/publish took an unauthenticated POST through it (LM-6; 2026-11-24 probe:
+# 400 "Topic is required"), so the bridge publishes on Kong's keyed /realtime (publish_env).
 SSH_ROUTES="8000 waf 80
 6379 redis 6379
 8025 mailpit 8025
-1025 mailpit 1025
-4000 realtime 4000"
+1025 mailpit 1025"
 
 note() { printf '[grobase-link] %s\n' "$*" >&2; }
 die() {

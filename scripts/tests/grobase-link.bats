@@ -326,12 +326,12 @@ esac"
 @test "publish_env ssh and local: probe nothing, never add the mount list, and clear one a direct link left" {
   probe_stub
   helper "publish_env ssh '$env_local'"
-  grep -qx 'REALTIME_PUBLISH_URL=' "$env_local"
-  grep -qx 'REALTIME_PUBLISH_APIKEY=' "$env_local"
   grep -qx 'OSIONOS_QUERY_ROUTER_URL=http://mini-baas-kong:8000/query/v1' "$env_local"
   grep -qx 'OSIONOS_ADAPTER_REGISTRY_URL=http://mini-baas-kong:8000/admin/v1' "$env_local"
   grep -qx 'KEEP=1' "$env_local"
   helper "publish_env local '$env_local'"
+  grep -qx 'REALTIME_PUBLISH_URL=' "$env_local"
+  grep -qx 'REALTIME_PUBLISH_APIKEY=' "$env_local"
   grep -qx 'OSIONOS_QUERY_ROUTER_URL=' "$env_local"
   grep -qx 'OSIONOS_ADAPTER_REGISTRY_URL=' "$env_local"
   [ "$(grep -c '^OSIONOS_TENANT_MOUNTS_URL=' "$env_local")" -eq 0 ]
@@ -339,6 +339,17 @@ esac"
   printf 'OSIONOS_TENANT_MOUNTS_URL=http://mini-baas-kong:8000/v1/tenants/me/mounts\n' >>"$env_local"
   helper "publish_env ssh '$env_local'"
   grep -qx 'OSIONOS_TENANT_MOUNTS_URL=' "$env_local"
+}
+
+# LM-6: the ssh relay has no 4000, so the compose default (mini-baas-realtime:4000) would publish
+# into a refused name; the bridge publishes through Kong's keyed /realtime route, behind the WAF.
+@test "publish_env ssh: the bridge publishes on Kong's /realtime with the service key, never the :4000 default" {
+  probe_stub
+  helper "publish_env ssh '$env_local'"
+  [ "$status" -eq 0 ]
+  grep -qx 'REALTIME_PUBLISH_URL=http://mini-baas-kong:8000/realtime' "$env_local"
+  grep -qx 'REALTIME_PUBLISH_APIKEY=svc-1' "$env_local"
+  [ ! -e "$BATS_TEST_TMPDIR/requests" ]
 }
 
 @test "publish_env direct writes OSIONOS_BAAS_KEEPALIVE=1" {

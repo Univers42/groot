@@ -199,9 +199,10 @@ capability_answer() {
 }
 
 # publish_env MODE ENV_LOCAL [TARGET] — where the bridge publishes realtime events and reaches
-# query-router. ssh and local reach the realtime gateway by name (empty = docker-compose.yml's
-# default); direct mode has only the edge, whose /realtime/v1/publish admits the service_role
-# key alone (grobase kong.yml). No remote kind relays query-router or the adapter-registry
+# query-router. local reaches the realtime gateway by name (empty = docker-compose.yml's
+# default); ssh relays no 4000 (SSH_ROUTES in grobase-link.sh, ruling LM-6), so it and direct
+# publish on Kong's /realtime/v1/publish, which admits the service_role key alone (grobase
+# kong.yml). No remote kind relays query-router or the adapter-registry
 # (SERVICES in grobase-link.sh), so ssh and direct reach them on Kong's /query/v1 and
 # service_role-only /admin/v1; empty = the bridge's container-DNS defaults.
 # Through Tailscale Funnel the WAF refuses /realtime/v1/publish and /admin/v1 (grobase rule
@@ -212,10 +213,12 @@ capability_answer() {
 # write OSIONOS_TENANT_MOUNTS_URL; they only clear one a direct link left.
 publish_env() {
   local url="" key="" query="" registry="" mounts="" keepalive="" mounts_status
-  if [[ "$1" = direct ]]; then
+  if [[ "$1" != local ]]; then
     url=http://mini-baas-kong:8000/realtime
-    keepalive=1
     key=$(get_env "$2" SERVICE_ROLE_KEY) || key=""
+  fi
+  if [[ "$1" = direct ]]; then
+    keepalive=1
     if [[ "$(capability_answer "$3" POST /realtime/v1/publish)" = 403 ]]; then
       url=ws://mini-baas-kong:8000/realtime/v1/ws
       key=""

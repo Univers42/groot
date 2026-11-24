@@ -1,8 +1,9 @@
 #!/usr/bin/env bats
-# What an ssh link relays (ruling LM-4, 2026-11-23). Kong was reached on its own :8000, around the
-# VM's WAF, so bridge writes skipped CRS. Now 8000 is the WAF's plaintext port (VM 127.0.0.1:8880).
-# up_ssh runs with the master, the endpoint listing and ssh's forwards stubbed:
-# nothing here reaches a host.
+# What an ssh link relays (ruling LM-4, LM-6, 2026-11-23). Kong was reached on its own :8000,
+# around the VM's WAF, so bridge writes skipped CRS; the relay also carried realtime :4000, whose
+# /v1/publish takes an unauthenticated POST (LM-1 U1: 400 "Topic is required" through :4000). Now
+# 8000 is the WAF's plaintext port (VM 127.0.0.1:8880) and 4000 is not relayed. up_ssh runs with
+# the master, the endpoint listing and ssh's forwards stubbed: nothing here reaches a host.
 #
 # Run: docker run --rm -v "$PWD:/code" -w /code bats/bats:1.11.1 scripts/tests/grobase-link-ssh-routes.bats
 
@@ -42,13 +43,20 @@ up_ssh b2b"
   [[ "$output" != *kong-8000* ]]
 }
 
+@test "4000 is not relayed, and nothing forwards to realtime, though realtime runs on the VM" {
+  ssh_up
+  [ "$status" -eq 0 ]
+  run ! grep -q '^4000 ' "$GROBASE_LINK_DIR/routes"
+  run ! grep -q 'realtime' "$MUX_LOG"
+}
+
 @test "mailpit and tenant-control keep their forwards" {
   ssh_up
   [ "$status" -eq 0 ]
   grep -qx '8025 UNIX-CONNECT:/link/mailpit-8025.sock' "$GROBASE_LINK_DIR/routes"
   grep -qx '1025 UNIX-CONNECT:/link/mailpit-1025.sock' "$GROBASE_LINK_DIR/routes"
   grep -qx -- "-O forward -L $GROBASE_LINK_DIR/tenant-control-3022.sock:172.18.0.12:3022 x" "$MUX_LOG"
-  [ "$(wc -l <"$GROBASE_LINK_DIR/routes")" -eq 5 ]
+  [ "$(wc -l <"$GROBASE_LINK_DIR/routes")" -eq 4 ]
 }
 
 @test "no WAF :80 on the VM: exit 1 naming the WAF, the routes untouched, no fallback to Kong's :8000" {
