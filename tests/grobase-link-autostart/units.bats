@@ -36,6 +36,23 @@ STUB
   grep -qx "Environment=VM_PORTS_FILE=/vm/ports.env" "$UNITS/grobase-lan-edge.service"
 }
 
+@test "the link unit carries GROBASE_LINK_REQUIRE; unset renders it empty, which the script reads as unset" {
+  GROBASE_LINK_REQUIRE=ssh run bash "$REPO/scripts/grobase-link-autostart.sh" install
+  [ "$status" -eq 0 ]
+  grep -qx "Environment=GROBASE_LINK_REQUIRE=ssh" "$UNITS/grobase-link.service"
+  run bash "$REPO/scripts/grobase-link-autostart.sh" install
+  [ "$status" -eq 0 ]
+  grep -qx "Environment=GROBASE_LINK_REQUIRE=" "$UNITS/grobase-link.service"
+}
+
+@test "a GROBASE_LINK_REQUIRE that is not local, ssh or direct installs nothing" {
+  GROBASE_LINK_REQUIRE='ssh|x' run bash "$REPO/scripts/grobase-link-autostart.sh" install
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"GROBASE_LINK_REQUIRE"* ]]
+  [ ! -e "$UNITS/grobase-link.service" ]
+  [ ! -e "$BATS_TEST_TMPDIR/calls" ]
+}
+
 @test "without LAN_IF the LAN edge is not installed" {
   run bash "$REPO/scripts/grobase-link-autostart.sh" install
   [ "$status" -eq 0 ]

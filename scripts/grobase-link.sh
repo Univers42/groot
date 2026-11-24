@@ -29,6 +29,7 @@ CA_FILE=$(setting GROBASE_CA_FILE "")               # direct targets only: the C
 IDE_SSH=$(setting GROBASE_IDE_SSH "")               # direct targets only: an ssh alias used for the IDE plane forward, nothing else
 ADMIN_SSH=$(setting GROBASE_ADMIN_SSH "")           # direct targets only: an ssh alias for bring-up, never for runtime traffic
 ADMIN_HOST_KEY=$(setting GROBASE_ADMIN_HOST_KEY "") # "<type> <base64>", the only key that alias may present
+REQUIRE=$(setting GROBASE_LINK_REQUIRE "")         # local | ssh | direct: the only mode `up` may link in; empty = any
 LINK_HOST_KEY=$(setting GROBASE_LINK_HOST_KEY "")   # "<type> <base64>", the only key an ssh link master accepts
 CONNECT_IP=$(setting GROBASE_CONNECT_IP "")         # direct targets only: the address the relay dials for the URL's name
 REMOTE_ENV="${GROBASE_REMOTE_ENV:-$REPO/.env.grobase-remote}"
@@ -169,11 +170,27 @@ own_link_dir() {
   mkdir -p "$LINK_DIR" && chmod 700 "$LINK_DIR"
 }
 
+# Where TARGET came from, for the journal: a mode that changed with no edit is traced to the file.
+target_origin() {
+  if [ -n "${GROBASE_TARGET:-}" ]; then
+    printf 'from the environment (settings file %s)' "$CONF"
+  elif get_env "$CONF" GROBASE_TARGET >/dev/null 2>&1; then
+    printf 'from %s' "$CONF"
+  elif [ -f "$CONF" ]; then
+    printf 'the default: %s sets no GROBASE_TARGET' "$CONF"
+  else
+    printf 'the default: %s does not exist' "$CONF"
+  fi
+}
 cmd_up() {
   local mode target
+  case "$REQUIRE" in '' | local | ssh | direct) ;; *) die "GROBASE_LINK_REQUIRE=$REQUIRE: expected local, ssh or direct (settings file $CONF)" ;; esac
   own_link_dir
-  [ -n "${GROBASE_TARGET:-}" ] || ! get_env "$CONF" GROBASE_TARGET >/dev/null || note "target $TARGET, from ${CONF#"$REPO"/}"
+  note "target $TARGET, $(target_origin)"
   read -r mode target < <(resolve)
+  # Before the master, the forwards, the routes and the state: make link then stops before the relay.
+  [ -z "$REQUIRE" ] || [ "$mode" = "$REQUIRE" ] ||
+    die "refusing to link: target $TARGET resolved to $mode, but GROBASE_LINK_REQUIRE=$REQUIRE ($(target_origin)); nothing was changed. Set GROBASE_TARGET to this host's $REQUIRE target in $CONF, or change GROBASE_LINK_REQUIRE if the mode really changed"
   case "$mode" in
   ssh) up_ssh "$target" ;;
   direct) up_direct "$target" ;;
@@ -308,6 +325,7 @@ usage: grobase-link.sh up|down|status|env|verify|mode|conf [KEY]|api-url|docker-
 Settings: the environment (make link KEY=value) wins, then ./.env.grobase-link (KEY=value, git-ignored; .env.grobase-link.example documents it), then the default.
   GROBASE_TARGET          auto | local | ssh://[user@]host[:port] | <ssh alias|user@host|host> | http(s)://host[:port]  -- the scheme is the kind of connection
   GROBASE_LINK_HOST_PORT  28000 (0 = none)        GROBASE_REMOTE_DIR  ssh: where its Kong was started (else /opt/grobase)
+  GROBASE_LINK_REQUIRE    local | ssh | direct: `up` exits 1, changing nothing, when the target resolves to another mode; empty = any
   GROBASE_LINK_HOST_KEY   "<type> <base64>": the only host key an ssh master (ssh target, GROBASE_IDE_SSH) accepts; required
   GROBASE_API_URL         the WAF URL clients call, https://<vm>.<tailnet>.ts.net:8443; ssh/auto need it
   GROBASE_CA_FILE         direct targets only: the PEM CA signing that Kong's certificate; empty = the relay's system store

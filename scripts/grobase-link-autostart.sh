@@ -6,6 +6,7 @@
 #   install   render the units with this clone's path, enable grobase-link.service and
 #             grobase-link-heal.timer, and hand the link over to the unit (link-down + start)
 #             LAN_IF=<iface> also installs grobase-lan-edge.service (WAF on the LAN, 8443)
+#             GROBASE_LINK_REQUIRE=local|ssh|direct is written into grobase-link.service (the only mode it links in)
 #             LAN_SSH=1 with LAN_IF also installs grobase-lan-ssh.service (the VM's password ssh on
 #             the LAN, 4242); an install without it removes that unit, so the last call decides
 #   remove    disable and delete them; the link itself stays as it is
@@ -20,7 +21,7 @@ ports_file="${VM_PORTS_FILE:-${VM_PATH:-/mnt/storage/virtual_machines}/${VM_NAME
 render() { # render <unit>: back up a differing installed copy, then write the rendered one
 	local unit="$1" out="$unitdir/$1" tmp
 	tmp=$(mktemp)
-	sed -e "s|@GROOT@|$groot|g" -e "s|@LAN_IF@|${LAN_IF:-}|g" -e "s|@VM_PORTS_FILE@|$ports_file|g" "$src/$unit.in" >"$tmp"
+	sed -e "s|@GROOT@|$groot|g" -e "s|@LAN_IF@|${LAN_IF:-}|g" -e "s|@VM_PORTS_FILE@|$ports_file|g" -e "s|@LINK_REQUIRE@|${GROBASE_LINK_REQUIRE:-}|g" "$src/$unit.in" >"$tmp"
 	if [ -e "$out" ] && ! cmp -s "$tmp" "$out"; then
 		cp -a "$out" "$out.bak-$(date +%Y%m%d%H%M%S)"
 		echo "[autostart] backed up the installed $unit"
@@ -30,6 +31,11 @@ render() { # render <unit>: back up a differing installed copy, then write the r
 }
 
 install_units() {
+	case "${GROBASE_LINK_REQUIRE:-}" in '' | local | ssh | direct) ;; *)
+		echo "[autostart] GROBASE_LINK_REQUIRE=${GROBASE_LINK_REQUIRE}: expected local, ssh or direct; nothing installed" >&2
+		exit 2
+		;;
+	esac
 	mkdir -p "$unitdir"
 	render grobase-link.service
 	render grobase-link-heal.service
@@ -80,9 +86,9 @@ remove_units() {
 case "${1:-}" in
 install) install_units ;;
 remove) remove_units ;;
--h | --help) sed -n '2,12p' "$0" ;;
+-h | --help) sed -n '2,13p' "$0" ;;
 *)
-	sed -n '2,12p' "$0" >&2
+	sed -n '2,13p' "$0" >&2
 	exit 2
 	;;
 esac

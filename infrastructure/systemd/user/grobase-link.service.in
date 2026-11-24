@@ -15,6 +15,9 @@ After=b2b-vm-baas.service
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=@GROOT@
+# The mode this host links in (make link-autostart GROBASE_LINK_REQUIRE=ssh); empty = the settings
+# file's, else any. A restart that resolves to another mode fails instead of switching the frontends.
+Environment=GROBASE_LINK_REQUIRE=@LINK_REQUIRE@
 ExecStart=/usr/bin/make --no-print-directory link
 ExecStop=/usr/bin/make --no-print-directory link-down
 TimeoutStartSec=900
