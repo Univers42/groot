@@ -57,6 +57,9 @@ datacenter-vm: ## Wait for the VM, have born2root start grobase in it, seed an e
 	@$(DATACENTER_SCRIPT) vm
 
 datacenter-configure: ## Pin the VM's host key, write the link's settings
+## Usage: make datacenter-configure [DATACENTER_LINK_CONF_FORCE=1]
+## A settings file that links this host in another mode (ssh, local, auto) is kept and the step
+## fails naming it; DATACENTER_LINK_CONF_FORCE=1 replaces it with the direct link.
 	@$(DATACENTER_SCRIPT) configure
 
 datacenter-certs: ## Copy the CA certificate and the WAF's leaf from the VM, never the CA key

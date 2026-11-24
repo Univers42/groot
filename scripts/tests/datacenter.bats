@@ -316,6 +316,77 @@ hidden_vm() {
   grep -qx 'grobase-admin ssh-ed25519 AAAAhostkey' "$XDG_STATE_HOME/groot/admin_known_hosts"
 }
 
+# configure writes a direct link (the WAF over https). A settings file holding another mode is this
+# host's choice, not a stale copy (ruling LM-7): kept byte for byte unless forced.
+# link_conf CONTENT — a settings file of another mode, and its snapshot.
+link_conf() {
+  printf '%b' "$1" >"$GROBASE_LINK_CONF"
+  cp "$GROBASE_LINK_CONF" "$BATS_TEST_TMPDIR/link-conf.before"
+}
+
+@test "configure: a settings file of another mode is kept byte-identical; exit 1 says what, why and what to do" {
+  vault_set
+  fake_own_vm
+  stub ip 'echo "1.1.1.1 dev eth0 src 10.12.19.4"'
+  local conf mode
+  for conf in 'GROBASE_TARGET=ssh://u@192.0.2.1:4242\nGROBASE_LINK_HOST_KEY=ssh-ed25519 AAAAfake\n:ssh' \
+    'GROBASE_TARGET=b2b\n:ssh' 'GROBASE_TARGET=local\n:local' 'GROBASE_LINK_HOST_PORT=0\n:auto' \
+    'GROBASE_TARGET=https://localhost:8443\nGROBASE_LINK_REQUIRE=ssh\n:ssh'; do
+    mode=${conf##*:}
+    link_conf "${conf%:*}"
+    dc configure
+    [ "$status" -eq 1 ]
+    cmp "$GROBASE_LINK_CONF" "$BATS_TEST_TMPDIR/link-conf.before"
+    [[ "$output" == *"refusing to overwrite $GROBASE_LINK_CONF: it links this host in $mode mode"* ]]
+    [[ "$output" == *"would switch this host's frontends to direct"* ]]
+    [[ "$output" == *"DATACENTER_LINK_CONF_FORCE=1 make datacenter-configure"* ]]
+    [[ "$output" != *192.0.2.1* ]]
+    [[ "$output" != *AAAAfake* ]]
+  done
+  [ ! -e "$XDG_STATE_HOME/groot/admin_known_hosts" ]
+  [ ! -e "$CTL_CFG_DIR/secrets/datacenter.env" ]
+  [ "$(grep -c ssh_host_ed25519 "$LOG")" -eq 0 ]
+}
+
+@test "configure: DATACENTER_LINK_CONF_FORCE=1 replaces a settings file of another mode" {
+  vault_set
+  fake_own_vm
+  stub ip 'echo "1.1.1.1 dev eth0 src 10.12.19.4"'
+  link_conf 'GROBASE_TARGET=ssh://u@192.0.2.1:4242\nGROBASE_LINK_REQUIRE=ssh\n'
+  DATACENTER_LINK_CONF_FORCE=1 dc configure
+  [ "$status" -eq 0 ]
+  grep -qx 'GROBASE_TARGET=https://localhost:8443' "$GROBASE_LINK_CONF"
+  [ "$(grep -c GROBASE_LINK_REQUIRE "$GROBASE_LINK_CONF")" -eq 0 ]
+}
+
+@test "configure: a direct settings file is rewritten as before, keeping its GROBASE_LINK_REQUIRE=direct" {
+  vault_set
+  fake_own_vm
+  stub ip 'echo "1.1.1.1 dev eth0 src 10.12.19.4"'
+  link_conf 'GROBASE_TARGET=https://localhost:9443\nGROBASE_LINK_REQUIRE=direct\n'
+  dc configure
+  [ "$status" -eq 0 ]
+  grep -qx 'GROBASE_TARGET=https://localhost:8443' "$GROBASE_LINK_CONF"
+  grep -qx 'GROBASE_LINK_REQUIRE=direct' "$GROBASE_LINK_CONF"
+}
+
+@test "make all / make datacenter-configure: an ssh settings file stays byte-identical" {
+  vault_set
+  fake_own_vm
+  stub ip 'echo "1.1.1.1 dev eth0 src 10.12.19.4"'
+  link_conf 'GROBASE_TARGET=ssh://u@192.0.2.1:4242\nGROBASE_LINK_HOST_KEY=ssh-ed25519 AAAAfake\n'
+  repo
+  stub openssl 'exit 0'
+  run make -n all GROBASE_DATACENTER=b2b SKIP_SYNC=1
+  [[ "$output" == *"datacenter.sh configure"* ]]
+  cmp "$GROBASE_LINK_CONF" "$BATS_TEST_TMPDIR/link-conf.before"
+  # -n prints configure's recipe without running it; this runs it, the vault and VM stubbed as above.
+  run make --no-print-directory datacenter-configure GROBASE_DATACENTER=b2b
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"refusing to overwrite $GROBASE_LINK_CONF: it links this host in ssh mode"* ]]
+  cmp "$GROBASE_LINK_CONF" "$BATS_TEST_TMPDIR/link-conf.before"
+}
+
 @test "vm: grobase running and seeded: no make, no write" {
   vault_set
   vm_says 9 'vintage=2026-11-04'

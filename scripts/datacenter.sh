@@ -180,10 +180,27 @@ connect_ip() {
   printf '%s\n' "$addr"
 }
 
+# The mode a link settings file holds, as grobase-link.sh takes it: its GROBASE_LINK_REQUIRE, else
+# its target's kind (auto when it names none).
+link_conf_mode() {
+  local mode
+  mode=$(get_env "$1" GROBASE_LINK_REQUIRE 2>/dev/null) && { printf '%s\n' "$mode"; return; }
+  case "$(get_env "$1" GROBASE_TARGET 2>/dev/null)" in
+  '' | auto) echo auto ;;
+  local) echo local ;;
+  http://* | https://*) echo direct ;;
+  *) echo ssh ;;
+  esac
+}
 cmd_configure() {
-  local alias key addr waf
+  local alias key addr waf mode=direct require=""
   alias=$(cmd_setting)
   [ -n "$alias" ] || die "this machine has no data center (no vault42 credentials, no GROBASE_DATACENTER)"
+  # Before anything reads the VM or writes a pin: another mode in the file is this host's choice (LM-7).
+  [ ! -f "$CONF" ] || mode=$(link_conf_mode "$CONF")
+  [ "$mode" = direct ] || [ "${DATACENTER_LINK_CONF_FORCE:-}" = 1 ] ||
+    die "refusing to overwrite $CONF: it links this host in $mode mode, and configure writes a direct link to $alias's WAF, which would switch this host's frontends to direct on the next make link. Nothing was changed. Keep it: move the file out of the way only when this host should go direct; replace it: DATACENTER_LINK_CONF_FORCE=1 make datacenter-configure"
+  [ "$mode" != direct ] || require=$(get_env "$CONF" GROBASE_LINK_REQUIRE 2>/dev/null)
   require_alias_on_record "$alias"
   waf=$(waf_port "$alias") || exit 1
   key=$(pinned_host_key "$alias") || exit 1
@@ -199,6 +216,7 @@ GROBASE_CONNECT_IP=$addr
 GROBASE_ADMIN_SSH=$alias
 GROBASE_ADMIN_HOST_KEY=$key
 EOF
+  [ -z "$require" ] || printf 'GROBASE_LINK_REQUIRE=%s\n' "$require" >>"$CONF.tmp"
   mv "$CONF.tmp" "$CONF"
   note "$alias at https://localhost:$waf, reached from containers through $addr"
 }
