@@ -371,8 +371,8 @@ specs per mode, the consumer filter, the verdicts, the exit codes) are
    forward is cancelled, never answered with Kong's own :8000. Realtime :4000 is not relayed: its
    `/v1/publish` took an unauthenticated POST (LM-6), so the name refuses connections and the
    bridge publishes on `http://mini-baas-kong:8000/realtime` with the service key (`publish_env`).
-   Any other missing service is reported and its name refuses connections instead of pointing at
-   something else. tenant-control 3022 gets one more socket,
+   Redis stays the VM's, the session store (LM-8). Any other missing service is reported and its
+   name refuses connections instead of pointing at something else. tenant-control 3022 gets one more socket,
    `tenant-control-3022.sock`, in no route: only host scripts use it
    (`make link-live-data-ensure`), no frontend can name it.
 4. **The relay.** `alpine/socat:1.8.0.1` reads `/link/routes` (`<port> <socat address>`) and

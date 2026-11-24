@@ -1,9 +1,10 @@
 #!/usr/bin/env bats
-# What an ssh link relays (ruling LM-4, LM-6, 2026-11-23). Kong was reached on its own :8000,
+# What an ssh link relays (ruling LM-4, LM-6, LM-8, 2026-11-23). Kong was reached on its own :8000,
 # around the VM's WAF, so bridge writes skipped CRS; the relay also carried realtime :4000, whose
 # /v1/publish takes an unauthenticated POST (LM-1 U1: 400 "Topic is required" through :4000). Now
-# 8000 is the WAF's plaintext port (VM 127.0.0.1:8880) and 4000 is not relayed. up_ssh runs with
-# the master, the endpoint listing and ssh's forwards stubbed: nothing here reaches a host.
+# 8000 is the WAF's plaintext port (VM 127.0.0.1:8880), 4000 is not relayed, and Redis stays the
+# VM's session store (moving it logs every user out). up_ssh runs with the master, the endpoint
+# listing and ssh's forwards stubbed: nothing here reaches a host.
 #
 # Run: docker run --rm -v "$PWD:/code" -w /code bats/bats:1.11.1 scripts/tests/grobase-link-ssh-routes.bats
 
@@ -48,6 +49,13 @@ up_ssh b2b"
   [ "$status" -eq 0 ]
   run ! grep -q '^4000 ' "$GROBASE_LINK_DIR/routes"
   run ! grep -q 'realtime' "$MUX_LOG"
+}
+
+@test "LM-8: 6379 still relays to the VM's mini-baas-redis, the session store" {
+  ssh_up
+  [ "$status" -eq 0 ]
+  grep -qx '6379 UNIX-CONNECT:/link/redis-6379.sock' "$GROBASE_LINK_DIR/routes"
+  grep -qx -- "-O forward -L $GROBASE_LINK_DIR/redis-6379.sock:172.18.0.10:6379 x" "$MUX_LOG"
 }
 
 @test "mailpit and tenant-control keep their forwards" {
