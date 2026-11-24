@@ -364,10 +364,13 @@ specs per mode, the consumer filter, the verdicts, the exit codes) are
    container over the master gives, per tcp port, the published host port (rewritten to
    `127.0.0.1`) or, when nothing is published, the container IP on its first network
    (`remote_endpoints`, `:57-68`).
-3. **One unix socket per port.** For each row of `SERVICES` (`:38-42`: kong 8000, redis 6379,
-   mailpit 8025 and 1025, realtime 4000) a `-L $LINK_DIR/<svc>-<port>.sock:<ip:port>` forward
-   (`up_ssh`, `:119-140`). A missing service is reported and its name refuses connections
-   instead of pointing at something else. tenant-control 3022 gets one more socket,
+3. **One unix socket per port.** For each row of `SSH_ROUTES` (relay 8000 → the WAF's :80, i.e.
+   VM `127.0.0.1:8880`; redis 6379; mailpit 8025 and 1025; realtime 4000) a `-L $LINK_DIR/<svc>-<port>.sock:<ip:port>`
+   forward (`up_ssh`). Kong is reached through the WAF so the link's writes cross CRS like the
+   public edge's (ruling LM-4); a VM that does not publish the WAF's :80 is refused before any
+   forward is cancelled, never answered with Kong's own :8000. Realtime 4000 is relayed as it
+   was. Any other missing service is reported and its name refuses connections instead of
+   pointing at something else. tenant-control 3022 gets one more socket,
    `tenant-control-3022.sock`, in no route: only host scripts use it
    (`make link-live-data-ensure`), no frontend can name it.
 4. **The relay.** `alpine/socat:1.8.0.1` reads `/link/routes` (`<port> <socat address>`) and
@@ -411,7 +414,8 @@ Probes run from a container on the frontends' network, the way the frontends con
 | `http://mini-baas-realtime:4000/v1/health` | `HTTP 200` `{"status":"ok",…}`; `/health` is `404` — the server's routes are `/v1/*` (`apps/grobase/infra/docker/services/realtime/realtime-agnostic/crates/realtime-server/src/server.rs:242-245`) |
 | host `http://127.0.0.1:28000/auth/v1/health` with apikey | `HTTP 200` |
 
-`bash scripts/grobase-link.sh status` → `ssh: master to b2b up; Kong through …/kong-8000.sock answers HTTP 404`, exit 0.
+`bash scripts/grobase-link.sh status` → `ssh: master to b2b up; Kong through …/kong-8000.sock answers HTTP 404`, exit 0
+(before LM-4; since, the socket is the one the 8000 route names, `waf-80.sock`).
 Parsers, settings precedence and exit codes: `scripts/tests/grobase-link.bats`, 11 tests,
 `scripts/tests/grobase-link-verify.bats`, 5 tests, and the `get_env` reader in
 `scripts/tests/envfile.bats`; run with

@@ -160,7 +160,7 @@ case "$*" in
 *"sh -s"*)
   case "$(cat)" in
   *osionos-ide-plane*) echo "healthy 172.30.0.5" ;;
-  *) echo "P /mini-baas-kong 8000/tcp 127.0.0.1:8000" ;;
+  *) printf "P /mini-baas-kong 8000/tcp 127.0.0.1:8000\nP /mini-baas-waf 80/tcp 127.0.0.1:8880\n" ;;
   esac ;;
 esac
 exit 0

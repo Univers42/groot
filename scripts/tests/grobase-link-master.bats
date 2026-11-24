@@ -56,11 +56,11 @@ need_sshd() {
 }
 
 # start_vm HOSTKEY_FILE — sshd on a free loopback port with that host key, the link user's key
-# authorized, and a `docker` on its PATH that shows one Kong, as the VM would; sets PORT.
+# authorized, and a `docker` on its PATH that shows Kong and the WAF's :80, as the VM would; sets PORT.
 start_vm() {
   local _
   mkdir -p "$BATS_TEST_TMPDIR/vm-bin" "$BATS_TEST_TMPDIR/vm-grobase"
-  printf '#!/bin/sh\ncase "$*" in\n"ps "*) echo mini-baas-kong ;;\n*NetworkSettings.Ports*) printf "N /mini-baas-kong 127.0.0.1\\nP /mini-baas-kong 8000/tcp 127.0.0.1:8000\\n" ;;\nesac\n' \
+  printf '#!/bin/sh\ncase "$*" in\n"ps "*) echo mini-baas-kong ;;\n*NetworkSettings.Ports*) printf "N /mini-baas-kong 127.0.0.1\\nP /mini-baas-kong 8000/tcp 127.0.0.1:8000\\nP /mini-baas-waf 80/tcp 127.0.0.1:8880\\n" ;;\nesac\n' \
     >"$BATS_TEST_TMPDIR/vm-bin/docker"
   chmod +x "$BATS_TEST_TMPDIR/vm-bin/docker"
   printf 'JWT_SECRET=served-by-%s\n' "${1##*/}" >"$BATS_TEST_TMPDIR/vm-grobase/.env"

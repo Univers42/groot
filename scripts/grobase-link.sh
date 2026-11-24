@@ -45,6 +45,14 @@ SERVICES="8000 kong 8000 mini-baas-kong http
 8025 mailpit 8025 mini-baas-mailpit http
 1025 mailpit 1025 mailpit smtp
 4000 realtime 4000 mini-baas-realtime http"
+# ssh mode's relay: <relay port> <VM service> <container port>. Kong is reached through the WAF's
+# plaintext port (VM 127.0.0.1:8880, CRS on), so the link's writes cross the rules the public edge's
+# do (ruling LM-4, 2026-11-23); before, 8000 went to Kong's own port, around them.
+SSH_ROUTES="8000 waf 80
+6379 redis 6379
+8025 mailpit 8025
+1025 mailpit 1025
+4000 realtime 4000"
 
 note() { printf '[grobase-link] %s\n' "$*" >&2; }
 die() {
@@ -113,9 +121,12 @@ up_ssh() {
   open_master "$1"
   endpoints=$(remote_endpoints)
   [ -n "$endpoints" ] || die "no mini-baas-* container is running on $1"
+  # Checked before any forward is cancelled: a VM without its WAF keeps the link it had.
+  awk '$1 == "waf" && $2 == 80 { f = 1 } END { exit !f }' <<<"$endpoints" ||
+    die "the WAF (mini-baas-waf :80) is not published on $1; refusing to reach Kong around it"
   cancel_forwards
   : >"$ROUTES.tmp"
-  while read -r relay svc cport _; do
+  while read -r relay svc cport; do
     ep=$(awk -v s="$svc" -v p="$cport" '$1 == s && $2 == p { print $3; exit }' <<<"$endpoints")
     [ -n "$ep" ] || {
       note "$svc:$cport is not running on $1; its name will refuse connections"
@@ -124,14 +135,13 @@ up_ssh() {
     sock="$LINK_DIR/$svc-$cport.sock"
     forward "$sock" "$ep"
     printf '%s UNIX-CONNECT:/link/%s\n' "$relay" "${sock##*/}" >>"$ROUTES.tmp"
-    [ "$svc:$cport" = kong:8000 ] && kong=$ep
-  done <<<"$SERVICES"
-  [ -n "$kong" ] || die "Kong is not running on $1; nothing to link"
+    if [ "$relay" = 8000 ]; then kong=$ep; fi
+  done <<<"$SSH_ROUTES"
   ep=$(awk '$1 == "tenant-control" && $2 == 3022 { print $3; exit }' <<<"$endpoints")
   [ -z "$ep" ] || forward "$LINK_DIR/tenant-control-3022.sock" "$ep"
   mv "$ROUTES.tmp" "$ROUTES"
   link_ide_plane
-  note "ssh link to $1: $(wc -l <"$ROUTES") ports relayed, Kong at $kong$(forward_host_port "$kong")"
+  note "ssh link to $1: $(wc -l <"$ROUTES") ports relayed, Kong through the WAF at $kong$(forward_host_port "$kong")"
 }
 
 # Bring-up only: one forward each to the VM's docker socket and tenant-control, for the steps that
@@ -219,7 +229,7 @@ cmd_down() {
 }
 
 cmd_status() {
-  local mode target code
+  local mode target code sock
   mode=$(state_get mode) || true
   [ -n "$mode" ] || die "no link; open one with: make link"
   target=$(state_get target)
@@ -230,8 +240,9 @@ cmd_status() {
     ;;
   ssh)
     mux -O check x 2>/dev/null || die "ssh: master to $target is gone; re-run make link"
-    code=$(curl -s -o /dev/null -m 5 -w '%{http_code}' --unix-socket "$LINK_DIR/kong-8000.sock" http://kong/ || true)
-    note "ssh: master to $target up; Kong through $LINK_DIR/kong-8000.sock answers HTTP $code"
+    sock=$(awk '$1 == 8000 { sub(/^UNIX-CONNECT:\/link\//, "", $2); print $2; exit }' "$ROUTES" 2>/dev/null || true)
+    code=$(curl -s -o /dev/null -m 5 -w '%{http_code}' --unix-socket "$LINK_DIR/${sock:-none}" http://kong/ || true)
+    note "ssh: master to $target up; Kong through $LINK_DIR/${sock:-none} answers HTTP $code"
     [ "$code" != 000 ]
     ;;
   direct)
