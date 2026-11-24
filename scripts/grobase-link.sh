@@ -29,6 +29,7 @@ CA_FILE=$(setting GROBASE_CA_FILE "")               # direct targets only: the C
 IDE_SSH=$(setting GROBASE_IDE_SSH "")               # direct targets only: an ssh alias used for the IDE plane forward, nothing else
 ADMIN_SSH=$(setting GROBASE_ADMIN_SSH "")           # direct targets only: an ssh alias for bring-up, never for runtime traffic
 ADMIN_HOST_KEY=$(setting GROBASE_ADMIN_HOST_KEY "") # "<type> <base64>", the only key that alias may present
+LINK_HOST_KEY=$(setting GROBASE_LINK_HOST_KEY "")   # "<type> <base64>", the only key an ssh link master accepts
 CONNECT_IP=$(setting GROBASE_CONNECT_IP "")         # direct targets only: the address the relay dials for the URL's name
 REMOTE_ENV="${GROBASE_REMOTE_ENV:-$REPO/.env.grobase-remote}"
 CTL="$LINK_DIR/ssh.ctl"
@@ -58,6 +59,8 @@ mux() { ssh -F /dev/null -S "$CTL" -o BatchMode=yes -o LogLevel=ERROR "$@"; }
 . "$REPO/scripts/lib/grobase-link-target.sh"
 # shellcheck source=scripts/lib/grobase-remote-dir.sh
 . "$REPO/scripts/lib/grobase-remote-dir.sh"
+# shellcheck source=scripts/lib/grobase-link-master.sh
+. "$REPO/scripts/lib/grobase-link-master.sh"
 # shellcheck source=scripts/lib/grobase-link-verify.sh
 . "$REPO/scripts/lib/grobase-link-verify.sh"
 # shellcheck source=scripts/lib/grobase-link-ide.sh
@@ -87,22 +90,6 @@ cancel_forwards() {
   [ -f "$FORWARDS" ] || return 0
   while read -r f; do [ -z "$f" ] || mux -O cancel -L "$f" x 2>/dev/null || true; done <"$FORWARDS"
   rm -f "$FORWARDS" "$LINK_DIR"/*.sock "$LINK_DIR"/ide/*.sock
-}
-# Reuses a live master only when it goes to the same host: the control socket has one
-# path, so a new target would otherwise silently keep talking to the previous machine.
-# shellcheck disable=SC2046 # see ssh_args
-open_master() {
-  local prev
-  prev=$(state_get target 2>/dev/null || true)
-  if mux -O check x 2>/dev/null; then
-    [ "$(ssh_args "$prev")" != "$(ssh_args "$1")" ] || return 0
-    note "closing the master to $prev"
-    cmd_down_ssh
-  fi
-  ssh -o ControlMaster=yes -o ControlPath="$CTL" -o ControlPersist=yes -o ClearAllForwardings=yes \
-    -o StreamLocalBindUnlink=yes -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 \
-    -o ServerAliveCountMax=4 -o LogLevel=ERROR -N -f $(ssh_args "$1") ||
-    die "ssh cannot open a master to $1 (key in ssh-agent or passwordless? try: ssh $(ssh_args "$1"))"
 }
 forward() { # <listen> <ip:port>; records it so a later up or down can cancel it
   mux -O forward -L "$1:$2" x || die "ssh refused the forward $1 -> $2"
@@ -144,23 +131,6 @@ up_ssh() {
   mv "$ROUTES.tmp" "$ROUTES"
   link_ide_plane
   note "ssh link to $1: $(wc -l <"$ROUTES") ports relayed, Kong at $kong$(forward_host_port "$kong")"
-}
-
-# The alias says where the VM is and nothing else: the master runs with -F /dev/null, so its
-# forwards (RemoteForward 9222 on b2b) and its `StrictHostKeyChecking no` do not apply, and the VM
-# must present GROBASE_ADMIN_HOST_KEY. A docker ssh:// transport would inherit both.
-open_admin_master() {
-  local host port user known="$LINK_DIR/admin_known_hosts"
-  [[ $ADMIN_SSH =~ ^[A-Za-z0-9][A-Za-z0-9._@:-]*$ ]] || die "GROBASE_ADMIN_SSH is not a plain ssh alias or user@host"
-  [ -n "$ADMIN_HOST_KEY" ] || die "GROBASE_ADMIN_SSH needs GROBASE_ADMIN_HOST_KEY, the VM's host key"
-  read -r host port user < <(ssh -G "$ADMIN_SSH" | awk '$1 == "hostname" { h = $2 } $1 == "port" { p = $2 } $1 == "user" { u = $2 } END { print h, p, u }')
-  [ -n "$user" ] || die "ssh cannot read the alias $ADMIN_SSH"
-  printf 'grobase-admin %s\n' "$ADMIN_HOST_KEY" >"$known"
-  ssh -F /dev/null -o ControlMaster=yes -o ControlPath="$CTL" -o ControlPersist=yes -o ClearAllForwardings=yes \
-    -o StreamLocalBindUnlink=yes -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 \
-    -o ServerAliveCountMax=4 -o LogLevel=ERROR -o StrictHostKeyChecking=yes -o HostKeyAlias=grobase-admin \
-    -o UserKnownHostsFile="$known" -p "$port" -l "$user" -N -f "$host" ||
-    die "no admin ssh to $ADMIN_SSH; a rebuilt VM has a new host key: remove GROBASE_ADMIN_HOST_KEY from ~/.config/42ctl/secrets/datacenter.env"
 }
 
 # Bring-up only: one forward each to the VM's docker socket and tenant-control, for the steps that
@@ -338,6 +308,7 @@ usage: grobase-link.sh up|down|status|env|verify|mode|conf [KEY]|api-url|docker-
 Settings: the environment (make link KEY=value) wins, then ./.env.grobase-link (KEY=value, git-ignored; .env.grobase-link.example documents it), then the default.
   GROBASE_TARGET          auto | local | ssh://[user@]host[:port] | <ssh alias|user@host|host> | http(s)://host[:port]  -- the scheme is the kind of connection
   GROBASE_LINK_HOST_PORT  28000 (0 = none)        GROBASE_REMOTE_DIR  ssh: where its Kong was started (else /opt/grobase)
+  GROBASE_LINK_HOST_KEY   "<type> <base64>": the only host key an ssh master (ssh target, GROBASE_IDE_SSH) accepts; required
   GROBASE_API_URL         the WAF URL clients call, https://<vm>.<tailnet>.ts.net:8443; ssh/auto need it
   GROBASE_CA_FILE         direct targets only: the PEM CA signing that Kong's certificate; empty = the relay's system store
   GROBASE_IDE_SSH         direct targets only: an ssh alias used solely for the IDE plane socket; empty = no ssh

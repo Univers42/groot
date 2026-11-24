@@ -21,6 +21,8 @@ setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../grobase-link.sh"
   export GROBASE_LINK_DIR="$BATS_TEST_TMPDIR/link"
   export GROBASE_LINK_CONF="$BATS_TEST_TMPDIR/absent.env"
+  # Every ssh master is pinned (LM-2); a fake key, since ssh here is a stub.
+  export GROBASE_LINK_HOST_KEY="ssh-ed25519 AAAAfake"
 }
 
 helper() { run bash -c "source '$SCRIPT' && $1"; }
@@ -140,8 +142,8 @@ helper() { run bash -c "source '$SCRIPT' && $1"; }
 }
 
 # direct_up [ENV=value...] — `up` against a direct target; docker answers the reachability probe,
-# ssh is the recorder: no master answers `-O check`, opening one fails when FAIL_MASTER=1, the
-# plane probe reports one healthy plane.
+# ssh is the recorder: no master answers `-O check`, `-G` names a documentation address, opening
+# a master fails when FAIL_MASTER=1, the plane probe reports one healthy plane.
 direct_up() {
   SSH_LOG="$BATS_TEST_TMPDIR/ssh.log"
   : >"$SSH_LOG"
@@ -153,6 +155,7 @@ direct_up() {
     cat <<'STUB'
 case "$*" in
 *"-O check"*) exit 1 ;;
+"-G "*) printf "hostname 192.0.2.1\nport 22\nuser u\n" ;;
 *ControlMaster=yes*) [ -z "$FAIL_MASTER" ] || exit 255 ;;
 *"sh -s"*)
   case "$(cat)" in

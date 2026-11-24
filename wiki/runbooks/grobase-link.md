@@ -98,7 +98,8 @@ container, at itself.
 **Tailscale, any network**: the WAF answers at `https://baas.tail10f2ea.ts.net:8443`, and ssh
 reaches `ssh://dlesieur@100.97.49.118:4242` once the device's key is on the VM — once, over
 Tailscale: `ssh-copy-id -p 4242 dlesieur@100.97.49.118` (BatchMode never prompts for a
-password). The first ssh to an address asks to accept the host key; compare it with
+password). The link's master accepts only `GROBASE_LINK_HOST_KEY` (`.env.grobase-link.example`),
+whatever the ssh config says; the key's fingerprint is
 `SHA256:5uEVhnFXCwx3TKgh3hqn7DsdwF4YQy8C4hWbKY8aRiM`.
 
 On the tailnet, tailscale itself answers `:8443` with a Let's Encrypt certificate for
@@ -353,8 +354,10 @@ specs per mode, the consumer filter, the verdicts, the exit codes) are
 
 ## ssh mode, step by step
 
-1. **Master.** `ssh -o ControlMaster=yes -o ControlPersist=yes -o ClearAllForwardings=yes -N -f <target>`
-   (`open_master`, `grobase-link.sh:97-103`). One authenticated connection; every later
+1. **Master.** `ssh -F /dev/null -o ControlMaster=yes -o StrictHostKeyChecking=yes -o IdentityAgent=none
+   -o ForwardAgent=no … -N -f <host>`, with the host, port, user and key files read from `ssh -G <target>`
+   and `GROBASE_LINK_HOST_KEY` the only key accepted (`pinned_master`, `scripts/lib/grobase-link-master.sh`;
+   ruling LM-2). The admin master is the same builder. One authenticated connection; every later
    operation is `ssh -F /dev/null -S <ctl> -O forward|cancel|check|exit`, so no re-auth and
    none of the user's config forwards replay.
 2. **Where each service listens on the remote.** `docker inspect` of every `mini-baas-*`
