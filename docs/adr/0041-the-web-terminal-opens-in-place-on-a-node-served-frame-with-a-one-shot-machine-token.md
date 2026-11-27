@@ -69,11 +69,19 @@ ruling is in the osionos verdict file, "Amendment 1".
   remember the computer, the owner chose "Beta too". The owner's unit and the Connector name both
   `https://baas.tail10f2ea.ts.net:8443` and `https://baas-beta.tail10f2ea.ts.net` as remember origins.
   Accepted risk, replacing the W15 sentence above: after one emailed code per computer, any commit pushed to
-  osionos `develop` can run commands in the owner's shell with no further code, for up to 30 days sliding and
-  90 days absolute, until "Forget this computer", unpair or sign-out-everywhere. R4 still binds each secret to
-  the origin that received it, so the beta's secret does not open shells for production's frame, or the
+  osionos `develop` can run commands in, and read or write the picked folders of, the owner's computer with no
+  further code, for up to 12 hours idle and 30 days absolute (30 days sliding and 90 days absolute before
+  2026-11-27), until "Forget this computer", unpair or sign-out-everywhere. R4 still binds each secret to the
+  origin that received it, so the beta's secret does not open shells or files for production's frame, or the
   reverse. To withdraw it, drop the beta from the remember origins and restart the node. Its secrets then stop
-  opening shells, and R7 deletes them.
+  opening shells and files, and R7 deletes them.
+- **Amended 2026-11-27 (the trusted browser, devil PROCEED-WITH-CONDITIONS TB1–TB25, groot
+  `docs/adr/DRAFT-connector-trusted-browser-ruling.md`).** A remembered computer lasts 12 hours idle and
+  30 days absolute, and opens the editor's `/api/fs` as well as `/api/pty`, through the same store and jti
+  guard. The node no longer drops its pairing on any 410: only a gone signed by a pinned bridge key, for this
+  machine and this beat, archives `machine.json` and wipes the remembered computers. A node restarted with no
+  pairing and no terminal never pairs on its own. `osionos-node status` shows the pairing and the remembered
+  computers without their secrets.
 
 ## Measured 2026-11-04 (G3 of `docs/ops/production-golive-verdict-2026-11-04.md`)
 

@@ -58,6 +58,10 @@
 - Run, format, LSP and AI on disk files are not part of this decision: they went through the bridge
   sandbox. The dock's terminal is the run path.
 - The beta frames this page under the owner's W15 and R5 decisions. Withdrawing W15 withdraws it.
+- Amended 2026-11-27 (devil TB1, TB5, TB6, groot `docs/adr/DRAFT-connector-trusted-browser-ruling.md`): a
+  remembered computer opens this page without a step-up too, within ADR 0041's 12 hours idle and 30 days
+  absolute. The editor offers "remember" only in a step-up that showed the choice, and its copy names files
+  as well as the terminal. A signed removal of the machine forgets the roots.
 - The builder owes F1–F20. The status becomes "accepted" when they are green and shown. F19 (Chrome e2e) is
   measured before merging to develop, because a merge ships to the beta.
 - To reverse: drop `/editor/`, `/api/fs` and `roots.json`, in one release and a node restart. Files already
